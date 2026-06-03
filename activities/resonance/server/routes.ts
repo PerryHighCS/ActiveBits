@@ -1189,9 +1189,11 @@ function generatePasscode(): string {
   return Math.random().toString(36).slice(2, 10).toUpperCase()
 }
 
-function generateImportedQuestionId(existingQuestionIds: Set<string>): string {
+export function generateImportedQuestionId(existingQuestionIds: Set<string>): string {
   for (let attempts = 0; attempts < 10; attempts += 1) {
-    const id = `q_imported_${Math.random().toString(36).slice(2, 12)}`
+    const randomSuffix = Math.random().toString(36).slice(2, 12)
+    const suffix = randomSuffix.length > 0 ? randomSuffix : Date.now().toString(36)
+    const id = `q_imported_${suffix}`
     if (!existingQuestionIds.has(id)) {
       return id
     }

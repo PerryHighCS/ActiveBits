@@ -8,7 +8,7 @@ import {
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import type { WsRouter } from '../../../types/websocket.js'
-import setupResonanceRoutes, { resolveAnswerabilityErrorMessage } from './routes.js'
+import setupResonanceRoutes, { generateImportedQuestionId, resolveAnswerabilityErrorMessage } from './routes.js'
 
 interface RouteRequest {
   params: Record<string, string | undefined>
@@ -73,6 +73,23 @@ function createMockWs(): WsRouter {
     register() {},
   }
 }
+
+void test('generateImportedQuestionId falls back when Math.random produces an empty suffix', () => {
+  const previousRandom = Math.random
+  const previousDateNow = Date.now
+  Math.random = () => 0
+  Date.now = () => 1_700_000_000_000
+
+  try {
+    assert.equal(
+      generateImportedQuestionId(new Set(['q1'])),
+      'q_imported_loyw3v28',
+    )
+  } finally {
+    Math.random = previousRandom
+    Date.now = previousDateNow
+  }
+})
 
 function createEmbeddedResonanceSession(): SessionRecord {
   const now = Date.now()
