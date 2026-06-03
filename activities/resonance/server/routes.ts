@@ -1193,14 +1193,11 @@ function generateImportedQuestionId(existingQuestionIds: Set<string>): string {
   for (let attempts = 0; attempts < 10; attempts += 1) {
     const id = `q_imported_${Math.random().toString(36).slice(2, 12)}`
     if (!existingQuestionIds.has(id)) {
-      existingQuestionIds.add(id)
       return id
     }
   }
 
-  const fallback = `q_imported_${Date.now().toString(36)}_${existingQuestionIds.size}`
-  existingQuestionIds.add(fallback)
-  return fallback
+  return `q_imported_${Date.now().toString(36)}_${existingQuestionIds.size}`
 }
 
 function verifyInstructorPasscode(expected: string, candidate: string): boolean {
