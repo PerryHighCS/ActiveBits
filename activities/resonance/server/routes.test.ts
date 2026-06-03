@@ -8,7 +8,7 @@ import {
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import type { WsRouter } from '../../../types/websocket.js'
-import setupResonanceRoutes, { resolveAnswerabilityErrorMessage } from './routes.js'
+import setupResonanceRoutes, { generateImportedQuestionId, resolveAnswerabilityErrorMessage } from './routes.js'
 
 interface RouteRequest {
   params: Record<string, string | undefined>
@@ -73,6 +73,17 @@ function createMockWs(): WsRouter {
     register() {},
   }
 }
+
+void test('generateImportedQuestionId falls back when Math.random produces an empty suffix', () => {
+  assert.equal(
+    generateImportedQuestionId(
+      new Set(['q1']),
+      () => 0,
+      () => 1_700_000_000_000,
+    ),
+    'q_imported_loyw3v28',
+  )
+})
 
 function createEmbeddedResonanceSession(): SessionRecord {
   const now = Date.now()
@@ -1457,6 +1468,147 @@ void test('responses route includes submitted, working, and idle progress entrie
       { studentId: 'student3', status: 'idle', responseId: null },
     ],
   )
+
+  await sessions.close()
+})
+
+void test('import-questions route appends a saved question set to an instructor session', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const sessions = createSessionStore(null)
+  const session = createInstructorResonanceSession()
+  await sessions.set(session.id, session)
+
+  setupResonanceRoutes(app, sessions, ws)
+
+  const handler = app.handlers.post['/api/resonance/:sessionId/import-questions']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.(
+    {
+      params: { sessionId: session.id },
+      headers: {
+        'x-instructor-passcode': 'TEACH123',
+      },
+      body: {
+        questions: [
+          {
+            id: 'q_imported_frq',
+            type: 'free-response',
+            text: 'What changed in your thinking?',
+            order: 50,
+          },
+          {
+            id: 'q_imported_mcq',
+            type: 'multiple-choice',
+            text: 'Which answers are valid?',
+            order: 51,
+            options: [
+              { id: 'a', text: 'A', isCorrect: true },
+              { id: 'b', text: 'B' },
+            ],
+          },
+        ],
+      },
+    },
+    res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  const body = res.body as { questions?: Array<{ id: string; order: number }> }
+  assert.deepEqual(body.questions?.map((question) => ({ id: question.id, order: question.order })), [
+    { id: 'q_imported_frq', order: 1 },
+    { id: 'q_imported_mcq', order: 2 },
+  ])
+
+  const stored = await sessions.get(session.id)
+  const storedQuestions = (stored?.data as { questions?: Array<{ id: string; order: number }> } | undefined)?.questions ?? []
+  assert.deepEqual(storedQuestions.map((question) => ({ id: question.id, order: question.order })), [
+    { id: 'q1', order: 0 },
+    { id: 'q_imported_frq', order: 1 },
+    { id: 'q_imported_mcq', order: 2 },
+  ])
+
+  await sessions.close()
+})
+
+void test('import-questions route remaps duplicate question ids from separate sets', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const sessions = createSessionStore(null)
+  const session = createInstructorResonanceSession()
+  await sessions.set(session.id, session)
+
+  setupResonanceRoutes(app, sessions, ws)
+
+  const handler = app.handlers.post['/api/resonance/:sessionId/import-questions']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.(
+    {
+      params: { sessionId: session.id },
+      headers: {
+        'x-instructor-passcode': 'TEACH123',
+      },
+      body: {
+        questions: [
+          {
+            id: 'q1',
+            type: 'free-response',
+            text: 'Replacement text',
+            order: 99,
+          },
+          {
+            id: 'q_new',
+            type: 'free-response',
+            text: 'New question',
+            order: 100,
+          },
+        ],
+      },
+    },
+    res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  const body = res.body as {
+    ok?: boolean
+    questions?: Array<{ id: string; type: string; text: string; order: number }>
+    remappedQuestionIds?: Record<string, string>
+  }
+  const remappedQ1 = body.remappedQuestionIds?.q1
+  assert.equal(body.ok, true)
+  assert.equal(typeof remappedQ1, 'string')
+  assert.notEqual(remappedQ1, 'q1')
+  assert.match(remappedQ1 ?? '', /^q_imported_[\w-]+$/)
+  assert.deepEqual(body.questions, [
+    {
+      id: remappedQ1,
+      type: 'free-response',
+      text: 'Replacement text',
+      order: 1,
+    },
+    {
+      id: 'q_new',
+      type: 'free-response',
+      text: 'New question',
+      order: 2,
+    },
+  ])
+
+  const stored = await sessions.get(session.id)
+  const storedQuestions = (stored?.data as { questions?: Array<{ id: string; text: string; order: number }> } | undefined)?.questions ?? []
+  assert.deepEqual(storedQuestions.map((question) => ({
+    id: question.id,
+    text: question.text,
+    order: question.order,
+  })), [
+    { id: 'q1', text: 'Explain your reasoning.', order: 0 },
+    { id: remappedQ1 ?? '', text: 'Replacement text', order: 1 },
+    { id: 'q_new', text: 'New question', order: 2 },
+  ])
 
   await sessions.close()
 })

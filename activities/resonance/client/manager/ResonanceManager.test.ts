@@ -4,6 +4,7 @@ import { JSDOM } from 'jsdom'
 import { storeCreateSessionBootstrapPayload } from '@src/components/common/manageDashboardUtils'
 import {
   formatEndSessionError,
+  formatQuestionImportError,
   handleQuestionListItemKeyDown,
   isAllQuestionsSelected,
   isQuestionStemVisuallyTruncated,
@@ -15,6 +16,8 @@ import {
   resolveManagerActiveTab,
   resolvePasscode,
   resolveStagedAdvanceLabel,
+  shouldAdvanceStagedQuestion,
+  shouldRevealStagedChoices,
   shouldShowQuestionListActivationControls,
   shouldShowQuestionPanelActions,
   shouldRenderResonanceEndSessionButton,
@@ -256,6 +259,46 @@ void test('resolveStagedAdvanceLabel names skip, next, and end staged actions', 
     }),
     'End staged run',
   )
+})
+
+void test('staged choice controls depend on the staged current question state', () => {
+  const mcq = {
+    id: 'q1',
+    type: 'multiple-choice' as const,
+    text: 'Pick one',
+    order: 0,
+    options: [
+      { id: 'a', text: 'A' },
+      { id: 'b', text: 'B' },
+    ],
+  }
+  const frq = {
+    id: 'q2',
+    type: 'free-response' as const,
+    text: 'Explain',
+    order: 1,
+  }
+  const hiddenChoicesRun = {
+    questionIds: ['q1', 'q2'],
+    currentQuestionId: 'q1',
+    currentIndex: 0,
+    choicesRevealed: false,
+    completedQuestionIds: [],
+  }
+  const revealedChoicesRun = { ...hiddenChoicesRun, choicesRevealed: true }
+
+  assert.equal(shouldRevealStagedChoices(mcq, hiddenChoicesRun), true)
+  assert.equal(shouldAdvanceStagedQuestion(mcq, hiddenChoicesRun), false)
+  assert.equal(shouldRevealStagedChoices(mcq, revealedChoicesRun), false)
+  assert.equal(shouldAdvanceStagedQuestion(mcq, revealedChoicesRun), true)
+  assert.equal(shouldRevealStagedChoices(frq, hiddenChoicesRun), false)
+  assert.equal(shouldAdvanceStagedQuestion(frq, hiddenChoicesRun), true)
+})
+
+void test('formatQuestionImportError prefers useful error messages and falls back safely', () => {
+  assert.equal(formatQuestionImportError(new Error('question set contains ids already in this session')), 'question set contains ids already in this session')
+  assert.equal(formatQuestionImportError(new Error('   ')), 'Unable to load this question set into the session.')
+  assert.equal(formatQuestionImportError('nope'), 'Unable to load this question set into the session.')
 })
 
 void test('isAllQuestionsSelected only returns true when every available question is selected', () => {

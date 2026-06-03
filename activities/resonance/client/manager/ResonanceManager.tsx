@@ -6,6 +6,7 @@ import type { InstructorAnnotation, Question, ResonancePresentationMode, StagedR
 import { useInstructorState } from '../hooks/useInstructorState.js'
 import ResponseViewer from './ResponseViewer.js'
 import QuestionBuilder from '../tools/QuestionBuilder.js'
+import ResonanceQuestionSetUploader from '../tools/ResonanceQuestionSetUploader.js'
 import FormattedMarkdown, { plainTextFromMarkdown } from '../components/FormattedMarkdown.js'
 
 // ---------------------------------------------------------------------------
@@ -90,6 +91,20 @@ export function resolveStagedAdvanceLabel(params: {
 
 export function shouldShowQuestionPanelActions(question: Question): boolean {
   return question.type === 'multiple-choice'
+}
+
+export function shouldRevealStagedChoices(
+  question: Question | null,
+  stagedRun: StagedRunState | null,
+): boolean {
+  return question?.type === 'multiple-choice' && stagedRun?.choicesRevealed === false
+}
+
+export function shouldAdvanceStagedQuestion(
+  question: Question | null,
+  stagedRun: StagedRunState | null,
+): boolean {
+  return question !== null && (question.type !== 'multiple-choice' || stagedRun?.choicesRevealed === true)
 }
 
 export function isQuestionStemVisuallyTruncated(
@@ -194,6 +209,14 @@ export function formatEndSessionError(error: unknown): string {
   return 'Unable to end this Resonance session. Please try again.'
 }
 
+export function formatQuestionImportError(error: unknown): string {
+  if (error instanceof Error && error.message.trim().length > 0) {
+    return error.message
+  }
+
+  return 'Unable to load this question set into the session.'
+}
+
 export function resolveManagerActiveTab(params: {
   currentActiveTab: string | null
   previousStagedQuestionId: string | null
@@ -257,6 +280,10 @@ export default function ResonanceManager() {
   const [expandedQuestionStemIds, setExpandedQuestionStemIds] = useState<string[]>([])
   const [overflowingQuestionStemIds, setOverflowingQuestionStemIds] = useState<string[]>([])
   const [isAddQuestionOpen, setIsAddQuestionOpen] = useState(false)
+  const [isImportOpen, setIsImportOpen] = useState(false)
+  const [pendingImportQuestions, setPendingImportQuestions] = useState<Question[] | null>(null)
+  const [isImportingQuestions, setIsImportingQuestions] = useState(false)
+  const [questionImportError, setQuestionImportError] = useState<string | null>(null)
   const [activationPresentationMode, setActivationPresentationMode] = useState<ResonancePresentationMode>('standard')
   const [countdownNow, setCountdownNow] = useState(() => Date.now())
   const [endSessionError, setEndSessionError] = useState<string | null>(null)
@@ -492,6 +519,41 @@ export default function ResonanceManager() {
     [callInstructor],
   )
 
+  const importQuestions = useCallback(async () => {
+    if (!sessionId || passcode === null || pendingImportQuestions === null || isImportingQuestions) {
+      return
+    }
+
+    setIsImportingQuestions(true)
+    setQuestionImportError(null)
+    try {
+      const response = await fetch(`/api/resonance/${sessionId}/import-questions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Instructor-Passcode': passcode,
+        },
+        body: JSON.stringify({ questions: pendingImportQuestions }),
+      })
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null) as { error?: unknown } | null
+        throw new Error(
+          typeof payload?.error === 'string' && payload.error.trim().length > 0
+            ? payload.error
+            : `Failed to load question set (${response.status})`,
+        )
+      }
+
+      setPendingImportQuestions(null)
+      setIsImportOpen(false)
+      void refresh()
+    } catch (importFailure) {
+      setQuestionImportError(formatQuestionImportError(importFailure))
+    } finally {
+      setIsImportingQuestions(false)
+    }
+  }, [isImportingQuestions, passcode, pendingImportQuestions, refresh, sessionId])
+
   const endSession = useCallback(async () => {
     if (!sessionId || isEndingSession) {
       return
@@ -605,14 +667,10 @@ export default function ResonanceManager() {
   const viewingQuestion = questions.find((q) => q.id === activeTab) ?? null
   const isViewingCurrentStagedQuestion =
     isStagedRunActive && viewingQuestion?.id === stagedRun.currentQuestionId
-  const canRevealCurrentStagedChoices =
-    isViewingCurrentStagedQuestion &&
-    viewingQuestion?.type === 'multiple-choice' &&
-    stagedRun.choicesRevealed === false
+  const canRevealCurrentStagedChoices = shouldRevealStagedChoices(currentStagedQuestion, stagedRun)
   const canSkipCurrentStagedQuestion = canRevealCurrentStagedChoices
-  const canAdvanceCurrentStagedQuestion = isViewingCurrentStagedQuestion &&
-    (viewingQuestion?.type !== 'multiple-choice' || stagedRun.choicesRevealed)
-  const stagedAdvanceLabel = isViewingCurrentStagedQuestion
+  const canAdvanceCurrentStagedQuestion = shouldAdvanceStagedQuestion(currentStagedQuestion, stagedRun)
+  const stagedAdvanceLabel = isStagedRunActive && currentStagedQuestion !== null
     ? resolveStagedAdvanceLabel({
         isStemOnlyMultipleChoice: canSkipCurrentStagedQuestion,
         currentIndex: stagedRun.currentIndex,
@@ -717,7 +775,47 @@ export default function ResonanceManager() {
               )}
             </div>
 
-            <p className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-2 border-t border-slate-200 dark:border-slate-700 pt-3">
+            <div className="border-t border-slate-200 dark:border-slate-700 py-3">
+              <button
+                type="button"
+                aria-expanded={isImportOpen}
+                aria-controls="resonance-question-importer"
+                onClick={() => setIsImportOpen((current) => !current)}
+                className="flex w-full items-center justify-between rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-2.5 py-2 text-left text-xs font-medium text-slate-700 dark:text-slate-300 hover:border-slate-300 dark:hover:border-slate-600 hover:bg-white dark:hover:bg-slate-700"
+              >
+                <span>{isImportOpen ? 'Hide question loader' : 'Load question set'}</span>
+                <span className="text-sm text-slate-400 dark:text-slate-500">{isImportOpen ? '▴' : '▾'}</span>
+              </button>
+              {isImportOpen && (
+                <div id="resonance-question-importer" className="mt-2 space-y-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-3">
+                  <ResonanceQuestionSetUploader
+                    onQuestionsChanged={(importedQuestions) => {
+                      setPendingImportQuestions(importedQuestions)
+                      setQuestionImportError(null)
+                    }}
+                  />
+                  {questionImportError !== null && (
+                    <p className="text-xs text-red-600 dark:text-red-400" role="alert">
+                      {questionImportError}
+                    </p>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => { void importQuestions() }}
+                    disabled={pendingImportQuestions === null || pendingImportQuestions.length === 0 || isImportingQuestions}
+                    className="w-full rounded-lg bg-indigo-600 px-2 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {isImportingQuestions
+                      ? 'Loading...'
+                      : pendingImportQuestions !== null
+                        ? `Load ${pendingImportQuestions.length} question${pendingImportQuestions.length !== 1 ? 's' : ''}`
+                        : 'Load questions'}
+                  </button>
+                </div>
+              )}
+            </div>
+
+            <p className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-2">
               Questions
             </p>
 
@@ -771,6 +869,42 @@ export default function ResonanceManager() {
                 >
                   Stop
                 </button>
+                </div>
+              </div>
+            )}
+
+            {isStagedRunActive && currentStagedQuestion !== null && (
+              <div className="mb-3 rounded-xl border border-rose-200 dark:border-rose-800 bg-rose-50 dark:bg-rose-950/30 p-2.5 space-y-2">
+                <div className="space-y-1">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-rose-700 dark:text-rose-300">
+                    Staged {stagedRun.currentIndex + 1} of {stagedRun.questionIds.length}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab(currentStagedQuestion.id)}
+                    className="block w-full text-left text-xs font-medium text-slate-800 dark:text-slate-100 hover:text-rose-700 dark:hover:text-rose-300"
+                  >
+                    {plainTextFromMarkdown(currentStagedQuestion.text) || currentStagedQuestion.text}
+                  </button>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {canRevealCurrentStagedChoices && (
+                    <button
+                      type="button"
+                      onClick={revealChoices}
+                      className="rounded-lg bg-rose-600 px-2 py-1 text-[11px] font-medium text-white hover:bg-rose-700"
+                    >
+                      Reveal choices
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={advanceStagedQuestion}
+                    disabled={!canSkipCurrentStagedQuestion && !canAdvanceCurrentStagedQuestion}
+                    className="rounded-lg border border-rose-300 dark:border-rose-700 px-2 py-1 text-[11px] font-medium text-rose-700 dark:text-rose-300 hover:bg-white dark:hover:bg-rose-900/30 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {stagedAdvanceLabel}
+                  </button>
                 </div>
               </div>
             )}

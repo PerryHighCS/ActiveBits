@@ -1189,6 +1189,23 @@ function generatePasscode(): string {
   return Math.random().toString(36).slice(2, 10).toUpperCase()
 }
 
+export function generateImportedQuestionId(
+  existingQuestionIds: Set<string>,
+  random: () => number = Math.random,
+  now: () => number = Date.now,
+): string {
+  for (let attempts = 0; attempts < 10; attempts += 1) {
+    const randomSuffix = random().toString(36).slice(2, 12)
+    const suffix = randomSuffix.length > 0 ? randomSuffix : now().toString(36)
+    const id = `q_imported_${suffix}`
+    if (!existingQuestionIds.has(id)) {
+      return id
+    }
+  }
+
+  return `q_imported_${now().toString(36)}_${existingQuestionIds.size}`
+}
+
 function verifyInstructorPasscode(expected: string, candidate: string): boolean {
   if (!expected || !candidate) return false
   const exp = Buffer.from(expected, 'utf8')
@@ -1900,6 +1917,68 @@ export default function setupResonanceRoutes(
     console.info('[resonance] Question added', { sessionId, questionId: question.id })
     void broadcast('resonance:question-added', { question }, sessionId)
     res.json({ ok: true, question })
+  })
+
+  // POST /api/resonance/:sessionId/import-questions
+  // Appends a validated saved question set, remapping ids that already exist in the session.
+  app.post('/api/resonance/:sessionId/import-questions', async (req, res) => {
+    const { sessionId } = req.params
+    if (!sessionId) {
+      res.status(400).json({ error: 'missing sessionId' })
+      return
+    }
+
+    const session = await loadResonanceSession(sessionId)
+    if (!session) {
+      res.status(404).json({ error: 'session not found' })
+      return
+    }
+
+    if (!checkInstructorAuth(req, session)) {
+      res.status(403).json({ error: 'forbidden' })
+      return
+    }
+
+    const body = isPlainObject(req.body) ? req.body : {}
+    const { questions, errors } = validateQuestionSet(body.questions)
+    if (errors.length > 0 || questions.length === 0) {
+      res.status(400).json({ error: errors[0] ?? 'invalid question set', details: errors })
+      return
+    }
+
+    const existingQuestionIds = new Set(session.data.questions.map((question) => question.id))
+    let nextOrder = session.data.questions.length
+    const remappedQuestionIds: Record<string, string> = {}
+    const importedQuestions = questions.map((question) => {
+      const id = existingQuestionIds.has(question.id)
+        ? generateImportedQuestionId(existingQuestionIds)
+        : question.id
+      existingQuestionIds.add(id)
+      if (id !== question.id) {
+        remappedQuestionIds[question.id] = id
+      }
+
+      const importedQuestion = {
+        ...question,
+        id,
+        order: nextOrder,
+      }
+      nextOrder += 1
+      return importedQuestion
+    })
+
+    session.data.questions.push(...importedQuestions)
+    await sessions.set(sessionId, session)
+
+    console.info('[resonance] Question set imported', {
+      sessionId,
+      importedQuestionCount: importedQuestions.length,
+      remappedQuestionCount: Object.keys(remappedQuestionIds).length,
+      totalQuestionCount: session.data.questions.length,
+    })
+    void broadcastStudentSessionState(session, sessionId)
+    broadcastToRole('resonance:instructor-state', buildInstructorSnapshot(session), sessionId, true)
+    res.json({ ok: true, questions: importedQuestions, remappedQuestionIds })
   })
 
   // POST /api/resonance/:sessionId/annotate-response
