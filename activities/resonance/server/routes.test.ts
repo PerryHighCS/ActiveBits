@@ -75,20 +75,14 @@ function createMockWs(): WsRouter {
 }
 
 void test('generateImportedQuestionId falls back when Math.random produces an empty suffix', () => {
-  const previousRandom = Math.random
-  const previousDateNow = Date.now
-  Math.random = () => 0
-  Date.now = () => 1_700_000_000_000
-
-  try {
-    assert.equal(
-      generateImportedQuestionId(new Set(['q1'])),
-      'q_imported_loyw3v28',
-    )
-  } finally {
-    Math.random = previousRandom
-    Date.now = previousDateNow
-  }
+  assert.equal(
+    generateImportedQuestionId(
+      new Set(['q1']),
+      () => 0,
+      () => 1_700_000_000_000,
+    ),
+    'q_imported_loyw3v28',
+  )
 })
 
 function createEmbeddedResonanceSession(): SessionRecord {

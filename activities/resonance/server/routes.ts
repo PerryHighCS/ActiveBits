@@ -1189,17 +1189,21 @@ function generatePasscode(): string {
   return Math.random().toString(36).slice(2, 10).toUpperCase()
 }
 
-export function generateImportedQuestionId(existingQuestionIds: Set<string>): string {
+export function generateImportedQuestionId(
+  existingQuestionIds: Set<string>,
+  random: () => number = Math.random,
+  now: () => number = Date.now,
+): string {
   for (let attempts = 0; attempts < 10; attempts += 1) {
-    const randomSuffix = Math.random().toString(36).slice(2, 12)
-    const suffix = randomSuffix.length > 0 ? randomSuffix : Date.now().toString(36)
+    const randomSuffix = random().toString(36).slice(2, 12)
+    const suffix = randomSuffix.length > 0 ? randomSuffix : now().toString(36)
     const id = `q_imported_${suffix}`
     if (!existingQuestionIds.has(id)) {
       return id
     }
   }
 
-  return `q_imported_${Date.now().toString(36)}_${existingQuestionIds.size}`
+  return `q_imported_${now().toString(36)}_${existingQuestionIds.size}`
 }
 
 function verifyInstructorPasscode(expected: string, candidate: string): boolean {
