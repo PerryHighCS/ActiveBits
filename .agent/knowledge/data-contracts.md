@@ -15,6 +15,15 @@ Document API and data-shape assumptions that must stay compatible over time.
 
 ## Contracts
 
+- Date: 2026-06-03
+- Surface: REST | activity interface | file import
+- Contract: Resonance managers can append saved question sets into an active live session through `POST /api/resonance/:sessionId/import-questions` with `{ questions }` and the instructor passcode header. The payload uses the same JSON question-set shape exported by the Resonance tools page and is normalized through `validateQuestionSet(...)` before persistence.
+- Compatibility constraints: Question ids are only unique within an authored question set, not globally unique across files. Import preserves existing session questions, rewrites any incoming question id that already exists in the session, appends all imported questions after the current list, and does not clear live responses, active runs, reveals, or drafts.
+- Validation rules: Invalid question sets return `400`; successful imports return `remappedQuestionIds` for any incoming id collisions and broadcast updated instructor/student snapshots.
+- Evidence (schema/tests/path): `activities/resonance/server/routes.ts`; `activities/resonance/server/routes.test.ts`; `activities/resonance/client/manager/ResonanceManager.tsx`; `activities/resonance/client/tools/ResonanceQuestionSetUploader.test.ts`
+- Follow-up action: If teachers later need a true replace-session-question-set action that removes missing questions, add an explicit destructive route that deliberately handles dependent response/reveal/active-run cleanup instead of overloading import.
+- Owner: Codex
+
 - Date: 2026-06-02
 - Surface: activity interface | client routing
 - Contract: Activities may set `studentLayout.expandShell: true` to request the app shell omit its default page padding once `SessionRouter` resolves a live student session to that activity. `manageLayout.expandShell` remains for instructor manager routes, and `standaloneLayout.expandShell` remains for direct standalone routes where the activity id is already available in the URL.
