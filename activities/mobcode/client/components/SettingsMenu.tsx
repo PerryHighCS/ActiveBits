@@ -5,9 +5,14 @@ import { MOB_CODE_THEMES } from '../utils/constants'
 interface SettingsMenuProps {
   theme: MobCodeThemeId
   onThemeChange: (theme: MobCodeThemeId) => void
+  label?: string
 }
 
-export default function SettingsMenu({ theme, onThemeChange }: SettingsMenuProps) {
+export default function SettingsMenu({
+  theme,
+  onThemeChange,
+  label = 'Theme',
+}: SettingsMenuProps) {
   const [open, setOpen] = useState(false)
   const menuId = useId()
 
@@ -16,12 +21,12 @@ export default function SettingsMenu({ theme, onThemeChange }: SettingsMenuProps
       <button
         type="button"
         className="rounded border border-gray-300 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
-        aria-label="Editor settings"
+        aria-label={`${label} settings`}
         aria-expanded={open}
         aria-controls={menuId}
         onClick={() => setOpen((value) => !value)}
       >
-        ⚙
+        {label}
       </button>
       {open && (
         <div

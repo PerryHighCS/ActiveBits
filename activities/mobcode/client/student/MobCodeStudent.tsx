@@ -4,6 +4,7 @@ import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
 import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler'
 import type { MobCodeThemeId } from '../../shared/types'
 import CodeEditor from '../components/CodeEditor'
+import { resolveEditorTheme } from '../components/CodeEditor'
 import EditorToolbar from '../components/EditorToolbar'
 import { MOB_CODE_MESSAGE_TYPES } from '../utils/constants'
 import { resolveActiveFile, sanitizeFilesMap } from '../utils/fileUtils'
@@ -87,6 +88,10 @@ export default function MobCodeStudent({ sessionData }: MobCodeStudentProps) {
     setThemeCookie(nextTheme)
   }
 
+  const editorThemeClassName = typeof resolveEditorTheme(theme) === 'string'
+    ? `mobcode-editor-theme-${theme}`
+    : `mobcode-editor-theme-${theme}`
+
   return (
     <div className="mobcode-shell">
       <EditorToolbar files={files} readOnly theme={theme} onThemeChange={handleThemeChange} />
@@ -94,7 +99,7 @@ export default function MobCodeStudent({ sessionData }: MobCodeStudentProps) {
         <aside className="mobcode-sidebar">
           <VirtualFileExplorer files={files} activePath={activeFile} readOnly onSelect={setActiveFile} />
         </aside>
-        <main className="mobcode-editor-pane">
+        <main className={`mobcode-editor-pane ${editorThemeClassName}`}>
           {activeFile ? (
             <CodeEditor value={files[activeFile] ?? ''} filename={activeFile} theme={theme} readOnly />
           ) : (

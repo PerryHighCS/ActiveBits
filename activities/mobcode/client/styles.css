@@ -19,9 +19,31 @@
   background: #ffffff;
 }
 
+.mobcode-editor-theme-light {
+  background: #ffffff;
+}
+
+.mobcode-editor-theme-one-dark {
+  background: #282c34;
+}
+
+.mobcode-editor-theme-github-light {
+  background: #ffffff;
+}
+
+.mobcode-editor-theme-github-dark {
+  background: #0d1117;
+}
+
 .mobcode-editor-pane .cm-editor {
   height: 100%;
   font-size: 14px;
+  background: transparent;
+}
+
+.mobcode-editor-pane .cm-scroller,
+.mobcode-editor-pane .cm-gutters {
+  background: transparent;
 }
 
 .mobcode-empty {

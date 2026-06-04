@@ -6,8 +6,10 @@ import type { VirtualFileEntry } from '@src/components/common/virtualFileExplore
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
 import type { MobCodeStatePayload, MobCodeThemeId } from '../../shared/types'
 import CodeEditor from '../components/CodeEditor'
-import EditorToolbar from '../components/EditorToolbar'
+import { resolveEditorTheme } from '../components/CodeEditor'
 import FileNameModal from '../components/FileNameModal'
+import FileControlsMenuContent from '../components/FileControlsMenuContent'
+import SettingsMenu from '../components/SettingsMenu'
 import { MOB_CODE_INSTRUCTOR_STORAGE_PREFIX, MOB_CODE_MESSAGE_TYPES } from '../utils/constants'
 import {
   deletePathFromFiles,
@@ -148,6 +150,9 @@ export default function MobCodeManager() {
   }
 
   const activeContent = activeFile ? files[activeFile] ?? '' : ''
+  const editorThemeClassName = typeof resolveEditorTheme(theme) === 'string'
+    ? `mobcode-editor-theme-${theme}`
+    : `mobcode-editor-theme-${theme}`
 
   const submitModal = (path: string) => {
     if (modalMode === 'create-file') {
@@ -167,17 +172,22 @@ export default function MobCodeManager() {
 
   return (
     <div className="mobcode-shell">
-      <SessionHeader activityName="Mob Code" sessionId={sessionId} />
-      <EditorToolbar
-        files={files}
-        theme={theme}
-        onThemeChange={handleThemeChange}
-        onUploadFiles={(uploadedFiles) => {
-          const nextActive = resolveActiveFile(uploadedFiles, activeFile)
-          applyFiles(uploadedFiles, nextActive, MOB_CODE_MESSAGE_TYPES.STATE_SYNC)
-        }}
-        onCreateFile={() => setModalMode('create-file')}
-        onCreateFolder={() => setModalMode('create-folder')}
+      <SessionHeader
+        activityName="Mob Code"
+        sessionId={sessionId}
+        actionMenuLabel="Code Files"
+        actionMenuContent={(
+          <FileControlsMenuContent
+            files={files}
+            onUploadFiles={(uploadedFiles) => {
+              const nextActive = resolveActiveFile(uploadedFiles, activeFile)
+              applyFiles(uploadedFiles, nextActive, MOB_CODE_MESSAGE_TYPES.STATE_SYNC)
+            }}
+            onCreateFile={() => setModalMode('create-file')}
+            onCreateFolder={() => setModalMode('create-folder')}
+          />
+        )}
+        headerActions={<SettingsMenu theme={theme} onThemeChange={handleThemeChange} label="Theme" />}
       />
       {!instructorPasscode && (
         <div className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800">
@@ -212,7 +222,7 @@ export default function MobCodeManager() {
             ) : null}
           />
         </aside>
-        <main className="mobcode-editor-pane">
+        <main className={`mobcode-editor-pane ${editorThemeClassName}`}>
           {activeFile ? (
             <CodeEditor
               value={activeContent}

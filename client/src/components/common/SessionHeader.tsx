@@ -1,4 +1,4 @@
-import { useState, type MouseEvent } from 'react'
+import { useId, useState, type MouseEvent, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useClipboard } from '@src/hooks/useClipboard'
 import Button from '../ui/Button'
@@ -10,18 +10,31 @@ export interface SessionHeaderProps {
   sessionId?: string
   simple?: boolean
   onEndSession?: () => void | Promise<void>
+  actionMenuLabel?: string
+  actionMenuContent?: ReactNode
+  headerActions?: ReactNode
 }
 
 /**
  * SessionHeader - Reusable header for activity manager pages
  * Shows activity name, join code, join URL, and end session button
  */
-export default function SessionHeader({ activityName, sessionId, onEndSession, simple = false }: SessionHeaderProps) {
+export default function SessionHeader({
+  activityName,
+  sessionId,
+  onEndSession,
+  simple = false,
+  actionMenuLabel = 'Activity Actions',
+  actionMenuContent,
+  headerActions,
+}: SessionHeaderProps) {
   const [showEndModal, setShowEndModal] = useState(false)
+  const [showActionMenu, setShowActionMenu] = useState(false)
   const [isEnding, setIsEnding] = useState(false)
   const [errorMessage, setErrorMessage] = useState('')
   const { copyToClipboard, isCopied } = useClipboard(1500)
   const navigate = useNavigate()
+  const actionMenuId = useId()
 
   const studentJoinUrl =
     sessionId && typeof window !== 'undefined' ? `${window.location.origin}/${sessionId}` : ''
@@ -82,28 +95,49 @@ export default function SessionHeader({ activityName, sessionId, onEndSession, s
 
   return (
     <>
-      <div className="bg-white border-b border-gray-200 px-6 py-4 mb-6">
-        <div className="flex flex-col gap-3">
-          <h1 className="text-2xl font-bold text-gray-800">{activityName}</h1>
-
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-gray-600">Join Code:</span>
-                <code
-                  onClick={copyCode}
-                  className="px-3 py-1.5 rounded bg-gray-100 font-mono text-lg font-semibold text-gray-800 cursor-pointer hover:bg-gray-200 transition-colors"
-                  title="Click to copy"
+      <div className="bg-white border-b border-gray-200 px-6 py-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex min-w-0 flex-wrap items-center gap-3">
+            <h1 className="text-2xl font-bold text-gray-800">{activityName}</h1>
+            {actionMenuContent != null && (
+              <div className="relative">
+                <Button
+                  onClick={() => setShowActionMenu((value) => !value)}
+                  variant="outline"
+                  aria-expanded={showActionMenu}
+                  aria-controls={actionMenuId}
                 >
-                  {isCopied(sessionId) ? '✓ Copied!' : sessionId}
-                </code>
+                  {actionMenuLabel}
+                </Button>
+                {showActionMenu && (
+                  <div
+                    id={actionMenuId}
+                    role="menu"
+                    className="absolute left-0 z-20 mt-2 min-w-56 rounded border border-gray-200 bg-white p-2 shadow-lg"
+                  >
+                    {actionMenuContent}
+                  </div>
+                )}
               </div>
+            )}
+            {headerActions}
+          </div>
 
-              <Button onClick={handleCopyLinkClick} variant="outline">
-                {isCopied(studentJoinUrl) ? '✓ Copied!' : 'Copy Join URL'}
-              </Button>
+          <div className="flex flex-wrap items-center justify-end gap-3">
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-gray-600">Join Code:</span>
+              <code
+                onClick={copyCode}
+                className="px-3 py-1.5 rounded bg-gray-100 font-mono text-lg font-semibold text-gray-800 cursor-pointer hover:bg-gray-200 transition-colors"
+                title="Click to copy"
+              >
+                {isCopied(sessionId) ? '✓ Copied!' : sessionId}
+              </code>
             </div>
 
+            <Button onClick={handleCopyLinkClick} variant="outline">
+              {isCopied(studentJoinUrl) ? '✓ Copied!' : 'Copy Join URL'}
+            </Button>
             <Button
               onClick={() => setShowEndModal(true)}
               variant="outline"

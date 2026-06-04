@@ -29,6 +29,25 @@ void test('SessionHeader full mode renders join controls and action buttons', ()
   assert.match(html, /End Session/)
 })
 
+void test('SessionHeader can render an activity action menu trigger', () => {
+  const html = renderToStaticMarkup(
+    <MemoryRouter>
+      <SessionHeader
+        activityName="Mob Code"
+        sessionId="abc123"
+        actionMenuLabel="Code Files"
+        actionMenuContent={<button type="button">Upload Zip</button>}
+        headerActions={<button type="button">Theme</button>}
+      />
+    </MemoryRouter>,
+  )
+
+  assert.match(html, /Code Files/)
+  assert.match(html, /Theme/)
+  assert.match(html, /aria-expanded="false"/)
+  assert.doesNotMatch(html, /Upload Zip/)
+})
+
 void test('SessionHeader hides join and end controls for embedded child sessions', () => {
   const html = renderToStaticMarkup(
     <MemoryRouter>

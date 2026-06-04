@@ -15,7 +15,7 @@ interface CodeEditorProps {
   onChange?: (value: string) => void
 }
 
-function resolveTheme(theme: MobCodeThemeId) {
+export function resolveEditorTheme(theme: MobCodeThemeId) {
   if (theme === 'one-dark') return oneDark
   if (theme === 'github-light') return githubLight
   if (theme === 'github-dark') return githubDark
@@ -49,13 +49,14 @@ export default function CodeEditor({ value, filename, readOnly = false, theme, o
       value={value}
       height="100%"
       basicSetup={{
+        autocompletion: false,
         lineNumbers: true,
         foldGutter: true,
         highlightActiveLine: true,
         bracketMatching: true,
       }}
       extensions={extensions}
-      theme={resolveTheme(theme)}
+      theme={resolveEditorTheme(theme)}
       onChange={(nextValue) => onChange?.(nextValue)}
     />
   )
