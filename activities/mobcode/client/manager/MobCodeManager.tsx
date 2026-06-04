@@ -126,11 +126,18 @@ export default function MobCodeManager() {
   const persistState = useCallback(
     async (payload: MobCodeStatePayload, messageType: DurableMobCodeMessageType = MOB_CODE_MESSAGE_TYPES.STATE_SYNC) => {
       if (!sessionId || !instructorPasscode) return
-      await fetch(`/api/mobcode/${sessionId}/state`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...payload, instructorPasscode, messageType }),
-      })
+      try {
+        const response = await fetch(`/api/mobcode/${sessionId}/state`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...payload, instructorPasscode, messageType }),
+        })
+        if (!response.ok) {
+          throw new Error(`MobCode state persist failed with status ${response.status}`)
+        }
+      } catch (error) {
+        console.error('Failed to persist MobCode state:', error)
+      }
     },
     [sessionId, instructorPasscode],
   )

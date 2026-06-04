@@ -77,7 +77,7 @@ export async function extractZipFiles(file: File): Promise<ZipImportResult> {
 
     const bytes = await entry.async('uint8array')
     if (bytes.byteLength > ZIP_LIMITS.maxFileBytes) {
-      skipped.push(path)
+      skipped.push(entry.name)
       continue
     }
     totalBytes += bytes.byteLength
@@ -90,7 +90,7 @@ export async function extractZipFiles(file: File): Promise<ZipImportResult> {
       files[path] = content
       extractedCount += 1
     } catch {
-      skipped.push(path)
+      skipped.push(entry.name)
     }
   }
 

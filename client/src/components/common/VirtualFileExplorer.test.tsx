@@ -42,7 +42,7 @@ function installDomEnvironment(url: string) {
 void test('VirtualFileExplorer supports tree keyboard navigation across visible items', async () => {
   const restoreDom = installDomEnvironment('https://bits.example')
   const { cleanup, fireEvent, render } = await import('@testing-library/react')
-  const { default: VirtualFileExplorer } = await import('./VirtualFileExplorer.js')
+  const { default: VirtualFileExplorer } = await import('./VirtualFileExplorer')
 
   try {
     const rendered = render(

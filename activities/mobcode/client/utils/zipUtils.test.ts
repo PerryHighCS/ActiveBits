@@ -26,10 +26,12 @@ void test('extractZipFiles skips binary/artifact entries and extracts text', asy
     'Main.java': 'class Main {}',
     'image.png': new Uint8Array([1, 2, 3]),
     '.git/config': 'x',
+    'src/Large.txt': 'x'.repeat(ZIP_LIMITS.maxFileBytes + 1),
   })
   const result = await extractZipFiles(file)
   assert.deepEqual(result.files, { 'Main.java': 'class Main {}' })
   assert.ok(result.skipped.includes('image.png'))
+  assert.ok(result.skipped.includes('src/Large.txt'))
 })
 
 void test('extractZipFiles rejects large zip file inputs before extraction', async () => {
