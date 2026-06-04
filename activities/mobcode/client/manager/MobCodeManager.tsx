@@ -63,6 +63,7 @@ export default function MobCodeManager() {
   const { sessionId } = useParams()
   const location = useLocation()
   const instructorPasscode = readInstructorPasscode(sessionId, location.state)
+  const canEdit = instructorPasscode.length > 0
   const [files, setFiles] = useState<Record<string, string>>({})
   const [activeFile, setActiveFile] = useState('')
   const [theme, setTheme] = useState<MobCodeThemeId>(() => getThemeFromCookie())
@@ -167,11 +168,11 @@ export default function MobCodeManager() {
 
   const sendWsMessage = useCallback(
     (type: string, payload: unknown): boolean => {
-      if (!sessionId || socketRef.current?.readyState !== 1) return false
+      if (!sessionId || !instructorPasscode || socketRef.current?.readyState !== 1) return false
       socketRef.current.send(JSON.stringify({ type, sessionId, payload }))
       return true
     },
-    [sessionId, socketRef],
+    [instructorPasscode, sessionId, socketRef],
   )
 
   const flushPendingPresenceSync = useCallback(() => {
@@ -284,6 +285,7 @@ export default function MobCodeManager() {
 
   const importFilesIntoWorkspace = useCallback(
     (importedFiles: Record<string, string>, skippedCount = 0) => {
+      if (!canEdit) return
       const nextFiles = sanitizeFilesMap({
         ...latestStateRef.current.files,
         ...importedFiles,
@@ -294,11 +296,12 @@ export default function MobCodeManager() {
       setFileImportMessage(skippedCount > 0 ? `${skippedCount} files skipped` : '')
       applyFiles(nextFiles, nextActiveFile, MOB_CODE_MESSAGE_TYPES.FILE_TREE_CHANGED)
     },
-    [applyFiles],
+    [applyFiles, canEdit],
   )
 
   const handleDroppedFiles = useCallback(
     async (droppedFiles: File[]) => {
+      if (!canEdit) return
       try {
         const result = await extractImportedFiles(droppedFiles)
         importFilesIntoWorkspace(result.files, result.skipped.length)
@@ -306,7 +309,7 @@ export default function MobCodeManager() {
         setFileImportMessage(error instanceof Error ? error.message : 'Could not import dropped files')
       }
     },
-    [importFilesIntoWorkspace],
+    [canEdit, importFilesIntoWorkspace],
   )
 
   const handleThemeChange = (nextTheme: MobCodeThemeId) => {
@@ -339,8 +342,8 @@ export default function MobCodeManager() {
         activityName="Mob Code"
         sessionId={sessionId}
         includeBottomMargin={false}
-        actionMenuLabel="Code Files"
-        actionMenuContent={(
+        actionMenuLabel={canEdit ? 'Code Files' : undefined}
+        actionMenuContent={canEdit ? (
           <FileControlsMenuContent
             files={files}
             onUploadFiles={(uploadedFiles) => {
@@ -350,7 +353,7 @@ export default function MobCodeManager() {
             onCreateFolder={() => setModalMode('create-folder')}
             onMessageChange={setFileImportMessage}
           />
-        )}
+        ) : undefined}
         headerActions={<SettingsMenu theme={theme} onThemeChange={handleThemeChange} label="Theme" />}
       />
       {!instructorPasscode && (
@@ -363,25 +366,28 @@ export default function MobCodeManager() {
           <VirtualFileExplorer
             files={files}
             activePath={activeFile}
-            allowCreate
-            allowRename
-            allowDelete
+            allowCreate={canEdit}
+            allowRename={canEdit}
+            allowDelete={canEdit}
             dropPrompt="Drop files or zip archives here to import"
             onSelect={(path) => {
-              latestStateRef.current = applyActiveFileChange(latestStateRef.current, path)
               setActiveFile(path)
+              if (!canEdit) return
+              latestStateRef.current = applyActiveFileChange(latestStateRef.current, path)
               sendWsMessage(MOB_CODE_MESSAGE_TYPES.ACTIVE_FILE_CHANGED, { activeFile: path })
               schedulePresenceSync(path, [{ anchor: 0, head: 0 }])
               void persistState(latestStateRef.current)
             }}
-            onCreateFile={() => setModalMode('create-file')}
-            onCreateFolder={() => setModalMode('create-folder')}
-            onDropFiles={handleDroppedFiles}
+            onCreateFile={canEdit ? () => setModalMode('create-file') : undefined}
+            onCreateFolder={canEdit ? () => setModalMode('create-folder') : undefined}
+            onDropFiles={canEdit ? handleDroppedFiles : undefined}
             onRename={(path) => {
+              if (!canEdit) return
               setRenameTarget(path)
               setModalMode('rename')
             }}
             onDelete={(path) => {
+              if (!canEdit) return
               const nextFiles = deletePathFromFiles(files, path)
               applyFiles(nextFiles, resolveActiveFile(nextFiles, activeFile))
             }}
@@ -401,7 +407,9 @@ export default function MobCodeManager() {
               value={activeContent}
               filename={activeFile}
               theme={theme}
+              readOnly={!canEdit}
               onUpdate={(viewUpdate) => {
+                if (!canEdit) return
                 if (!activeFile || (!viewUpdate.docChanged && !viewUpdate.selectionSet)) return
                 const selections = viewUpdate.state.selection.ranges.map((range) => ({
                   anchor: range.anchor,
