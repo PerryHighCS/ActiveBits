@@ -14,6 +14,14 @@ Use this log for durable findings that future contributors and agents should reu
 
 ## Discoveries
 
+- Date: 2026-06-04
+- Area: activities | mobcode
+- Discovery: MobCode is registered as a production activity with manager/student expanded-shell layouts and create-session bootstrap storage for `instructorPasscode` under `mobcode_instructor_${sessionId}`.
+- Why it matters: MobCode manager state mutations require that passcode for durable HTTP persistence and websocket edit relays, so future recovery work should preserve the bootstrap path or add an explicit server-backed teacher recovery endpoint.
+- Evidence: `activities/mobcode/activity.config.ts`; `activities/mobcode/server/routes.ts`; `activities/mobcode/client/manager/MobCodeManager.tsx`
+- Follow-up action: If persistent Teacher Join needs full MobCode edit recovery after browser storage loss, add a canonical teacher-auth recovery route instead of weakening the mutation checks.
+- Owner: Codex
+
 - Date: 2026-05-12
 - Area: server | tooling
 - Discovery: `http-proxy-middleware` can be upgraded to `^4.0.0` in this repo without code changes in `server/server.ts`; existing `createProxyMiddleware` usage, `pathFilter`, and websocket upgrade handling remain compatible.
