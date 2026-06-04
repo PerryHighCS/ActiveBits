@@ -9,7 +9,7 @@ import CodeEditor from '../components/CodeEditor'
 import FileNameModal from '../components/FileNameModal'
 import FileControlsMenuContent from '../components/FileControlsMenuContent'
 import SettingsMenu from '../components/SettingsMenu'
-import { MOB_CODE_INSTRUCTOR_STORAGE_PREFIX, MOB_CODE_MESSAGE_TYPES } from '../utils/constants'
+import { MOB_CODE_MESSAGE_TYPES } from '../utils/constants'
 import {
   deletePathFromFiles,
   renameActiveFilePath,
@@ -28,6 +28,7 @@ import {
   isStatePayload,
   parseMobCodeMessage,
 } from './managerUtils'
+import { resolveMobCodeInstructorPasscode } from './passcodeUtils'
 import '../styles.css'
 
 interface SessionResponse {
@@ -49,20 +50,13 @@ type DurableMobCodeMessageType =
 const LIVE_CONTENT_SYNC_INTERVAL_MS = 120
 const LIVE_PRESENCE_SYNC_INTERVAL_MS = 60
 
-function readInstructorPasscode(sessionId: string | undefined, locationState: unknown): string {
-  const state = locationState != null && typeof locationState === 'object'
-    ? (locationState as Record<string, unknown>)
-    : {}
-  const fromState = state.instructorPasscode
-  if (typeof fromState === 'string' && fromState.length > 0) return fromState
-  if (!sessionId || typeof sessionStorage === 'undefined') return ''
-  return sessionStorage.getItem(`${MOB_CODE_INSTRUCTOR_STORAGE_PREFIX}${sessionId}`) ?? ''
-}
-
 export default function MobCodeManager() {
   const { sessionId } = useParams()
   const location = useLocation()
-  const instructorPasscode = readInstructorPasscode(sessionId, location.state)
+  const instructorPasscode = resolveMobCodeInstructorPasscode({
+    sessionId,
+    locationState: location.state,
+  })
   const canEdit = instructorPasscode.length > 0
   const [files, setFiles] = useState<Record<string, string>>({})
   const [activeFile, setActiveFile] = useState('')
@@ -78,7 +72,6 @@ export default function MobCodeManager() {
   const presenceDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pendingPresenceRef = useRef<{ path: string; selections: MobCodeSelectionRange[] } | null>(null)
   const lastPresenceSyncAtRef = useRef(0)
-  const latestEditorSelectionsRef = useRef<MobCodeSelectionRange[]>([])
 
   useEffect(() => {
     latestStateRef.current = createStateSnapshot(files, activeFile)
@@ -415,7 +408,6 @@ export default function MobCodeManager() {
                   anchor: range.anchor,
                   head: range.head,
                 }))
-                latestEditorSelectionsRef.current = selections
                 if (viewUpdate.docChanged) {
                   const content = viewUpdate.state.doc.toString()
                   setFiles((current) => {

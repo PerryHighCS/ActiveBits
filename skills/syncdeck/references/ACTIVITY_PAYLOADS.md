@@ -254,6 +254,33 @@ Practical guidance:
 
 Gallery Walk currently behaves more like a session-configured embedded activity than a deep-link-heavy one. Treat `title` as a host-seeded config value rather than a broad standalone permalink contract.
 
+## MobCode
+
+### Deck launch payload
+
+MobCode can seed starter files for an embedded live coding session.
+
+Example:
+
+```html
+<section
+  data-activity-id="mobcode"
+  data-activity-trigger="slide-enter"
+  data-activity-options='{"files":{"src/Main.java":"public class Main {\n  public static void main(String[] args) {\n    System.out.println(\"Hello, MobCode\");\n  }\n}\n","README.md":"Pair on the starter code and explain each change.\n"},"activeFile":"src/Main.java"}'
+>
+```
+
+Field guidance:
+
+- `files` is an object map of relative virtual paths to UTF-8 text content
+- `activeFile` is optional and should match one of the `files` keys when provided
+- paths should be safe relative paths such as `src/Main.java`; traversal segments such as `../` are ignored
+- omit `files` to start with an empty MobCode workspace
+
+### Child embedded launch state
+
+MobCode reads `embeddedLaunch.selectedOptions.files` and `embeddedLaunch.selectedOptions.activeFile` only when the child session is first created without an existing MobCode file tree. After that, the live session state under `groups.default` is authoritative, so later reloads or reconnects do not overwrite instructor edits with the original starter payload.
+
 ## Raffle
 
 The current deck example uses:

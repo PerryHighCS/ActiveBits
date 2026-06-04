@@ -28,6 +28,11 @@ interface MobCodeSocket extends ActiveBitsWebSocket {
   instructorPasscode?: string | null
 }
 
+interface EmbeddedMobCodeLaunchOptions {
+  files?: unknown
+  activeFile?: unknown
+}
+
 const DEFAULT_GROUP_ID = 'default'
 const MAX_FILES = 250
 const MAX_PATH_LENGTH = 240
@@ -97,6 +102,25 @@ function normalizeFiles(value: unknown): Record<string, string> {
   return files
 }
 
+function readEmbeddedStarterState(source: Record<string, unknown>): MobCodeGroupState | null {
+  const embeddedLaunch = isPlainObject(source.embeddedLaunch) ? source.embeddedLaunch : null
+  const selectedOptions = isPlainObject(embeddedLaunch?.selectedOptions) ? embeddedLaunch.selectedOptions : null
+  if (!selectedOptions) {
+    return null
+  }
+
+  const { files: rawFiles, activeFile } = selectedOptions as EmbeddedMobCodeLaunchOptions
+  if (!isPlainObject(rawFiles)) {
+    return null
+  }
+
+  const files = normalizeFiles(rawFiles)
+  return {
+    files,
+    activeFile: resolveActiveFile(files, activeFile),
+  }
+}
+
 function resolveActiveFile(files: Record<string, string>, activeFile: unknown): string {
   if (typeof activeFile === 'string' && Object.hasOwn(files, activeFile)) return activeFile
   return Object.keys(files).sort((a, b) => a.localeCompare(b))[0] ?? ''
@@ -106,12 +130,16 @@ export function normalizeMobCodeSessionData(data: unknown): MobCodeSessionData {
   const source = isPlainObject(data) ? data : {}
   const { instructorPasscode, ...restSource } = source
   const groupsSource = isPlainObject(source.groups) ? source.groups : {}
-  const defaultSource = isPlainObject(groupsSource[DEFAULT_GROUP_ID]) ? groupsSource[DEFAULT_GROUP_ID] : {}
-  const files = normalizeFiles(defaultSource.files)
-  const defaultGroup: MobCodeGroupState = {
-    files,
-    activeFile: resolveActiveFile(files, defaultSource.activeFile),
-  }
+  const hasExplicitDefaultGroup = isPlainObject(groupsSource[DEFAULT_GROUP_ID])
+  const defaultSource = hasExplicitDefaultGroup ? groupsSource[DEFAULT_GROUP_ID] as Record<string, unknown> : {}
+  const embeddedStarterState = hasExplicitDefaultGroup ? null : readEmbeddedStarterState(source)
+  const defaultGroup: MobCodeGroupState = embeddedStarterState ?? (() => {
+    const files = normalizeFiles(defaultSource.files)
+    return {
+      files,
+      activeFile: resolveActiveFile(files, defaultSource.activeFile),
+    }
+  })()
 
   return {
     ...restSource,
@@ -119,7 +147,9 @@ export function normalizeMobCodeSessionData(data: unknown): MobCodeSessionData {
       ...groupsSource,
       [DEFAULT_GROUP_ID]: defaultGroup,
     },
-    ...(typeof instructorPasscode === 'string' ? { instructorPasscode } : {}),
+    instructorPasscode: typeof instructorPasscode === 'string' && instructorPasscode.length > 0
+      ? instructorPasscode
+      : createInstructorPasscode(),
   }
 }
 

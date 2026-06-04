@@ -11,6 +11,8 @@ import {
 void test('normalizeMobCodeSessionData creates default group when missing', () => {
   const data = normalizeMobCodeSessionData({})
   assert.deepEqual(data.groups.default, { files: {}, activeFile: '' })
+  assert.equal(typeof data.instructorPasscode, 'string')
+  assert.equal(data.instructorPasscode?.length, 32)
 })
 
 void test('normalizeMobCodeSessionData preserves valid files and active file', () => {
@@ -44,7 +46,51 @@ void test('normalizeMobCodeSessionData drops invalid file records and repairs ac
     files: { 'src/Main.java': 'ok' },
     activeFile: 'src/Main.java',
   })
-  assert.equal('instructorPasscode' in data, false)
+  assert.equal(typeof data.instructorPasscode, 'string')
+  assert.equal(data.instructorPasscode?.length, 32)
+})
+
+void test('normalizeMobCodeSessionData seeds starter files from embedded launch options when groups are missing', () => {
+  const data = normalizeMobCodeSessionData({
+    embeddedLaunch: {
+      selectedOptions: {
+        files: {
+          'src/Main.java': 'class Main {}',
+          '../bad': 'ignored',
+        },
+        activeFile: 'src/Main.java',
+      },
+    },
+  })
+
+  assert.deepEqual(data.groups.default, {
+    files: { 'src/Main.java': 'class Main {}' },
+    activeFile: 'src/Main.java',
+  })
+})
+
+void test('normalizeMobCodeSessionData does not rehydrate embedded starter files when an explicit group already exists', () => {
+  const data = normalizeMobCodeSessionData({
+    groups: {
+      default: {
+        files: {},
+        activeFile: '',
+      },
+    },
+    embeddedLaunch: {
+      selectedOptions: {
+        files: {
+          'src/Main.java': 'class Main {}',
+        },
+        activeFile: 'src/Main.java',
+      },
+    },
+  })
+
+  assert.deepEqual(data.groups.default, {
+    files: {},
+    activeFile: '',
+  })
 })
 
 void test('readStatePayload rejects malformed requests instead of clearing state', () => {

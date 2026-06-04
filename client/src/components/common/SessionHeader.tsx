@@ -108,7 +108,6 @@ export default function SessionHeader({
                   variant="outline"
                   aria-expanded={showActionMenu}
                   aria-controls={showActionMenu ? actionMenuId : undefined}
-                  aria-haspopup="menu"
                 >
                   {actionMenuLabel}
                 </Button>

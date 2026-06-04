@@ -15,6 +15,15 @@ Document API and data-shape assumptions that must stay compatible over time.
 
 ## Contracts
 
+- Date: 2026-06-04
+- Surface: activity interface | SyncDeck embedded launch
+- Contract: MobCode embedded launches may seed a starter workspace through `embeddedLaunch.selectedOptions` using `{ files: Record<string, string>, activeFile?: string }`. `files` is a virtual path to UTF-8 text map, and `activeFile` is optional.
+- Compatibility constraints: The starter payload is only used when a MobCode child session is created without an explicit `groups.default` workspace. Once live MobCode state exists, `groups.default.files` and `groups.default.activeFile` remain authoritative so reloads do not overwrite instructor edits or intentionally emptied workspaces.
+- Validation rules: Paths are normalized to safe relative paths, file content is truncated to MobCode's existing per-file and total UTF-8 byte limits, and invalid/traversal paths are dropped. If `activeFile` is missing or invalid, MobCode falls back to the first valid file path.
+- Evidence (schema/tests/path): `activities/mobcode/server/routes.ts`; `activities/mobcode/server/routes.test.ts`; `activities/syncdeck/server/routes.test.ts`; `skills/syncdeck/references/ACTIVITY_PAYLOADS.md`
+- Follow-up action: If MobCode later needs richer embedded bootstrap data such as language/tooling hints, extend the launch object under explicit new keys rather than overloading `files` entries with metadata.
+- Owner: Codex
+
 - Date: 2026-06-03
 - Surface: REST | activity interface | file import
 - Contract: Resonance managers can append saved question sets into an active live session through `POST /api/resonance/:sessionId/import-questions` with `{ questions }` and the instructor passcode header. The payload uses the same JSON question-set shape exported by the Resonance tools page and is normalized through `validateQuestionSet(...)` before persistence.
