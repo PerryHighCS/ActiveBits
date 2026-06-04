@@ -1,7 +1,7 @@
 import { useEffect, useId, useState } from 'react'
 import Modal from '@src/components/ui/Modal'
 import Button from '@src/components/ui/Button'
-import { normalizeMobCodePath } from '../utils/fileUtils'
+import { isValidMobCodePath, normalizeMobCodePath } from '../utils/fileUtils'
 
 interface FileNameModalProps {
   open: boolean
@@ -28,7 +28,7 @@ export default function FileNameModal({
   }, [open, initialValue])
 
   const normalized = normalizeMobCodePath(value)
-  const isValid = normalized.length > 0 && normalized === value.trim()
+  const isValid = normalized.length > 0 && normalized === value.trim() && isValidMobCodePath(normalized)
 
   return (
     <Modal open={open} onClose={onClose} title={title}>

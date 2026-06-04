@@ -24,6 +24,41 @@ function handleActionKey(event: KeyboardEvent<HTMLButtonElement>, action: () => 
   action()
 }
 
+function focusTreeItemButton(button: HTMLButtonElement | null | undefined): void {
+  button?.focus()
+}
+
+function getTreeItemButtons(currentTarget: HTMLButtonElement): HTMLButtonElement[] {
+  const tree = currentTarget.closest('[role="tree"]')
+  if (!tree) return []
+  return Array.from(tree.querySelectorAll<HTMLButtonElement>('[role="treeitem"]'))
+}
+
+function focusSiblingItem(currentTarget: HTMLButtonElement, direction: -1 | 1): void {
+  const buttons = getTreeItemButtons(currentTarget)
+  const currentIndex = buttons.indexOf(currentTarget)
+  if (currentIndex < 0) return
+  focusTreeItemButton(buttons[currentIndex + direction])
+}
+
+function focusBoundaryItem(currentTarget: HTMLButtonElement, boundary: 'first' | 'last'): void {
+  const buttons = getTreeItemButtons(currentTarget)
+  if (buttons.length === 0) return
+  focusTreeItemButton(boundary === 'first' ? buttons[0] : buttons.at(-1))
+}
+
+function focusFirstChildItem(currentTarget: HTMLButtonElement): void {
+  const group = currentTarget.closest('li')?.querySelector<HTMLElement>(':scope > ul[role="group"]')
+  const button = group?.querySelector<HTMLButtonElement>('[role="treeitem"]')
+  focusTreeItemButton(button)
+}
+
+function focusParentItem(currentTarget: HTMLButtonElement): void {
+  const parentGroup = currentTarget.closest('ul[role="group"]')
+  const parentItem = parentGroup?.closest('li')?.querySelector<HTMLButtonElement>(':scope > div > [role="treeitem"]')
+  focusTreeItemButton(parentItem)
+}
+
 export default function VirtualFileExplorerItem({
   entry,
   depth,
@@ -70,15 +105,35 @@ export default function VirtualFileExplorerItem({
           role="treeitem"
           aria-expanded={isFolder ? isExpanded : undefined}
           aria-current={isActive ? 'page' : undefined}
+          aria-selected={isActive || undefined}
+          aria-level={depth + 1}
           className="flex min-w-0 flex-1 items-center gap-2 py-1 text-left"
           onClick={activate}
           onKeyDown={(event) => {
-            if (event.key === 'ArrowRight' && isFolder && !isExpanded) {
+            if (event.key === 'ArrowDown') {
+              event.preventDefault()
+              focusSiblingItem(event.currentTarget, 1)
+            } else if (event.key === 'ArrowUp') {
+              event.preventDefault()
+              focusSiblingItem(event.currentTarget, -1)
+            } else if (event.key === 'Home') {
+              event.preventDefault()
+              focusBoundaryItem(event.currentTarget, 'first')
+            } else if (event.key === 'End') {
+              event.preventDefault()
+              focusBoundaryItem(event.currentTarget, 'last')
+            } else if (event.key === 'ArrowRight' && isFolder && !isExpanded) {
               event.preventDefault()
               onToggleFolder(entry.path)
+            } else if (event.key === 'ArrowRight' && isFolder && isExpanded) {
+              event.preventDefault()
+              focusFirstChildItem(event.currentTarget)
             } else if (event.key === 'ArrowLeft' && isFolder && isExpanded) {
               event.preventDefault()
               onToggleFolder(entry.path)
+            } else if (event.key === 'ArrowLeft') {
+              event.preventDefault()
+              focusParentItem(event.currentTarget)
             }
           }}
         >

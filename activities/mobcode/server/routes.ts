@@ -28,6 +28,7 @@ const MAX_FILE_CONTENT_LENGTH = 1_000_000
 const MAX_TOTAL_CONTENT_LENGTH = 25_000_000
 const INSTRUCTOR_PASSCODE_BYTES = 16
 const WS_OPEN = 1
+const DURABLE_MESSAGE_TYPES = new Set<MobCodeMessage['type']>(['state-sync', 'file-tree-changed'])
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return value != null && typeof value === 'object' && !Array.isArray(value)
@@ -107,13 +108,59 @@ function verifyPasscode(expected: string | undefined, candidate: unknown): boole
   return expectedBuffer.length === candidateBuffer.length && timingSafeEqual(expectedBuffer, candidateBuffer)
 }
 
-function readStatePayload(value: unknown): MobCodeStatePayload | null {
-  const source = isPlainObject(value) ? value : {}
+export function readStatePayload(value: unknown): MobCodeStatePayload | null {
+  if (!isPlainObject(value) || !isPlainObject(value.files) || typeof value.activeFile !== 'string') return null
+  const source = value
   const files = normalizeFiles(source.files)
   return {
     files,
     activeFile: resolveActiveFile(files, source.activeFile),
   }
+}
+
+export function readDurableMessageType(value: unknown): MobCodeMessage['type'] {
+  return typeof value === 'string' && DURABLE_MESSAGE_TYPES.has(value as MobCodeMessage['type'])
+    ? value as MobCodeMessage['type']
+    : 'state-sync'
+}
+
+export function readWsRelayMessage(
+  message: MobCodeMessage,
+  files: Record<string, string>,
+): MobCodeMessage | null {
+  if (message.type === 'file-content-update') {
+    if (!isPlainObject(message.payload)) return null
+    const { path, content } = message.payload
+    if (
+      typeof path !== 'string' ||
+      !isSafePath(path) ||
+      !Object.hasOwn(files, path) ||
+      typeof content !== 'string' ||
+      content.length > MAX_FILE_CONTENT_LENGTH
+    ) {
+      return null
+    }
+
+    return {
+      type: message.type,
+      payload: { path, content },
+    }
+  }
+
+  if (message.type === 'active-file-changed') {
+    if (!isPlainObject(message.payload)) return null
+    const { activeFile } = message.payload
+    if (typeof activeFile !== 'string' || !isSafePath(activeFile) || !Object.hasOwn(files, activeFile)) {
+      return null
+    }
+
+    return {
+      type: message.type,
+      payload: { activeFile },
+    }
+  }
+
+  return null
 }
 
 function readParam(value: string | string[] | undefined): string {
@@ -180,7 +227,13 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
           return
         }
 
-        const outgoing = JSON.stringify({ ...msg, timestamp: Date.now() })
+        const relayMessage = readWsRelayMessage(msg, session.data.groups[DEFAULT_GROUP_ID]?.files ?? {})
+        if (!relayMessage) {
+          console.warn(JSON.stringify({ event: 'mobcode.ws-mutation-invalid', sessionId: client.sessionId, type: msg.type }))
+          return
+        }
+
+        const outgoing = JSON.stringify({ ...relayMessage, timestamp: Date.now() })
         for (const peer of ws.wss.clients) {
           if (peer !== client && peer.readyState === WS_OPEN && peer.sessionId === client.sessionId) {
             peer.send(outgoing)
@@ -251,7 +304,7 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
 
       session.data.groups[DEFAULT_GROUP_ID] = payload
       await sessions.set(session.id, session)
-      await broadcast(typeof body.messageType === 'string' ? body.messageType : 'state-sync', payload, session.id)
+      await broadcast(readDurableMessageType(body.messageType), payload, session.id)
       res.json({ ok: true })
     } catch (error) {
       console.error(JSON.stringify({ event: 'mobcode.state-failed', sessionId: req.params.sessionId, error: String(error) }))

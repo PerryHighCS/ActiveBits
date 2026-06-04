@@ -4,6 +4,7 @@ import {
   deletePathFromFiles,
   getFileExtension,
   isValidFileName,
+  isValidMobCodePath,
   normalizeMobCodePath,
   renamePathInFiles,
   resolveActiveFile,
@@ -18,6 +19,13 @@ void test('path helpers normalize and validate file names', () => {
   assert.equal(isValidFileName(''), false)
   assert.equal(isValidFileName('bad\0name'), false)
   assert.equal(getFileExtension('src/Main.java'), 'java')
+})
+
+void test('isValidMobCodePath accepts safe relative paths and rejects traversal', () => {
+  assert.equal(isValidMobCodePath('src/Main.java'), true)
+  assert.equal(isValidMobCodePath('folder/.keep'), true)
+  assert.equal(isValidMobCodePath('../Main.java'), false)
+  assert.equal(isValidMobCodePath('src/../Main.java'), false)
 })
 
 void test('sanitizeFilesMap keeps safe string files and trims invalid entries', () => {

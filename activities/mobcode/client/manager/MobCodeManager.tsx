@@ -97,7 +97,17 @@ export default function MobCodeManager() {
   useEffect(() => {
     if (!sessionId) return undefined
     connect()
-    return () => disconnect()
+    return () => {
+      if (wsDebounceRef.current) {
+        clearTimeout(wsDebounceRef.current)
+        wsDebounceRef.current = null
+      }
+      if (persistDebounceRef.current) {
+        clearTimeout(persistDebounceRef.current)
+        persistDebounceRef.current = null
+      }
+      disconnect()
+    }
   }, [sessionId, connect, disconnect])
 
   const persistState = useCallback(
