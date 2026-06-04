@@ -9,6 +9,7 @@ export interface SessionHeaderProps {
   activityName: string
   sessionId?: string
   simple?: boolean
+  includeBottomMargin?: boolean
   onEndSession?: () => void | Promise<void>
   actionMenuLabel?: string
   actionMenuContent?: ReactNode
@@ -24,6 +25,7 @@ export default function SessionHeader({
   sessionId,
   onEndSession,
   simple = false,
+  includeBottomMargin = true,
   actionMenuLabel = 'Activity Actions',
   actionMenuContent,
   headerActions,
@@ -95,7 +97,7 @@ export default function SessionHeader({
 
   return (
     <>
-      <div className="mb-6 bg-white border-b border-gray-200 px-6 py-4">
+      <div className={`${includeBottomMargin ? 'mb-6 ' : ''}bg-white border-b border-gray-200 px-6 py-4`}>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex min-w-0 flex-wrap items-center gap-3">
             <h1 className="text-2xl font-bold text-gray-800">{activityName}</h1>

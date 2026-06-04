@@ -30,6 +30,16 @@ void test('SessionHeader full mode renders join controls and action buttons', ()
   assert.match(html, /mb-6/)
 })
 
+void test('SessionHeader can opt out of default bottom margin', () => {
+  const html = renderToStaticMarkup(
+    <MemoryRouter>
+      <SessionHeader activityName="Mob Code" sessionId="abc123" includeBottomMargin={false} />
+    </MemoryRouter>,
+  )
+
+  assert.doesNotMatch(html, /mb-6/)
+})
+
 void test('SessionHeader can render an activity action menu trigger', () => {
   const html = renderToStaticMarkup(
     <MemoryRouter>

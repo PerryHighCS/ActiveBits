@@ -213,6 +213,7 @@ export default function MobCodeManager() {
       <SessionHeader
         activityName="Mob Code"
         sessionId={sessionId}
+        includeBottomMargin={false}
         actionMenuLabel="Code Files"
         actionMenuContent={(
           <FileControlsMenuContent
