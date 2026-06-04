@@ -22,7 +22,7 @@ void test('resolveMobCodeInstructorPasscode prefers router state', () => {
       sessionId: 's1',
       locationState: { instructorPasscode: 'state-passcode' },
       storage,
-      consumeBootstrapPayload: () => ({ instructorPasscode: 'bootstrap-passcode' }),
+      readBootstrapPayload: () => ({ instructorPasscode: 'bootstrap-passcode' }),
     }),
     'state-passcode',
   )
@@ -35,22 +35,22 @@ void test('resolveMobCodeInstructorPasscode falls back to activity storage key',
       sessionId: 's1',
       locationState: null,
       storage,
-      consumeBootstrapPayload: () => null,
+      readBootstrapPayload: () => null,
     }),
     'stored-passcode',
   )
 })
 
-void test('resolveMobCodeInstructorPasscode consumes same-tab bootstrap payload and persists it', () => {
+void test('resolveMobCodeInstructorPasscode reads same-tab bootstrap payload without persisting it to storage', () => {
   const storage = createStorage()
   assert.equal(
     resolveMobCodeInstructorPasscode({
       sessionId: 's1',
       locationState: null,
       storage,
-      consumeBootstrapPayload: () => ({ instructorPasscode: 'bootstrap-passcode' }),
+      readBootstrapPayload: () => ({ instructorPasscode: 'bootstrap-passcode' }),
     }),
     'bootstrap-passcode',
   )
-  assert.equal(storage.store.get('mobcode_instructor_s1'), 'bootstrap-passcode')
+  assert.equal(storage.store.get('mobcode_instructor_s1'), undefined)
 })

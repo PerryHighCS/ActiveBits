@@ -1,4 +1,4 @@
-import { consumeCreateSessionBootstrapPayload } from '@src/components/common/manageDashboardUtils'
+import { readCreateSessionBootstrapPayload } from '@src/components/common/manageDashboardUtils'
 import { MOB_CODE_INSTRUCTOR_STORAGE_PREFIX } from '../utils/constants'
 
 function readLocationStatePasscode(locationState: unknown): string {
@@ -12,8 +12,8 @@ function readLocationStatePasscode(locationState: unknown): string {
 export function resolveMobCodeInstructorPasscode(params: {
   sessionId: string | undefined
   locationState: unknown
-  storage?: Pick<Storage, 'getItem' | 'setItem'> | null
-  consumeBootstrapPayload?: typeof consumeCreateSessionBootstrapPayload
+  storage?: Pick<Storage, 'getItem'> | null
+  readBootstrapPayload?: typeof readCreateSessionBootstrapPayload
 }): string {
   const fromLocationState = readLocationStatePasscode(params.locationState)
   if (fromLocationState) {
@@ -31,18 +31,8 @@ export function resolveMobCodeInstructorPasscode(params: {
     return fromStorage
   }
 
-  const consumeBootstrapPayload = params.consumeBootstrapPayload ?? consumeCreateSessionBootstrapPayload
-  const bootstrap = consumeBootstrapPayload('mobcode', params.sessionId)
+  const readBootstrapPayload = params.readBootstrapPayload ?? readCreateSessionBootstrapPayload
+  const bootstrap = readBootstrapPayload('mobcode', params.sessionId)
   const fromBootstrap = typeof bootstrap?.instructorPasscode === 'string' ? bootstrap.instructorPasscode : ''
-  if (!fromBootstrap) {
-    return ''
-  }
-
-  try {
-    storage?.setItem(storageKey, fromBootstrap)
-  } catch {
-    // Best-effort persistence only; the in-memory passcode still allows manager auth.
-  }
-
-  return fromBootstrap
+  return fromBootstrap || ''
 }
