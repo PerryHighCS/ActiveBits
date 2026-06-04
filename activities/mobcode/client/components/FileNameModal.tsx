@@ -28,7 +28,7 @@ export default function FileNameModal({
   }, [open, initialValue])
 
   const normalized = normalizeMobCodePath(value)
-  const isValid = normalized.length > 0 && normalized === value.trim() && isValidMobCodePath(normalized)
+  const isValid = normalized.length > 0 && isValidMobCodePath(normalized)
 
   return (
     <Modal open={open} onClose={onClose} title={title}>
