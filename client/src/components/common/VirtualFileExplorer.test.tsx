@@ -83,3 +83,24 @@ void test('VirtualFileExplorer supports tree keyboard navigation across visible 
     restoreDom()
   }
 })
+
+void test('VirtualFileExplorer renders icon buttons for file and folder creation', async () => {
+  const restoreDom = installDomEnvironment('https://bits.example')
+  const { cleanup, render } = await import('@testing-library/react')
+  const { default: VirtualFileExplorer } = await import('./VirtualFileExplorer')
+
+  try {
+    const rendered = render(
+      <VirtualFileExplorer
+        files={{}}
+        allowCreate
+      />,
+    )
+
+    assert.equal(rendered.getByRole('button', { name: 'Add file' }).getAttribute('title'), 'Add file')
+    assert.equal(rendered.getByRole('button', { name: 'Add folder' }).getAttribute('title'), 'Add folder')
+  } finally {
+    cleanup()
+    restoreDom()
+  }
+})
