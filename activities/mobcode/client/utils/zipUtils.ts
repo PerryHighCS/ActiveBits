@@ -46,6 +46,7 @@ function isKnownBinaryPath(path: string): boolean {
 export function normalizeZipEntryPath(rawPath: string): string | null {
   const normalized = normalizeMobCodePath(rawPath.replace(/^\/+/, ''))
   if (!normalized) return null
+  if (normalized.length > 240 || normalized.includes('\0')) return null
   if (normalized.split('/').some((part) => part === '..' || part === '.')) return null
   if (shouldSkipPath(normalized)) return null
   return normalized

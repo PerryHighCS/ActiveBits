@@ -15,6 +15,8 @@ async function makeZipFile(entries: Record<string, string | Uint8Array>): Promis
 void test('normalizes zip paths and rejects traversal/artifacts', () => {
   assert.equal(normalizeZipEntryPath('/src/Main.java'), 'src/Main.java')
   assert.equal(normalizeZipEntryPath('../Main.java'), null)
+  assert.equal(normalizeZipEntryPath(`src/${'a'.repeat(241)}.java`), null)
+  assert.equal(normalizeZipEntryPath('bad\0name.java'), null)
   assert.equal(normalizeZipEntryPath('__MACOSX/file'), null)
   assert.equal(normalizeZipEntryPath('src/.DS_Store'), null)
 })

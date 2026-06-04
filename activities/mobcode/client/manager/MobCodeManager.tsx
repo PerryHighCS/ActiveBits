@@ -6,7 +6,6 @@ import type { VirtualFileEntry } from '@src/components/common/virtualFileExplore
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
 import type { MobCodeStatePayload, MobCodeThemeId } from '../../shared/types'
 import CodeEditor from '../components/CodeEditor'
-import { resolveEditorTheme } from '../components/CodeEditor'
 import FileNameModal from '../components/FileNameModal'
 import FileControlsMenuContent from '../components/FileControlsMenuContent'
 import SettingsMenu from '../components/SettingsMenu'
@@ -169,9 +168,7 @@ export default function MobCodeManager() {
   }
 
   const activeContent = activeFile ? files[activeFile] ?? '' : ''
-  const editorThemeClassName = typeof resolveEditorTheme(theme) === 'string'
-    ? `mobcode-editor-theme-${theme}`
-    : `mobcode-editor-theme-${theme}`
+  const editorThemeClassName = `mobcode-editor-theme-${theme}`
 
   const submitModal = (path: string) => {
     if (modalMode === 'create-file') {

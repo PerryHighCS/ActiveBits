@@ -4,7 +4,6 @@ import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
 import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler'
 import type { MobCodeThemeId } from '../../shared/types'
 import CodeEditor from '../components/CodeEditor'
-import { resolveEditorTheme } from '../components/CodeEditor'
 import EditorToolbar from '../components/EditorToolbar'
 import { MOB_CODE_MESSAGE_TYPES } from '../utils/constants'
 import { resolveActiveFile, sanitizeFilesMap } from '../utils/fileUtils'
@@ -88,9 +87,7 @@ export default function MobCodeStudent({ sessionData }: MobCodeStudentProps) {
     setThemeCookie(nextTheme)
   }
 
-  const editorThemeClassName = typeof resolveEditorTheme(theme) === 'string'
-    ? `mobcode-editor-theme-${theme}`
-    : `mobcode-editor-theme-${theme}`
+  const editorThemeClassName = `mobcode-editor-theme-${theme}`
 
   return (
     <div className="mobcode-shell">

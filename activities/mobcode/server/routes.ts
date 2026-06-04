@@ -104,9 +104,16 @@ function createInstructorPasscode(): string {
 
 function verifyPasscode(expected: string | undefined, candidate: unknown): boolean {
   if (typeof expected !== 'string' || typeof candidate !== 'string') return false
+  if (candidate.length === 0 || candidate.length > 512 || expected.length !== candidate.length) return false
   const expectedBuffer = Buffer.from(expected)
   const candidateBuffer = Buffer.from(candidate)
-  return expectedBuffer.length === candidateBuffer.length && timingSafeEqual(expectedBuffer, candidateBuffer)
+  if (expectedBuffer.length === 0 || expectedBuffer.length !== candidateBuffer.length) return false
+
+  try {
+    return timingSafeEqual(expectedBuffer, candidateBuffer)
+  } catch {
+    return false
+  }
 }
 
 export function readStatePayload(value: unknown): MobCodeStatePayload | null {
