@@ -91,13 +91,6 @@ export default function CodeEditor({
     }
   }, [filename])
 
-  const remotePresenceKey = useMemo(() => {
-    if (!readOnly || !remotePresence || remotePresence.path !== filename) {
-      return filename
-    }
-    return `${filename}:${remotePresence.selections.map((selection) => `${selection.anchor}-${selection.head}`).join(',')}`
-  }, [filename, readOnly, remotePresence])
-
   const extensions = useMemo(
     () => [
       ...languageExtensions,
@@ -110,7 +103,6 @@ export default function CodeEditor({
 
   return (
     <CodeMirror
-      key={remotePresenceKey}
       value={value}
       height="100%"
       basicSetup={{
