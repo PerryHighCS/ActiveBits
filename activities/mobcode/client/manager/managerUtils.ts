@@ -1,5 +1,10 @@
 import type { MobCodeMessage, MobCodeStatePayload } from '../../shared/types'
 
+export interface LiveContentSyncPlan {
+  sendImmediately: boolean
+  delayMs: number
+}
+
 export function parseMobCodeMessage(rawData: unknown): MobCodeMessage | null {
   if (typeof rawData !== 'string') return null
   try {
@@ -40,5 +45,25 @@ export function applyActiveFileChange(current: MobCodeStatePayload, activeFile: 
   return {
     files: current.files,
     activeFile,
+  }
+}
+
+export function createLiveContentSyncPlan(
+  now: number,
+  lastSentAt: number,
+  intervalMs: number,
+): LiveContentSyncPlan {
+  if (lastSentAt <= 0) {
+    return { sendImmediately: true, delayMs: 0 }
+  }
+
+  const elapsedMs = now - lastSentAt
+  if (elapsedMs >= intervalMs) {
+    return { sendImmediately: true, delayMs: 0 }
+  }
+
+  return {
+    sendImmediately: false,
+    delayMs: intervalMs - elapsedMs,
   }
 }

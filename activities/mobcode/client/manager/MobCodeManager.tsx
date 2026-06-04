@@ -19,7 +19,14 @@ import {
 } from '../utils/fileUtils'
 import { getThemeFromCookie, setThemeCookie } from '../utils/themeUtils'
 import { extractImportedFiles } from '../utils/zipUtils'
-import { applyActiveFileChange, applyContentChange, createStateSnapshot, isStatePayload, parseMobCodeMessage } from './managerUtils'
+import {
+  applyActiveFileChange,
+  applyContentChange,
+  createLiveContentSyncPlan,
+  createStateSnapshot,
+  isStatePayload,
+  parseMobCodeMessage,
+} from './managerUtils'
 import '../styles.css'
 
 interface SessionResponse {
@@ -37,6 +44,8 @@ type ModalMode = 'create-file' | 'create-folder' | 'rename' | null
 type DurableMobCodeMessageType =
   | typeof MOB_CODE_MESSAGE_TYPES.STATE_SYNC
   | typeof MOB_CODE_MESSAGE_TYPES.FILE_TREE_CHANGED
+
+const LIVE_CONTENT_SYNC_INTERVAL_MS = 120
 
 function readInstructorPasscode(sessionId: string | undefined, locationState: unknown): string {
   const state = locationState != null && typeof locationState === 'object'
@@ -61,6 +70,8 @@ export default function MobCodeManager() {
   const wsDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const persistDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const latestStateRef = useRef<MobCodeStatePayload>(createStateSnapshot({}, ''))
+  const lastLiveSyncAtRef = useRef(0)
+  const pendingContentUpdateRef = useRef<{ path: string; content: string } | null>(null)
 
   useEffect(() => {
     latestStateRef.current = createStateSnapshot(files, activeFile)
@@ -145,26 +156,47 @@ export default function MobCodeManager() {
   )
 
   const sendWsMessage = useCallback(
-    (type: string, payload: unknown) => {
-      if (!sessionId || socketRef.current?.readyState !== 1) return
+    (type: string, payload: unknown): boolean => {
+      if (!sessionId || socketRef.current?.readyState !== 1) return false
       socketRef.current.send(JSON.stringify({ type, sessionId, payload }))
+      return true
     },
     [sessionId, socketRef],
   )
 
+  const flushPendingContentSync = useCallback(() => {
+    const pendingUpdate = pendingContentUpdateRef.current
+    if (!pendingUpdate) return
+    const sent = sendWsMessage(MOB_CODE_MESSAGE_TYPES.FILE_CONTENT_UPDATE, pendingUpdate)
+    if (!sent) return
+    pendingContentUpdateRef.current = null
+    lastLiveSyncAtRef.current = Date.now()
+  }, [sendWsMessage])
+
   const scheduleContentSync = useCallback(
     (path: string, content: string) => {
-      if (wsDebounceRef.current) clearTimeout(wsDebounceRef.current)
-      wsDebounceRef.current = setTimeout(() => {
-        sendWsMessage(MOB_CODE_MESSAGE_TYPES.FILE_CONTENT_UPDATE, { path, content })
-      }, 500)
+      pendingContentUpdateRef.current = { path, content }
+
+      const syncPlan = createLiveContentSyncPlan(Date.now(), lastLiveSyncAtRef.current, LIVE_CONTENT_SYNC_INTERVAL_MS)
+      if (syncPlan.sendImmediately) {
+        if (wsDebounceRef.current) {
+          clearTimeout(wsDebounceRef.current)
+          wsDebounceRef.current = null
+        }
+        flushPendingContentSync()
+      } else if (wsDebounceRef.current == null) {
+        wsDebounceRef.current = setTimeout(() => {
+          wsDebounceRef.current = null
+          flushPendingContentSync()
+        }, syncPlan.delayMs)
+      }
 
       if (persistDebounceRef.current) clearTimeout(persistDebounceRef.current)
       persistDebounceRef.current = setTimeout(() => {
         void persistState(latestStateRef.current)
       }, 5000)
     },
-    [persistState, sendWsMessage],
+    [flushPendingContentSync, persistState],
   )
 
   const clearPendingSync = useCallback(() => {
@@ -172,6 +204,7 @@ export default function MobCodeManager() {
       clearTimeout(wsDebounceRef.current)
       wsDebounceRef.current = null
     }
+    pendingContentUpdateRef.current = null
     if (persistDebounceRef.current) {
       clearTimeout(persistDebounceRef.current)
       persistDebounceRef.current = null
