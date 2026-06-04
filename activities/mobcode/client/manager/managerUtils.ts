@@ -20,3 +20,25 @@ export function isStatePayload(value: unknown): value is MobCodeStatePayload {
     typeof payload.activeFile === 'string'
   )
 }
+
+export function createStateSnapshot(files: Record<string, string>, activeFile: string): MobCodeStatePayload {
+  return { files, activeFile }
+}
+
+export function applyContentChange(
+  current: MobCodeStatePayload,
+  path: string,
+  content: string,
+): MobCodeStatePayload {
+  return {
+    files: { ...current.files, [path]: content },
+    activeFile: current.activeFile,
+  }
+}
+
+export function applyActiveFileChange(current: MobCodeStatePayload, activeFile: string): MobCodeStatePayload {
+  return {
+    files: current.files,
+    activeFile,
+  }
+}

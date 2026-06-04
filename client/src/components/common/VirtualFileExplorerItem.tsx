@@ -1,4 +1,4 @@
-import type { KeyboardEvent, ReactNode } from 'react'
+import type { ReactNode } from 'react'
 import type { VirtualFileEntry } from './virtualFileExplorerTypes'
 
 interface VirtualFileExplorerItemProps {
@@ -16,12 +16,6 @@ interface VirtualFileExplorerItemProps {
   renderItemActions?: (entry: VirtualFileEntry) => ReactNode
   getItemBadges?: (entry: VirtualFileEntry) => ReactNode
   getItemClassName?: (entry: VirtualFileEntry) => string | undefined
-}
-
-function handleActionKey(event: KeyboardEvent<HTMLButtonElement>, action: () => void): void {
-  if (event.key !== 'Enter' && event.key !== ' ') return
-  event.preventDefault()
-  action()
 }
 
 function focusTreeItemButton(button: HTMLButtonElement | null | undefined): void {
@@ -150,7 +144,6 @@ export default function VirtualFileExplorerItem({
             className="rounded px-1 text-xs text-gray-500 opacity-0 hover:bg-gray-200 group-hover:opacity-100 focus:opacity-100"
             aria-label={`Rename ${entry.displayName}`}
             onClick={() => onRename?.(entry.path)}
-            onKeyDown={(event) => handleActionKey(event, () => onRename?.(entry.path))}
           >
             Rename
           </button>
@@ -161,7 +154,6 @@ export default function VirtualFileExplorerItem({
             className="rounded px-1 text-xs text-red-600 opacity-0 hover:bg-red-50 group-hover:opacity-100 focus:opacity-100"
             aria-label={`Delete ${entry.displayName}`}
             onClick={() => onDelete?.(entry.path)}
-            onKeyDown={(event) => handleActionKey(event, () => onDelete?.(entry.path))}
           >
             Delete
           </button>

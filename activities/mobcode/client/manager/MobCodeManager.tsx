@@ -18,7 +18,7 @@ import {
   sanitizeFilesMap,
 } from '../utils/fileUtils'
 import { getThemeFromCookie, setThemeCookie } from '../utils/themeUtils'
-import { isStatePayload, parseMobCodeMessage } from './managerUtils'
+import { applyActiveFileChange, applyContentChange, createStateSnapshot, isStatePayload, parseMobCodeMessage } from './managerUtils'
 import '../styles.css'
 
 interface SessionResponse {
@@ -55,10 +55,10 @@ export default function MobCodeManager() {
   const [renameTarget, setRenameTarget] = useState('')
   const wsDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const persistDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const latestStateRef = useRef<MobCodeStatePayload>({ files: {}, activeFile: '' })
+  const latestStateRef = useRef<MobCodeStatePayload>(createStateSnapshot({}, ''))
 
   useEffect(() => {
-    latestStateRef.current = { files, activeFile }
+    latestStateRef.current = createStateSnapshot(files, activeFile)
   }, [files, activeFile])
 
   useEffect(() => {
@@ -68,8 +68,10 @@ export default function MobCodeManager() {
       .then((session) => {
         if (!session) return
         const nextFiles = sanitizeFilesMap(session.data?.groups?.default?.files)
+        const nextActiveFile = resolveActiveFile(nextFiles, session.data?.groups?.default?.activeFile)
+        latestStateRef.current = createStateSnapshot(nextFiles, nextActiveFile)
         setFiles(nextFiles)
-        setActiveFile(resolveActiveFile(nextFiles, session.data?.groups?.default?.activeFile))
+        setActiveFile(nextActiveFile)
       })
       .catch((error) => console.error('Failed to fetch MobCode session:', error))
   }, [sessionId])
@@ -155,6 +157,7 @@ export default function MobCodeManager() {
 
   const applyFiles = useCallback(
     (nextFiles: Record<string, string>, nextActiveFile: string, messageType: string = MOB_CODE_MESSAGE_TYPES.FILE_TREE_CHANGED) => {
+      latestStateRef.current = createStateSnapshot(nextFiles, nextActiveFile)
       setFiles(nextFiles)
       setActiveFile(nextActiveFile)
       void persistState({ files: nextFiles, activeFile: nextActiveFile }, messageType)
@@ -219,9 +222,10 @@ export default function MobCodeManager() {
             allowRename
             allowDelete
             onSelect={(path) => {
+              latestStateRef.current = applyActiveFileChange(latestStateRef.current, path)
               setActiveFile(path)
               sendWsMessage(MOB_CODE_MESSAGE_TYPES.ACTIVE_FILE_CHANGED, { activeFile: path })
-              void persistState({ files, activeFile: path })
+              void persistState(latestStateRef.current)
             }}
             onCreateFile={() => setModalMode('create-file')}
             onCreateFolder={() => setModalMode('create-folder')}
@@ -245,7 +249,11 @@ export default function MobCodeManager() {
               filename={activeFile}
               theme={theme}
               onChange={(content) => {
-                setFiles((current) => ({ ...current, [activeFile]: content }))
+                setFiles((current) => {
+                  const nextState = applyContentChange(createStateSnapshot(current, latestStateRef.current.activeFile), activeFile, content)
+                  latestStateRef.current = nextState
+                  return nextState.files
+                })
                 scheduleContentSync(activeFile, content)
               }}
             />

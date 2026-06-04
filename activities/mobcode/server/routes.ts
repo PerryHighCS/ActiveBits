@@ -256,7 +256,11 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
         const outgoing = JSON.stringify({ ...relayMessage, timestamp: Date.now() })
         for (const peer of ws.wss.clients) {
           if (peer !== client && peer.readyState === WS_OPEN && peer.sessionId === client.sessionId) {
-            peer.send(outgoing)
+            try {
+              peer.send(outgoing)
+            } catch {
+              // Ignore failed sends; websocket liveness cleanup owns stale clients.
+            }
           }
         }
       })().catch((error) => {
