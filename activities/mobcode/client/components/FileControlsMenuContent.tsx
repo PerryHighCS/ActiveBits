@@ -32,6 +32,12 @@ export default function FileControlsMenuContent({
 
   return (
     <div className="space-y-1">
+      <button type="button" role="menuitem" className={menuButtonClass} onClick={onCreateFile}>
+        New File
+      </button>
+      <button type="button" role="menuitem" className={menuButtonClass} onClick={onCreateFolder}>
+        New Folder
+      </button>
       <button
         type="button"
         role="menuitem"
@@ -59,12 +65,6 @@ export default function FileControlsMenuContent({
             })
         }}
       />
-      <button type="button" role="menuitem" className={menuButtonClass} onClick={onCreateFile}>
-        New File
-      </button>
-      <button type="button" role="menuitem" className={menuButtonClass} onClick={onCreateFolder}>
-        New Folder
-      </button>
       <button
         type="button"
         role="menuitem"

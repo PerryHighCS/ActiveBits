@@ -34,7 +34,7 @@ export default function SettingsMenu({
           role="menu"
           className="absolute right-0 z-10 mt-2 w-48 rounded border border-gray-200 bg-white p-2 shadow-lg"
         >
-          <p className="px-2 pb-1 text-xs font-semibold uppercase text-gray-500">Theme</p>
+          <p className="px-2 pb-1 text-xs font-semibold uppercase text-gray-500">Editor Theme</p>
           {MOB_CODE_THEMES.map((option) => (
             <button
               key={option.id}
