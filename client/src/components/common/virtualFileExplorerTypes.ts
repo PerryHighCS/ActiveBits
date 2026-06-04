@@ -1,18 +1,11 @@
 import type { ReactNode } from 'react'
 
-export interface VirtualFileBadge {
-  id: string
-  label: string
-  tone?: 'neutral' | 'info' | 'warning' | 'danger' | 'success'
-}
-
 export interface VirtualFileEntry {
   path: string
   kind: 'file' | 'folder'
   displayName: string
   parentPath?: string
   children?: VirtualFileEntry[]
-  badges?: VirtualFileBadge[]
   className?: string
 }
 

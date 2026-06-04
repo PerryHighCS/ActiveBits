@@ -246,7 +246,7 @@ Upload and download both happen in the browser using `jszip` — no server-side 
 | Max zip file size | 10 MB | Reject before extraction with user-facing error |
 | Max extracted file count | 200 files | Stop extraction, warn user |
 | Max per-file size | 1 MB | Skip file, log warning in console |
-| Max total extracted size | 25 MB | Stop extraction and reject archive to avoid zip-bomb expansion |
+| Max total extracted size | 4 MiB | Stop extraction and reject archive to avoid zip-bomb expansion |
 | Path traversal (`../`) | Reject | Normalize paths, strip leading `../` and `/`, reject any remaining `..` segments |
 | OS artifacts | Skip | Filter `__MACOSX/`, `.DS_Store`, `Thumbs.db`, `.git/` |
 | Binary/non-UTF-8 files | Skip | Attempt UTF-8 decode; if it fails or file extension is known-binary (`.class`, `.jar`, `.png`, `.jpg`, etc.), skip with a note in the file tree or a toast |

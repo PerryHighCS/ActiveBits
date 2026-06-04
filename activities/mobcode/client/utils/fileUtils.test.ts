@@ -35,6 +35,16 @@ void test('sanitizeFilesMap keeps safe string files and trims invalid entries', 
   })
 })
 
+void test('sanitizeFilesMap enforces file-count and total-size limits', () => {
+  const tooMany = Object.fromEntries(Array.from({ length: 260 }, (_, index) => [`src/File${index}.txt`, 'x']))
+  assert.equal(Object.keys(sanitizeFilesMap(tooMany)).length, 250)
+
+  const oversized = sanitizeFilesMap(Object.fromEntries(
+    Array.from({ length: 5 }, (_, index) => [`src/File${index}.txt`, 'x'.repeat(1024 * 1024)]),
+  ))
+  assert.deepEqual(Object.keys(oversized), ['src/File0.txt', 'src/File1.txt', 'src/File2.txt', 'src/File3.txt'])
+})
+
 void test('rename and delete path helpers handle files and folders', () => {
   const files = { 'src/Main.java': 'a', 'src/Helper.java': 'b', 'README.md': 'c' }
   assert.deepEqual(renamePathInFiles(files, 'src', 'app'), {

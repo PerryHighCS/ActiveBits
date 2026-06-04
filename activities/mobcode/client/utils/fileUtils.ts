@@ -2,6 +2,8 @@ import { isSafeVirtualPath, normalizeVirtualPath } from '@src/components/common/
 
 const MAX_FILE_PATH_LENGTH = 240
 const MAX_FILE_CONTENT_LENGTH = 1_000_000
+const MAX_FILES = 250
+const MAX_TOTAL_CONTENT_LENGTH = 4 * 1024 * 1024
 
 export function normalizeMobCodePath(path: string): string {
   return normalizeVirtualPath(path)
@@ -34,13 +36,18 @@ export function getFileExtension(path: string): string {
 export function sanitizeFilesMap(value: unknown): Record<string, string> {
   if (value == null || typeof value !== 'object' || Array.isArray(value)) return {}
   const files: Record<string, string> = {}
+  let totalLength = 0
   for (const [rawPath, rawContent] of Object.entries(value)) {
+    if (Object.keys(files).length >= MAX_FILES) break
     const path = normalizeMobCodePath(rawPath)
     if (!isSafeVirtualPath(path)) continue
     if (typeof rawContent !== 'string') continue
-    files[path] = rawContent.length > MAX_FILE_CONTENT_LENGTH
+    const content = rawContent.length > MAX_FILE_CONTENT_LENGTH
       ? rawContent.slice(0, MAX_FILE_CONTENT_LENGTH)
       : rawContent
+    totalLength += content.length
+    if (totalLength > MAX_TOTAL_CONTENT_LENGTH) break
+    files[path] = content
   }
   return files
 }
