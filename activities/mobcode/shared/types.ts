@@ -8,10 +8,7 @@ export interface MobCodeSessionData extends Record<string, unknown> {
   instructorPasscode?: string
 }
 
-export interface MobCodeStatePayload {
-  files: Record<string, string>
-  activeFile: string
-}
+export type MobCodeStatePayload = MobCodeGroupState
 
 export type MobCodeThemeId = 'light' | 'one-dark' | 'github-light' | 'github-dark'
 

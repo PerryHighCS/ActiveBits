@@ -33,6 +33,9 @@ interface SessionResponse {
 }
 
 type ModalMode = 'create-file' | 'create-folder' | 'rename' | null
+type DurableMobCodeMessageType =
+  | typeof MOB_CODE_MESSAGE_TYPES.STATE_SYNC
+  | typeof MOB_CODE_MESSAGE_TYPES.FILE_TREE_CHANGED
 
 function readInstructorPasscode(sessionId: string | undefined, locationState: unknown): string {
   const state = locationState != null && typeof locationState === 'object'
@@ -121,7 +124,7 @@ export default function MobCodeManager() {
   }, [sessionId, connect, disconnect])
 
   const persistState = useCallback(
-    async (payload: MobCodeStatePayload, messageType: string = MOB_CODE_MESSAGE_TYPES.STATE_SYNC) => {
+    async (payload: MobCodeStatePayload, messageType: DurableMobCodeMessageType = MOB_CODE_MESSAGE_TYPES.STATE_SYNC) => {
       if (!sessionId || !instructorPasscode) return
       await fetch(`/api/mobcode/${sessionId}/state`, {
         method: 'POST',
@@ -167,7 +170,11 @@ export default function MobCodeManager() {
   }, [])
 
   const applyFiles = useCallback(
-    (nextFiles: Record<string, string>, nextActiveFile: string, messageType: string = MOB_CODE_MESSAGE_TYPES.FILE_TREE_CHANGED) => {
+    (
+      nextFiles: Record<string, string>,
+      nextActiveFile: string,
+      messageType: DurableMobCodeMessageType = MOB_CODE_MESSAGE_TYPES.FILE_TREE_CHANGED,
+    ) => {
       clearPendingSync()
       latestStateRef.current = createStateSnapshot(nextFiles, nextActiveFile)
       setFiles(nextFiles)

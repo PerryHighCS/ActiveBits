@@ -27,6 +27,7 @@ void test('SessionHeader full mode renders join controls and action buttons', ()
   assert.match(html, /abc123/)
   assert.match(html, /Copy Join URL/)
   assert.match(html, /End Session/)
+  assert.match(html, /mb-6/)
 })
 
 void test('SessionHeader can render an activity action menu trigger', () => {

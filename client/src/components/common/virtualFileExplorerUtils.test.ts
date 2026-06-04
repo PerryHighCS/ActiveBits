@@ -34,6 +34,19 @@ void test('buildVirtualFileTree filters unsafe or invalid file paths', () => {
   )
 })
 
+void test('buildVirtualFileTree de-duplicates equivalent normalized file paths', () => {
+  const tree = buildVirtualFileTree({
+    'src/App.tsx': '',
+    'src\\App.tsx': '',
+    'src/index.ts': '',
+  })
+
+  assert.deepEqual(
+    tree[0]?.children?.map((entry) => `${entry.kind}:${entry.path}`),
+    ['file:src/App.tsx', 'file:src/index.ts'],
+  )
+})
+
 void test('normalizeVirtualPath trims slashes and ignores empty segments', () => {
   assert.equal(normalizeVirtualPath('/src//Main.java'), 'src/Main.java')
   assert.equal(normalizeVirtualPath('src\\Main.java'), 'src/Main.java')
