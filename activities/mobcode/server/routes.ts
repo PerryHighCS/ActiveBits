@@ -48,19 +48,42 @@ function isSafePath(path: string): boolean {
   return path.split('/').every((part) => part !== '.' && part !== '..')
 }
 
+function getUtf8ByteLength(value: string): number {
+  return Buffer.byteLength(value, 'utf8')
+}
+
+function truncateUtf8ToByteLimit(value: string, maxBytes: number): string {
+  if (getUtf8ByteLength(value) <= maxBytes) return value
+
+  let low = 0
+  let high = value.length
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2)
+    if (getUtf8ByteLength(value.slice(0, mid)) <= maxBytes) {
+      low = mid
+    } else {
+      high = mid - 1
+    }
+  }
+
+  return value.slice(0, low)
+}
+
 function normalizeFiles(value: unknown): Record<string, string> {
   if (!isPlainObject(value)) return {}
   const files: Record<string, string> = {}
-  let totalLength = 0
+  let totalBytes = 0
+  let fileCount = 0
 
   for (const [rawPath, rawContent] of Object.entries(value)) {
-    if (Object.keys(files).length >= MAX_FILES) break
+    if (fileCount >= MAX_FILES) break
     const path = normalizePath(rawPath)
     if (!isSafePath(path) || typeof rawContent !== 'string') continue
-    const content = rawContent.slice(0, MAX_FILE_CONTENT_LENGTH)
-    totalLength += content.length
-    if (totalLength > MAX_TOTAL_CONTENT_LENGTH) break
+    const content = truncateUtf8ToByteLimit(rawContent, MAX_FILE_CONTENT_LENGTH)
+    totalBytes += getUtf8ByteLength(content)
+    if (totalBytes > MAX_TOTAL_CONTENT_LENGTH) break
     files[path] = content
+    fileCount += 1
   }
 
   return files
@@ -144,7 +167,7 @@ export function readWsRelayMessage(
       !isSafePath(path) ||
       !Object.hasOwn(files, path) ||
       typeof content !== 'string' ||
-      content.length > MAX_FILE_CONTENT_LENGTH
+      getUtf8ByteLength(content) > MAX_FILE_CONTENT_LENGTH
     ) {
       return null
     }

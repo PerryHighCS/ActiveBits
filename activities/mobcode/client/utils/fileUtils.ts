@@ -4,6 +4,28 @@ const MAX_FILE_PATH_LENGTH = 240
 const MAX_FILE_CONTENT_LENGTH = 1_000_000
 const MAX_FILES = 250
 const MAX_TOTAL_CONTENT_LENGTH = 4 * 1024 * 1024
+const utf8Encoder = new TextEncoder()
+
+function getUtf8ByteLength(value: string): number {
+  return utf8Encoder.encode(value).byteLength
+}
+
+function truncateUtf8ToByteLimit(value: string, maxBytes: number): string {
+  if (getUtf8ByteLength(value) <= maxBytes) return value
+
+  let low = 0
+  let high = value.length
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2)
+    if (getUtf8ByteLength(value.slice(0, mid)) <= maxBytes) {
+      low = mid
+    } else {
+      high = mid - 1
+    }
+  }
+
+  return value.slice(0, low)
+}
 
 export function normalizeMobCodePath(path: string): string {
   return normalizeVirtualPath(path)
@@ -36,18 +58,18 @@ export function getFileExtension(path: string): string {
 export function sanitizeFilesMap(value: unknown): Record<string, string> {
   if (value == null || typeof value !== 'object' || Array.isArray(value)) return {}
   const files: Record<string, string> = {}
-  let totalLength = 0
+  let totalBytes = 0
+  let fileCount = 0
   for (const [rawPath, rawContent] of Object.entries(value)) {
-    if (Object.keys(files).length >= MAX_FILES) break
+    if (fileCount >= MAX_FILES) break
     const path = normalizeMobCodePath(rawPath)
     if (!isSafeVirtualPath(path)) continue
     if (typeof rawContent !== 'string') continue
-    const content = rawContent.length > MAX_FILE_CONTENT_LENGTH
-      ? rawContent.slice(0, MAX_FILE_CONTENT_LENGTH)
-      : rawContent
-    totalLength += content.length
-    if (totalLength > MAX_TOTAL_CONTENT_LENGTH) break
+    const content = truncateUtf8ToByteLimit(rawContent, MAX_FILE_CONTENT_LENGTH)
+    totalBytes += getUtf8ByteLength(content)
+    if (totalBytes > MAX_TOTAL_CONTENT_LENGTH) break
     files[path] = content
+    fileCount += 1
   }
   return files
 }

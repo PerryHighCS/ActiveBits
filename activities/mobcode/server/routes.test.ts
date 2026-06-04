@@ -112,3 +112,36 @@ void test('normalizeMobCodeSessionData verification path rejects oversized passc
   assert.equal(typeof data.instructorPasscode, 'string')
   assert.equal(data.instructorPasscode?.length, 32)
 })
+
+void test('normalizeMobCodeSessionData enforces UTF-8 byte limits for file content and total size', () => {
+  const oversizedSingle = normalizeMobCodeSessionData({
+    groups: {
+      default: {
+        files: {
+          'Emoji.txt': '😀'.repeat(300_000),
+        },
+        activeFile: 'Emoji.txt',
+      },
+    },
+  })
+  const singleGroup = oversizedSingle.groups.default!
+  assert.equal(Buffer.byteLength(singleGroup.files['Emoji.txt'] ?? '', 'utf8') <= 1_000_000, true)
+
+  const oversizedTotal = normalizeMobCodeSessionData({
+    groups: {
+      default: {
+        files: Object.fromEntries(
+          Array.from({ length: 5 }, (_, index) => [`src/File${index}.txt`, '😀'.repeat(300_000)]),
+        ),
+        activeFile: 'src/File0.txt',
+      },
+    },
+  })
+  const totalGroup = oversizedTotal.groups.default!
+  assert.deepEqual(Object.keys(totalGroup.files), [
+    'src/File0.txt',
+    'src/File1.txt',
+    'src/File2.txt',
+    'src/File3.txt',
+  ])
+})

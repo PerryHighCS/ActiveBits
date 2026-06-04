@@ -45,6 +45,18 @@ void test('sanitizeFilesMap enforces file-count and total-size limits', () => {
   assert.deepEqual(Object.keys(oversized), ['src/File0.txt', 'src/File1.txt', 'src/File2.txt', 'src/File3.txt'])
 })
 
+void test('sanitizeFilesMap measures UTF-8 bytes for per-file and total-size limits', () => {
+  const oversizedSingle = sanitizeFilesMap({
+    'Emoji.txt': '😀'.repeat(300_000),
+  })
+  assert.equal(new TextEncoder().encode(oversizedSingle['Emoji.txt'] ?? '').byteLength <= 1_000_000, true)
+
+  const oversizedTotal = sanitizeFilesMap(Object.fromEntries(
+    Array.from({ length: 5 }, (_, index) => [`src/File${index}.txt`, '😀'.repeat(300_000)]),
+  ))
+  assert.deepEqual(Object.keys(oversizedTotal), ['src/File0.txt', 'src/File1.txt', 'src/File2.txt', 'src/File3.txt'])
+})
+
 void test('rename and delete path helpers handle files and folders', () => {
   const files = { 'src/Main.java': 'a', 'src/Helper.java': 'b', 'README.md': 'c' }
   assert.deepEqual(renamePathInFiles(files, 'src', 'app'), {
