@@ -54,3 +54,23 @@ void test('extractImportedFiles combines text files and zip archives', async () 
   })
   assert.deepEqual(result.skipped, ['image.png'])
 })
+
+void test('extractImportedFiles skips oversized plain files before reading them into memory', async () => {
+  let arrayBufferCalls = 0
+  const oversizedFile = {
+    name: 'Huge.java',
+    size: ZIP_LIMITS.maxFileBytes + 1,
+    type: 'text/plain',
+    webkitRelativePath: '',
+    arrayBuffer: async () => {
+      arrayBufferCalls += 1
+      return new ArrayBuffer(0)
+    },
+  } as unknown as File
+
+  const result = await extractImportedFiles([oversizedFile])
+
+  assert.deepEqual(result.files, {})
+  assert.deepEqual(result.skipped, ['Huge.java'])
+  assert.equal(arrayBufferCalls, 0)
+})

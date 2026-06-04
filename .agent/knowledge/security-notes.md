@@ -15,6 +15,15 @@ Track security-relevant boundaries, risks, and mitigation decisions.
 
 ## Notes
 
+- Date: 2026-06-04
+- Area: mobcode zip/file import
+- Threat or risk: Client-side zip/file imports that allocate full file buffers before enforcing size caps can freeze the tab or exhaust memory with oversized plain files or highly compressed zip entries.
+- Control or mitigation: MobCode now rejects oversized plain files by `File.size` before `arrayBuffer()` and uses JSZip central-directory `uncompressedSize` metadata to skip oversized zip entries before inflating them.
+- Residual risk: The import path still trusts JSZip metadata enough to decide whether to inflate an entry; malformed archives can still cost zip-parse work up to the outer archive-size cap, but no longer inflate obviously oversized entries.
+- Validation (test/review/path): `activities/mobcode/client/utils/zipUtils.ts`; `activities/mobcode/client/utils/zipUtils.test.ts`.
+- Follow-up action: If we ever need stronger zip-bomb resistance than JSZip metadata plus archive-size caps, move archive extraction into a streaming worker or server-side preprocessing path.
+- Owner: Codex
+
 - Date: 2026-06-02
 - Area: resonance Markdown rendering
 - Threat or risk: Authored Markdown for question stems and MCQ choices can carry raw HTML or unsafe URLs that would create XSS, navigation, or local-file exposure risks if rendered directly.

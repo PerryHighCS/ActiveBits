@@ -28,6 +28,14 @@ export interface ZipImportResult {
   skipped: string[]
 }
 
+interface ZipEntryMetadata {
+  uncompressedSize?: number
+}
+
+interface ZipEntryWithMetadata extends JSZip.JSZipObject {
+  _data?: ZipEntryMetadata
+}
+
 interface ImportAccumulator extends ZipImportResult {
   totalBytes: number
   extractedCount: number
@@ -74,6 +82,11 @@ function isZipFile(file: File): boolean {
 
 function skipImport(accumulator: ImportAccumulator, rawPath: string): void {
   accumulator.skipped.push(rawPath)
+}
+
+function getZipEntryUncompressedSize(entry: JSZip.JSZipObject): number | null {
+  const size = (entry as ZipEntryWithMetadata)._data?.uncompressedSize
+  return typeof size === 'number' && Number.isFinite(size) && size >= 0 ? size : null
 }
 
 function appendImportedBytes(accumulator: ImportAccumulator, rawPath: string, bytes: Uint8Array): void {
@@ -123,7 +136,13 @@ export async function extractZipFiles(file: File): Promise<ZipImportResult> {
 
   for (const entry of Object.values(archive.files)) {
     if (entry.dir) continue
-    appendImportedBytes(accumulator, entry.name, await entry.async('uint8array'))
+    const entryName = entry.unsafeOriginalName || entry.name
+    const uncompressedSize = getZipEntryUncompressedSize(entry)
+    if (uncompressedSize != null && uncompressedSize > ZIP_LIMITS.maxFileBytes) {
+      skipImport(accumulator, entryName)
+      continue
+    }
+    appendImportedBytes(accumulator, entryName, await entry.async('uint8array'))
   }
 
   return { files: accumulator.files, skipped: accumulator.skipped }
@@ -139,8 +158,19 @@ export async function extractImportedFiles(inputFiles: Iterable<File>): Promise<
       const archive = await JSZip.loadAsync(await file.arrayBuffer())
       for (const entry of Object.values(archive.files)) {
         if (entry.dir) continue
-        appendImportedBytes(accumulator, entry.name, await entry.async('uint8array'))
+        const entryName = entry.unsafeOriginalName || entry.name
+        const uncompressedSize = getZipEntryUncompressedSize(entry)
+        if (uncompressedSize != null && uncompressedSize > ZIP_LIMITS.maxFileBytes) {
+          skipImport(accumulator, entryName)
+          continue
+        }
+        appendImportedBytes(accumulator, entryName, await entry.async('uint8array'))
       }
+      continue
+    }
+
+    if (file.size > ZIP_LIMITS.maxFileBytes) {
+      skipImport(accumulator, file.webkitRelativePath || file.name)
       continue
     }
 
