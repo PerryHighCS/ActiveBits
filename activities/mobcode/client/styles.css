@@ -1,12 +1,15 @@
 .mobcode-shell {
+  display: flex;
+  flex-direction: column;
   min-height: 100vh;
   background: #f8fafc;
 }
 
 .mobcode-workspace {
   display: grid;
+  flex: 1;
   grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
-  min-height: calc(100vh - 11rem);
+  min-height: 0;
 }
 
 .mobcode-sidebar {
