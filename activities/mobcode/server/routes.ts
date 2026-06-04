@@ -241,9 +241,11 @@ export function readWsRelayMessage(
 
 export function readWsInstructorPasscode(message: MobCodeMessage): string | null {
   if (message.type !== 'manager-auth' || !isPlainObject(message.payload)) return null
-  return typeof message.payload.instructorPasscode === 'string' && message.payload.instructorPasscode.length > 0
-    ? message.payload.instructorPasscode
-    : null
+  return (
+    typeof message.payload.instructorPasscode === 'string' &&
+    message.payload.instructorPasscode.length > 0 &&
+    message.payload.instructorPasscode.length <= 512
+  ) ? message.payload.instructorPasscode : null
 }
 
 function readParam(value: string | string[] | undefined): string {

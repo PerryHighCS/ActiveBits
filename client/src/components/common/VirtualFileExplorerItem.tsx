@@ -98,7 +98,6 @@ export default function VirtualFileExplorerItem({
           type="button"
           role="treeitem"
           aria-expanded={isFolder ? isExpanded : undefined}
-          aria-current={isActive ? 'page' : undefined}
           aria-selected={isActive || undefined}
           aria-level={depth + 1}
           className="flex min-w-0 flex-1 items-center gap-2 py-1 text-left"

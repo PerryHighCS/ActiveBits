@@ -122,6 +122,10 @@ void test('readWsInstructorPasscode accepts only explicit manager auth payloads'
     readWsInstructorPasscode({ type: 'file-content-update', payload: { instructorPasscode: 'secret' } }),
     null,
   )
+  assert.equal(
+    readWsInstructorPasscode({ type: 'manager-auth', payload: { instructorPasscode: 'x'.repeat(513) } }),
+    null,
+  )
 })
 
 void test('normalizeMobCodeSessionData verification path rejects oversized passcodes before buffer comparison', () => {
