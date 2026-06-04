@@ -4,6 +4,7 @@ export const DEFAULT_GROUP_ID = 'default'
 
 export const MOB_CODE_MESSAGE_TYPES = {
   STATE_SYNC: 'state-sync',
+  MANAGER_AUTH: 'manager-auth',
   FILE_CONTENT_UPDATE: 'file-content-update',
   ACTIVE_FILE_CHANGED: 'active-file-changed',
   FILE_TREE_CHANGED: 'file-tree-changed',

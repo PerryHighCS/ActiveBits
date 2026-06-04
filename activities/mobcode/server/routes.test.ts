@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { normalizeMobCodeSessionData, readDurableMessageType, readStatePayload, readWsRelayMessage } from './routes'
+import {
+  normalizeMobCodeSessionData,
+  readDurableMessageType,
+  readStatePayload,
+  readWsInstructorPasscode,
+  readWsRelayMessage,
+} from './routes'
 
 void test('normalizeMobCodeSessionData creates default group when missing', () => {
   const data = normalizeMobCodeSessionData({})
@@ -9,6 +15,7 @@ void test('normalizeMobCodeSessionData creates default group when missing', () =
 
 void test('normalizeMobCodeSessionData preserves valid files and active file', () => {
   const data = normalizeMobCodeSessionData({
+    instructorPasscode: 'secret',
     groups: {
       default: {
         files: { 'Main.java': 'class Main {}' },
@@ -20,10 +27,12 @@ void test('normalizeMobCodeSessionData preserves valid files and active file', (
     files: { 'Main.java': 'class Main {}' },
     activeFile: 'Main.java',
   })
+  assert.equal(data.instructorPasscode, 'secret')
 })
 
 void test('normalizeMobCodeSessionData drops invalid file records and repairs active file', () => {
   const data = normalizeMobCodeSessionData({
+    instructorPasscode: 42,
     groups: {
       default: {
         files: { '../bad': 'x', 'src/Main.java': 'ok', binary: 7 },
@@ -35,6 +44,7 @@ void test('normalizeMobCodeSessionData drops invalid file records and repairs ac
     files: { 'src/Main.java': 'ok' },
     activeFile: 'src/Main.java',
   })
+  assert.equal('instructorPasscode' in data, false)
 })
 
 void test('readStatePayload rejects malformed requests instead of clearing state', () => {
@@ -75,6 +85,21 @@ void test('readWsRelayMessage validates websocket mutation payloads against sess
   )
   assert.equal(
     readWsRelayMessage({ type: 'active-file-changed', payload: { activeFile: 'missing.java' } }, files),
+    null,
+  )
+})
+
+void test('readWsInstructorPasscode accepts only explicit manager auth payloads', () => {
+  assert.equal(
+    readWsInstructorPasscode({ type: 'manager-auth', payload: { instructorPasscode: 'secret' } }),
+    'secret',
+  )
+  assert.equal(
+    readWsInstructorPasscode({ type: 'manager-auth', payload: { instructorPasscode: '' } }),
+    null,
+  )
+  assert.equal(
+    readWsInstructorPasscode({ type: 'file-content-update', payload: { instructorPasscode: 'secret' } }),
     null,
   )
 })

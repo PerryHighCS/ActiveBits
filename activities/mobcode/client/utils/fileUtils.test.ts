@@ -6,6 +6,7 @@ import {
   isValidFileName,
   isValidMobCodePath,
   normalizeMobCodePath,
+  renameActiveFilePath,
   renamePathInFiles,
   resolveActiveFile,
   sanitizeFilesMap,
@@ -43,4 +44,7 @@ void test('rename and delete path helpers handle files and folders', () => {
   })
   assert.deepEqual(deletePathFromFiles(files, 'src'), { 'README.md': 'c' })
   assert.equal(resolveActiveFile(files, 'missing'), 'README.md')
+  assert.equal(renameActiveFilePath('src/Main.java', 'src', 'app'), 'app/Main.java')
+  assert.equal(renameActiveFilePath('src', 'src', 'app'), 'app')
+  assert.equal(renameActiveFilePath('README.md', 'src', 'app'), 'README.md')
 })

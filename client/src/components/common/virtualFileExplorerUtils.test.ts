@@ -20,6 +20,20 @@ void test('buildVirtualFileTree derives sorted folders and files from a flat map
   )
 })
 
+void test('buildVirtualFileTree filters unsafe or invalid file paths', () => {
+  const tree = buildVirtualFileTree({
+    'src/App.tsx': '',
+    '../bad.ts': '',
+    'bad\0name.ts': '',
+    '': '',
+  })
+
+  assert.deepEqual(
+    tree.map((entry) => `${entry.kind}:${entry.path}`),
+    ['folder:src'],
+  )
+})
+
 void test('normalizeVirtualPath trims slashes and ignores empty segments', () => {
   assert.equal(normalizeVirtualPath('/src//Main.java'), 'src/Main.java')
   assert.equal(normalizeVirtualPath('src\\Main.java'), 'src/Main.java')

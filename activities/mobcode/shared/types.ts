@@ -17,6 +17,7 @@ export type MobCodeThemeId = 'light' | 'one-dark' | 'github-light' | 'github-dar
 
 export type MobCodeMessageType =
   | 'state-sync'
+  | 'manager-auth'
   | 'file-content-update'
   | 'active-file-changed'
   | 'file-tree-changed'

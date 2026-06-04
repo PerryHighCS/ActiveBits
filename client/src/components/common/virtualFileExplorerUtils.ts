@@ -57,7 +57,7 @@ export function buildVirtualFileTree(files: Record<string, string>): VirtualFile
 
   for (const rawPath of Object.keys(files)) {
     const path = normalizeVirtualPath(rawPath)
-    if (!path) continue
+    if (!isSafeVirtualPath(path)) continue
     const segments = path.split('/')
     const displayName = segments.at(-1) ?? path
     const parentPath = segments.length > 1 ? segments.slice(0, -1).join('/') : undefined

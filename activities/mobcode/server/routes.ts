@@ -73,6 +73,7 @@ function resolveActiveFile(files: Record<string, string>, activeFile: unknown): 
 
 export function normalizeMobCodeSessionData(data: unknown): MobCodeSessionData {
   const source = isPlainObject(data) ? data : {}
+  const { instructorPasscode, ...restSource } = source
   const groupsSource = isPlainObject(source.groups) ? source.groups : {}
   const defaultSource = isPlainObject(groupsSource[DEFAULT_GROUP_ID]) ? groupsSource[DEFAULT_GROUP_ID] : {}
   const files = normalizeFiles(defaultSource.files)
@@ -82,12 +83,12 @@ export function normalizeMobCodeSessionData(data: unknown): MobCodeSessionData {
   }
 
   return {
-    ...source,
+    ...restSource,
     groups: {
       ...groupsSource,
       [DEFAULT_GROUP_ID]: defaultGroup,
     },
-    ...(typeof source.instructorPasscode === 'string' ? { instructorPasscode: source.instructorPasscode } : {}),
+    ...(typeof instructorPasscode === 'string' ? { instructorPasscode } : {}),
   }
 }
 
@@ -163,6 +164,13 @@ export function readWsRelayMessage(
   return null
 }
 
+export function readWsInstructorPasscode(message: MobCodeMessage): string | null {
+  if (message.type !== 'manager-auth' || !isPlainObject(message.payload)) return null
+  return typeof message.payload.instructorPasscode === 'string' && message.payload.instructorPasscode.length > 0
+    ? message.payload.instructorPasscode
+    : null
+}
+
 function readParam(value: string | string[] | undefined): string {
   return Array.isArray(value) ? value[0] ?? '' : value ?? ''
 }
@@ -210,7 +218,7 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
     const client = socket as MobCodeSocket
     client.sessionId = query.get('sessionId') || null
     client.mobCodeRole = query.get('role') === 'manager' ? 'manager' : 'student'
-    client.instructorPasscode = query.get('instructorPasscode')
+    client.instructorPasscode = null
     if (client.sessionId) {
       ensureBroadcastSubscription(client.sessionId)
     }
@@ -218,6 +226,11 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
     client.on('message', (rawData) => {
       const msg = parseWsMessage(rawData)
       if (!msg || !client.sessionId) return
+      if (msg.type === 'manager-auth') {
+        if (client.mobCodeRole !== 'manager') return
+        client.instructorPasscode = readWsInstructorPasscode(msg)
+        return
+      }
       if (msg.type !== 'file-content-update' && msg.type !== 'active-file-changed') return
 
       ;(async () => {

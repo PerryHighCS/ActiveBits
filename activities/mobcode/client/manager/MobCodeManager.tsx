@@ -13,6 +13,7 @@ import SettingsMenu from '../components/SettingsMenu'
 import { MOB_CODE_INSTRUCTOR_STORAGE_PREFIX, MOB_CODE_MESSAGE_TYPES } from '../utils/constants'
 import {
   deletePathFromFiles,
+  renameActiveFilePath,
   renamePathInFiles,
   resolveActiveFile,
   sanitizeFilesMap,
@@ -77,13 +78,21 @@ export default function MobCodeManager() {
   const buildWsUrl = useCallback(() => {
     if (!sessionId) return null
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const params = new URLSearchParams({ sessionId, role: 'manager', instructorPasscode })
+    const params = new URLSearchParams({ sessionId, role: 'manager' })
     return `${protocol}//${window.location.host}/ws/mobcode?${params.toString()}`
-  }, [sessionId, instructorPasscode])
+  }, [sessionId])
 
   const { connect, disconnect, socketRef } = useResilientWebSocket({
     buildUrl: buildWsUrl,
     shouldReconnect: true,
+    onOpen: (_event, ws) => {
+      if (!instructorPasscode) return
+      ws.send(JSON.stringify({
+        type: MOB_CODE_MESSAGE_TYPES.MANAGER_AUTH,
+        sessionId,
+        payload: { instructorPasscode },
+      }))
+    },
     onMessage: (event) => {
       const msg = parseMobCodeMessage(event.data)
       if (!msg || !isStatePayload(msg.payload)) return
@@ -174,7 +183,7 @@ export default function MobCodeManager() {
       applyFiles(nextFiles, keepPath)
     } else if (modalMode === 'rename' && renameTarget) {
       const nextFiles = renamePathInFiles(files, renameTarget, path)
-      applyFiles(nextFiles, resolveActiveFile(nextFiles, activeFile === renameTarget ? path : activeFile))
+      applyFiles(nextFiles, resolveActiveFile(nextFiles, renameActiveFilePath(activeFile, renameTarget, path)))
     }
     setModalMode(null)
     setRenameTarget('')

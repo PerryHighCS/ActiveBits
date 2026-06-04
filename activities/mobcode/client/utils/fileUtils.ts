@@ -69,6 +69,13 @@ export function renamePathInFiles(
   return next
 }
 
+export function renameActiveFilePath(activeFile: string, oldPath: string, newPath: string): string {
+  if (activeFile === oldPath) return newPath
+  const folderPrefix = `${oldPath}/`
+  if (!activeFile.startsWith(folderPrefix)) return activeFile
+  return `${newPath}/${activeFile.slice(folderPrefix.length)}`
+}
+
 export function deletePathFromFiles(files: Record<string, string>, targetPath: string): Record<string, string> {
   const next: Record<string, string> = {}
   const folderPrefix = `${targetPath}/`
