@@ -155,14 +155,26 @@ export default function MobCodeManager() {
     [persistState, sendWsMessage],
   )
 
+  const clearPendingSync = useCallback(() => {
+    if (wsDebounceRef.current) {
+      clearTimeout(wsDebounceRef.current)
+      wsDebounceRef.current = null
+    }
+    if (persistDebounceRef.current) {
+      clearTimeout(persistDebounceRef.current)
+      persistDebounceRef.current = null
+    }
+  }, [])
+
   const applyFiles = useCallback(
     (nextFiles: Record<string, string>, nextActiveFile: string, messageType: string = MOB_CODE_MESSAGE_TYPES.FILE_TREE_CHANGED) => {
+      clearPendingSync()
       latestStateRef.current = createStateSnapshot(nextFiles, nextActiveFile)
       setFiles(nextFiles)
       setActiveFile(nextActiveFile)
       void persistState({ files: nextFiles, activeFile: nextActiveFile }, messageType)
     },
-    [persistState],
+    [clearPendingSync, persistState],
   )
 
   const handleThemeChange = (nextTheme: MobCodeThemeId) => {

@@ -5,7 +5,7 @@ export const ZIP_LIMITS = {
   maxZipBytes: 10 * 1024 * 1024,
   maxFiles: 200,
   maxFileBytes: 1024 * 1024,
-  maxTotalBytes: 25 * 1024 * 1024,
+  maxTotalBytes: 4 * 1024 * 1024,
 } as const
 
 const BINARY_EXTENSIONS = new Set([
@@ -82,7 +82,7 @@ export async function extractZipFiles(file: File): Promise<ZipImportResult> {
     }
     totalBytes += bytes.byteLength
     if (totalBytes > ZIP_LIMITS.maxTotalBytes) {
-      throw new Error('Zip contents are larger than 25 MB after extraction.')
+      throw new Error('Zip contents are larger than 4 MB after extraction.')
     }
 
     try {

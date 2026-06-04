@@ -45,6 +45,7 @@ void test('SessionHeader can render an activity action menu trigger', () => {
   assert.match(html, /Code Files/)
   assert.match(html, /Theme/)
   assert.match(html, /aria-expanded="false"/)
+  assert.match(html, /aria-haspopup="menu"/)
   assert.doesNotMatch(html, /Upload Zip/)
 })
 

@@ -47,4 +47,6 @@ void test('rename and delete path helpers handle files and folders', () => {
   assert.equal(renameActiveFilePath('src/Main.java', 'src', 'app'), 'app/Main.java')
   assert.equal(renameActiveFilePath('src', 'src', 'app'), 'app')
   assert.equal(renameActiveFilePath('README.md', 'src', 'app'), 'README.md')
+  assert.deepEqual(renamePathInFiles(files, 'src/Main.java', 'README.md'), files)
+  assert.deepEqual(renamePathInFiles(files, 'src', 'README.md'), files)
 })

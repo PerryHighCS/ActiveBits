@@ -27,6 +27,7 @@ ActiveBits supports two session storage modes:
 - **Persistent Metadata**: Waiting room state (10-minute TTL)
 - **WebSocket Keepalive Cache**: In-memory cache (30s TTL) for reducing Valkey traffic
 - **Pub/Sub Channels**: Cross-instance broadcasting for session events
+- **JSON request body budget**: Server accepts JSON bodies up to `5mb`; MobCode file-state payloads are capped lower at `4 MiB` after parsing.
 
 ## Render.com Deployment
 

@@ -55,17 +55,36 @@ export function renamePathInFiles(
   oldPath: string,
   newPath: string,
 ): Record<string, string> {
+  const remappedEntries = new Map<string, string>()
   const next: Record<string, string> = {}
   const folderPrefix = `${oldPath}/`
   for (const [path, content] of Object.entries(files)) {
     if (path === oldPath) {
-      next[newPath] = content
+      remappedEntries.set(newPath, content)
     } else if (path.startsWith(folderPrefix)) {
-      next[`${newPath}/${path.slice(folderPrefix.length)}`] = content
+      remappedEntries.set(`${newPath}/${path.slice(folderPrefix.length)}`, content)
     } else {
       next[path] = content
     }
   }
+
+  const nextPaths = Object.keys(next)
+  const remappedPaths = Array.from(remappedEntries.keys())
+  for (const targetPath of remappedPaths) {
+    const targetPrefix = `${targetPath}/`
+    if (
+      Object.hasOwn(next, targetPath) ||
+      nextPaths.some((path) => path.startsWith(targetPrefix) || targetPath.startsWith(`${path}/`)) ||
+      remappedPaths.some((path) => path !== targetPath && (targetPath.startsWith(`${path}/`) || path.startsWith(targetPrefix)))
+    ) {
+      return files
+    }
+  }
+
+  for (const [path, content] of remappedEntries) {
+    next[path] = content
+  }
+
   return next
 }
 

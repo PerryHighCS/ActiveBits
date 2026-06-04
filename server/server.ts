@@ -14,9 +14,10 @@ import { registerPersistentSessionRoutes } from './routes/persistentSessionRoute
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
+const JSON_BODY_LIMIT = '5mb'
 
 const app = express()
-app.use(express.json())
+app.use(express.json({ limit: JSON_BODY_LIMIT }))
 app.use(cookieParser())
 
 const server = http.createServer(app)
