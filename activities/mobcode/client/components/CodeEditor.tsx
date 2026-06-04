@@ -26,7 +26,6 @@ class RemoteCursorWidget extends WidgetType {
     const label = document.createElement('span')
     label.className = 'mobcode-remote-cursor-label'
     label.textContent = '🧑‍🏫'
-    label.setAttribute('aria-label', 'Instructor cursor')
     cursor.appendChild(label)
 
     return cursor

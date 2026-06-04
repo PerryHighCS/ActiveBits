@@ -24,6 +24,7 @@ export default function SettingsMenu({
         aria-label={`${label} settings`}
         aria-expanded={open}
         aria-controls={open ? menuId : undefined}
+        aria-haspopup="menu"
         onClick={() => setOpen((value) => !value)}
       >
         {label}
