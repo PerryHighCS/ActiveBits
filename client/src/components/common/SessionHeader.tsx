@@ -107,7 +107,7 @@ export default function SessionHeader({
                   onClick={() => setShowActionMenu((value) => !value)}
                   variant="outline"
                   aria-expanded={showActionMenu}
-                  aria-controls={actionMenuId}
+                  aria-controls={showActionMenu ? actionMenuId : undefined}
                   aria-haspopup="menu"
                 >
                   {actionMenuLabel}

@@ -23,7 +23,7 @@ export default function SettingsMenu({
         className="rounded border border-gray-300 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
         aria-label={`${label} settings`}
         aria-expanded={open}
-        aria-controls={menuId}
+        aria-controls={open ? menuId : undefined}
         onClick={() => setOpen((value) => !value)}
       >
         {label}
