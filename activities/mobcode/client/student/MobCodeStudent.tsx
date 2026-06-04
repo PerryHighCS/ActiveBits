@@ -28,6 +28,16 @@ interface SessionResponse {
   }
 }
 
+interface RawPresenceSelection {
+  anchor?: unknown
+  head?: unknown
+}
+
+interface RawPresencePayload {
+  path?: unknown
+  selections?: unknown
+}
+
 export function applyStudentFileContentUpdate(
   currentFiles: Record<string, string>,
   path: string,
@@ -45,6 +55,43 @@ export function resolveStudentActiveFileChange(
 ): string {
   if (typeof nextActiveFile !== 'string') return currentActiveFile
   return Object.hasOwn(currentFiles, nextActiveFile) ? nextActiveFile : currentActiveFile
+}
+
+export function sanitizeStudentPresenceUpdate(
+  currentFiles: Record<string, string>,
+  payload: RawPresencePayload,
+): MobCodeEditorPresencePayload | null {
+  if (typeof payload.path !== 'string' || !Array.isArray(payload.selections)) return null
+  const content = currentFiles[payload.path]
+  if (typeof content !== 'string') return null
+
+  const maxOffset = content.length
+  const selections = payload.selections.flatMap((selection) => {
+    if (selection == null || typeof selection !== 'object') return []
+    const rawAnchor = (selection as RawPresenceSelection).anchor
+    const rawHead = (selection as RawPresenceSelection).head
+    if (
+      typeof rawAnchor !== 'number' ||
+      typeof rawHead !== 'number' ||
+      !Number.isInteger(rawAnchor) ||
+      !Number.isInteger(rawHead) ||
+      rawAnchor < 0 ||
+      rawHead < 0 ||
+      rawAnchor > maxOffset ||
+      rawHead > maxOffset
+    ) {
+      return []
+    }
+    const anchor = rawAnchor as number
+    const head = rawHead as number
+    return [{ anchor, head }]
+  })
+
+  if (selections.length !== payload.selections.length) return null
+  return {
+    path: payload.path,
+    selections,
+  }
 }
 
 export default function MobCodeStudent({ sessionData }: MobCodeStudentProps) {
@@ -109,25 +156,9 @@ export default function MobCodeStudent({ sessionData }: MobCodeStudentProps) {
           resolveStudentActiveFileChange(latestFilesRef.current, current, payload.activeFile),
         )
       } else if (msg.type === MOB_CODE_MESSAGE_TYPES.EDITOR_PRESENCE_UPDATE) {
-        const payload = msg.payload as { path?: unknown; selections?: unknown }
-        if (
-          typeof payload.path === 'string' &&
-          Array.isArray(payload.selections) &&
-          payload.selections.every((selection) =>
-            selection != null &&
-            typeof selection === 'object' &&
-            Number.isInteger((selection as { anchor?: unknown }).anchor) &&
-            Number.isInteger((selection as { head?: unknown }).head),
-          )
-        ) {
-          setInstructorPresence({
-            path: payload.path,
-            selections: payload.selections.map((selection) => ({
-              anchor: (selection as { anchor: number }).anchor,
-              head: (selection as { head: number }).head,
-            })),
-          })
-        }
+        setInstructorPresence(
+          sanitizeStudentPresenceUpdate(latestFilesRef.current, msg.payload as RawPresencePayload),
+        )
       }
     },
   })
