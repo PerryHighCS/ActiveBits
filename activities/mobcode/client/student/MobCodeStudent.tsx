@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import VirtualFileExplorer from '@src/components/common/VirtualFileExplorer'
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
 import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler'
-import type { MobCodeThemeId } from '../../shared/types'
+import type { MobCodeEditorPresencePayload, MobCodeThemeId } from '../../shared/types'
 import CodeEditor from '../components/CodeEditor'
 import EditorToolbar from '../components/EditorToolbar'
 import { MOB_CODE_MESSAGE_TYPES } from '../utils/constants'
@@ -34,6 +34,7 @@ export default function MobCodeStudent({ sessionData }: MobCodeStudentProps) {
   const [files, setFiles] = useState<Record<string, string>>({})
   const [activeFile, setActiveFile] = useState('')
   const [theme, setTheme] = useState<MobCodeThemeId>(() => getThemeFromCookie())
+  const [instructorPresence, setInstructorPresence] = useState<MobCodeEditorPresencePayload | null>(null)
 
   useEffect(() => {
     void fetch(`/api/mobcode/${sessionId}/session`)
@@ -43,6 +44,7 @@ export default function MobCodeStudent({ sessionData }: MobCodeStudentProps) {
         const nextFiles = sanitizeFilesMap(session.data?.groups?.default?.files)
         setFiles(nextFiles)
         setActiveFile(resolveActiveFile(nextFiles, session.data?.groups?.default?.activeFile))
+        setInstructorPresence(null)
       })
       .catch((error) => console.error('Failed to fetch MobCode session:', error))
   }, [sessionId])
@@ -63,8 +65,13 @@ export default function MobCodeStudent({ sessionData }: MobCodeStudentProps) {
         (msg.type === MOB_CODE_MESSAGE_TYPES.STATE_SYNC || msg.type === MOB_CODE_MESSAGE_TYPES.FILE_TREE_CHANGED) &&
         isStatePayload(msg.payload)
       ) {
-        setFiles(msg.payload.files)
+        const nextFiles = msg.payload.files
+        setFiles(nextFiles)
         setActiveFile(msg.payload.activeFile)
+        setInstructorPresence((current) => {
+          if (current == null || Object.hasOwn(nextFiles, current.path)) return current
+          return null
+        })
       } else if (msg.type === MOB_CODE_MESSAGE_TYPES.FILE_CONTENT_UPDATE) {
         const payload = msg.payload as { path?: unknown; content?: unknown }
         if (typeof payload.path === 'string' && typeof payload.content === 'string') {
@@ -73,6 +80,26 @@ export default function MobCodeStudent({ sessionData }: MobCodeStudentProps) {
       } else if (msg.type === MOB_CODE_MESSAGE_TYPES.ACTIVE_FILE_CHANGED) {
         const payload = msg.payload as { activeFile?: unknown }
         if (typeof payload.activeFile === 'string') setActiveFile(payload.activeFile)
+      } else if (msg.type === MOB_CODE_MESSAGE_TYPES.EDITOR_PRESENCE_UPDATE) {
+        const payload = msg.payload as { path?: unknown; selections?: unknown }
+        if (
+          typeof payload.path === 'string' &&
+          Array.isArray(payload.selections) &&
+          payload.selections.every((selection) =>
+            selection != null &&
+            typeof selection === 'object' &&
+            Number.isInteger((selection as { anchor?: unknown }).anchor) &&
+            Number.isInteger((selection as { head?: unknown }).head),
+          )
+        ) {
+          setInstructorPresence({
+            path: payload.path,
+            selections: payload.selections.map((selection) => ({
+              anchor: (selection as { anchor: number }).anchor,
+              head: (selection as { head: number }).head,
+            })),
+          })
+        }
       }
     },
   })
@@ -98,7 +125,13 @@ export default function MobCodeStudent({ sessionData }: MobCodeStudentProps) {
         </aside>
         <main className={`mobcode-editor-pane ${editorThemeClassName}`}>
           {activeFile ? (
-            <CodeEditor value={files[activeFile] ?? ''} filename={activeFile} theme={theme} readOnly />
+            <CodeEditor
+              value={files[activeFile] ?? ''}
+              filename={activeFile}
+              theme={theme}
+              readOnly
+              remotePresence={instructorPresence}
+            />
           ) : (
             <div className="mobcode-empty">Waiting for instructor to load code...</div>
           )}

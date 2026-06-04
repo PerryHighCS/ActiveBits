@@ -12,11 +12,22 @@ export type MobCodeStatePayload = MobCodeGroupState
 
 export type MobCodeThemeId = 'light' | 'one-dark' | 'github-light' | 'github-dark'
 
+export interface MobCodeSelectionRange {
+  anchor: number
+  head: number
+}
+
+export interface MobCodeEditorPresencePayload {
+  path: string
+  selections: MobCodeSelectionRange[]
+}
+
 export type MobCodeMessageType =
   | 'state-sync'
   | 'manager-auth'
   | 'file-content-update'
   | 'active-file-changed'
+  | 'editor-presence-update'
   | 'file-tree-changed'
 
 export interface MobCodeMessage {

@@ -75,6 +75,16 @@ void test('readWsRelayMessage validates websocket mutation payloads against sess
     readWsRelayMessage({ type: 'active-file-changed', payload: { activeFile: 'src/Main.java' } }, files),
     { type: 'active-file-changed', payload: { activeFile: 'src/Main.java' } },
   )
+  assert.deepEqual(
+    readWsRelayMessage(
+      {
+        type: 'editor-presence-update',
+        payload: { path: 'src/Main.java', selections: [{ anchor: 2, head: 5 }] },
+      },
+      files,
+    ),
+    { type: 'editor-presence-update', payload: { path: 'src/Main.java', selections: [{ anchor: 2, head: 5 }] } },
+  )
   assert.equal(
     readWsRelayMessage({ type: 'file-content-update', payload: { path: '../bad', content: 'x' } }, files),
     null,
@@ -85,6 +95,16 @@ void test('readWsRelayMessage validates websocket mutation payloads against sess
   )
   assert.equal(
     readWsRelayMessage({ type: 'active-file-changed', payload: { activeFile: 'missing.java' } }, files),
+    null,
+  )
+  assert.equal(
+    readWsRelayMessage(
+      {
+        type: 'editor-presence-update',
+        payload: { path: 'src/Main.java', selections: [{ anchor: -1, head: 2 }] },
+      },
+      files,
+    ),
     null,
   )
 })

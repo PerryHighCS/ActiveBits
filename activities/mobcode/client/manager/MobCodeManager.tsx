@@ -4,7 +4,7 @@ import SessionHeader from '@src/components/common/SessionHeader'
 import VirtualFileExplorer from '@src/components/common/VirtualFileExplorer'
 import type { VirtualFileEntry } from '@src/components/common/virtualFileExplorerTypes'
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
-import type { MobCodeStatePayload, MobCodeThemeId } from '../../shared/types'
+import type { MobCodeSelectionRange, MobCodeStatePayload, MobCodeThemeId } from '../../shared/types'
 import CodeEditor from '../components/CodeEditor'
 import FileNameModal from '../components/FileNameModal'
 import FileControlsMenuContent from '../components/FileControlsMenuContent'
@@ -22,6 +22,7 @@ import { extractImportedFiles } from '../utils/zipUtils'
 import {
   applyActiveFileChange,
   applyContentChange,
+  createEditorPresencePayload,
   createLiveContentSyncPlan,
   createStateSnapshot,
   isStatePayload,
@@ -46,6 +47,7 @@ type DurableMobCodeMessageType =
   | typeof MOB_CODE_MESSAGE_TYPES.FILE_TREE_CHANGED
 
 const LIVE_CONTENT_SYNC_INTERVAL_MS = 120
+const LIVE_PRESENCE_SYNC_INTERVAL_MS = 60
 
 function readInstructorPasscode(sessionId: string | undefined, locationState: unknown): string {
   const state = locationState != null && typeof locationState === 'object'
@@ -71,7 +73,11 @@ export default function MobCodeManager() {
   const persistDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const latestStateRef = useRef<MobCodeStatePayload>(createStateSnapshot({}, ''))
   const lastLiveSyncAtRef = useRef(0)
-  const pendingContentUpdateRef = useRef<{ path: string; content: string } | null>(null)
+  const pendingContentUpdateRef = useRef<{ path: string; content: string; selections: MobCodeSelectionRange[] } | null>(null)
+  const presenceDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const pendingPresenceRef = useRef<{ path: string; selections: MobCodeSelectionRange[] } | null>(null)
+  const lastPresenceSyncAtRef = useRef(0)
+  const latestEditorSelectionsRef = useRef<MobCodeSelectionRange[]>([])
 
   useEffect(() => {
     latestStateRef.current = createStateSnapshot(files, activeFile)
@@ -132,6 +138,10 @@ export default function MobCodeManager() {
         clearTimeout(persistDebounceRef.current)
         persistDebounceRef.current = null
       }
+      if (presenceDebounceRef.current) {
+        clearTimeout(presenceDebounceRef.current)
+        presenceDebounceRef.current = null
+      }
       disconnect()
     }
   }, [sessionId, connect, disconnect])
@@ -164,18 +174,38 @@ export default function MobCodeManager() {
     [sessionId, socketRef],
   )
 
+  const flushPendingPresenceSync = useCallback(() => {
+    const pendingPresence = pendingPresenceRef.current
+    if (!pendingPresence) return
+    const sent = sendWsMessage(
+      MOB_CODE_MESSAGE_TYPES.EDITOR_PRESENCE_UPDATE,
+      createEditorPresencePayload(pendingPresence.path, pendingPresence.selections),
+    )
+    if (!sent) return
+    pendingPresenceRef.current = null
+    lastPresenceSyncAtRef.current = Date.now()
+  }, [sendWsMessage])
+
   const flushPendingContentSync = useCallback(() => {
     const pendingUpdate = pendingContentUpdateRef.current
     if (!pendingUpdate) return
-    const sent = sendWsMessage(MOB_CODE_MESSAGE_TYPES.FILE_CONTENT_UPDATE, pendingUpdate)
+    const sent = sendWsMessage(MOB_CODE_MESSAGE_TYPES.FILE_CONTENT_UPDATE, {
+      path: pendingUpdate.path,
+      content: pendingUpdate.content,
+    })
     if (!sent) return
+    pendingPresenceRef.current = {
+      path: pendingUpdate.path,
+      selections: pendingUpdate.selections,
+    }
+    flushPendingPresenceSync()
     pendingContentUpdateRef.current = null
     lastLiveSyncAtRef.current = Date.now()
-  }, [sendWsMessage])
+  }, [flushPendingPresenceSync, sendWsMessage])
 
   const scheduleContentSync = useCallback(
-    (path: string, content: string) => {
-      pendingContentUpdateRef.current = { path, content }
+    (path: string, content: string, selections: MobCodeSelectionRange[]) => {
+      pendingContentUpdateRef.current = { path, content, selections }
 
       const syncPlan = createLiveContentSyncPlan(Date.now(), lastLiveSyncAtRef.current, LIVE_CONTENT_SYNC_INTERVAL_MS)
       if (syncPlan.sendImmediately) {
@@ -199,12 +229,38 @@ export default function MobCodeManager() {
     [flushPendingContentSync, persistState],
   )
 
+  const schedulePresenceSync = useCallback(
+    (path: string, selections: MobCodeSelectionRange[]) => {
+      pendingPresenceRef.current = { path, selections }
+
+      const syncPlan = createLiveContentSyncPlan(Date.now(), lastPresenceSyncAtRef.current, LIVE_PRESENCE_SYNC_INTERVAL_MS)
+      if (syncPlan.sendImmediately) {
+        if (presenceDebounceRef.current) {
+          clearTimeout(presenceDebounceRef.current)
+          presenceDebounceRef.current = null
+        }
+        flushPendingPresenceSync()
+      } else if (presenceDebounceRef.current == null) {
+        presenceDebounceRef.current = setTimeout(() => {
+          presenceDebounceRef.current = null
+          flushPendingPresenceSync()
+        }, syncPlan.delayMs)
+      }
+    },
+    [flushPendingPresenceSync],
+  )
+
   const clearPendingSync = useCallback(() => {
     if (wsDebounceRef.current) {
       clearTimeout(wsDebounceRef.current)
       wsDebounceRef.current = null
     }
     pendingContentUpdateRef.current = null
+    if (presenceDebounceRef.current) {
+      clearTimeout(presenceDebounceRef.current)
+      presenceDebounceRef.current = null
+    }
+    pendingPresenceRef.current = null
     if (persistDebounceRef.current) {
       clearTimeout(persistDebounceRef.current)
       persistDebounceRef.current = null
@@ -315,6 +371,7 @@ export default function MobCodeManager() {
               latestStateRef.current = applyActiveFileChange(latestStateRef.current, path)
               setActiveFile(path)
               sendWsMessage(MOB_CODE_MESSAGE_TYPES.ACTIVE_FILE_CHANGED, { activeFile: path })
+              schedulePresenceSync(path, [{ anchor: 0, head: 0 }])
               void persistState(latestStateRef.current)
             }}
             onCreateFile={() => setModalMode('create-file')}
@@ -344,13 +401,28 @@ export default function MobCodeManager() {
               value={activeContent}
               filename={activeFile}
               theme={theme}
-              onChange={(content) => {
-                setFiles((current) => {
-                  const nextState = applyContentChange(createStateSnapshot(current, latestStateRef.current.activeFile), activeFile, content)
-                  latestStateRef.current = nextState
-                  return nextState.files
-                })
-                scheduleContentSync(activeFile, content)
+              onUpdate={(viewUpdate) => {
+                if (!activeFile || (!viewUpdate.docChanged && !viewUpdate.selectionSet)) return
+                const selections = viewUpdate.state.selection.ranges.map((range) => ({
+                  anchor: range.anchor,
+                  head: range.head,
+                }))
+                latestEditorSelectionsRef.current = selections
+                if (viewUpdate.docChanged) {
+                  const content = viewUpdate.state.doc.toString()
+                  setFiles((current) => {
+                    const nextState = applyContentChange(
+                      createStateSnapshot(current, latestStateRef.current.activeFile),
+                      activeFile,
+                      content,
+                    )
+                    latestStateRef.current = nextState
+                    return nextState.files
+                  })
+                  scheduleContentSync(activeFile, content, selections)
+                } else {
+                  schedulePresenceSync(activeFile, selections)
+                }
               }}
             />
           ) : (

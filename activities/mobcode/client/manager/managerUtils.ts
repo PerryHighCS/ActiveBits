@@ -1,4 +1,4 @@
-import type { MobCodeMessage, MobCodeStatePayload } from '../../shared/types'
+import type { MobCodeEditorPresencePayload, MobCodeMessage, MobCodeSelectionRange, MobCodeStatePayload } from '../../shared/types'
 
 export interface LiveContentSyncPlan {
   sendImmediately: boolean
@@ -45,6 +45,16 @@ export function applyActiveFileChange(current: MobCodeStatePayload, activeFile: 
   return {
     files: current.files,
     activeFile,
+  }
+}
+
+export function createEditorPresencePayload(
+  path: string,
+  selections: readonly MobCodeSelectionRange[],
+): MobCodeEditorPresencePayload {
+  return {
+    path,
+    selections: selections.map(({ anchor, head }) => ({ anchor, head })),
   }
 }
 

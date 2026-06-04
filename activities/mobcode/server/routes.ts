@@ -4,7 +4,14 @@ import { createSession, type SessionRecord, type SessionStore } from 'activebits
 import { createBroadcastSubscriptionHelper } from 'activebits-server/core/broadcastUtils.js'
 import { registerSessionNormalizer } from 'activebits-server/core/sessionNormalization.js'
 import type { ActiveBitsWebSocket, WsRouter } from '../../../types/websocket.js'
-import type { MobCodeGroupState, MobCodeMessage, MobCodeSessionData, MobCodeStatePayload } from '../shared/types.js'
+import type {
+  MobCodeEditorPresencePayload,
+  MobCodeGroupState,
+  MobCodeMessage,
+  MobCodeSelectionRange,
+  MobCodeSessionData,
+  MobCodeStatePayload,
+} from '../shared/types.js'
 
 interface MobCodeSessionStore extends Pick<SessionStore, 'get' | 'set'> {
   publishBroadcast?: (channel: string, message: Record<string, unknown>) => Promise<void>
@@ -27,6 +34,7 @@ const MAX_PATH_LENGTH = 240
 const MAX_FILE_CONTENT_LENGTH = 1_000_000
 const MAX_TOTAL_CONTENT_LENGTH = 4 * 1024 * 1024
 const INSTRUCTOR_PASSCODE_BYTES = 16
+const MAX_PRESENCE_SELECTIONS = 16
 const WS_OPEN = 1
 const DURABLE_MESSAGE_TYPES = new Set<MobCodeMessage['type']>(['state-sync', 'file-tree-changed'])
 
@@ -191,6 +199,43 @@ export function readWsRelayMessage(
     }
   }
 
+  if (message.type === 'editor-presence-update') {
+    if (!isPlainObject(message.payload)) return null
+    const { path, selections } = message.payload
+    if (
+      typeof path !== 'string' ||
+      !isSafePath(path) ||
+      !Object.hasOwn(files, path) ||
+      !Array.isArray(selections) ||
+      selections.length > MAX_PRESENCE_SELECTIONS
+    ) {
+      return null
+    }
+
+    const normalizedSelections: MobCodeSelectionRange[] = []
+    for (const selection of selections) {
+      if (!isPlainObject(selection)) return null
+      const { anchor, head } = selection as Partial<MobCodeSelectionRange>
+      if (
+        !Number.isInteger(anchor) ||
+        !Number.isInteger(head) ||
+        (anchor as number) < 0 ||
+        (head as number) < 0 ||
+        (anchor as number) > MAX_FILE_CONTENT_LENGTH ||
+        (head as number) > MAX_FILE_CONTENT_LENGTH
+      ) {
+        return null
+      }
+      normalizedSelections.push({ anchor: anchor as number, head: head as number })
+    }
+
+    const payload: MobCodeEditorPresencePayload = { path, selections: normalizedSelections }
+    return {
+      type: message.type,
+      payload,
+    }
+  }
+
   return null
 }
 
@@ -261,7 +306,11 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
         client.instructorPasscode = readWsInstructorPasscode(msg)
         return
       }
-      if (msg.type !== 'file-content-update' && msg.type !== 'active-file-changed') return
+      if (
+        msg.type !== 'file-content-update' &&
+        msg.type !== 'active-file-changed' &&
+        msg.type !== 'editor-presence-update'
+      ) return
 
       ;(async () => {
         const session = asMobCodeSession(await sessions.get(client.sessionId ?? ''))

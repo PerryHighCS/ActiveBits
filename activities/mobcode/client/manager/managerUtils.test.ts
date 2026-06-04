@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { applyActiveFileChange, applyContentChange, createLiveContentSyncPlan, createStateSnapshot } from './managerUtils'
+import {
+  applyActiveFileChange,
+  applyContentChange,
+  createEditorPresencePayload,
+  createLiveContentSyncPlan,
+  createStateSnapshot,
+} from './managerUtils'
 
 void test('applyContentChange updates files while preserving the active file snapshot', () => {
   const current = createStateSnapshot({ 'Main.java': 'old' }, 'Main.java')
@@ -33,5 +39,20 @@ void test('createLiveContentSyncPlan throttles live syncs while typing continuou
   assert.deepEqual(createLiveContentSyncPlan(1_000, 950, 120), {
     sendImmediately: false,
     delayMs: 70,
+  })
+})
+
+void test('createEditorPresencePayload clones selection ranges for websocket presence updates', () => {
+  const payload = createEditorPresencePayload('Main.java', [
+    { anchor: 2, head: 6 },
+    { anchor: 10, head: 10 },
+  ])
+
+  assert.deepEqual(payload, {
+    path: 'Main.java',
+    selections: [
+      { anchor: 2, head: 6 },
+      { anchor: 10, head: 10 },
+    ],
   })
 })

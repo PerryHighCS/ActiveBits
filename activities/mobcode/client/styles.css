@@ -51,6 +51,34 @@
   background: transparent;
 }
 
+.mobcode-editor-pane .mobcode-remote-selection {
+  background: color-mix(in srgb, #60a5fa 32%, transparent);
+}
+
+.mobcode-editor-pane .mobcode-remote-cursor {
+  position: relative;
+  display: inline-block;
+  width: 0;
+  height: 1.4em;
+  margin-left: -1px;
+  border-left: 2px solid #2563eb;
+  vertical-align: text-top;
+  pointer-events: none;
+}
+
+.mobcode-editor-pane .mobcode-remote-cursor-label {
+  position: absolute;
+  top: -1.5rem;
+  left: -1px;
+  white-space: nowrap;
+  border-radius: 4px;
+  background: #2563eb;
+  color: #ffffff;
+  font-size: 0.6875rem;
+  line-height: 1;
+  padding: 0.2rem 0.35rem;
+}
+
 .mobcode-empty {
   display: flex;
   min-height: 24rem;

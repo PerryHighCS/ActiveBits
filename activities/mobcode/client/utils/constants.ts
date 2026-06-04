@@ -7,6 +7,7 @@ export const MOB_CODE_MESSAGE_TYPES = {
   MANAGER_AUTH: 'manager-auth',
   FILE_CONTENT_UPDATE: 'file-content-update',
   ACTIVE_FILE_CHANGED: 'active-file-changed',
+  EDITOR_PRESENCE_UPDATE: 'editor-presence-update',
   FILE_TREE_CHANGED: 'file-tree-changed',
 } as const
 
