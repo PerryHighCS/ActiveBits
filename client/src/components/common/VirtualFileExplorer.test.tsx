@@ -104,3 +104,47 @@ void test('VirtualFileExplorer renders icon buttons for file and folder creation
     restoreDom()
   }
 })
+
+void test('VirtualFileExplorer accepts dropped files when uploads are enabled', async () => {
+  const restoreDom = installDomEnvironment('https://bits.example')
+  const { cleanup, fireEvent, render } = await import('@testing-library/react')
+  const { default: VirtualFileExplorer } = await import('./VirtualFileExplorer')
+
+  try {
+    const droppedFile = new File(['class Main {}'], 'Main.java', { type: 'text/plain' })
+    let droppedFiles: File[] = []
+
+    const rendered = render(
+      <VirtualFileExplorer
+        files={{}}
+        onDropFiles={(files) => {
+          droppedFiles = files
+        }}
+        dropPrompt="Drop files or zip archives here to import"
+      />,
+    )
+
+    const explorer = rendered.container.firstElementChild as HTMLDivElement
+    fireEvent.dragEnter(explorer, {
+      dataTransfer: {
+        files: [droppedFile],
+        types: ['Files'],
+      },
+    })
+
+    assert.equal(rendered.queryByText('Drop files or zip archives here to import') !== null, true)
+
+    fireEvent.drop(explorer, {
+      dataTransfer: {
+        files: [droppedFile],
+        types: ['Files'],
+      },
+    })
+
+    assert.equal(droppedFiles.length, 1)
+    assert.equal(droppedFiles[0]?.name, 'Main.java')
+  } finally {
+    cleanup()
+    restoreDom()
+  }
+})

@@ -18,6 +18,7 @@ import {
   sanitizeFilesMap,
 } from '../utils/fileUtils'
 import { getThemeFromCookie, setThemeCookie } from '../utils/themeUtils'
+import { extractImportedFiles } from '../utils/zipUtils'
 import { applyActiveFileChange, applyContentChange, createStateSnapshot, isStatePayload, parseMobCodeMessage } from './managerUtils'
 import '../styles.css'
 
@@ -56,6 +57,7 @@ export default function MobCodeManager() {
   const [theme, setTheme] = useState<MobCodeThemeId>(() => getThemeFromCookie())
   const [modalMode, setModalMode] = useState<ModalMode>(null)
   const [renameTarget, setRenameTarget] = useState('')
+  const [fileImportMessage, setFileImportMessage] = useState('')
   const wsDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const persistDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const latestStateRef = useRef<MobCodeStatePayload>(createStateSnapshot({}, ''))
@@ -191,6 +193,33 @@ export default function MobCodeManager() {
     [clearPendingSync, persistState],
   )
 
+  const importFilesIntoWorkspace = useCallback(
+    (importedFiles: Record<string, string>, skippedCount = 0) => {
+      const nextFiles = sanitizeFilesMap({
+        ...latestStateRef.current.files,
+        ...importedFiles,
+      })
+      const importedPaths = Object.keys(importedFiles).sort((a, b) => a.localeCompare(b))
+      const focusPath = importedPaths.find((path) => Object.hasOwn(nextFiles, path)) ?? latestStateRef.current.activeFile
+      const nextActiveFile = resolveActiveFile(nextFiles, focusPath)
+      setFileImportMessage(skippedCount > 0 ? `${skippedCount} files skipped` : '')
+      applyFiles(nextFiles, nextActiveFile, MOB_CODE_MESSAGE_TYPES.FILE_TREE_CHANGED)
+    },
+    [applyFiles],
+  )
+
+  const handleDroppedFiles = useCallback(
+    async (droppedFiles: File[]) => {
+      try {
+        const result = await extractImportedFiles(droppedFiles)
+        importFilesIntoWorkspace(result.files, result.skipped.length)
+      } catch (error) {
+        setFileImportMessage(error instanceof Error ? error.message : 'Could not import dropped files')
+      }
+    },
+    [importFilesIntoWorkspace],
+  )
+
   const handleThemeChange = (nextTheme: MobCodeThemeId) => {
     setTheme(nextTheme)
     setThemeCookie(nextTheme)
@@ -226,11 +255,11 @@ export default function MobCodeManager() {
           <FileControlsMenuContent
             files={files}
             onUploadFiles={(uploadedFiles) => {
-              const nextActive = resolveActiveFile(uploadedFiles, activeFile)
-              applyFiles(uploadedFiles, nextActive, MOB_CODE_MESSAGE_TYPES.STATE_SYNC)
+              importFilesIntoWorkspace(uploadedFiles)
             }}
             onCreateFile={() => setModalMode('create-file')}
             onCreateFolder={() => setModalMode('create-folder')}
+            onMessageChange={setFileImportMessage}
           />
         )}
         headerActions={<SettingsMenu theme={theme} onThemeChange={handleThemeChange} label="Theme" />}
@@ -248,6 +277,7 @@ export default function MobCodeManager() {
             allowCreate
             allowRename
             allowDelete
+            dropPrompt="Drop files or zip archives here to import"
             onSelect={(path) => {
               latestStateRef.current = applyActiveFileChange(latestStateRef.current, path)
               setActiveFile(path)
@@ -256,6 +286,7 @@ export default function MobCodeManager() {
             }}
             onCreateFile={() => setModalMode('create-file')}
             onCreateFolder={() => setModalMode('create-folder')}
+            onDropFiles={handleDroppedFiles}
             onRename={(path) => {
               setRenameTarget(path)
               setModalMode('rename')
@@ -268,6 +299,11 @@ export default function MobCodeManager() {
               <span className="rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-500">keep</span>
             ) : null}
           />
+          {fileImportMessage && (
+            <div className="border-t border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+              {fileImportMessage}
+            </div>
+          )}
         </aside>
         <main className={`mobcode-editor-pane ${editorThemeClassName}`}>
           {activeFile ? (

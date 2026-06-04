@@ -28,6 +28,12 @@ export interface ZipImportResult {
   skipped: string[]
 }
 
+interface ImportAccumulator extends ZipImportResult {
+  totalBytes: number
+  extractedCount: number
+  byteLengths: Map<string, number>
+}
+
 function shouldSkipPath(path: string): boolean {
   const parts = path.split('/')
   return (
@@ -52,49 +58,99 @@ export function normalizeZipEntryPath(rawPath: string): string | null {
   return normalized
 }
 
+function createImportAccumulator(): ImportAccumulator {
+  return {
+    files: {},
+    skipped: [],
+    totalBytes: 0,
+    extractedCount: 0,
+    byteLengths: new Map(),
+  }
+}
+
+function isZipFile(file: File): boolean {
+  return file.type === 'application/zip' || file.name.toLowerCase().endsWith('.zip')
+}
+
+function skipImport(accumulator: ImportAccumulator, rawPath: string): void {
+  accumulator.skipped.push(rawPath)
+}
+
+function appendImportedBytes(accumulator: ImportAccumulator, rawPath: string, bytes: Uint8Array): void {
+  const path = normalizeZipEntryPath(rawPath)
+  if (!path || isKnownBinaryPath(path)) {
+    skipImport(accumulator, rawPath)
+    return
+  }
+
+  if (bytes.byteLength > ZIP_LIMITS.maxFileBytes) {
+    skipImport(accumulator, rawPath)
+    return
+  }
+
+  const previousBytes = accumulator.byteLengths.get(path) ?? 0
+  const isNewPath = !accumulator.byteLengths.has(path)
+  if (isNewPath && accumulator.extractedCount >= ZIP_LIMITS.maxFiles) {
+    skipImport(accumulator, rawPath)
+    return
+  }
+
+  const nextTotalBytes = accumulator.totalBytes - previousBytes + bytes.byteLength
+  if (nextTotalBytes > ZIP_LIMITS.maxTotalBytes) {
+    throw new Error('Imported files are larger than 4 MB after extraction.')
+  }
+
+  try {
+    const content = new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+    accumulator.files[path] = content
+    accumulator.totalBytes = nextTotalBytes
+    accumulator.byteLengths.set(path, bytes.byteLength)
+    if (isNewPath) {
+      accumulator.extractedCount += 1
+    }
+  } catch {
+    skipImport(accumulator, rawPath)
+  }
+}
+
 export async function extractZipFiles(file: File): Promise<ZipImportResult> {
   if (file.size > ZIP_LIMITS.maxZipBytes) {
     throw new Error('Zip file is larger than 10 MB.')
   }
 
   const archive = await JSZip.loadAsync(await file.arrayBuffer())
-  const files: Record<string, string> = {}
-  const skipped: string[] = []
-  let totalBytes = 0
-  let extractedCount = 0
+  const accumulator = createImportAccumulator()
 
   for (const entry of Object.values(archive.files)) {
     if (entry.dir) continue
-    const path = normalizeZipEntryPath(entry.name)
-    if (!path || isKnownBinaryPath(path)) {
-      skipped.push(entry.name)
-      continue
-    }
-    if (extractedCount >= ZIP_LIMITS.maxFiles) {
-      skipped.push(entry.name)
-      continue
-    }
-
-    const bytes = await entry.async('uint8array')
-    if (bytes.byteLength > ZIP_LIMITS.maxFileBytes) {
-      skipped.push(entry.name)
-      continue
-    }
-    totalBytes += bytes.byteLength
-    if (totalBytes > ZIP_LIMITS.maxTotalBytes) {
-      throw new Error('Zip contents are larger than 4 MB after extraction.')
-    }
-
-    try {
-      const content = new TextDecoder('utf-8', { fatal: true }).decode(bytes)
-      files[path] = content
-      extractedCount += 1
-    } catch {
-      skipped.push(entry.name)
-    }
+    appendImportedBytes(accumulator, entry.name, await entry.async('uint8array'))
   }
 
-  return { files, skipped }
+  return { files: accumulator.files, skipped: accumulator.skipped }
+}
+
+export async function extractImportedFiles(inputFiles: Iterable<File>): Promise<ZipImportResult> {
+  const accumulator = createImportAccumulator()
+  for (const file of inputFiles) {
+    if (isZipFile(file)) {
+      if (file.size > ZIP_LIMITS.maxZipBytes) {
+        throw new Error('Zip file is larger than 10 MB.')
+      }
+      const archive = await JSZip.loadAsync(await file.arrayBuffer())
+      for (const entry of Object.values(archive.files)) {
+        if (entry.dir) continue
+        appendImportedBytes(accumulator, entry.name, await entry.async('uint8array'))
+      }
+      continue
+    }
+
+    appendImportedBytes(
+      accumulator,
+      file.webkitRelativePath || file.name,
+      new Uint8Array(await file.arrayBuffer()),
+    )
+  }
+  return { files: accumulator.files, skipped: accumulator.skipped }
 }
 
 export async function buildZipBlob(files: Record<string, string>): Promise<Blob> {

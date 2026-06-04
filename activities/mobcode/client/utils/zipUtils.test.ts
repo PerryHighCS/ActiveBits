@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import JSZip from 'jszip'
-import { extractZipFiles, normalizeZipEntryPath, ZIP_LIMITS } from './zipUtils'
+import { extractImportedFiles, extractZipFiles, normalizeZipEntryPath, ZIP_LIMITS } from './zipUtils'
 
 async function makeZipFile(entries: Record<string, string | Uint8Array>): Promise<File> {
   const zip = new JSZip()
@@ -37,4 +37,20 @@ void test('extractZipFiles skips binary/artifact entries and extracts text', asy
 void test('extractZipFiles rejects large zip file inputs before extraction', async () => {
   const file = new File([new Uint8Array(ZIP_LIMITS.maxZipBytes + 1)], 'large.zip')
   await assert.rejects(() => extractZipFiles(file), /larger than 10 MB/)
+})
+
+void test('extractImportedFiles combines text files and zip archives', async () => {
+  const zipFile = await makeZipFile({
+    'src/Helper.java': 'class Helper {}',
+  })
+  const textFile = new File(['class Main {}'], 'Main.java', { type: 'text/plain' })
+  const binaryFile = new File([new Uint8Array([1, 2, 3])], 'image.png', { type: 'image/png' })
+
+  const result = await extractImportedFiles([textFile, zipFile, binaryFile])
+
+  assert.deepEqual(result.files, {
+    'Main.java': 'class Main {}',
+    'src/Helper.java': 'class Helper {}',
+  })
+  assert.deepEqual(result.skipped, ['image.png'])
 })

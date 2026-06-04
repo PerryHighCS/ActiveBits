@@ -16,11 +16,13 @@ export interface VirtualFileExplorerProps {
   allowCreate?: boolean
   allowRename?: boolean
   allowDelete?: boolean
+  dropPrompt?: string
   onSelect?: (path: string) => void
   onCreateFile?: (parentPath?: string) => void
   onCreateFolder?: (parentPath?: string) => void
   onRename?: (path: string) => void
   onDelete?: (path: string) => void
+  onDropFiles?: (files: File[]) => void | Promise<void>
   renderItemActions?: (entry: VirtualFileEntry) => ReactNode
   getItemBadges?: (entry: VirtualFileEntry) => ReactNode
   getItemClassName?: (entry: VirtualFileEntry) => string | undefined

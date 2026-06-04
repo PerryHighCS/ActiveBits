@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import VirtualFileExplorerItem from './VirtualFileExplorerItem'
 import type { VirtualFileExplorerProps } from './virtualFileExplorerTypes'
 import { buildVirtualFileTree } from './virtualFileExplorerUtils'
@@ -31,17 +31,22 @@ export default function VirtualFileExplorer({
   allowCreate = false,
   allowRename = false,
   allowDelete = false,
+  dropPrompt = 'Drop files here to import',
   onSelect,
   onCreateFile,
   onCreateFolder,
   onRename,
   onDelete,
+  onDropFiles,
   renderItemActions,
   getItemBadges,
   getItemClassName,
 }: VirtualFileExplorerProps) {
   const tree = useMemo(() => buildVirtualFileTree(files), [files])
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(() => new Set())
+  const [isDragActive, setIsDragActive] = useState(false)
+  const dragDepthRef = useRef(0)
+  const canDropFiles = !readOnly && typeof onDropFiles === 'function'
 
   const toggleFolder = (path: string) => {
     setExpandedFolders((current) => {
@@ -55,8 +60,45 @@ export default function VirtualFileExplorer({
     })
   }
 
+  const resetDragState = () => {
+    dragDepthRef.current = 0
+    setIsDragActive(false)
+  }
+
   return (
-    <div className="flex h-full min-h-0 flex-col border-r border-gray-200 bg-white">
+    <div
+      className={[
+        'relative flex h-full min-h-0 flex-col border-r border-gray-200 bg-white',
+        canDropFiles && isDragActive ? 'ring-2 ring-inset ring-blue-400' : '',
+      ].filter(Boolean).join(' ')}
+      onDragEnter={(event) => {
+        if (!canDropFiles || !event.dataTransfer?.types.includes('Files')) return
+        event.preventDefault()
+        dragDepthRef.current += 1
+        setIsDragActive(true)
+      }}
+      onDragOver={(event) => {
+        if (!canDropFiles || !event.dataTransfer?.types.includes('Files')) return
+        event.preventDefault()
+        event.dataTransfer.dropEffect = 'copy'
+      }}
+      onDragLeave={(event) => {
+        if (!canDropFiles || !event.dataTransfer?.types.includes('Files')) return
+        event.preventDefault()
+        dragDepthRef.current = Math.max(0, dragDepthRef.current - 1)
+        if (dragDepthRef.current === 0) {
+          setIsDragActive(false)
+        }
+      }}
+      onDrop={(event) => {
+        if (!canDropFiles) return
+        event.preventDefault()
+        const droppedFiles = Array.from(event.dataTransfer?.files ?? [])
+        resetDragState()
+        if (droppedFiles.length === 0) return
+        void onDropFiles?.(droppedFiles)
+      }}
+    >
       <div className="flex items-center justify-between gap-2 border-b border-gray-200 px-3 py-2">
         <h2 className="text-sm font-semibold text-gray-800">Files</h2>
         {!readOnly && allowCreate && (
@@ -109,6 +151,11 @@ export default function VirtualFileExplorer({
           </ul>
         )}
       </div>
+      {canDropFiles && isDragActive && (
+        <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-blue-50/90 px-6 text-center text-sm font-medium text-blue-700">
+          {dropPrompt}
+        </div>
+      )}
     </div>
   )
 }

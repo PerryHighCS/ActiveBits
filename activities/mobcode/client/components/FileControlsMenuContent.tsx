@@ -1,11 +1,12 @@
 import { useRef, useState } from 'react'
-import { buildZipBlob, extractZipFiles } from '../utils/zipUtils'
+import { buildZipBlob, extractImportedFiles, extractZipFiles } from '../utils/zipUtils'
 
 interface FileControlsMenuContentProps {
   files: Record<string, string>
   onUploadFiles: (files: Record<string, string>) => void
   onCreateFile: () => void
   onCreateFolder: () => void
+  onMessageChange?: (message: string) => void
 }
 
 export default function FileControlsMenuContent({
@@ -13,10 +14,23 @@ export default function FileControlsMenuContent({
   onUploadFiles,
   onCreateFile,
   onCreateFolder,
+  onMessageChange,
 }: FileControlsMenuContentProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const uploadFilesInputRef = useRef<HTMLInputElement | null>(null)
   const [message, setMessage] = useState('')
   const hasFiles = Object.keys(files).length > 0
+
+  const updateMessage = (nextMessage: string) => {
+    setMessage(nextMessage)
+    onMessageChange?.(nextMessage)
+  }
+
+  const importFiles = async (selectedFiles: File[]) => {
+    const result = await extractImportedFiles(selectedFiles)
+    onUploadFiles(result.files)
+    updateMessage(result.skipped.length > 0 ? `${result.skipped.length} files skipped` : '')
+  }
 
   const handleDownload = async () => {
     const blob = await buildZipBlob(files)
@@ -42,10 +56,32 @@ export default function FileControlsMenuContent({
         type="button"
         role="menuitem"
         className={menuButtonClass}
+        onClick={() => uploadFilesInputRef.current?.click()}
+      >
+        Upload Files
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        className={menuButtonClass}
         onClick={() => fileInputRef.current?.click()}
       >
         Upload Zip
       </button>
+      <input
+        ref={uploadFilesInputRef}
+        type="file"
+        multiple
+        className="hidden"
+        onChange={(event) => {
+          const selectedFiles = Array.from(event.target.files ?? [])
+          event.currentTarget.value = ''
+          if (selectedFiles.length === 0) return
+          void importFiles(selectedFiles).catch((error) => {
+            updateMessage(error instanceof Error ? error.message : 'Could not import files')
+          })
+        }}
+      />
       <input
         ref={fileInputRef}
         type="file"
@@ -58,10 +94,10 @@ export default function FileControlsMenuContent({
           void extractZipFiles(file)
             .then((result) => {
               onUploadFiles(result.files)
-              setMessage(result.skipped.length > 0 ? `${result.skipped.length} files skipped` : '')
+              updateMessage(result.skipped.length > 0 ? `${result.skipped.length} files skipped` : '')
             })
             .catch((error) => {
-              setMessage(error instanceof Error ? error.message : 'Could not import zip')
+              updateMessage(error instanceof Error ? error.message : 'Could not import zip')
             })
         }}
       />
