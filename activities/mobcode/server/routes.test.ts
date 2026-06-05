@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import type { SessionRecord } from 'activebits-server/core/sessions.js'
 import {
   applyWsRelayMessageToGroupState,
   hasOpenSessionClients,
@@ -10,12 +11,187 @@ import {
   readWsInstructorPasscode,
   readWsRelayMessage,
 } from './routes'
+import setupMobCodeRoutes from './routes'
+
+type RouteHandler = (
+  req: { params: Record<string, string>; body?: unknown },
+  res: MockResponse,
+) => Promise<void> | void
+
+interface MockResponse {
+  statusCode: number
+  body: unknown
+  status(code: number): MockResponse
+  json(payload: unknown): MockResponse
+}
+
+function createResponse(): MockResponse {
+  return {
+    statusCode: 200,
+    body: null,
+    status(code: number) {
+      this.statusCode = code
+      return this
+    },
+    json(payload: unknown) {
+      this.body = payload
+      return this
+    },
+  }
+}
+
+function createMockApp() {
+  const handlers: {
+    post: Record<string, RouteHandler>
+    get: Record<string, RouteHandler>
+  } = {
+    post: {},
+    get: {},
+  }
+
+  return {
+    handlers,
+    post(path: string, handler: RouteHandler) {
+      handlers.post[path] = handler
+    },
+    get(path: string, handler: RouteHandler) {
+      handlers.get[path] = handler
+    },
+  }
+}
+
+function createMockWs() {
+  return {
+    wss: {
+      clients: new Set<{
+        readyState: number
+        sessionId?: string | null
+        send(payload: string): void
+      }>(),
+    },
+    register(_path: string, _handler: (socket: unknown, query: URLSearchParams) => void) {},
+  }
+}
+
+function createMobCodeSessionRecord(overrides?: Partial<SessionRecord & { data: ReturnType<typeof normalizeMobCodeSessionData> }>) {
+  return {
+    id: 'mobcode-session',
+    type: 'mobcode',
+    created: Date.now(),
+    data: normalizeMobCodeSessionData({
+      instructorPasscode: 'secret-passcode',
+      groups: {
+        default: {
+          files: { 'Main.java': 'class Main {}' },
+          activeFile: 'Main.java',
+        },
+      },
+    }),
+    ...overrides,
+  } as SessionRecord & { data: ReturnType<typeof normalizeMobCodeSessionData> }
+}
 
 void test('normalizeMobCodeSessionData creates default group when missing', () => {
   const data = normalizeMobCodeSessionData({})
   assert.deepEqual(data.groups.default, { files: {}, activeFile: '' })
   assert.equal(typeof data.instructorPasscode, 'string')
   assert.equal(data.instructorPasscode?.length, 32)
+})
+
+void test('GET /api/mobcode/:sessionId/session does not leak instructor passcode', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const session = createMobCodeSessionRecord()
+  setupMobCodeRoutes(app as never, {
+    async get(id: string) {
+      return id === session.id ? session : null
+    },
+    async set() {},
+  }, ws as never)
+
+  const sessionHandler = app.handlers.get['/api/mobcode/:sessionId/session']
+  assert.ok(sessionHandler)
+
+  const response = createResponse()
+  await sessionHandler({
+    params: { sessionId: session.id },
+  } as unknown as Parameters<typeof sessionHandler>[0], response as unknown as Parameters<typeof sessionHandler>[1])
+
+  assert.equal(response.statusCode, 200)
+  assert.deepEqual(response.body, {
+    id: session.id,
+    type: session.type,
+    data: {
+      groups: session.data.groups,
+    },
+  })
+  assert.equal(
+    Object.hasOwn((response.body as { data: { groups: unknown; instructorPasscode?: unknown } }).data, 'instructorPasscode'),
+    false,
+  )
+})
+
+void test('POST /api/mobcode/:sessionId/state returns 403 for a bad instructor passcode', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const session = createMobCodeSessionRecord()
+  let setCalls = 0
+  setupMobCodeRoutes(app as never, {
+    async get(id: string) {
+      return id === session.id ? session : null
+    },
+    async set() {
+      setCalls += 1
+    },
+  }, ws as never)
+
+  const stateHandler = app.handlers.post['/api/mobcode/:sessionId/state']
+  assert.ok(stateHandler)
+
+  const response = createResponse()
+  await stateHandler({
+    params: { sessionId: session.id },
+    body: {
+      instructorPasscode: 'wrong-passcode',
+      files: { 'Main.java': 'updated' },
+      activeFile: 'Main.java',
+    },
+  } as unknown as Parameters<typeof stateHandler>[0], response as unknown as Parameters<typeof stateHandler>[1])
+
+  assert.equal(response.statusCode, 403)
+  assert.deepEqual(response.body, { error: 'Forbidden' })
+  assert.equal(setCalls, 0)
+})
+
+void test('POST /api/mobcode/:sessionId/state returns 400 for an invalid payload', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const session = createMobCodeSessionRecord()
+  let setCalls = 0
+  setupMobCodeRoutes(app as never, {
+    async get(id: string) {
+      return id === session.id ? session : null
+    },
+    async set() {
+      setCalls += 1
+    },
+  }, ws as never)
+
+  const stateHandler = app.handlers.post['/api/mobcode/:sessionId/state']
+  assert.ok(stateHandler)
+
+  const response = createResponse()
+  await stateHandler({
+    params: { sessionId: session.id },
+    body: {
+      instructorPasscode: 'secret-passcode',
+      activeFile: 'Main.java',
+    },
+  } as unknown as Parameters<typeof stateHandler>[0], response as unknown as Parameters<typeof stateHandler>[1])
+
+  assert.equal(response.statusCode, 400)
+  assert.deepEqual(response.body, { error: 'Invalid state payload' })
+  assert.equal(setCalls, 0)
 })
 
 void test('normalizeMobCodeSessionData preserves valid files and active file', () => {
