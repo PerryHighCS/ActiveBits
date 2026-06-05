@@ -65,6 +65,10 @@ function getUtf8ByteLength(value: string): number {
   return Buffer.byteLength(value, 'utf8')
 }
 
+function getTotalFileBytes(files: Record<string, string>): number {
+  return Object.values(files).reduce((total, content) => total + getUtf8ByteLength(content), 0)
+}
+
 function truncateUtf8ToByteLimit(value: string, maxBytes: number): string {
   if (getUtf8ByteLength(value) <= maxBytes) return value
 
@@ -207,6 +211,13 @@ export function readWsRelayMessage(
       typeof content !== 'string' ||
       getUtf8ByteLength(content) > MAX_FILE_CONTENT_LENGTH
     ) {
+      return null
+    }
+
+    const currentTotalBytes = getTotalFileBytes(files)
+    const currentFileBytes = getUtf8ByteLength(files[path] ?? '')
+    const nextFileBytes = getUtf8ByteLength(content)
+    if (currentTotalBytes - currentFileBytes + nextFileBytes > MAX_TOTAL_CONTENT_LENGTH) {
       return null
     }
 

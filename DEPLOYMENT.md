@@ -27,7 +27,7 @@ ActiveBits supports two session storage modes:
 - **Persistent Metadata**: Waiting room state (10-minute TTL)
 - **WebSocket Keepalive Cache**: In-memory cache (30s TTL) for reducing Valkey traffic
 - **Pub/Sub Channels**: Cross-instance broadcasting for session events
-- **JSON request body budget**: Most routes keep Express's default JSON body limit. Only the `/api/mobcode` route prefix uses a `5mb` parser budget, and MobCode file-state payloads are capped lower at `4 MiB` after parsing.
+- **JSON request body budget**: Most routes keep Express's default JSON body limit. Only the `/api/mobcode` route prefix uses an `8mb` parser budget, and MobCode file-state payloads are capped lower at `4 MiB` after parsing.
 
 ## Render.com Deployment
 

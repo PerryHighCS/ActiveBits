@@ -155,6 +155,26 @@ void test('readWsRelayMessage validates websocket mutation payloads against sess
   )
 })
 
+void test('readWsRelayMessage rejects content updates that would exceed total workspace bytes', () => {
+  const files = {
+    'src/File0.txt': '😀'.repeat(300_000),
+    'src/File1.txt': '😀'.repeat(300_000),
+    'src/File2.txt': '😀'.repeat(300_000),
+    'src/File3.txt': '😀'.repeat(300_000),
+  }
+
+  assert.equal(
+    readWsRelayMessage(
+      {
+        type: 'file-content-update',
+        payload: { path: 'src/File0.txt', content: '😀'.repeat(400_000) },
+      },
+      files,
+    ),
+    null,
+  )
+})
+
 void test('readWsInstructorPasscode accepts only explicit manager auth payloads', () => {
   assert.equal(
     readWsInstructorPasscode({ type: 'manager-auth', payload: { instructorPasscode: 'secret' } }),
