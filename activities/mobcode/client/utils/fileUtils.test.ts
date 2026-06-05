@@ -37,6 +37,17 @@ void test('sanitizeFilesMap keeps safe string files and trims invalid entries', 
   })
 })
 
+void test('sanitizeFilesMap drops file entries that collide with implied folder paths', () => {
+  assert.deepEqual(sanitizeFilesMap({
+    src: 'hidden',
+    'src/Main.java': 'class Main {}',
+    'src/utils/math.ts': 'export const math = 1',
+  }), {
+    'src/Main.java': 'class Main {}',
+    'src/utils/math.ts': 'export const math = 1',
+  })
+})
+
 void test('sanitizeFilesMap enforces file-count and total-size limits', () => {
   const tooMany = Object.fromEntries(Array.from({ length: 260 }, (_, index) => [`src/File${index}.txt`, 'x']))
   assert.equal(Object.keys(sanitizeFilesMap(tooMany)).length, 250)

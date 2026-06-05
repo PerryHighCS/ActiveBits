@@ -236,3 +236,26 @@ void test('normalizeMobCodeSessionData enforces UTF-8 byte limits for file conte
     'src/File3.txt',
   ])
 })
+
+void test('normalizeMobCodeSessionData drops file entries that collide with implied folder paths', () => {
+  const data = normalizeMobCodeSessionData({
+    groups: {
+      default: {
+        files: {
+          src: 'hidden',
+          'src/Main.java': 'class Main {}',
+          'src/utils/math.ts': 'export const math = 1',
+        },
+        activeFile: 'src',
+      },
+    },
+  })
+
+  assert.deepEqual(data.groups.default, {
+    files: {
+      'src/Main.java': 'class Main {}',
+      'src/utils/math.ts': 'export const math = 1',
+    },
+    activeFile: 'src/Main.java',
+  })
+})

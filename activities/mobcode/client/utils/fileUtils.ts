@@ -61,19 +61,32 @@ export function getFileExtension(path: string): string {
 
 export function sanitizeFilesMap(value: unknown): Record<string, string> {
   if (value == null || typeof value !== 'object' || Array.isArray(value)) return {}
+  const normalizedEntries: Array<[string, string]> = []
+  const impliedFolderPaths = new Set<string>()
+  const seenPaths = new Set<string>()
   const files: Record<string, string> = {}
   let totalBytes = 0
   let fileCount = 0
   for (const [rawPath, rawContent] of Object.entries(value)) {
     if (fileCount >= MAX_FILES) break
     const path = normalizeMobCodePath(rawPath)
-    if (!isSafeVirtualPath(path)) continue
+    if (!isSafeVirtualPath(path) || seenPaths.has(path)) continue
+    seenPaths.add(path)
     if (typeof rawContent !== 'string') continue
     const content = truncateUtf8ToByteLimit(rawContent, MAX_FILE_CONTENT_LENGTH)
     totalBytes += getUtf8ByteLength(content)
     if (totalBytes > MAX_TOTAL_CONTENT_LENGTH) break
-    files[path] = content
+    normalizedEntries.push([path, content])
+    const segments = path.split('/')
+    for (let index = 1; index < segments.length; index += 1) {
+      impliedFolderPaths.add(segments.slice(0, index).join('/'))
+    }
     fileCount += 1
+  }
+
+  for (const [path, content] of normalizedEntries) {
+    if (impliedFolderPaths.has(path)) continue
+    files[path] = content
   }
   return files
 }

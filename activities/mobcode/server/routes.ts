@@ -89,6 +89,9 @@ function truncateUtf8ToByteLimit(value: string, maxBytes: number): string {
 
 function normalizeFiles(value: unknown): Record<string, string> {
   if (!isPlainObject(value)) return {}
+  const normalizedEntries: Array<[string, string]> = []
+  const impliedFolderPaths = new Set<string>()
+  const seenPaths = new Set<string>()
   const files: Record<string, string> = {}
   let totalBytes = 0
   let fileCount = 0
@@ -96,12 +99,22 @@ function normalizeFiles(value: unknown): Record<string, string> {
   for (const [rawPath, rawContent] of Object.entries(value)) {
     if (fileCount >= MAX_FILES) break
     const path = normalizePath(rawPath)
-    if (!isSafePath(path) || typeof rawContent !== 'string') continue
+    if (!isSafePath(path) || seenPaths.has(path) || typeof rawContent !== 'string') continue
+    seenPaths.add(path)
     const content = truncateUtf8ToByteLimit(rawContent, MAX_FILE_CONTENT_LENGTH)
     totalBytes += getUtf8ByteLength(content)
     if (totalBytes > MAX_TOTAL_CONTENT_LENGTH) break
-    files[path] = content
+    normalizedEntries.push([path, content])
+    const segments = path.split('/')
+    for (let index = 1; index < segments.length; index += 1) {
+      impliedFolderPaths.add(segments.slice(0, index).join('/'))
+    }
     fileCount += 1
+  }
+
+  for (const [path, content] of normalizedEntries) {
+    if (impliedFolderPaths.has(path)) continue
+    files[path] = content
   }
 
   return files
