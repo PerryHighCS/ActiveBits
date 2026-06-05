@@ -473,7 +473,6 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
         }
 
         const nextGroup = applyWsRelayMessageToGroupState(currentGroup, relayMessage)
-        session.data.groups[DEFAULT_GROUP_ID] = nextGroup
         liveGroupsBySession.set(sessionId, nextGroup)
 
         const outgoing = JSON.stringify({ ...relayMessage, timestamp: Date.now() })

@@ -61,6 +61,7 @@ function createMockApp() {
 }
 
 function createMockWs() {
+  let handler: ((socket: unknown, query: URLSearchParams) => void) | null = null
   return {
     wss: {
       clients: new Set<{
@@ -69,8 +70,40 @@ function createMockWs() {
         send(payload: string): void
       }>(),
     },
-    register(_path: string, _handler: (socket: unknown, query: URLSearchParams) => void) {},
+    register(_path: string, nextHandler: (socket: unknown, query: URLSearchParams) => void) {
+      handler = nextHandler
+    },
+    getHandler() {
+      return handler
+    },
   }
+}
+
+function createMockSocket() {
+  const listeners = new Map<string, Array<(payload?: unknown) => void>>()
+
+  return {
+    readyState: 1,
+    sessionId: null as string | null,
+    sent: [] as string[],
+    on(event: string, listener: (payload?: unknown) => void) {
+      const existing = listeners.get(event) ?? []
+      existing.push(listener)
+      listeners.set(event, existing)
+    },
+    send(payload: string) {
+      this.sent.push(payload)
+    },
+    emit(event: string, payload?: unknown) {
+      for (const listener of listeners.get(event) ?? []) {
+        listener(payload)
+      }
+    },
+  }
+}
+
+function flushAsyncWork(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve))
 }
 
 function createMobCodeSessionRecord(overrides?: Partial<SessionRecord & { data: ReturnType<typeof normalizeMobCodeSessionData> }>) {
@@ -433,6 +466,60 @@ void test('resolveWsValidationGroupState prefers live ws state over persisted se
   assert.deepEqual(resolveWsValidationGroupState(persistedGroup, liveGroup), liveGroup)
   assert.deepEqual(resolveWsValidationGroupState(persistedGroup, undefined), persistedGroup)
   assert.deepEqual(resolveWsValidationGroupState(undefined, undefined), { files: {}, activeFile: '' })
+})
+
+void test('websocket relay updates live validation state without mutating session data in place', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const session = createMobCodeSessionRecord({
+    data: normalizeMobCodeSessionData({
+      instructorPasscode: 'secret-passcode',
+      groups: {
+        default: {
+          files: { 'Main.java': 'class Main {}' },
+          activeFile: 'Main.java',
+        },
+      },
+    }),
+  })
+
+  setupMobCodeRoutes(app as never, {
+    async get(id: string) {
+      return id === session.id ? session : null
+    },
+    async set() {},
+  }, ws as never)
+
+  const managerSocket = createMockSocket()
+  const studentSocket = createMockSocket()
+  ws.wss.clients.add(managerSocket)
+  ws.wss.clients.add(studentSocket)
+
+  const wsHandler = ws.getHandler()
+  assert.ok(wsHandler)
+  wsHandler(managerSocket, new URLSearchParams({ sessionId: session.id, role: 'manager' }))
+  wsHandler(studentSocket, new URLSearchParams({ sessionId: session.id, role: 'student' }))
+
+  managerSocket.emit('message', JSON.stringify({
+    type: 'manager-auth',
+    payload: { instructorPasscode: 'secret-passcode' },
+  }))
+  managerSocket.emit('message', JSON.stringify({
+    type: 'file-content-update',
+    payload: { path: 'Main.java', content: 'class Main { int x = 1; }' },
+  }))
+  await flushAsyncWork()
+
+  const defaultGroup = session.data.groups.default
+  assert.ok(defaultGroup)
+  assert.equal(defaultGroup.files['Main.java'], 'class Main {}')
+  assert.equal(studentSocket.sent.length, 1)
+  const outgoing = JSON.parse(studentSocket.sent[0] ?? '{}') as { type: string; payload: { path: string; content: string } }
+  assert.equal(outgoing.type, 'file-content-update')
+  assert.deepEqual(outgoing.payload, {
+    path: 'Main.java',
+    content: 'class Main { int x = 1; }',
+  })
 })
 
 void test('hasOpenSessionClients only retains live ws state when a session still has open sockets', () => {
