@@ -154,6 +154,16 @@ void test('readWsRelayMessage validates websocket mutation payloads against sess
     ),
     null,
   )
+  assert.equal(
+    readWsRelayMessage(
+      {
+        type: 'editor-presence-update',
+        payload: { path: 'src/Main.java', selections: [{ anchor: 100, head: 100 }] },
+      },
+      files,
+    ),
+    null,
+  )
 })
 
 void test('readWsRelayMessage rejects content updates that would exceed total workspace bytes', () => {

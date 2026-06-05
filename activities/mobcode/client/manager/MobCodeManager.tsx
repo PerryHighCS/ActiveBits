@@ -54,6 +54,7 @@ type DurableMobCodeMessageType =
 
 const LIVE_CONTENT_SYNC_INTERVAL_MS = 250
 const LIVE_PRESENCE_SYNC_INTERVAL_MS = 60
+const PERSIST_STATE_INTERVAL_MS = 5000
 
 export default function MobCodeManager() {
   const { sessionId } = useParams()
@@ -76,6 +77,7 @@ export default function MobCodeManager() {
   const latestStateRef = useRef<MobCodeStatePayload>(createStateSnapshot({}, ''))
   const latestFileSizeStatsRef = useRef(getMobCodeFileSizeStats({}))
   const lastLiveSyncAtRef = useRef(0)
+  const lastPersistSyncAtRef = useRef(0)
   const pendingContentUpdateRef = useRef<{ path: string; content: string; selections: MobCodeSelectionRange[] } | null>(null)
   const presenceDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pendingPresenceRef = useRef<{ path: string; selections: MobCodeSelectionRange[] } | null>(null)
@@ -209,6 +211,28 @@ export default function MobCodeManager() {
     lastLiveSyncAtRef.current = Date.now()
   }, [flushPendingPresenceSync, sendWsMessage])
 
+  const flushPendingPersistSync = useCallback(() => {
+    if (persistDebounceRef.current) {
+      clearTimeout(persistDebounceRef.current)
+      persistDebounceRef.current = null
+    }
+    lastPersistSyncAtRef.current = Date.now()
+    void persistState(latestStateRef.current)
+  }, [persistState])
+
+  const schedulePersistSync = useCallback(() => {
+    const syncPlan = createLiveContentSyncPlan(Date.now(), lastPersistSyncAtRef.current, PERSIST_STATE_INTERVAL_MS)
+    if (syncPlan.sendImmediately) {
+      flushPendingPersistSync()
+      return
+    }
+    if (persistDebounceRef.current == null) {
+      persistDebounceRef.current = setTimeout(() => {
+        flushPendingPersistSync()
+      }, syncPlan.delayMs)
+    }
+  }, [flushPendingPersistSync])
+
   const scheduleContentSync = useCallback(
     (path: string, content: string, selections: MobCodeSelectionRange[]) => {
       pendingContentUpdateRef.current = { path, content, selections }
@@ -227,12 +251,9 @@ export default function MobCodeManager() {
         }, syncPlan.delayMs)
       }
 
-      if (persistDebounceRef.current) clearTimeout(persistDebounceRef.current)
-      persistDebounceRef.current = setTimeout(() => {
-        void persistState(latestStateRef.current)
-      }, 5000)
+      schedulePersistSync()
     },
-    [flushPendingContentSync, persistState],
+    [flushPendingContentSync, schedulePersistSync],
   )
 
   const schedulePresenceSync = useCallback(

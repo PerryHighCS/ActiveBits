@@ -273,6 +273,7 @@ export function readWsRelayMessage(
       return null
     }
 
+    const currentFileLength = files[path]?.length ?? 0
     const normalizedSelections: MobCodeSelectionRange[] = []
     for (const selection of selections) {
       if (!isPlainObject(selection)) return null
@@ -282,8 +283,8 @@ export function readWsRelayMessage(
         !Number.isInteger(head) ||
         (anchor as number) < 0 ||
         (head as number) < 0 ||
-        (anchor as number) > MAX_FILE_CONTENT_LENGTH ||
-        (head as number) > MAX_FILE_CONTENT_LENGTH
+        (anchor as number) > currentFileLength ||
+        (head as number) > currentFileLength
       ) {
         return null
       }
