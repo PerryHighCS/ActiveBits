@@ -60,6 +60,14 @@ For concrete launch payloads, read `ACTIVITY_PAYLOADS.md`.
 - notes:
   supports deck-authored launch options for bit width, mission length, challenge types, hints, and place-value support; teachers can still adjust settings from the Binary Breach console
 
+### MobCode
+
+- id: `mobcode`
+- best for: instructor live coding, walkthroughs of multi-file programs, and short code-reading/debugging moments
+- classroom shape: branch into a shared code workspace, let the instructor type while students follow in real time, then return to the deck
+- notes:
+  supports deck-authored starter files and an optional starting active file so a presentation can open directly into a prepared codebase snapshot
+
 ## Utility / Contract-Test Activity
 
 ### Embedded Test
@@ -92,6 +100,7 @@ Choose:
 - `gallery-walk` for “structured critique or feedback artifacts”
 - `raffle` for “quick lightweight interaction”
 - `binary-breach` for “binary number-sense practice mission”
+- `mobcode` for “live coding or code walkthroughs”
 - `embedded-test` for “verify the embedding contract itself”
 
 ## Maintenance Rule

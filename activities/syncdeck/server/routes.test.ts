@@ -2265,6 +2265,67 @@ void test('embedded-activity start route creates a child session, stores keyed m
   assert.equal(typeof studentStart?.entryParticipantToken, 'string')
 })
 
+void test('embedded-activity start route returns manager bootstrap and starter files for MobCode child sessions', async () => {
+  await import('../../mobcode/server/routes')
+  const app = createMockApp()
+  const ws = createMockWs()
+  const storeState = createSessionStore({
+    s1: createSyncDeckSession('s1', 'teacher-passcode-1'),
+  })
+  setupSyncDeckRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.post['/api/syncdeck/:sessionId/embedded-activity/start']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.(
+    createRequest(
+      { sessionId: 's1' },
+      {
+        instructorPasscode: 'teacher-passcode-1',
+        activityId: 'mobcode',
+        instanceKey: 'mobcode:4:0',
+        location: { h: 4, v: 0 },
+        activityOptions: {
+          files: {
+            'src/Main.java': 'class Main {}',
+          },
+          activeFile: 'src/Main.java',
+        },
+      },
+    ),
+    res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  const body = res.body as {
+    childSessionId: string
+    managerBootstrap?: { instructorPasscode?: string }
+  }
+  assert.equal(typeof body.managerBootstrap?.instructorPasscode, 'string')
+  assert.equal(body.managerBootstrap?.instructorPasscode?.length, 32)
+
+  const childSession = storeState.store[body.childSessionId] as SessionRecord | undefined
+  assert.equal(childSession?.type, 'mobcode')
+  assert.deepEqual(asRecord(childSession?.data)?.embeddedLaunch, {
+    parentSessionId: 's1',
+    instanceKey: 'mobcode:4:0',
+    location: { h: 4, v: 0 },
+    selectedOptions: {
+      files: {
+        'src/Main.java': 'class Main {}',
+      },
+      activeFile: 'src/Main.java',
+    },
+  })
+  assert.deepEqual(asRecord(asRecord(childSession?.data)?.groups)?.default, {
+    files: {
+      'src/Main.java': 'class Main {}',
+    },
+    activeFile: 'src/Main.java',
+  })
+})
+
 void test('embedded-activity start route rejects unknown activities before creating a child session', async () => {
   const app = createMockApp()
   const ws = createMockWs()

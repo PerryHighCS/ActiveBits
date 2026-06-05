@@ -11,12 +11,22 @@ import { setupPersistentSessionWs } from './core/persistentSessionWs.js'
 import { registerActivityRoutes, initializeActivityRegistry } from './activities/activityRegistry.js'
 import { registerStatusRoute } from './routes/statusRoute.js'
 import { registerPersistentSessionRoutes } from './routes/persistentSessionRoutes.js'
+import { isMobCodeJsonRoute, MOB_CODE_JSON_BODY_LIMIT } from './core/jsonBodyParsing.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
 const app = express()
-app.use(express.json())
+const defaultJsonParser = express.json()
+const mobCodeJsonParser = express.json({ limit: MOB_CODE_JSON_BODY_LIMIT })
+
+app.use((req, res, next) => {
+  if (isMobCodeJsonRoute(req.path)) {
+    mobCodeJsonParser(req, res, next)
+    return
+  }
+  defaultJsonParser(req, res, next)
+})
 app.use(cookieParser())
 
 const server = http.createServer(app)

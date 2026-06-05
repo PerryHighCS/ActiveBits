@@ -1,0 +1,100 @@
+.mobcode-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  background: #f8fafc;
+}
+
+.mobcode-workspace {
+  display: grid;
+  flex: 1;
+  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+  min-height: 0;
+}
+
+.mobcode-sidebar {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.mobcode-editor-pane {
+  min-width: 0;
+  min-height: 0;
+  background: #ffffff;
+}
+
+.mobcode-editor-theme-light {
+  background: #ffffff;
+}
+
+.mobcode-editor-theme-one-dark {
+  background: #282c34;
+}
+
+.mobcode-editor-theme-github-light {
+  background: #ffffff;
+}
+
+.mobcode-editor-theme-github-dark {
+  background: #0d1117;
+}
+
+.mobcode-editor-pane .cm-editor {
+  height: 100%;
+  font-size: 14px;
+  background: transparent;
+}
+
+.mobcode-editor-pane .cm-scroller,
+.mobcode-editor-pane .cm-gutters {
+  background: transparent;
+}
+
+.mobcode-editor-pane .mobcode-remote-selection {
+  background: color-mix(in srgb, #60a5fa 32%, transparent);
+}
+
+.mobcode-editor-pane .mobcode-remote-cursor {
+  position: relative;
+  display: inline-block;
+  width: 0;
+  height: 1.4em;
+  margin-left: -1px;
+  border-left: 2px solid #2563eb;
+  vertical-align: text-top;
+  pointer-events: none;
+}
+
+.mobcode-editor-pane .mobcode-remote-cursor-label {
+  position: absolute;
+  top: -1.5rem;
+  left: -1px;
+  white-space: nowrap;
+  border-radius: 4px;
+  background: #2563eb;
+  color: #ffffff;
+  font-size: 0.6875rem;
+  line-height: 1;
+  padding: 0.2rem 0.35rem;
+}
+
+.mobcode-empty {
+  display: flex;
+  min-height: 24rem;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  color: #64748b;
+}
+
+@media (max-width: 760px) {
+  .mobcode-workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .mobcode-sidebar {
+    max-height: 14rem;
+    border-bottom: 1px solid #e5e7eb;
+  }
+}

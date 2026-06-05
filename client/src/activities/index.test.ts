@@ -25,6 +25,7 @@ const EXPECTED_ACTIVITIES = [
   'python-list-practice',
   'raffle',
   'gallery-walk',
+  'mobcode',
   'traveling-salesman',
   'www-sim',
 ]
