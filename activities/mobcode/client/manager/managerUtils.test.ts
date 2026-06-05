@@ -6,6 +6,7 @@ import {
   createEditorPresencePayload,
   createLiveContentSyncPlan,
   createStateSnapshot,
+  flushPendingMobCodeCleanupWork,
   sendMobCodeWsMessage,
 } from './managerUtils'
 
@@ -56,6 +57,36 @@ void test('createEditorPresencePayload clones selection ranges for websocket pre
       { anchor: 10, head: 10 },
     ],
   })
+})
+
+void test('flushPendingMobCodeCleanupWork flushes pending content before presence and persists pending state', () => {
+  const calls: string[] = []
+
+  flushPendingMobCodeCleanupWork({
+    hasPendingContent: true,
+    hasPendingPresence: true,
+    hasPendingPersist: true,
+    flushContent: () => calls.push('content'),
+    flushPresence: () => calls.push('presence'),
+    flushPersist: () => calls.push('persist'),
+  })
+
+  assert.deepEqual(calls, ['content', 'persist'])
+})
+
+void test('flushPendingMobCodeCleanupWork flushes presence when there is no pending content', () => {
+  const calls: string[] = []
+
+  flushPendingMobCodeCleanupWork({
+    hasPendingContent: false,
+    hasPendingPresence: true,
+    hasPendingPersist: false,
+    flushContent: () => calls.push('content'),
+    flushPresence: () => calls.push('presence'),
+    flushPersist: () => calls.push('persist'),
+  })
+
+  assert.deepEqual(calls, ['presence'])
 })
 
 void test('sendMobCodeWsMessage returns false when websocket send throws', () => {

@@ -27,6 +27,7 @@ import {
   applyActiveFileChange,
   applyContentChange,
   createEditorPresencePayload,
+  flushPendingMobCodeCleanupWork,
   createLiveContentSyncPlan,
   createStateSnapshot,
   isStatePayload,
@@ -134,26 +135,6 @@ export default function MobCodeManager() {
       }
     },
   })
-
-  useEffect(() => {
-    if (!sessionId) return undefined
-    connect()
-    return () => {
-      if (wsDebounceRef.current) {
-        clearTimeout(wsDebounceRef.current)
-        wsDebounceRef.current = null
-      }
-      if (persistDebounceRef.current) {
-        clearTimeout(persistDebounceRef.current)
-        persistDebounceRef.current = null
-      }
-      if (presenceDebounceRef.current) {
-        clearTimeout(presenceDebounceRef.current)
-        presenceDebounceRef.current = null
-      }
-      disconnect()
-    }
-  }, [sessionId, connect, disconnect])
 
   const persistState = useCallback(
     async (payload: MobCodeStatePayload, messageType: DurableMobCodeMessageType = MOB_CODE_MESSAGE_TYPES.STATE_SYNC) => {
@@ -293,6 +274,44 @@ export default function MobCodeManager() {
       persistDebounceRef.current = null
     }
   }, [])
+
+  useEffect(() => {
+    if (!sessionId) return undefined
+    connect()
+    return () => {
+      const hasPendingContent = pendingContentUpdateRef.current != null
+      const hasPendingPresence = pendingPresenceRef.current != null
+      const hasPendingPersist = persistDebounceRef.current != null
+      if (wsDebounceRef.current) {
+        clearTimeout(wsDebounceRef.current)
+        wsDebounceRef.current = null
+      }
+      if (presenceDebounceRef.current) {
+        clearTimeout(presenceDebounceRef.current)
+        presenceDebounceRef.current = null
+      }
+      if (persistDebounceRef.current) {
+        clearTimeout(persistDebounceRef.current)
+        persistDebounceRef.current = null
+      }
+      flushPendingMobCodeCleanupWork({
+        hasPendingContent,
+        hasPendingPresence,
+        hasPendingPersist,
+        flushContent: flushPendingContentSync,
+        flushPresence: flushPendingPresenceSync,
+        flushPersist: flushPendingPersistSync,
+      })
+      disconnect()
+    }
+  }, [
+    sessionId,
+    connect,
+    disconnect,
+    flushPendingContentSync,
+    flushPendingPersistSync,
+    flushPendingPresenceSync,
+  ])
 
   const applyFiles = useCallback(
     (

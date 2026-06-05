@@ -5,6 +5,15 @@ export interface LiveContentSyncPlan {
   delayMs: number
 }
 
+interface PendingMobCodeCleanupWorkOptions {
+  hasPendingContent: boolean
+  hasPendingPresence: boolean
+  hasPendingPersist: boolean
+  flushContent: () => void
+  flushPresence: () => void
+  flushPersist: () => void
+}
+
 export function parseMobCodeMessage(rawData: unknown): MobCodeMessage | null {
   if (typeof rawData !== 'string') return null
   try {
@@ -75,6 +84,25 @@ export function createLiveContentSyncPlan(
   return {
     sendImmediately: false,
     delayMs: intervalMs - elapsedMs,
+  }
+}
+
+export function flushPendingMobCodeCleanupWork({
+  hasPendingContent,
+  hasPendingPresence,
+  hasPendingPersist,
+  flushContent,
+  flushPresence,
+  flushPersist,
+}: PendingMobCodeCleanupWorkOptions): void {
+  if (hasPendingContent) {
+    flushContent()
+  } else if (hasPendingPresence) {
+    flushPresence()
+  }
+
+  if (hasPendingPersist) {
+    flushPersist()
   }
 }
 
