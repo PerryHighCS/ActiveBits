@@ -156,12 +156,103 @@ void test('GET /api/mobcode/:sessionId/session does not leak instructor passcode
     type: session.type,
     data: {
       groups: session.data.groups,
+      runnerId: null,
     },
   })
   assert.equal(
     Object.hasOwn((response.body as { data: { groups: unknown; instructorPasscode?: unknown } }).data, 'instructorPasscode'),
     false,
   )
+})
+
+void test('GET /api/mobcode/:sessionId/session exposes sanitized embedded runner id', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const session = createMobCodeSessionRecord({
+    data: normalizeMobCodeSessionData({
+      instructorPasscode: 'secret-passcode',
+      groups: {
+        default: {
+          files: { 'main.py': 'print("hello")' },
+          activeFile: 'main.py',
+        },
+      },
+      embeddedLaunch: {
+        selectedOptions: {
+          runnerId: 'brython-terminal',
+        },
+      },
+    }),
+  })
+  setupMobCodeRoutes(app as never, {
+    async get(id: string) {
+      return id === session.id ? session : null
+    },
+    async set() {},
+  }, ws as never)
+
+  const sessionHandler = app.handlers.get['/api/mobcode/:sessionId/session']
+  assert.ok(sessionHandler)
+
+  const response = createResponse()
+  await sessionHandler({
+    params: { sessionId: session.id },
+  } as unknown as Parameters<typeof sessionHandler>[0], response as unknown as Parameters<typeof sessionHandler>[1])
+
+  assert.equal(response.statusCode, 200)
+  assert.deepEqual(response.body, {
+    id: session.id,
+    type: session.type,
+    data: {
+      groups: session.data.groups,
+      runnerId: 'brython-terminal',
+    },
+  })
+})
+
+void test('GET /api/mobcode/:sessionId/session drops invalid embedded runner id', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const session = createMobCodeSessionRecord({
+    data: normalizeMobCodeSessionData({
+      instructorPasscode: 'secret-passcode',
+      groups: {
+        default: {
+          files: { 'Main.java': 'class Main {}' },
+          activeFile: 'Main.java',
+        },
+      },
+      embeddedLaunch: {
+        selectedOptions: {
+          runnerId: 'cheerpj',
+        },
+      },
+    }),
+  })
+  setupMobCodeRoutes(app as never, {
+    async get(id: string) {
+      return id === session.id ? session : null
+    },
+    async set() {},
+  }, ws as never)
+
+  const sessionHandler = app.handlers.get['/api/mobcode/:sessionId/session']
+  assert.ok(sessionHandler)
+
+  const response = createResponse()
+  await sessionHandler({
+    params: { sessionId: session.id },
+  } as unknown as Parameters<typeof sessionHandler>[0], response as unknown as Parameters<typeof sessionHandler>[1])
+
+  assert.equal(response.statusCode, 200)
+  assert.deepEqual(response.body, {
+    id: session.id,
+    type: session.type,
+    data: {
+      groups: session.data.groups,
+      runnerId: null,
+    },
+  })
 })
 
 void test('POST /api/mobcode/:sessionId/state returns 403 for a bad instructor passcode', async () => {

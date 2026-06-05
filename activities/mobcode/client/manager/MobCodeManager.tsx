@@ -4,7 +4,14 @@ import SessionHeader from '@src/components/common/SessionHeader'
 import VirtualFileExplorer from '@src/components/common/VirtualFileExplorer'
 import type { VirtualFileEntry } from '@src/components/common/virtualFileExplorerTypes'
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
-import type { MobCodeMessageType, MobCodeSelectionRange, MobCodeStatePayload, MobCodeThemeId } from '../../shared/types'
+import type {
+  MobCodeMessageType,
+  MobCodeRunnerId,
+  MobCodeSelectionRange,
+  MobCodeStatePayload,
+  MobCodeThemeId,
+} from '../../shared/types'
+import { isMobCodeRunnerId } from '../../shared/types'
 import CodeEditor from '../components/CodeEditor'
 import FileNameModal from '../components/FileNameModal'
 import FileControlsMenuContent from '../components/FileControlsMenuContent'
@@ -23,6 +30,11 @@ import {
 } from '../utils/fileUtils'
 import { getThemeFromCookie, setThemeCookie } from '../utils/themeUtils'
 import { extractImportedFiles } from '../utils/zipUtils'
+import {
+  DEFAULT_MOB_CODE_RUNNER_ID,
+  MOB_CODE_RUNNERS,
+  openMobCodeRunnerPopup,
+} from '../runner/runnerUtils'
 import {
   applyActiveFileChange,
   applyContentChange,
@@ -45,6 +57,7 @@ interface SessionResponse {
         activeFile?: unknown
       }
     }
+    runnerId?: unknown
   }
 }
 
@@ -74,6 +87,8 @@ export default function MobCodeManager() {
   const [modalErrorMessage, setModalErrorMessage] = useState('')
   const [fileImportMessage, setFileImportMessage] = useState('')
   const [editorLimitMessage, setEditorLimitMessage] = useState('')
+  const [runnerId, setRunnerId] = useState<MobCodeRunnerId>(DEFAULT_MOB_CODE_RUNNER_ID)
+  const [runnerMessage, setRunnerMessage] = useState('')
   const wsDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const persistDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const latestStateRef = useRef<MobCodeStatePayload>(createStateSnapshot({}, ''))
@@ -105,6 +120,9 @@ export default function MobCodeManager() {
         latestStateRef.current = createStateSnapshot(nextFiles, nextActiveFile)
         replaceFilesState(nextFiles)
         setActiveFile(nextActiveFile)
+        if (isMobCodeRunnerId(session.data?.runnerId)) {
+          setRunnerId(session.data.runnerId)
+        }
       })
       .catch((error) => console.error('Failed to fetch MobCode session:', error))
   }, [encodedSessionId, replaceFilesState, sessionId])
@@ -363,6 +381,24 @@ export default function MobCodeManager() {
     setThemeCookie(nextTheme)
   }
 
+  const handleRunCode = () => {
+    const result = openMobCodeRunnerPopup({
+      files: latestStateRef.current.files,
+      activeFile: latestStateRef.current.activeFile,
+      sessionId,
+      runnerId,
+    })
+    setRunnerMessage(
+      result.opened
+        ? ''
+        : result.reason === 'missing-entry'
+          ? 'Add or select a Python file before running Brython.'
+          : result.reason === 'popup-blocked'
+            ? 'The runner popup was blocked. Allow popups for this site and try again.'
+            : 'That runner is not available yet.',
+    )
+  }
+
   const activeContent = activeFile ? files[activeFile] ?? '' : ''
   const editorThemeClassName = `mobcode-editor-theme-${theme}`
 
@@ -414,11 +450,43 @@ export default function MobCodeManager() {
             onMessageChange={setFileImportMessage}
           />
         ) : undefined}
-        headerActions={<SettingsMenu theme={theme} onThemeChange={handleThemeChange} label="Theme" />}
+        headerActions={(
+          <div className="mobcode-header-actions">
+            <label className="mobcode-runner-picker">
+              <span className="sr-only">Runner implementation</span>
+              <select
+                aria-label="Runner implementation"
+                value={runnerId}
+                onChange={(event) => setRunnerId(event.target.value as MobCodeRunnerId)}
+              >
+                {MOB_CODE_RUNNERS.map((runner) => (
+                  <option key={runner.id} value={runner.id}>
+                    {runner.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="button"
+              className="mobcode-runner-button"
+              onClick={handleRunCode}
+              disabled={Object.keys(files).length === 0}
+              title={MOB_CODE_RUNNERS.find((runner) => runner.id === runnerId)?.description}
+            >
+              Run
+            </button>
+            <SettingsMenu theme={theme} onThemeChange={handleThemeChange} label="Theme" />
+          </div>
+        )}
       />
       {!instructorPasscode && (
         <div className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800">
           Instructor edit credentials are not available in this tab. Rejoin from the create-session flow to persist changes.
+        </div>
+      )}
+      {runnerMessage && (
+        <div className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800">
+          {runnerMessage}
         </div>
       )}
       <div className="mobcode-workspace">
