@@ -106,6 +106,16 @@ export default function VirtualFileExplorer({
     onSelect?.(normalizedToRawPath.get(path) ?? path)
   }
 
+  const mapPathToRawFileKey = (path: string) => normalizedToRawPath.get(path) ?? path
+
+  const handleRename = (path: string) => {
+    onRename?.(mapPathToRawFileKey(path))
+  }
+
+  const handleDelete = (path: string) => {
+    onDelete?.(mapPathToRawFileKey(path))
+  }
+
   return (
     <div
       className={[
@@ -186,8 +196,8 @@ export default function VirtualFileExplorer({
                 allowDelete={allowDelete}
                 onToggleFolder={toggleFolder}
                 onSelect={handleSelect}
-                onRename={onRename}
-                onDelete={onDelete}
+                onRename={handleRename}
+                onDelete={handleDelete}
                 renderItemActions={renderItemActions}
                 getItemBadges={getItemBadges}
                 getItemClassName={getItemClassName}

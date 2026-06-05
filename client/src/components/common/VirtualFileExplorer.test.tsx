@@ -278,3 +278,41 @@ void test('VirtualFileExplorer disables rename and delete actions when handlers 
     restoreDom()
   }
 })
+
+void test('VirtualFileExplorer emits original raw file keys for rename and delete actions', async () => {
+  const restoreDom = installDomEnvironment('https://bits.example')
+  const { cleanup, fireEvent, render } = await import('@testing-library/react')
+  const { default: VirtualFileExplorer } = await import('./VirtualFileExplorer')
+
+  try {
+    let renamedPath = ''
+    let deletedPath = ''
+    const rendered = render(
+      <VirtualFileExplorer
+        files={{
+          '\\src\\\\utils//math.ts': '',
+        }}
+        allowRename
+        allowDelete
+        onRename={(path) => {
+          renamedPath = path
+        }}
+        onDelete={(path) => {
+          deletedPath = path
+        }}
+      />,
+    )
+
+    fireEvent.click(rendered.getByRole('treeitem', { name: 'src' }))
+    fireEvent.click(rendered.getByRole('treeitem', { name: 'utils' }))
+    fireEvent.mouseOver(rendered.getByRole('treeitem', { name: 'math.ts' }))
+    fireEvent.click(rendered.getByRole('button', { name: 'Rename math.ts' }))
+    fireEvent.click(rendered.getByRole('button', { name: 'Delete math.ts' }))
+
+    assert.equal(renamedPath, '\\src\\\\utils//math.ts')
+    assert.equal(deletedPath, '\\src\\\\utils//math.ts')
+  } finally {
+    cleanup()
+    restoreDom()
+  }
+})
