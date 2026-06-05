@@ -101,6 +101,15 @@ export function clampMobCodeContentEdit(
   }
 }
 
+export function wouldPathConflict(files: Record<string, string>, targetPath: string): boolean {
+  const targetPrefix = `${targetPath}/`
+  return Object.keys(files).some((path) => (
+    path === targetPath ||
+    path.startsWith(targetPrefix) ||
+    targetPath.startsWith(`${path}/`)
+  ))
+}
+
 export function resolveActiveFile(files: Record<string, string>, activeFile: unknown): string {
   if (typeof activeFile === 'string' && Object.hasOwn(files, activeFile)) return activeFile
   return Object.keys(files).sort((a, b) => a.localeCompare(b))[0] ?? ''

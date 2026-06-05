@@ -361,6 +361,7 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
         msg.type !== 'active-file-changed' &&
         msg.type !== 'editor-presence-update'
       ) return
+      if (client.mobCodeRole !== 'manager') return
 
       ;(async () => {
         const session = asMobCodeSession(await sessions.get(client.sessionId ?? ''))

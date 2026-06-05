@@ -8,6 +8,7 @@ interface FileNameModalProps {
   title: string
   initialValue?: string
   submitLabel: string
+  errorMessage?: string
   onClose: () => void
   onSubmit: (path: string) => void
 }
@@ -17,6 +18,7 @@ export default function FileNameModal({
   title,
   initialValue = '',
   submitLabel,
+  errorMessage = '',
   onClose,
   onSubmit,
 }: FileNameModalProps) {
@@ -53,6 +55,7 @@ export default function FileNameModal({
         {!isValid && value.trim().length > 0 && (
           <p className="text-sm text-red-700">Use a safe relative path without traversal segments.</p>
         )}
+        {errorMessage && <p className="text-sm text-red-700">{errorMessage}</p>}
         <div className="flex justify-end gap-2">
           <Button type="button" variant="outline" onClick={onClose}>
             Cancel

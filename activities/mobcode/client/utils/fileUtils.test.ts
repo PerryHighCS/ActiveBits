@@ -11,6 +11,7 @@ import {
   renamePathInFiles,
   resolveActiveFile,
   sanitizeFilesMap,
+  wouldPathConflict,
 } from './fileUtils'
 
 void test('path helpers normalize and validate file names', () => {
@@ -85,4 +86,18 @@ void test('rename and delete path helpers handle files and folders', () => {
   assert.equal(renameActiveFilePath('README.md', 'src', 'app'), 'README.md')
   assert.deepEqual(renamePathInFiles(files, 'src/Main.java', 'README.md'), files)
   assert.deepEqual(renamePathInFiles(files, 'src', 'README.md'), files)
+})
+
+void test('wouldPathConflict catches file and folder creation collisions', () => {
+  const files = {
+    'src/Main.java': 'a',
+    'README.md': 'b',
+    'empty/.keep': '',
+  }
+
+  assert.equal(wouldPathConflict(files, 'README.md'), true)
+  assert.equal(wouldPathConflict(files, 'src'), true)
+  assert.equal(wouldPathConflict(files, 'src/Main.java'), true)
+  assert.equal(wouldPathConflict(files, 'empty'), true)
+  assert.equal(wouldPathConflict(files, 'notes/Todo.md'), false)
 })

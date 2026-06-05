@@ -17,6 +17,7 @@ import {
   renamePathInFiles,
   resolveActiveFile,
   sanitizeFilesMap,
+  wouldPathConflict,
 } from '../utils/fileUtils'
 import { getThemeFromCookie, setThemeCookie } from '../utils/themeUtils'
 import { extractImportedFiles } from '../utils/zipUtils'
@@ -65,6 +66,7 @@ export default function MobCodeManager() {
   const [theme, setTheme] = useState<MobCodeThemeId>(() => getThemeFromCookie())
   const [modalMode, setModalMode] = useState<ModalMode>(null)
   const [renameTarget, setRenameTarget] = useState('')
+  const [modalErrorMessage, setModalErrorMessage] = useState('')
   const [fileImportMessage, setFileImportMessage] = useState('')
   const [editorLimitMessage, setEditorLimitMessage] = useState('')
   const wsDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -317,9 +319,17 @@ export default function MobCodeManager() {
 
   const submitModal = (path: string) => {
     if (modalMode === 'create-file') {
+      if (wouldPathConflict(files, path)) {
+        setModalErrorMessage('A file or folder already exists at that path.')
+        return
+      }
       const nextFiles = { ...files, [path]: '' }
       applyFiles(nextFiles, path)
     } else if (modalMode === 'create-folder') {
+      if (wouldPathConflict(files, path)) {
+        setModalErrorMessage('A file or folder already exists at that path.')
+        return
+      }
       const keepPath = `${path}/.keep`
       const nextFiles = { ...files, [keepPath]: '' }
       applyFiles(nextFiles, keepPath)
@@ -327,6 +337,7 @@ export default function MobCodeManager() {
       const nextFiles = renamePathInFiles(files, renameTarget, path)
       applyFiles(nextFiles, resolveActiveFile(nextFiles, renameActiveFilePath(activeFile, renameTarget, path)))
     }
+    setModalErrorMessage('')
     setModalMode(null)
     setRenameTarget('')
   }
@@ -449,7 +460,9 @@ export default function MobCodeManager() {
         title={modalMode === 'rename' ? 'Rename Path' : modalMode === 'create-folder' ? 'New Folder' : 'New File'}
         initialValue={modalMode === 'rename' ? renameTarget : ''}
         submitLabel={modalMode === 'rename' ? 'Rename' : 'Create'}
+        errorMessage={modalErrorMessage}
         onClose={() => {
+          setModalErrorMessage('')
           setModalMode(null)
           setRenameTarget('')
         }}
