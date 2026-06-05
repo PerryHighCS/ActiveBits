@@ -17,6 +17,8 @@ void test('normalizes zip paths and rejects traversal/artifacts', () => {
   assert.equal(normalizeZipEntryPath('../Main.java'), null)
   assert.equal(normalizeZipEntryPath(`src/${'a'.repeat(241)}.java`), null)
   assert.equal(normalizeZipEntryPath('bad\0name.java'), null)
+  assert.equal(normalizeZipEntryPath('__proto__/payload.java'), null)
+  assert.equal(normalizeZipEntryPath('src/constructor/payload.java'), null)
   assert.equal(normalizeZipEntryPath('__MACOSX/file'), null)
   assert.equal(normalizeZipEntryPath('src/.DS_Store'), null)
 })
@@ -73,4 +75,16 @@ void test('extractImportedFiles skips oversized plain files before reading them 
   assert.deepEqual(result.files, {})
   assert.deepEqual(result.skipped, ['Huge.java'])
   assert.equal(arrayBufferCalls, 0)
+})
+
+void test('extractZipFiles rejects prototype-pollution entry paths', async () => {
+  const file = await makeZipFile({
+    '__proto__/payload.java': 'class Main {}',
+    'src/Main.java': 'class Main {}',
+  })
+
+  const result = await extractZipFiles(file)
+
+  assert.deepEqual(result.files, { 'src/Main.java': 'class Main {}' })
+  assert.deepEqual(result.skipped, ['__proto__/payload.java'])
 })

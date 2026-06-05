@@ -50,6 +50,7 @@ const MAX_PRESENCE_SELECTIONS = 16
 const WS_OPEN = 1
 const LIVE_GROUP_CLEANUP_DELAY_MS = 30_000
 const DURABLE_MESSAGE_TYPES = new Set<MobCodeMessage['type']>(['state-sync', 'file-tree-changed'])
+const RESERVED_PATH_SEGMENTS = new Set(['__proto__', 'constructor', 'prototype'])
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return value != null && typeof value === 'object' && !Array.isArray(value)
@@ -66,7 +67,11 @@ function normalizePath(path: string): string {
 
 function isSafePath(path: string): boolean {
   if (!path || path.length > MAX_PATH_LENGTH || path.includes('\0')) return false
-  return path.split('/').every((part) => part !== '.' && part !== '..')
+  return path.split('/').every((part) => (
+    part !== '.' &&
+    part !== '..' &&
+    !RESERVED_PATH_SEGMENTS.has(part)
+  ))
 }
 
 function getUtf8ByteLength(value: string): number {

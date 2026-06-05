@@ -4,6 +4,8 @@ interface MutableEntry extends VirtualFileEntry {
   children: MutableEntry[]
 }
 
+const RESERVED_PATH_SEGMENTS = new Set(['__proto__', 'constructor', 'prototype'])
+
 function normalizePathPart(part: string): string {
   return part.trim()
 }
@@ -20,7 +22,11 @@ export function normalizeVirtualPath(path: string): string {
 export function isSafeVirtualPath(path: string): boolean {
   const normalized = normalizeVirtualPath(path)
   if (!normalized || normalized.length > 240 || normalized.includes('\0')) return false
-  return normalized.split('/').every((part) => part !== '.' && part !== '..')
+  return normalized.split('/').every((part) => (
+    part !== '.' &&
+    part !== '..' &&
+    !RESERVED_PATH_SEGMENTS.has(part)
+  ))
 }
 
 function sortEntries(entries: MutableEntry[]): MutableEntry[] {

@@ -249,7 +249,7 @@ void test('normalizeMobCodeSessionData drops invalid file records and repairs ac
     instructorPasscode: 42,
     groups: {
       default: {
-        files: { '../bad': 'x', 'src/Main.java': 'ok', binary: 7 },
+        files: { '../bad': 'x', '__proto__/polluted.java': 'x', 'src/Main.java': 'ok', binary: 7 },
         activeFile: '../bad',
       },
     },

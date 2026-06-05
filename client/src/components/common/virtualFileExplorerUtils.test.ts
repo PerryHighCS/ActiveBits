@@ -76,3 +76,9 @@ void test('isSafeVirtualPath rejects traversal, empty, null byte, and long paths
   assert.equal(isSafeVirtualPath('bad\0name'), false)
   assert.equal(isSafeVirtualPath(`${'a'.repeat(241)}.txt`), false)
 })
+
+void test('isSafeVirtualPath rejects prototype-pollution path segments', () => {
+  assert.equal(isSafeVirtualPath('__proto__/Main.java'), false)
+  assert.equal(isSafeVirtualPath('src/constructor/Helper.java'), false)
+  assert.equal(isSafeVirtualPath('prototype/utils.ts'), false)
+})
