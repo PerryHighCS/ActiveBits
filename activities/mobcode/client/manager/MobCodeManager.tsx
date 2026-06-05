@@ -392,7 +392,7 @@ export default function MobCodeManager() {
       result.opened
         ? ''
         : result.reason === 'missing-entry'
-          ? 'Add or select a Python file before running Brython.'
+          ? 'Add or select a Python file before running it.'
           : result.reason === 'popup-blocked'
             ? 'The runner popup was blocked. Allow popups for this site and try again.'
             : 'That runner is not available yet.',

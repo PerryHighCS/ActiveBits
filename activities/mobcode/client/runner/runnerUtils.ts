@@ -36,7 +36,7 @@ interface BrythonRunnerPayload {
 export const MOB_CODE_RUNNERS: readonly MobCodeRunnerDefinition[] = [
   {
     id: 'brython-terminal',
-    label: 'Brython Terminal',
+    label: 'Python Terminal',
     description: 'Run a Python entry file in a popup terminal.',
   },
 ]
@@ -170,7 +170,7 @@ export function buildBrythonRunnerHtml(payload: BrythonRunnerPayload): string {
 </head>
 <body>
   <header>
-    <h1>MobCode Brython Runner</h1>
+    <h1>MobCode Python Runner</h1>
     <div class="entry">${entryFile}</div>
   </header>
   <main>
@@ -255,7 +255,7 @@ if window.mobcodeRunnerShouldStart():
         else:
             window.mobcodeTerminal.write('\\nError in ' + entry_filename + ', line ' + str(line_number) + '\\n')
 
-    window.mobcodeTerminal.write('[Brython] Running ' + entry_filename + '\\n')
+    window.mobcodeTerminal.write('[Python] Running ' + entry_filename + '\\n')
 
     try:
         compiled_code = compile(entry_source, entry_filename, 'exec')
@@ -270,7 +270,7 @@ if window.mobcodeRunnerShouldStart():
     if (typeof brython === 'function') {
       brython({ debug: 1 });
     } else {
-      window.mobcodeTerminal.write('[error] Brython failed to load. Check this popup\\'s network access.\\n');
+      window.mobcodeTerminal.write('[error] Python runner failed to load. Check this popup\\'s network access.\\n');
     }
   </script>
 </body>

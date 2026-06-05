@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   buildBrythonRunnerHtml,
+  MOB_CODE_RUNNERS,
   openMobCodeRunnerPopup,
   resolveBrythonEntryFile,
 } from './runnerUtils'
@@ -29,6 +30,10 @@ void test('resolveBrythonEntryFile falls back to the first Python file', () => {
 
 void test('resolveBrythonEntryFile returns null when the workspace has no Python file', () => {
   assert.equal(resolveBrythonEntryFile({ 'Main.java': 'class Main {}' }, 'Main.java'), null)
+})
+
+void test('MOB_CODE_RUNNERS exposes Python-facing labels', () => {
+  assert.deepEqual(MOB_CODE_RUNNERS.map((runner) => runner.label), ['Python Terminal'])
 })
 
 void test('buildBrythonRunnerHtml escapes payload content in script contexts', () => {
@@ -84,6 +89,19 @@ void test('buildBrythonRunnerHtml prints a user-file error header before the raw
   assert.match(html, /Error in ' \+ entry_filename \+ ', line ' \+ str\(line_number\)/)
   assert.match(html, /print_user_error_header\(error\)/)
   assert.match(html, /traceback\.print_exc\(\)/)
+})
+
+void test('buildBrythonRunnerHtml shows Python-facing runner labels', () => {
+  const html = buildBrythonRunnerHtml({
+    files: { 'test.py': 'print("Hello")' },
+    entryFile: 'test.py',
+    title: 'Runner',
+  })
+
+  assert.match(html, /MobCode Python Runner/)
+  assert.match(html, /\[Python\] Running/)
+  assert.doesNotMatch(html, /MobCode Brython Runner/)
+  assert.doesNotMatch(html, /\[Brython\] Running/)
 })
 
 void test('openMobCodeRunnerPopup opens a fresh blob-backed runner popup', () => {

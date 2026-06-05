@@ -274,7 +274,7 @@ Field guidance:
 
 - `files` is an object map of relative virtual paths to UTF-8 text content
 - `activeFile` is optional and should match one of the `files` keys when provided
-- `runnerId` is optional; use `brython-terminal` to preselect the Brython popup runner for Python-focused launches
+- `runnerId` is optional; use `brython-terminal` to preselect the Python popup runner for Python-focused launches
 - paths should be safe relative paths such as `src/Main.java`; paths containing traversal segments such as `../` are rejected and will not load
 - omit `files` to start with an empty MobCode workspace
 
