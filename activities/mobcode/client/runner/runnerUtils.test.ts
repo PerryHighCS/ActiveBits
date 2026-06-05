@@ -78,6 +78,23 @@ void test('buildBrythonRunnerHtml runs user code in a Brython worker', () => {
   assert.match(html, /worker\.create_worker\('mobcode-python-worker', None, handle_worker_message, handle_worker_error\)/)
 })
 
+void test('buildBrythonRunnerHtml wires terminal input through a blocking worker bridge', () => {
+  const html = buildBrythonRunnerHtml({
+    files: { 'test.py': 'name = input("Name? ")\nprint(name)\n' },
+    entryFile: 'test.py',
+    title: 'Runner',
+  })
+
+  assert.match(html, /window\.mobcodeInputBridge = \(\(\) =>/)
+  assert.match(html, /control_buffer = SharedArrayBuffer\.new\(8\)/)
+  assert.match(html, /data_buffer = SharedArrayBuffer\.new\(65536\)/)
+  assert.match(html, /Atomics\.wait\(input_control, 0, 0\)/)
+  assert.match(html, /'input': mobcode_input/)
+  assert.match(html, /worker_self\.send\(\{\s*'type': 'input-request'/)
+  assert.match(html, /message_type == 'input-request'/)
+  assert.match(html, /bridge\.request\(/)
+})
+
 void test('buildBrythonRunnerHtml compiles user code with the entry filename for tracebacks', () => {
   const html = buildBrythonRunnerHtml({
     files: { 'test.py': 'print("Hello")\nraise ValueError("boom")\n' },
@@ -87,7 +104,10 @@ void test('buildBrythonRunnerHtml compiles user code with the entry filename for
 
   assert.match(html, /entry_filename = "test\.py"/)
   assert.match(html, /compiled_code = compile\(entry_source, entry_filename, 'exec'\)/)
-  assert.match(html, /exec\(compiled_code, \{'__name__': '__main__', '__file__': entry_filename\}\)/)
+  assert.match(html, /exec\(compiled_code, \{/)
+  assert.match(html, /'__file__': entry_filename/)
+  assert.match(html, /'__builtins__': builtins/)
+  assert.match(html, /'input': mobcode_input/)
 })
 
 void test('buildBrythonRunnerHtml prints a user-file error header before the raw traceback', () => {

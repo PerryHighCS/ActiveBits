@@ -201,14 +201,75 @@ export function buildBrythonRunnerHtml(payload: BrythonRunnerPayload): string {
         terminal.append(document.createTextNode(String(value)));
         terminal.scrollTop = terminal.scrollHeight;
       },
-      input(promptText) {
-        const promptValue = String(promptText || '');
-        if (promptValue) this.write(promptValue);
-        const value = window.prompt(promptValue) ?? '';
-        this.write(value + '\\n');
-        return value;
+      writeln(value) {
+        this.write(String(value) + '\\n');
       }
     };
+    window.mobcodeRejectInput = (controlBuffer) => {
+      const control = new Int32Array(controlBuffer);
+      Atomics.store(control, 1, 0);
+      Atomics.store(control, 0, 2);
+      Atomics.notify(control, 0, 1);
+    };
+    window.mobcodeInputBridge = (() => {
+      const maxInputBytes = 65536;
+      if (
+        typeof Atomics !== 'object' ||
+        typeof TextEncoder !== 'function'
+      ) {
+        return null;
+      }
+      const encoder = new TextEncoder();
+
+      function submitInput(input, value, controlBuffer, dataBuffer) {
+        const control = new Int32Array(controlBuffer);
+        const data = new Uint8Array(dataBuffer);
+        const bytes = encoder.encode(value).slice(0, maxInputBytes);
+        data.fill(0);
+        data.set(bytes);
+        Atomics.store(control, 1, bytes.length);
+        Atomics.store(control, 0, 1);
+        Atomics.notify(control, 0, 1);
+        input.replaceWith(document.createTextNode(value + '\\n'));
+      }
+
+      function rejectInput(controlBuffer) {
+        window.mobcodeRejectInput(controlBuffer);
+      }
+
+      return {
+        request(promptText, controlBuffer, dataBuffer) {
+          if (!controlBuffer || !dataBuffer) {
+            window.mobcodeTerminal.write('\\n[error] Interactive input bridge failed to initialize.\\n');
+            return;
+          }
+          window.mobcodeTerminal.write(String(promptText || ''));
+          const terminal = document.getElementById('terminal');
+          const input = document.createElement('input');
+          input.type = 'text';
+          input.autocomplete = 'off';
+          input.spellcheck = false;
+          input.setAttribute('aria-label', 'Program input');
+          input.style.cssText = [
+            'min-width: 12rem',
+            'border: 0',
+            'outline: 0',
+            'background: transparent',
+            'color: inherit',
+            'font: inherit',
+          ].join(';');
+          input.addEventListener('keydown', (event) => {
+            if (event.key !== 'Enter') return;
+            event.preventDefault();
+            submitInput(input, input.value, controlBuffer, dataBuffer);
+          });
+          terminal.append(input);
+          input.focus();
+          terminal.scrollTop = terminal.scrollHeight;
+        },
+        reject: rejectInput,
+      };
+    })();
     window.addEventListener('error', (event) => {
       window.mobcodeTerminal.write('\\n[error] ' + event.message + '\\n');
     });
@@ -218,6 +279,15 @@ from browser import self as worker_self
 import builtins
 import sys
 import traceback
+
+try:
+    from javascript import Atomics, Int32Array, SharedArrayBuffer, TextDecoder, Uint8Array
+except Exception:
+    Atomics = None
+    Int32Array = None
+    SharedArrayBuffer = None
+    TextDecoder = None
+    Uint8Array = None
 
 entry_filename = ${serializedEntryFile}
 entry_source = ${serializedEntryContent}
@@ -234,9 +304,27 @@ class MobCodeWorkerOutput:
         pass
 
 def mobcode_input(prompt=''):
-    if prompt:
-        worker_self.send({'type': 'stdout', 'data': str(prompt)})
-    raise RuntimeError('input() is not available in the isolated Python runner yet.')
+    if Atomics is None or Int32Array is None or SharedArrayBuffer is None or TextDecoder is None or Uint8Array is None:
+        raise RuntimeError('Interactive input is not available in this browser. Ask the instructor to enable the isolated Python runner input bridge.')
+    control_buffer = SharedArrayBuffer.new(8)
+    data_buffer = SharedArrayBuffer.new(65536)
+    input_control = Int32Array.new(control_buffer)
+    input_data = Uint8Array.new(data_buffer)
+    input_decoder = TextDecoder.new()
+    Atomics.store(input_control, 0, 0)
+    worker_self.send({
+        'type': 'input-request',
+        'prompt': str(prompt),
+        'controlBuffer': control_buffer,
+        'dataBuffer': data_buffer,
+    })
+    wait_result = Atomics.wait(input_control, 0, 0)
+    if wait_result != 'ok':
+        raise RuntimeError('Interactive input was interrupted.')
+    if Atomics.load(input_control, 0) != 1:
+        raise RuntimeError('Interactive input was interrupted.')
+    byte_length = Atomics.load(input_control, 1)
+    return input_decoder.decode(input_data.slice(0, byte_length))
 
 def find_user_error_line(error):
     traceback_node = getattr(error, '__traceback__', None)
@@ -261,7 +349,12 @@ builtins.input = mobcode_input
 
 try:
     compiled_code = compile(entry_source, entry_filename, 'exec')
-    exec(compiled_code, {'__name__': '__main__', '__file__': entry_filename})
+    exec(compiled_code, {
+        '__name__': '__main__',
+        '__file__': entry_filename,
+        '__builtins__': builtins,
+        'input': mobcode_input,
+    })
     worker_self.send({'type': 'done'})
 except SystemExit:
     worker_self.send({'type': 'done'})
@@ -285,6 +378,19 @@ def handle_worker_message(event):
     data = message.get('data', '')
     if message_type in ['stdout', 'stderr']:
         window.mobcodeTerminal.write(str(data))
+    elif message_type == 'input-request':
+        bridge = window.mobcodeInputBridge
+        if bridge is None:
+            window.mobcodeTerminal.write('\\n[error] Interactive input is not available in this browser.\\n')
+            control_buffer = message.get('controlBuffer')
+            if control_buffer is not None:
+                window.mobcodeRejectInput(control_buffer)
+            return
+        bridge.request(
+            message.get('prompt', ''),
+            message.get('controlBuffer'),
+            message.get('dataBuffer'),
+        )
 
 def handle_worker_error(error):
     window.mobcodeTerminal.write('\\n[error] Python runner worker failed: ' + str(error) + '\\n')

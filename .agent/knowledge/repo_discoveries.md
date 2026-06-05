@@ -16,10 +16,10 @@ Use this log for durable findings that future contributors and agents should reu
 
 - Date: 2026-06-05
 - Area: activities | mobcode
-- Discovery: MobCode runner launch is activity-contained under `activities/mobcode/client/runner`, with the first implementation using a same-origin popup that loads Brython from jsDelivr and executes the selected Python entry file with prompt-backed `input()` and terminal-style stdout/stderr capture. Embedded launches can preselect the manager runner through `embeddedLaunch.selectedOptions.runnerId`, currently `brython-terminal`.
+- Discovery: MobCode runner launch is activity-contained under `activities/mobcode/client/runner`, with the first implementation using a same-origin popup that loads Brython from jsDelivr, executes the selected Python entry file in a Brython worker, and captures terminal-style stdout/stderr. Interactive `input()` is bridged through terminal UI plus `SharedArrayBuffer`/`Atomics`, so availability depends on browser shared-memory policy.
 - Why it matters: Future runner implementations can add ids to the shared `MobCodeRunnerId` union and runner registry without changing shared dashboard code. If classrooms need offline or locked-down execution, the Brython assets should be self-hosted before relying on the popup runner.
 - Evidence: `activities/mobcode/client/runner/runnerUtils.ts`; `activities/mobcode/client/manager/MobCodeManager.tsx`; `activities/mobcode/server/routes.ts`; `skills/syncdeck/references/ACTIVITY_PAYLOADS.md`; `DEPLOYMENT.md`
-- Follow-up action: Add multi-file import support, an xterm-backed terminal renderer, true worker-based execution or interrupt support for runaway loops, and the CMU graphics bridge as incremental Brython runner improvements rather than replacing the MobCode editor transport.
+- Follow-up action: Add multi-file import support, an xterm-backed terminal renderer, explicit Stop/interrupt support for runaway worker loops, and the CMU graphics bridge as incremental Brython runner improvements rather than replacing the MobCode editor transport.
 - Owner: Codex
 
 - Date: 2026-06-04
