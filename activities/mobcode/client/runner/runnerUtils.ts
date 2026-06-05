@@ -187,7 +187,14 @@ export function buildBrythonRunnerHtml(payload: BrythonRunnerPayload): string {
   </main>
   <script>
     window.__MOB_CODE_RUNNER_PAYLOAD__ = ${serializedPayload};
-    window.__MOB_CODE_RUNNER_STARTED__ = false;
+    (() => {
+      let runnerStarted = false;
+      window.mobcodeRunnerShouldStart = () => {
+        if (runnerStarted) return false;
+        runnerStarted = true;
+        return true;
+      };
+    })();
     window.mobcodeTerminal = {
       write(value) {
         const terminal = document.getElementById('terminal');
@@ -212,9 +219,7 @@ import builtins
 import sys
 import traceback
 
-if not getattr(window, '__MOB_CODE_RUNNER_STARTED__', False):
-    window.__MOB_CODE_RUNNER_STARTED__ = True
-
+if window.mobcodeRunnerShouldStart():
     class MobCodeTerminalOutput:
         def write(self, data):
             if data is not None:

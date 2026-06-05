@@ -52,10 +52,10 @@ void test('buildBrythonRunnerHtml guards Brython execution against duplicate ini
     title: 'Runner',
   })
 
-  assert.match(html, /__MOB_CODE_RUNNER_STARTED__/)
-  assert.match(html, /window\.__MOB_CODE_RUNNER_STARTED__ = false;/)
-  assert.match(html, /if not getattr\(window, '__MOB_CODE_RUNNER_STARTED__', False\):/)
-  assert.match(html, /window\.__MOB_CODE_RUNNER_STARTED__ = True/)
+  assert.match(html, /let runnerStarted = false;/)
+  assert.match(html, /window\.mobcodeRunnerShouldStart = \(\) =>/)
+  assert.match(html, /if \(runnerStarted\) return false;/)
+  assert.match(html, /if window\.mobcodeRunnerShouldStart\(\):/)
 })
 
 void test('openMobCodeRunnerPopup writes the Brython runner document to a popup', () => {
