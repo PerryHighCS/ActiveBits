@@ -147,7 +147,10 @@ function readEmbeddedStarterState(source: Record<string, unknown>): MobCodeGroup
 }
 
 function resolveActiveFile(files: Record<string, string>, activeFile: unknown): string {
-  if (typeof activeFile === 'string' && Object.hasOwn(files, activeFile)) return activeFile
+  if (typeof activeFile === 'string') {
+    const normalizedActiveFile = normalizePath(activeFile)
+    if (Object.hasOwn(files, normalizedActiveFile)) return normalizedActiveFile
+  }
   return Object.keys(files).sort((a, b) => a.localeCompare(b))[0] ?? ''
 }
 

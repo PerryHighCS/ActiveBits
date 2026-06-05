@@ -248,6 +248,28 @@ void test('normalizeMobCodeSessionData seeds starter files from embedded launch 
   })
 })
 
+void test('normalizeMobCodeSessionData normalizes activeFile before matching starter files', () => {
+  const data = normalizeMobCodeSessionData({
+    embeddedLaunch: {
+      selectedOptions: {
+        files: {
+          'src/Main.java': 'class Main {}',
+          'src/Helper.java': 'class Helper {}',
+        },
+        activeFile: ' /src\\Main.java ',
+      },
+    },
+  })
+
+  assert.deepEqual(data.groups.default, {
+    files: {
+      'src/Main.java': 'class Main {}',
+      'src/Helper.java': 'class Helper {}',
+    },
+    activeFile: 'src/Main.java',
+  })
+})
+
 void test('normalizeMobCodeSessionData does not rehydrate embedded starter files when an explicit group already exists', () => {
   const data = normalizeMobCodeSessionData({
     groups: {
