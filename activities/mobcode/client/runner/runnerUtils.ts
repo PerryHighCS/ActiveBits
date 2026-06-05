@@ -187,6 +187,7 @@ export function buildBrythonRunnerHtml(payload: BrythonRunnerPayload): string {
   </main>
   <script>
     window.__MOB_CODE_RUNNER_PAYLOAD__ = ${serializedPayload};
+    window.__MOB_CODE_RUNNER_STARTED__ = false;
     window.mobcodeTerminal = {
       write(value) {
         const terminal = document.getElementById('terminal');
