@@ -335,6 +335,10 @@ export default function MobCodeManager() {
       applyFiles(nextFiles, keepPath)
     } else if (modalMode === 'rename' && renameTarget) {
       const nextFiles = renamePathInFiles(files, renameTarget, path)
+      if (nextFiles === files) {
+        setModalErrorMessage('A file or folder already exists at that path.')
+        return
+      }
       applyFiles(nextFiles, resolveActiveFile(nextFiles, renameActiveFilePath(activeFile, renameTarget, path)))
     }
     setModalErrorMessage('')
