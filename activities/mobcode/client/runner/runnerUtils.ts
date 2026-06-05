@@ -213,59 +213,85 @@ export function buildBrythonRunnerHtml(payload: BrythonRunnerPayload): string {
       window.mobcodeTerminal.write('\\n[error] ' + event.message + '\\n');
     });
   </script>
-  <script type="text/python">
-from browser import window
+  <script type="text/python" class="webworker" id="mobcode-python-worker">
+from browser import self as worker_self
 import builtins
 import sys
 import traceback
 
+entry_filename = ${serializedEntryFile}
+entry_source = ${serializedEntryContent}
+
+class MobCodeWorkerOutput:
+    def __init__(self, message_type):
+        self.message_type = message_type
+
+    def write(self, data):
+        if data is not None:
+            worker_self.send({'type': self.message_type, 'data': str(data)})
+
+    def flush(self):
+        pass
+
+def mobcode_input(prompt=''):
+    if prompt:
+        worker_self.send({'type': 'stdout', 'data': str(prompt)})
+    raise RuntimeError('input() is not available in the isolated Python runner yet.')
+
+def find_user_error_line(error):
+    traceback_node = getattr(error, '__traceback__', None)
+    while traceback_node is not None:
+        frame = getattr(traceback_node, 'tb_frame', None)
+        code = getattr(frame, 'f_code', None)
+        filename = getattr(code, 'co_filename', None)
+        if filename == entry_filename:
+            return getattr(traceback_node, 'tb_lineno', None)
+        traceback_node = getattr(traceback_node, 'tb_next', None)
+    return getattr(error, 'lineno', None)
+
+def format_user_error_header(error):
+    line_number = find_user_error_line(error)
+    if line_number is None:
+        return '\\nError in ' + entry_filename + '\\n'
+    return '\\nError in ' + entry_filename + ', line ' + str(line_number) + '\\n'
+
+sys.stdout = MobCodeWorkerOutput('stdout')
+sys.stderr = MobCodeWorkerOutput('stderr')
+builtins.input = mobcode_input
+
+try:
+    compiled_code = compile(entry_source, entry_filename, 'exec')
+    exec(compiled_code, {'__name__': '__main__', '__file__': entry_filename})
+    worker_self.send({'type': 'done'})
+except SystemExit:
+    worker_self.send({'type': 'done'})
+except Exception as error:
+    worker_self.send({'type': 'stderr', 'data': format_user_error_header(error)})
+    worker_self.send({'type': 'stderr', 'data': traceback.format_exc()})
+  </script>
+  <script type="text/python">
+from browser import window, worker
+
+entry_filename = ${serializedEntryFile}
+
+def handle_worker_message(event):
+    message = event.data
+    if hasattr(message, 'to_dict'):
+        message = message.to_dict()
+    if not isinstance(message, dict):
+        window.mobcodeTerminal.write(str(message))
+        return
+    message_type = message.get('type')
+    data = message.get('data', '')
+    if message_type in ['stdout', 'stderr']:
+        window.mobcodeTerminal.write(str(data))
+
+def handle_worker_error(error):
+    window.mobcodeTerminal.write('\\n[error] Python runner worker failed: ' + str(error) + '\\n')
+
 if window.mobcodeRunnerShouldStart():
-    class MobCodeTerminalOutput:
-        def write(self, data):
-            if data is not None:
-                window.mobcodeTerminal.write(str(data))
-
-        def flush(self):
-            pass
-
-    def mobcode_input(prompt=''):
-        return window.mobcodeTerminal.input(str(prompt))
-
-    sys.stdout = MobCodeTerminalOutput()
-    sys.stderr = MobCodeTerminalOutput()
-    builtins.input = mobcode_input
-
-    entry_filename = ${serializedEntryFile}
-    entry_source = ${serializedEntryContent}
-
-    def find_user_error_line(error):
-        traceback_node = getattr(error, '__traceback__', None)
-        while traceback_node is not None:
-            frame = getattr(traceback_node, 'tb_frame', None)
-            code = getattr(frame, 'f_code', None)
-            filename = getattr(code, 'co_filename', None)
-            if filename == entry_filename:
-                return getattr(traceback_node, 'tb_lineno', None)
-            traceback_node = getattr(traceback_node, 'tb_next', None)
-        return getattr(error, 'lineno', None)
-
-    def print_user_error_header(error):
-        line_number = find_user_error_line(error)
-        if line_number is None:
-            window.mobcodeTerminal.write('\\nError in ' + entry_filename + '\\n')
-        else:
-            window.mobcodeTerminal.write('\\nError in ' + entry_filename + ', line ' + str(line_number) + '\\n')
-
     window.mobcodeTerminal.write('[Python] Running ' + entry_filename + '\\n')
-
-    try:
-        compiled_code = compile(entry_source, entry_filename, 'exec')
-        exec(compiled_code, {'__name__': '__main__', '__file__': entry_filename})
-    except SystemExit:
-        raise
-    except Exception as error:
-        print_user_error_header(error)
-        traceback.print_exc()
+    worker.create_worker('mobcode-python-worker', None, handle_worker_message, handle_worker_error)
   </script>
   <script>
     if (typeof brython === 'function') {

@@ -65,6 +65,19 @@ void test('buildBrythonRunnerHtml guards Brython execution against duplicate ini
   assert.match(html, /URL\.revokeObjectURL\(window\.location\.href\)/)
 })
 
+void test('buildBrythonRunnerHtml runs user code in a Brython worker', () => {
+  const html = buildBrythonRunnerHtml({
+    files: { 'test.py': 'print("Hello")' },
+    entryFile: 'test.py',
+    title: 'Runner',
+  })
+
+  assert.match(html, /class="webworker" id="mobcode-python-worker"/)
+  assert.match(html, /from browser import self as worker_self/)
+  assert.match(html, /worker_self\.send\(\{'type': self\.message_type, 'data': str\(data\)\}\)/)
+  assert.match(html, /worker\.create_worker\('mobcode-python-worker', None, handle_worker_message, handle_worker_error\)/)
+})
+
 void test('buildBrythonRunnerHtml compiles user code with the entry filename for tracebacks', () => {
   const html = buildBrythonRunnerHtml({
     files: { 'test.py': 'print("Hello")\nraise ValueError("boom")\n' },
@@ -87,8 +100,8 @@ void test('buildBrythonRunnerHtml prints a user-file error header before the raw
   assert.match(html, /def find_user_error_line\(error\):/)
   assert.match(html, /if filename == entry_filename:/)
   assert.match(html, /Error in ' \+ entry_filename \+ ', line ' \+ str\(line_number\)/)
-  assert.match(html, /print_user_error_header\(error\)/)
-  assert.match(html, /traceback\.print_exc\(\)/)
+  assert.match(html, /worker_self\.send\(\{'type': 'stderr', 'data': format_user_error_header\(error\)\}\)/)
+  assert.match(html, /worker_self\.send\(\{'type': 'stderr', 'data': traceback\.format_exc\(\)\}\)/)
 })
 
 void test('buildBrythonRunnerHtml shows Python-facing runner labels', () => {
