@@ -44,6 +44,15 @@ export default function VirtualFileExplorer({
 }: VirtualFileExplorerProps) {
   const tree = useMemo(() => buildVirtualFileTree(files), [files])
   const normalizedActivePath = useMemo(() => normalizeVirtualPath(activePath ?? ''), [activePath])
+  const normalizedToRawPath = useMemo(() => {
+    const next = new Map<string, string>()
+    for (const rawPath of Object.keys(files)) {
+      const normalizedPath = normalizeVirtualPath(rawPath)
+      if (!isSafeVirtualPath(normalizedPath) || next.has(normalizedPath)) continue
+      next.set(normalizedPath, rawPath)
+    }
+    return next
+  }, [files])
   const filePaths = useMemo(
     () =>
       new Set(
@@ -89,6 +98,10 @@ export default function VirtualFileExplorer({
   const resetDragState = () => {
     dragDepthRef.current = 0
     setIsDragActive(false)
+  }
+
+  const handleSelect = (path: string) => {
+    onSelect?.(normalizedToRawPath.get(path) ?? path)
   }
 
   return (
@@ -166,7 +179,7 @@ export default function VirtualFileExplorer({
                 allowRename={allowRename}
                 allowDelete={allowDelete}
                 onToggleFolder={toggleFolder}
-                onSelect={onSelect}
+                onSelect={handleSelect}
                 onRename={onRename}
                 onDelete={onDelete}
                 renderItemActions={renderItemActions}

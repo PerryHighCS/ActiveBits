@@ -205,3 +205,32 @@ void test('VirtualFileExplorer auto-expands ancestors for normalized file keys a
     restoreDom()
   }
 })
+
+void test('VirtualFileExplorer emits the original raw file key when a normalized entry is selected', async () => {
+  const restoreDom = installDomEnvironment('https://bits.example')
+  const { cleanup, fireEvent, render } = await import('@testing-library/react')
+  const { default: VirtualFileExplorer } = await import('./VirtualFileExplorer')
+
+  try {
+    let selectedPath = ''
+    const rendered = render(
+      <VirtualFileExplorer
+        files={{
+          '\\src\\\\utils//math.ts': '',
+        }}
+        onSelect={(path) => {
+          selectedPath = path
+        }}
+      />,
+    )
+
+    fireEvent.click(rendered.getByRole('treeitem', { name: 'src' }))
+    fireEvent.click(rendered.getByRole('treeitem', { name: 'utils' }))
+    fireEvent.click(rendered.getByRole('treeitem', { name: 'math.ts' }))
+
+    assert.equal(selectedPath, '\\src\\\\utils//math.ts')
+  } finally {
+    cleanup()
+    restoreDom()
+  }
+})
