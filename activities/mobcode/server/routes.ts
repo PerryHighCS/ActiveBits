@@ -39,6 +39,7 @@ const MAX_PATH_LENGTH = 240
 const MAX_FILE_CONTENT_LENGTH = 1_000_000
 const MAX_TOTAL_CONTENT_LENGTH = 4 * 1024 * 1024
 const INSTRUCTOR_PASSCODE_BYTES = 16
+const MAX_INSTRUCTOR_PASSCODE_LENGTH = 512
 const MAX_PRESENCE_SELECTIONS = 16
 const WS_OPEN = 1
 const DURABLE_MESSAGE_TYPES = new Set<MobCodeMessage['type']>(['state-sync', 'file-tree-changed'])
@@ -151,7 +152,10 @@ export function normalizeMobCodeSessionData(data: unknown): MobCodeSessionData {
       ...groupsSource,
       [DEFAULT_GROUP_ID]: defaultGroup,
     },
-    instructorPasscode: typeof instructorPasscode === 'string' && instructorPasscode.length > 0
+    instructorPasscode:
+      typeof instructorPasscode === 'string' &&
+      instructorPasscode.length > 0 &&
+      instructorPasscode.length <= MAX_INSTRUCTOR_PASSCODE_LENGTH
       ? instructorPasscode
       : createInstructorPasscode(),
   }
@@ -169,7 +173,11 @@ function createInstructorPasscode(): string {
 
 function verifyPasscode(expected: string | undefined, candidate: unknown): boolean {
   if (typeof expected !== 'string' || typeof candidate !== 'string') return false
-  if (candidate.length === 0 || candidate.length > 512 || expected.length !== candidate.length) return false
+  if (
+    candidate.length === 0 ||
+    candidate.length > MAX_INSTRUCTOR_PASSCODE_LENGTH ||
+    expected.length !== candidate.length
+  ) return false
   const expectedBuffer = Buffer.from(expected)
   const candidateBuffer = Buffer.from(candidate)
   if (expectedBuffer.length === 0 || expectedBuffer.length !== candidateBuffer.length) return false
@@ -285,7 +293,7 @@ export function readWsInstructorPasscode(message: MobCodeMessage): string | null
   return (
     typeof message.payload.instructorPasscode === 'string' &&
     message.payload.instructorPasscode.length > 0 &&
-    message.payload.instructorPasscode.length <= 512
+    message.payload.instructorPasscode.length <= MAX_INSTRUCTOR_PASSCODE_LENGTH
   ) ? message.payload.instructorPasscode : null
 }
 

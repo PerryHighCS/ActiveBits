@@ -196,11 +196,12 @@ void test('readWsInstructorPasscode accepts only explicit manager auth payloads'
 
 void test('normalizeMobCodeSessionData verification path rejects oversized passcodes before buffer comparison', () => {
   const data = normalizeMobCodeSessionData({
-    instructorPasscode: '0123456789abcdef0123456789abcdef',
+    instructorPasscode: 'x'.repeat(513),
     groups: { default: { files: {}, activeFile: '' } },
   })
   assert.equal(typeof data.instructorPasscode, 'string')
   assert.equal(data.instructorPasscode?.length, 32)
+  assert.notEqual(data.instructorPasscode, 'x'.repeat(513))
 })
 
 void test('normalizeMobCodeSessionData enforces UTF-8 byte limits for file content and total size', () => {
