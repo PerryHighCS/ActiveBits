@@ -16,6 +16,7 @@ import type {
 interface MobCodeSessionStore extends Pick<SessionStore, 'get' | 'set'> {
   publishBroadcast?: (channel: string, message: Record<string, unknown>) => Promise<void>
   subscribeToBroadcast?: (channel: string, handler: (message: unknown) => void) => void
+  valkeyStore?: SessionStore['valkeyStore']
 }
 
 interface AppLike {
@@ -358,9 +359,10 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
   async function broadcast(type: string, payload: MobCodeStatePayload, sessionId: string): Promise<void> {
     const msgObj = { type, payload, timestamp: Date.now() }
     const msg = JSON.stringify(msgObj)
-    if (sessions.publishBroadcast) {
+    if (sessions.publishBroadcast && sessions.valkeyStore != null) {
       try {
         await sessions.publishBroadcast(`session:${sessionId}:broadcast`, msgObj)
+        return
       } catch (error) {
         console.error(JSON.stringify({ event: 'mobcode.broadcast-publish-failed', sessionId, error: String(error) }))
       }

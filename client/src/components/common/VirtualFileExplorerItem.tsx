@@ -72,6 +72,8 @@ export default function VirtualFileExplorerItem({
   const isFolder = entry.kind === 'folder'
   const isExpanded = isFolder ? expandedFolders.has(entry.path) : false
   const isActive = entry.kind === 'file' && entry.path === activePath
+  const canRename = !readOnly && allowRename && typeof onRename === 'function'
+  const canDelete = !readOnly && allowDelete && typeof onDelete === 'function'
   const badges = getItemBadges?.(entry)
   const customClassName = getItemClassName?.(entry) ?? entry.className ?? ''
   const indent = `${depth * 0.875}rem`
@@ -142,6 +144,8 @@ export default function VirtualFileExplorerItem({
             type="button"
             className="rounded px-1 text-xs text-gray-500 opacity-0 hover:bg-gray-200 group-hover:opacity-100 focus:opacity-100"
             aria-label={`Rename ${entry.displayName}`}
+            disabled={!canRename}
+            aria-disabled={!canRename || undefined}
             onClick={() => onRename?.(entry.path)}
           >
             Rename
@@ -152,6 +156,8 @@ export default function VirtualFileExplorerItem({
             type="button"
             className="rounded px-1 text-xs text-red-600 opacity-0 hover:bg-red-50 group-hover:opacity-100 focus:opacity-100"
             aria-label={`Delete ${entry.displayName}`}
+            disabled={!canDelete}
+            aria-disabled={!canDelete || undefined}
             onClick={() => onDelete?.(entry.path)}
           >
             Delete

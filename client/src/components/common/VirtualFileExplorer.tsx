@@ -66,6 +66,8 @@ export default function VirtualFileExplorer({
   const [isDragActive, setIsDragActive] = useState(false)
   const dragDepthRef = useRef(0)
   const canDropFiles = !readOnly && typeof onDropFiles === 'function'
+  const canCreateFile = !readOnly && allowCreate && typeof onCreateFile === 'function'
+  const canCreateFolder = !readOnly && allowCreate && typeof onCreateFolder === 'function'
   const effectiveExpandedFolders = useMemo(() => {
     if (!normalizedActivePath || !filePaths.has(normalizedActivePath)) {
       return expandedFolders
@@ -147,6 +149,8 @@ export default function VirtualFileExplorer({
               className="inline-flex h-8 w-8 items-center justify-center rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
               aria-label="Add file"
               title="Add file"
+              disabled={!canCreateFile}
+              aria-disabled={!canCreateFile || undefined}
               onClick={() => onCreateFile?.()}
             >
               <FilePlusIcon />
@@ -156,6 +160,8 @@ export default function VirtualFileExplorer({
               className="inline-flex h-8 w-8 items-center justify-center rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
               aria-label="Add folder"
               title="Add folder"
+              disabled={!canCreateFolder}
+              aria-disabled={!canCreateFolder || undefined}
               onClick={() => onCreateFolder?.()}
             >
               <FolderPlusIcon />

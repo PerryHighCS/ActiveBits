@@ -105,6 +105,27 @@ void test('VirtualFileExplorer renders icon buttons for file and folder creation
   }
 })
 
+void test('VirtualFileExplorer disables create buttons when handlers are missing', async () => {
+  const restoreDom = installDomEnvironment('https://bits.example')
+  const { cleanup, render } = await import('@testing-library/react')
+  const { default: VirtualFileExplorer } = await import('./VirtualFileExplorer')
+
+  try {
+    const rendered = render(
+      <VirtualFileExplorer
+        files={{}}
+        allowCreate
+      />,
+    )
+
+    assert.equal((rendered.getByRole('button', { name: 'Add file' }) as HTMLButtonElement).disabled, true)
+    assert.equal((rendered.getByRole('button', { name: 'Add folder' }) as HTMLButtonElement).disabled, true)
+  } finally {
+    cleanup()
+    restoreDom()
+  }
+})
+
 void test('VirtualFileExplorer accepts dropped files when uploads are enabled', async () => {
   const restoreDom = installDomEnvironment('https://bits.example')
   const { cleanup, fireEvent, render } = await import('@testing-library/react')
@@ -229,6 +250,29 @@ void test('VirtualFileExplorer emits the original raw file key when a normalized
     fireEvent.click(rendered.getByRole('treeitem', { name: 'math.ts' }))
 
     assert.equal(selectedPath, '\\src\\\\utils//math.ts')
+  } finally {
+    cleanup()
+    restoreDom()
+  }
+})
+
+void test('VirtualFileExplorer disables rename and delete actions when handlers are missing', async () => {
+  const restoreDom = installDomEnvironment('https://bits.example')
+  const { cleanup, fireEvent, render } = await import('@testing-library/react')
+  const { default: VirtualFileExplorer } = await import('./VirtualFileExplorer')
+
+  try {
+    const rendered = render(
+      <VirtualFileExplorer
+        files={{ 'Main.java': '' }}
+        allowRename
+        allowDelete
+      />,
+    )
+
+    fireEvent.mouseOver(rendered.getByRole('treeitem', { name: 'Main.java' }))
+    assert.equal((rendered.getByRole('button', { name: 'Rename Main.java' }) as HTMLButtonElement).disabled, true)
+    assert.equal((rendered.getByRole('button', { name: 'Delete Main.java' }) as HTMLButtonElement).disabled, true)
   } finally {
     cleanup()
     restoreDom()
