@@ -326,6 +326,13 @@ export function applyWsRelayMessageToGroupState(
   return group
 }
 
+export function resolveWsValidationGroupState(
+  persistedGroup: MobCodeGroupState | undefined,
+  liveGroup: MobCodeGroupState | undefined,
+): MobCodeGroupState {
+  return liveGroup ?? persistedGroup ?? { files: {}, activeFile: '' }
+}
+
 export function readWsInstructorPasscode(message: MobCodeMessage): string | null {
   if (message.type !== 'manager-auth' || !isPlainObject(message.payload)) return null
   return (
@@ -355,6 +362,7 @@ registerSessionNormalizer('mobcode', (session) => {
 
 export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessionStore, ws: WsRouter): void {
   const ensureBroadcastSubscription = createBroadcastSubscriptionHelper(sessions, ws)
+  const liveGroupsBySession = new Map<string, MobCodeGroupState>()
 
   async function broadcast(type: string, payload: MobCodeStatePayload, sessionId: string): Promise<void> {
     const msgObj = { type, payload, timestamp: Date.now() }
@@ -391,6 +399,7 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
     client.on('message', (rawData) => {
       const msg = parseWsMessage(rawData)
       if (!msg || !client.sessionId) return
+      const sessionId = client.sessionId
       if (msg.type === 'manager-auth') {
         if (client.mobCodeRole !== 'manager') return
         client.instructorPasscode = readWsInstructorPasscode(msg)
@@ -404,26 +413,29 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
       if (client.mobCodeRole !== 'manager') return
 
       ;(async () => {
-        const session = asMobCodeSession(await sessions.get(client.sessionId ?? ''))
+        const session = asMobCodeSession(await sessions.get(sessionId))
         if (!session || !verifyPasscode(session.data.instructorPasscode, client.instructorPasscode)) {
-          console.warn(JSON.stringify({ event: 'mobcode.ws-mutation-denied', sessionId: client.sessionId }))
+          console.warn(JSON.stringify({ event: 'mobcode.ws-mutation-denied', sessionId }))
           return
         }
 
-        const relayMessage = readWsRelayMessage(msg, session.data.groups[DEFAULT_GROUP_ID]?.files ?? {})
-        if (!relayMessage) {
-          console.warn(JSON.stringify({ event: 'mobcode.ws-mutation-invalid', sessionId: client.sessionId, type: msg.type }))
-          return
-        }
-
-        session.data.groups[DEFAULT_GROUP_ID] = applyWsRelayMessageToGroupState(
-          session.data.groups[DEFAULT_GROUP_ID] ?? { files: {}, activeFile: '' },
-          relayMessage,
+        const currentGroup = resolveWsValidationGroupState(
+          session.data.groups[DEFAULT_GROUP_ID],
+          liveGroupsBySession.get(sessionId),
         )
+        const relayMessage = readWsRelayMessage(msg, currentGroup.files)
+        if (!relayMessage) {
+          console.warn(JSON.stringify({ event: 'mobcode.ws-mutation-invalid', sessionId, type: msg.type }))
+          return
+        }
+
+        const nextGroup = applyWsRelayMessageToGroupState(currentGroup, relayMessage)
+        session.data.groups[DEFAULT_GROUP_ID] = nextGroup
+        liveGroupsBySession.set(sessionId, nextGroup)
 
         const outgoing = JSON.stringify({ ...relayMessage, timestamp: Date.now() })
         for (const peer of ws.wss.clients) {
-          if (peer !== client && peer.readyState === WS_OPEN && peer.sessionId === client.sessionId) {
+          if (peer !== client && peer.readyState === WS_OPEN && peer.sessionId === sessionId) {
             try {
               peer.send(outgoing)
             } catch {
@@ -432,7 +444,7 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
           }
         }
       })().catch((error) => {
-        console.error(JSON.stringify({ event: 'mobcode.ws-message-failed', sessionId: client.sessionId, error: String(error) }))
+        console.error(JSON.stringify({ event: 'mobcode.ws-message-failed', sessionId, error: String(error) }))
       })
     })
   })
@@ -495,6 +507,7 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
       }
 
       session.data.groups[DEFAULT_GROUP_ID] = payload
+      liveGroupsBySession.set(session.id, payload)
       await sessions.set(session.id, session)
       await broadcast(readDurableMessageType(body.messageType), payload, session.id)
       res.json({ ok: true })

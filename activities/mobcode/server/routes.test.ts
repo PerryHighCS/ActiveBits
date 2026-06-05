@@ -3,6 +3,7 @@ import test from 'node:test'
 import {
   applyWsRelayMessageToGroupState,
   normalizeMobCodeSessionData,
+  resolveWsValidationGroupState,
   readDurableMessageType,
   readStatePayload,
   readWsInstructorPasscode,
@@ -218,6 +219,21 @@ void test('applyWsRelayMessageToGroupState advances in-memory files for cumulati
     ),
     null,
   )
+})
+
+void test('resolveWsValidationGroupState prefers live ws state over persisted session data', () => {
+  const persistedGroup = {
+    files: { 'src/Main.java': 'persisted' },
+    activeFile: 'src/Main.java',
+  }
+  const liveGroup = {
+    files: { 'src/Main.java': 'live' },
+    activeFile: 'src/Main.java',
+  }
+
+  assert.deepEqual(resolveWsValidationGroupState(persistedGroup, liveGroup), liveGroup)
+  assert.deepEqual(resolveWsValidationGroupState(persistedGroup, undefined), persistedGroup)
+  assert.deepEqual(resolveWsValidationGroupState(undefined, undefined), { files: {}, activeFile: '' })
 })
 
 void test('readWsInstructorPasscode accepts only explicit manager auth payloads', () => {
