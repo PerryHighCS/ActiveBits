@@ -47,6 +47,23 @@ void test('buildVirtualFileTree de-duplicates equivalent normalized file paths',
   )
 })
 
+void test('buildVirtualFileTree skips file entries that collide with implied folder paths', () => {
+  const tree = buildVirtualFileTree({
+    src: '',
+    'src/Main.java': '',
+    'src/utils/math.ts': '',
+  })
+
+  assert.deepEqual(
+    tree.map((entry) => `${entry.kind}:${entry.path}`),
+    ['folder:src'],
+  )
+  assert.deepEqual(
+    tree[0]?.children?.map((entry) => `${entry.kind}:${entry.path}`),
+    ['folder:src/utils', 'file:src/Main.java'],
+  )
+})
+
 void test('normalizeVirtualPath trims slashes and ignores empty segments', () => {
   assert.equal(normalizeVirtualPath('/src//Main.java'), 'src/Main.java')
   assert.equal(normalizeVirtualPath('src\\Main.java'), 'src/Main.java')

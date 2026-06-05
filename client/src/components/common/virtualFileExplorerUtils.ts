@@ -35,7 +35,9 @@ function sortEntries(entries: MutableEntry[]): MutableEntry[] {
 export function buildVirtualFileTree(files: Record<string, string>): VirtualFileEntry[] {
   const roots: MutableEntry[] = []
   const folders = new Map<string, MutableEntry>()
+  const normalizedFiles: string[] = []
   const seenFiles = new Set<string>()
+  const impliedFolderPaths = new Set<string>()
 
   function ensureFolder(path: string): MutableEntry {
     const existing = folders.get(path)
@@ -60,6 +62,15 @@ export function buildVirtualFileTree(files: Record<string, string>): VirtualFile
     const path = normalizeVirtualPath(rawPath)
     if (!isSafeVirtualPath(path) || seenFiles.has(path)) continue
     seenFiles.add(path)
+    normalizedFiles.push(path)
+    const segments = path.split('/')
+    for (let index = 1; index < segments.length; index += 1) {
+      impliedFolderPaths.add(segments.slice(0, index).join('/'))
+    }
+  }
+
+  for (const path of normalizedFiles) {
+    if (impliedFolderPaths.has(path)) continue
     const segments = path.split('/')
     const displayName = segments.at(-1) ?? path
     const parentPath = segments.length > 1 ? segments.slice(0, -1).join('/') : undefined
