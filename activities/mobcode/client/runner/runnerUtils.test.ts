@@ -112,6 +112,8 @@ void test('openMobCodeRunnerPopup opens a fresh blob-backed runner popup', () =>
       openedUrl = String(url ?? '')
       assert.equal(target, '_blank')
       assert.match(features ?? '', /width=1120/)
+      assert.match(features ?? '', /noopener/)
+      assert.match(features ?? '', /noreferrer/)
       return {
         focus() {
           focused = true
@@ -133,7 +135,18 @@ void test('openMobCodeRunnerPopup opens a fresh blob-backed runner popup', () =>
   URL.revokeObjectURL(openedUrl)
 })
 
-void test('openMobCodeRunnerPopup reports missing entry and blocked popup states', () => {
+void test('openMobCodeRunnerPopup treats a noopener null handle as opened', () => {
+  assert.deepEqual(
+    openMobCodeRunnerPopup({
+      files: { 'main.py': 'print("hello")' },
+      activeFile: 'main.py',
+      runnerId: 'brython-terminal',
+    }, { open: () => null }),
+    { opened: true },
+  )
+})
+
+void test('openMobCodeRunnerPopup reports missing entry and thrown popup open failures', () => {
   assert.deepEqual(
     openMobCodeRunnerPopup({
       files: { 'Main.java': 'class Main {}' },
@@ -148,7 +161,11 @@ void test('openMobCodeRunnerPopup reports missing entry and blocked popup states
       files: { 'main.py': 'print("hello")' },
       activeFile: 'main.py',
       runnerId: 'brython-terminal',
-    }, { open: () => null }),
+    }, {
+      open() {
+        throw new Error('blocked')
+      },
+    }),
     { opened: false, reason: 'popup-blocked' },
   )
 })

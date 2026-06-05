@@ -42,6 +42,7 @@ export const MOB_CODE_RUNNERS: readonly MobCodeRunnerDefinition[] = [
 ]
 
 export const DEFAULT_MOB_CODE_RUNNER_ID: MobCodeRunnerId = 'brython-terminal'
+const RUNNER_POPUP_FEATURES = 'popup=yes,width=1120,height=760,noopener,noreferrer'
 
 export function isPythonFile(path: string): boolean {
   return path.toLowerCase().endsWith('.py')
@@ -296,10 +297,16 @@ export function openMobCodeRunnerPopup(
     sessionId: request.sessionId,
     title,
   }))
-  const popup = browserWindow.open(runnerUrl, '_blank', 'popup=yes,width=1120,height=760')
-  if (!popup) {
+  let popup: MobCodeRunnerPopup | null
+  try {
+    popup = browserWindow.open(runnerUrl, '_blank', RUNNER_POPUP_FEATURES)
+  } catch {
     URL.revokeObjectURL(runnerUrl)
     return { opened: false, reason: 'popup-blocked' }
+  }
+
+  if (!popup) {
+    return { opened: true }
   }
 
   popup.focus()
