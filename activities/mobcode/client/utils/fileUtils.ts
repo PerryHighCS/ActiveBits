@@ -6,7 +6,12 @@ const MAX_FILES = 250
 const MAX_TOTAL_CONTENT_LENGTH = 4 * 1024 * 1024
 const utf8Encoder = new TextEncoder()
 
-function getUtf8ByteLength(value: string): number {
+export interface MobCodeFileSizeStats {
+  perFileBytes: Record<string, number>
+  totalBytes: number
+}
+
+export function getUtf8ByteLength(value: string): number {
   return utf8Encoder.encode(value).byteLength
 }
 
@@ -27,8 +32,15 @@ function truncateUtf8ToByteLimit(value: string, maxBytes: number): string {
   return value.slice(0, low)
 }
 
-function getTotalFileBytes(files: Record<string, string>): number {
-  return Object.values(files).reduce((total, content) => total + getUtf8ByteLength(content), 0)
+export function getMobCodeFileSizeStats(files: Record<string, string>): MobCodeFileSizeStats {
+  const perFileBytes: Record<string, number> = {}
+  let totalBytes = 0
+  for (const [path, content] of Object.entries(files)) {
+    const byteLength = getUtf8ByteLength(content)
+    perFileBytes[path] = byteLength
+    totalBytes += byteLength
+  }
+  return { perFileBytes, totalBytes }
 }
 
 export function normalizeMobCodePath(path: string): string {
@@ -95,9 +107,10 @@ export function clampMobCodeContentEdit(
   files: Record<string, string>,
   path: string,
   content: string,
+  stats: MobCodeFileSizeStats = getMobCodeFileSizeStats(files),
 ): { files: Record<string, string>; content: string; limitReason: 'per-file' | 'total' | null } {
-  const currentFileBytes = getUtf8ByteLength(files[path] ?? '')
-  const otherFilesBytes = getTotalFileBytes(files) - currentFileBytes
+  const currentFileBytes = stats.perFileBytes[path] ?? getUtf8ByteLength(files[path] ?? '')
+  const otherFilesBytes = Math.max(0, stats.totalBytes - currentFileBytes)
   const perFileClamped = truncateUtf8ToByteLimit(content, MAX_FILE_CONTENT_LENGTH)
   const maxAllowedBytes = Math.max(0, Math.min(MAX_FILE_CONTENT_LENGTH, MAX_TOTAL_CONTENT_LENGTH - otherFilesBytes))
   const nextContent = truncateUtf8ToByteLimit(perFileClamped, maxAllowedBytes)

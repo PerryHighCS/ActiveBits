@@ -13,6 +13,8 @@ import { MOB_CODE_MESSAGE_TYPES } from '../utils/constants'
 import {
   clampMobCodeContentEdit,
   deletePathFromFiles,
+  getMobCodeFileSizeStats,
+  getUtf8ByteLength,
   renameActiveFilePath,
   renamePathInFiles,
   resolveActiveFile,
@@ -50,7 +52,7 @@ type DurableMobCodeMessageType =
   | typeof MOB_CODE_MESSAGE_TYPES.STATE_SYNC
   | typeof MOB_CODE_MESSAGE_TYPES.FILE_TREE_CHANGED
 
-const LIVE_CONTENT_SYNC_INTERVAL_MS = 120
+const LIVE_CONTENT_SYNC_INTERVAL_MS = 250
 const LIVE_PRESENCE_SYNC_INTERVAL_MS = 60
 
 export default function MobCodeManager() {
@@ -72,6 +74,7 @@ export default function MobCodeManager() {
   const wsDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const persistDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const latestStateRef = useRef<MobCodeStatePayload>(createStateSnapshot({}, ''))
+  const latestFileSizeStatsRef = useRef(getMobCodeFileSizeStats({}))
   const lastLiveSyncAtRef = useRef(0)
   const pendingContentUpdateRef = useRef<{ path: string; content: string; selections: MobCodeSelectionRange[] } | null>(null)
   const presenceDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -82,6 +85,11 @@ export default function MobCodeManager() {
     latestStateRef.current = createStateSnapshot(files, activeFile)
   }, [files, activeFile])
 
+  const replaceFilesState = useCallback((nextFiles: Record<string, string>) => {
+    latestFileSizeStatsRef.current = getMobCodeFileSizeStats(nextFiles)
+    setFiles(nextFiles)
+  }, [])
+
   useEffect(() => {
     if (!sessionId) return
     void fetch(`/api/mobcode/${sessionId}/session`)
@@ -91,11 +99,11 @@ export default function MobCodeManager() {
         const nextFiles = sanitizeFilesMap(session.data?.groups?.default?.files)
         const nextActiveFile = resolveActiveFile(nextFiles, session.data?.groups?.default?.activeFile)
         latestStateRef.current = createStateSnapshot(nextFiles, nextActiveFile)
-        setFiles(nextFiles)
+        replaceFilesState(nextFiles)
         setActiveFile(nextActiveFile)
       })
       .catch((error) => console.error('Failed to fetch MobCode session:', error))
-  }, [sessionId])
+  }, [replaceFilesState, sessionId])
 
   const buildWsUrl = useCallback(() => {
     if (!sessionId) return null
@@ -119,7 +127,7 @@ export default function MobCodeManager() {
       const msg = parseMobCodeMessage(event.data)
       if (!msg || !isStatePayload(msg.payload)) return
       if (msg.type === MOB_CODE_MESSAGE_TYPES.STATE_SYNC || msg.type === MOB_CODE_MESSAGE_TYPES.FILE_TREE_CHANGED) {
-        setFiles(msg.payload.files)
+        replaceFilesState(msg.payload.files)
         setActiveFile(msg.payload.activeFile)
       }
     },
@@ -273,11 +281,11 @@ export default function MobCodeManager() {
     ) => {
       clearPendingSync()
       latestStateRef.current = createStateSnapshot(nextFiles, nextActiveFile)
-      setFiles(nextFiles)
+      replaceFilesState(nextFiles)
       setActiveFile(nextActiveFile)
       void persistState({ files: nextFiles, activeFile: nextActiveFile }, messageType)
     },
-    [clearPendingSync, persistState],
+    [clearPendingSync, persistState, replaceFilesState],
   )
 
   const importFilesIntoWorkspace = useCallback(
@@ -428,7 +436,12 @@ export default function MobCodeManager() {
                 }))
                 if (viewUpdate.docChanged) {
                   const content = viewUpdate.state.doc.toString()
-                  const clampedEdit = clampMobCodeContentEdit(latestStateRef.current.files, activeFile, content)
+                  const clampedEdit = clampMobCodeContentEdit(
+                    latestStateRef.current.files,
+                    activeFile,
+                    content,
+                    latestFileSizeStatsRef.current,
+                  )
                   setEditorLimitMessage(
                     clampedEdit.limitReason === 'per-file'
                       ? 'This file reached the 1 MB MobCode limit and was truncated.'
@@ -441,6 +454,19 @@ export default function MobCodeManager() {
                     activeFile,
                     clampedEdit.content,
                   )
+                  const nextContentBytes = getUtf8ByteLength(clampedEdit.content)
+                  latestFileSizeStatsRef.current = {
+                    perFileBytes: {
+                      ...latestFileSizeStatsRef.current.perFileBytes,
+                      [activeFile]: nextContentBytes,
+                    },
+                    totalBytes: Math.max(
+                      0,
+                      latestFileSizeStatsRef.current.totalBytes
+                        - (latestFileSizeStatsRef.current.perFileBytes[activeFile] ?? 0)
+                        + nextContentBytes,
+                    ),
+                  }
                   latestStateRef.current = nextState
                   setFiles(nextState.files)
                   scheduleContentSync(activeFile, clampedEdit.content, selections)

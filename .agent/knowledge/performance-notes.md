@@ -16,6 +16,16 @@ Record performance findings, bottlenecks, and optimization decisions.
 
 ## Notes
 
+- Date: 2026-06-05
+- Area: activities | mobcode | live typing sync
+- Observation: `clampMobCodeContentEdit(...)` originally recomputed total workspace UTF-8 bytes from every file on each CodeMirror document change, and live full-file websocket updates were throttled at 120 ms.
+- Baseline metric: Typing-time size enforcement was `O(total files)` per keystroke, and worst-case large-file streaming could enqueue full-file payloads about 8 times per second.
+- Change applied: Added cached per-file byte accounting for manager typing-time clamps and raised the full-file websocket throttle to 250 ms while keeping selection-presence updates separate.
+- Result metric: Size-limit checks are now `O(1)` per keystroke in the steady state, and worst-case full-file pushes are cut to about 4 per second.
+- Tradeoffs: The manager now keeps one extra in-memory byte-size map alongside the current file state, and live text propagation is slightly less aggressive than the previous 120 ms cadence.
+- Evidence (profile/log/path): `activities/mobcode/client/manager/MobCodeManager.tsx`; `activities/mobcode/client/utils/fileUtils.ts`.
+- Owner: Codex
+
 - Date: 2026-06-04
 - Area: activities | mobcode | bundle-size
 - Finding: The first MobCode production build emits an isolated `activity-mobcode` chunk at about 522 KB minified / 167 KB gzip after adding CodeMirror 6 themes, language packs, and JSZip.

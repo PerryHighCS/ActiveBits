@@ -4,6 +4,7 @@ import {
   clampMobCodeContentEdit,
   deletePathFromFiles,
   getFileExtension,
+  getMobCodeFileSizeStats,
   isValidFileName,
   isValidMobCodePath,
   normalizeMobCodePath,
@@ -81,6 +82,17 @@ void test('clampMobCodeContentEdit enforces per-file and total workspace limits 
   const totalEdit = clampMobCodeContentEdit(crowdedFiles, 'src/File0.txt', '😀'.repeat(400_000))
   assert.equal(new TextEncoder().encode(totalEdit.content).byteLength, 594_304)
   assert.equal(totalEdit.limitReason, 'total')
+})
+
+void test('clampMobCodeContentEdit accepts cached file size stats for typing-time checks', () => {
+  const files = {
+    'src/Main.java': 'class Main {}',
+    'src/Emoji.txt': '😀'.repeat(100_000),
+  }
+  const stats = getMobCodeFileSizeStats(files)
+  const withStats = clampMobCodeContentEdit(files, 'src/Emoji.txt', '😀'.repeat(300_000), stats)
+  const withoutStats = clampMobCodeContentEdit(files, 'src/Emoji.txt', '😀'.repeat(300_000))
+  assert.deepEqual(withStats, withoutStats)
 })
 
 void test('rename and delete path helpers handle files and folders', () => {
