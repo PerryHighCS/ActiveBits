@@ -56,24 +56,19 @@ void test('buildBrythonRunnerHtml guards Brython execution against duplicate ini
   assert.match(html, /window\.mobcodeRunnerShouldStart = \(\) =>/)
   assert.match(html, /if \(runnerStarted\) return false;/)
   assert.match(html, /if window\.mobcodeRunnerShouldStart\(\):/)
+  assert.match(html, /window\.opener = null;/)
+  assert.match(html, /URL\.revokeObjectURL\(window\.location\.href\)/)
 })
 
-void test('openMobCodeRunnerPopup writes the Brython runner document to a popup', () => {
-  const writes: string[] = []
+void test('openMobCodeRunnerPopup opens a fresh blob-backed runner popup', () => {
+  let openedUrl = ''
   let focused = false
   const browserWindow = {
     open(url?: string | URL, target?: string, features?: string) {
-      assert.equal(url, '')
-      assert.equal(target, 'mobcode-runner')
+      openedUrl = String(url ?? '')
+      assert.equal(target, '_blank')
       assert.match(features ?? '', /width=1120/)
       return {
-        document: {
-          open() {},
-          write(value: string) {
-            writes.push(value)
-          },
-          close() {},
-        },
         focus() {
           focused = true
         },
@@ -90,8 +85,8 @@ void test('openMobCodeRunnerPopup writes the Brython runner document to a popup'
     { opened: true },
   )
   assert.equal(focused, true)
-  assert.equal(writes.length, 1)
-  assert.match(writes[0] ?? '', /MobCode Brython Runner/)
+  assert.match(openedUrl, /^blob:/)
+  URL.revokeObjectURL(openedUrl)
 })
 
 void test('openMobCodeRunnerPopup reports missing entry and blocked popup states', () => {

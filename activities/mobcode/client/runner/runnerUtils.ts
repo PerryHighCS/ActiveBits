@@ -19,11 +19,6 @@ export interface MobCodeRunnerLaunchResult {
 }
 
 interface MobCodeRunnerPopup {
-  document: {
-    open: () => void
-    write: (html: string) => void
-    close: () => void
-  }
   focus: () => void
 }
 
@@ -186,6 +181,10 @@ export function buildBrythonRunnerHtml(payload: BrythonRunnerPayload): string {
     </section>
   </main>
   <script>
+    try { window.opener = null; } catch {}
+    window.addEventListener('load', () => {
+      try { URL.revokeObjectURL(window.location.href); } catch {}
+    });
     window.__MOB_CODE_RUNNER_PAYLOAD__ = ${serializedPayload};
     (() => {
       let runnerStarted = false;
@@ -255,6 +254,10 @@ if window.mobcodeRunnerShouldStart():
 </html>`
 }
 
+export function createMobCodeRunnerDocumentUrl(html: string): string {
+  return URL.createObjectURL(new Blob([html], { type: 'text/html' }))
+}
+
 export function openMobCodeRunnerPopup(
   request: MobCodeRunnerLaunchRequest,
   browserWindow: MobCodeRunnerWindow = window,
@@ -263,18 +266,19 @@ export function openMobCodeRunnerPopup(
   const entryFile = resolveBrythonEntryFile(request.files, request.activeFile)
   if (!entryFile) return { opened: false, reason: 'missing-entry' }
 
-  const popup = browserWindow.open('', 'mobcode-runner', 'popup=yes,width=1120,height=760')
-  if (!popup) return { opened: false, reason: 'popup-blocked' }
-
   const title = `MobCode Runner - ${entryFile}`
-  popup.document.open()
-  popup.document.write(buildBrythonRunnerHtml({
+  const runnerUrl = createMobCodeRunnerDocumentUrl(buildBrythonRunnerHtml({
     files: request.files,
     entryFile,
     sessionId: request.sessionId,
     title,
   }))
-  popup.document.close()
+  const popup = browserWindow.open(runnerUrl, '_blank', 'popup=yes,width=1120,height=760')
+  if (!popup) {
+    URL.revokeObjectURL(runnerUrl)
+    return { opened: false, reason: 'popup-blocked' }
+  }
+
   popup.focus()
   return { opened: true }
 }
