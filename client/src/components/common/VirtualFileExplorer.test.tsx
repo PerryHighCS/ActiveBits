@@ -165,9 +165,37 @@ void test('VirtualFileExplorer expands ancestor folders for an externally contro
       />,
     )
 
-    const srcFolder = rendered.getByRole('treeitem', { name: /src/i })
-    const utilsFolder = rendered.getByRole('treeitem', { name: /utils/i })
-    const mathFile = rendered.getByRole('treeitem', { name: /math\.ts/i })
+    const srcFolder = rendered.getByRole('treeitem', { name: 'src' })
+    const utilsFolder = rendered.getByRole('treeitem', { name: 'utils' })
+    const mathFile = rendered.getByRole('treeitem', { name: 'math.ts' })
+
+    assert.equal(srcFolder.getAttribute('aria-expanded'), 'true')
+    assert.equal(utilsFolder.getAttribute('aria-expanded'), 'true')
+    assert.equal(mathFile.getAttribute('aria-selected'), 'true')
+  } finally {
+    cleanup()
+    restoreDom()
+  }
+})
+
+void test('VirtualFileExplorer auto-expands ancestors for normalized file keys and active paths', async () => {
+  const restoreDom = installDomEnvironment('https://bits.example')
+  const { cleanup, render } = await import('@testing-library/react')
+  const { default: VirtualFileExplorer } = await import('./VirtualFileExplorer')
+
+  try {
+    const rendered = render(
+      <VirtualFileExplorer
+        files={{
+          '\\src\\\\utils//math.ts': '',
+        }}
+        activePath="/src/utils/math.ts"
+      />,
+    )
+
+    const srcFolder = rendered.getByRole('treeitem', { name: 'src' })
+    const utilsFolder = rendered.getByRole('treeitem', { name: 'utils' })
+    const mathFile = rendered.getByRole('treeitem', { name: 'math.ts' })
 
     assert.equal(srcFolder.getAttribute('aria-expanded'), 'true')
     assert.equal(utilsFolder.getAttribute('aria-expanded'), 'true')

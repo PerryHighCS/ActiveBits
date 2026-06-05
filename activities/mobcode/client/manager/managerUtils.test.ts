@@ -6,6 +6,7 @@ import {
   createEditorPresencePayload,
   createLiveContentSyncPlan,
   createStateSnapshot,
+  sendMobCodeWsMessage,
 } from './managerUtils'
 
 void test('applyContentChange updates files while preserving the active file snapshot', () => {
@@ -55,4 +56,22 @@ void test('createEditorPresencePayload clones selection ranges for websocket pre
       { anchor: 10, head: 10 },
     ],
   })
+})
+
+void test('sendMobCodeWsMessage returns false when websocket send throws', () => {
+  const ws = {
+    readyState: 1 as const,
+    send() {
+      throw new Error('socket closed')
+    },
+  }
+
+  assert.equal(
+    sendMobCodeWsMessage(ws, {
+      type: 'file-content-update',
+      sessionId: 'abc123',
+      payload: { path: 'Main.java', content: 'class Main {}' },
+    }),
+    false,
+  )
 })

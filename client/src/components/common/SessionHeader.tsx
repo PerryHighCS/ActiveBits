@@ -12,6 +12,7 @@ export interface SessionHeaderProps {
   includeBottomMargin?: boolean
   onEndSession?: () => void | Promise<void>
   actionMenuLabel?: string
+  actionMenuRole?: 'menu'
   actionMenuContent?: ReactNode
   headerActions?: ReactNode
 }
@@ -27,6 +28,7 @@ export default function SessionHeader({
   simple = false,
   includeBottomMargin = true,
   actionMenuLabel = 'Activity Actions',
+  actionMenuRole,
   actionMenuContent,
   headerActions,
 }: SessionHeaderProps) {
@@ -107,7 +109,7 @@ export default function SessionHeader({
                   onClick={() => setShowActionMenu((value) => !value)}
                   variant="outline"
                   aria-expanded={showActionMenu}
-                  aria-haspopup="menu"
+                  aria-haspopup={actionMenuRole}
                   aria-controls={showActionMenu ? actionMenuId : undefined}
                 >
                   {actionMenuLabel}
@@ -116,6 +118,7 @@ export default function SessionHeader({
                   <div
                     id={actionMenuId}
                     aria-label={actionMenuLabel}
+                    role={actionMenuRole}
                     className="absolute left-0 z-20 mt-2 min-w-56 rounded border border-gray-200 bg-white p-2 shadow-lg"
                   >
                     {actionMenuContent}

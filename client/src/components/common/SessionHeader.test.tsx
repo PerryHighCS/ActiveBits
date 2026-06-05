@@ -47,6 +47,7 @@ void test('SessionHeader can render an activity action menu trigger', () => {
         activityName="Mob Code"
         sessionId="abc123"
         actionMenuLabel="Code Files"
+        actionMenuRole="menu"
         actionMenuContent={<button type="button">Upload Zip</button>}
         headerActions={<button type="button">Theme</button>}
       />
@@ -57,8 +58,25 @@ void test('SessionHeader can render an activity action menu trigger', () => {
   assert.match(html, /Theme/)
   assert.match(html, /aria-expanded="false"/)
   assert.match(html, /aria-haspopup="menu"/)
+  assert.doesNotMatch(html, /role="menu"/)
   assert.doesNotMatch(html, /aria-controls=/)
   assert.doesNotMatch(html, /Upload Zip/)
+})
+
+void test('SessionHeader leaves popup semantics unset for generic action content by default', () => {
+  const html = renderToStaticMarkup(
+    <MemoryRouter>
+      <SessionHeader
+        activityName="Mob Code"
+        sessionId="abc123"
+        actionMenuLabel="Details"
+        actionMenuContent={<div>Summary</div>}
+      />
+    </MemoryRouter>,
+  )
+
+  assert.doesNotMatch(html, /aria-haspopup=/)
+  assert.doesNotMatch(html, /role="menu"/)
 })
 
 void test('SessionHeader hides join and end controls for embedded child sessions', () => {

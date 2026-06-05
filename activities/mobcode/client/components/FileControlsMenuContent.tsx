@@ -46,14 +46,25 @@ export default function FileControlsMenuContent({
 
   return (
     <div className="space-y-1">
-      <button type="button" className={menuButtonClass} onClick={onCreateFile}>
+      <button
+        type="button"
+        role="menuitem"
+        className={menuButtonClass}
+        onClick={onCreateFile}
+      >
         New File
       </button>
-      <button type="button" className={menuButtonClass} onClick={onCreateFolder}>
+      <button
+        type="button"
+        role="menuitem"
+        className={menuButtonClass}
+        onClick={onCreateFolder}
+      >
         New Folder
       </button>
       <button
         type="button"
+        role="menuitem"
         className={menuButtonClass}
         onClick={() => uploadFilesInputRef.current?.click()}
       >
@@ -61,6 +72,7 @@ export default function FileControlsMenuContent({
       </button>
       <button
         type="button"
+        role="menuitem"
         className={menuButtonClass}
         onClick={() => fileInputRef.current?.click()}
       >
@@ -101,6 +113,7 @@ export default function FileControlsMenuContent({
       />
       <button
         type="button"
+        role="menuitem"
         className={`${menuButtonClass} disabled:cursor-not-allowed disabled:opacity-50`}
         disabled={!hasFiles}
         onClick={() => void handleDownload()}

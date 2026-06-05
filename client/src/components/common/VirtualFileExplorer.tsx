@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from 'react'
 import VirtualFileExplorerItem from './VirtualFileExplorerItem'
 import type { VirtualFileExplorerProps } from './virtualFileExplorerTypes'
-import { buildVirtualFileTree } from './virtualFileExplorerUtils'
+import { buildVirtualFileTree, isSafeVirtualPath, normalizeVirtualPath } from './virtualFileExplorerUtils'
 
 function FilePlusIcon() {
   return (
@@ -43,17 +43,26 @@ export default function VirtualFileExplorer({
   getItemClassName,
 }: VirtualFileExplorerProps) {
   const tree = useMemo(() => buildVirtualFileTree(files), [files])
-  const filePaths = useMemo(() => new Set(Object.keys(files)), [files])
+  const normalizedActivePath = useMemo(() => normalizeVirtualPath(activePath ?? ''), [activePath])
+  const filePaths = useMemo(
+    () =>
+      new Set(
+        Object.keys(files)
+          .map((path) => normalizeVirtualPath(path))
+          .filter((path) => isSafeVirtualPath(path)),
+      ),
+    [files],
+  )
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(() => new Set())
   const [isDragActive, setIsDragActive] = useState(false)
   const dragDepthRef = useRef(0)
   const canDropFiles = !readOnly && typeof onDropFiles === 'function'
   const effectiveExpandedFolders = useMemo(() => {
-    if (!activePath || !filePaths.has(activePath)) {
+    if (!normalizedActivePath || !filePaths.has(normalizedActivePath)) {
       return expandedFolders
     }
 
-    const segments = activePath.split('/')
+    const segments = normalizedActivePath.split('/')
     if (segments.length <= 1) {
       return expandedFolders
     }
@@ -63,7 +72,7 @@ export default function VirtualFileExplorer({
       next.add(segments.slice(0, index).join('/'))
     }
     return next
-  }, [activePath, expandedFolders, filePaths])
+  }, [expandedFolders, filePaths, normalizedActivePath])
 
   const toggleFolder = (path: string) => {
     setExpandedFolders((current) => {
@@ -151,7 +160,7 @@ export default function VirtualFileExplorer({
                 key={entry.path}
                 entry={entry}
                 depth={0}
-                activePath={activePath}
+                activePath={normalizedActivePath}
                 expandedFolders={effectiveExpandedFolders}
                 readOnly={readOnly}
                 allowRename={allowRename}

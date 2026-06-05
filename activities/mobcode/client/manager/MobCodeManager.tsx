@@ -4,7 +4,7 @@ import SessionHeader from '@src/components/common/SessionHeader'
 import VirtualFileExplorer from '@src/components/common/VirtualFileExplorer'
 import type { VirtualFileEntry } from '@src/components/common/virtualFileExplorerTypes'
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
-import type { MobCodeSelectionRange, MobCodeStatePayload, MobCodeThemeId } from '../../shared/types'
+import type { MobCodeMessageType, MobCodeSelectionRange, MobCodeStatePayload, MobCodeThemeId } from '../../shared/types'
 import CodeEditor from '../components/CodeEditor'
 import FileNameModal from '../components/FileNameModal'
 import FileControlsMenuContent from '../components/FileControlsMenuContent'
@@ -27,6 +27,7 @@ import {
   createStateSnapshot,
   isStatePayload,
   parseMobCodeMessage,
+  sendMobCodeWsMessage,
 } from './managerUtils'
 import { resolveMobCodeInstructorPasscode } from './passcodeUtils'
 import '../styles.css'
@@ -160,10 +161,9 @@ export default function MobCodeManager() {
   )
 
   const sendWsMessage = useCallback(
-    (type: string, payload: unknown): boolean => {
-      if (!sessionId || !instructorPasscode || socketRef.current?.readyState !== 1) return false
-      socketRef.current.send(JSON.stringify({ type, sessionId, payload }))
-      return true
+    (type: MobCodeMessageType, payload: unknown): boolean => {
+      if (!sessionId || !instructorPasscode) return false
+      return sendMobCodeWsMessage(socketRef.current, { type, sessionId, payload })
     },
     [instructorPasscode, sessionId, socketRef],
   )
@@ -336,6 +336,7 @@ export default function MobCodeManager() {
         sessionId={sessionId}
         includeBottomMargin={false}
         actionMenuLabel={canEdit ? 'Code Files' : undefined}
+        actionMenuRole={canEdit ? 'menu' : undefined}
         actionMenuContent={canEdit ? (
           <FileControlsMenuContent
             files={files}

@@ -77,3 +77,16 @@ export function createLiveContentSyncPlan(
     delayMs: intervalMs - elapsedMs,
   }
 }
+
+export function sendMobCodeWsMessage(
+  ws: Pick<WebSocket, 'readyState' | 'send'> | null | undefined,
+  message: MobCodeMessage,
+): boolean {
+  if (!ws || ws.readyState !== 1) return false
+  try {
+    ws.send(JSON.stringify(message))
+    return true
+  } catch {
+    return false
+  }
+}
