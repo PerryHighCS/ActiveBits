@@ -1,9 +1,9 @@
 import { githubDark, githubLight } from '@uiw/codemirror-theme-github'
 import CodeMirror from '@uiw/react-codemirror'
 import { oneDark } from '@codemirror/theme-one-dark'
-import { EditorState, StateField, type ChangeDesc, type Extension } from '@codemirror/state'
+import { EditorState, StateEffect, StateField, type ChangeDesc, type Extension } from '@codemirror/state'
 import { Decoration, EditorView, WidgetType, type ViewUpdate } from '@codemirror/view'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { MobCodeEditorPresencePayload, MobCodeThemeId } from '../../shared/types'
 import { loadLanguageExtension } from '../utils/languageMap'
 
@@ -32,16 +32,25 @@ class RemoteCursorWidget extends WidgetType {
   }
 }
 
-function createRemotePresenceExtension(
-  remotePresence: MobCodeEditorPresencePayload | null | undefined,
-  filename: string,
-): Extension {
-  return StateField.define({
-    create: () => createRemotePresenceDecorations(remotePresence, filename),
-    update: (value, update) => mapRemotePresenceDecorations(value, update.changes),
-    provide: (field) => EditorView.decorations.from(field),
-  })
-}
+const setRemotePresenceEffect = StateEffect.define<{
+  remotePresence: MobCodeEditorPresencePayload | null | undefined
+  filename: string
+}>()
+
+const remotePresenceField = StateField.define<ReturnType<typeof createRemotePresenceDecorations>>({
+  create: () => Decoration.none,
+  update: (value, update) => {
+    let nextValue = mapRemotePresenceDecorations(value, update.changes)
+    for (const effect of update.effects) {
+      if (!effect.is(setRemotePresenceEffect)) continue
+      nextValue = createRemotePresenceDecorations(effect.value.remotePresence, effect.value.filename)
+    }
+    return nextValue
+  },
+  provide: (field) => EditorView.decorations.from(field),
+})
+
+const remotePresenceExtension: Extension = remotePresenceField
 
 export function createRemotePresenceDecorations(
   remotePresence: MobCodeEditorPresencePayload | null | undefined,
@@ -92,6 +101,7 @@ export default function CodeEditor({
   remotePresence,
 }: CodeEditorProps) {
   const [languageExtensions, setLanguageExtensions] = useState<Extension[]>([])
+  const editorViewRef = useRef<EditorView | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -108,10 +118,18 @@ export default function CodeEditor({
       ...languageExtensions,
       EditorState.readOnly.of(readOnly),
       EditorView.editable.of(!readOnly),
-      createRemotePresenceExtension(remotePresence, filename),
+      remotePresenceExtension,
     ],
-    [filename, languageExtensions, readOnly, remotePresence],
+    [languageExtensions, readOnly],
   )
+
+  useEffect(() => {
+    const view = editorViewRef.current
+    if (!view) return
+    view.dispatch({
+      effects: setRemotePresenceEffect.of({ remotePresence, filename }),
+    })
+  }, [filename, remotePresence])
 
   return (
     <CodeMirror
@@ -126,6 +144,12 @@ export default function CodeEditor({
       }}
       extensions={extensions}
       theme={resolveEditorTheme(theme)}
+      onCreateEditor={(view) => {
+        editorViewRef.current = view
+        view.dispatch({
+          effects: setRemotePresenceEffect.of({ remotePresence, filename }),
+        })
+      }}
       onChange={(nextValue) => onChange?.(nextValue)}
       onUpdate={onUpdate}
     />
