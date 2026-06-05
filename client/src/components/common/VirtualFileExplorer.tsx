@@ -43,10 +43,27 @@ export default function VirtualFileExplorer({
   getItemClassName,
 }: VirtualFileExplorerProps) {
   const tree = useMemo(() => buildVirtualFileTree(files), [files])
+  const filePaths = useMemo(() => new Set(Object.keys(files)), [files])
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(() => new Set())
   const [isDragActive, setIsDragActive] = useState(false)
   const dragDepthRef = useRef(0)
   const canDropFiles = !readOnly && typeof onDropFiles === 'function'
+  const effectiveExpandedFolders = useMemo(() => {
+    if (!activePath || !filePaths.has(activePath)) {
+      return expandedFolders
+    }
+
+    const segments = activePath.split('/')
+    if (segments.length <= 1) {
+      return expandedFolders
+    }
+
+    const next = new Set(expandedFolders)
+    for (let index = 1; index < segments.length; index += 1) {
+      next.add(segments.slice(0, index).join('/'))
+    }
+    return next
+  }, [activePath, expandedFolders, filePaths])
 
   const toggleFolder = (path: string) => {
     setExpandedFolders((current) => {
@@ -135,7 +152,7 @@ export default function VirtualFileExplorer({
                 entry={entry}
                 depth={0}
                 activePath={activePath}
-                expandedFolders={expandedFolders}
+                expandedFolders={effectiveExpandedFolders}
                 readOnly={readOnly}
                 allowRename={allowRename}
                 allowDelete={allowDelete}

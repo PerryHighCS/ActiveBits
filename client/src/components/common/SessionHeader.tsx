@@ -61,7 +61,7 @@ export default function SessionHeader({
 
   if (embeddedChildSession) {
     return (
-      <div className="bg-white border-b border-gray-200 px-6 py-4 mb-6">
+      <div className={`${includeBottomMargin ? 'mb-6 ' : ''}bg-white border-b border-gray-200 px-6 py-4`}>
         <div className="flex flex-col gap-2">
           <h1 className="text-2xl font-bold text-gray-800">{activityName}</h1>
           <p className="text-sm text-gray-600">
@@ -107,7 +107,7 @@ export default function SessionHeader({
                   onClick={() => setShowActionMenu((value) => !value)}
                   variant="outline"
                   aria-expanded={showActionMenu}
-                  aria-haspopup="true"
+                  aria-haspopup="menu"
                   aria-controls={showActionMenu ? actionMenuId : undefined}
                 >
                   {actionMenuLabel}

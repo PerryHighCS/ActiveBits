@@ -148,3 +148,32 @@ void test('VirtualFileExplorer accepts dropped files when uploads are enabled', 
     restoreDom()
   }
 })
+
+void test('VirtualFileExplorer expands ancestor folders for an externally controlled active file', async () => {
+  const restoreDom = installDomEnvironment('https://bits.example')
+  const { cleanup, render } = await import('@testing-library/react')
+  const { default: VirtualFileExplorer } = await import('./VirtualFileExplorer')
+
+  try {
+    const rendered = render(
+      <VirtualFileExplorer
+        files={{
+          'src/utils/math.ts': '',
+          'README.md': '',
+        }}
+        activePath="src/utils/math.ts"
+      />,
+    )
+
+    const srcFolder = rendered.getByRole('treeitem', { name: /src/i })
+    const utilsFolder = rendered.getByRole('treeitem', { name: /utils/i })
+    const mathFile = rendered.getByRole('treeitem', { name: /math\.ts/i })
+
+    assert.equal(srcFolder.getAttribute('aria-expanded'), 'true')
+    assert.equal(utilsFolder.getAttribute('aria-expanded'), 'true')
+    assert.equal(mathFile.getAttribute('aria-selected'), 'true')
+  } finally {
+    cleanup()
+    restoreDom()
+  }
+})

@@ -56,7 +56,7 @@ void test('SessionHeader can render an activity action menu trigger', () => {
   assert.match(html, /Code Files/)
   assert.match(html, /Theme/)
   assert.match(html, /aria-expanded="false"/)
-  assert.match(html, /aria-haspopup="true"/)
+  assert.match(html, /aria-haspopup="menu"/)
   assert.doesNotMatch(html, /aria-controls=/)
   assert.doesNotMatch(html, /Upload Zip/)
 })
@@ -71,4 +71,19 @@ void test('SessionHeader hides join and end controls for embedded child sessions
   assert.match(html, /Embedded session managed by parent SyncDeck session/i)
   assert.doesNotMatch(html, /Join Code:/)
   assert.doesNotMatch(html, /End Session/)
+  assert.match(html, /mb-6/)
+})
+
+void test('SessionHeader embedded child mode respects bottom-margin opt out', () => {
+  const html = renderToStaticMarkup(
+    <MemoryRouter>
+      <SessionHeader
+        activityName="Embedded Test"
+        sessionId="CHILD:parent:abc12:embedded-test"
+        includeBottomMargin={false}
+      />
+    </MemoryRouter>,
+  )
+
+  assert.doesNotMatch(html, /mb-6/)
 })
