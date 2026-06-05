@@ -409,7 +409,6 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
     if (sessions.publishBroadcast && sessions.valkeyStore != null) {
       try {
         await sessions.publishBroadcast(`session:${sessionId}:broadcast`, msgObj)
-        return
       } catch (error) {
         console.error(JSON.stringify({ event: 'mobcode.broadcast-publish-failed', sessionId, error: String(error) }))
       }
