@@ -163,7 +163,6 @@ export function normalizeMobCodeSessionData(data: unknown): MobCodeSessionData {
 
 function asMobCodeSession(session: SessionRecord | null): (SessionRecord & { data: MobCodeSessionData }) | null {
   if (!session || session.type !== 'mobcode') return null
-  session.data = normalizeMobCodeSessionData(session.data)
   return session as SessionRecord & { data: MobCodeSessionData }
 }
 

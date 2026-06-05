@@ -11,6 +11,7 @@ import FileControlsMenuContent from '../components/FileControlsMenuContent'
 import SettingsMenu from '../components/SettingsMenu'
 import { MOB_CODE_MESSAGE_TYPES } from '../utils/constants'
 import {
+  clampMobCodeContentEdit,
   deletePathFromFiles,
   renameActiveFilePath,
   renamePathInFiles,
@@ -65,6 +66,7 @@ export default function MobCodeManager() {
   const [modalMode, setModalMode] = useState<ModalMode>(null)
   const [renameTarget, setRenameTarget] = useState('')
   const [fileImportMessage, setFileImportMessage] = useState('')
+  const [editorLimitMessage, setEditorLimitMessage] = useState('')
   const wsDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const persistDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const latestStateRef = useRef<MobCodeStatePayload>(createStateSnapshot({}, ''))
@@ -411,16 +413,22 @@ export default function MobCodeManager() {
                 }))
                 if (viewUpdate.docChanged) {
                   const content = viewUpdate.state.doc.toString()
-                  setFiles((current) => {
-                    const nextState = applyContentChange(
-                      createStateSnapshot(current, latestStateRef.current.activeFile),
-                      activeFile,
-                      content,
-                    )
-                    latestStateRef.current = nextState
-                    return nextState.files
-                  })
-                  scheduleContentSync(activeFile, content, selections)
+                  const clampedEdit = clampMobCodeContentEdit(latestStateRef.current.files, activeFile, content)
+                  setEditorLimitMessage(
+                    clampedEdit.limitReason === 'per-file'
+                      ? 'This file reached the 1 MB MobCode limit and was truncated.'
+                      : clampedEdit.limitReason === 'total'
+                        ? 'The MobCode workspace reached the 4 MiB limit. This edit was truncated.'
+                        : '',
+                  )
+                  const nextState = applyContentChange(
+                    createStateSnapshot(clampedEdit.files, latestStateRef.current.activeFile),
+                    activeFile,
+                    clampedEdit.content,
+                  )
+                  latestStateRef.current = nextState
+                  setFiles(nextState.files)
+                  scheduleContentSync(activeFile, clampedEdit.content, selections)
                 } else {
                   schedulePresenceSync(activeFile, selections)
                 }
@@ -428,6 +436,11 @@ export default function MobCodeManager() {
             />
           ) : (
             <div className="mobcode-empty">Create or upload files to start coding.</div>
+          )}
+          {editorLimitMessage && (
+            <div className="border-t border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+              {editorLimitMessage}
+            </div>
           )}
         </main>
       </div>

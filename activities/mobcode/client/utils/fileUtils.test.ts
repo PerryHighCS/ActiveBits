@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
+  clampMobCodeContentEdit,
   deletePathFromFiles,
   getFileExtension,
   isValidFileName,
@@ -55,6 +56,19 @@ void test('sanitizeFilesMap measures UTF-8 bytes for per-file and total-size lim
     Array.from({ length: 5 }, (_, index) => [`src/File${index}.txt`, '😀'.repeat(300_000)]),
   ))
   assert.deepEqual(Object.keys(oversizedTotal), ['src/File0.txt', 'src/File1.txt', 'src/File2.txt', 'src/File3.txt'])
+})
+
+void test('clampMobCodeContentEdit enforces per-file and total workspace limits for live edits', () => {
+  const perFileEdit = clampMobCodeContentEdit({}, 'Emoji.txt', '😀'.repeat(300_000))
+  assert.equal(new TextEncoder().encode(perFileEdit.content).byteLength <= 1_000_000, true)
+  assert.equal(perFileEdit.limitReason, 'per-file')
+
+  const crowdedFiles = Object.fromEntries(
+    Array.from({ length: 4 }, (_, index) => [`src/File${index}.txt`, '😀'.repeat(300_000)]),
+  )
+  const totalEdit = clampMobCodeContentEdit(crowdedFiles, 'src/File0.txt', '😀'.repeat(400_000))
+  assert.equal(new TextEncoder().encode(totalEdit.content).byteLength, 594_304)
+  assert.equal(totalEdit.limitReason, 'total')
 })
 
 void test('rename and delete path helpers handle files and folders', () => {

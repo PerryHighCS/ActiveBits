@@ -27,6 +27,10 @@ function truncateUtf8ToByteLimit(value: string, maxBytes: number): string {
   return value.slice(0, low)
 }
 
+function getTotalFileBytes(files: Record<string, string>): number {
+  return Object.values(files).reduce((total, content) => total + getUtf8ByteLength(content), 0)
+}
+
 export function normalizeMobCodePath(path: string): string {
   return normalizeVirtualPath(path)
 }
@@ -72,6 +76,29 @@ export function sanitizeFilesMap(value: unknown): Record<string, string> {
     fileCount += 1
   }
   return files
+}
+
+export function clampMobCodeContentEdit(
+  files: Record<string, string>,
+  path: string,
+  content: string,
+): { files: Record<string, string>; content: string; limitReason: 'per-file' | 'total' | null } {
+  const currentFileBytes = getUtf8ByteLength(files[path] ?? '')
+  const otherFilesBytes = getTotalFileBytes(files) - currentFileBytes
+  const perFileClamped = truncateUtf8ToByteLimit(content, MAX_FILE_CONTENT_LENGTH)
+  const maxAllowedBytes = Math.max(0, Math.min(MAX_FILE_CONTENT_LENGTH, MAX_TOTAL_CONTENT_LENGTH - otherFilesBytes))
+  const nextContent = truncateUtf8ToByteLimit(perFileClamped, maxAllowedBytes)
+
+  return {
+    files: { ...files, [path]: nextContent },
+    content: nextContent,
+    limitReason:
+      nextContent === content
+        ? null
+        : nextContent !== perFileClamped
+          ? 'total'
+          : 'per-file',
+  }
 }
 
 export function resolveActiveFile(files: Record<string, string>, activeFile: unknown): string {
