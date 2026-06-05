@@ -196,8 +196,8 @@ export default function VirtualFileExplorer({
                 allowDelete={allowDelete}
                 onToggleFolder={toggleFolder}
                 onSelect={handleSelect}
-                onRename={handleRename}
-                onDelete={handleDelete}
+                onRename={onRename ? handleRename : undefined}
+                onDelete={onDelete ? handleDelete : undefined}
                 renderItemActions={renderItemActions}
                 getItemBadges={getItemBadges}
                 getItemClassName={getItemClassName}
