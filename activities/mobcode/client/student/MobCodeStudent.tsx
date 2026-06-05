@@ -96,6 +96,7 @@ export function sanitizeStudentPresenceUpdate(
 
 export default function MobCodeStudent({ sessionData }: MobCodeStudentProps) {
   const { sessionId } = sessionData
+  const encodedSessionId = encodeURIComponent(sessionId)
   const attachSessionEndedHandler = useSessionEndedHandler()
   const [files, setFiles] = useState<Record<string, string>>({})
   const [activeFile, setActiveFile] = useState('')
@@ -104,7 +105,7 @@ export default function MobCodeStudent({ sessionData }: MobCodeStudentProps) {
   const latestFilesRef = useRef<Record<string, string>>({})
 
   useEffect(() => {
-    void fetch(`/api/mobcode/${sessionId}/session`)
+    void fetch(`/api/mobcode/${encodedSessionId}/session`)
       .then((res) => (res.ok ? res.json() as Promise<SessionResponse> : null))
       .then((session) => {
         if (!session) return
@@ -115,7 +116,7 @@ export default function MobCodeStudent({ sessionData }: MobCodeStudentProps) {
         setInstructorPresence(null)
       })
       .catch((error) => console.error('Failed to fetch MobCode session:', error))
-  }, [sessionId])
+  }, [encodedSessionId, sessionId])
 
   const buildWsUrl = useCallback(() => {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'

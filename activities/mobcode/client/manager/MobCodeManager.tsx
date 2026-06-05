@@ -59,6 +59,7 @@ const PERSIST_STATE_INTERVAL_MS = 5000
 
 export default function MobCodeManager() {
   const { sessionId } = useParams()
+  const encodedSessionId = sessionId ? encodeURIComponent(sessionId) : ''
   const location = useLocation()
   const instructorPasscode = resolveMobCodeInstructorPasscode({
     sessionId,
@@ -95,7 +96,7 @@ export default function MobCodeManager() {
 
   useEffect(() => {
     if (!sessionId) return
-    void fetch(`/api/mobcode/${sessionId}/session`)
+    void fetch(`/api/mobcode/${encodedSessionId}/session`)
       .then((res) => (res.ok ? res.json() as Promise<SessionResponse> : null))
       .then((session) => {
         if (!session) return
@@ -106,7 +107,7 @@ export default function MobCodeManager() {
         setActiveFile(nextActiveFile)
       })
       .catch((error) => console.error('Failed to fetch MobCode session:', error))
-  }, [replaceFilesState, sessionId])
+  }, [encodedSessionId, replaceFilesState, sessionId])
 
   const buildWsUrl = useCallback(() => {
     if (!sessionId) return null
@@ -140,7 +141,7 @@ export default function MobCodeManager() {
     async (payload: MobCodeStatePayload, messageType: DurableMobCodeMessageType = MOB_CODE_MESSAGE_TYPES.STATE_SYNC) => {
       if (!sessionId || !instructorPasscode) return
       try {
-        const response = await fetch(`/api/mobcode/${sessionId}/state`, {
+        const response = await fetch(`/api/mobcode/${encodedSessionId}/state`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ ...payload, instructorPasscode, messageType }),
@@ -152,7 +153,7 @@ export default function MobCodeManager() {
         console.error('Failed to persist MobCode state:', error)
       }
     },
-    [sessionId, instructorPasscode],
+    [encodedSessionId, sessionId, instructorPasscode],
   )
 
   const sendWsMessage = useCallback(
