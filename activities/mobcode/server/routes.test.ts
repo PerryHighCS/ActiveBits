@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
+  applyWsRelayMessageToGroupState,
   normalizeMobCodeSessionData,
   readDurableMessageType,
   readStatePayload,
@@ -170,6 +171,40 @@ void test('readWsRelayMessage rejects content updates that would exceed total wo
         payload: { path: 'src/File0.txt', content: '😀'.repeat(400_000) },
       },
       files,
+    ),
+    null,
+  )
+})
+
+void test('applyWsRelayMessageToGroupState advances in-memory files for cumulative ws validation', () => {
+  const initialGroup = {
+    files: {
+      'src/File0.txt': 'x'.repeat(1_000_000),
+      'src/File1.txt': 'x'.repeat(1_000_000),
+      'src/File2.txt': 'x'.repeat(1_000_000),
+      'src/File3.txt': 'x'.repeat(700_000),
+      'src/File4.txt': 'x'.repeat(400_000),
+    },
+    activeFile: 'src/File0.txt',
+  }
+
+  const acceptedUpdate = readWsRelayMessage(
+    {
+      type: 'file-content-update',
+      payload: { path: 'src/File4.txt', content: 'x'.repeat(450_000) },
+    },
+    initialGroup.files,
+  )
+  assert.notEqual(acceptedUpdate, null)
+
+  const updatedGroup = applyWsRelayMessageToGroupState(initialGroup, acceptedUpdate!)
+  assert.equal(
+    readWsRelayMessage(
+      {
+        type: 'file-content-update',
+        payload: { path: 'src/File3.txt', content: 'x'.repeat(750_000) },
+      },
+      updatedGroup.files,
     ),
     null,
   )

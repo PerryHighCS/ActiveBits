@@ -300,6 +300,30 @@ export function readWsRelayMessage(
   return null
 }
 
+export function applyWsRelayMessageToGroupState(
+  group: MobCodeGroupState,
+  message: MobCodeMessage,
+): MobCodeGroupState {
+  if (message.type === 'file-content-update' && isPlainObject(message.payload) && typeof message.payload.path === 'string') {
+    return {
+      ...group,
+      files: {
+        ...group.files,
+        [message.payload.path]: typeof message.payload.content === 'string' ? message.payload.content : group.files[message.payload.path] ?? '',
+      },
+    }
+  }
+
+  if (message.type === 'active-file-changed' && isPlainObject(message.payload) && typeof message.payload.activeFile === 'string') {
+    return {
+      ...group,
+      activeFile: message.payload.activeFile,
+    }
+  }
+
+  return group
+}
+
 export function readWsInstructorPasscode(message: MobCodeMessage): string | null {
   if (message.type !== 'manager-auth' || !isPlainObject(message.payload)) return null
   return (
@@ -388,6 +412,11 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
           console.warn(JSON.stringify({ event: 'mobcode.ws-mutation-invalid', sessionId: client.sessionId, type: msg.type }))
           return
         }
+
+        session.data.groups[DEFAULT_GROUP_ID] = applyWsRelayMessageToGroupState(
+          session.data.groups[DEFAULT_GROUP_ID] ?? { files: {}, activeFile: '' },
+          relayMessage,
+        )
 
         const outgoing = JSON.stringify({ ...relayMessage, timestamp: Date.now() })
         for (const peer of ws.wss.clients) {
