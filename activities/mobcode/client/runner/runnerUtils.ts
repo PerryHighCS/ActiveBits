@@ -211,29 +211,32 @@ import builtins
 import sys
 import traceback
 
-class MobCodeTerminalOutput:
-    def write(self, data):
-        if data is not None:
-            window.mobcodeTerminal.write(str(data))
+if not getattr(window, '__MOB_CODE_RUNNER_STARTED__', False):
+    window.__MOB_CODE_RUNNER_STARTED__ = True
 
-    def flush(self):
-        pass
+    class MobCodeTerminalOutput:
+        def write(self, data):
+            if data is not None:
+                window.mobcodeTerminal.write(str(data))
 
-def mobcode_input(prompt=''):
-    return window.mobcodeTerminal.input(str(prompt))
+        def flush(self):
+            pass
 
-sys.stdout = MobCodeTerminalOutput()
-sys.stderr = MobCodeTerminalOutput()
-builtins.input = mobcode_input
+    def mobcode_input(prompt=''):
+        return window.mobcodeTerminal.input(str(prompt))
 
-window.mobcodeTerminal.write('[Brython] Running ' + ${serializedEntryFile} + '\\n')
+    sys.stdout = MobCodeTerminalOutput()
+    sys.stderr = MobCodeTerminalOutput()
+    builtins.input = mobcode_input
 
-try:
-    exec(${serializedEntryContent}, {'__name__': '__main__', '__file__': ${serializedEntryFile}})
-except SystemExit:
-    raise
-except Exception:
-    traceback.print_exc()
+    window.mobcodeTerminal.write('[Brython] Running ' + ${serializedEntryFile} + '\\n')
+
+    try:
+        exec(${serializedEntryContent}, {'__name__': '__main__', '__file__': ${serializedEntryFile}})
+    except SystemExit:
+        raise
+    except Exception:
+        traceback.print_exc()
   </script>
   <script>
     if (typeof brython === 'function') {

@@ -45,6 +45,18 @@ void test('buildBrythonRunnerHtml escapes payload content in script contexts', (
   assert.match(html, /\\u003c\/script\\u003e\\u003cscript\\u003e/)
 })
 
+void test('buildBrythonRunnerHtml guards Brython execution against duplicate initialization', () => {
+  const html = buildBrythonRunnerHtml({
+    files: { 'test.py': 'print("Hello")' },
+    entryFile: 'test.py',
+    title: 'Runner',
+  })
+
+  assert.match(html, /__MOB_CODE_RUNNER_STARTED__/)
+  assert.match(html, /if not getattr\(window, '__MOB_CODE_RUNNER_STARTED__', False\):/)
+  assert.match(html, /window\.__MOB_CODE_RUNNER_STARTED__ = True/)
+})
+
 void test('openMobCodeRunnerPopup writes the Brython runner document to a popup', () => {
   const writes: string[] = []
   let focused = false
