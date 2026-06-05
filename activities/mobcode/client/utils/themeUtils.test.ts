@@ -12,3 +12,7 @@ void test('reads theme from cookie string', () => {
   assert.equal(getThemeFromCookie('other=1; mobcode-theme=one-dark'), 'one-dark')
   assert.equal(getThemeFromCookie('other=1'), DEFAULT_MOB_CODE_THEME)
 })
+
+void test('falls back when the cookie value is malformed', () => {
+  assert.equal(getThemeFromCookie('mobcode-theme=%E0%A4%A'), DEFAULT_MOB_CODE_THEME)
+})

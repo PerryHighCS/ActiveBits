@@ -1,7 +1,7 @@
 import { githubDark, githubLight } from '@uiw/codemirror-theme-github'
 import CodeMirror from '@uiw/react-codemirror'
 import { oneDark } from '@codemirror/theme-one-dark'
-import { EditorState, StateField, type Extension } from '@codemirror/state'
+import { EditorState, StateField, type ChangeDesc, type Extension } from '@codemirror/state'
 import { Decoration, EditorView, WidgetType, type ViewUpdate } from '@codemirror/view'
 import { useEffect, useMemo, useState } from 'react'
 import type { MobCodeEditorPresencePayload, MobCodeThemeId } from '../../shared/types'
@@ -37,30 +37,42 @@ function createRemotePresenceExtension(
   filename: string,
 ): Extension {
   return StateField.define({
-    create: () => {
-      if (!remotePresence || remotePresence.path !== filename) {
-        return Decoration.none
-      }
-
-      const decorations = remotePresence.selections.flatMap((selection) => {
-        const from = Math.min(selection.anchor, selection.head)
-        const to = Math.max(selection.anchor, selection.head)
-        const nextDecorations = []
-        if (from !== to) {
-          nextDecorations.push(Decoration.mark({ class: 'mobcode-remote-selection' }).range(from, to))
-        }
-        nextDecorations.push(Decoration.widget({
-          widget: new RemoteCursorWidget(),
-          side: 1,
-        }).range(selection.head))
-        return nextDecorations
-      })
-
-      return Decoration.set(decorations, true)
-    },
-    update: (value) => value,
+    create: () => createRemotePresenceDecorations(remotePresence, filename),
+    update: (value, update) => mapRemotePresenceDecorations(value, update.changes),
     provide: (field) => EditorView.decorations.from(field),
   })
+}
+
+export function createRemotePresenceDecorations(
+  remotePresence: MobCodeEditorPresencePayload | null | undefined,
+  filename: string,
+) {
+  if (!remotePresence || remotePresence.path !== filename) {
+    return Decoration.none
+  }
+
+  const decorations = remotePresence.selections.flatMap((selection) => {
+    const from = Math.min(selection.anchor, selection.head)
+    const to = Math.max(selection.anchor, selection.head)
+    const nextDecorations = []
+    if (from !== to) {
+      nextDecorations.push(Decoration.mark({ class: 'mobcode-remote-selection' }).range(from, to))
+    }
+    nextDecorations.push(Decoration.widget({
+      widget: new RemoteCursorWidget(),
+      side: 1,
+    }).range(selection.head))
+    return nextDecorations
+  })
+
+  return Decoration.set(decorations, true)
+}
+
+export function mapRemotePresenceDecorations(
+  decorations: ReturnType<typeof createRemotePresenceDecorations>,
+  changes: ChangeDesc,
+) {
+  return decorations.map(changes)
 }
 
 export function resolveEditorTheme(theme: MobCodeThemeId) {

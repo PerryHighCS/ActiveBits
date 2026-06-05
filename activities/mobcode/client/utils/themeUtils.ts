@@ -15,7 +15,11 @@ export function getThemeFromCookie(cookieString = globalThis.document?.cookie ??
     .map((part) => part.trim())
     .find((part) => part.startsWith(`${MOB_CODE_THEME_COOKIE}=`))
   if (!match) return DEFAULT_MOB_CODE_THEME
-  return normalizeMobCodeTheme(decodeURIComponent(match.slice(MOB_CODE_THEME_COOKIE.length + 1)))
+  try {
+    return normalizeMobCodeTheme(decodeURIComponent(match.slice(MOB_CODE_THEME_COOKIE.length + 1)))
+  } catch {
+    return DEFAULT_MOB_CODE_THEME
+  }
 }
 
 export function setThemeCookie(theme: MobCodeThemeId): void {
