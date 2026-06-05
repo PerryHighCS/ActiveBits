@@ -5,6 +5,14 @@ function readLocationStatePasscode(locationState: unknown): string {
   const state = locationState != null && typeof locationState === 'object'
     ? (locationState as Record<string, unknown>)
     : {}
+  const nestedPayload = state.createSessionPayload != null && typeof state.createSessionPayload === 'object'
+    ? state.createSessionPayload as Record<string, unknown>
+    : null
+  const nestedValue = nestedPayload?.instructorPasscode
+  if (typeof nestedValue === 'string' && nestedValue.length > 0) {
+    return nestedValue
+  }
+
   const value = state.instructorPasscode
   return typeof value === 'string' && value.length > 0 ? value : ''
 }

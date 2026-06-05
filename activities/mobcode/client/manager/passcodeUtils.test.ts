@@ -20,6 +20,19 @@ void test('resolveMobCodeInstructorPasscode prefers router state', () => {
   assert.equal(
     resolveMobCodeInstructorPasscode({
       sessionId: 's1',
+      locationState: { createSessionPayload: { instructorPasscode: 'state-passcode' } },
+      storage,
+      readBootstrapPayload: () => ({ instructorPasscode: 'bootstrap-passcode' }),
+    }),
+    'state-passcode',
+  )
+})
+
+void test('resolveMobCodeInstructorPasscode still accepts legacy direct router state field', () => {
+  const storage = createStorage()
+  assert.equal(
+    resolveMobCodeInstructorPasscode({
+      sessionId: 's1',
       locationState: { instructorPasscode: 'state-passcode' },
       storage,
       readBootstrapPayload: () => ({ instructorPasscode: 'bootstrap-passcode' }),
