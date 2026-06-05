@@ -60,6 +60,32 @@ void test('buildBrythonRunnerHtml guards Brython execution against duplicate ini
   assert.match(html, /URL\.revokeObjectURL\(window\.location\.href\)/)
 })
 
+void test('buildBrythonRunnerHtml compiles user code with the entry filename for tracebacks', () => {
+  const html = buildBrythonRunnerHtml({
+    files: { 'test.py': 'print("Hello")\nraise ValueError("boom")\n' },
+    entryFile: 'test.py',
+    title: 'Runner',
+  })
+
+  assert.match(html, /entry_filename = "test\.py"/)
+  assert.match(html, /compiled_code = compile\(entry_source, entry_filename, 'exec'\)/)
+  assert.match(html, /exec\(compiled_code, \{'__name__': '__main__', '__file__': entry_filename\}\)/)
+})
+
+void test('buildBrythonRunnerHtml prints a user-file error header before the raw traceback', () => {
+  const html = buildBrythonRunnerHtml({
+    files: { 'test.py': 'print("Hello")\n1 / 0\n' },
+    entryFile: 'test.py',
+    title: 'Runner',
+  })
+
+  assert.match(html, /def find_user_error_line\(error\):/)
+  assert.match(html, /if filename == entry_filename:/)
+  assert.match(html, /Error in ' \+ entry_filename \+ ', line ' \+ str\(line_number\)/)
+  assert.match(html, /print_user_error_header\(error\)/)
+  assert.match(html, /traceback\.print_exc\(\)/)
+})
+
 void test('openMobCodeRunnerPopup opens a fresh blob-backed runner popup', () => {
   let openedUrl = ''
   let focused = false

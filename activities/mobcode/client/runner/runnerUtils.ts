@@ -234,13 +234,36 @@ if window.mobcodeRunnerShouldStart():
     sys.stderr = MobCodeTerminalOutput()
     builtins.input = mobcode_input
 
-    window.mobcodeTerminal.write('[Brython] Running ' + ${serializedEntryFile} + '\\n')
+    entry_filename = ${serializedEntryFile}
+    entry_source = ${serializedEntryContent}
+
+    def find_user_error_line(error):
+        traceback_node = getattr(error, '__traceback__', None)
+        while traceback_node is not None:
+            frame = getattr(traceback_node, 'tb_frame', None)
+            code = getattr(frame, 'f_code', None)
+            filename = getattr(code, 'co_filename', None)
+            if filename == entry_filename:
+                return getattr(traceback_node, 'tb_lineno', None)
+            traceback_node = getattr(traceback_node, 'tb_next', None)
+        return getattr(error, 'lineno', None)
+
+    def print_user_error_header(error):
+        line_number = find_user_error_line(error)
+        if line_number is None:
+            window.mobcodeTerminal.write('\\nError in ' + entry_filename + '\\n')
+        else:
+            window.mobcodeTerminal.write('\\nError in ' + entry_filename + ', line ' + str(line_number) + '\\n')
+
+    window.mobcodeTerminal.write('[Brython] Running ' + entry_filename + '\\n')
 
     try:
-        exec(${serializedEntryContent}, {'__name__': '__main__', '__file__': ${serializedEntryFile}})
+        compiled_code = compile(entry_source, entry_filename, 'exec')
+        exec(compiled_code, {'__name__': '__main__', '__file__': entry_filename})
     except SystemExit:
         raise
-    except Exception:
+    except Exception as error:
+        print_user_error_header(error)
         traceback.print_exc()
   </script>
   <script>
