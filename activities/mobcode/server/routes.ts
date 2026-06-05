@@ -29,6 +29,11 @@ interface MobCodeSocket extends ActiveBitsWebSocket {
   instructorPasscode?: string | null
 }
 
+interface SessionScopedWsClient {
+  readyState: number
+  sessionId?: string | null
+}
+
 interface EmbeddedMobCodeLaunchOptions {
   files?: unknown
   activeFile?: unknown
@@ -43,6 +48,7 @@ const INSTRUCTOR_PASSCODE_BYTES = 16
 const MAX_INSTRUCTOR_PASSCODE_LENGTH = 512
 const MAX_PRESENCE_SELECTIONS = 16
 const WS_OPEN = 1
+const LIVE_GROUP_CLEANUP_DELAY_MS = 30_000
 const DURABLE_MESSAGE_TYPES = new Set<MobCodeMessage['type']>(['state-sync', 'file-tree-changed'])
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -333,6 +339,18 @@ export function resolveWsValidationGroupState(
   return liveGroup ?? persistedGroup ?? { files: {}, activeFile: '' }
 }
 
+export function hasOpenSessionClients(
+  clients: Iterable<SessionScopedWsClient>,
+  sessionId: string,
+): boolean {
+  for (const client of clients) {
+    if (client.readyState === WS_OPEN && client.sessionId === sessionId) {
+      return true
+    }
+  }
+  return false
+}
+
 export function readWsInstructorPasscode(message: MobCodeMessage): string | null {
   if (message.type !== 'manager-auth' || !isPlainObject(message.payload)) return null
   return (
@@ -363,6 +381,27 @@ registerSessionNormalizer('mobcode', (session) => {
 export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessionStore, ws: WsRouter): void {
   const ensureBroadcastSubscription = createBroadcastSubscriptionHelper(sessions, ws)
   const liveGroupsBySession = new Map<string, MobCodeGroupState>()
+  const liveGroupCleanupTimers = new Map<string, ReturnType<typeof setTimeout>>()
+
+  const cancelLiveGroupCleanup = (sessionId: string) => {
+    const existingTimer = liveGroupCleanupTimers.get(sessionId)
+    if (!existingTimer) return
+    clearTimeout(existingTimer)
+    liveGroupCleanupTimers.delete(sessionId)
+  }
+
+  const scheduleLiveGroupCleanup = (sessionId: string) => {
+    cancelLiveGroupCleanup(sessionId)
+    const timer = setTimeout(() => {
+      liveGroupCleanupTimers.delete(sessionId)
+      if (hasOpenSessionClients(ws.wss.clients as Iterable<SessionScopedWsClient>, sessionId)) {
+        return
+      }
+      liveGroupsBySession.delete(sessionId)
+    }, LIVE_GROUP_CLEANUP_DELAY_MS)
+    timer.unref?.()
+    liveGroupCleanupTimers.set(sessionId, timer)
+  }
 
   async function broadcast(type: string, payload: MobCodeStatePayload, sessionId: string): Promise<void> {
     const msgObj = { type, payload, timestamp: Date.now() }
@@ -393,6 +432,7 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
     client.mobCodeRole = query.get('role') === 'manager' ? 'manager' : 'student'
     client.instructorPasscode = null
     if (client.sessionId) {
+      cancelLiveGroupCleanup(client.sessionId)
       ensureBroadcastSubscription(client.sessionId)
     }
 
@@ -400,6 +440,7 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
       const msg = parseWsMessage(rawData)
       if (!msg || !client.sessionId) return
       const sessionId = client.sessionId
+      cancelLiveGroupCleanup(sessionId)
       if (msg.type === 'manager-auth') {
         if (client.mobCodeRole !== 'manager') return
         client.instructorPasscode = readWsInstructorPasscode(msg)
@@ -446,6 +487,11 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
       })().catch((error) => {
         console.error(JSON.stringify({ event: 'mobcode.ws-message-failed', sessionId, error: String(error) }))
       })
+    })
+
+    client.on('close', () => {
+      if (!client.sessionId) return
+      scheduleLiveGroupCleanup(client.sessionId)
     })
   })
 

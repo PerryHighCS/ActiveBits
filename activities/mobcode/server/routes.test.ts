@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   applyWsRelayMessageToGroupState,
+  hasOpenSessionClients,
   normalizeMobCodeSessionData,
   resolveWsValidationGroupState,
   readDurableMessageType,
@@ -234,6 +235,23 @@ void test('resolveWsValidationGroupState prefers live ws state over persisted se
   assert.deepEqual(resolveWsValidationGroupState(persistedGroup, liveGroup), liveGroup)
   assert.deepEqual(resolveWsValidationGroupState(persistedGroup, undefined), persistedGroup)
   assert.deepEqual(resolveWsValidationGroupState(undefined, undefined), { files: {}, activeFile: '' })
+})
+
+void test('hasOpenSessionClients only retains live ws state when a session still has open sockets', () => {
+  assert.equal(
+    hasOpenSessionClients([
+      { readyState: 1, sessionId: 'session-a' },
+      { readyState: 3, sessionId: 'session-b' },
+    ], 'session-a'),
+    true,
+  )
+  assert.equal(
+    hasOpenSessionClients([
+      { readyState: 3, sessionId: 'session-a' },
+      { readyState: 1, sessionId: 'session-b' },
+    ], 'session-a'),
+    false,
+  )
 })
 
 void test('readWsInstructorPasscode accepts only explicit manager auth payloads', () => {
