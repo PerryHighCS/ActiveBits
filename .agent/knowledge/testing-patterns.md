@@ -17,11 +17,11 @@ Capture reusable test setup patterns, common failure modes, and reliability guid
 
 - Date: 2026-06-06
 - Scope: unit | integration
-- Pattern: For MobCode editor sync, test both sides of stale durable snapshot handling: editable manager clients should ignore remote durable `state-sync`/`file-tree-changed` echoes, and the server should prefer the latest live websocket group over older durable POST payloads only while an authenticated manager socket is connected. For delayed `file-tree-changed` persists, preserve live content for files that still exist in the requested tree.
+- Pattern: For MobCode editor sync, test both sides of stale durable snapshot handling: editable manager clients should ignore remote durable `state-sync`/`file-tree-changed` echoes, and the server should merge durable `state-sync`/`file-tree-changed` payloads with the latest live websocket group only while an authenticated manager socket is connected. The merge keeps the requested file tree so creates/deletes/renames survive, while preserving live content for files that still exist in that requested tree.
 - Why it helps: Instructor typing is sent live over websocket and persisted on a slower cadence. A delayed durable snapshot can otherwise overwrite newer local edits or rebroadcast stale content to students.
 - Example (file/path): `activities/mobcode/client/manager/managerUtils.test.ts`; `activities/mobcode/server/routes.test.ts`
 - Failure signal: Instructor code appears to revert while typing, or students briefly lose recent edits after a delayed persist/broadcast completes.
-- Follow-up action: If MobCode later adds explicit revision numbers, update these tests to assert monotonic revision handling instead of relying on authenticated-manager-gated live-state preference.
+- Follow-up action: If MobCode later adds explicit revision numbers, update these tests to assert monotonic revision handling instead of relying on authenticated-manager-gated live-state merge preference.
 - Owner: Codex
 
 - Date: 2026-03-04

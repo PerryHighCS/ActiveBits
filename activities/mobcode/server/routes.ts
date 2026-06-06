@@ -358,6 +358,22 @@ export function resolveWsValidationGroupState(
   return liveGroup ?? persistedGroup ?? { files: {}, activeFile: '' }
 }
 
+function mergeDurableStatePayload(
+  requestedPayload: MobCodeStatePayload,
+  liveGroup: MobCodeGroupState,
+): MobCodeStatePayload {
+  const mergedFiles = Object.fromEntries(
+    Object.entries(requestedPayload.files).map(([path, content]) => [
+      path,
+      Object.hasOwn(liveGroup.files, path) ? liveGroup.files[path] ?? content : content,
+    ]),
+  )
+  return {
+    files: mergedFiles,
+    activeFile: Object.hasOwn(mergedFiles, liveGroup.activeFile) ? liveGroup.activeFile : requestedPayload.activeFile,
+  }
+}
+
 export function resolveDurableStatePayload(
   messageType: MobCodeMessage['type'],
   requestedPayload: MobCodeStatePayload,
@@ -365,19 +381,7 @@ export function resolveDurableStatePayload(
   hasActiveManager: boolean,
 ): MobCodeStatePayload {
   if (!liveGroup || !hasActiveManager) return requestedPayload
-  if (messageType === 'state-sync') return liveGroup
-  if (messageType === 'file-tree-changed') {
-    const mergedFiles = Object.fromEntries(
-      Object.entries(requestedPayload.files).map(([path, content]) => [
-        path,
-        Object.hasOwn(liveGroup.files, path) ? liveGroup.files[path] ?? content : content,
-      ]),
-    )
-    return {
-      files: mergedFiles,
-      activeFile: Object.hasOwn(mergedFiles, liveGroup.activeFile) ? liveGroup.activeFile : requestedPayload.activeFile,
-    }
-  }
+  if (messageType === 'state-sync' || messageType === 'file-tree-changed') return mergeDurableStatePayload(requestedPayload, liveGroup)
   return requestedPayload
 }
 

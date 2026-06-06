@@ -561,7 +561,7 @@ void test('resolveWsValidationGroupState prefers live ws state over persisted se
   assert.deepEqual(resolveWsValidationGroupState(undefined, undefined), { files: {}, activeFile: '' })
 })
 
-void test('resolveDurableStatePayload only prefers live edits while a manager is active', () => {
+void test('resolveDurableStatePayload merges requested tree changes with live edits while a manager is active', () => {
   const requestedPayload = {
     files: {
       'src/Main.java': 'stale persisted snapshot',
@@ -577,16 +577,18 @@ void test('resolveDurableStatePayload only prefers live edits while a manager is
     activeFile: 'src/Main.java',
   }
 
-  assert.deepEqual(resolveDurableStatePayload('state-sync', requestedPayload, liveGroup, true), liveGroup)
-  assert.deepEqual(resolveDurableStatePayload('state-sync', requestedPayload, liveGroup, false), requestedPayload)
-  assert.deepEqual(resolveDurableStatePayload('state-sync', requestedPayload, undefined, true), requestedPayload)
-  assert.deepEqual(resolveDurableStatePayload('file-tree-changed', requestedPayload, liveGroup, true), {
+  const mergedPayload = {
     files: {
       'src/Main.java': 'newer live edit',
       'src/New.java': 'new file from tree change',
     },
     activeFile: 'src/Main.java',
-  })
+  }
+
+  assert.deepEqual(resolveDurableStatePayload('state-sync', requestedPayload, liveGroup, true), mergedPayload)
+  assert.deepEqual(resolveDurableStatePayload('state-sync', requestedPayload, liveGroup, false), requestedPayload)
+  assert.deepEqual(resolveDurableStatePayload('state-sync', requestedPayload, undefined, true), requestedPayload)
+  assert.deepEqual(resolveDurableStatePayload('file-tree-changed', requestedPayload, liveGroup, true), mergedPayload)
   assert.deepEqual(
     resolveDurableStatePayload('file-tree-changed', {
       files: { 'src/New.java': 'new file from tree change' },
