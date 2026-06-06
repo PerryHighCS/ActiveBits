@@ -83,7 +83,7 @@ function indentationWidth(value: string): number {
   return width
 }
 
-function rewriteInputCallsForAwait(line: string): string {
+function rewriteCallNamesForAwait(line: string, names: ReadonlySet<string>, replacementName?: string): string {
   let output = ''
   let index = 0
   let quote: '"' | "'" | null = null
@@ -125,15 +125,17 @@ function rewriteInputCallsForAwait(line: string): string {
       continue
     }
 
-    const identifier = line.slice(index, index + 5)
-    if (identifier === 'input') {
+    const identifier = line.slice(index).match(/^[A-Za-z_][A-Za-z0-9_]*/)
+    if (identifier) {
+      const name = identifier[0]
       const previous = line[index - 1] ?? ''
-      const following = line.slice(index + 5).match(/^\s*\(/)
+      const following = line.slice(index + name.length).match(/^\s*\(/)
       const isMemberAccess = previous === '.'
       const isIdentifierPart = /[A-Za-z0-9_]/.test(previous)
-      if (following && !isMemberAccess && !isIdentifierPart) {
-        output += 'await mobcode_input'
-        index += 5
+      const alreadyAwaited = /\bawait\s*$/.test(output)
+      if (following && names.has(name) && !isMemberAccess && !isIdentifierPart && !alreadyAwaited) {
+        output += `await ${replacementName ?? name}`
+        index += name.length
         continue
       }
     }
@@ -145,10 +147,62 @@ function rewriteInputCallsForAwait(line: string): string {
   return output
 }
 
+function rewriteInputCallsForAwait(line: string): string {
+  return rewriteCallNamesForAwait(line, new Set(['input']), 'mobcode_input')
+}
+
+interface PythonBlock {
+  name: string
+  startLine: number
+  startIndent: number
+  bodyEndLine: number
+  containsInput: boolean
+}
+
+function topLevelPythonBlocks(lines: readonly string[]): PythonBlock[] {
+  const blocks: PythonBlock[] = []
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index] ?? ''
+    const trimmed = line.trim()
+    const match = trimmed.match(/^def\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/)
+    if (!match) continue
+
+    const startIndent = indentationWidth(line)
+    if (startIndent !== 0) continue
+    let bodyEndLine = index
+    let containsInput = false
+    for (let bodyIndex = index + 1; bodyIndex < lines.length; bodyIndex += 1) {
+      const bodyLine = lines[bodyIndex] ?? ''
+      const bodyTrimmed = bodyLine.trim()
+      if (!bodyTrimmed || bodyTrimmed.startsWith('#')) {
+        bodyEndLine = bodyIndex
+        continue
+      }
+      const bodyIndent = indentationWidth(bodyLine)
+      if (bodyIndent <= startIndent) break
+      bodyEndLine = bodyIndex
+      if (rewriteInputCallsForAwait(bodyLine) !== bodyLine) containsInput = true
+    }
+
+    blocks.push({
+      name: match[1] ?? '',
+      startLine: index,
+      startIndent,
+      bodyEndLine,
+      containsInput,
+    })
+  }
+  return blocks
+}
+
 export function buildBrythonAsyncEntrySource(source: string): string {
   const lines = source.split(/\r?\n/)
+  const inputBlocks = topLevelPythonBlocks(lines)
+    .filter((block) => block.name !== '' && block.containsInput)
+  const asyncInputFunctionNames = new Set(inputBlocks.map((block) => block.name))
+  const inputBlockByStartLine = new Map(inputBlocks.map((block) => [block.startLine, block]))
   const functionScopes: number[] = []
-  const transformedLines = lines.map((line) => {
+  const transformedLines = lines.map((line, lineIndex) => {
     const trimmed = line.trim()
     if (!trimmed || trimmed.startsWith('#')) return line
 
@@ -158,7 +212,18 @@ export function buildBrythonAsyncEntrySource(source: string): string {
     }
 
     const inFunctionScope = functionScopes.length > 0
-    const rewrittenLine = inFunctionScope ? line : rewriteInputCallsForAwait(line)
+    const inAsyncInputFunction = inputBlocks.some((block) => lineIndex > block.startLine && lineIndex <= block.bodyEndLine)
+    const asyncBlock = inputBlockByStartLine.get(lineIndex)
+    let rewrittenLine = line
+    if (asyncBlock) {
+      rewrittenLine = line.replace(/^(\s*)def\s+/, '$1async def ')
+    } else if (inAsyncInputFunction) {
+      rewrittenLine = rewriteInputCallsForAwait(line)
+      rewrittenLine = rewriteCallNamesForAwait(rewrittenLine, asyncInputFunctionNames)
+    } else if (!inFunctionScope) {
+      rewrittenLine = rewriteInputCallsForAwait(line)
+      rewrittenLine = rewriteCallNamesForAwait(rewrittenLine, asyncInputFunctionNames)
+    }
 
     if (/^\s*(async\s+def|def|class)\s+/.test(trimmed)) {
       functionScopes.push(indent)
@@ -192,6 +257,8 @@ export function buildBrythonRunnerHtml(payload: BrythonRunnerPayload): string {
   const entryContent = payload.files[payload.entryFile] ?? ''
   const serializedEntryContent = escapeScriptJson(buildBrythonAsyncEntrySource(entryContent))
   const serializedEntryFile = escapeScriptJson(payload.entryFile)
+  const entryLineContent = entryContent.replace(/\r?\n$/, '')
+  const entryLineCount = entryLineContent ? entryLineContent.split(/\r?\n/).length : 1
   const title = escapeHtml(payload.title)
   const entryFile = escapeHtml(payload.entryFile)
 
@@ -370,6 +437,7 @@ import traceback
 
 entry_filename = ${serializedEntryFile}
 entry_source = ${serializedEntryContent}
+entry_user_line_count = ${entryLineCount}
 input_sequence = 0
 input_futures = {}
 
@@ -413,8 +481,7 @@ def find_user_error_line(error):
         filename = getattr(code, 'co_filename', None)
         if filename == entry_filename:
             line_number = getattr(traceback_node, 'tb_lineno', None)
-            function_name = getattr(code, 'co_name', '')
-            if line_number is not None and function_name == '__mobcode_user_main__':
+            if line_number is not None and line_number <= entry_user_line_count + 1:
                 return max(1, line_number - 1)
             return line_number
         traceback_node = getattr(traceback_node, 'tb_next', None)

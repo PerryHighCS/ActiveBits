@@ -102,21 +102,37 @@ void test('buildBrythonRunnerHtml wires terminal input through async worker mess
   assert.match(html, /bridge\.request\(/)
 })
 
-void test('buildBrythonAsyncEntrySource rewrites top-level input while leaving functions alone', () => {
+void test('buildBrythonAsyncEntrySource rewrites top-level and function input', () => {
   const source = buildBrythonAsyncEntrySource([
     'name = input("Name?")',
     'if name:',
     '    age = input("Age?")',
     'def ask():',
     '    return input("Nested?")',
-    'print(name)',
+    'print(ask())',
   ].join('\n'))
 
   assert.match(source, /async def __mobcode_user_main__\(\):/)
   assert.match(source, /name = await mobcode_input\("Name\?"\)/)
   assert.match(source, / {4}age = await mobcode_input\("Age\?"\)/)
-  assert.match(source, /def ask\(\):\n {8}return input\("Nested\?"\)/)
+  assert.match(source, /async def ask\(\):\n {8}return await mobcode_input\("Nested\?"\)/)
+  assert.match(source, /print\(await ask\(\)\)/)
   assert.match(source, /aio\.run\(__mobcode_run__\(\)\)/)
+})
+
+void test('buildBrythonAsyncEntrySource does not rewrite class method input yet', () => {
+  const source = buildBrythonAsyncEntrySource([
+    'class Prompter:',
+    '    def ask(self):',
+    '        return input("Nested?")',
+    'prompter = Prompter()',
+    'print(prompter.ask())',
+  ].join('\n'))
+
+  assert.match(source, /class Prompter:/)
+  assert.match(source, /def ask\(self\):\n {12}return input\("Nested\?"\)/)
+  assert.match(source, /print\(prompter\.ask\(\)\)/)
+  assert.doesNotMatch(source, /return await mobcode_input/)
 })
 
 void test('buildBrythonRunnerHtml compiles user code with the entry filename for tracebacks', () => {
@@ -127,6 +143,7 @@ void test('buildBrythonRunnerHtml compiles user code with the entry filename for
   })
 
   assert.match(html, /entry_filename = "test\.py"/)
+  assert.match(html, /entry_user_line_count = 2/)
   assert.match(html, /compiled_code = compile\(entry_source, entry_filename, 'exec'\)/)
   assert.match(html, /'__file__': entry_filename/)
   assert.match(html, /'input': mobcode_input/)
@@ -142,6 +159,7 @@ void test('buildBrythonRunnerHtml prints a user-file error header before the raw
 
   assert.match(html, /def find_user_error_line\(error\):/)
   assert.match(html, /if filename == entry_filename:/)
+  assert.match(html, /line_number <= entry_user_line_count \+ 1/)
   assert.match(html, /Error in ' \+ entry_filename \+ ', line ' \+ str\(line_number\)/)
   assert.match(html, /worker_self\.send\(\{'type': 'stderr', 'data': format_user_error_header\(error\)\}\)/)
   assert.match(html, /worker_self\.send\(\{'type': 'stderr', 'data': traceback\.format_exc\(\)\}\)/)
