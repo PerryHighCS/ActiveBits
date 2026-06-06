@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
+  buildBrythonAsyncEntrySource,
   buildBrythonRunnerHtml,
   MOB_CODE_RUNNERS,
   openMobCodeRunnerPopup,
@@ -90,12 +91,29 @@ void test('buildBrythonRunnerHtml wires terminal input through async worker mess
   assert.match(html, /from browser import aio, bind/)
   assert.match(html, /input_future = aio\.Future\(\)/)
   assert.match(html, /input_future\.set_result/)
-  assert.match(html, /class MobCodeInputTransformer/)
-  assert.match(html, /ast\.Await/)
+  assert.match(html, /async def __mobcode_user_main__/)
+  assert.match(html, /name = await mobcode_input/)
   assert.match(html, /await __mobcode_user_main__\(\)/)
   assert.match(html, /worker_self\.send\(\{\s*'type': 'input-request'/)
   assert.match(html, /message_type == 'input-request'/)
   assert.match(html, /bridge\.request\(/)
+})
+
+void test('buildBrythonAsyncEntrySource rewrites top-level input while leaving functions alone', () => {
+  const source = buildBrythonAsyncEntrySource([
+    'name = input("Name?")',
+    'if name:',
+    '    age = input("Age?")',
+    'def ask():',
+    '    return input("Nested?")',
+    'print(name)',
+  ].join('\n'))
+
+  assert.match(source, /async def __mobcode_user_main__\(\):/)
+  assert.match(source, /name = await mobcode_input\("Name\?"\)/)
+  assert.match(source, / {4}age = await mobcode_input\("Age\?"\)/)
+  assert.match(source, /def ask\(\):\n {8}return input\("Nested\?"\)/)
+  assert.match(source, /aio\.run\(__mobcode_run__\(\)\)/)
 })
 
 void test('buildBrythonRunnerHtml compiles user code with the entry filename for tracebacks', () => {
@@ -106,7 +124,7 @@ void test('buildBrythonRunnerHtml compiles user code with the entry filename for
   })
 
   assert.match(html, /entry_filename = "test\.py"/)
-  assert.match(html, /compiled_code = compile\(build_runner_module\(entry_source\), entry_filename, 'exec'\)/)
+  assert.match(html, /compiled_code = compile\(entry_source, entry_filename, 'exec'\)/)
   assert.match(html, /'__file__': entry_filename/)
   assert.match(html, /'input': mobcode_input/)
   assert.match(html, /exec\(compiled_code, runner_globals\)/)

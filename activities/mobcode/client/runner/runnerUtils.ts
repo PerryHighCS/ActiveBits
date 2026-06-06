@@ -73,10 +73,124 @@ function escapeScriptJson(value: unknown): string {
     .replaceAll('\u2029', '\\u2029')
 }
 
+function indentationWidth(value: string): number {
+  let width = 0
+  for (const character of value) {
+    if (character === ' ') width += 1
+    else if (character === '\t') width += 4
+    else break
+  }
+  return width
+}
+
+function rewriteInputCallsForAwait(line: string): string {
+  let output = ''
+  let index = 0
+  let quote: '"' | "'" | null = null
+  let tripleQuote = false
+
+  while (index < line.length) {
+    const character = line[index]
+    const nextTwo = line.slice(index, index + 3)
+
+    if (quote) {
+      output += character
+      if (character === '\\') {
+        output += line[index + 1] ?? ''
+        index += 2
+        continue
+      }
+      if (tripleQuote && nextTwo === quote.repeat(3)) {
+        output += line.slice(index + 1, index + 3)
+        index += 3
+        quote = null
+        tripleQuote = false
+        continue
+      }
+      if (!tripleQuote && character === quote) quote = null
+      index += 1
+      continue
+    }
+
+    if (character === '#') {
+      output += line.slice(index)
+      break
+    }
+
+    if (character === '"' || character === "'") {
+      quote = character
+      tripleQuote = nextTwo === character.repeat(3)
+      output += tripleQuote ? nextTwo : character
+      index += tripleQuote ? 3 : 1
+      continue
+    }
+
+    const identifier = line.slice(index, index + 5)
+    if (identifier === 'input') {
+      const previous = line[index - 1] ?? ''
+      const following = line.slice(index + 5).match(/^\s*\(/)
+      const isMemberAccess = previous === '.'
+      const isIdentifierPart = /[A-Za-z0-9_]/.test(previous)
+      if (following && !isMemberAccess && !isIdentifierPart) {
+        output += 'await mobcode_input'
+        index += 5
+        continue
+      }
+    }
+
+    output += character
+    index += 1
+  }
+
+  return output
+}
+
+export function buildBrythonAsyncEntrySource(source: string): string {
+  const lines = source.split(/\r?\n/)
+  const functionScopes: number[] = []
+  const transformedLines = lines.map((line) => {
+    const trimmed = line.trim()
+    if (!trimmed || trimmed.startsWith('#')) return line
+
+    const indent = indentationWidth(line)
+    while (functionScopes.length > 0 && indent <= Number(functionScopes.at(-1))) {
+      functionScopes.pop()
+    }
+
+    const inFunctionScope = functionScopes.length > 0
+    const rewrittenLine = inFunctionScope ? line : rewriteInputCallsForAwait(line)
+
+    if (/^\s*(async\s+def|def|class)\s+/.test(trimmed)) {
+      functionScopes.push(indent)
+    }
+
+    return rewrittenLine
+  })
+  const userBody = transformedLines.length > 0
+    ? transformedLines.map((line) => `    ${line}`).join('\n')
+    : '    pass'
+
+  return `async def __mobcode_user_main__():
+${userBody || '    pass'}
+
+async def __mobcode_run__():
+    try:
+        await __mobcode_user_main__()
+        worker_self.send({'type': 'done'})
+    except SystemExit:
+        worker_self.send({'type': 'done'})
+    except Exception as error:
+        worker_self.send({'type': 'stderr', 'data': format_user_error_header(error)})
+        worker_self.send({'type': 'stderr', 'data': traceback.format_exc()})
+
+aio.run(__mobcode_run__())
+`
+}
+
 export function buildBrythonRunnerHtml(payload: BrythonRunnerPayload): string {
   const serializedPayload = escapeScriptJson(payload)
   const entryContent = payload.files[payload.entryFile] ?? ''
-  const serializedEntryContent = escapeScriptJson(entryContent)
+  const serializedEntryContent = escapeScriptJson(buildBrythonAsyncEntrySource(entryContent))
   const serializedEntryFile = escapeScriptJson(payload.entryFile)
   const title = escapeHtml(payload.title)
   const entryFile = escapeHtml(payload.entryFile)
@@ -254,7 +368,6 @@ export function buildBrythonRunnerHtml(payload: BrythonRunnerPayload): string {
   <script type="text/python" class="webworker" id="mobcode-python-worker">
 from browser import self as worker_self
 from browser import aio, bind
-import ast
 import builtins
 import sys
 import traceback
@@ -296,49 +409,6 @@ def handle_worker_message(event):
     if input_future is not None:
         input_future.set_result(str(message.get('value', '')))
 
-class MobCodeInputTransformer(ast.NodeTransformer):
-    def visit_FunctionDef(self, node):
-        return node
-
-    def visit_AsyncFunctionDef(self, node):
-        return node
-
-    def visit_Call(self, node):
-        self.generic_visit(node)
-        function_name = getattr(node.func, 'id', None)
-        if function_name != 'input':
-            return node
-        return ast.copy_location(ast.Await(value=ast.Call(
-            func=ast.Name(id='mobcode_input', ctx=ast.Load()),
-            args=node.args,
-            keywords=node.keywords,
-        )), node)
-
-def build_runner_module(source):
-    source_module = ast.parse(source, entry_filename, 'exec')
-    transformer = MobCodeInputTransformer()
-    transformed_body = [transformer.visit(node) for node in source_module.body]
-    wrapper_module = ast.parse("""
-async def __mobcode_user_main__():
-    pass
-
-async def __mobcode_run__():
-    try:
-        await __mobcode_user_main__()
-        worker_self.send({'type': 'done'})
-    except SystemExit:
-        worker_self.send({'type': 'done'})
-    except Exception as error:
-        worker_self.send({'type': 'stderr', 'data': format_user_error_header(error)})
-        worker_self.send({'type': 'stderr', 'data': traceback.format_exc()})
-
-aio.run(__mobcode_run__())
-""", entry_filename, 'exec')
-    user_main = wrapper_module.body[0]
-    user_main.body = transformed_body or [ast.Pass()]
-    ast.fix_missing_locations(wrapper_module)
-    return wrapper_module
-
 def find_user_error_line(error):
     traceback_node = getattr(error, '__traceback__', None)
     while traceback_node is not None:
@@ -346,7 +416,11 @@ def find_user_error_line(error):
         code = getattr(frame, 'f_code', None)
         filename = getattr(code, 'co_filename', None)
         if filename == entry_filename:
-            return getattr(traceback_node, 'tb_lineno', None)
+            line_number = getattr(traceback_node, 'tb_lineno', None)
+            function_name = getattr(code, 'co_name', '')
+            if line_number is not None and function_name == '__mobcode_user_main__':
+                return max(1, line_number - 1)
+            return line_number
         traceback_node = getattr(traceback_node, 'tb_next', None)
     return getattr(error, 'lineno', None)
 
@@ -361,7 +435,7 @@ sys.stderr = MobCodeWorkerOutput('stderr')
 builtins.input = mobcode_input
 
 try:
-    compiled_code = compile(build_runner_module(entry_source), entry_filename, 'exec')
+    compiled_code = compile(entry_source, entry_filename, 'exec')
     runner_globals = globals()
     runner_globals.update({
         '__name__': '__main__',
