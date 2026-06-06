@@ -80,6 +80,24 @@ void test('buildBrythonRunnerHtml runs user code in a Brython worker', () => {
   assert.match(html, /worker\.create_worker\('mobcode-python-worker', handle_worker_ready, handle_worker_message, handle_worker_error\)/)
 })
 
+void test('buildBrythonRunnerHtml exposes stop and output limit controls', () => {
+  const html = buildBrythonRunnerHtml({
+    files: { 'test.py': 'while True:\n    pass\n' },
+    entryFile: 'test.py',
+    title: 'Runner',
+  })
+
+  assert.match(html, /id="stop-runner"/)
+  assert.match(html, /aria-label="Stop Python runner"/)
+  assert.match(html, /window\.mobcodeRunnerSetState = \(state\) =>/)
+  assert.match(html, /maxChars: 100000/)
+  assert.match(html, /\[output truncated\]/)
+  assert.match(html, /def stop_active_worker\(\):/)
+  assert.match(html, /active_worker\.terminate\(\)/)
+  assert.match(html, /@bind\(document\['stop-runner'\], 'click'\)/)
+  assert.match(html, /message_type == 'done'/)
+})
+
 void test('buildBrythonRunnerHtml wires terminal input through async worker messages', () => {
   const html = buildBrythonRunnerHtml({
     files: { 'test.py': 'name = input("Name? ")\nprint(name)\n' },
@@ -120,7 +138,7 @@ void test('buildBrythonAsyncEntrySource rewrites top-level and function input', 
   assert.match(source, /aio\.run\(__mobcode_run__\(\)\)/)
 })
 
-void test('buildBrythonAsyncEntrySource does not rewrite class method input yet', () => {
+void test('buildBrythonAsyncEntrySource rewrites class method input', () => {
   const source = buildBrythonAsyncEntrySource([
     'class Prompter:',
     '    def ask(self):',
@@ -130,9 +148,23 @@ void test('buildBrythonAsyncEntrySource does not rewrite class method input yet'
   ].join('\n'))
 
   assert.match(source, /class Prompter:/)
-  assert.match(source, /def ask\(self\):\n {12}return input\("Nested\?"\)/)
-  assert.match(source, /print\(prompter\.ask\(\)\)/)
-  assert.doesNotMatch(source, /return await mobcode_input/)
+  assert.match(source, /async def ask\(self\):\n {12}return await mobcode_input\("Nested\?"\)/)
+  assert.match(source, /print\(await prompter\.ask\(\)\)/)
+})
+
+void test('buildBrythonAsyncEntrySource leaves nested function input unchanged', () => {
+  const source = buildBrythonAsyncEntrySource([
+    'def outer():',
+    '    def inner():',
+    '        return input("Nested?")',
+    '    return inner()',
+    'print(outer())',
+  ].join('\n'))
+
+  assert.match(source, /def outer\(\):/)
+  assert.match(source, /def inner\(\):\n {12}return input\("Nested\?"\)/)
+  assert.match(source, /return inner\(\)/)
+  assert.doesNotMatch(source, /async def inner/)
 })
 
 void test('buildBrythonRunnerHtml compiles user code with the entry filename for tracebacks', () => {
