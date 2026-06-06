@@ -23,9 +23,12 @@ const brythonVendorAssetPaths = new Map<string, string>([
   ['brython.js', serverRequire.resolve('brython/brython.js')],
   ['brython_stdlib.js', serverRequire.resolve('brython/brython_stdlib.js')],
 ])
+const env = process.env.NODE_ENV || 'development'
 
 const app = express()
-app.set('trust proxy', 1)
+if (env === 'production') {
+  app.set('trust proxy', 1)
+}
 const defaultJsonParser = express.json()
 const mobCodeJsonParser = express.json({ limit: MOB_CODE_JSON_BODY_LIMIT })
 const brythonVendorAssetRateLimit = rateLimit({
@@ -85,7 +88,6 @@ app.get<{ assetName: string }>('/vendor/brython/:assetName', brythonVendorAssetR
   res.sendFile(assetPath)
 })
 
-const env = process.env.NODE_ENV || 'development'
 if (!env.startsWith('dev')) {
   app.use(express.static(path.join(__dirname, '../client/dist')))
   app.get('/*fallback', (_req, res) => {

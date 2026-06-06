@@ -289,7 +289,7 @@ When a new deployment is triggered:
 2. **Secure Cookies**: Enabled in production via `NODE_ENV=production`
 3. **Strong Secrets**: Use 32+ character random strings for `PERSISTENT_SESSION_SECRET`
 4. **Rate Limiting**: Built-in for teacher code attempts (5 attempts/minute per IP+hash)
-5. **Reverse Proxy**: The server trusts one proxy hop so Render-forwarded client IPs feed IP-based rate limits.
+5. **Reverse Proxy**: In production, the server trusts one proxy hop so Render-forwarded client IPs feed IP-based rate limits.
 6. **Valkey Access**: Use internal URLs only (not publicly accessible)
 
 ## Backup and Recovery
