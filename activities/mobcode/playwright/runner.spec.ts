@@ -53,12 +53,14 @@ async function runMobCodePopup(page: Page): Promise<Page> {
   return popup
 }
 
-test('MobCode student view exposes the instructor-selected Python runner', async ({ page }) => {
+test('MobCode student view launches the instructor-selected Python runner', async ({ page }) => {
   const session = await createMobCodeSession(page)
   await seedMobCodeFile(page, session, 'print("hello from student")\n')
   await openMobCodeStudent(page, session)
 
   await expect(page.getByLabel('Runner implementation')).toHaveCount(0)
+  const popup = await runMobCodePopup(page)
+  await expect(popup.locator('#terminal')).toContainText('hello from student', { timeout: 15_000 })
 })
 
 test('MobCode Python runner popup prints terminal output', async ({ page }) => {
