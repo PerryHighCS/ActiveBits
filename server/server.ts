@@ -1,4 +1,5 @@
 import http from 'node:http'
+import { createRequire } from 'node:module'
 import type { Socket } from 'node:net'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -16,8 +17,12 @@ import { isMobCodeJsonRoute, MOB_CODE_JSON_BODY_LIMIT } from './core/jsonBodyPar
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
-const repoRoot = path.resolve(__dirname, path.basename(__dirname) === 'dist' ? '../..' : '..')
-const brythonPackageRoot = path.join(repoRoot, 'node_modules/brython')
+const serverRequire = createRequire(import.meta.url)
+const brythonVendorAssetPaths = new Map<string, string>([
+  ['brython.min.js', serverRequire.resolve('brython/brython.min.js')],
+  ['brython.js', serverRequire.resolve('brython/brython.js')],
+  ['brython_stdlib.js', serverRequire.resolve('brython/brython_stdlib.js')],
+])
 
 const app = express()
 const defaultJsonParser = express.json()
@@ -69,13 +74,18 @@ registerStatusRoute({ app, sessions, ws, sessionTtl, valkeyUrl })
 app.get('/health-check', (_req, res) => {
   res.json({ status: 'ok', memory: process.memoryUsage() })
 })
-app.get('/vendor/brython/:assetName', brythonVendorAssetRateLimit, (req, res, next) => {
+app.get('/vendor/brython/:assetName', brythonVendorAssetRateLimit, (req, res) => {
   const assetName = req.params.assetName
-  if (assetName !== 'brython.min.js' && assetName !== 'brython.js' && assetName !== 'brython_stdlib.js') {
-    next()
+  if (typeof assetName !== 'string') {
+    res.status(404).type('text/plain').send('Brython vendor asset not found')
     return
   }
-  res.sendFile(path.join(brythonPackageRoot, assetName))
+  const assetPath = brythonVendorAssetPaths.get(assetName)
+  if (!assetPath) {
+    res.status(404).type('text/plain').send('Brython vendor asset not found')
+    return
+  }
+  res.sendFile(assetPath)
 })
 
 const env = process.env.NODE_ENV || 'development'
