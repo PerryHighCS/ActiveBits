@@ -3,6 +3,7 @@ import test from 'node:test'
 import type { SessionRecord } from 'activebits-server/core/sessions.js'
 import {
   applyWsRelayMessageToGroupState,
+  hasOpenManagerSessionClients,
   hasOpenSessionClients,
   normalizeMobCodeSessionData,
   resolveDurableStatePayload,
@@ -560,7 +561,7 @@ void test('resolveWsValidationGroupState prefers live ws state over persisted se
   assert.deepEqual(resolveWsValidationGroupState(undefined, undefined), { files: {}, activeFile: '' })
 })
 
-void test('resolveDurableStatePayload preserves newer live edits for ordinary state syncs', () => {
+void test('resolveDurableStatePayload only prefers live edits while a manager is active', () => {
   const requestedPayload = {
     files: { 'src/Main.java': 'stale persisted snapshot' },
     activeFile: 'src/Main.java',
@@ -570,9 +571,10 @@ void test('resolveDurableStatePayload preserves newer live edits for ordinary st
     activeFile: 'src/Main.java',
   }
 
-  assert.deepEqual(resolveDurableStatePayload('state-sync', requestedPayload, liveGroup), liveGroup)
-  assert.deepEqual(resolveDurableStatePayload('state-sync', requestedPayload, undefined), requestedPayload)
-  assert.deepEqual(resolveDurableStatePayload('file-tree-changed', requestedPayload, liveGroup), requestedPayload)
+  assert.deepEqual(resolveDurableStatePayload('state-sync', requestedPayload, liveGroup, true), liveGroup)
+  assert.deepEqual(resolveDurableStatePayload('state-sync', requestedPayload, liveGroup, false), requestedPayload)
+  assert.deepEqual(resolveDurableStatePayload('state-sync', requestedPayload, undefined, true), requestedPayload)
+  assert.deepEqual(resolveDurableStatePayload('file-tree-changed', requestedPayload, liveGroup, true), requestedPayload)
 })
 
 void test('websocket relay updates live validation state without mutating session data in place', async () => {
@@ -643,6 +645,22 @@ void test('hasOpenSessionClients only retains live ws state when a session still
       { readyState: 1, sessionId: 'session-b' },
     ], 'session-a'),
     false,
+  )
+})
+
+void test('hasOpenManagerSessionClients requires an open manager socket for the session', () => {
+  assert.equal(
+    hasOpenManagerSessionClients([
+      { readyState: 1, sessionId: 'session-a', mobCodeRole: 'student' },
+      { readyState: 1, sessionId: 'session-b', mobCodeRole: 'manager' },
+    ], 'session-a'),
+    false,
+  )
+  assert.equal(
+    hasOpenManagerSessionClients([
+      { readyState: 1, sessionId: 'session-a', mobCodeRole: 'manager' },
+    ], 'session-a'),
+    true,
   )
 })
 

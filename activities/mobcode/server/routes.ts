@@ -34,6 +34,7 @@ interface MobCodeSocket extends ActiveBitsWebSocket {
 interface SessionScopedWsClient {
   readyState: number
   sessionId?: string | null
+  mobCodeRole?: 'manager' | 'student'
 }
 
 interface EmbeddedMobCodeLaunchOptions {
@@ -360,8 +361,9 @@ export function resolveDurableStatePayload(
   messageType: MobCodeMessage['type'],
   requestedPayload: MobCodeStatePayload,
   liveGroup: MobCodeGroupState | undefined,
+  hasActiveManager: boolean,
 ): MobCodeStatePayload {
-  return messageType === 'state-sync' && liveGroup ? liveGroup : requestedPayload
+  return messageType === 'state-sync' && liveGroup && hasActiveManager ? liveGroup : requestedPayload
 }
 
 export function hasOpenSessionClients(
@@ -370,6 +372,18 @@ export function hasOpenSessionClients(
 ): boolean {
   for (const client of clients) {
     if (client.readyState === WS_OPEN && client.sessionId === sessionId) {
+      return true
+    }
+  }
+  return false
+}
+
+export function hasOpenManagerSessionClients(
+  clients: Iterable<SessionScopedWsClient>,
+  sessionId: string,
+): boolean {
+  for (const client of clients) {
+    if (client.readyState === WS_OPEN && client.sessionId === sessionId && client.mobCodeRole === 'manager') {
       return true
     }
   }
@@ -583,7 +597,12 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
       }
 
       const messageType = readDurableMessageType(body.messageType)
-      const nextPayload = resolveDurableStatePayload(messageType, payload, liveGroupsBySession.get(session.id))
+      const nextPayload = resolveDurableStatePayload(
+        messageType,
+        payload,
+        liveGroupsBySession.get(session.id),
+        hasOpenManagerSessionClients(ws.wss.clients as Iterable<SessionScopedWsClient>, session.id),
+      )
       session.data.groups[DEFAULT_GROUP_ID] = nextPayload
       liveGroupsBySession.set(session.id, nextPayload)
       await sessions.set(session.id, session)
