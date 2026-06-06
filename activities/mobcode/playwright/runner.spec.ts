@@ -12,10 +12,19 @@ async function createMobCodeSession(page: Page): Promise<MobCodeCreateResponse> 
 }
 
 async function seedMobCodeFile(page: Page, session: MobCodeCreateResponse, source: string): Promise<void> {
+  await seedMobCodeFiles(page, session, { 'test.py': source }, 'test.py')
+}
+
+async function seedMobCodeFiles(
+  page: Page,
+  session: MobCodeCreateResponse,
+  files: Record<string, string>,
+  activeFile: string,
+): Promise<void> {
   const response = await page.request.post(`/api/mobcode/${encodeURIComponent(session.id)}/state`, {
     data: {
-      files: { 'test.py': source },
-      activeFile: 'test.py',
+      files,
+      activeFile,
       instructorPasscode: session.instructorPasscode,
       messageType: 'file-tree-changed',
     },
@@ -61,6 +70,15 @@ test('MobCode student view launches the instructor-selected Python runner', asyn
   await expect(page.getByLabel('Runner implementation')).toHaveCount(0)
   const popup = await runMobCodePopup(page)
   await expect(popup.locator('#terminal')).toContainText('hello from student', { timeout: 15_000 })
+})
+
+test('MobCode student runner status is announced as an alert', async ({ page }) => {
+  const session = await createMobCodeSession(page)
+  await seedMobCodeFiles(page, session, { 'README.md': 'not python' }, 'README.md')
+  await openMobCodeStudent(page, session)
+
+  await page.getByRole('button', { name: 'Run' }).click()
+  await expect(page.getByRole('alert')).toHaveText('Add or select a Python file before running it.')
 })
 
 test('MobCode Python runner popup prints terminal output', async ({ page }) => {
