@@ -15,8 +15,8 @@ import { isMobCodeRunnerId } from '../../shared/types'
 import CodeEditor from '../components/CodeEditor'
 import FileNameModal from '../components/FileNameModal'
 import FileControlsMenuContent from '../components/FileControlsMenuContent'
+import RunnerControls from '../components/RunnerControls'
 import SettingsMenu from '../components/SettingsMenu'
-import RunnerControls from './RunnerControls'
 import { MOB_CODE_MESSAGE_TYPES } from '../utils/constants'
 import {
   clampMobCodeContentEdit,

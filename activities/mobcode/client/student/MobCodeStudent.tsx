@@ -2,9 +2,17 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import VirtualFileExplorer from '@src/components/common/VirtualFileExplorer'
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
 import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler'
-import type { MobCodeEditorPresencePayload, MobCodeThemeId } from '../../shared/types'
+import type { MobCodeEditorPresencePayload, MobCodeRunnerId, MobCodeThemeId } from '../../shared/types'
+import { isMobCodeRunnerId } from '../../shared/types'
 import CodeEditor from '../components/CodeEditor'
 import EditorToolbar from '../components/EditorToolbar'
+import RunnerControls from '../components/RunnerControls'
+import {
+  DEFAULT_MOB_CODE_RUNNER_ID,
+  MOB_CODE_RUNNERS,
+  type MobCodeRunnerDefinition,
+  openMobCodeRunnerPopup,
+} from '../runner/runnerUtils'
 import { MOB_CODE_MESSAGE_TYPES } from '../utils/constants'
 import { resolveActiveFile, sanitizeFilesMap } from '../utils/fileUtils'
 import { getThemeFromCookie, setThemeCookie } from '../utils/themeUtils'
@@ -19,6 +27,7 @@ interface MobCodeStudentProps {
 
 interface SessionResponse {
   data?: {
+    runnerId?: unknown
     groups?: {
       default?: {
         files?: unknown
@@ -94,12 +103,22 @@ export function sanitizeStudentPresenceUpdate(
   }
 }
 
+export function getStudentRunnerOptions(
+  runnerId: MobCodeRunnerId,
+  runners: readonly MobCodeRunnerDefinition[] = MOB_CODE_RUNNERS,
+): readonly MobCodeRunnerDefinition[] {
+  const selectedRunners = runners.filter((runner) => runner.id === runnerId)
+  return selectedRunners.length > 0 ? selectedRunners : runners
+}
+
 export default function MobCodeStudent({ sessionData }: MobCodeStudentProps) {
   const { sessionId } = sessionData
   const encodedSessionId = encodeURIComponent(sessionId)
   const attachSessionEndedHandler = useSessionEndedHandler()
   const [files, setFiles] = useState<Record<string, string>>({})
   const [activeFile, setActiveFile] = useState('')
+  const [runnerId, setRunnerId] = useState<MobCodeRunnerId>(DEFAULT_MOB_CODE_RUNNER_ID)
+  const [runnerMessage, setRunnerMessage] = useState('')
   const [theme, setTheme] = useState<MobCodeThemeId>(() => getThemeFromCookie())
   const [instructorPresence, setInstructorPresence] = useState<MobCodeEditorPresencePayload | null>(null)
   const latestFilesRef = useRef<Record<string, string>>({})
@@ -113,6 +132,8 @@ export default function MobCodeStudent({ sessionData }: MobCodeStudentProps) {
         latestFilesRef.current = nextFiles
         setFiles(nextFiles)
         setActiveFile(resolveActiveFile(nextFiles, session.data?.groups?.default?.activeFile))
+        setRunnerId(isMobCodeRunnerId(session.data?.runnerId) ? session.data.runnerId : DEFAULT_MOB_CODE_RUNNER_ID)
+        setRunnerMessage('')
         setInstructorPresence(null)
       })
       .catch((error) => console.error('Failed to fetch MobCode session:', error))
@@ -174,11 +195,51 @@ export default function MobCodeStudent({ sessionData }: MobCodeStudentProps) {
     setThemeCookie(nextTheme)
   }
 
+  const handleRunCode = () => {
+    const result = openMobCodeRunnerPopup({
+      files,
+      activeFile,
+      sessionId,
+      runnerId,
+    })
+    setRunnerMessage(
+      result.opened
+        ? ''
+        : result.reason === 'missing-entry'
+          ? 'Add or select a Python file before running it.'
+          : result.reason === 'popup-blocked'
+            ? 'The runner popup was blocked. Allow popups for this site and try again.'
+            : 'That runner is not available yet.',
+    )
+  }
+
   const editorThemeClassName = `mobcode-editor-theme-${theme}`
+  const studentRunners = getStudentRunnerOptions(runnerId)
 
   return (
     <div className="mobcode-shell">
-      <EditorToolbar files={files} readOnly theme={theme} onThemeChange={handleThemeChange} />
+      <EditorToolbar
+        files={files}
+        readOnly
+        theme={theme}
+        centerControls={(
+          <div className="mobcode-runner-actions">
+            <RunnerControls
+              files={files}
+              runnerId={runnerId}
+              runners={studentRunners.length > 0 ? studentRunners : MOB_CODE_RUNNERS}
+              onRunCode={handleRunCode}
+              onRunnerChange={setRunnerId}
+            />
+          </div>
+        )}
+        onThemeChange={handleThemeChange}
+      />
+      {runnerMessage && (
+        <div className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800">
+          {runnerMessage}
+        </div>
+      )}
       <div className="mobcode-workspace">
         <aside className="mobcode-sidebar">
           <VirtualFileExplorer files={files} activePath={activeFile} readOnly onSelect={setActiveFile} />

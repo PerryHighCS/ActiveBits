@@ -39,6 +39,11 @@ async function openMobCodeManager(page: Page, session: MobCodeCreateResponse): P
   await expect(page.getByRole('button', { name: 'Run' })).toBeEnabled()
 }
 
+async function openMobCodeStudent(page: Page, session: MobCodeCreateResponse): Promise<void> {
+  await page.goto(`/${encodeURIComponent(session.id)}`)
+  await expect(page.getByRole('button', { name: 'Run' })).toBeEnabled()
+}
+
 async function runMobCodePopup(page: Page): Promise<Page> {
   const popupPromise = page.waitForEvent('popup')
   await page.getByRole('button', { name: 'Run' }).click()
@@ -47,6 +52,14 @@ async function runMobCodePopup(page: Page): Promise<Page> {
   await expect(popup.getByText('[Python] Running test.py')).toBeVisible({ timeout: 15_000 })
   return popup
 }
+
+test('MobCode student view exposes the instructor-selected Python runner', async ({ page }) => {
+  const session = await createMobCodeSession(page)
+  await seedMobCodeFile(page, session, 'print("hello from student")\n')
+  await openMobCodeStudent(page, session)
+
+  await expect(page.getByLabel('Runner implementation')).toHaveCount(0)
+})
 
 test('MobCode Python runner popup prints terminal output', async ({ page }) => {
   const session = await createMobCodeSession(page)
