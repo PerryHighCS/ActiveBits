@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   buildBrythonAsyncEntrySource,
+  buildBrythonModuleSource,
   buildBrythonRunnerHtml,
   MOB_CODE_RUNNERS,
   openMobCodeRunnerPopup,
@@ -142,6 +143,45 @@ void test('buildBrythonRunnerHtml blocks browser escape-hatch imports', () => {
   assert.match(html, /def mobcode_import\(name, globals=None, locals=None, fromlist=\(\), level=0\):/)
   assert.match(html, /builtins\.__import__ = mobcode_import/)
   assert.match(html, /Module '" \+ root_name \+ "' is not available in the terminal runner/)
+})
+
+void test('buildBrythonRunnerHtml exposes read-only workspace files and imports', () => {
+  const html = buildBrythonRunnerHtml({
+    files: {
+      'main.py': 'from helper import greet\nprint(greet("Ada"))\nprint(open("data/names.txt").read())\n',
+      'helper.py': 'def greet(name):\n    return "Hello " + name\n',
+      'data/names.txt': 'Ada\nGrace\n',
+    },
+    entryFile: 'main.py',
+    title: 'Runner',
+  })
+
+  assert.match(html, /workspace_files = \{/)
+  assert.match(html, /"data\/names\.txt":"Ada\\nGrace\\n"/)
+  assert.match(html, /workspace_python_modules = \{/)
+  assert.match(html, /"helper\.py":"def greet/)
+  assert.match(html, /def mobcode_open\(path, mode='r'/)
+  assert.match(html, /MobCode workspace files are read-only in the terminal runner/)
+  assert.match(html, /class MobCodeReadOnlyFile:/)
+  assert.match(html, /def mobcode_create_workspace_module\(name, path\):/)
+  assert.match(html, /module_type = original_import\('types'\)\.ModuleType/)
+  assert.match(html, /compiled_module = compile\(workspace_python_modules\[path\], path, 'exec'\)/)
+  assert.match(html, /builtins\.open = mobcode_open/)
+  assert.match(html, /'open': mobcode_open/)
+})
+
+void test('buildBrythonModuleSource transforms functions without adding entry wrapper', () => {
+  const source = buildBrythonModuleSource([
+    'def ask():',
+    '    return input("Name?")',
+    'def plain():',
+    '    return 42',
+  ].join('\n'))
+
+  assert.match(source, /async def ask\(\):\n {4}return await mobcode_input\("Name\?"\)/)
+  assert.match(source, /def plain\(\):/)
+  assert.doesNotMatch(source, /__mobcode_user_main__/)
+  assert.doesNotMatch(source, /mobcode_run_async/)
 })
 
 void test('buildBrythonAsyncEntrySource rewrites top-level and function input', () => {

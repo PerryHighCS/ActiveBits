@@ -288,6 +288,32 @@ function topLevelPythonBlocks(lines: readonly string[]): PythonBlock[] {
 }
 
 export function buildBrythonAsyncEntrySource(source: string): string {
+  const userBody = buildBrythonTransformedSource(source, { rewriteTopLevelInput: true })
+
+  return `async def __mobcode_user_main__():
+${userBody || '    pass'}
+
+async def __mobcode_run__():
+    try:
+        await __mobcode_user_main__()
+        mobcode_report_done()
+    except SystemExit:
+        mobcode_report_done()
+    except Exception as error:
+        mobcode_report_error(error)
+
+mobcode_run_async(__mobcode_run__())
+`
+}
+
+export function buildBrythonModuleSource(source: string): string {
+  return buildBrythonTransformedSource(source, { rewriteTopLevelInput: false }).replace(/^ {4}/gm, '')
+}
+
+function buildBrythonTransformedSource(
+  source: string,
+  options: { rewriteTopLevelInput: boolean },
+): string {
   const lines = source.split(/\r?\n/)
   const inputBlocks = topLevelPythonBlocks(lines)
     .filter((block) => block.name !== '' && block.containsInput)
@@ -318,7 +344,7 @@ export function buildBrythonAsyncEntrySource(source: string): string {
       rewrittenLine = rewriteInputCallsForAwait(line)
       rewrittenLine = rewriteCallNamesForAwait(rewrittenLine, asyncInputFunctionNames)
       rewrittenLine = rewriteMemberCallNamesForAwait(rewrittenLine, asyncInputMethodNames)
-    } else if (!inFunctionScope) {
+    } else if (!inFunctionScope && options.rewriteTopLevelInput) {
       rewrittenLine = rewriteInputCallsForAwait(line)
       rewrittenLine = rewriteCallNamesForAwait(rewrittenLine, asyncInputFunctionNames)
       rewrittenLine = rewriteMemberCallNamesForAwait(rewrittenLine, asyncInputMethodNames)
@@ -334,20 +360,7 @@ export function buildBrythonAsyncEntrySource(source: string): string {
     ? transformedLines.map((line) => `    ${line}`).join('\n')
     : '    pass'
 
-  return `async def __mobcode_user_main__():
-${userBody || '    pass'}
-
-async def __mobcode_run__():
-    try:
-        await __mobcode_user_main__()
-        mobcode_report_done()
-    except SystemExit:
-        mobcode_report_done()
-    except Exception as error:
-        mobcode_report_error(error)
-
-mobcode_run_async(__mobcode_run__())
-`
+  return userBody
 }
 
 export function buildBrythonRunnerHtml(payload: BrythonRunnerPayload): string {
@@ -355,6 +368,15 @@ export function buildBrythonRunnerHtml(payload: BrythonRunnerPayload): string {
   const entryContent = payload.files[payload.entryFile] ?? ''
   const serializedEntryContent = escapeScriptJson(buildBrythonAsyncEntrySource(entryContent))
   const serializedEntryFile = escapeScriptJson(payload.entryFile)
+  const serializedWorkspaceFiles = escapeScriptJson(payload.files)
+  const serializedWorkspacePythonModules = escapeScriptJson(Object.fromEntries(
+    Object.entries(payload.files)
+      .filter(([path]) => isPythonFile(path))
+      .map(([path, content]) => [
+        path,
+        buildBrythonModuleSource(content),
+      ]),
+  ))
   const entryLineContent = entryContent.replace(/\r?\n$/, '')
   const entryLineCount = entryLineContent ? entryLineContent.split(/\r?\n/).length : 1
   const title = escapeHtml(payload.title)
@@ -586,6 +608,8 @@ import traceback
 entry_filename = ${serializedEntryFile}
 entry_source = ${serializedEntryContent}
 entry_user_line_count = ${entryLineCount}
+workspace_files = ${serializedWorkspaceFiles}
+workspace_python_modules = ${serializedWorkspacePythonModules}
 input_sequence = 0
 input_futures = {}
 original_import = builtins.__import__
@@ -666,17 +690,159 @@ def mobcode_report_error(error):
 def mobcode_run_async(coroutine):
     aio.run(coroutine)
 
+def mobcode_normalize_workspace_path(path):
+    value = str(path).replace('\\\\', '/')
+    if '://' in value or value.startswith('/') or value.startswith('~'):
+        raise ValueError('Path is outside the MobCode workspace: ' + value)
+    parts = []
+    for part in value.split('/'):
+        if part == '' or part == '.':
+            continue
+        if part == '..':
+            raise ValueError('Path is outside the MobCode workspace: ' + value)
+        parts.append(part)
+    return '/'.join(parts)
+
+def mobcode_find_workspace_file(path):
+    normalized_path = mobcode_normalize_workspace_path(path)
+    if normalized_path in workspace_files:
+        return normalized_path
+    entry_dir = entry_filename.rsplit('/', 1)[0] if '/' in entry_filename else ''
+    if entry_dir:
+        entry_relative_path = entry_dir + '/' + normalized_path
+        if entry_relative_path in workspace_files:
+            return entry_relative_path
+    raise FileNotFoundError("No such MobCode workspace file: '" + normalized_path + "'")
+
+class MobCodeReadOnlyFile:
+    def __init__(self, path, content):
+        self.name = path
+        self.closed = False
+        self._content = str(content)
+        self._position = 0
+        self._lines = None
+
+    def _ensure_open(self):
+        if self.closed:
+            raise ValueError('I/O operation on closed file.')
+
+    def readable(self):
+        return True
+
+    def writable(self):
+        return False
+
+    def seekable(self):
+        return True
+
+    def read(self, size=-1):
+        self._ensure_open()
+        if size is None or int(size) < 0:
+            result = self._content[self._position:]
+            self._position = len(self._content)
+            return result
+        end = min(len(self._content), self._position + int(size))
+        result = self._content[self._position:end]
+        self._position = end
+        return result
+
+    def readline(self, size=-1):
+        self._ensure_open()
+        if self._position >= len(self._content):
+            return ''
+        newline_index = self._content.find('\\n', self._position)
+        end = len(self._content) if newline_index == -1 else newline_index + 1
+        if size is not None and int(size) >= 0:
+            end = min(end, self._position + int(size))
+        result = self._content[self._position:end]
+        self._position = end
+        return result
+
+    def readlines(self):
+        self._ensure_open()
+        return list(self)
+
+    def seek(self, offset, whence=0):
+        self._ensure_open()
+        if int(whence) == 0:
+            next_position = int(offset)
+        elif int(whence) == 1:
+            next_position = self._position + int(offset)
+        elif int(whence) == 2:
+            next_position = len(self._content) + int(offset)
+        else:
+            raise ValueError('Invalid whence value.')
+        self._position = max(0, min(len(self._content), next_position))
+        return self._position
+
+    def tell(self):
+        self._ensure_open()
+        return self._position
+
+    def close(self):
+        self.closed = True
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        line = self.readline()
+        if line == '':
+            raise StopIteration
+        return line
+
+    def __enter__(self):
+        self._ensure_open()
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        self.close()
+        return False
+
+def mobcode_open(path, mode='r', buffering=-1, encoding=None, errors=None, newline=None, closefd=True, opener=None):
+    mode_text = str(mode)
+    if mode_text not in ['r', 'rt']:
+        raise ValueError('MobCode workspace files are read-only in the terminal runner.')
+    workspace_path = mobcode_find_workspace_file(path)
+    return MobCodeReadOnlyFile(workspace_path, workspace_files[workspace_path])
+
+def mobcode_module_path(name):
+    return str(name).replace('.', '/') + '.py'
+
+def mobcode_create_workspace_module(name, path):
+    module_type = original_import('types').ModuleType
+    module = module_type(name)
+    module.__file__ = path
+    module.__package__ = name.rsplit('.', 1)[0] if '.' in name else ''
+    sys.modules[name] = module
+    module_globals = module.__dict__
+    module_globals.update({
+        '__builtins__': builtins,
+        'input': mobcode_input,
+        'mobcode_input': mobcode_input,
+    })
+    compiled_module = compile(workspace_python_modules[path], path, 'exec')
+    exec(compiled_module, module_globals)
+    return module
+
 def mobcode_import(name, globals=None, locals=None, fromlist=(), level=0):
     root_name = str(name).split('.', 1)[0]
     if level != 0:
         raise ImportError('Relative imports are not available in the terminal runner yet.')
     if root_name in blocked_import_roots:
         raise ImportError("Module '" + root_name + "' is not available in the terminal runner.")
+    module_name = str(name)
+    if module_name in sys.modules:
+        return sys.modules[module_name]
+    workspace_module_path = mobcode_module_path(module_name)
+    if workspace_module_path in workspace_python_modules:
+        return mobcode_create_workspace_module(module_name, workspace_module_path)
     return original_import(name, globals, locals, fromlist, level)
 
 sys.stdout = MobCodeWorkerOutput('stdout')
 sys.stderr = MobCodeWorkerOutput('stderr')
 builtins.input = mobcode_input
+builtins.open = mobcode_open
 builtins.__import__ = mobcode_import
 
 try:
@@ -690,6 +856,7 @@ try:
         'mobcode_report_done': mobcode_report_done,
         'mobcode_report_error': mobcode_report_error,
         'input': mobcode_input,
+        'open': mobcode_open,
     }
     exec(compiled_code, runner_globals)
 except Exception as error:
