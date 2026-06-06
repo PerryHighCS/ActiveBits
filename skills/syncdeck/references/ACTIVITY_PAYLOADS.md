@@ -266,7 +266,7 @@ Example:
 <section
   data-activity-id="mobcode"
   data-activity-trigger="slide-enter"
-  data-activity-options='{"files":{"src/Main.java":"public class Main {\n  public static void main(String[] args) {\n    System.out.println(\"Hello, MobCode\");\n  }\n}\n","README.md":"Pair on the starter code and explain each change.\n"},"activeFile":"src/Main.java"}'
+  data-activity-options='{"files":{"main.py":"name = input(\"Name? \")\nprint(f\"Hello, {name}!\")\n","README.md":"Pair on the starter code and explain each change.\n"},"activeFile":"main.py","runnerId":"brython-terminal"}'
 >
 ```
 
@@ -274,12 +274,15 @@ Field guidance:
 
 - `files` is an object map of relative virtual paths to UTF-8 text content
 - `activeFile` is optional and should match one of the `files` keys when provided
+- `runnerId` is optional; use `brython-terminal` to preselect the Python popup runner for Python-focused launches
 - paths should be safe relative paths such as `src/Main.java`; paths containing traversal segments such as `../` are rejected and will not load
 - omit `files` to start with an empty MobCode workspace
 
 ### Child embedded launch state
 
 MobCode reads `embeddedLaunch.selectedOptions.files` and `embeddedLaunch.selectedOptions.activeFile` only when the child session is first created without an existing MobCode file tree. After that, the live session state under `groups.default` is authoritative, so later reloads or reconnects do not overwrite instructor edits with the original starter payload.
+
+MobCode also reads `embeddedLaunch.selectedOptions.runnerId` on manager load to preselect the instructor's runner control. The current supported value is `brython-terminal`; unsupported values are ignored and the manager falls back to the default runner.
 
 ## Raffle
 

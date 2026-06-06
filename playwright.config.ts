@@ -17,7 +17,11 @@ const webServerCommand = shouldReuseClientBuild
   : "sh -c 'npm run build --workspace client && npm run start --prefix server'"
 
 export default defineConfig({
-  testDir: './playwright',
+  testDir: './',
+  testMatch: [
+    'playwright/**/*.spec.ts',
+    'activities/*/playwright/**/*.spec.ts',
+  ],
   fullyParallel: true,
   forbidOnly: isCi,
   retries: isCi ? 2 : 0,

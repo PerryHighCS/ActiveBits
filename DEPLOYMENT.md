@@ -180,6 +180,7 @@ When scaling to multiple instances:
 17. **Standalone activity launcher route**: `/launch/:activityId` is a client-owned launcher page. It must remain safe to load because the GET route does not create sessions; session creation still happens through `POST /api/:activityId/create` after the launcher button or explicit `?start=1` client auto-start. Deployments should preserve fallback routing to the SPA for `/launch/...` paths.
 18. **Video Sync natural completion handoff**: When the instructor preview reaches YouTube's natural `ENDED` state, the manager client converts that player event into the same authoritative pause command used for manual pauses. Preserve that browser-to-command path so the server does not continue projecting a finished video as still playing and heartbeat updates do not restart the preview loop.
 19. **SyncDeck embedded manager bootstrap timing**: SyncDeck embedded-start responses can carry child manager bootstrap data such as Video Sync's `instructorPasscode`. The manager must refresh an already-mounted embedded manager iframe after caching that bootstrap payload, because the websocket start broadcast can make the child render before the HTTP start response arrives. Ad-hoc sessions depend on this refresh path because they do not have persistent teacher-cookie recovery. Embedded managers that consume the one-time bootstrap payload must wait until their settled initialization pass before deleting it so React development remounts do not exhaust credentials before the visible iframe is ready.
+20. **MobCode Python runner popup**: The MobCode Python runner opens a same-origin popup and loads Brython from the npm-installed `brython` package through a rate-limited, allowlisted `/vendor/brython/...` route for `brython.min.js`, `brython.js`, and `brython_stdlib.js` before executing the selected Python entry file in the browser. Production deployments must include installed workspace dependencies so those vendor assets are present beside the server process. Interactive terminal `input()` is handled by compiling the entry file into an async worker wrapper and passing prompt responses through worker messages, so it does not require cross-origin-isolated shared memory. The popup includes a Stop control that terminates the active worker, caps terminal output to avoid runaway print loops exhausting the page, blocks direct imports of browser/JavaScript/system escape-hatch modules in the terminal runner profile, preflights unsupported entry imports before Brython attempts browser module loading, rewrites common `time.sleep(...)` calls to an async browser sleep bridge, and exposes only read-only MobCode workspace files through helper imports and `open(...)`.
 
 **To scale horizontally**:
 1. Go to **Settings** → **Scaling**
@@ -288,7 +289,8 @@ When a new deployment is triggered:
 2. **Secure Cookies**: Enabled in production via `NODE_ENV=production`
 3. **Strong Secrets**: Use 32+ character random strings for `PERSISTENT_SESSION_SECRET`
 4. **Rate Limiting**: Built-in for teacher code attempts (5 attempts/minute per IP+hash)
-5. **Valkey Access**: Use internal URLs only (not publicly accessible)
+5. **Reverse Proxy**: In production, the server trusts one proxy hop so Render-forwarded client IPs feed IP-based rate limits.
+6. **Valkey Access**: Use internal URLs only (not publicly accessible)
 
 ## Backup and Recovery
 

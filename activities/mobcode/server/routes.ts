@@ -8,10 +8,12 @@ import type {
   MobCodeEditorPresencePayload,
   MobCodeGroupState,
   MobCodeMessage,
+  MobCodeRunnerId,
   MobCodeSelectionRange,
   MobCodeSessionData,
   MobCodeStatePayload,
 } from '../shared/types.js'
+import { isMobCodeRunnerId } from '../shared/types.js'
 
 interface MobCodeSessionStore extends Pick<SessionStore, 'get' | 'set'> {
   publishBroadcast?: (channel: string, message: Record<string, unknown>) => Promise<void>
@@ -37,6 +39,7 @@ interface SessionScopedWsClient {
 interface EmbeddedMobCodeLaunchOptions {
   files?: unknown
   activeFile?: unknown
+  runnerId?: unknown
 }
 
 const DEFAULT_GROUP_ID = 'default'
@@ -149,6 +152,12 @@ function readEmbeddedStarterState(source: Record<string, unknown>): MobCodeGroup
     files,
     activeFile: resolveActiveFile(files, activeFile),
   }
+}
+
+function readEmbeddedRunnerId(source: Record<string, unknown>): MobCodeRunnerId | null {
+  const embeddedLaunch = isPlainObject(source.embeddedLaunch) ? source.embeddedLaunch : null
+  const selectedOptions = isPlainObject(embeddedLaunch?.selectedOptions) ? embeddedLaunch.selectedOptions : null
+  return isMobCodeRunnerId(selectedOptions?.runnerId) ? selectedOptions.runnerId : null
 }
 
 function resolveActiveFile(files: Record<string, string>, activeFile: unknown): string {
@@ -531,7 +540,14 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
         res.status(404).json({ error: 'Session not found' })
         return
       }
-      res.json({ id: session.id, type: session.type, data: { groups: session.data.groups } })
+      res.json({
+        id: session.id,
+        type: session.type,
+        data: {
+          groups: session.data.groups,
+          runnerId: readEmbeddedRunnerId(session.data),
+        },
+      })
     } catch (error) {
       console.error(JSON.stringify({ event: 'mobcode.fetch-failed', sessionId: req.params.sessionId, error: String(error) }))
       res.status(500).json({ error: 'Failed to fetch session' })

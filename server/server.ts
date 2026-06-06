@@ -1,9 +1,11 @@
 import http from 'node:http'
+import { createRequire } from 'node:module'
 import type { Socket } from 'node:net'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import express from 'express'
 import cookieParser from 'cookie-parser'
+import { rateLimit } from 'express-rate-limit'
 import { createSessionStore, setupSessionRoutes } from './core/sessions.js'
 import { createWsRouter } from './core/wsRouter.js'
 import { initializePersistentStorage } from './core/persistentSessions.js'
@@ -15,10 +17,26 @@ import { isMobCodeJsonRoute, MOB_CODE_JSON_BODY_LIMIT } from './core/jsonBodyPar
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
+const serverRequire = createRequire(import.meta.url)
+const brythonVendorAssetPaths = new Map<string, string>([
+  ['brython.min.js', serverRequire.resolve('brython/brython.min.js')],
+  ['brython.js', serverRequire.resolve('brython/brython.js')],
+  ['brython_stdlib.js', serverRequire.resolve('brython/brython_stdlib.js')],
+])
+const env = process.env.NODE_ENV || 'development'
 
 const app = express()
+if (env === 'production') {
+  app.set('trust proxy', 1)
+}
 const defaultJsonParser = express.json()
 const mobCodeJsonParser = express.json({ limit: MOB_CODE_JSON_BODY_LIMIT })
+const brythonVendorAssetRateLimit = rateLimit({
+  windowMs: 60 * 1000,
+  max: 600,
+  standardHeaders: true,
+  legacyHeaders: false,
+})
 
 app.use((req, res, next) => {
   if (isMobCodeJsonRoute(req.path)) {
@@ -60,8 +78,16 @@ registerStatusRoute({ app, sessions, ws, sessionTtl, valkeyUrl })
 app.get('/health-check', (_req, res) => {
   res.json({ status: 'ok', memory: process.memoryUsage() })
 })
+app.get<{ assetName: string }>('/vendor/brython/:assetName', brythonVendorAssetRateLimit, (req, res) => {
+  const assetName = req.params.assetName
+  const assetPath = brythonVendorAssetPaths.get(assetName)
+  if (!assetPath) {
+    res.status(404).type('text/plain').send('Brython vendor asset not found')
+    return
+  }
+  res.sendFile(assetPath)
+})
 
-const env = process.env.NODE_ENV || 'development'
 if (!env.startsWith('dev')) {
   app.use(express.static(path.join(__dirname, '../client/dist')))
   app.get('/*fallback', (_req, res) => {

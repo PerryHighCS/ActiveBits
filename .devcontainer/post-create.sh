@@ -14,3 +14,10 @@ cd "$workspace_folder" || exit 1
 bash .devcontainer/setup-dev.sh --no-wait-valkey
 
 npm install --workspaces --include-workspace-root
+
+if [[ "${ACTIVEBITS_SKIP_PLAYWRIGHT_WEBKIT_INSTALL:-0}" == "1" ]]; then
+  echo "ℹ️ Skipping Playwright WebKit install (ACTIVEBITS_SKIP_PLAYWRIGHT_WEBKIT_INSTALL=1)."
+else
+  echo "🌐 Installing Playwright WebKit browser and host dependencies..."
+  npx playwright install --with-deps webkit
+fi

@@ -12,6 +12,13 @@
     },
     "noEmit": true
   },
-  "include": ["*/client/**/*", "*/server/**/*", "*/shared/**/*", "*/activity.config.*", "../types/**/*.d.ts"],
+  "include": [
+    "*/client/**/*",
+    "*/server/**/*",
+    "*/shared/**/*",
+    "*/playwright/**/*",
+    "*/activity.config.*",
+    "../types/**/*.d.ts"
+  ],
   "exclude": ["node_modules"]
 }

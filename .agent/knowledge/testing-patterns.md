@@ -320,3 +320,12 @@ Capture reusable test setup patterns, common failure modes, and reliability guid
 - Failure signal: One job quietly diverges onto different install behavior because a copied `Install dependencies` block was edited in some jobs but not others.
 - Follow-up action: Keep the shared install action thin; if install setup later needs outputs or cross-job orchestration, promote it to a reusable workflow instead of reintroducing duplication.
 - Owner: Codex
+
+- Date: 2026-06-06
+- Scope: e2e
+- Pattern: Keep one root Playwright harness, but let it discover activity-owned browser specs under `activities/*/playwright/**/*.spec.ts` in addition to shared root specs under `playwright/**/*.spec.ts`.
+- Why it helps: Activity-specific browser/runtime coverage stays self-contained with the owning activity while still using the repo-standard `npm run test:e2e` server/build setup and Playwright config.
+- Example (file/path): `playwright.config.ts`; `activities/mobcode/playwright/runner.spec.ts`
+- Failure signal: Activity browser specs either require ad hoc commands outside the root harness or pile up in the shared root `playwright/` directory even though the behavior belongs to one activity.
+- Follow-up action: For future activity-owned browser flows, create or extend `activities/<activity-id>/playwright/...` and run them through the root `npm run test:e2e` scripts.
+- Owner: Codex

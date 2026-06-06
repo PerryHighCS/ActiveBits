@@ -79,6 +79,24 @@ void test('SessionHeader leaves popup semantics unset for generic action content
   assert.doesNotMatch(html, /role="menu"/)
 })
 
+void test('SessionHeader can render centered activity controls', () => {
+  const html = renderToStaticMarkup(
+    <MemoryRouter>
+      <SessionHeader
+        activityName="Mob Code"
+        sessionId="abc123"
+        headerActions={<button type="button">Theme</button>}
+        centerHeaderActions={<button type="button">Run</button>}
+      />
+    </MemoryRouter>,
+  )
+
+  assert.match(html, /Theme/)
+  assert.match(html, /Run/)
+  assert.match(html, /md:left-1\/2/)
+  assert.match(html, /justify-center/)
+})
+
 void test('SessionHeader hides join and end controls for embedded child sessions', () => {
   const html = renderToStaticMarkup(
     <MemoryRouter>

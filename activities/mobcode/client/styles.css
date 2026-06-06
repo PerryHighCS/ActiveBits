@@ -24,6 +24,55 @@
   background: #ffffff;
 }
 
+.mobcode-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.mobcode-runner-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
+.mobcode-runner-picker select {
+  min-height: 2.25rem;
+  max-width: 12rem;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  background: #ffffff;
+  padding: 0.35rem 0.65rem;
+  color: #111827;
+  font-size: 0.875rem;
+}
+
+.mobcode-runner-button {
+  min-height: 2.25rem;
+  border: 1px solid #1d4ed8;
+  border-radius: 6px;
+  background: #2563eb;
+  padding: 0.35rem 0.85rem;
+  color: #ffffff;
+  font-size: 0.875rem;
+  font-weight: 700;
+}
+
+.mobcode-runner-button:hover:not(:disabled) {
+  background: #1d4ed8;
+}
+
+.mobcode-runner-button:disabled {
+  border-color: #cbd5e1;
+  background: #e2e8f0;
+  color: #64748b;
+  cursor: not-allowed;
+}
+
 .mobcode-editor-theme-light {
   background: #ffffff;
 }
