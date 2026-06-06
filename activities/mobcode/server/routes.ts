@@ -617,10 +617,11 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
       }
 
       const messageType = readDurableMessageType(body.messageType)
+      const currentLiveGroup = liveGroupsBySession.get(session.id)
       const nextPayload = resolveDurableStatePayload(
         messageType,
         payload,
-        liveGroupsBySession.get(session.id),
+        currentLiveGroup,
         hasOpenManagerSessionClients(
           ws.wss.clients as Iterable<SessionScopedWsClient>,
           session.id,
@@ -628,7 +629,9 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
         ),
       )
       session.data.groups[DEFAULT_GROUP_ID] = nextPayload
-      liveGroupsBySession.set(session.id, nextPayload)
+      if (nextPayload !== currentLiveGroup) {
+        liveGroupsBySession.set(session.id, nextPayload)
+      }
       await sessions.set(session.id, session)
       await broadcast(messageType, nextPayload, session.id)
       res.json({ ok: true })
