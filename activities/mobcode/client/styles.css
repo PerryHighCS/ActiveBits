@@ -42,14 +42,18 @@
   padding: 0.75rem 1rem;
 }
 
-.mobcode-editor-toolbar > :last-child {
-  grid-column: 3;
-  justify-self: end;
+.mobcode-editor-toolbar-start {
+  grid-column: 1;
 }
 
 .mobcode-editor-toolbar-center {
   grid-column: 2;
   justify-self: center;
+}
+
+.mobcode-editor-toolbar-settings {
+  grid-column: 3;
+  justify-self: end;
 }
 
 .mobcode-runner-actions {

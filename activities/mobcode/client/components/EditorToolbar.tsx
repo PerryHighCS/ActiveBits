@@ -40,7 +40,7 @@ export default function EditorToolbar({
 
   return (
     <div className="mobcode-editor-toolbar">
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="mobcode-editor-toolbar-start flex flex-wrap items-center gap-2">
         {!readOnly && (
           <>
             <button
@@ -96,7 +96,9 @@ export default function EditorToolbar({
         {message && <span className="text-sm text-amber-700">{message}</span>}
       </div>
       {centerControls != null && <div className="mobcode-editor-toolbar-center">{centerControls}</div>}
-      <SettingsMenu theme={theme} onThemeChange={onThemeChange} />
+      <div className="mobcode-editor-toolbar-settings">
+        <SettingsMenu theme={theme} onThemeChange={onThemeChange} />
+      </div>
     </div>
   )
 }
