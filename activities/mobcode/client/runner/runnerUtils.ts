@@ -205,41 +205,19 @@ export function buildBrythonRunnerHtml(payload: BrythonRunnerPayload): string {
         this.write(String(value) + '\\n');
       }
     };
-    window.mobcodeRejectInput = (controlBuffer) => {
-      const control = new Int32Array(controlBuffer);
-      Atomics.store(control, 1, 0);
-      Atomics.store(control, 0, 2);
-      Atomics.notify(control, 0, 1);
-    };
     window.mobcodeInputBridge = (() => {
-      const maxInputBytes = 65536;
-      if (
-        typeof Atomics !== 'object' ||
-        typeof TextEncoder !== 'function'
-      ) {
-        return null;
-      }
-      const encoder = new TextEncoder();
-
-      function submitInput(input, value, controlBuffer, dataBuffer) {
-        const control = new Int32Array(controlBuffer);
-        const data = new Uint8Array(dataBuffer);
-        const bytes = encoder.encode(value).slice(0, maxInputBytes);
-        data.fill(0);
-        data.set(bytes);
-        Atomics.store(control, 1, bytes.length);
-        Atomics.store(control, 0, 1);
-        Atomics.notify(control, 0, 1);
+      function submitInput(input, value, requestId, runnerWorker) {
+        runnerWorker.send({
+          type: 'input-response',
+          id: requestId,
+          value,
+        });
         input.replaceWith(document.createTextNode(value + '\\n'));
       }
 
-      function rejectInput(controlBuffer) {
-        window.mobcodeRejectInput(controlBuffer);
-      }
-
       return {
-        request(promptText, controlBuffer, dataBuffer) {
-          if (!controlBuffer || !dataBuffer) {
+        request(requestId, promptText, runnerWorker) {
+          if (!requestId || !runnerWorker) {
             window.mobcodeTerminal.write('\\n[error] Interactive input bridge failed to initialize.\\n');
             return;
           }
@@ -261,13 +239,12 @@ export function buildBrythonRunnerHtml(payload: BrythonRunnerPayload): string {
           input.addEventListener('keydown', (event) => {
             if (event.key !== 'Enter') return;
             event.preventDefault();
-            submitInput(input, input.value, controlBuffer, dataBuffer);
+            submitInput(input, input.value, requestId, runnerWorker);
           });
           terminal.append(input);
           input.focus();
           terminal.scrollTop = terminal.scrollHeight;
         },
-        reject: rejectInput,
       };
     })();
     window.addEventListener('error', (event) => {
@@ -276,21 +253,16 @@ export function buildBrythonRunnerHtml(payload: BrythonRunnerPayload): string {
   </script>
   <script type="text/python" class="webworker" id="mobcode-python-worker">
 from browser import self as worker_self
+from browser import aio, bind
+import ast
 import builtins
 import sys
 import traceback
 
-try:
-    from javascript import Atomics, Int32Array, SharedArrayBuffer, TextDecoder, Uint8Array
-except Exception:
-    Atomics = None
-    Int32Array = None
-    SharedArrayBuffer = None
-    TextDecoder = None
-    Uint8Array = None
-
 entry_filename = ${serializedEntryFile}
 entry_source = ${serializedEntryContent}
+input_sequence = 0
+input_futures = {}
 
 class MobCodeWorkerOutput:
     def __init__(self, message_type):
@@ -304,27 +276,68 @@ class MobCodeWorkerOutput:
         pass
 
 def mobcode_input(prompt=''):
-    if Atomics is None or Int32Array is None or SharedArrayBuffer is None or TextDecoder is None or Uint8Array is None:
-        raise RuntimeError('Interactive input is not available in this browser. Ask the instructor to enable the isolated Python runner input bridge.')
-    control_buffer = SharedArrayBuffer.new(8)
-    data_buffer = SharedArrayBuffer.new(65536)
-    input_control = Int32Array.new(control_buffer)
-    input_data = Uint8Array.new(data_buffer)
-    input_decoder = TextDecoder.new()
-    Atomics.store(input_control, 0, 0)
-    worker_self.send({
-        'type': 'input-request',
-        'prompt': str(prompt),
-        'controlBuffer': control_buffer,
-        'dataBuffer': data_buffer,
-    })
-    wait_result = Atomics.wait(input_control, 0, 0)
-    if wait_result != 'ok':
-        raise RuntimeError('Interactive input was interrupted.')
-    if Atomics.load(input_control, 0) != 1:
-        raise RuntimeError('Interactive input was interrupted.')
-    byte_length = Atomics.load(input_control, 1)
-    return input_decoder.decode(input_data.slice(0, byte_length))
+    global input_sequence
+    input_sequence += 1
+    request_id = str(input_sequence)
+    input_future = aio.Future()
+    input_futures[request_id] = input_future
+    worker_self.send({'type': 'input-request', 'id': request_id, 'prompt': str(prompt)})
+    return input_future
+
+@bind(worker_self, 'message')
+def handle_worker_message(event):
+    message = event.data
+    if hasattr(message, 'to_dict'):
+        message = message.to_dict()
+    if not isinstance(message, dict) or message.get('type') != 'input-response':
+        return
+    request_id = str(message.get('id', ''))
+    input_future = input_futures.pop(request_id, None)
+    if input_future is not None:
+        input_future.set_result(str(message.get('value', '')))
+
+class MobCodeInputTransformer(ast.NodeTransformer):
+    def visit_FunctionDef(self, node):
+        return node
+
+    def visit_AsyncFunctionDef(self, node):
+        return node
+
+    def visit_Call(self, node):
+        self.generic_visit(node)
+        function_name = getattr(node.func, 'id', None)
+        if function_name != 'input':
+            return node
+        return ast.copy_location(ast.Await(value=ast.Call(
+            func=ast.Name(id='mobcode_input', ctx=ast.Load()),
+            args=node.args,
+            keywords=node.keywords,
+        )), node)
+
+def build_runner_module(source):
+    source_module = ast.parse(source, entry_filename, 'exec')
+    transformer = MobCodeInputTransformer()
+    transformed_body = [transformer.visit(node) for node in source_module.body]
+    wrapper_module = ast.parse("""
+async def __mobcode_user_main__():
+    pass
+
+async def __mobcode_run__():
+    try:
+        await __mobcode_user_main__()
+        worker_self.send({'type': 'done'})
+    except SystemExit:
+        worker_self.send({'type': 'done'})
+    except Exception as error:
+        worker_self.send({'type': 'stderr', 'data': format_user_error_header(error)})
+        worker_self.send({'type': 'stderr', 'data': traceback.format_exc()})
+
+aio.run(__mobcode_run__())
+""", entry_filename, 'exec')
+    user_main = wrapper_module.body[0]
+    user_main.body = transformed_body or [ast.Pass()]
+    ast.fix_missing_locations(wrapper_module)
+    return wrapper_module
 
 def find_user_error_line(error):
     traceback_node = getattr(error, '__traceback__', None)
@@ -348,16 +361,15 @@ sys.stderr = MobCodeWorkerOutput('stderr')
 builtins.input = mobcode_input
 
 try:
-    compiled_code = compile(entry_source, entry_filename, 'exec')
-    exec(compiled_code, {
+    compiled_code = compile(build_runner_module(entry_source), entry_filename, 'exec')
+    runner_globals = globals()
+    runner_globals.update({
         '__name__': '__main__',
         '__file__': entry_filename,
         '__builtins__': builtins,
         'input': mobcode_input,
     })
-    worker_self.send({'type': 'done'})
-except SystemExit:
-    worker_self.send({'type': 'done'})
+    exec(compiled_code, runner_globals)
 except Exception as error:
     worker_self.send({'type': 'stderr', 'data': format_user_error_header(error)})
     worker_self.send({'type': 'stderr', 'data': traceback.format_exc()})
@@ -366,8 +378,10 @@ except Exception as error:
 from browser import window, worker
 
 entry_filename = ${serializedEntryFile}
+active_worker = None
 
 def handle_worker_message(event):
+    global active_worker
     message = event.data
     if hasattr(message, 'to_dict'):
         message = message.to_dict()
@@ -382,14 +396,11 @@ def handle_worker_message(event):
         bridge = window.mobcodeInputBridge
         if bridge is None:
             window.mobcodeTerminal.write('\\n[error] Interactive input is not available in this browser.\\n')
-            control_buffer = message.get('controlBuffer')
-            if control_buffer is not None:
-                window.mobcodeRejectInput(control_buffer)
             return
         bridge.request(
+            message.get('id', ''),
             message.get('prompt', ''),
-            message.get('controlBuffer'),
-            message.get('dataBuffer'),
+            active_worker,
         )
 
 def handle_worker_error(error):
@@ -397,7 +408,7 @@ def handle_worker_error(error):
 
 if window.mobcodeRunnerShouldStart():
     window.mobcodeTerminal.write('[Python] Running ' + entry_filename + '\\n')
-    worker.create_worker('mobcode-python-worker', None, handle_worker_message, handle_worker_error)
+    active_worker = worker.create_worker('mobcode-python-worker', None, handle_worker_message, handle_worker_error)
   </script>
   <script>
     if (typeof brython === 'function') {

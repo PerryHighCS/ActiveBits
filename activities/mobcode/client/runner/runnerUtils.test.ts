@@ -78,7 +78,7 @@ void test('buildBrythonRunnerHtml runs user code in a Brython worker', () => {
   assert.match(html, /worker\.create_worker\('mobcode-python-worker', None, handle_worker_message, handle_worker_error\)/)
 })
 
-void test('buildBrythonRunnerHtml wires terminal input through a blocking worker bridge', () => {
+void test('buildBrythonRunnerHtml wires terminal input through async worker messages', () => {
   const html = buildBrythonRunnerHtml({
     files: { 'test.py': 'name = input("Name? ")\nprint(name)\n' },
     entryFile: 'test.py',
@@ -86,10 +86,13 @@ void test('buildBrythonRunnerHtml wires terminal input through a blocking worker
   })
 
   assert.match(html, /window\.mobcodeInputBridge = \(\(\) =>/)
-  assert.match(html, /control_buffer = SharedArrayBuffer\.new\(8\)/)
-  assert.match(html, /data_buffer = SharedArrayBuffer\.new\(65536\)/)
-  assert.match(html, /Atomics\.wait\(input_control, 0, 0\)/)
-  assert.match(html, /'input': mobcode_input/)
+  assert.match(html, /type: 'input-response'/)
+  assert.match(html, /from browser import aio, bind/)
+  assert.match(html, /input_future = aio\.Future\(\)/)
+  assert.match(html, /input_future\.set_result/)
+  assert.match(html, /class MobCodeInputTransformer/)
+  assert.match(html, /ast\.Await/)
+  assert.match(html, /await __mobcode_user_main__\(\)/)
   assert.match(html, /worker_self\.send\(\{\s*'type': 'input-request'/)
   assert.match(html, /message_type == 'input-request'/)
   assert.match(html, /bridge\.request\(/)
@@ -103,11 +106,10 @@ void test('buildBrythonRunnerHtml compiles user code with the entry filename for
   })
 
   assert.match(html, /entry_filename = "test\.py"/)
-  assert.match(html, /compiled_code = compile\(entry_source, entry_filename, 'exec'\)/)
-  assert.match(html, /exec\(compiled_code, \{/)
+  assert.match(html, /compiled_code = compile\(build_runner_module\(entry_source\), entry_filename, 'exec'\)/)
   assert.match(html, /'__file__': entry_filename/)
-  assert.match(html, /'__builtins__': builtins/)
   assert.match(html, /'input': mobcode_input/)
+  assert.match(html, /exec\(compiled_code, runner_globals\)/)
 })
 
 void test('buildBrythonRunnerHtml prints a user-file error header before the raw traceback', () => {
