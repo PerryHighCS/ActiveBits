@@ -15,8 +15,8 @@ import { isMobCodeRunnerId } from '../../shared/types'
 import CodeEditor from '../components/CodeEditor'
 import FileNameModal from '../components/FileNameModal'
 import FileControlsMenuContent from '../components/FileControlsMenuContent'
+import RunnerControls from '../components/RunnerControls'
 import SettingsMenu from '../components/SettingsMenu'
-import RunnerControls from './RunnerControls'
 import { MOB_CODE_MESSAGE_TYPES } from '../utils/constants'
 import {
   clampMobCodeContentEdit,
@@ -46,6 +46,7 @@ import {
   isStatePayload,
   parseMobCodeMessage,
   sendMobCodeWsMessage,
+  shouldApplyRemoteStateMessage,
 } from './managerUtils'
 import { resolveMobCodeInstructorPasscode } from './passcodeUtils'
 import '../styles.css'
@@ -149,6 +150,7 @@ export default function MobCodeManager() {
     onMessage: (event) => {
       const msg = parseMobCodeMessage(event.data)
       if (!msg || !isStatePayload(msg.payload)) return
+      if (!shouldApplyRemoteStateMessage(msg.type, canEdit)) return
       if (msg.type === MOB_CODE_MESSAGE_TYPES.STATE_SYNC || msg.type === MOB_CODE_MESSAGE_TYPES.FILE_TREE_CHANGED) {
         replaceFilesState(msg.payload.files)
         setActiveFile(msg.payload.activeFile)
@@ -474,7 +476,11 @@ export default function MobCodeManager() {
         </div>
       )}
       {runnerMessage && (
-        <div className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800">
+        <div
+          className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800"
+          role="alert"
+          aria-live="assertive"
+        >
           {runnerMessage}
         </div>
       )}

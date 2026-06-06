@@ -57,6 +57,11 @@ export function applyActiveFileChange(current: MobCodeStatePayload, activeFile: 
   }
 }
 
+export function shouldApplyRemoteStateMessage(type: MobCodeMessage['type'], canEdit: boolean): boolean {
+  if (!canEdit) return true
+  return type !== 'state-sync' && type !== 'file-tree-changed'
+}
+
 export function createEditorPresencePayload(
   path: string,
   selections: readonly MobCodeSelectionRange[],

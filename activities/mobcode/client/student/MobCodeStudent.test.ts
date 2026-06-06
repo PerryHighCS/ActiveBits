@@ -2,9 +2,12 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   applyStudentFileContentUpdate,
+  getStudentRunnerOptions,
   resolveStudentActiveFileChange,
   sanitizeStudentPresenceUpdate,
 } from './MobCodeStudent'
+import type { MobCodeRunnerId } from '../../shared/types'
+import type { MobCodeRunnerDefinition } from '../runner/runnerUtils'
 
 void test('applyStudentFileContentUpdate ignores updates for missing paths', () => {
   const files = {
@@ -65,4 +68,24 @@ void test('sanitizeStudentPresenceUpdate keeps in-bounds selections', () => {
       selections: [{ anchor: 1, head: 5 }],
     },
   )
+})
+
+void test('getStudentRunnerOptions exposes only the instructor-selected runner', () => {
+  const pythonRunner: MobCodeRunnerDefinition = {
+    id: 'brython-terminal',
+    label: 'Python Terminal',
+    description: 'Run Python',
+  }
+  const futureRunner: MobCodeRunnerDefinition = {
+    id: 'future-runner' as MobCodeRunnerId,
+    label: 'Future Runner',
+    description: 'Not here yet',
+  }
+
+  assert.deepEqual(getStudentRunnerOptions('brython-terminal', [pythonRunner, futureRunner]), [pythonRunner])
+  assert.deepEqual(getStudentRunnerOptions('missing-runner' as MobCodeRunnerId, [pythonRunner]), [{
+    id: 'missing-runner' as MobCodeRunnerId,
+    label: 'Unavailable runner',
+    description: 'The instructor-selected runner is not available in this browser.',
+  }])
 })

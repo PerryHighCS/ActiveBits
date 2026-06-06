@@ -1,0 +1,90 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+language: "en-US"
+early_access: false
+reviews:
+  profile: "assertive"
+  request_changes_workflow: false
+  high_level_summary: true
+  poem: false
+  review_status: true
+  review_details: false
+  auto_review:
+    enabled: true
+    drafts: false
+    base_branches:
+      - ".*"
+  path_filters:
+    - "!**/.github/**"
+    - "!**/dist/**"
+    - "!**/node_modules/**"
+    - "!**/test-results/**"
+  path_instructions:
+    - path: "client/src/**/*.{ts,tsx}"
+      instructions: |
+        This is the shared React/Vite client workspace. Review for React 19 and TypeScript correctness, accessibility semantics, route/session behavior, and browser security issues such as XSS, unsafe URL handling, and accidental credential exposure.
+        Treat accessibility as a release requirement: require native semantic controls where possible; icon-only controls must have accessible names; expanded/pressed/selected/disabled/invalid/busy state must be exposed through native attributes or appropriate ARIA.
+        Check keyboard access, focus order, focus restoration after dialogs/menus, visible focus indicators, labels/descriptions for form controls, and that visual-only state is not the only signal.
+        Keep this workspace activity-agnostic: shared client modules may define generic contracts, but should not import implementation files from `activities/<activity-id>/...`.
+        Prefer focused unit tests under `client/src` for shared helpers/components; use root Playwright coverage when changes cross routing, storage, fetch, websocket, or activity-loading boundaries.
+
+    - path: "server/**/*.{ts,tsx}"
+      instructions: |
+        This is the Express/WebSocket server workspace. Review runtime-resolvable imports, structured error handling/logging, auth/session boundaries, websocket lifecycle behavior, rate limiting, and production deployment behavior on Render.
+        Do not rely on bundler-only import behavior in server/runtime paths. Server dependencies that are used at runtime should be declared in `server/package.json`.
+        Watch for sensitive data exposure in logs, responses, URLs, cookies, websocket query strings, and persisted session data.
+
+    - path: "activities/*/client/**/*.{ts,tsx,css}"
+      instructions: |
+        This is activity-owned client code. Activity-specific behavior should stay inside its activity folder and should not require one-off conditionals in shared client modules.
+        Review manager/student role separation, accessibility, keyboard behavior, responsive layout, state synchronization, websocket/fetch cleanup, and whether user-facing workflow changes have activity-local unit or Playwright coverage.
+        Treat accessibility as a release requirement: require native semantic controls where possible; icon-only controls must have accessible names; expanded/pressed/selected/disabled/invalid/busy state must be exposed through native attributes or appropriate ARIA.
+        Check keyboard access, focus order, focus restoration after dialogs/menus/popups, visible focus indicators, labels/descriptions for form controls, and that visual-only state is not the only signal.
+        Prefer reusable seams inside the activity for tests. Browser-level tests that exercise the activity should live under `activities/<activity-id>/playwright`.
+
+    - path: "activities/*/server/**/*.ts"
+      instructions: |
+        This is activity-owned server code. Review route validation, authorization, session mutation safety, websocket message validation, structured logging, and whether server-side state normalization preserves existing sessions.
+        Activity server routes should be self-contained and should not introduce activity-specific assumptions into shared server core unless there is a generic contract.
+        Tests should usually live beside the activity server code and should cover invalid input, auth failure, and persistence/broadcast edge cases.
+
+    - path: "activities/*/shared/**/*.ts"
+      instructions: |
+        This is activity-owned shared client/server contract code. Review for backward-compatible payload changes, narrow type guards, and validation helpers that both sides can rely on.
+        If a SyncDeck-embedded activity launch format changes, ensure `skills/syncdeck/references/ACTIVITY_PAYLOADS.md` is updated in the same branch.
+
+    - path: "activities/*/activity.config.{ts,js}"
+      instructions: |
+        This declares activity metadata and entry points. Review production surfacing, standalone/permalink flags, utility route exposure, manager/student layout choices, and whether new visible routes have appropriate tests or documentation.
+        Avoid central registry changes when auto-discovery should be sufficient.
+
+    - path: "activities/*/playwright/**/*.ts"
+      instructions: |
+        These are activity-local Playwright tests. Review that tests use the shared root Playwright harness and remain under the activity they exercise.
+        Prefer realistic browser flows for routing, fetch, storage, websocket, popup, and runtime-runner behavior. Avoid brittle timing sleeps; use locators, events, and explicit assertions.
+
+    - path: "playwright/**/*.ts"
+      instructions: |
+        This is the shared root Playwright harness. Review server startup assumptions, browser project configuration, secret handling, local port use, and cross-activity test reliability.
+        Activity-specific tests should generally live under `activities/<activity-id>/playwright`; root Playwright files should stay generic harness/config utilities.
+
+    - path: "types/**/*.ts"
+      instructions: |
+        This workspace defines shared repository contracts. Review for backward compatibility, explicit interfaces, and whether changes affect both client and server consumers.
+        Avoid activity-specific types here unless they are part of a generic extension point.
+
+    - path: "scripts/**/*.{ts,js,mjs,sh}"
+      instructions: |
+        This is repository tooling. Review cross-platform assumptions, Node 24/npm workspace behavior, shell safety, and whether scripts avoid destructive operations or generated-output churn.
+        Scripts that enforce repository invariants should have clear failure messages and should be reflected in README/AGENTS/knowledge notes when relevant.
+
+    - path: ".devcontainer/**/*"
+      instructions: |
+        This affects contributor and CI-like development environments. Review host dependency installs, browser/Playwright compatibility, privilege model, and opt-out environment variables.
+        Keep default devcontainer behavior least-privilege unless a documented tool requires otherwise.
+
+    - path: "*.{json,jsonc,ts,js,mjs,cjs,yml,yaml}"
+      instructions: |
+        This is repository-root configuration. Review npm workspace consistency, Node 24 engine alignment, TypeScript/ESLint/Playwright config drift, and whether package-lock changes match package.json changes.
+        Changes to runtime, build, or deployment behavior should update `README.md`, `ARCHITECTURE.md`, or `DEPLOYMENT.md` as appropriate.
+chat:
+  auto_reply: true

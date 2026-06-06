@@ -3,8 +3,10 @@ import test from 'node:test'
 import type { SessionRecord } from 'activebits-server/core/sessions.js'
 import {
   applyWsRelayMessageToGroupState,
+  hasOpenManagerSessionClients,
   hasOpenSessionClients,
   normalizeMobCodeSessionData,
+  resolveDurableStatePayload,
   resolveWsValidationGroupState,
   readDurableMessageType,
   readStatePayload,
@@ -559,6 +561,47 @@ void test('resolveWsValidationGroupState prefers live ws state over persisted se
   assert.deepEqual(resolveWsValidationGroupState(undefined, undefined), { files: {}, activeFile: '' })
 })
 
+void test('resolveDurableStatePayload merges requested tree changes with live edits while a manager is active', () => {
+  const requestedPayload = {
+    files: {
+      'src/Main.java': 'stale persisted snapshot',
+      'src/New.java': 'new file from tree change',
+    },
+    activeFile: 'src/New.java',
+  }
+  const liveGroup = {
+    files: {
+      'src/Main.java': 'newer live edit',
+      'src/Deleted.java': 'deleted live file should not return',
+    },
+    activeFile: 'src/Main.java',
+  }
+
+  const mergedPayload = {
+    files: {
+      'src/Main.java': 'newer live edit',
+      'src/New.java': 'new file from tree change',
+    },
+    activeFile: 'src/Main.java',
+  }
+
+  assert.deepEqual(resolveDurableStatePayload('state-sync', requestedPayload, liveGroup, true), mergedPayload)
+  assert.deepEqual(resolveDurableStatePayload('state-sync', requestedPayload, liveGroup, false), requestedPayload)
+  assert.deepEqual(resolveDurableStatePayload('state-sync', requestedPayload, undefined, true), requestedPayload)
+  assert.deepEqual(resolveDurableStatePayload('file-tree-changed', requestedPayload, liveGroup, true), mergedPayload)
+  assert.deepEqual(
+    resolveDurableStatePayload('file-tree-changed', {
+      files: { 'src/New.java': 'new file from tree change' },
+      activeFile: 'src/New.java',
+    }, liveGroup, true),
+    {
+      files: { 'src/New.java': 'new file from tree change' },
+      activeFile: 'src/New.java',
+    },
+  )
+  assert.deepEqual(resolveDurableStatePayload('file-tree-changed', requestedPayload, liveGroup, false), requestedPayload)
+})
+
 void test('websocket relay updates live validation state without mutating session data in place', async () => {
   const app = createMockApp()
   const ws = createMockWs()
@@ -627,6 +670,28 @@ void test('hasOpenSessionClients only retains live ws state when a session still
       { readyState: 1, sessionId: 'session-b' },
     ], 'session-a'),
     false,
+  )
+})
+
+void test('hasOpenManagerSessionClients requires an authenticated open manager socket for the session', () => {
+  assert.equal(
+    hasOpenManagerSessionClients([
+      { readyState: 1, sessionId: 'session-a', mobCodeRole: 'student', instructorPasscode: 'secret' },
+      { readyState: 1, sessionId: 'session-b', mobCodeRole: 'manager', instructorPasscode: 'secret' },
+    ], 'session-a', 'secret'),
+    false,
+  )
+  assert.equal(
+    hasOpenManagerSessionClients([
+      { readyState: 1, sessionId: 'session-a', mobCodeRole: 'manager', instructorPasscode: 'wrong' },
+    ], 'session-a', 'secret'),
+    false,
+  )
+  assert.equal(
+    hasOpenManagerSessionClients([
+      { readyState: 1, sessionId: 'session-a', mobCodeRole: 'manager', instructorPasscode: 'secret' },
+    ], 'session-a', 'secret'),
+    true,
   )
 })
 

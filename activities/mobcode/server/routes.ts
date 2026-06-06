@@ -34,6 +34,8 @@ interface MobCodeSocket extends ActiveBitsWebSocket {
 interface SessionScopedWsClient {
   readyState: number
   sessionId?: string | null
+  mobCodeRole?: 'manager' | 'student'
+  instructorPasscode?: string | null
 }
 
 interface EmbeddedMobCodeLaunchOptions {
@@ -356,12 +358,57 @@ export function resolveWsValidationGroupState(
   return liveGroup ?? persistedGroup ?? { files: {}, activeFile: '' }
 }
 
+function mergeDurableStatePayload(
+  requestedPayload: MobCodeStatePayload,
+  liveGroup: MobCodeGroupState,
+): MobCodeStatePayload {
+  const mergedFiles = Object.fromEntries(
+    Object.entries(requestedPayload.files).map(([path, content]) => [
+      path,
+      Object.hasOwn(liveGroup.files, path) ? liveGroup.files[path] ?? content : content,
+    ]),
+  )
+  return {
+    files: mergedFiles,
+    activeFile: Object.hasOwn(mergedFiles, liveGroup.activeFile) ? liveGroup.activeFile : requestedPayload.activeFile,
+  }
+}
+
+export function resolveDurableStatePayload(
+  messageType: MobCodeMessage['type'],
+  requestedPayload: MobCodeStatePayload,
+  liveGroup: MobCodeGroupState | undefined,
+  hasActiveManager: boolean,
+): MobCodeStatePayload {
+  if (!liveGroup || !hasActiveManager) return requestedPayload
+  if (messageType === 'state-sync' || messageType === 'file-tree-changed') return mergeDurableStatePayload(requestedPayload, liveGroup)
+  return requestedPayload
+}
+
 export function hasOpenSessionClients(
   clients: Iterable<SessionScopedWsClient>,
   sessionId: string,
 ): boolean {
   for (const client of clients) {
     if (client.readyState === WS_OPEN && client.sessionId === sessionId) {
+      return true
+    }
+  }
+  return false
+}
+
+export function hasOpenManagerSessionClients(
+  clients: Iterable<SessionScopedWsClient>,
+  sessionId: string,
+  instructorPasscode: string | undefined,
+): boolean {
+  for (const client of clients) {
+    if (
+      client.readyState === WS_OPEN &&
+      client.sessionId === sessionId &&
+      client.mobCodeRole === 'manager' &&
+      verifyPasscode(instructorPasscode, client.instructorPasscode)
+    ) {
       return true
     }
   }
@@ -574,10 +621,24 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
         return
       }
 
-      session.data.groups[DEFAULT_GROUP_ID] = payload
-      liveGroupsBySession.set(session.id, payload)
+      const messageType = readDurableMessageType(body.messageType)
+      const currentLiveGroup = liveGroupsBySession.get(session.id)
+      const nextPayload = resolveDurableStatePayload(
+        messageType,
+        payload,
+        currentLiveGroup,
+        hasOpenManagerSessionClients(
+          ws.wss.clients as Iterable<SessionScopedWsClient>,
+          session.id,
+          session.data.instructorPasscode,
+        ),
+      )
+      session.data.groups[DEFAULT_GROUP_ID] = nextPayload
+      if (nextPayload !== currentLiveGroup) {
+        liveGroupsBySession.set(session.id, nextPayload)
+      }
       await sessions.set(session.id, session)
-      await broadcast(readDurableMessageType(body.messageType), payload, session.id)
+      await broadcast(messageType, nextPayload, session.id)
       res.json({ ok: true })
     } catch (error) {
       console.error(JSON.stringify({ event: 'mobcode.state-failed', sessionId: req.params.sessionId, error: String(error) }))

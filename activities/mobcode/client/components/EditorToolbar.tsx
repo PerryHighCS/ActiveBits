@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react'
+import type { ReactNode } from 'react'
 import type { MobCodeThemeId } from '../../shared/types'
 import SettingsMenu from './SettingsMenu'
 import { buildZipBlob, extractZipFiles } from '../utils/zipUtils'
@@ -7,6 +8,7 @@ interface EditorToolbarProps {
   files: Record<string, string>
   readOnly?: boolean
   theme: MobCodeThemeId
+  centerControls?: ReactNode
   onThemeChange: (theme: MobCodeThemeId) => void
   onUploadFiles?: (files: Record<string, string>) => void
   onCreateFile?: () => void
@@ -17,6 +19,7 @@ export default function EditorToolbar({
   files,
   readOnly = false,
   theme,
+  centerControls,
   onThemeChange,
   onUploadFiles,
   onCreateFile,
@@ -36,8 +39,8 @@ export default function EditorToolbar({
   }
 
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 bg-white px-4 py-3">
-      <div className="flex flex-wrap items-center gap-2">
+    <div className="mobcode-editor-toolbar">
+      <div className="mobcode-editor-toolbar-start flex flex-wrap items-center gap-2">
         {!readOnly && (
           <>
             <button
@@ -92,7 +95,10 @@ export default function EditorToolbar({
         </button>
         {message && <span className="text-sm text-amber-700">{message}</span>}
       </div>
-      <SettingsMenu theme={theme} onThemeChange={onThemeChange} />
+      {centerControls != null && <div className="mobcode-editor-toolbar-center">{centerControls}</div>}
+      <div className="mobcode-editor-toolbar-settings">
+        <SettingsMenu theme={theme} onThemeChange={onThemeChange} />
+      </div>
     </div>
   )
 }
