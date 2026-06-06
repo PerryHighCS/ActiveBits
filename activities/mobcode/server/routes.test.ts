@@ -567,7 +567,7 @@ void test('resolveDurableStatePayload only prefers live edits while a manager is
       'src/Main.java': 'stale persisted snapshot',
       'src/New.java': 'new file from tree change',
     },
-    activeFile: 'src/Main.java',
+    activeFile: 'src/New.java',
   }
   const liveGroup = {
     files: {
@@ -587,6 +587,16 @@ void test('resolveDurableStatePayload only prefers live edits while a manager is
     },
     activeFile: 'src/Main.java',
   })
+  assert.deepEqual(
+    resolveDurableStatePayload('file-tree-changed', {
+      files: { 'src/New.java': 'new file from tree change' },
+      activeFile: 'src/New.java',
+    }, liveGroup, true),
+    {
+      files: { 'src/New.java': 'new file from tree change' },
+      activeFile: 'src/New.java',
+    },
+  )
   assert.deepEqual(resolveDurableStatePayload('file-tree-changed', requestedPayload, liveGroup, false), requestedPayload)
 })
 

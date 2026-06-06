@@ -367,14 +367,15 @@ export function resolveDurableStatePayload(
   if (!liveGroup || !hasActiveManager) return requestedPayload
   if (messageType === 'state-sync') return liveGroup
   if (messageType === 'file-tree-changed') {
+    const mergedFiles = Object.fromEntries(
+      Object.entries(requestedPayload.files).map(([path, content]) => [
+        path,
+        Object.hasOwn(liveGroup.files, path) ? liveGroup.files[path] ?? content : content,
+      ]),
+    )
     return {
-      files: Object.fromEntries(
-        Object.entries(requestedPayload.files).map(([path, content]) => [
-          path,
-          Object.hasOwn(liveGroup.files, path) ? liveGroup.files[path] ?? content : content,
-        ]),
-      ),
-      activeFile: requestedPayload.activeFile,
+      files: mergedFiles,
+      activeFile: Object.hasOwn(mergedFiles, liveGroup.activeFile) ? liveGroup.activeFile : requestedPayload.activeFile,
     }
   }
   return requestedPayload
