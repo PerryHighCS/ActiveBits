@@ -15,6 +15,15 @@ Track security-relevant boundaries, risks, and mitigation decisions.
 
 ## Notes
 
+- Date: 2026-06-06
+- Area: MobCode Brython vendor assets
+- Threat or risk: The Python runner needs same-origin Brython JavaScript files, and file-serving routes without rate limiting can be abused for repeated filesystem-backed reads.
+- Control or mitigation: `/vendor/brython/:assetName` now uses `express-rate-limit` before serving an allowlist of Brython assets (`brython.min.js`, `brython.js`, `brython_stdlib.js`) from the npm package.
+- Residual risk: The route still serves public static runtime code and depends on `node_modules/brython` being present beside the server process, but requests outside the allowlist fall through and high-volume access is throttled.
+- Validation (test/review/path): `server/server.ts`; `npm --workspace server run lint`; `npm --workspace server run typecheck`.
+- Follow-up action: If more vendor assets are exposed later, keep them behind explicit allowlists and shared rate-limited middleware instead of broad package-directory static routes.
+- Owner: Codex
+
 - Date: 2026-06-04
 - Area: mobcode zip/file import
 - Threat or risk: Client-side zip/file imports that allocate full file buffers before enforcing size caps can freeze the tab or exhaust memory with oversized plain files or highly compressed zip entries.

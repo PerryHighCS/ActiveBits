@@ -4,6 +4,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import express from 'express'
 import cookieParser from 'cookie-parser'
+import { rateLimit } from 'express-rate-limit'
 import { createSessionStore, setupSessionRoutes } from './core/sessions.js'
 import { createWsRouter } from './core/wsRouter.js'
 import { initializePersistentStorage } from './core/persistentSessions.js'
@@ -21,6 +22,12 @@ const brythonPackageRoot = path.join(repoRoot, 'node_modules/brython')
 const app = express()
 const defaultJsonParser = express.json()
 const mobCodeJsonParser = express.json({ limit: MOB_CODE_JSON_BODY_LIMIT })
+const brythonVendorAssetRateLimit = rateLimit({
+  windowMs: 60 * 1000,
+  max: 600,
+  standardHeaders: true,
+  legacyHeaders: false,
+})
 
 app.use((req, res, next) => {
   if (isMobCodeJsonRoute(req.path)) {
@@ -62,7 +69,7 @@ registerStatusRoute({ app, sessions, ws, sessionTtl, valkeyUrl })
 app.get('/health-check', (_req, res) => {
   res.json({ status: 'ok', memory: process.memoryUsage() })
 })
-app.get('/vendor/brython/:assetName', (req, res, next) => {
+app.get('/vendor/brython/:assetName', brythonVendorAssetRateLimit, (req, res, next) => {
   const assetName = req.params.assetName
   if (assetName !== 'brython.min.js' && assetName !== 'brython.js' && assetName !== 'brython_stdlib.js') {
     next()
