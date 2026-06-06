@@ -320,18 +320,14 @@ export function buildBrythonRunnerHtml(payload: BrythonRunnerPayload): string {
       }
     };
     window.mobcodeInputBridge = (() => {
-      function submitInput(input, value, requestId, runnerWorker) {
-        runnerWorker.send({
-          type: 'input-response',
-          id: requestId,
-          value,
-        });
+      function submitInput(input, value, requestId, submitInputResponse) {
+        submitInputResponse(requestId, value);
         input.replaceWith(document.createTextNode(value + '\\n'));
       }
 
       return {
-        request(requestId, promptText, runnerWorker) {
-          if (!requestId || !runnerWorker) {
+        request(requestId, promptText, submitInputResponse) {
+          if (!requestId || typeof submitInputResponse !== 'function') {
             window.mobcodeTerminal.write('\\n[error] Interactive input bridge failed to initialize.\\n');
             return;
           }
@@ -353,7 +349,7 @@ export function buildBrythonRunnerHtml(payload: BrythonRunnerPayload): string {
           input.addEventListener('keydown', (event) => {
             if (event.key !== 'Enter') return;
             event.preventDefault();
-            submitInput(input, input.value, requestId, runnerWorker);
+            submitInput(input, input.value, requestId, submitInputResponse);
           });
           terminal.append(input);
           input.focus();
@@ -454,6 +450,20 @@ from browser import window, worker
 entry_filename = ${serializedEntryFile}
 active_worker = None
 
+def handle_worker_ready(runner_worker):
+    global active_worker
+    active_worker = runner_worker
+
+def submit_input_response(request_id, value):
+    if active_worker is None:
+        window.mobcodeTerminal.write('\\n[error] Python runner is not ready for input.\\n')
+        return
+    active_worker.send({
+        'type': 'input-response',
+        'id': str(request_id),
+        'value': str(value),
+    })
+
 def handle_worker_message(event):
     global active_worker
     message = event.data
@@ -474,7 +484,7 @@ def handle_worker_message(event):
         bridge.request(
             message.get('id', ''),
             message.get('prompt', ''),
-            active_worker,
+            submit_input_response,
         )
 
 def handle_worker_error(error):
@@ -482,7 +492,7 @@ def handle_worker_error(error):
 
 if window.mobcodeRunnerShouldStart():
     window.mobcodeTerminal.write('[Python] Running ' + entry_filename + '\\n')
-    active_worker = worker.create_worker('mobcode-python-worker', None, handle_worker_message, handle_worker_error)
+    worker.create_worker('mobcode-python-worker', handle_worker_ready, handle_worker_message, handle_worker_error)
   </script>
   <script>
     if (typeof brython === 'function') {

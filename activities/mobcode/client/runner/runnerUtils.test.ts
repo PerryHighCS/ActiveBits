@@ -76,7 +76,8 @@ void test('buildBrythonRunnerHtml runs user code in a Brython worker', () => {
   assert.match(html, /class="webworker" id="mobcode-python-worker"/)
   assert.match(html, /from browser import self as worker_self/)
   assert.match(html, /worker_self\.send\(\{'type': self\.message_type, 'data': str\(data\)\}\)/)
-  assert.match(html, /worker\.create_worker\('mobcode-python-worker', None, handle_worker_message, handle_worker_error\)/)
+  assert.match(html, /def handle_worker_ready\(runner_worker\):/)
+  assert.match(html, /worker\.create_worker\('mobcode-python-worker', handle_worker_ready, handle_worker_message, handle_worker_error\)/)
 })
 
 void test('buildBrythonRunnerHtml wires terminal input through async worker messages', () => {
@@ -87,7 +88,7 @@ void test('buildBrythonRunnerHtml wires terminal input through async worker mess
   })
 
   assert.match(html, /window\.mobcodeInputBridge = \(\(\) =>/)
-  assert.match(html, /type: 'input-response'/)
+  assert.match(html, /'type': 'input-response'/)
   assert.match(html, /from browser import aio, bind/)
   assert.match(html, /input_future = aio\.Future\(\)/)
   assert.match(html, /input_future\.set_result/)
@@ -95,6 +96,8 @@ void test('buildBrythonRunnerHtml wires terminal input through async worker mess
   assert.match(html, /name = await mobcode_input/)
   assert.match(html, /await __mobcode_user_main__\(\)/)
   assert.match(html, /worker_self\.send\(\{\s*'type': 'input-request'/)
+  assert.match(html, /def submit_input_response\(request_id, value\):/)
+  assert.match(html, /active_worker\.send\(\{/)
   assert.match(html, /message_type == 'input-request'/)
   assert.match(html, /bridge\.request\(/)
 })
