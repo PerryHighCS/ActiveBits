@@ -227,7 +227,7 @@ export default function MobCodeStudent({ sessionData }: MobCodeStudentProps) {
             <RunnerControls
               files={files}
               runnerId={runnerId}
-              runners={studentRunners.length > 0 ? studentRunners : MOB_CODE_RUNNERS}
+              runners={studentRunners}
               onRunCode={handleRunCode}
               onRunnerChange={setRunnerId}
             />
