@@ -35,6 +35,7 @@ interface SessionScopedWsClient {
   readyState: number
   sessionId?: string | null
   mobCodeRole?: 'manager' | 'student'
+  instructorPasscode?: string | null
 }
 
 interface EmbeddedMobCodeLaunchOptions {
@@ -363,7 +364,20 @@ export function resolveDurableStatePayload(
   liveGroup: MobCodeGroupState | undefined,
   hasActiveManager: boolean,
 ): MobCodeStatePayload {
-  return messageType === 'state-sync' && liveGroup && hasActiveManager ? liveGroup : requestedPayload
+  if (!liveGroup || !hasActiveManager) return requestedPayload
+  if (messageType === 'state-sync') return liveGroup
+  if (messageType === 'file-tree-changed') {
+    return {
+      files: Object.fromEntries(
+        Object.entries(requestedPayload.files).map(([path, content]) => [
+          path,
+          Object.hasOwn(liveGroup.files, path) ? liveGroup.files[path] ?? content : content,
+        ]),
+      ),
+      activeFile: requestedPayload.activeFile,
+    }
+  }
+  return requestedPayload
 }
 
 export function hasOpenSessionClients(
@@ -381,9 +395,15 @@ export function hasOpenSessionClients(
 export function hasOpenManagerSessionClients(
   clients: Iterable<SessionScopedWsClient>,
   sessionId: string,
+  instructorPasscode: string | undefined,
 ): boolean {
   for (const client of clients) {
-    if (client.readyState === WS_OPEN && client.sessionId === sessionId && client.mobCodeRole === 'manager') {
+    if (
+      client.readyState === WS_OPEN &&
+      client.sessionId === sessionId &&
+      client.mobCodeRole === 'manager' &&
+      verifyPasscode(instructorPasscode, client.instructorPasscode)
+    ) {
       return true
     }
   }
@@ -601,7 +621,11 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
         messageType,
         payload,
         liveGroupsBySession.get(session.id),
-        hasOpenManagerSessionClients(ws.wss.clients as Iterable<SessionScopedWsClient>, session.id),
+        hasOpenManagerSessionClients(
+          ws.wss.clients as Iterable<SessionScopedWsClient>,
+          session.id,
+          session.data.instructorPasscode,
+        ),
       )
       session.data.groups[DEFAULT_GROUP_ID] = nextPayload
       liveGroupsBySession.set(session.id, nextPayload)

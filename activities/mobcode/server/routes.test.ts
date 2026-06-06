@@ -563,18 +563,31 @@ void test('resolveWsValidationGroupState prefers live ws state over persisted se
 
 void test('resolveDurableStatePayload only prefers live edits while a manager is active', () => {
   const requestedPayload = {
-    files: { 'src/Main.java': 'stale persisted snapshot' },
+    files: {
+      'src/Main.java': 'stale persisted snapshot',
+      'src/New.java': 'new file from tree change',
+    },
     activeFile: 'src/Main.java',
   }
   const liveGroup = {
-    files: { 'src/Main.java': 'newer live edit' },
+    files: {
+      'src/Main.java': 'newer live edit',
+      'src/Deleted.java': 'deleted live file should not return',
+    },
     activeFile: 'src/Main.java',
   }
 
   assert.deepEqual(resolveDurableStatePayload('state-sync', requestedPayload, liveGroup, true), liveGroup)
   assert.deepEqual(resolveDurableStatePayload('state-sync', requestedPayload, liveGroup, false), requestedPayload)
   assert.deepEqual(resolveDurableStatePayload('state-sync', requestedPayload, undefined, true), requestedPayload)
-  assert.deepEqual(resolveDurableStatePayload('file-tree-changed', requestedPayload, liveGroup, true), requestedPayload)
+  assert.deepEqual(resolveDurableStatePayload('file-tree-changed', requestedPayload, liveGroup, true), {
+    files: {
+      'src/Main.java': 'newer live edit',
+      'src/New.java': 'new file from tree change',
+    },
+    activeFile: 'src/Main.java',
+  })
+  assert.deepEqual(resolveDurableStatePayload('file-tree-changed', requestedPayload, liveGroup, false), requestedPayload)
 })
 
 void test('websocket relay updates live validation state without mutating session data in place', async () => {
@@ -648,18 +661,24 @@ void test('hasOpenSessionClients only retains live ws state when a session still
   )
 })
 
-void test('hasOpenManagerSessionClients requires an open manager socket for the session', () => {
+void test('hasOpenManagerSessionClients requires an authenticated open manager socket for the session', () => {
   assert.equal(
     hasOpenManagerSessionClients([
-      { readyState: 1, sessionId: 'session-a', mobCodeRole: 'student' },
-      { readyState: 1, sessionId: 'session-b', mobCodeRole: 'manager' },
-    ], 'session-a'),
+      { readyState: 1, sessionId: 'session-a', mobCodeRole: 'student', instructorPasscode: 'secret' },
+      { readyState: 1, sessionId: 'session-b', mobCodeRole: 'manager', instructorPasscode: 'secret' },
+    ], 'session-a', 'secret'),
     false,
   )
   assert.equal(
     hasOpenManagerSessionClients([
-      { readyState: 1, sessionId: 'session-a', mobCodeRole: 'manager' },
-    ], 'session-a'),
+      { readyState: 1, sessionId: 'session-a', mobCodeRole: 'manager', instructorPasscode: 'wrong' },
+    ], 'session-a', 'secret'),
+    false,
+  )
+  assert.equal(
+    hasOpenManagerSessionClients([
+      { readyState: 1, sessionId: 'session-a', mobCodeRole: 'manager', instructorPasscode: 'secret' },
+    ], 'session-a', 'secret'),
     true,
   )
 })
