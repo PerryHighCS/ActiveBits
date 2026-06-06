@@ -33,6 +33,11 @@ interface BrythonRunnerPayload {
   title: string
 }
 
+interface MobCodeImportDiagnostic {
+  line: number
+  moduleName: string
+}
+
 export const MOB_CODE_RUNNERS: readonly MobCodeRunnerDefinition[] = [
   {
     id: 'brython-terminal',
@@ -43,6 +48,48 @@ export const MOB_CODE_RUNNERS: readonly MobCodeRunnerDefinition[] = [
 
 export const DEFAULT_MOB_CODE_RUNNER_ID: MobCodeRunnerId = 'brython-terminal'
 const RUNNER_POPUP_FEATURES = 'popup=yes,width=1120,height=760,noopener,noreferrer'
+const TERMINAL_BLOCKED_IMPORT_ROOTS = [
+  'browser',
+  'javascript',
+  'os',
+  'pathlib',
+  'importlib',
+  'sys',
+  'subprocess',
+  'socket',
+  'asyncio',
+  'threading',
+  'multiprocessing',
+  'webbrowser',
+  'getpass',
+]
+const TERMINAL_ALLOWED_IMPORT_ROOTS = [
+  'array',
+  'bisect',
+  'calendar',
+  'cmath',
+  'collections',
+  'copy',
+  'csv',
+  'datetime',
+  'decimal',
+  'fractions',
+  'functools',
+  'heapq',
+  'itertools',
+  'json',
+  'math',
+  'operator',
+  'pprint',
+  'random',
+  're',
+  'statistics',
+  'string',
+  'time',
+  'types',
+]
+const TERMINAL_BLOCKED_IMPORT_ROOT_SET = new Set(TERMINAL_BLOCKED_IMPORT_ROOTS)
+const TERMINAL_ALLOWED_IMPORT_ROOT_SET = new Set(TERMINAL_ALLOWED_IMPORT_ROOTS)
 
 export function isPythonFile(path: string): boolean {
   return path.toLowerCase().endsWith('.py')
@@ -71,6 +118,52 @@ function escapeScriptJson(value: unknown): string {
     .replaceAll('&', '\\u0026')
     .replaceAll('\u2028', '\\u2028')
     .replaceAll('\u2029', '\\u2029')
+}
+
+function modulePath(moduleName: string): string {
+  return `${moduleName.replaceAll('.', '/')}.py`
+}
+
+function isWorkspacePythonModule(moduleName: string, files: Record<string, string>): boolean {
+  return Object.hasOwn(files, modulePath(moduleName))
+}
+
+function isTerminalAllowedModule(moduleName: string, files: Record<string, string>): boolean {
+  const rootName = moduleName.split('.')[0] ?? moduleName
+  return isWorkspacePythonModule(moduleName, files)
+    || TERMINAL_ALLOWED_IMPORT_ROOT_SET.has(rootName)
+}
+
+function findUnsupportedEntryImport(source: string, files: Record<string, string>): MobCodeImportDiagnostic | null {
+  const lines = source.split(/\r?\n/)
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index] ?? ''
+    const trimmed = line.trim()
+    if (!trimmed || trimmed.startsWith('#')) continue
+
+    const importMatch = trimmed.match(/^import\s+(.+)$/)
+    if (importMatch) {
+      const importText = (importMatch[1] ?? '').split('#')[0]?.split(';')[0] ?? ''
+      for (const importPart of importText.split(',')) {
+        const moduleName = importPart.trim().split(/\s+as\s+/)[0]?.trim()
+        if (!moduleName) continue
+        const rootName = moduleName.split('.')[0] ?? moduleName
+        if (TERMINAL_BLOCKED_IMPORT_ROOT_SET.has(rootName) || !isTerminalAllowedModule(moduleName, files)) {
+          return { line: index + 1, moduleName }
+        }
+      }
+    }
+
+    const fromImportMatch = trimmed.match(/^from\s+([A-Za-z_][A-Za-z0-9_.]*)\s+import\s+/)
+    if (fromImportMatch) {
+      const moduleName = fromImportMatch[1] ?? ''
+      const rootName = moduleName.split('.')[0] ?? moduleName
+      if (TERMINAL_BLOCKED_IMPORT_ROOT_SET.has(rootName) || !isTerminalAllowedModule(moduleName, files)) {
+        return { line: index + 1, moduleName }
+      }
+    }
+  }
+  return null
 }
 
 function indentationWidth(value: string): number {
@@ -149,6 +242,83 @@ function rewriteCallNamesForAwait(line: string, names: ReadonlySet<string>, repl
 
 function rewriteInputCallsForAwait(line: string): string {
   return rewriteCallNamesForAwait(line, new Set(['input']), 'mobcode_input')
+}
+
+function rewriteDottedCallForAwait(line: string, dottedName: string, replacementName: string): string {
+  let output = ''
+  let index = 0
+  let quote: '"' | "'" | null = null
+  let tripleQuote = false
+
+  while (index < line.length) {
+    const character = line[index]
+    const nextTwo = line.slice(index, index + 3)
+
+    if (quote) {
+      output += character
+      if (character === '\\') {
+        output += line[index + 1] ?? ''
+        index += 2
+        continue
+      }
+      if (tripleQuote && nextTwo === quote.repeat(3)) {
+        output += line.slice(index + 1, index + 3)
+        index += 3
+        quote = null
+        tripleQuote = false
+        continue
+      }
+      if (!tripleQuote && character === quote) quote = null
+      index += 1
+      continue
+    }
+
+    if (character === '#') {
+      output += line.slice(index)
+      break
+    }
+
+    if (character === '"' || character === "'") {
+      quote = character
+      tripleQuote = nextTwo === character.repeat(3)
+      output += tripleQuote ? nextTwo : character
+      index += tripleQuote ? 3 : 1
+      continue
+    }
+
+    const previous = line[index - 1] ?? ''
+    const following = line.slice(index + dottedName.length).match(/^\s*\(/)
+    const isIdentifierPart = /[A-Za-z0-9_.]/.test(previous)
+    const alreadyAwaited = /\bawait\s*$/.test(output)
+    if (line.startsWith(dottedName, index) && following && !isIdentifierPart && !alreadyAwaited) {
+      output += `await ${replacementName}`
+      index += dottedName.length
+      continue
+    }
+
+    output += character
+    index += 1
+  }
+
+  return output
+}
+
+function importsTimeSleep(lines: readonly string[]): boolean {
+  return lines.some((line) => /^from\s+time\s+import\s+/.test(line.trim()) && /\bsleep\b/.test(line))
+}
+
+function rewriteSleepCallsForAwait(line: string, rewriteBareSleep: boolean): string {
+  let rewrittenLine = rewriteDottedCallForAwait(line, 'time.sleep', 'mobcode_sleep')
+  if (rewriteBareSleep) {
+    rewrittenLine = rewriteCallNamesForAwait(rewrittenLine, new Set(['sleep']), 'mobcode_sleep')
+  }
+  return rewrittenLine
+}
+
+function rewriteAwaitableCallsForAwait(line: string, rewriteBareSleep: boolean): string {
+  let rewrittenLine = rewriteInputCallsForAwait(line)
+  rewrittenLine = rewriteSleepCallsForAwait(rewrittenLine, rewriteBareSleep)
+  return rewrittenLine
 }
 
 function rewriteMemberCallNamesForAwait(line: string, names: ReadonlySet<string>): string {
@@ -240,6 +410,7 @@ function isTopLevelClassMethod(lines: readonly string[], lineIndex: number, star
 
 function topLevelPythonBlocks(lines: readonly string[]): PythonBlock[] {
   const blocks: PythonBlock[] = []
+  const rewriteBareSleep = importsTimeSleep(lines)
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index] ?? ''
     const trimmed = line.trim()
@@ -273,7 +444,7 @@ function topLevelPythonBlocks(lines: readonly string[]): PythonBlock[] {
         nestedBlockIndent = bodyIndent
         continue
       }
-      if (rewriteInputCallsForAwait(bodyLine) !== bodyLine) containsInput = true
+      if (rewriteAwaitableCallsForAwait(bodyLine, rewriteBareSleep) !== bodyLine) containsInput = true
     }
 
     blocks.push({
@@ -299,7 +470,7 @@ async def __mobcode_run__():
         mobcode_report_done()
     except SystemExit:
         mobcode_report_done()
-    except Exception as error:
+    except BaseException as error:
         mobcode_report_error(error)
 
 mobcode_run_async(__mobcode_run__())
@@ -315,6 +486,7 @@ function buildBrythonTransformedSource(
   options: { rewriteTopLevelInput: boolean },
 ): string {
   const lines = source.split(/\r?\n/)
+  const rewriteBareSleep = importsTimeSleep(lines)
   const inputBlocks = topLevelPythonBlocks(lines)
     .filter((block) => block.name !== '' && block.containsInput)
   const asyncInputFunctionNames = new Set(inputBlocks
@@ -341,11 +513,11 @@ function buildBrythonTransformedSource(
     if (asyncBlock) {
       rewrittenLine = line.replace(/^(\s*)def\s+/, '$1async def ')
     } else if (inAsyncInputFunction) {
-      rewrittenLine = rewriteInputCallsForAwait(line)
+      rewrittenLine = rewriteAwaitableCallsForAwait(line, rewriteBareSleep)
       rewrittenLine = rewriteCallNamesForAwait(rewrittenLine, asyncInputFunctionNames)
       rewrittenLine = rewriteMemberCallNamesForAwait(rewrittenLine, asyncInputMethodNames)
     } else if (!inFunctionScope && options.rewriteTopLevelInput) {
-      rewrittenLine = rewriteInputCallsForAwait(line)
+      rewrittenLine = rewriteAwaitableCallsForAwait(line, rewriteBareSleep)
       rewrittenLine = rewriteCallNamesForAwait(rewrittenLine, asyncInputFunctionNames)
       rewrittenLine = rewriteMemberCallNamesForAwait(rewrittenLine, asyncInputMethodNames)
     }
@@ -368,6 +540,10 @@ export function buildBrythonRunnerHtml(payload: BrythonRunnerPayload): string {
   const entryContent = payload.files[payload.entryFile] ?? ''
   const serializedEntryContent = escapeScriptJson(buildBrythonAsyncEntrySource(entryContent))
   const serializedEntryFile = escapeScriptJson(payload.entryFile)
+  const entryImportDiagnostic = findUnsupportedEntryImport(entryContent, payload.files)
+  const serializedEntryImportDiagnostic = entryImportDiagnostic === null
+    ? 'None'
+    : escapeScriptJson(entryImportDiagnostic)
   const serializedWorkspaceFiles = escapeScriptJson(payload.files)
   const serializedWorkspacePythonModules = escapeScriptJson(Object.fromEntries(
     Object.entries(payload.files)
@@ -377,6 +553,8 @@ export function buildBrythonRunnerHtml(payload: BrythonRunnerPayload): string {
         buildBrythonModuleSource(content),
       ]),
   ))
+  const serializedBlockedImportRoots = escapeScriptJson(TERMINAL_BLOCKED_IMPORT_ROOTS)
+  const serializedAllowedImportRoots = escapeScriptJson(TERMINAL_ALLOWED_IMPORT_ROOTS)
   const entryLineContent = entryContent.replace(/\r?\n$/, '')
   const entryLineCount = entryLineContent ? entryLineContent.split(/\r?\n/).length : 1
   const title = escapeHtml(payload.title)
@@ -443,11 +621,11 @@ export function buildBrythonRunnerHtml(payload: BrythonRunnerPayload): string {
       opacity: 0.55;
     }
     main {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) minmax(16rem, 32%);
       min-height: 0;
+      display: flex;
     }
     #terminal {
+      flex: 1;
       min-height: 0;
       overflow: auto;
       white-space: pre-wrap;
@@ -458,34 +636,8 @@ export function buildBrythonRunnerHtml(payload: BrythonRunnerPayload): string {
       font-size: 0.95rem;
       line-height: 1.45;
     }
-    #graphics {
-      min-height: 0;
-      border-left: 1px solid #374151;
-      background: #f9fafb;
-      color: #111827;
-      display: grid;
-      grid-template-rows: auto 1fr;
-    }
-    #graphics h2 {
-      margin: 0;
-      padding: 0.75rem 1rem;
-      border-bottom: 1px solid #d1d5db;
-      font-size: 0.9rem;
-    }
-    #graphics-surface {
-      min-height: 18rem;
-      background:
-        linear-gradient(#e5e7eb 1px, transparent 1px),
-        linear-gradient(90deg, #e5e7eb 1px, transparent 1px);
-      background-size: 24px 24px;
-      background-color: #ffffff;
-    }
     .dim { color: #9ca3af; }
     .error { color: #fca5a5; }
-    @media (max-width: 760px) {
-      main { grid-template-columns: 1fr; }
-      #graphics { display: none; }
-    }
   </style>
   <script src="https://cdn.jsdelivr.net/npm/brython@3.13.0/brython.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/brython@3.13.0/brython_stdlib.js"></script>
@@ -500,10 +652,6 @@ export function buildBrythonRunnerHtml(payload: BrythonRunnerPayload): string {
   </header>
   <main>
     <section id="terminal" aria-label="Program terminal" tabindex="0"></section>
-    <section id="graphics" aria-label="Graphics output">
-      <h2>Graphics</h2>
-      <div id="graphics-surface"></div>
-    </section>
   </main>
   <script>
     try { window.opener = null; } catch {}
@@ -526,6 +674,31 @@ export function buildBrythonRunnerHtml(payload: BrythonRunnerPayload): string {
       stopButton.disabled = !isRunning;
       stopButton.textContent = isRunning ? 'Stop' : state === 'done' ? 'Done' : 'Stopped';
     };
+    (() => {
+      const NativeWorker = window.Worker;
+      let activeNativeWorker = null;
+      window.Worker = function(...args) {
+        const worker = new NativeWorker(...args);
+        activeNativeWorker = worker;
+        return worker;
+      };
+      window.Worker.prototype = NativeWorker.prototype;
+      Object.setPrototypeOf(window.Worker, NativeWorker);
+      window.mobcodeTerminateWorker = () => {
+        if (!activeNativeWorker || typeof activeNativeWorker.terminate !== 'function') {
+          throw new Error('The Python worker cannot be terminated by this browser.');
+        }
+        activeNativeWorker.terminate();
+        activeNativeWorker = null;
+      };
+      window.mobcodeClearNativeWorker = () => {
+        activeNativeWorker = null;
+      };
+    })();
+    window.mobcodeTerminateWorker = window.mobcodeTerminateWorker || (() => {
+      throw new Error('The Python worker cannot be terminated by this browser.');
+    });
+    window.mobcodeClearNativeWorker = window.mobcodeClearNativeWorker || (() => {});
     window.mobcodeTerminal = {
       maxChars: 100000,
       charsWritten: 0,
@@ -608,25 +781,14 @@ import traceback
 entry_filename = ${serializedEntryFile}
 entry_source = ${serializedEntryContent}
 entry_user_line_count = ${entryLineCount}
+entry_import_diagnostic = ${serializedEntryImportDiagnostic}
 workspace_files = ${serializedWorkspaceFiles}
 workspace_python_modules = ${serializedWorkspacePythonModules}
 input_sequence = 0
 input_futures = {}
 original_import = builtins.__import__
-blocked_import_roots = {
-    'browser',
-    'javascript',
-    'os',
-    'pathlib',
-    'importlib',
-    'sys',
-    'subprocess',
-    'socket',
-    'asyncio',
-    'threading',
-    'multiprocessing',
-    'webbrowser',
-}
+blocked_import_roots = set(${serializedBlockedImportRoots})
+allowed_import_roots = set(${serializedAllowedImportRoots})
 
 class MobCodeWorkerOutput:
     def __init__(self, message_type):
@@ -639,6 +801,11 @@ class MobCodeWorkerOutput:
     def flush(self):
         pass
 
+class MobCodeImportValidationError(ImportError):
+    def __init__(self, module_name, line_number):
+        ImportError.__init__(self, "Module '" + str(module_name) + "' is not available in the terminal runner.")
+        self.lineno = int(line_number) + 1
+
 def mobcode_input(prompt=''):
     global input_sequence
     input_sequence += 1
@@ -647,6 +814,15 @@ def mobcode_input(prompt=''):
     input_futures[request_id] = input_future
     worker_self.send({'type': 'input-request', 'id': request_id, 'prompt': str(prompt)})
     return input_future
+
+async def mobcode_sleep(seconds=0):
+    try:
+        delay = float(seconds)
+    except Exception:
+        delay = 0
+    if delay < 0:
+        delay = 0
+    await aio.sleep(delay)
 
 @bind(worker_self, 'message')
 def handle_worker_message(event):
@@ -670,9 +846,17 @@ def find_user_error_line(error):
             line_number = getattr(traceback_node, 'tb_lineno', None)
             if line_number is not None and line_number <= entry_user_line_count + 1:
                 return max(1, line_number - 1)
-            return line_number
+            return None
         traceback_node = getattr(traceback_node, 'tb_next', None)
-    return getattr(error, 'lineno', None)
+    fallback_line_number = getattr(error, 'lineno', None)
+    if fallback_line_number is not None:
+        try:
+            fallback_line_number = int(fallback_line_number)
+        except Exception:
+            return None
+        if fallback_line_number <= entry_user_line_count + 1:
+            return max(1, fallback_line_number - 1)
+    return None
 
 def format_user_error_header(error):
     line_number = find_user_error_line(error)
@@ -683,9 +867,21 @@ def format_user_error_header(error):
 def mobcode_report_done():
     worker_self.send({'type': 'done'})
 
+def mobcode_format_error(error):
+    try:
+        formatted_error = traceback.format_exc()
+        if formatted_error.strip() != 'NoneType: None':
+            return formatted_error
+    except Exception:
+        pass
+    try:
+        return error.__class__.__name__ + ': ' + str(error) + '\\n'
+    except Exception:
+        return 'Python error could not be formatted.\\n'
+
 def mobcode_report_error(error):
     worker_self.send({'type': 'stderr', 'data': format_user_error_header(error)})
-    worker_self.send({'type': 'stderr', 'data': traceback.format_exc()})
+    worker_self.send({'type': 'stderr', 'data': mobcode_format_error(error)})
 
 def mobcode_run_async(coroutine):
     aio.run(coroutine)
@@ -715,10 +911,11 @@ def mobcode_find_workspace_file(path):
     raise FileNotFoundError("No such MobCode workspace file: '" + normalized_path + "'")
 
 class MobCodeReadOnlyFile:
-    def __init__(self, path, content):
+    def __init__(self, path, content, binary=False):
         self.name = path
         self.closed = False
-        self._content = str(content)
+        self._binary = bool(binary)
+        self._content = str(content).encode('utf-8') if self._binary else str(content)
         self._position = 0
         self._lines = None
 
@@ -749,8 +946,9 @@ class MobCodeReadOnlyFile:
     def readline(self, size=-1):
         self._ensure_open()
         if self._position >= len(self._content):
-            return ''
-        newline_index = self._content.find('\\n', self._position)
+            return b'' if self._binary else ''
+        newline = b'\\n' if self._binary else '\\n'
+        newline_index = self._content.find(newline, self._position)
         end = len(self._content) if newline_index == -1 else newline_index + 1
         if size is not None and int(size) >= 0:
             end = min(end, self._position + int(size))
@@ -787,7 +985,7 @@ class MobCodeReadOnlyFile:
 
     def __next__(self):
         line = self.readline()
-        if line == '':
+        if line == (b'' if self._binary else ''):
             raise StopIteration
         return line
 
@@ -801,10 +999,20 @@ class MobCodeReadOnlyFile:
 
 def mobcode_open(path, mode='r', buffering=-1, encoding=None, errors=None, newline=None, closefd=True, opener=None):
     mode_text = str(mode)
-    if mode_text not in ['r', 'rt']:
+    path_text = str(path)
+    if any(flag in mode_text for flag in ['w', 'a', 'x', '+']):
         raise ValueError('MobCode workspace files are read-only in the terminal runner.')
-    workspace_path = mobcode_find_workspace_file(path)
-    return MobCodeReadOnlyFile(workspace_path, workspace_files[workspace_path])
+    if not mode_text.startswith('r'):
+        raise ValueError('MobCode workspace files are read-only in the terminal runner.')
+    try:
+        workspace_path = mobcode_find_workspace_file(path)
+    except FileNotFoundError:
+        if '#mobcode-python-worker' in path_text:
+            return MobCodeReadOnlyFile(path_text, '', 'b' in mode_text)
+        if path_text.startswith('VFS.'):
+            return original_open(path, mode, buffering, encoding, errors, newline, closefd, opener)
+        raise
+    return MobCodeReadOnlyFile(workspace_path, workspace_files[workspace_path], 'b' in mode_text)
 
 def mobcode_module_path(name):
     return str(name).replace('.', '/') + '.py'
@@ -820,6 +1028,7 @@ def mobcode_create_workspace_module(name, path):
         '__builtins__': builtins,
         'input': mobcode_input,
         'mobcode_input': mobcode_input,
+        'mobcode_sleep': mobcode_sleep,
     })
     compiled_module = compile(workspace_python_modules[path], path, 'exec')
     exec(compiled_module, module_globals)
@@ -837,7 +1046,12 @@ def mobcode_import(name, globals=None, locals=None, fromlist=(), level=0):
     workspace_module_path = mobcode_module_path(module_name)
     if workspace_module_path in workspace_python_modules:
         return mobcode_create_workspace_module(module_name, workspace_module_path)
-    return original_import(name, globals, locals, fromlist, level)
+    if root_name not in allowed_import_roots:
+        raise ImportError("Module '" + module_name + "' is not available in the terminal runner.")
+    try:
+        return original_import(name, globals, locals, fromlist, level)
+    except BaseException as error:
+        raise ImportError("Module '" + module_name + "' is not available in the terminal runner.") from error
 
 sys.stdout = MobCodeWorkerOutput('stdout')
 sys.stderr = MobCodeWorkerOutput('stderr')
@@ -846,12 +1060,18 @@ builtins.open = mobcode_open
 builtins.__import__ = mobcode_import
 
 try:
+    if entry_import_diagnostic is not None:
+        raise MobCodeImportValidationError(
+            entry_import_diagnostic.get('moduleName', ''),
+            entry_import_diagnostic.get('line', 1),
+        )
     compiled_code = compile(entry_source, entry_filename, 'exec')
     runner_globals = {
         '__name__': '__main__',
         '__file__': entry_filename,
         '__builtins__': builtins,
         'mobcode_input': mobcode_input,
+        'mobcode_sleep': mobcode_sleep,
         'mobcode_run_async': mobcode_run_async,
         'mobcode_report_done': mobcode_report_done,
         'mobcode_report_error': mobcode_report_error,
@@ -859,7 +1079,7 @@ try:
         'open': mobcode_open,
     }
     exec(compiled_code, runner_globals)
-except Exception as error:
+except BaseException as error:
     mobcode_report_error(error)
   </script>
   <script type="text/python">
@@ -876,6 +1096,7 @@ def handle_worker_ready(runner_worker):
 def clear_active_worker(state):
     global active_worker
     active_worker = None
+    window.mobcodeClearNativeWorker()
     window.mobcodeInputBridge.cancel()
     window.mobcodeRunnerSetState(state)
 
@@ -883,7 +1104,7 @@ def stop_active_worker():
     if active_worker is None:
         return
     try:
-        active_worker.terminate()
+        window.mobcodeTerminateWorker()
     except Exception as error:
         window.mobcodeTerminal.write('\\n[error] Python runner could not be stopped: ' + str(error) + '\\n')
         return

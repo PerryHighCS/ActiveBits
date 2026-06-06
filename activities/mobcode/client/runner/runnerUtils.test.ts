@@ -94,9 +94,25 @@ void test('buildBrythonRunnerHtml exposes stop and output limit controls', () =>
   assert.match(html, /maxChars: 100000/)
   assert.match(html, /\[output truncated\]/)
   assert.match(html, /def stop_active_worker\(\):/)
-  assert.match(html, /active_worker\.terminate\(\)/)
+  assert.match(html, /const NativeWorker = window\.Worker/)
+  assert.match(html, /activeNativeWorker = worker/)
+  assert.match(html, /activeNativeWorker\.terminate\(\)/)
+  assert.match(html, /window\.mobcodeTerminateWorker\(\)/)
   assert.match(html, /@bind\(document\['stop-runner'\], 'click'\)/)
   assert.match(html, /message_type == 'done'/)
+})
+
+void test('buildBrythonRunnerHtml renders a terminal-only popup', () => {
+  const html = buildBrythonRunnerHtml({
+    files: { 'test.py': 'print("hello")\n' },
+    entryFile: 'test.py',
+    title: 'Runner',
+  })
+
+  assert.match(html, /id="terminal"/)
+  assert.doesNotMatch(html, /id="graphics"/)
+  assert.doesNotMatch(html, /Graphics output/)
+  assert.doesNotMatch(html, /graphics-surface/)
 })
 
 void test('buildBrythonRunnerHtml wires terminal input through async worker messages', () => {
@@ -135,14 +151,48 @@ void test('buildBrythonRunnerHtml blocks browser escape-hatch imports', () => {
     title: 'Runner',
   })
 
-  assert.match(html, /blocked_import_roots = \{/)
-  assert.match(html, /'browser'/)
-  assert.match(html, /'javascript'/)
-  assert.match(html, /'os'/)
-  assert.match(html, /'sys'/)
+  assert.match(html, /blocked_import_roots = set\(\[/)
+  assert.match(html, /"browser"/)
+  assert.match(html, /"javascript"/)
+  assert.match(html, /"os"/)
+  assert.match(html, /"sys"/)
+  assert.match(html, /"getpass"/)
+  assert.match(html, /allowed_import_roots = set\(\[/)
+  assert.match(html, /"math"/)
+  assert.match(html, /"random"/)
+  assert.match(html, /"time"/)
   assert.match(html, /def mobcode_import\(name, globals=None, locals=None, fromlist=\(\), level=0\):/)
   assert.match(html, /builtins\.__import__ = mobcode_import/)
   assert.match(html, /Module '" \+ root_name \+ "' is not available in the terminal runner/)
+  assert.match(html, /if root_name not in allowed_import_roots:/)
+  assert.match(html, /return original_import\(name, globals, locals, fromlist, level\)/)
+  assert.match(html, /except BaseException as error:/)
+  assert.match(html, /Module '" \+ module_name \+ "' is not available in the terminal runner/)
+})
+
+void test('buildBrythonRunnerHtml serializes no import diagnostic as Python None', () => {
+  const html = buildBrythonRunnerHtml({
+    files: { 'test.py': 'import time\nprint("ok")\n' },
+    entryFile: 'test.py',
+    title: 'Runner',
+  })
+
+  assert.match(html, /entry_import_diagnostic = None/)
+  assert.doesNotMatch(html, /entry_import_diagnostic = null/)
+})
+
+void test('buildBrythonRunnerHtml preflights unsupported entry imports', () => {
+  const html = buildBrythonRunnerHtml({
+    files: { 'test.py': 'import timey\nprint("never")\n' },
+    entryFile: 'test.py',
+    title: 'Runner',
+  })
+
+  assert.match(html, /entry_import_diagnostic = \{"line":1,"moduleName":"timey"\}/)
+  assert.match(html, /class MobCodeImportValidationError\(ImportError\):/)
+  assert.match(html, /self\.lineno = int\(line_number\) \+ 1/)
+  assert.match(html, /if entry_import_diagnostic is not None:/)
+  assert.match(html, /raise MobCodeImportValidationError\(/)
 })
 
 void test('buildBrythonRunnerHtml exposes read-only workspace files and imports', () => {
@@ -162,6 +212,14 @@ void test('buildBrythonRunnerHtml exposes read-only workspace files and imports'
   assert.match(html, /"helper\.py":"def greet/)
   assert.match(html, /def mobcode_open\(path, mode='r'/)
   assert.match(html, /MobCode workspace files are read-only in the terminal runner/)
+  assert.match(html, /self\._content = str\(content\)\.encode\('utf-8'\) if self\._binary else str\(content\)/)
+  assert.match(html, /return b'' if self\._binary else ''/)
+  assert.match(html, /path_text = str\(path\)/)
+  assert.match(html, /'#mobcode-python-worker' in path_text/)
+  assert.match(html, /return MobCodeReadOnlyFile\(path_text, '', 'b' in mode_text\)/)
+  assert.match(html, /path_text\.startswith\('VFS\.'\)/)
+  assert.match(html, /return original_open\(path, mode, buffering, encoding, errors, newline, closefd, opener\)/)
+  assert.match(html, /'b' in mode_text/)
   assert.match(html, /class MobCodeReadOnlyFile:/)
   assert.match(html, /def mobcode_create_workspace_module\(name, path\):/)
   assert.match(html, /module_type = original_import\('types'\)\.ModuleType/)
@@ -216,6 +274,44 @@ void test('buildBrythonAsyncEntrySource rewrites class method input', () => {
   assert.match(source, /print\(await prompter\.ask\(\)\)/)
 })
 
+void test('buildBrythonAsyncEntrySource rewrites top-level time.sleep', () => {
+  const source = buildBrythonAsyncEntrySource([
+    'import time',
+    'print("hello")',
+    'while True:',
+    '    time.sleep(1)',
+  ].join('\n'))
+
+  assert.match(source, /import time/)
+  assert.match(source, /print\("hello"\)/)
+  assert.match(source, /while True:\n {8}await mobcode_sleep\(1\)/)
+  assert.doesNotMatch(source, /time\.sleep\(1\)/)
+})
+
+void test('buildBrythonAsyncEntrySource rewrites imported sleep calls', () => {
+  const source = buildBrythonAsyncEntrySource([
+    'from time import sleep',
+    'sleep(0.5)',
+  ].join('\n'))
+
+  assert.match(source, /from time import sleep/)
+  assert.match(source, /await mobcode_sleep\(0\.5\)/)
+  assert.doesNotMatch(source, /\nsleep\(0\.5\)/)
+})
+
+void test('buildBrythonAsyncEntrySource rewrites functions that call time.sleep', () => {
+  const source = buildBrythonAsyncEntrySource([
+    'import time',
+    'def pause():',
+    '    time.sleep(1)',
+    '    return "done"',
+    'print(pause())',
+  ].join('\n'))
+
+  assert.match(source, /async def pause\(\):\n {8}await mobcode_sleep\(1\)/)
+  assert.match(source, /print\(await pause\(\)\)/)
+})
+
 void test('buildBrythonAsyncEntrySource leaves nested function input unchanged', () => {
   const source = buildBrythonAsyncEntrySource([
     'def outer():',
@@ -243,8 +339,12 @@ void test('buildBrythonRunnerHtml compiles user code with the entry filename for
   assert.match(html, /compiled_code = compile\(entry_source, entry_filename, 'exec'\)/)
   assert.match(html, /'__file__': entry_filename/)
   assert.match(html, /'input': mobcode_input/)
+  assert.match(html, /async def mobcode_sleep\(seconds=0\):/)
+  assert.match(html, /await aio\.sleep\(delay\)/)
+  assert.match(html, /'mobcode_sleep': mobcode_sleep/)
   assert.match(html, /'mobcode_run_async': mobcode_run_async/)
   assert.match(html, /'mobcode_report_done': mobcode_report_done/)
+  assert.match(html, /except BaseException as error:/)
   assert.match(html, /exec\(compiled_code, runner_globals\)/)
   assert.doesNotMatch(html, /runner_globals = globals\(\)/)
   assert.doesNotMatch(html, /'aio': aio/)
@@ -260,9 +360,17 @@ void test('buildBrythonRunnerHtml prints a user-file error header before the raw
   assert.match(html, /def find_user_error_line\(error\):/)
   assert.match(html, /if filename == entry_filename:/)
   assert.match(html, /line_number <= entry_user_line_count \+ 1/)
+  assert.match(html, /fallback_line_number = getattr\(error, 'lineno', None\)/)
+  assert.match(html, /fallback_line_number = int\(fallback_line_number\)/)
+  assert.match(html, /return max\(1, fallback_line_number - 1\)/)
+  assert.match(html, /return None/)
   assert.match(html, /Error in ' \+ entry_filename \+ ', line ' \+ str\(line_number\)/)
+  assert.match(html, /def mobcode_format_error\(error\):/)
+  assert.match(html, /formatted_error = traceback\.format_exc\(\)/)
+  assert.match(html, /formatted_error\.strip\(\) != 'NoneType: None'/)
+  assert.match(html, /return error\.__class__\.__name__ \+ ': ' \+ str\(error\)/)
   assert.match(html, /worker_self\.send\(\{'type': 'stderr', 'data': format_user_error_header\(error\)\}\)/)
-  assert.match(html, /worker_self\.send\(\{'type': 'stderr', 'data': traceback\.format_exc\(\)\}\)/)
+  assert.match(html, /worker_self\.send\(\{'type': 'stderr', 'data': mobcode_format_error\(error\)\}\)/)
 })
 
 void test('buildBrythonRunnerHtml shows Python-facing runner labels', () => {

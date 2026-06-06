@@ -15,6 +15,7 @@ export interface SessionHeaderProps {
   actionMenuRole?: 'menu'
   actionMenuContent?: ReactNode
   headerActions?: ReactNode
+  centerHeaderActions?: ReactNode
 }
 
 /**
@@ -31,6 +32,7 @@ export default function SessionHeader({
   actionMenuRole,
   actionMenuContent,
   headerActions,
+  centerHeaderActions,
 }: SessionHeaderProps) {
   const [showEndModal, setShowEndModal] = useState(false)
   const [showActionMenu, setShowActionMenu] = useState(false)
@@ -100,7 +102,7 @@ export default function SessionHeader({
   return (
     <>
       <div className={`${includeBottomMargin ? 'mb-6 ' : ''}bg-white border-b border-gray-200 px-6 py-4`}>
-        <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="relative flex flex-wrap items-center justify-between gap-3">
           <div className="flex min-w-0 flex-wrap items-center gap-3">
             <h1 className="text-2xl font-bold text-gray-800">{activityName}</h1>
             {actionMenuContent != null && (
@@ -128,6 +130,12 @@ export default function SessionHeader({
             )}
             {headerActions}
           </div>
+
+          {centerHeaderActions != null && (
+            <div className="order-last flex w-full justify-center md:absolute md:left-1/2 md:top-1/2 md:order-none md:w-auto md:-translate-x-1/2 md:-translate-y-1/2">
+              {centerHeaderActions}
+            </div>
+          )}
 
           <div className="flex flex-wrap items-center justify-end gap-3">
             <div className="flex items-center gap-2">

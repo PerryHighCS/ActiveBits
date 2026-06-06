@@ -16,6 +16,7 @@ import CodeEditor from '../components/CodeEditor'
 import FileNameModal from '../components/FileNameModal'
 import FileControlsMenuContent from '../components/FileControlsMenuContent'
 import SettingsMenu from '../components/SettingsMenu'
+import RunnerControls from './RunnerControls'
 import { MOB_CODE_MESSAGE_TYPES } from '../utils/constants'
 import {
   clampMobCodeContentEdit,
@@ -437,7 +438,7 @@ export default function MobCodeManager() {
         activityName="Mob Code"
         sessionId={sessionId}
         includeBottomMargin={false}
-        actionMenuLabel={canEdit ? 'Code Files' : undefined}
+        actionMenuLabel={canEdit ? 'Files' : undefined}
         actionMenuRole={canEdit ? 'menu' : undefined}
         actionMenuContent={canEdit ? (
           <FileControlsMenuContent
@@ -452,30 +453,18 @@ export default function MobCodeManager() {
         ) : undefined}
         headerActions={(
           <div className="mobcode-header-actions">
-            <label className="mobcode-runner-picker">
-              <span className="sr-only">Runner implementation</span>
-              <select
-                aria-label="Runner implementation"
-                value={runnerId}
-                onChange={(event) => setRunnerId(event.target.value as MobCodeRunnerId)}
-              >
-                {MOB_CODE_RUNNERS.map((runner) => (
-                  <option key={runner.id} value={runner.id}>
-                    {runner.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <button
-              type="button"
-              className="mobcode-runner-button"
-              onClick={handleRunCode}
-              disabled={Object.keys(files).length === 0}
-              title={MOB_CODE_RUNNERS.find((runner) => runner.id === runnerId)?.description}
-            >
-              Run
-            </button>
             <SettingsMenu theme={theme} onThemeChange={handleThemeChange} label="Theme" />
+          </div>
+        )}
+        centerHeaderActions={(
+          <div className="mobcode-runner-actions">
+            <RunnerControls
+              files={files}
+              runnerId={runnerId}
+              runners={MOB_CODE_RUNNERS}
+              onRunCode={handleRunCode}
+              onRunnerChange={setRunnerId}
+            />
           </div>
         )}
       />

@@ -32,6 +32,14 @@
   gap: 0.5rem;
 }
 
+.mobcode-runner-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
 .mobcode-runner-picker select {
   min-height: 2.25rem;
   max-width: 12rem;
