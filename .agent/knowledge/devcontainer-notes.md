@@ -13,6 +13,13 @@ Track durable local-development and devcontainer behavior that future contributo
 
 ## Entries
 
+- Date: 2026-06-06
+- Change: `.devcontainer/post-create.sh` now runs `npx playwright install --with-deps webkit` after workspace npm install so default and privileged devcontainers can run the CI WebKit browser-smoke project locally. Set `ACTIVEBITS_SKIP_PLAYWRIGHT_WEBKIT_INSTALL=1` to skip the browser/dependency download in constrained rebuilds.
+- Risk: First devcontainer creation does more apt/browser setup work and downloads the WebKit browser cache, but this keeps local browser-smoke parity with the CI Playwright container.
+- Evidence: `.devcontainer/post-create.sh`; `bash -n .devcontainer/post-create.sh`.
+- Follow-up action: If the e2e matrix grows to more browser engines, add them through the same Playwright-managed installer instead of hand-maintaining distro package lists.
+- Owner: Codex
+
 - Date: 2026-05-12
 - Change: `.devcontainer/setup-dev.sh` now installs `bubblewrap` when `bwrap` is missing, using the same privileged `apt-get` fallback pattern already used for other devcontainer tool gaps.
 - Risk: The setup script may perform one extra `apt-get update` on images that omit `bwrap`, but bootstrap now restores the sandbox dependency expected by privileged agent workflows.
