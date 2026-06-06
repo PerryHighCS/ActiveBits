@@ -85,6 +85,8 @@ void test('buildBrythonRunnerHtml runs user code in a Brython worker', () => {
   assert.match(html, /worker_self\.send\(\{'type': self\.message_type, 'data': str\(data\)\}\)/)
   assert.match(html, /def handle_worker_ready\(runner_worker\):/)
   assert.match(html, /worker\.create_worker\('mobcode-python-worker', handle_worker_ready, handle_worker_message, handle_worker_error\)/)
+  assert.match(html, /brython\(\{ debug: 0 \}\)/)
+  assert.doesNotMatch(html, /brython\(\{ debug: 1 \}\)/)
 })
 
 void test('buildBrythonRunnerHtml exposes stop and output limit controls', () => {

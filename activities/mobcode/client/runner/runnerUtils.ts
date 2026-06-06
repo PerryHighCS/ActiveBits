@@ -670,6 +670,7 @@ export function buildBrythonRunnerHtml(payload: BrythonRunnerPayload): string {
     <section id="terminal" aria-label="Program terminal" tabindex="0"></section>
   </main>
   <script>
+    // Keep opener during window.open so browsers return a usable popup handle, then drop it inside the runner.
     try { window.opener = null; } catch {}
     window.addEventListener('load', () => {
       try { URL.revokeObjectURL(window.location.href); } catch {}
@@ -1205,7 +1206,7 @@ if window.mobcodeRunnerShouldStart():
   </script>
   <script>
     if (typeof brython === 'function') {
-      brython({ debug: 1 });
+      brython({ debug: 0 });
     } else {
       window.mobcodeTerminal.write('[error] Python runner failed to load. Check this popup\\'s network access.\\n');
     }

@@ -25,6 +25,7 @@ const brythonVendorAssetPaths = new Map<string, string>([
 ])
 
 const app = express()
+app.set('trust proxy', 1)
 const defaultJsonParser = express.json()
 const mobCodeJsonParser = express.json({ limit: MOB_CODE_JSON_BODY_LIMIT })
 const brythonVendorAssetRateLimit = rateLimit({
@@ -74,12 +75,8 @@ registerStatusRoute({ app, sessions, ws, sessionTtl, valkeyUrl })
 app.get('/health-check', (_req, res) => {
   res.json({ status: 'ok', memory: process.memoryUsage() })
 })
-app.get('/vendor/brython/:assetName', brythonVendorAssetRateLimit, (req, res) => {
+app.get<{ assetName: string }>('/vendor/brython/:assetName', brythonVendorAssetRateLimit, (req, res) => {
   const assetName = req.params.assetName
-  if (typeof assetName !== 'string') {
-    res.status(404).type('text/plain').send('Brython vendor asset not found')
-    return
-  }
   const assetPath = brythonVendorAssetPaths.get(assetName)
   if (!assetPath) {
     res.status(404).type('text/plain').send('Brython vendor asset not found')

@@ -18,8 +18,8 @@ Track security-relevant boundaries, risks, and mitigation decisions.
 - Date: 2026-06-06
 - Area: MobCode Brython vendor assets
 - Threat or risk: The Python runner needs same-origin Brython JavaScript files, and file-serving routes without rate limiting can be abused for repeated filesystem-backed reads.
-- Control or mitigation: `/vendor/brython/:assetName` now uses `express-rate-limit` before serving an allowlist of Brython assets (`brython.min.js`, `brython.js`, `brython_stdlib.js`) from the npm package.
-- Residual risk: The route still serves public static runtime code and depends on `node_modules/brython` being present beside the server process, but requests outside the allowlist fall through and high-volume access is throttled.
+- Control or mitigation: `/vendor/brython/:assetName` uses `express-rate-limit` before serving an allowlist of Brython assets (`brython.min.js`, `brython.js`, `brython_stdlib.js`) resolved from the server-owned npm package. Requests outside the allowlist return 404 directly, and Express trusts one proxy hop so Render-forwarded client IPs feed IP-based limits.
+- Residual risk: The route still serves public static runtime code and depends on the server workspace installing the `brython` package.
 - Validation (test/review/path): `server/server.ts`; `npm --workspace server run lint`; `npm --workspace server run typecheck`.
 - Follow-up action: If more vendor assets are exposed later, keep them behind explicit allowlists and shared rate-limited middleware instead of broad package-directory static routes.
 - Owner: Codex
