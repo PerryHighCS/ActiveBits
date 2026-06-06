@@ -693,9 +693,15 @@ export function buildBrythonRunnerHtml(payload: BrythonRunnerPayload): string {
     (() => {
       const NativeWorker = window.Worker;
       let activeNativeWorker = null;
+      const shouldWrapBlobWorkers = (() => {
+        const userAgent = navigator.userAgent || '';
+        const isWebKitLike = /\\bAppleWebKit\\b/.test(userAgent);
+        const isChromiumLike = /\\b(Chrome|Chromium|CriOS|Edg|OPR)\\b/.test(userAgent);
+        return !isWebKitLike || isChromiumLike;
+      })();
       window.Worker = function(...args) {
         let workerUrlToRevoke = null;
-        if (typeof args[0] === 'string' && args[0].startsWith('blob:')) {
+        if (shouldWrapBlobWorkers && typeof args[0] === 'string' && args[0].startsWith('blob:')) {
           workerUrlToRevoke = URL.createObjectURL(new Blob([
             [
               "try {",
