@@ -22,7 +22,7 @@ Before making changes, read these files when relevant:
 2. Treat generated outputs (`dist`, caches, `node_modules`) as out of scope for manual edits.
 3. Add or update tests for the code you change, even if nobody asked.
 4. For tests that intentionally exercise failure/error paths, add explicit `[TEST]` log messages so expected noisy output is clearly distinguishable from real regressions.
-5. Use the shared Playwright harness for browser-level coverage that crosses routing, fetch, storage, and websocket/runtime boundaries. Keep Playwright tests under the repo-root `playwright/` directory and run them with the root `npm run test:e2e` scripts rather than ad hoc browser commands.
+5. Add Playwright tests where appropriate for browser-level coverage that crosses routing, fetch, storage, websocket/runtime, popup, or other real-browser boundaries. Use the shared Playwright harness and run tests with the root `npm run test:e2e` scripts rather than ad hoc browser commands. Keep shared browser specs under the repo-root `playwright/` directory, and keep activity-specific browser specs with the activity they test under `activities/<activity-id>/playwright/`.
 6. Frontend controls must include appropriate accessibility semantics for their role and state. Use native elements when possible, and add relevant attributes such as `aria-label`, `aria-labelledby`, `aria-describedby`, `aria-controls`, `aria-expanded`, `aria-pressed`, `aria-selected`, and `disabled` when the control behavior requires them.
 7. All API endpoints must include proper error handling and logging.
 8. Use structured logging for all server-side events.

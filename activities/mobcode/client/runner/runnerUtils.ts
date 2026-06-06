@@ -24,6 +24,7 @@ interface MobCodeRunnerPopup {
 
 interface MobCodeRunnerWindow {
   open: (url?: string | URL, target?: string, features?: string) => MobCodeRunnerPopup | null
+  location?: { origin?: string }
 }
 
 interface BrythonRunnerPayload {
@@ -31,6 +32,7 @@ interface BrythonRunnerPayload {
   entryFile: string
   sessionId?: string
   title: string
+  assetBaseUrl?: string
 }
 
 interface MobCodeImportDiagnostic {
@@ -557,6 +559,7 @@ export function buildBrythonRunnerHtml(payload: BrythonRunnerPayload): string {
   const serializedAllowedImportRoots = escapeScriptJson(TERMINAL_ALLOWED_IMPORT_ROOTS)
   const entryLineContent = entryContent.replace(/\r?\n$/, '')
   const entryLineCount = entryLineContent ? entryLineContent.split(/\r?\n/).length : 1
+  const assetBaseUrl = payload.assetBaseUrl ? `${payload.assetBaseUrl.replace(/\/+$/, '')}/` : '/'
   const title = escapeHtml(payload.title)
   const entryFile = escapeHtml(payload.entryFile)
 
@@ -565,6 +568,7 @@ export function buildBrythonRunnerHtml(payload: BrythonRunnerPayload): string {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <base href="${escapeHtml(assetBaseUrl)}">
   <title>${title}</title>
   <style>
     :root {
@@ -639,8 +643,14 @@ export function buildBrythonRunnerHtml(payload: BrythonRunnerPayload): string {
     .dim { color: #9ca3af; }
     .error { color: #fca5a5; }
   </style>
-  <script src="https://cdn.jsdelivr.net/npm/brython@3.13.0/brython.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/brython@3.13.0/brython_stdlib.js"></script>
+  <script>
+    try {
+      Object.defineProperty(navigator, 'language', { value: 'en-US', configurable: true });
+      Object.defineProperty(navigator, 'languages', { value: ['en-US', 'en'], configurable: true });
+    } catch {}
+  </script>
+  <script src="/vendor/brython/brython.min.js"></script>
+  <script src="/vendor/brython/brython_stdlib.js"></script>
 </head>
 <body>
   <header>
@@ -678,7 +688,23 @@ export function buildBrythonRunnerHtml(payload: BrythonRunnerPayload): string {
       const NativeWorker = window.Worker;
       let activeNativeWorker = null;
       window.Worker = function(...args) {
+        let workerUrlToRevoke = null;
+        if (typeof args[0] === 'string' && args[0].startsWith('blob:')) {
+          workerUrlToRevoke = URL.createObjectURL(new Blob([
+            [
+              "try {",
+              "  Object.defineProperty(navigator, 'language', { value: 'en-US', configurable: true });",
+              "  Object.defineProperty(navigator, 'languages', { value: ['en-US', 'en'], configurable: true });",
+              "} catch {}",
+              "importScripts(" + JSON.stringify(args[0]) + ");",
+            ].join("\\n")
+          ], { type: 'text/javascript' }));
+          args[0] = workerUrlToRevoke;
+        }
         const worker = new NativeWorker(...args);
+        if (workerUrlToRevoke) {
+          setTimeout(() => URL.revokeObjectURL(workerUrlToRevoke), 0);
+        }
         activeNativeWorker = worker;
         return worker;
       };
@@ -801,11 +827,6 @@ class MobCodeWorkerOutput:
     def flush(self):
         pass
 
-class MobCodeImportValidationError(ImportError):
-    def __init__(self, module_name, line_number):
-        ImportError.__init__(self, "Module '" + str(module_name) + "' is not available in the terminal runner.")
-        self.lineno = int(line_number) + 1
-
 def mobcode_input(prompt=''):
     global input_sequence
     input_sequence += 1
@@ -837,6 +858,11 @@ def handle_worker_message(event):
         input_future.set_result(str(message.get('value', '')))
 
 def find_user_error_line(error):
+    if entry_import_diagnostic is not None:
+        try:
+            return int(entry_import_diagnostic.get('line', 1))
+        except Exception:
+            return None
     traceback_node = getattr(error, '__traceback__', None)
     while traceback_node is not None:
         frame = getattr(traceback_node, 'tb_frame', None)
@@ -1061,10 +1087,7 @@ builtins.__import__ = mobcode_import
 
 try:
     if entry_import_diagnostic is not None:
-        raise MobCodeImportValidationError(
-            entry_import_diagnostic.get('moduleName', ''),
-            entry_import_diagnostic.get('line', 1),
-        )
+        raise ImportError("Module '" + str(entry_import_diagnostic.get('moduleName', '')) + "' is not available in the terminal runner.")
     compiled_code = compile(entry_source, entry_filename, 'exec')
     runner_globals = {
         '__name__': '__main__',
@@ -1187,6 +1210,7 @@ export function openMobCodeRunnerPopup(
     entryFile,
     sessionId: request.sessionId,
     title,
+    assetBaseUrl: browserWindow.location?.origin,
   }))
   let popup: MobCodeRunnerPopup | null
   try {

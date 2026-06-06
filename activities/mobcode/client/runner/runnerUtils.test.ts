@@ -72,8 +72,14 @@ void test('buildBrythonRunnerHtml runs user code in a Brython worker', () => {
     files: { 'test.py': 'print("Hello")' },
     entryFile: 'test.py',
     title: 'Runner',
+    assetBaseUrl: 'http://127.0.0.1:3100',
   })
 
+  assert.match(html, /<base href="http:\/\/127\.0\.0\.1:3100\/">/)
+  assert.match(html, /Object\.defineProperty\(navigator, 'language', \{ value: 'en-US'/)
+  assert.match(html, /Object\.defineProperty\(navigator, 'languages', \{ value: \['en-US', 'en'\]/)
+  assert.match(html, /src="\/vendor\/brython\/brython\.min\.js"/)
+  assert.match(html, /src="\/vendor\/brython\/brython_stdlib\.js"/)
   assert.match(html, /class="webworker" id="mobcode-python-worker"/)
   assert.match(html, /from browser import self as worker_self/)
   assert.match(html, /worker_self\.send\(\{'type': self\.message_type, 'data': str\(data\)\}\)/)
@@ -95,6 +101,8 @@ void test('buildBrythonRunnerHtml exposes stop and output limit controls', () =>
   assert.match(html, /\[output truncated\]/)
   assert.match(html, /def stop_active_worker\(\):/)
   assert.match(html, /const NativeWorker = window\.Worker/)
+  assert.match(html, /args\[0\]\.startsWith\('blob:'\)/)
+  assert.match(html, /importScripts\(" \+ JSON\.stringify\(args\[0\]\) \+ "\);/)
   assert.match(html, /activeNativeWorker = worker/)
   assert.match(html, /activeNativeWorker\.terminate\(\)/)
   assert.match(html, /window\.mobcodeTerminateWorker\(\)/)
@@ -189,10 +197,9 @@ void test('buildBrythonRunnerHtml preflights unsupported entry imports', () => {
   })
 
   assert.match(html, /entry_import_diagnostic = \{"line":1,"moduleName":"timey"\}/)
-  assert.match(html, /class MobCodeImportValidationError\(ImportError\):/)
-  assert.match(html, /self\.lineno = int\(line_number\) \+ 1/)
   assert.match(html, /if entry_import_diagnostic is not None:/)
-  assert.match(html, /raise MobCodeImportValidationError\(/)
+  assert.match(html, /return int\(entry_import_diagnostic\.get\('line', 1\)\)/)
+  assert.match(html, /raise ImportError\("Module '"/)
 })
 
 void test('buildBrythonRunnerHtml exposes read-only workspace files and imports', () => {
@@ -390,6 +397,7 @@ void test('openMobCodeRunnerPopup opens a fresh blob-backed runner popup', () =>
   let openedUrl = ''
   let focused = false
   const browserWindow = {
+    location: { origin: 'https://bits.example' },
     open(url?: string | URL, target?: string, features?: string) {
       openedUrl = String(url ?? '')
       assert.equal(target, '_blank')
