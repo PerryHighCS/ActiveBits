@@ -15,6 +15,15 @@ Capture reusable test setup patterns, common failure modes, and reliability guid
 
 ## Entries
 
+- Date: 2026-06-06
+- Scope: unit | integration
+- Pattern: For MobCode editor sync, test both sides of stale durable snapshot handling: editable manager clients should ignore remote durable `state-sync`/`file-tree-changed` echoes, and the server should prefer the latest live websocket group over an older ordinary `state-sync` POST payload.
+- Why it helps: Instructor typing is sent live over websocket and persisted on a slower cadence. A delayed durable snapshot can otherwise overwrite newer local edits or rebroadcast stale content to students.
+- Example (file/path): `activities/mobcode/client/manager/managerUtils.test.ts`; `activities/mobcode/server/routes.test.ts`
+- Failure signal: Instructor code appears to revert while typing, or students briefly lose recent edits after a delayed persist/broadcast completes.
+- Follow-up action: If MobCode later adds explicit revision numbers, update these tests to assert monotonic revision handling instead of relying on live-state preference.
+- Owner: Codex
+
 - Date: 2026-03-04
 - Scope: integration
 - Pattern: Session-store mocks for route tests should return deep clones from `get()` and store clones on `set()` when production storage serializes records between calls.

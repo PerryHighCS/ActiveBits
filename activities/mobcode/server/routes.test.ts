@@ -5,6 +5,7 @@ import {
   applyWsRelayMessageToGroupState,
   hasOpenSessionClients,
   normalizeMobCodeSessionData,
+  resolveDurableStatePayload,
   resolveWsValidationGroupState,
   readDurableMessageType,
   readStatePayload,
@@ -557,6 +558,21 @@ void test('resolveWsValidationGroupState prefers live ws state over persisted se
   assert.deepEqual(resolveWsValidationGroupState(persistedGroup, liveGroup), liveGroup)
   assert.deepEqual(resolveWsValidationGroupState(persistedGroup, undefined), persistedGroup)
   assert.deepEqual(resolveWsValidationGroupState(undefined, undefined), { files: {}, activeFile: '' })
+})
+
+void test('resolveDurableStatePayload preserves newer live edits for ordinary state syncs', () => {
+  const requestedPayload = {
+    files: { 'src/Main.java': 'stale persisted snapshot' },
+    activeFile: 'src/Main.java',
+  }
+  const liveGroup = {
+    files: { 'src/Main.java': 'newer live edit' },
+    activeFile: 'src/Main.java',
+  }
+
+  assert.deepEqual(resolveDurableStatePayload('state-sync', requestedPayload, liveGroup), liveGroup)
+  assert.deepEqual(resolveDurableStatePayload('state-sync', requestedPayload, undefined), requestedPayload)
+  assert.deepEqual(resolveDurableStatePayload('file-tree-changed', requestedPayload, liveGroup), requestedPayload)
 })
 
 void test('websocket relay updates live validation state without mutating session data in place', async () => {

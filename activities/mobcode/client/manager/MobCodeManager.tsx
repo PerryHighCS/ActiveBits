@@ -46,6 +46,7 @@ import {
   isStatePayload,
   parseMobCodeMessage,
   sendMobCodeWsMessage,
+  shouldApplyRemoteStateMessage,
 } from './managerUtils'
 import { resolveMobCodeInstructorPasscode } from './passcodeUtils'
 import '../styles.css'
@@ -149,6 +150,7 @@ export default function MobCodeManager() {
     onMessage: (event) => {
       const msg = parseMobCodeMessage(event.data)
       if (!msg || !isStatePayload(msg.payload)) return
+      if (!shouldApplyRemoteStateMessage(msg.type, canEdit)) return
       if (msg.type === MOB_CODE_MESSAGE_TYPES.STATE_SYNC || msg.type === MOB_CODE_MESSAGE_TYPES.FILE_TREE_CHANGED) {
         replaceFilesState(msg.payload.files)
         setActiveFile(msg.payload.activeFile)

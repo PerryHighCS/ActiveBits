@@ -356,6 +356,14 @@ export function resolveWsValidationGroupState(
   return liveGroup ?? persistedGroup ?? { files: {}, activeFile: '' }
 }
 
+export function resolveDurableStatePayload(
+  messageType: MobCodeMessage['type'],
+  requestedPayload: MobCodeStatePayload,
+  liveGroup: MobCodeGroupState | undefined,
+): MobCodeStatePayload {
+  return messageType === 'state-sync' && liveGroup ? liveGroup : requestedPayload
+}
+
 export function hasOpenSessionClients(
   clients: Iterable<SessionScopedWsClient>,
   sessionId: string,
@@ -574,10 +582,12 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
         return
       }
 
-      session.data.groups[DEFAULT_GROUP_ID] = payload
-      liveGroupsBySession.set(session.id, payload)
+      const messageType = readDurableMessageType(body.messageType)
+      const nextPayload = resolveDurableStatePayload(messageType, payload, liveGroupsBySession.get(session.id))
+      session.data.groups[DEFAULT_GROUP_ID] = nextPayload
+      liveGroupsBySession.set(session.id, nextPayload)
       await sessions.set(session.id, session)
-      await broadcast(readDurableMessageType(body.messageType), payload, session.id)
+      await broadcast(messageType, nextPayload, session.id)
       res.json({ ok: true })
     } catch (error) {
       console.error(JSON.stringify({ event: 'mobcode.state-failed', sessionId: req.params.sessionId, error: String(error) }))

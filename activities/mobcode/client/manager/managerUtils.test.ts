@@ -8,6 +8,7 @@ import {
   createStateSnapshot,
   flushPendingMobCodeCleanupWork,
   sendMobCodeWsMessage,
+  shouldApplyRemoteStateMessage,
 } from './managerUtils'
 
 void test('applyContentChange updates files while preserving the active file snapshot', () => {
@@ -24,6 +25,13 @@ void test('applyActiveFileChange updates only the active file in the snapshot', 
     files: { 'Main.java': 'class Main {}' },
     activeFile: 'Helper.java',
   })
+})
+
+void test('shouldApplyRemoteStateMessage keeps editable manager state authoritative', () => {
+  assert.equal(shouldApplyRemoteStateMessage('state-sync', true), false)
+  assert.equal(shouldApplyRemoteStateMessage('file-tree-changed', true), false)
+  assert.equal(shouldApplyRemoteStateMessage('state-sync', false), true)
+  assert.equal(shouldApplyRemoteStateMessage('file-content-update', true), true)
 })
 
 void test('createLiveContentSyncPlan sends immediately on first sync or after the throttle window', () => {
