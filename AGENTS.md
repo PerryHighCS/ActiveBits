@@ -44,6 +44,8 @@ Before making code changes:
 
 ## Verification Matrix
 
+Redirect and cache test output to a temp file, then inspect or tail that file instead of streaming long test logs directly.
+
 Run these minimum checks based on scope:
 
 1. Docs-only changes
