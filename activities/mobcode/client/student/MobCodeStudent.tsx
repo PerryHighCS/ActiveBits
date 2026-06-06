@@ -108,7 +108,13 @@ export function getStudentRunnerOptions(
   runners: readonly MobCodeRunnerDefinition[] = MOB_CODE_RUNNERS,
 ): readonly MobCodeRunnerDefinition[] {
   const selectedRunners = runners.filter((runner) => runner.id === runnerId)
-  return selectedRunners.length > 0 ? selectedRunners : runners
+  return selectedRunners.length > 0
+    ? selectedRunners
+    : [{
+        id: runnerId,
+        label: 'Unavailable runner',
+        description: 'The instructor-selected runner is not available in this browser.',
+      }]
 }
 
 export default function MobCodeStudent({ sessionData }: MobCodeStudentProps) {

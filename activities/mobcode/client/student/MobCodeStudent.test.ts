@@ -83,5 +83,9 @@ void test('getStudentRunnerOptions exposes only the instructor-selected runner',
   }
 
   assert.deepEqual(getStudentRunnerOptions('brython-terminal', [pythonRunner, futureRunner]), [pythonRunner])
-  assert.deepEqual(getStudentRunnerOptions('missing-runner' as MobCodeRunnerId, [pythonRunner]), [pythonRunner])
+  assert.deepEqual(getStudentRunnerOptions('missing-runner' as MobCodeRunnerId, [pythonRunner]), [{
+    id: 'missing-runner' as MobCodeRunnerId,
+    label: 'Unavailable runner',
+    description: 'The instructor-selected runner is not available in this browser.',
+  }])
 })
