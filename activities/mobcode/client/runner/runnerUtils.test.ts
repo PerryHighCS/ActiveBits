@@ -120,6 +120,30 @@ void test('buildBrythonRunnerHtml wires terminal input through async worker mess
   assert.match(html, /bridge\.request\(/)
 })
 
+void test('buildBrythonRunnerHtml blocks browser escape-hatch imports', () => {
+  const html = buildBrythonRunnerHtml({
+    files: {
+      'test.py': [
+        'import math',
+        'import browser',
+        'from javascript import window',
+        'import os',
+      ].join('\n'),
+    },
+    entryFile: 'test.py',
+    title: 'Runner',
+  })
+
+  assert.match(html, /blocked_import_roots = \{/)
+  assert.match(html, /'browser'/)
+  assert.match(html, /'javascript'/)
+  assert.match(html, /'os'/)
+  assert.match(html, /'sys'/)
+  assert.match(html, /def mobcode_import\(name, globals=None, locals=None, fromlist=\(\), level=0\):/)
+  assert.match(html, /builtins\.__import__ = mobcode_import/)
+  assert.match(html, /Module '" \+ root_name \+ "' is not available in the terminal runner/)
+})
+
 void test('buildBrythonAsyncEntrySource rewrites top-level and function input', () => {
   const source = buildBrythonAsyncEntrySource([
     'name = input("Name?")',
@@ -135,7 +159,7 @@ void test('buildBrythonAsyncEntrySource rewrites top-level and function input', 
   assert.match(source, / {4}age = await mobcode_input\("Age\?"\)/)
   assert.match(source, /async def ask\(\):\n {8}return await mobcode_input\("Nested\?"\)/)
   assert.match(source, /print\(await ask\(\)\)/)
-  assert.match(source, /aio\.run\(__mobcode_run__\(\)\)/)
+  assert.match(source, /mobcode_run_async\(__mobcode_run__\(\)\)/)
 })
 
 void test('buildBrythonAsyncEntrySource rewrites class method input', () => {
@@ -179,7 +203,11 @@ void test('buildBrythonRunnerHtml compiles user code with the entry filename for
   assert.match(html, /compiled_code = compile\(entry_source, entry_filename, 'exec'\)/)
   assert.match(html, /'__file__': entry_filename/)
   assert.match(html, /'input': mobcode_input/)
+  assert.match(html, /'mobcode_run_async': mobcode_run_async/)
+  assert.match(html, /'mobcode_report_done': mobcode_report_done/)
   assert.match(html, /exec\(compiled_code, runner_globals\)/)
+  assert.doesNotMatch(html, /runner_globals = globals\(\)/)
+  assert.doesNotMatch(html, /'aio': aio/)
 })
 
 void test('buildBrythonRunnerHtml prints a user-file error header before the raw traceback', () => {

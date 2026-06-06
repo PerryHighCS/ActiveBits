@@ -340,14 +340,13 @@ ${userBody || '    pass'}
 async def __mobcode_run__():
     try:
         await __mobcode_user_main__()
-        worker_self.send({'type': 'done'})
+        mobcode_report_done()
     except SystemExit:
-        worker_self.send({'type': 'done'})
+        mobcode_report_done()
     except Exception as error:
-        worker_self.send({'type': 'stderr', 'data': format_user_error_header(error)})
-        worker_self.send({'type': 'stderr', 'data': traceback.format_exc()})
+        mobcode_report_error(error)
 
-aio.run(__mobcode_run__())
+mobcode_run_async(__mobcode_run__())
 `
 }
 
@@ -589,6 +588,21 @@ entry_source = ${serializedEntryContent}
 entry_user_line_count = ${entryLineCount}
 input_sequence = 0
 input_futures = {}
+original_import = builtins.__import__
+blocked_import_roots = {
+    'browser',
+    'javascript',
+    'os',
+    'pathlib',
+    'importlib',
+    'sys',
+    'subprocess',
+    'socket',
+    'asyncio',
+    'threading',
+    'multiprocessing',
+    'webbrowser',
+}
 
 class MobCodeWorkerOutput:
     def __init__(self, message_type):
@@ -642,23 +656,44 @@ def format_user_error_header(error):
         return '\\nError in ' + entry_filename + '\\n'
     return '\\nError in ' + entry_filename + ', line ' + str(line_number) + '\\n'
 
+def mobcode_report_done():
+    worker_self.send({'type': 'done'})
+
+def mobcode_report_error(error):
+    worker_self.send({'type': 'stderr', 'data': format_user_error_header(error)})
+    worker_self.send({'type': 'stderr', 'data': traceback.format_exc()})
+
+def mobcode_run_async(coroutine):
+    aio.run(coroutine)
+
+def mobcode_import(name, globals=None, locals=None, fromlist=(), level=0):
+    root_name = str(name).split('.', 1)[0]
+    if level != 0:
+        raise ImportError('Relative imports are not available in the terminal runner yet.')
+    if root_name in blocked_import_roots:
+        raise ImportError("Module '" + root_name + "' is not available in the terminal runner.")
+    return original_import(name, globals, locals, fromlist, level)
+
 sys.stdout = MobCodeWorkerOutput('stdout')
 sys.stderr = MobCodeWorkerOutput('stderr')
 builtins.input = mobcode_input
+builtins.__import__ = mobcode_import
 
 try:
     compiled_code = compile(entry_source, entry_filename, 'exec')
-    runner_globals = globals()
-    runner_globals.update({
+    runner_globals = {
         '__name__': '__main__',
         '__file__': entry_filename,
         '__builtins__': builtins,
+        'mobcode_input': mobcode_input,
+        'mobcode_run_async': mobcode_run_async,
+        'mobcode_report_done': mobcode_report_done,
+        'mobcode_report_error': mobcode_report_error,
         'input': mobcode_input,
-    })
+    }
     exec(compiled_code, runner_globals)
 except Exception as error:
-    worker_self.send({'type': 'stderr', 'data': format_user_error_header(error)})
-    worker_self.send({'type': 'stderr', 'data': traceback.format_exc()})
+    mobcode_report_error(error)
   </script>
   <script type="text/python">
 from browser import bind, document, window, worker
