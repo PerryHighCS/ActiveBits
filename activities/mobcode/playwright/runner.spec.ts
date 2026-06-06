@@ -24,11 +24,18 @@ async function seedMobCodeFile(page: Page, session: MobCodeCreateResponse, sourc
 }
 
 async function openMobCodeManager(page: Page, session: MobCodeCreateResponse): Promise<void> {
+  await page.addInitScript(({ instructorPasscode }) => {
+    window.history.replaceState(
+      {
+        usr: { createSessionPayload: { instructorPasscode } },
+        key: 'mobcode-playwright',
+        idx: 0,
+      },
+      '',
+      window.location.href,
+    )
+  }, { instructorPasscode: session.instructorPasscode })
   await page.goto(`/manage/mobcode/${encodeURIComponent(session.id)}`)
-  await page.evaluate(({ id, instructorPasscode }) => {
-    window.sessionStorage.setItem(`mobcode_instructor_${id}`, instructorPasscode)
-  }, session)
-  await page.reload({ waitUntil: 'networkidle' })
   await expect(page.getByRole('button', { name: 'Run' })).toBeEnabled()
 }
 

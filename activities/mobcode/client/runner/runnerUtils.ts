@@ -813,6 +813,7 @@ workspace_python_modules = ${serializedWorkspacePythonModules}
 input_sequence = 0
 input_futures = {}
 original_import = builtins.__import__
+original_open = builtins.open
 blocked_import_roots = set(${serializedBlockedImportRoots})
 allowed_import_roots = set(${serializedAllowedImportRoots})
 
@@ -1221,7 +1222,8 @@ export function openMobCodeRunnerPopup(
   }
 
   if (!popup) {
-    return { opened: true }
+    URL.revokeObjectURL(runnerUrl)
+    return { opened: false, reason: 'popup-blocked' }
   }
 
   popup.focus()

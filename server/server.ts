@@ -16,6 +16,7 @@ import { isMobCodeJsonRoute, MOB_CODE_JSON_BODY_LIMIT } from './core/jsonBodyPar
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 const repoRoot = path.resolve(__dirname, path.basename(__dirname) === 'dist' ? '../..' : '..')
+const brythonPackageRoot = path.join(repoRoot, 'node_modules/brython')
 
 const app = express()
 const defaultJsonParser = express.json()
@@ -61,7 +62,14 @@ registerStatusRoute({ app, sessions, ws, sessionTtl, valkeyUrl })
 app.get('/health-check', (_req, res) => {
   res.json({ status: 'ok', memory: process.memoryUsage() })
 })
-app.use('/vendor/brython', express.static(path.join(repoRoot, 'node_modules/brython')))
+app.get('/vendor/brython/:assetName', (req, res, next) => {
+  const assetName = req.params.assetName
+  if (assetName !== 'brython.min.js' && assetName !== 'brython.js' && assetName !== 'brython_stdlib.js') {
+    next()
+    return
+  }
+  res.sendFile(path.join(brythonPackageRoot, assetName))
+})
 
 const env = process.env.NODE_ENV || 'development'
 if (!env.startsWith('dev')) {

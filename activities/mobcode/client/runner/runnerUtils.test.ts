@@ -217,6 +217,7 @@ void test('buildBrythonRunnerHtml exposes read-only workspace files and imports'
   assert.match(html, /"data\/names\.txt":"Ada\\nGrace\\n"/)
   assert.match(html, /workspace_python_modules = \{/)
   assert.match(html, /"helper\.py":"def greet/)
+  assert.match(html, /original_open = builtins\.open/)
   assert.match(html, /def mobcode_open\(path, mode='r'/)
   assert.match(html, /MobCode workspace files are read-only in the terminal runner/)
   assert.match(html, /self\._content = str\(content\)\.encode\('utf-8'\) if self\._binary else str\(content\)/)
@@ -425,15 +426,34 @@ void test('openMobCodeRunnerPopup opens a fresh blob-backed runner popup', () =>
   URL.revokeObjectURL(openedUrl)
 })
 
-void test('openMobCodeRunnerPopup treats a noopener null handle as opened', () => {
-  assert.deepEqual(
-    openMobCodeRunnerPopup({
-      files: { 'main.py': 'print("hello")' },
-      activeFile: 'main.py',
-      runnerId: 'brython-terminal',
-    }, { open: () => null }),
-    { opened: true },
-  )
+void test('openMobCodeRunnerPopup reports a null popup handle as blocked and revokes the blob URL', () => {
+  const originalRevokeObjectUrl = URL.revokeObjectURL
+  let openedUrl = ''
+  let revokedUrl = ''
+  URL.revokeObjectURL = (url) => {
+    revokedUrl = url
+  }
+
+  try {
+    assert.deepEqual(
+      openMobCodeRunnerPopup({
+        files: { 'main.py': 'print("hello")' },
+        activeFile: 'main.py',
+        runnerId: 'brython-terminal',
+      }, {
+        open(url?: string | URL) {
+          openedUrl = String(url ?? '')
+          return null
+        },
+      }),
+      { opened: false, reason: 'popup-blocked' },
+    )
+  } finally {
+    URL.revokeObjectURL = originalRevokeObjectUrl
+  }
+
+  assert.match(openedUrl, /^blob:/)
+  assert.equal(revokedUrl, openedUrl)
 })
 
 void test('openMobCodeRunnerPopup reports missing entry and thrown popup open failures', () => {
