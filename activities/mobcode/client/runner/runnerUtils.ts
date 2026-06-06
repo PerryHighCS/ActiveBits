@@ -49,7 +49,7 @@ export const MOB_CODE_RUNNERS: readonly MobCodeRunnerDefinition[] = [
 ]
 
 export const DEFAULT_MOB_CODE_RUNNER_ID: MobCodeRunnerId = 'brython-terminal'
-const RUNNER_POPUP_FEATURES = 'popup=yes,width=1120,height=760,noopener,noreferrer'
+const RUNNER_POPUP_FEATURES = 'popup=yes,width=1120,height=760'
 const TERMINAL_BLOCKED_IMPORT_ROOTS = [
   'browser',
   'javascript',
@@ -578,9 +578,14 @@ export function buildBrythonRunnerHtml(payload: BrythonRunnerPayload): string {
       color: #e5e7eb;
     }
     * { box-sizing: border-box; }
+    html,
+    body {
+      height: 100%;
+      overflow: hidden;
+    }
     body {
       margin: 0;
-      min-height: 100vh;
+      height: 100vh;
       display: grid;
       grid-template-rows: auto 1fr;
       background: #111827;
@@ -627,6 +632,7 @@ export function buildBrythonRunnerHtml(payload: BrythonRunnerPayload): string {
     main {
       min-height: 0;
       display: flex;
+      overflow: hidden;
     }
     #terminal {
       flex: 1;
@@ -729,6 +735,9 @@ export function buildBrythonRunnerHtml(payload: BrythonRunnerPayload): string {
       maxChars: 100000,
       charsWritten: 0,
       truncated: false,
+      scrollToBottom(terminal) {
+        terminal.scrollTop = terminal.scrollHeight;
+      },
       write(value) {
         if (this.truncated) return;
         const terminal = document.getElementById('terminal');
@@ -740,7 +749,7 @@ export function buildBrythonRunnerHtml(payload: BrythonRunnerPayload): string {
         }
         this.charsWritten += text.length;
         terminal.append(document.createTextNode(text));
-        terminal.scrollTop = terminal.scrollHeight;
+        this.scrollToBottom(terminal);
       },
       writeln(value) {
         this.write(String(value) + '\\n');
@@ -748,10 +757,16 @@ export function buildBrythonRunnerHtml(payload: BrythonRunnerPayload): string {
     };
     window.mobcodeInputBridge = (() => {
       let activeInput = null;
+      const terminal = document.getElementById('terminal');
+      terminal.addEventListener('click', () => {
+        if (!activeInput) return;
+        activeInput.focus();
+      });
       function submitInput(input, value, requestId, submitInputResponse) {
         activeInput = null;
         submitInputResponse(requestId, value);
         input.replaceWith(document.createTextNode(value + '\\n'));
+        window.mobcodeTerminal.scrollToBottom(document.getElementById('terminal'));
       }
 
       return {
@@ -784,7 +799,7 @@ export function buildBrythonRunnerHtml(payload: BrythonRunnerPayload): string {
           });
           terminal.append(input);
           input.focus();
-          terminal.scrollTop = terminal.scrollHeight;
+          window.mobcodeTerminal.scrollToBottom(terminal);
         },
         cancel() {
           if (!activeInput) return;

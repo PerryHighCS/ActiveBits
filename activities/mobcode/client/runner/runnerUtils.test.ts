@@ -118,6 +118,9 @@ void test('buildBrythonRunnerHtml renders a terminal-only popup', () => {
   })
 
   assert.match(html, /id="terminal"/)
+  assert.match(html, /html,\s*\n\s{4}body \{\s*\n\s{6}height: 100%;\s*\n\s{6}overflow: hidden;/)
+  assert.match(html, /body \{\s*\n\s{6}margin: 0;\s*\n\s{6}height: 100vh;/)
+  assert.match(html, /main \{\s*\n\s{6}min-height: 0;\s*\n\s{6}display: flex;\s*\n\s{6}overflow: hidden;/)
   assert.doesNotMatch(html, /id="graphics"/)
   assert.doesNotMatch(html, /Graphics output/)
   assert.doesNotMatch(html, /graphics-surface/)
@@ -131,6 +134,11 @@ void test('buildBrythonRunnerHtml wires terminal input through async worker mess
   })
 
   assert.match(html, /window\.mobcodeInputBridge = \(\(\) =>/)
+  assert.match(html, /scrollToBottom\(terminal\) \{/)
+  assert.match(html, /this\.scrollToBottom\(terminal\);/)
+  assert.match(html, /window\.mobcodeTerminal\.scrollToBottom\(document\.getElementById\('terminal'\)\);/)
+  assert.match(html, /terminal\.addEventListener\('click', \(\) => \{/)
+  assert.match(html, /activeInput\.focus\(\);/)
   assert.match(html, /'type': 'input-response'/)
   assert.match(html, /from browser import aio, bind/)
   assert.match(html, /input_future = aio\.Future\(\)/)
@@ -403,8 +411,8 @@ void test('openMobCodeRunnerPopup opens a fresh blob-backed runner popup', () =>
       openedUrl = String(url ?? '')
       assert.equal(target, '_blank')
       assert.match(features ?? '', /width=1120/)
-      assert.match(features ?? '', /noopener/)
-      assert.match(features ?? '', /noreferrer/)
+      assert.doesNotMatch(features ?? '', /noopener/)
+      assert.doesNotMatch(features ?? '', /noreferrer/)
       return {
         focus() {
           focused = true
