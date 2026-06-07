@@ -35,6 +35,11 @@ const ACTION_MENU_FOCUSABLE_SELECTOR = [
   'textarea:not([disabled])',
   '[tabindex]:not([tabindex="-1"])',
 ].join(',')
+const ACTION_MENU_ITEM_SELECTOR = [
+  '[role="menuitem"]',
+  '[role="menuitemcheckbox"]',
+  '[role="menuitemradio"]',
+].join(',')
 
 interface ActionMenuProps {
   actionMenuContent: ReactNode
@@ -42,10 +47,23 @@ interface ActionMenuProps {
   resolvedActionMenuRole?: 'menu'
 }
 
+function isVisibleActionMenuElement(element: HTMLElement): boolean {
+  if (element.hidden === true || element.getAttribute('aria-hidden') === 'true') return false
+  const style = window.getComputedStyle(element)
+  return style.display !== 'none' && style.visibility !== 'hidden'
+}
+
 function getActionMenuFocusableElements(container: HTMLDivElement | null): HTMLElement[] {
   if (!container) return []
-  return Array.from(container.querySelectorAll<HTMLElement>(ACTION_MENU_FOCUSABLE_SELECTOR))
-    .filter((element) => !element.hasAttribute('disabled') && element.tabIndex !== -1)
+  const selector = container.getAttribute('role') === 'menu'
+    ? ACTION_MENU_ITEM_SELECTOR
+    : ACTION_MENU_FOCUSABLE_SELECTOR
+  return Array.from(container.querySelectorAll<HTMLElement>(selector))
+    .filter((element) => (
+      !element.hasAttribute('disabled')
+      && element.tabIndex !== -1
+      && isVisibleActionMenuElement(element)
+    ))
 }
 
 function ActionMenu({

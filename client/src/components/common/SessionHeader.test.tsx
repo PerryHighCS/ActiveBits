@@ -91,7 +91,7 @@ void test('SessionHeader can render an activity action menu trigger', () => {
         sessionId="abc123"
         actionMenuLabel="Code Files"
         actionMenuRole="menu"
-        actionMenuContent={<button type="button">Upload Zip</button>}
+        actionMenuContent={<button type="button" role="menuitem">Upload Zip</button>}
         headerActions={<button type="button">Theme</button>}
       />
     </MemoryRouter>,
@@ -137,8 +137,9 @@ void test('SessionHeader action menu supports focus and keyboard dismissal', asy
           actionMenuRole="menu"
           actionMenuContent={(
             <>
-              <button type="button">New File</button>
-              <button type="button">Upload Zip</button>
+              <button type="button" role="menuitem">New File</button>
+              <input type="file" aria-label="Hidden upload input" style={{ display: 'none' }} />
+              <button type="button" role="menuitem">Upload Zip</button>
             </>
           )}
         />
@@ -148,11 +149,14 @@ void test('SessionHeader action menu supports focus and keyboard dismissal', asy
     const trigger = rendered.getByRole('button', { name: 'Files' })
     fireEvent.click(trigger)
 
-    const newFileButton = await waitFor(() => rendered.getByRole('button', { name: 'New File' }))
+    const newFileButton = await waitFor(() => rendered.getByRole('menuitem', { name: 'New File' }))
     await waitFor(() => assert.equal(document.activeElement, newFileButton))
 
     fireEvent.keyDown(rendered.getByRole('menu', { name: 'Files' }), { key: 'ArrowDown' })
-    assert.equal(document.activeElement, rendered.getByRole('button', { name: 'Upload Zip' }))
+    assert.equal(document.activeElement, rendered.getByRole('menuitem', { name: 'Upload Zip' }))
+
+    fireEvent.keyDown(rendered.getByRole('menu', { name: 'Files' }), { key: 'ArrowDown' })
+    assert.equal(document.activeElement, newFileButton)
 
     fireEvent.keyDown(rendered.getByRole('menu', { name: 'Files' }), { key: 'Home' })
     assert.equal(document.activeElement, newFileButton)
