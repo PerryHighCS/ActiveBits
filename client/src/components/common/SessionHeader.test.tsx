@@ -111,11 +111,12 @@ void test('SessionHeader hides join and end controls but keeps activity controls
     </MemoryRouter>,
   )
 
-  assert.match(html, /Managed by SyncDeck/i)
   assert.match(html, /Files/)
   assert.match(html, /Theme/)
   assert.match(html, /Run/)
   assert.match(html, /md:left-1\/2/)
+  assert.doesNotMatch(html, /Managed by SyncDeck/i)
+  assert.doesNotMatch(html, /Embedded session managed/i)
   assert.doesNotMatch(html, /Join Code:/)
   assert.doesNotMatch(html, /End Session/)
   assert.match(html, /mb-6/)

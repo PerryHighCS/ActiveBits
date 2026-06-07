@@ -100,10 +100,6 @@ export default function SessionHeader({
               {centerHeaderActions}
             </div>
           )}
-
-          <p className="text-sm text-gray-600">
-            Managed by SyncDeck
-          </p>
         </div>
       </div>
     )
