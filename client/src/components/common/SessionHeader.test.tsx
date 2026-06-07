@@ -199,6 +199,41 @@ void test('SessionHeader action menu closes on outside click', async () => {
   }
 })
 
+void test('SessionHeader neutral action popup preserves arrow keys inside inputs', async () => {
+  const restoreDom = installDomEnvironment('https://bits.example')
+  const { cleanup, fireEvent, render, waitFor } = await import('@testing-library/react')
+
+  try {
+    const rendered = render(
+      <MemoryRouter>
+        <SessionHeader
+          activityName="Mob Code"
+          sessionId="abc123"
+          actionMenuLabel="Files"
+          actionMenuContent={(
+            <>
+              <input aria-label="File filter" />
+              <button type="button">New File</button>
+            </>
+          )}
+        />
+      </MemoryRouter>,
+    )
+
+    const trigger = rendered.getByRole('button', { name: 'Files' })
+    fireEvent.click(trigger)
+
+    const filterInput = await waitFor(() => rendered.getByLabelText('File filter'))
+    await waitFor(() => assert.equal(document.activeElement, filterInput))
+
+    fireEvent.keyDown(filterInput, { key: 'ArrowDown' })
+    assert.equal(document.activeElement, filterInput)
+  } finally {
+    cleanup()
+    restoreDom()
+  }
+})
+
 void test('SessionHeader can render centered activity controls', () => {
   const html = renderToStaticMarkup(
     <MemoryRouter>

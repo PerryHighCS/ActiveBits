@@ -111,7 +111,7 @@ function ActionMenu({
   }, [closeActionMenu, showActionMenu])
 
   const handleTriggerKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
-    if (event.key !== 'ArrowDown') return
+    if (resolvedActionMenuRole !== 'menu' || event.key !== 'ArrowDown') return
     event.preventDefault()
     setShowActionMenu(true)
   }
@@ -122,6 +122,8 @@ function ActionMenu({
       closeActionMenu(true)
       return
     }
+
+    if (resolvedActionMenuRole !== 'menu') return
 
     const focusableElements = getActionMenuFocusableElements(menuRef.current)
     if (focusableElements.length === 0) return
