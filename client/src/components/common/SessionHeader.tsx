@@ -66,10 +66,43 @@ export default function SessionHeader({
   if (embeddedChildSession) {
     return (
       <div className={`${includeBottomMargin ? 'mb-6 ' : ''}bg-white border-b border-gray-200 px-6 py-4`}>
-        <div className="flex flex-col gap-2">
-          <h1 className="text-2xl font-bold text-gray-800">{activityName}</h1>
+        <div className="relative flex flex-wrap items-center justify-between gap-3">
+          <div className="flex min-w-0 flex-wrap items-center gap-3">
+            <h1 className="text-2xl font-bold text-gray-800">{activityName}</h1>
+            {actionMenuContent != null && (
+              <div className="relative">
+                <Button
+                  onClick={() => setShowActionMenu((value) => !value)}
+                  variant="outline"
+                  aria-expanded={showActionMenu}
+                  aria-haspopup={actionMenuRole}
+                  aria-controls={showActionMenu ? actionMenuId : undefined}
+                >
+                  {actionMenuLabel}
+                </Button>
+                {showActionMenu && (
+                  <div
+                    id={actionMenuId}
+                    aria-label={actionMenuLabel}
+                    role={actionMenuRole}
+                    className="absolute left-0 z-20 mt-2 min-w-56 rounded border border-gray-200 bg-white p-2 shadow-lg"
+                  >
+                    {actionMenuContent}
+                  </div>
+                )}
+              </div>
+            )}
+            {headerActions}
+          </div>
+
+          {centerHeaderActions != null && (
+            <div className="order-last flex w-full justify-center md:absolute md:left-1/2 md:top-1/2 md:order-none md:w-auto md:-translate-x-1/2 md:-translate-y-1/2">
+              {centerHeaderActions}
+            </div>
+          )}
+
           <p className="text-sm text-gray-600">
-            Embedded session managed by parent SyncDeck session. Join code and end session controls are disabled here.
+            Managed by SyncDeck
           </p>
         </div>
       </div>

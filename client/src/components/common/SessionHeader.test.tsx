@@ -97,14 +97,25 @@ void test('SessionHeader can render centered activity controls', () => {
   assert.match(html, /justify-center/)
 })
 
-void test('SessionHeader hides join and end controls for embedded child sessions', () => {
+void test('SessionHeader hides join and end controls but keeps activity controls for embedded child sessions', () => {
   const html = renderToStaticMarkup(
     <MemoryRouter>
-      <SessionHeader activityName="Embedded Test" sessionId="CHILD:parent:abc12:embedded-test" />
+      <SessionHeader
+        activityName="Embedded Test"
+        sessionId="CHILD:parent:abc12:embedded-test"
+        actionMenuLabel="Files"
+        actionMenuContent={<button type="button">New File</button>}
+        headerActions={<button type="button">Theme</button>}
+        centerHeaderActions={<button type="button">Run</button>}
+      />
     </MemoryRouter>,
   )
 
-  assert.match(html, /Embedded session managed by parent SyncDeck session/i)
+  assert.match(html, /Managed by SyncDeck/i)
+  assert.match(html, /Files/)
+  assert.match(html, /Theme/)
+  assert.match(html, /Run/)
+  assert.match(html, /md:left-1\/2/)
   assert.doesNotMatch(html, /Join Code:/)
   assert.doesNotMatch(html, /End Session/)
   assert.match(html, /mb-6/)
