@@ -54,11 +54,15 @@ async function openMobCodeStudent(page: Page, session: MobCodeCreateResponse): P
 }
 
 async function runMobCodePopup(page: Page): Promise<Page> {
+  return await runMobCodePopupForEntry(page, 'test.py')
+}
+
+async function runMobCodePopupForEntry(page: Page, entryFile: string): Promise<Page> {
   const popupPromise = page.waitForEvent('popup')
   await page.getByRole('button', { name: 'Run' }).click()
   const popup = await popupPromise
   await popup.waitForLoadState('domcontentloaded')
-  await expect(popup.getByText('[Python] Running test.py')).toBeVisible({ timeout: 15_000 })
+  await expect(popup.getByText(`[Python] Running ${entryFile}`)).toBeVisible({ timeout: 15_000 })
   return popup
 }
 
@@ -90,6 +94,22 @@ test('MobCode Python runner popup prints terminal output', async ({ page }) => {
 
   await expect(popup.locator('#terminal')).toContainText('hello from playwright', { timeout: 15_000 })
   await expect(popup.getByRole('button', { name: 'Stop Python runner' })).toHaveText('Done')
+})
+
+test('MobCode Python runner popup imports workspace Python modules', async ({ page }) => {
+  const session = await createMobCodeSession(page)
+  await seedMobCodeFiles(page, session, {
+    'main.py': 'from greeter import Greeter\n\ng = Greeter()\nprint(g.greet("World"))\n',
+    'greeter.py': 'class Greeter:\n    def greet(self, name):\n        return f"Hello, {name}!"\n',
+  }, 'main.py')
+  await openMobCodeManager(page, session)
+
+  const popup = await runMobCodePopupForEntry(page, 'main.py')
+  const terminal = popup.locator('#terminal')
+
+  await expect(terminal).toContainText('Hello, World!', { timeout: 15_000 })
+  await expect(terminal).not.toContainText('Invalid URL')
+  await expect(terminal).not.toContainText('XMLHttpRequest')
 })
 
 test('MobCode Python runner popup handles terminal input', async ({ page }) => {

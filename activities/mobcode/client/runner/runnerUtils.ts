@@ -122,6 +122,15 @@ function escapeScriptJson(value: unknown): string {
     .replaceAll('\u2029', '\\u2029')
 }
 
+function encodeBase64Utf8(value: string): string {
+  const bytes = new TextEncoder().encode(value)
+  let binary = ''
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte)
+  }
+  return btoa(binary)
+}
+
 function modulePath(moduleName: string): string {
   return `${moduleName.replaceAll('.', '/')}.py`
 }
@@ -555,6 +564,14 @@ export function buildBrythonRunnerHtml(payload: BrythonRunnerPayload): string {
         buildBrythonModuleSource(content),
       ]),
   ))
+  const serializedWorkspaceBrythonFilesJson = escapeScriptJson(JSON.stringify(Object.fromEntries(
+    Object.entries(payload.files)
+      .filter(([path]) => isPythonFile(path))
+      .map(([path, content]) => [
+        path,
+        { content: encodeBase64Utf8(buildBrythonModuleSource(content)) },
+      ]),
+  )))
   const serializedBlockedImportRoots = escapeScriptJson(TERMINAL_BLOCKED_IMPORT_ROOTS)
   const serializedAllowedImportRoots = escapeScriptJson(TERMINAL_ALLOWED_IMPORT_ROOTS)
   const entryLineContent = entryContent.replace(/\r?\n$/, '')
@@ -832,12 +849,103 @@ entry_user_line_count = ${entryLineCount}
 entry_import_diagnostic = ${serializedEntryImportDiagnostic}
 workspace_files = ${serializedWorkspaceFiles}
 workspace_python_modules = ${serializedWorkspacePythonModules}
+workspace_brython_files_json = ${serializedWorkspaceBrythonFilesJson}
 input_sequence = 0
 input_futures = {}
 original_import = builtins.__import__
 original_open = builtins.open
 blocked_import_roots = set(${serializedBlockedImportRoots})
 allowed_import_roots = set(${serializedAllowedImportRoots})
+
+try:
+    worker_self.__BRYTHON__.add_files(worker_self.JSON.parse(workspace_brython_files_json))
+except Exception:
+    pass
+
+try:
+    worker_self.eval("""
+(function(workspaceFilesJson) {
+  const workspaceFiles = JSON.parse(workspaceFilesJson);
+  const NativeXMLHttpRequest = self.XMLHttpRequest;
+  if (!NativeXMLHttpRequest || self.mobcodeWorkspaceXMLHttpRequestInstalled) return;
+  self.mobcodeWorkspaceXMLHttpRequestInstalled = true;
+  // Brython's native importer fetches bare workspace modules with XHR before Python hooks run.
+  function normalizeWorkspaceUrl(url) {
+    const withoutSuffix = String(url).split('#')[0].split('?')[0];
+    try {
+      return new URL(withoutSuffix, self.location.href).pathname.replace(/^\\/+/, '');
+    } catch {
+      return withoutSuffix.replace(/^\\/+/, '');
+    }
+  }
+  function resolveWorkspacePath(url) {
+    const normalized = normalizeWorkspaceUrl(url);
+    const candidates = [
+      normalized,
+      normalized.slice(normalized.lastIndexOf('/') + 1),
+    ];
+    for (const candidate of candidates) {
+      if (Object.prototype.hasOwnProperty.call(workspaceFiles, candidate)) return candidate;
+    }
+    return null;
+  }
+  self.XMLHttpRequest = class MobCodeWorkspaceXMLHttpRequest {
+    constructor() {
+      this.nativeRequest = null;
+      this.workspacePath = null;
+      this.readyState = 0;
+      this.status = 0;
+      this.responseText = '';
+      this.onreadystatechange = null;
+    }
+    overrideMimeType(...args) {
+      if (this.nativeRequest) this.nativeRequest.overrideMimeType(...args);
+    }
+    getResponseHeader(name) {
+      if (this.nativeRequest) return this.nativeRequest.getResponseHeader(name);
+      return null;
+    }
+    getAllResponseHeaders() {
+      if (this.nativeRequest) return this.nativeRequest.getAllResponseHeaders();
+      return '';
+    }
+    abort() {
+      if (this.nativeRequest) this.nativeRequest.abort();
+    }
+    open(method, url, async = true, user, password) {
+      const workspacePath = String(method).toUpperCase() === 'GET' ? resolveWorkspacePath(url) : null;
+      if (workspacePath !== null) {
+        this.workspacePath = workspacePath;
+        this.readyState = 1;
+        return;
+      }
+      this.nativeRequest = new NativeXMLHttpRequest();
+      this.nativeRequest.open(method, url, async, user, password);
+    }
+    send(body) {
+      if (this.nativeRequest) {
+        this.nativeRequest.onreadystatechange = () => {
+          this.readyState = this.nativeRequest.readyState;
+          this.status = this.nativeRequest.status;
+          this.responseText = this.nativeRequest.responseText;
+          if (typeof this.onreadystatechange === 'function') this.onreadystatechange.call(this);
+        };
+        this.nativeRequest.send(body);
+        return;
+      }
+      const fileRecord = workspaceFiles[this.workspacePath];
+      this.status = fileRecord ? 200 : 404;
+      this.responseText = fileRecord ? atob(fileRecord.content) : '';
+      this.readyState = 4;
+      if (typeof this.onreadystatechange === 'function') {
+        setTimeout(() => this.onreadystatechange.call(this), 0);
+      }
+    }
+  };
+})(%s);
+""" % repr(workspace_brython_files_json))
+except Exception:
+    pass
 
 class MobCodeWorkerOutput:
     def __init__(self, message_type):
