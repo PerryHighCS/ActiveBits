@@ -683,6 +683,7 @@ export function buildBrythonRunnerHtml(payload: BrythonRunnerPayload): string {
     <div class="runner-actions">
       <div class="entry">${entryFile}</div>
       <button id="stop-runner" type="button" aria-label="Stop Python runner">Stop</button>
+      <button id="done-runner" type="button" aria-label="Close Python runner" hidden disabled>Done</button>
     </div>
   </header>
   <main>
@@ -696,6 +697,17 @@ export function buildBrythonRunnerHtml(payload: BrythonRunnerPayload): string {
     });
     window.__MOB_CODE_RUNNER_PAYLOAD__ = ${serializedPayload};
     (() => {
+      const closeRunnerWindow = window.close.bind(window);
+      let closeAllowed = false;
+      window.close = () => {
+        if (closeAllowed) closeRunnerWindow();
+      };
+      window.mobcodeCloseRunnerWindow = () => {
+        closeAllowed = true;
+        closeRunnerWindow();
+      };
+    })();
+    (() => {
       let runnerStarted = false;
       window.mobcodeRunnerShouldStart = () => {
         if (runnerStarted) return false;
@@ -704,12 +716,18 @@ export function buildBrythonRunnerHtml(payload: BrythonRunnerPayload): string {
       };
     })();
     window.mobcodeRunnerSetState = (state) => {
+      window.mobcodeRunnerState = state;
       const stopButton = document.getElementById('stop-runner');
-      if (!stopButton) return;
+      const doneButton = document.getElementById('done-runner');
+      if (!stopButton || !doneButton) return;
       const isRunning = state === 'running';
+      const canClose = state === 'done' || state === 'stopped';
       stopButton.disabled = !isRunning;
-      stopButton.textContent = isRunning ? 'Stop' : state === 'done' ? 'Done' : 'Stopped';
+      stopButton.hidden = !isRunning;
+      doneButton.disabled = !canClose;
+      doneButton.hidden = !canClose;
     };
+    window.mobcodeRunnerGetState = () => window.mobcodeRunnerState || 'loading';
     (() => {
       const NativeWorker = window.Worker;
       let activeNativeWorker = null;
@@ -1269,7 +1287,13 @@ def stop_active_worker():
 
 @bind(document['stop-runner'], 'click')
 def handle_stop_click(event):
+    if window.mobcodeRunnerGetState() != 'running':
+        return
     stop_active_worker()
+
+@bind(document['done-runner'], 'click')
+def handle_done_click(event):
+    window.mobcodeCloseRunnerWindow()
 
 def submit_input_response(request_id, value):
     if active_worker is None:

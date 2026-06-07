@@ -66,6 +66,18 @@ async function runMobCodePopupForEntry(page: Page, entryFile: string): Promise<P
   return popup
 }
 
+async function clickRunnerDoneAndWaitForClose(popup: Page): Promise<void> {
+  const closePromise = popup.waitForEvent('close')
+  try {
+    await popup.getByRole('button', { name: 'Close Python runner' }).click()
+  } catch (error) {
+    if (!(error instanceof Error) || !error.message.includes('Target page, context or browser has been closed')) {
+      throw error
+    }
+  }
+  await closePromise
+}
+
 test('MobCode student view launches the instructor-selected Python runner', async ({ page }) => {
   const session = await createMobCodeSession(page)
   await seedMobCodeFile(page, session, 'print("hello from student")\n')
@@ -93,7 +105,8 @@ test('MobCode Python runner popup prints terminal output', async ({ page }) => {
   const popup = await runMobCodePopup(page)
 
   await expect(popup.locator('#terminal')).toContainText('hello from playwright', { timeout: 15_000 })
-  await expect(popup.getByRole('button', { name: 'Stop Python runner' })).toHaveText('Done')
+  await expect(popup.getByRole('button', { name: 'Close Python runner' })).toHaveText('Done')
+  await clickRunnerDoneAndWaitForClose(popup)
 })
 
 test('MobCode Python runner popup imports workspace Python modules', async ({ page }) => {
@@ -113,6 +126,21 @@ test('MobCode Python runner popup imports workspace Python modules', async ({ pa
   await expect(terminal).not.toContainText('XMLHttpRequest')
 })
 
+test('MobCode Python runner popup closes from the stopped state', async ({ page }) => {
+  const session = await createMobCodeSession(page)
+  await seedMobCodeFile(page, session, 'print("ready")\n')
+  await openMobCodeManager(page, session)
+
+  const popup = await runMobCodePopup(page)
+
+  await expect(popup.locator('#terminal')).toContainText('ready', { timeout: 15_000 })
+  await popup.evaluate(() => {
+    (window as unknown as { mobcodeRunnerSetState: (state: string) => void }).mobcodeRunnerSetState('stopped')
+  })
+  await expect(popup.getByRole('button', { name: 'Close Python runner' })).toHaveText('Done')
+  await clickRunnerDoneAndWaitForClose(popup)
+})
+
 test('MobCode Python runner popup handles terminal input', async ({ page }) => {
   const session = await createMobCodeSession(page)
   await seedMobCodeFile(page, session, 'name = input("Name? ")\nprint("Hello " + name)\n')
@@ -121,6 +149,8 @@ test('MobCode Python runner popup handles terminal input', async ({ page }) => {
   const popup = await runMobCodePopup(page)
 
   await expect(popup.locator('#terminal')).toContainText('Name?', { timeout: 15_000 })
+  await expect(popup.getByRole('button', { name: 'Stop Python runner' })).toBeVisible()
+  await expect(popup.getByRole('button', { name: 'Close Python runner' })).toHaveCount(0)
   await popup.locator('#terminal').evaluate((terminal) => {
     const input = terminal.querySelector('input')
     if (input instanceof HTMLInputElement) {

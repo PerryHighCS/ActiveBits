@@ -65,6 +65,9 @@ void test('buildBrythonRunnerHtml guards Brython execution against duplicate ini
   assert.match(html, /if window\.mobcodeRunnerShouldStart\(\):/)
   assert.match(html, /window\.opener = null;/)
   assert.match(html, /URL\.revokeObjectURL\(window\.location\.href\)/)
+  assert.match(html, /const closeRunnerWindow = window\.close\.bind\(window\);/)
+  assert.match(html, /window\.close = \(\) => \{/)
+  assert.match(html, /window\.mobcodeCloseRunnerWindow = \(\) => \{/)
 })
 
 void test('buildBrythonRunnerHtml runs user code in a Brython worker', () => {
@@ -98,7 +101,18 @@ void test('buildBrythonRunnerHtml exposes stop and output limit controls', () =>
 
   assert.match(html, /id="stop-runner"/)
   assert.match(html, /aria-label="Stop Python runner"/)
+  assert.match(html, /id="done-runner"/)
+  assert.match(html, /aria-label="Close Python runner"/)
+  assert.match(html, /hidden disabled>Done<\/button>/)
   assert.match(html, /window\.mobcodeRunnerSetState = \(state\) =>/)
+  assert.match(html, /window\.mobcodeRunnerState = state;/)
+  assert.match(html, /const doneButton = document\.getElementById\('done-runner'\);/)
+  assert.match(html, /const canClose = state === 'done' \|\| state === 'stopped';/)
+  assert.match(html, /stopButton\.disabled = !isRunning;/)
+  assert.match(html, /stopButton\.hidden = !isRunning;/)
+  assert.match(html, /doneButton\.disabled = !canClose;/)
+  assert.match(html, /doneButton\.hidden = !canClose;/)
+  assert.match(html, /window\.mobcodeRunnerGetState = \(\) => window\.mobcodeRunnerState \|\| 'loading';/)
   assert.match(html, /maxChars: 100000/)
   assert.match(html, /\[output truncated\]/)
   assert.match(html, /def stop_active_worker\(\):/)
@@ -113,6 +127,9 @@ void test('buildBrythonRunnerHtml exposes stop and output limit controls', () =>
   assert.match(html, /activeNativeWorker\.terminate\(\)/)
   assert.match(html, /window\.mobcodeTerminateWorker\(\)/)
   assert.match(html, /@bind\(document\['stop-runner'\], 'click'\)/)
+  assert.match(html, /if window\.mobcodeRunnerGetState\(\) != 'running':/)
+  assert.match(html, /@bind\(document\['done-runner'\], 'click'\)/)
+  assert.match(html, /window\.mobcodeCloseRunnerWindow\(\)/)
   assert.match(html, /message_type == 'done'/)
 })
 
