@@ -222,6 +222,7 @@ void test('buildBrythonRunnerHtml exposes read-only workspace files and imports'
       'main.py': 'from helper import greet\nprint(greet("Ada"))\nprint(open("data/names.txt").read())\n',
       'helper.py': 'def greet(name):\n    return "Hello " + name\n',
       'data/names.txt': 'Ada\nGrace\n',
+      'README.md': 'Expected output: `3` and ${count}\n',
     },
     entryFile: 'main.py',
     title: 'Runner',
@@ -229,6 +230,8 @@ void test('buildBrythonRunnerHtml exposes read-only workspace files and imports'
 
   assert.match(html, /workspace_files = \{/)
   assert.match(html, /"data\/names\.txt":"Ada\\nGrace\\n"/)
+  assert.match(html, /Expected output: \\u00603\\u0060 and \\u0024\{count\}/)
+  assert.doesNotMatch(html, /Expected output: `3` and \$\{count\}/)
   assert.match(html, /workspace_python_modules = \{/)
   assert.match(html, /"helper\.py":"def greet/)
   assert.match(html, /workspace_brython_files_json = /)

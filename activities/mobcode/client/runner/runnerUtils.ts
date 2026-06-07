@@ -115,6 +115,8 @@ function escapeHtml(value: string): string {
 
 function escapeScriptJson(value: unknown): string {
   return JSON.stringify(value)
+    .replaceAll('${', '\\u0024{')
+    .replaceAll('`', '\\u0060')
     .replaceAll('<', '\\u003c')
     .replaceAll('>', '\\u003e')
     .replaceAll('&', '\\u0026')

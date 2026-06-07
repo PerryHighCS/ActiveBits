@@ -101,6 +101,7 @@ test('MobCode Python runner popup imports workspace Python modules', async ({ pa
   await seedMobCodeFiles(page, session, {
     'main.py': 'from greeter import Greeter\n\ng = Greeter()\nprint(g.greet("World"))\n',
     'greeter.py': 'class Greeter:\n    def greet(self, name):\n        return f"Hello, {name}!"\n',
+    'README.md': 'Expected output: `Hello, World!` and ${not_js}\n',
   }, 'main.py')
   await openMobCodeManager(page, session)
 
