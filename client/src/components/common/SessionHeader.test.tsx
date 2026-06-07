@@ -150,10 +150,11 @@ void test('SessionHeader action menu supports focus and keyboard dismissal', asy
     fireEvent.click(trigger)
 
     const newFileButton = await waitFor(() => rendered.getByRole('menuitem', { name: 'New File' }))
+    const uploadZipButton = rendered.getByRole('menuitem', { name: 'Upload Zip' })
     await waitFor(() => assert.equal(document.activeElement, newFileButton))
 
     fireEvent.keyDown(rendered.getByRole('menu', { name: 'Files' }), { key: 'ArrowDown' })
-    assert.equal(document.activeElement, rendered.getByRole('menuitem', { name: 'Upload Zip' }))
+    assert.equal(document.activeElement, uploadZipButton)
 
     fireEvent.keyDown(rendered.getByRole('menu', { name: 'Files' }), { key: 'ArrowDown' })
     assert.equal(document.activeElement, newFileButton)
@@ -164,6 +165,12 @@ void test('SessionHeader action menu supports focus and keyboard dismissal', asy
     fireEvent.keyDown(rendered.getByRole('menu', { name: 'Files' }), { key: 'Escape' })
     await waitFor(() => assert.equal(rendered.queryByRole('menu', { name: 'Files' }), null))
     await waitFor(() => assert.equal(document.activeElement, trigger))
+
+    fireEvent.keyDown(trigger, { key: 'ArrowUp' })
+    await waitFor(() => assert.notEqual(rendered.queryByRole('menu', { name: 'Files' }), null))
+    await waitFor(() => (
+      assert.equal(document.activeElement, rendered.getByRole('menuitem', { name: 'Upload Zip' }))
+    ))
   } finally {
     cleanup()
     restoreDom()

@@ -47,6 +47,8 @@ interface ActionMenuProps {
   resolvedActionMenuRole?: 'menu'
 }
 
+type ActionMenuInitialFocus = 'first' | 'last'
+
 function isVisibleActionMenuElement(element: HTMLElement): boolean {
   if (element.hidden === true || element.getAttribute('aria-hidden') === 'true') return false
   const style = window.getComputedStyle(element)
@@ -75,6 +77,7 @@ function ActionMenu({
   const actionMenuId = useId()
   const triggerRef = useRef<HTMLButtonElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
+  const pendingInitialFocusRef = useRef<ActionMenuInitialFocus>('first')
 
   const closeActionMenu = useCallback((returnFocus = false) => {
     setShowActionMenu(false)
@@ -86,8 +89,12 @@ function ActionMenu({
   useEffect(() => {
     if (!showActionMenu) return
     window.setTimeout(() => {
-      const [firstFocusable] = getActionMenuFocusableElements(menuRef.current)
-      firstFocusable?.focus()
+      const focusableElements = getActionMenuFocusableElements(menuRef.current)
+      const focusTarget = pendingInitialFocusRef.current === 'last'
+        ? focusableElements.at(-1)
+        : focusableElements[0]
+      pendingInitialFocusRef.current = 'first'
+      focusTarget?.focus()
     }, 0)
   }, [showActionMenu])
 
@@ -111,8 +118,12 @@ function ActionMenu({
   }, [closeActionMenu, showActionMenu])
 
   const handleTriggerKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
-    if (resolvedActionMenuRole !== 'menu' || event.key !== 'ArrowDown') return
+    if (
+      resolvedActionMenuRole !== 'menu'
+      || (event.key !== 'ArrowDown' && event.key !== 'ArrowUp')
+    ) return
     event.preventDefault()
+    pendingInitialFocusRef.current = event.key === 'ArrowUp' ? 'last' : 'first'
     setShowActionMenu(true)
   }
 
@@ -149,7 +160,10 @@ function ActionMenu({
     <div className="relative">
       <Button
         ref={triggerRef}
-        onClick={() => setShowActionMenu((value) => !value)}
+        onClick={() => {
+          pendingInitialFocusRef.current = 'first'
+          setShowActionMenu((value) => !value)
+        }}
         onKeyDown={handleTriggerKeyDown}
         variant="outline"
         aria-expanded={showActionMenu}
