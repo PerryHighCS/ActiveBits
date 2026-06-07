@@ -106,7 +106,7 @@ void test('SessionHeader can render an activity action menu trigger', () => {
   assert.doesNotMatch(html, /Upload Zip/)
 })
 
-void test('SessionHeader defaults action popup semantics to menu', () => {
+void test('SessionHeader leaves action popup semantics neutral by default', () => {
   const html = renderToStaticMarkup(
     <MemoryRouter>
       <SessionHeader
@@ -118,7 +118,7 @@ void test('SessionHeader defaults action popup semantics to menu', () => {
     </MemoryRouter>,
   )
 
-  assert.match(html, /aria-haspopup="menu"/)
+  assert.doesNotMatch(html, /aria-haspopup=/)
   assert.doesNotMatch(html, /aria-controls=/)
   assert.doesNotMatch(html, /role="menu"/)
 })
@@ -134,6 +134,7 @@ void test('SessionHeader action menu supports focus and keyboard dismissal', asy
           activityName="Mob Code"
           sessionId="abc123"
           actionMenuLabel="Files"
+          actionMenuRole="menu"
           actionMenuContent={(
             <>
               <button type="button">New File</button>
@@ -183,11 +184,11 @@ void test('SessionHeader action menu closes on outside click', async () => {
 
     const trigger = rendered.getByRole('button', { name: 'Files' })
     fireEvent.click(trigger)
-    await waitFor(() => assert.notEqual(rendered.queryByRole('menu', { name: 'Files' }), null))
+    await waitFor(() => assert.notEqual(rendered.queryByRole('button', { name: 'New File' }), null))
 
     fireEvent.mouseDown(document.body)
-    await waitFor(() => assert.equal(rendered.queryByRole('menu', { name: 'Files' }), null))
-    await waitFor(() => assert.equal(document.activeElement, trigger))
+    await waitFor(() => assert.equal(rendered.queryByRole('button', { name: 'New File' }), null))
+    assert.notEqual(document.activeElement, trigger)
   } finally {
     cleanup()
     restoreDom()

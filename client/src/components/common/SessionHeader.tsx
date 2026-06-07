@@ -39,7 +39,7 @@ const ACTION_MENU_FOCUSABLE_SELECTOR = [
 interface ActionMenuProps {
   actionMenuContent: ReactNode
   actionMenuLabel: string
-  resolvedActionMenuRole: 'menu'
+  resolvedActionMenuRole?: 'menu'
 }
 
 function getActionMenuFocusableElements(container: HTMLDivElement | null): HTMLElement[] {
@@ -58,7 +58,7 @@ function ActionMenu({
   const triggerRef = useRef<HTMLButtonElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
 
-  const closeActionMenu = useCallback((returnFocus = true) => {
+  const closeActionMenu = useCallback((returnFocus = false) => {
     setShowActionMenu(false)
     if (returnFocus) {
       window.setTimeout(() => triggerRef.current?.focus(), 0)
@@ -101,7 +101,7 @@ function ActionMenu({
   const handleMenuKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key === 'Escape') {
       event.preventDefault()
-      closeActionMenu()
+      closeActionMenu(true)
       return
     }
 
@@ -133,7 +133,7 @@ function ActionMenu({
         onKeyDown={handleTriggerKeyDown}
         variant="outline"
         aria-expanded={showActionMenu}
-        aria-haspopup={resolvedActionMenuRole}
+        aria-haspopup={resolvedActionMenuRole === 'menu' ? 'menu' : undefined}
         aria-controls={showActionMenu ? actionMenuId : undefined}
       >
         {actionMenuLabel}
@@ -143,7 +143,7 @@ function ActionMenu({
           ref={menuRef}
           id={actionMenuId}
           aria-label={actionMenuLabel}
-          role={resolvedActionMenuRole}
+          role={resolvedActionMenuRole === 'menu' ? 'menu' : undefined}
           onKeyDown={handleMenuKeyDown}
           className="absolute left-0 z-20 mt-2 min-w-56 rounded border border-gray-200 bg-white p-2 shadow-lg"
         >
@@ -175,7 +175,8 @@ export default function SessionHeader({
   const [errorMessage, setErrorMessage] = useState('')
   const { copyToClipboard, isCopied } = useClipboard(1500)
   const navigate = useNavigate()
-  const resolvedActionMenuRole = actionMenuContent != null ? actionMenuRole ?? 'menu' : undefined
+  // Only pass "menu" when callers provide content with matching menu-item semantics.
+  const resolvedActionMenuRole = actionMenuContent != null ? actionMenuRole : undefined
 
   const studentJoinUrl =
     sessionId && typeof window !== 'undefined' ? buildStudentJoinUrl(window.location.origin, sessionId) : ''
@@ -208,7 +209,7 @@ export default function SessionHeader({
               <ActionMenu
                 actionMenuContent={actionMenuContent}
                 actionMenuLabel={actionMenuLabel}
-                resolvedActionMenuRole={resolvedActionMenuRole ?? 'menu'}
+                resolvedActionMenuRole={resolvedActionMenuRole}
               />
             )}
             {headerActions}
@@ -257,7 +258,7 @@ export default function SessionHeader({
               <ActionMenu
                 actionMenuContent={actionMenuContent}
                 actionMenuLabel={actionMenuLabel}
-                resolvedActionMenuRole={resolvedActionMenuRole ?? 'menu'}
+                resolvedActionMenuRole={resolvedActionMenuRole}
               />
             )}
             {headerActions}
