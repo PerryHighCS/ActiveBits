@@ -1,4 +1,13 @@
-import { useId, useState, type MouseEvent, type ReactNode } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type MouseEvent,
+  type ReactNode,
+} from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useClipboard } from '@src/hooks/useClipboard'
 import Button from '../ui/Button'
@@ -18,6 +27,133 @@ export interface SessionHeaderProps {
   centerHeaderActions?: ReactNode
 }
 
+const ACTION_MENU_FOCUSABLE_SELECTOR = [
+  'button:not([disabled])',
+  '[href]',
+  'input:not([disabled])',
+  'select:not([disabled])',
+  'textarea:not([disabled])',
+  '[tabindex]:not([tabindex="-1"])',
+].join(',')
+
+interface ActionMenuProps {
+  actionMenuContent: ReactNode
+  actionMenuLabel: string
+  resolvedActionMenuRole: 'menu'
+}
+
+function getActionMenuFocusableElements(container: HTMLDivElement | null): HTMLElement[] {
+  if (!container) return []
+  return Array.from(container.querySelectorAll<HTMLElement>(ACTION_MENU_FOCUSABLE_SELECTOR))
+    .filter((element) => !element.hasAttribute('disabled') && element.tabIndex !== -1)
+}
+
+function ActionMenu({
+  actionMenuContent,
+  actionMenuLabel,
+  resolvedActionMenuRole,
+}: ActionMenuProps) {
+  const [showActionMenu, setShowActionMenu] = useState(false)
+  const actionMenuId = useId()
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+
+  const closeActionMenu = useCallback((returnFocus = true) => {
+    setShowActionMenu(false)
+    if (returnFocus) {
+      window.setTimeout(() => triggerRef.current?.focus(), 0)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!showActionMenu) return
+    window.setTimeout(() => {
+      const [firstFocusable] = getActionMenuFocusableElements(menuRef.current)
+      firstFocusable?.focus()
+    }, 0)
+  }, [showActionMenu])
+
+  useEffect(() => {
+    if (!showActionMenu) return
+
+    const handleDocumentPointer = (event: Event) => {
+      const target = event.target
+      if (!(target instanceof Node)) return
+      if (triggerRef.current?.contains(target) || menuRef.current?.contains(target)) return
+      closeActionMenu()
+    }
+
+    document.addEventListener('mousedown', handleDocumentPointer)
+    document.addEventListener('touchstart', handleDocumentPointer)
+
+    return () => {
+      document.removeEventListener('mousedown', handleDocumentPointer)
+      document.removeEventListener('touchstart', handleDocumentPointer)
+    }
+  }, [closeActionMenu, showActionMenu])
+
+  const handleTriggerKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
+    if (event.key !== 'ArrowDown') return
+    event.preventDefault()
+    setShowActionMenu(true)
+  }
+
+  const handleMenuKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      closeActionMenu()
+      return
+    }
+
+    const focusableElements = getActionMenuFocusableElements(menuRef.current)
+    if (focusableElements.length === 0) return
+
+    const currentIndex = focusableElements.indexOf(document.activeElement as HTMLElement)
+    let nextIndex: number | null = null
+    if (event.key === 'ArrowDown') {
+      nextIndex = currentIndex < 0 ? 0 : (currentIndex + 1) % focusableElements.length
+    } else if (event.key === 'ArrowUp') {
+      nextIndex = currentIndex <= 0 ? focusableElements.length - 1 : currentIndex - 1
+    } else if (event.key === 'Home') {
+      nextIndex = 0
+    } else if (event.key === 'End') {
+      nextIndex = focusableElements.length - 1
+    }
+
+    if (nextIndex === null) return
+    event.preventDefault()
+    focusableElements[nextIndex]?.focus()
+  }
+
+  return (
+    <div className="relative">
+      <Button
+        ref={triggerRef}
+        onClick={() => setShowActionMenu((value) => !value)}
+        onKeyDown={handleTriggerKeyDown}
+        variant="outline"
+        aria-expanded={showActionMenu}
+        aria-haspopup={resolvedActionMenuRole}
+        aria-controls={showActionMenu ? actionMenuId : undefined}
+      >
+        {actionMenuLabel}
+      </Button>
+      {showActionMenu && (
+        <div
+          ref={menuRef}
+          id={actionMenuId}
+          aria-label={actionMenuLabel}
+          role={resolvedActionMenuRole}
+          onKeyDown={handleMenuKeyDown}
+          className="absolute left-0 z-20 mt-2 min-w-56 rounded border border-gray-200 bg-white p-2 shadow-lg"
+        >
+          {actionMenuContent}
+        </div>
+      )}
+    </div>
+  )
+}
+
 /**
  * SessionHeader - Reusable header for activity manager pages
  * Shows activity name, join code, join URL, and end session button
@@ -35,12 +171,10 @@ export default function SessionHeader({
   centerHeaderActions,
 }: SessionHeaderProps) {
   const [showEndModal, setShowEndModal] = useState(false)
-  const [showActionMenu, setShowActionMenu] = useState(false)
   const [isEnding, setIsEnding] = useState(false)
   const [errorMessage, setErrorMessage] = useState('')
   const { copyToClipboard, isCopied } = useClipboard(1500)
   const navigate = useNavigate()
-  const actionMenuId = useId()
   const resolvedActionMenuRole = actionMenuContent != null ? actionMenuRole ?? 'menu' : undefined
 
   const studentJoinUrl =
@@ -71,27 +205,11 @@ export default function SessionHeader({
           <div className="flex min-w-0 flex-wrap items-center gap-3">
             <h1 className="text-2xl font-bold text-gray-800">{activityName}</h1>
             {actionMenuContent != null && (
-              <div className="relative">
-                <Button
-                  onClick={() => setShowActionMenu((value) => !value)}
-                  variant="outline"
-                  aria-expanded={showActionMenu}
-                  aria-haspopup={resolvedActionMenuRole}
-                  aria-controls={showActionMenu ? actionMenuId : undefined}
-                >
-                  {actionMenuLabel}
-                </Button>
-                {showActionMenu && (
-                  <div
-                    id={actionMenuId}
-                    aria-label={actionMenuLabel}
-                    role={resolvedActionMenuRole}
-                    className="absolute left-0 z-20 mt-2 min-w-56 rounded border border-gray-200 bg-white p-2 shadow-lg"
-                  >
-                    {actionMenuContent}
-                  </div>
-                )}
-              </div>
+              <ActionMenu
+                actionMenuContent={actionMenuContent}
+                actionMenuLabel={actionMenuLabel}
+                resolvedActionMenuRole={resolvedActionMenuRole ?? 'menu'}
+              />
             )}
             {headerActions}
           </div>
@@ -136,27 +254,11 @@ export default function SessionHeader({
           <div className="flex min-w-0 flex-wrap items-center gap-3">
             <h1 className="text-2xl font-bold text-gray-800">{activityName}</h1>
             {actionMenuContent != null && (
-              <div className="relative">
-                <Button
-                  onClick={() => setShowActionMenu((value) => !value)}
-                  variant="outline"
-                  aria-expanded={showActionMenu}
-                  aria-haspopup={resolvedActionMenuRole}
-                  aria-controls={showActionMenu ? actionMenuId : undefined}
-                >
-                  {actionMenuLabel}
-                </Button>
-                {showActionMenu && (
-                  <div
-                    id={actionMenuId}
-                    aria-label={actionMenuLabel}
-                    role={resolvedActionMenuRole}
-                    className="absolute left-0 z-20 mt-2 min-w-56 rounded border border-gray-200 bg-white p-2 shadow-lg"
-                  >
-                    {actionMenuContent}
-                  </div>
-                )}
-              </div>
+              <ActionMenu
+                actionMenuContent={actionMenuContent}
+                actionMenuLabel={actionMenuLabel}
+                resolvedActionMenuRole={resolvedActionMenuRole ?? 'menu'}
+              />
             )}
             {headerActions}
           </div>
