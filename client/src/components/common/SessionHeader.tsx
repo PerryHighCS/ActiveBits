@@ -41,6 +41,7 @@ export default function SessionHeader({
   const { copyToClipboard, isCopied } = useClipboard(1500)
   const navigate = useNavigate()
   const actionMenuId = useId()
+  const resolvedActionMenuRole = actionMenuContent != null ? actionMenuRole ?? 'menu' : undefined
 
   const studentJoinUrl =
     sessionId && typeof window !== 'undefined' ? `${window.location.origin}/${sessionId}` : ''
@@ -75,7 +76,7 @@ export default function SessionHeader({
                   onClick={() => setShowActionMenu((value) => !value)}
                   variant="outline"
                   aria-expanded={showActionMenu}
-                  aria-haspopup={actionMenuRole}
+                  aria-haspopup={resolvedActionMenuRole}
                   aria-controls={showActionMenu ? actionMenuId : undefined}
                 >
                   {actionMenuLabel}
@@ -84,7 +85,7 @@ export default function SessionHeader({
                   <div
                     id={actionMenuId}
                     aria-label={actionMenuLabel}
-                    role={actionMenuRole}
+                    role={resolvedActionMenuRole}
                     className="absolute left-0 z-20 mt-2 min-w-56 rounded border border-gray-200 bg-white p-2 shadow-lg"
                   >
                     {actionMenuContent}
@@ -140,7 +141,7 @@ export default function SessionHeader({
                   onClick={() => setShowActionMenu((value) => !value)}
                   variant="outline"
                   aria-expanded={showActionMenu}
-                  aria-haspopup={actionMenuRole}
+                  aria-haspopup={resolvedActionMenuRole}
                   aria-controls={showActionMenu ? actionMenuId : undefined}
                 >
                   {actionMenuLabel}
@@ -149,7 +150,7 @@ export default function SessionHeader({
                   <div
                     id={actionMenuId}
                     aria-label={actionMenuLabel}
-                    role={actionMenuRole}
+                    role={resolvedActionMenuRole}
                     className="absolute left-0 z-20 mt-2 min-w-56 rounded border border-gray-200 bg-white p-2 shadow-lg"
                   >
                     {actionMenuContent}

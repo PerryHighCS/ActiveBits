@@ -1313,7 +1313,7 @@ export function resolveDeckActivityRequestsFromDeckDocument(
     if (childSlides.length === 0) {
       const topLevelRequest = readDeckActivityRequestFromSlide(topLevelSlide, { h, v: 0 })
       if (topLevelRequest) {
-        requestsByH.set(h, [topLevelRequest])
+        requestsByH.set(h, [withReleasedVerticalStackActivityOptions(topLevelRequest)])
       }
       return
     }

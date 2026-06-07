@@ -71,7 +71,7 @@ async function clickRunnerDoneAndWaitForClose(popup: Page): Promise<void> {
   try {
     await popup.getByRole('button', { name: 'Close Python runner' }).click()
   } catch (error) {
-    if (!(error instanceof Error) || !error.message.includes('Target page, context or browser has been closed')) {
+    if (!popup.isClosed()) {
       throw error
     }
   }
@@ -113,15 +113,15 @@ test('MobCode Python runner popup imports workspace Python modules', async ({ pa
   const session = await createMobCodeSession(page)
   await seedMobCodeFiles(page, session, {
     'main.py': 'from greeter import Greeter\n\ng = Greeter()\nprint(g.greet("World"))\n',
-    'greeter.py': 'class Greeter:\n    def greet(self, name):\n        return f"Hello, {name}!"\n',
-    'README.md': 'Expected output: `Hello, World!` and ${not_js}\n',
+    'greeter.py': 'class Greeter:\n    def greet(self, name):\n        return f"Olá, {name}!"\n',
+    'README.md': 'Expected output: `Olá, World!` and ${not_js}\n',
   }, 'main.py')
   await openMobCodeManager(page, session)
 
   const popup = await runMobCodePopupForEntry(page, 'main.py')
   const terminal = popup.locator('#terminal')
 
-  await expect(terminal).toContainText('Hello, World!', { timeout: 15_000 })
+  await expect(terminal).toContainText('Olá, World!', { timeout: 15_000 })
   await expect(terminal).not.toContainText('Invalid URL')
   await expect(terminal).not.toContainText('XMLHttpRequest')
 })

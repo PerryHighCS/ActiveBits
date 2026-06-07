@@ -63,7 +63,7 @@ void test('SessionHeader can render an activity action menu trigger', () => {
   assert.doesNotMatch(html, /Upload Zip/)
 })
 
-void test('SessionHeader leaves popup semantics unset for generic action content by default', () => {
+void test('SessionHeader defaults action popup semantics to menu', () => {
   const html = renderToStaticMarkup(
     <MemoryRouter>
       <SessionHeader
@@ -75,7 +75,8 @@ void test('SessionHeader leaves popup semantics unset for generic action content
     </MemoryRouter>,
   )
 
-  assert.doesNotMatch(html, /aria-haspopup=/)
+  assert.match(html, /aria-haspopup="menu"/)
+  assert.doesNotMatch(html, /aria-controls=/)
   assert.doesNotMatch(html, /role="menu"/)
 })
 

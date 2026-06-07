@@ -730,6 +730,43 @@ void test('resolveDeckActivityRequestsFromDeckDocument derives released stack ke
   ])
 })
 
+void test('resolveDeckActivityRequestsFromDeckDocument normalizes top-level Resonance activity options', () => {
+  const dom = new JSDOM(`
+    <div class="reveal">
+      <div class="slides">
+        <section><p>Intro</p></section>
+        <section
+          data-activity-id="resonance"
+          data-activity-options='{"questions":[{"id":"q1","type":"short-answer","text":"What changed?","order":0}]}'
+        >
+          <p>Top-level question</p>
+        </section>
+      </div>
+    </div>
+  `)
+
+  const requestsByH = resolveDeckActivityRequestsFromDeckDocument(dom.window.document)
+
+  assert.deepEqual(requestsByH.get(1), [
+    {
+      activityId: 'resonance',
+      instanceKey: 'resonance:1:0',
+      location: { h: 1, v: 0 },
+      activityOptions: {
+        autoActivateAllQuestions: true,
+        questions: [
+          {
+            id: 'q1',
+            type: 'short-answer',
+            text: 'What changed?',
+            order: 0,
+          },
+        ],
+      },
+    },
+  ])
+})
+
 void test('resolveDeckActivityRequestsFromDeckDocument includes top-level MobCode activity slides', () => {
   const dom = new JSDOM(`
     <div class="reveal">

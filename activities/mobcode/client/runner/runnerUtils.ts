@@ -909,6 +909,14 @@ try:
     }
     return null;
   }
+  function decodeWorkspaceContent(base64Content) {
+    const binaryContent = atob(base64Content);
+    const bytes = new Uint8Array(binaryContent.length);
+    for (let index = 0; index < binaryContent.length; index += 1) {
+      bytes[index] = binaryContent.charCodeAt(index);
+    }
+    return new TextDecoder().decode(bytes);
+  }
   self.XMLHttpRequest = class MobCodeWorkspaceXMLHttpRequest {
     constructor() {
       this.nativeRequest = null;
@@ -955,7 +963,7 @@ try:
       }
       const fileRecord = workspaceFiles[this.workspacePath];
       this.status = fileRecord ? 200 : 404;
-      this.responseText = fileRecord ? atob(fileRecord.content) : '';
+      this.responseText = fileRecord ? decodeWorkspaceContent(fileRecord.content) : '';
       this.readyState = 4;
       if (typeof this.onreadystatechange === 'function') {
         setTimeout(() => this.onreadystatechange.call(this), 0);
