@@ -57,7 +57,7 @@ import { extractManagerNavigationCapabilitiesFromRevealMessage } from './SyncDec
 import { resolveSyncDeckActivityPickerEntries } from './SyncDeckManager.js'
 import { activitySupportsEmbeddedReport } from './SyncDeckManager.js'
 import { parseDownloadFilenameFromContentDisposition } from './SyncDeckManager.js'
-import { resolveVerticalStackActivityRequestsFromDeckDocument } from './SyncDeckManager.js'
+import { resolveDeckActivityRequestsFromDeckDocument } from './SyncDeckManager.js'
 
 void test('SyncDeckManager renders setup copy without a session id', () => {
   const html = renderToStaticMarkup(
@@ -686,7 +686,7 @@ void test('resolveManagerActivityRequestBatchInputs keeps current slide primary 
   )
 })
 
-void test('resolveVerticalStackActivityRequestsFromDeckDocument derives released stack keys from slide position', () => {
+void test('resolveDeckActivityRequestsFromDeckDocument derives released stack keys from slide position', () => {
   const dom = new JSDOM(`
     <div class="reveal">
       <div class="slides">
@@ -705,7 +705,7 @@ void test('resolveVerticalStackActivityRequestsFromDeckDocument derives released
     </div>
   `)
 
-  const requestsByH = resolveVerticalStackActivityRequestsFromDeckDocument(dom.window.document)
+  const requestsByH = resolveDeckActivityRequestsFromDeckDocument(dom.window.document)
 
   assert.deepEqual(requestsByH.get(1), [
     {
@@ -725,6 +725,41 @@ void test('resolveVerticalStackActivityRequestsFromDeckDocument derives released
             ],
           },
         ],
+      },
+    },
+  ])
+})
+
+void test('resolveDeckActivityRequestsFromDeckDocument includes top-level MobCode activity slides', () => {
+  const dom = new JSDOM(`
+    <div class="reveal">
+      <div class="slides">
+        <section><p>Intro</p></section>
+        <section><p>Background</p></section>
+        <section
+          data-activity-id="mobcode"
+          data-activity-trigger="slide-enter"
+          data-activity-options='{"files":{"main.py":"print(\\"Hello, MobCode!\\")\\n"},"activeFile":"main.py","runnerId":"brython-terminal"}'
+        >
+          <p>MobCode test</p>
+        </section>
+      </div>
+    </div>
+  `)
+
+  const requestsByH = resolveDeckActivityRequestsFromDeckDocument(dom.window.document)
+
+  assert.deepEqual(requestsByH.get(2), [
+    {
+      activityId: 'mobcode',
+      instanceKey: 'mobcode:2:0',
+      location: { h: 2, v: 0 },
+      activityOptions: {
+        files: {
+          'main.py': 'print("Hello, MobCode!")\n',
+        },
+        activeFile: 'main.py',
+        runnerId: 'brython-terminal',
       },
     },
   ])
