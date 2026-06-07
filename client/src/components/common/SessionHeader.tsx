@@ -1,9 +1,18 @@
-import { useId, useState, type MouseEvent, type ReactNode } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type MouseEvent,
+  type ReactNode,
+} from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useClipboard } from '@src/hooks/useClipboard'
 import Button from '../ui/Button'
 import Modal from '../ui/Modal'
-import { isEmbeddedChildSessionId } from './sessionHeaderUtils'
+import { buildStudentJoinUrl, isEmbeddedChildSessionId } from './sessionHeaderUtils'
 
 export interface SessionHeaderProps {
   activityName: string
@@ -16,6 +25,167 @@ export interface SessionHeaderProps {
   actionMenuContent?: ReactNode
   headerActions?: ReactNode
   centerHeaderActions?: ReactNode
+}
+
+const ACTION_MENU_FOCUSABLE_SELECTOR = [
+  'button:not([disabled])',
+  '[href]',
+  'input:not([disabled])',
+  'select:not([disabled])',
+  'textarea:not([disabled])',
+  '[tabindex]:not([tabindex="-1"])',
+].join(',')
+const ACTION_MENU_ITEM_SELECTOR = [
+  '[role="menuitem"]',
+  '[role="menuitemcheckbox"]',
+  '[role="menuitemradio"]',
+].join(',')
+
+interface ActionMenuProps {
+  actionMenuContent: ReactNode
+  actionMenuLabel: string
+  resolvedActionMenuRole?: 'menu'
+}
+
+type ActionMenuInitialFocus = 'first' | 'last'
+
+function isVisibleActionMenuElement(element: HTMLElement): boolean {
+  if (element.hidden === true || element.getAttribute('aria-hidden') === 'true') return false
+  const style = window.getComputedStyle(element)
+  return style.display !== 'none' && style.visibility !== 'hidden'
+}
+
+function getActionMenuFocusableElements(container: HTMLDivElement | null): HTMLElement[] {
+  if (!container) return []
+  const selector = container.getAttribute('role') === 'menu'
+    ? ACTION_MENU_ITEM_SELECTOR
+    : ACTION_MENU_FOCUSABLE_SELECTOR
+  return Array.from(container.querySelectorAll<HTMLElement>(selector))
+    .filter((element) => (
+      !element.hasAttribute('disabled')
+      && element.tabIndex !== -1
+      && isVisibleActionMenuElement(element)
+    ))
+}
+
+function ActionMenu({
+  actionMenuContent,
+  actionMenuLabel,
+  resolvedActionMenuRole,
+}: ActionMenuProps) {
+  const [showActionMenu, setShowActionMenu] = useState(false)
+  const actionMenuId = useId()
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+  const pendingInitialFocusRef = useRef<ActionMenuInitialFocus>('first')
+
+  const closeActionMenu = useCallback((returnFocus = false) => {
+    setShowActionMenu(false)
+    if (returnFocus) {
+      window.setTimeout(() => triggerRef.current?.focus(), 0)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!showActionMenu) return
+    window.setTimeout(() => {
+      const focusableElements = getActionMenuFocusableElements(menuRef.current)
+      const focusTarget = pendingInitialFocusRef.current === 'last'
+        ? focusableElements.at(-1)
+        : focusableElements[0]
+      pendingInitialFocusRef.current = 'first'
+      focusTarget?.focus()
+    }, 0)
+  }, [showActionMenu])
+
+  useEffect(() => {
+    if (!showActionMenu) return
+
+    const handleDocumentPointer = (event: Event) => {
+      const target = event.target
+      if (!(target instanceof Node)) return
+      if (triggerRef.current?.contains(target) || menuRef.current?.contains(target)) return
+      closeActionMenu()
+    }
+
+    document.addEventListener('mousedown', handleDocumentPointer)
+    document.addEventListener('touchstart', handleDocumentPointer)
+
+    return () => {
+      document.removeEventListener('mousedown', handleDocumentPointer)
+      document.removeEventListener('touchstart', handleDocumentPointer)
+    }
+  }, [closeActionMenu, showActionMenu])
+
+  const handleTriggerKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
+    if (
+      resolvedActionMenuRole !== 'menu'
+      || (event.key !== 'ArrowDown' && event.key !== 'ArrowUp')
+    ) return
+    event.preventDefault()
+    pendingInitialFocusRef.current = event.key === 'ArrowUp' ? 'last' : 'first'
+    setShowActionMenu(true)
+  }
+
+  const handleMenuKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      closeActionMenu(true)
+      return
+    }
+
+    if (resolvedActionMenuRole !== 'menu') return
+
+    const focusableElements = getActionMenuFocusableElements(menuRef.current)
+    if (focusableElements.length === 0) return
+
+    const currentIndex = focusableElements.indexOf(document.activeElement as HTMLElement)
+    let nextIndex: number | null = null
+    if (event.key === 'ArrowDown') {
+      nextIndex = currentIndex < 0 ? 0 : (currentIndex + 1) % focusableElements.length
+    } else if (event.key === 'ArrowUp') {
+      nextIndex = currentIndex <= 0 ? focusableElements.length - 1 : currentIndex - 1
+    } else if (event.key === 'Home') {
+      nextIndex = 0
+    } else if (event.key === 'End') {
+      nextIndex = focusableElements.length - 1
+    }
+
+    if (nextIndex === null) return
+    event.preventDefault()
+    focusableElements[nextIndex]?.focus()
+  }
+
+  return (
+    <div className="relative">
+      <Button
+        ref={triggerRef}
+        onClick={() => {
+          pendingInitialFocusRef.current = 'first'
+          setShowActionMenu((value) => !value)
+        }}
+        onKeyDown={handleTriggerKeyDown}
+        variant="outline"
+        aria-expanded={showActionMenu}
+        aria-haspopup={resolvedActionMenuRole === 'menu' ? 'menu' : undefined}
+        aria-controls={showActionMenu ? actionMenuId : undefined}
+      >
+        {actionMenuLabel}
+      </Button>
+      {showActionMenu && (
+        <div
+          ref={menuRef}
+          id={actionMenuId}
+          aria-label={actionMenuLabel}
+          role={resolvedActionMenuRole === 'menu' ? 'menu' : undefined}
+          onKeyDown={handleMenuKeyDown}
+          className="absolute left-0 z-20 mt-2 min-w-56 rounded border border-gray-200 bg-white p-2 shadow-lg"
+        >
+          {actionMenuContent}
+        </div>
+      )}
+    </div>
+  )
 }
 
 /**
@@ -35,15 +205,15 @@ export default function SessionHeader({
   centerHeaderActions,
 }: SessionHeaderProps) {
   const [showEndModal, setShowEndModal] = useState(false)
-  const [showActionMenu, setShowActionMenu] = useState(false)
   const [isEnding, setIsEnding] = useState(false)
   const [errorMessage, setErrorMessage] = useState('')
   const { copyToClipboard, isCopied } = useClipboard(1500)
   const navigate = useNavigate()
-  const actionMenuId = useId()
+  // Only pass "menu" when callers provide content with matching menu-item semantics.
+  const resolvedActionMenuRole = actionMenuContent != null ? actionMenuRole : undefined
 
   const studentJoinUrl =
-    sessionId && typeof window !== 'undefined' ? `${window.location.origin}/${sessionId}` : ''
+    sessionId && typeof window !== 'undefined' ? buildStudentJoinUrl(window.location.origin, sessionId) : ''
   const embeddedChildSession = isEmbeddedChildSessionId(sessionId)
 
   const copyLink = () => copyToClipboard(studentJoinUrl)
@@ -66,11 +236,24 @@ export default function SessionHeader({
   if (embeddedChildSession) {
     return (
       <div className={`${includeBottomMargin ? 'mb-6 ' : ''}bg-white border-b border-gray-200 px-6 py-4`}>
-        <div className="flex flex-col gap-2">
-          <h1 className="text-2xl font-bold text-gray-800">{activityName}</h1>
-          <p className="text-sm text-gray-600">
-            Embedded session managed by parent SyncDeck session. Join code and end session controls are disabled here.
-          </p>
+        <div className="relative flex flex-wrap items-center justify-between gap-3">
+          <div className="flex min-w-0 flex-wrap items-center gap-3">
+            <h1 className="text-2xl font-bold text-gray-800">{activityName}</h1>
+            {actionMenuContent != null && (
+              <ActionMenu
+                actionMenuContent={actionMenuContent}
+                actionMenuLabel={actionMenuLabel}
+                resolvedActionMenuRole={resolvedActionMenuRole}
+              />
+            )}
+            {headerActions}
+          </div>
+
+          {centerHeaderActions != null && (
+            <div className="order-last flex w-full justify-center md:absolute md:left-1/2 md:top-1/2 md:order-none md:w-auto md:-translate-x-1/2 md:-translate-y-1/2">
+              {centerHeaderActions}
+            </div>
+          )}
         </div>
       </div>
     )
@@ -106,27 +289,11 @@ export default function SessionHeader({
           <div className="flex min-w-0 flex-wrap items-center gap-3">
             <h1 className="text-2xl font-bold text-gray-800">{activityName}</h1>
             {actionMenuContent != null && (
-              <div className="relative">
-                <Button
-                  onClick={() => setShowActionMenu((value) => !value)}
-                  variant="outline"
-                  aria-expanded={showActionMenu}
-                  aria-haspopup={actionMenuRole}
-                  aria-controls={showActionMenu ? actionMenuId : undefined}
-                >
-                  {actionMenuLabel}
-                </Button>
-                {showActionMenu && (
-                  <div
-                    id={actionMenuId}
-                    aria-label={actionMenuLabel}
-                    role={actionMenuRole}
-                    className="absolute left-0 z-20 mt-2 min-w-56 rounded border border-gray-200 bg-white p-2 shadow-lg"
-                  >
-                    {actionMenuContent}
-                  </div>
-                )}
-              </div>
+              <ActionMenu
+                actionMenuContent={actionMenuContent}
+                actionMenuLabel={actionMenuLabel}
+                resolvedActionMenuRole={resolvedActionMenuRole}
+              />
             )}
             {headerActions}
           </div>

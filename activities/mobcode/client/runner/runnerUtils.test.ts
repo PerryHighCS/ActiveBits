@@ -65,6 +65,9 @@ void test('buildBrythonRunnerHtml guards Brython execution against duplicate ini
   assert.match(html, /if window\.mobcodeRunnerShouldStart\(\):/)
   assert.match(html, /window\.opener = null;/)
   assert.match(html, /URL\.revokeObjectURL\(window\.location\.href\)/)
+  assert.match(html, /const closeRunnerWindow = window\.close\.bind\(window\);/)
+  assert.match(html, /window\.close = \(\) => \{/)
+  assert.match(html, /window\.mobcodeCloseRunnerWindow = \(\) => \{/)
 })
 
 void test('buildBrythonRunnerHtml runs user code in a Brython worker', () => {
@@ -98,7 +101,18 @@ void test('buildBrythonRunnerHtml exposes stop and output limit controls', () =>
 
   assert.match(html, /id="stop-runner"/)
   assert.match(html, /aria-label="Stop Python runner"/)
+  assert.match(html, /id="done-runner"/)
+  assert.match(html, /aria-label="Close Python runner"/)
+  assert.match(html, /hidden disabled>Done<\/button>/)
   assert.match(html, /window\.mobcodeRunnerSetState = \(state\) =>/)
+  assert.match(html, /window\.mobcodeRunnerState = state;/)
+  assert.match(html, /const doneButton = document\.getElementById\('done-runner'\);/)
+  assert.match(html, /const canClose = state === 'done' \|\| state === 'stopped';/)
+  assert.match(html, /stopButton\.disabled = !isRunning;/)
+  assert.match(html, /stopButton\.hidden = !isRunning;/)
+  assert.match(html, /doneButton\.disabled = !canClose;/)
+  assert.match(html, /doneButton\.hidden = !canClose;/)
+  assert.match(html, /window\.mobcodeRunnerGetState = \(\) => window\.mobcodeRunnerState \|\| 'loading';/)
   assert.match(html, /maxChars: 100000/)
   assert.match(html, /\[output truncated\]/)
   assert.match(html, /def stop_active_worker\(\):/)
@@ -113,6 +127,9 @@ void test('buildBrythonRunnerHtml exposes stop and output limit controls', () =>
   assert.match(html, /activeNativeWorker\.terminate\(\)/)
   assert.match(html, /window\.mobcodeTerminateWorker\(\)/)
   assert.match(html, /@bind\(document\['stop-runner'\], 'click'\)/)
+  assert.match(html, /if window\.mobcodeRunnerGetState\(\) != 'running':/)
+  assert.match(html, /@bind\(document\['done-runner'\], 'click'\)/)
+  assert.match(html, /window\.mobcodeCloseRunnerWindow\(\)/)
   assert.match(html, /message_type == 'done'/)
 })
 
@@ -222,6 +239,7 @@ void test('buildBrythonRunnerHtml exposes read-only workspace files and imports'
       'main.py': 'from helper import greet\nprint(greet("Ada"))\nprint(open("data/names.txt").read())\n',
       'helper.py': 'def greet(name):\n    return "Hello " + name\n',
       'data/names.txt': 'Ada\nGrace\n',
+      'README.md': 'Expected output: `3` and ${count}\n',
     },
     entryFile: 'main.py',
     title: 'Runner',
@@ -229,8 +247,25 @@ void test('buildBrythonRunnerHtml exposes read-only workspace files and imports'
 
   assert.match(html, /workspace_files = \{/)
   assert.match(html, /"data\/names\.txt":"Ada\\nGrace\\n"/)
+  assert.match(html, /Expected output: \\u00603\\u0060 and \\u0024\{count\}/)
+  assert.doesNotMatch(html, /Expected output: `3` and \$\{count\}/)
   assert.match(html, /workspace_python_modules = \{/)
   assert.match(html, /"helper\.py":"def greet/)
+  assert.match(html, /workspace_brython_files_json = /)
+  assert.match(html, /worker_self\.__BRYTHON__\.add_files\(worker_self\.JSON\.parse\(workspace_brython_files_json\)\)/)
+  assert.match(html, /self\.XMLHttpRequest = class MobCodeWorkspaceXMLHttpRequest/)
+  assert.match(html, /resolveWorkspacePath\(url\)/)
+  assert.match(html, /replace\(\/\^\(\?:\\\.\\.\\\/\|\\\.\\\/\)\+\//)
+  assert.match(html, /normalized \+ '\/__init__\.py'/)
+  assert.match(html, /dottedAsPath \+ '\.py'/)
+  assert.match(html, /basename \+ '\/__init__\.py'/)
+  assert.match(html, /normalized\.endsWith\('\/' \+ workspacePath\)/)
+  assert.match(html, /this\.nativeRequest\.open\(method, url, async, user, password\);/)
+  assert.match(html, /this\.workspacePath = '';/)
+  assert.match(html, /function decodeWorkspaceContent\(base64Content\) \{/)
+  assert.match(html, /const binaryContent = atob\(base64Content\);/)
+  assert.match(html, /new TextDecoder\(\)\.decode\(bytes\)/)
+  assert.match(html, /decodeWorkspaceContent\(fileRecord\.content\)/)
   assert.match(html, /original_open = builtins\.open/)
   assert.match(html, /def mobcode_open\(path, mode='r'/)
   assert.match(html, /MobCode workspace files are read-only in the terminal runner/)
@@ -243,7 +278,17 @@ void test('buildBrythonRunnerHtml exposes read-only workspace files and imports'
   assert.match(html, /return original_open\(path, mode, buffering, encoding, errors, newline, closefd, opener\)/)
   assert.match(html, /'b' in mode_text/)
   assert.match(html, /class MobCodeReadOnlyFile:/)
+  assert.match(html, /def mobcode_module_path_candidates\(name\):/)
+  assert.match(html, /base_path \+ '\/__init__\.py'/)
+  assert.match(html, /def mobcode_parent_package_paths\(name\):/)
+  assert.match(html, /def mobcode_find_workspace_module_path\(name\):/)
   assert.match(html, /def mobcode_create_workspace_module\(name, path\):/)
+  assert.match(html, /is_package = path\.endswith\('\/__init__\.py'\)/)
+  assert.match(html, /module\.__path__ = \[path\.rsplit\('\/', 1\)\[0\]\]/)
+  assert.match(html, /def mobcode_ensure_workspace_module\(name\):/)
+  assert.match(html, /setattr\(parent_module, child_name, module\)/)
+  assert.match(html, /child_module = mobcode_ensure_workspace_module\(module_name \+ '\.' \+ item_name\)/)
+  assert.match(html, /return sys\.modules\[root_name\]/)
   assert.match(html, /module_type = original_import\('types'\)\.ModuleType/)
   assert.match(html, /compiled_module = compile\(workspace_python_modules\[path\], path, 'exec'\)/)
   assert.match(html, /builtins\.open = mobcode_open/)

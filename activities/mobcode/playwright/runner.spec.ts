@@ -54,12 +54,28 @@ async function openMobCodeStudent(page: Page, session: MobCodeCreateResponse): P
 }
 
 async function runMobCodePopup(page: Page): Promise<Page> {
+  return await runMobCodePopupForEntry(page, 'test.py')
+}
+
+async function runMobCodePopupForEntry(page: Page, entryFile: string): Promise<Page> {
   const popupPromise = page.waitForEvent('popup')
   await page.getByRole('button', { name: 'Run' }).click()
   const popup = await popupPromise
   await popup.waitForLoadState('domcontentloaded')
-  await expect(popup.getByText('[Python] Running test.py')).toBeVisible({ timeout: 15_000 })
+  await expect(popup.getByText(`[Python] Running ${entryFile}`)).toBeVisible({ timeout: 15_000 })
   return popup
+}
+
+async function clickRunnerDoneAndWaitForClose(popup: Page): Promise<void> {
+  const closePromise = popup.waitForEvent('close')
+  try {
+    await popup.getByRole('button', { name: 'Close Python runner' }).click()
+  } catch (error) {
+    if (!popup.isClosed()) {
+      throw error
+    }
+  }
+  await closePromise
 }
 
 test('MobCode student view launches the instructor-selected Python runner', async ({ page }) => {
@@ -89,7 +105,43 @@ test('MobCode Python runner popup prints terminal output', async ({ page }) => {
   const popup = await runMobCodePopup(page)
 
   await expect(popup.locator('#terminal')).toContainText('hello from playwright', { timeout: 15_000 })
-  await expect(popup.getByRole('button', { name: 'Stop Python runner' })).toHaveText('Done')
+  await expect(popup.getByRole('button', { name: 'Close Python runner' })).toHaveText('Done')
+  await clickRunnerDoneAndWaitForClose(popup)
+})
+
+test('MobCode Python runner popup imports workspace Python modules', async ({ page }) => {
+  const session = await createMobCodeSession(page)
+  await seedMobCodeFiles(page, session, {
+    'main.py': 'import greeter.messages\nfrom greeter import Greeter\nfrom greeter import messages\n\ng = Greeter()\nprint(g.greet("World"))\nprint(messages.punctuation())\nprint(greeter.messages.punctuation())\n',
+    'greeter/__init__.py': 'from greeter.core import Greeter\n',
+    'greeter/core.py': 'class Greeter:\n    def greet(self, name):\n        return f"Olá, {name}!"\n',
+    'greeter/messages.py': 'def punctuation():\n    return "!"\n',
+    'README.md': 'Expected output: `Olá, World!` and ${not_js}\n',
+  }, 'main.py')
+  await openMobCodeManager(page, session)
+
+  const popup = await runMobCodePopupForEntry(page, 'main.py')
+  const terminal = popup.locator('#terminal')
+
+  await expect(terminal).toContainText('Olá, World!', { timeout: 15_000 })
+  await expect(terminal).toContainText('!\n!', { timeout: 15_000 })
+  await expect(terminal).not.toContainText('Invalid URL')
+  await expect(terminal).not.toContainText('XMLHttpRequest')
+})
+
+test('MobCode Python runner popup closes from the stopped state', async ({ page }) => {
+  const session = await createMobCodeSession(page)
+  await seedMobCodeFile(page, session, 'print("ready")\n')
+  await openMobCodeManager(page, session)
+
+  const popup = await runMobCodePopup(page)
+
+  await expect(popup.locator('#terminal')).toContainText('ready', { timeout: 15_000 })
+  await popup.evaluate(() => {
+    (window as unknown as { mobcodeRunnerSetState: (state: string) => void }).mobcodeRunnerSetState('stopped')
+  })
+  await expect(popup.getByRole('button', { name: 'Close Python runner' })).toHaveText('Done')
+  await clickRunnerDoneAndWaitForClose(popup)
 })
 
 test('MobCode Python runner popup handles terminal input', async ({ page }) => {
@@ -100,6 +152,8 @@ test('MobCode Python runner popup handles terminal input', async ({ page }) => {
   const popup = await runMobCodePopup(page)
 
   await expect(popup.locator('#terminal')).toContainText('Name?', { timeout: 15_000 })
+  await expect(popup.getByRole('button', { name: 'Stop Python runner' })).toBeVisible()
+  await expect(popup.getByRole('button', { name: 'Close Python runner' })).toHaveCount(0)
   await popup.locator('#terminal').evaluate((terminal) => {
     const input = terminal.querySelector('input')
     if (input instanceof HTMLInputElement) {

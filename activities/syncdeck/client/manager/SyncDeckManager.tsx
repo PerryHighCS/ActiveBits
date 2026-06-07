@@ -1284,7 +1284,25 @@ function withReleasedVerticalStackActivityOptions(
   }
 }
 
-export function resolveVerticalStackActivityRequestsFromDeckDocument(
+function readDeckActivityRequestFromSlide(
+  slide: Element,
+  location: SyncDeckEmbeddedActivityLocation,
+): SyncDeckActivityLaunchRequest | null {
+  const activityId = slide.getAttribute('data-activity-id')?.trim() ?? ''
+  if (activityId.length === 0) {
+    return null
+  }
+
+  const activityOptions = parseDeckActivityOptions(slide.getAttribute('data-activity-options'))
+  return {
+    activityId,
+    instanceKey: buildGeneratedEmbeddedActivityInstanceKey(activityId, location),
+    location,
+    ...(activityOptions ? { activityOptions } : {}),
+  }
+}
+
+export function resolveDeckActivityRequestsFromDeckDocument(
   document: Document,
 ): SyncDeckDeckActivityRequestsByHorizontalIndex {
   const requestsByH: SyncDeckDeckActivityRequestsByHorizontalIndex = new Map()
@@ -1293,24 +1311,17 @@ export function resolveVerticalStackActivityRequestsFromDeckDocument(
   topLevelSlides.forEach((topLevelSlide, h) => {
     const childSlides = Array.from(topLevelSlide.querySelectorAll(':scope > section'))
     if (childSlides.length === 0) {
+      const topLevelRequest = readDeckActivityRequestFromSlide(topLevelSlide, { h, v: 0 })
+      if (topLevelRequest) {
+        requestsByH.set(h, [withReleasedVerticalStackActivityOptions(topLevelRequest)])
+      }
       return
     }
 
     const stackRequests = childSlides
       .map((slide, v): SyncDeckActivityLaunchRequest | null => {
-        const activityId = slide.getAttribute('data-activity-id')?.trim() ?? ''
-        if (activityId.length === 0) {
-          return null
-        }
-
-        const activityOptions = parseDeckActivityOptions(slide.getAttribute('data-activity-options'))
-        const location = { h, v }
-        return withReleasedVerticalStackActivityOptions({
-          activityId,
-          instanceKey: buildGeneratedEmbeddedActivityInstanceKey(activityId, location),
-          location,
-          ...(activityOptions ? { activityOptions } : {}),
-        })
+        const request = readDeckActivityRequestFromSlide(slide, { h, v })
+        return request ? withReleasedVerticalStackActivityOptions(request) : null
       })
       .filter((request): request is SyncDeckActivityLaunchRequest => request !== null)
 
@@ -3009,7 +3020,7 @@ const SyncDeckManager: FC = () => {
 
         const html = await response.text()
         const parsedDocument = new DOMParser().parseFromString(html, 'text/html')
-        const requestsByH = resolveVerticalStackActivityRequestsFromDeckDocument(parsedDocument)
+        const requestsByH = resolveDeckActivityRequestsFromDeckDocument(parsedDocument)
         deckActivityRequestsCacheRef.current = {
           presentationUrl: normalizedPresentationUrl,
           requestsByH,

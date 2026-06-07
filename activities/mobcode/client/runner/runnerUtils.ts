@@ -115,6 +115,8 @@ function escapeHtml(value: string): string {
 
 function escapeScriptJson(value: unknown): string {
   return JSON.stringify(value)
+    .replaceAll('${', '\\u0024{')
+    .replaceAll('`', '\\u0060')
     .replaceAll('<', '\\u003c')
     .replaceAll('>', '\\u003e')
     .replaceAll('&', '\\u0026')
@@ -122,12 +124,35 @@ function escapeScriptJson(value: unknown): string {
     .replaceAll('\u2029', '\\u2029')
 }
 
+function encodeBase64Utf8(value: string): string {
+  const bytes = new TextEncoder().encode(value)
+  const binaryCharacters: string[] = []
+  for (const byte of bytes) {
+    binaryCharacters.push(String.fromCharCode(byte))
+  }
+  return btoa(binaryCharacters.join(''))
+}
+
 function modulePath(moduleName: string): string {
   return `${moduleName.replaceAll('.', '/')}.py`
 }
 
+function modulePackagePath(moduleName: string): string {
+  return `${moduleName.replaceAll('.', '/')}/__init__.py`
+}
+
+function modulePathCandidates(moduleName: string): string[] {
+  return [modulePath(moduleName), modulePackagePath(moduleName)]
+}
+
+function moduleParentPackagePaths(moduleName: string): string[] {
+  const parts = moduleName.split('.')
+  return parts.slice(0, -1).map((_, index) => `${parts.slice(0, index + 1).join('/')}/__init__.py`)
+}
+
 function isWorkspacePythonModule(moduleName: string, files: Record<string, string>): boolean {
-  return Object.hasOwn(files, modulePath(moduleName))
+  return modulePathCandidates(moduleName).some((path) => Object.hasOwn(files, path))
+    && moduleParentPackagePaths(moduleName).every((path) => Object.hasOwn(files, path))
 }
 
 function isTerminalAllowedModule(moduleName: string, files: Record<string, string>): boolean {
@@ -555,6 +580,14 @@ export function buildBrythonRunnerHtml(payload: BrythonRunnerPayload): string {
         buildBrythonModuleSource(content),
       ]),
   ))
+  const serializedWorkspaceBrythonFilesJson = escapeScriptJson(JSON.stringify(Object.fromEntries(
+    Object.entries(payload.files)
+      .filter(([path]) => isPythonFile(path))
+      .map(([path, content]) => [
+        path,
+        { content: encodeBase64Utf8(buildBrythonModuleSource(content)) },
+      ]),
+  )))
   const serializedBlockedImportRoots = escapeScriptJson(TERMINAL_BLOCKED_IMPORT_ROOTS)
   const serializedAllowedImportRoots = escapeScriptJson(TERMINAL_ALLOWED_IMPORT_ROOTS)
   const entryLineContent = entryContent.replace(/\r?\n$/, '')
@@ -664,6 +697,7 @@ export function buildBrythonRunnerHtml(payload: BrythonRunnerPayload): string {
     <div class="runner-actions">
       <div class="entry">${entryFile}</div>
       <button id="stop-runner" type="button" aria-label="Stop Python runner">Stop</button>
+      <button id="done-runner" type="button" aria-label="Close Python runner" hidden disabled>Done</button>
     </div>
   </header>
   <main>
@@ -677,6 +711,17 @@ export function buildBrythonRunnerHtml(payload: BrythonRunnerPayload): string {
     });
     window.__MOB_CODE_RUNNER_PAYLOAD__ = ${serializedPayload};
     (() => {
+      const closeRunnerWindow = window.close.bind(window);
+      let closeAllowed = false;
+      window.close = () => {
+        if (closeAllowed) closeRunnerWindow();
+      };
+      window.mobcodeCloseRunnerWindow = () => {
+        closeAllowed = true;
+        closeRunnerWindow();
+      };
+    })();
+    (() => {
       let runnerStarted = false;
       window.mobcodeRunnerShouldStart = () => {
         if (runnerStarted) return false;
@@ -685,12 +730,18 @@ export function buildBrythonRunnerHtml(payload: BrythonRunnerPayload): string {
       };
     })();
     window.mobcodeRunnerSetState = (state) => {
+      window.mobcodeRunnerState = state;
       const stopButton = document.getElementById('stop-runner');
-      if (!stopButton) return;
+      const doneButton = document.getElementById('done-runner');
+      if (!stopButton || !doneButton) return;
       const isRunning = state === 'running';
+      const canClose = state === 'done' || state === 'stopped';
       stopButton.disabled = !isRunning;
-      stopButton.textContent = isRunning ? 'Stop' : state === 'done' ? 'Done' : 'Stopped';
+      stopButton.hidden = !isRunning;
+      doneButton.disabled = !canClose;
+      doneButton.hidden = !canClose;
     };
+    window.mobcodeRunnerGetState = () => window.mobcodeRunnerState || 'loading';
     (() => {
       const NativeWorker = window.Worker;
       let activeNativeWorker = null;
@@ -832,12 +883,134 @@ entry_user_line_count = ${entryLineCount}
 entry_import_diagnostic = ${serializedEntryImportDiagnostic}
 workspace_files = ${serializedWorkspaceFiles}
 workspace_python_modules = ${serializedWorkspacePythonModules}
+workspace_brython_files_json = ${serializedWorkspaceBrythonFilesJson}
 input_sequence = 0
 input_futures = {}
 original_import = builtins.__import__
 original_open = builtins.open
 blocked_import_roots = set(${serializedBlockedImportRoots})
 allowed_import_roots = set(${serializedAllowedImportRoots})
+
+try:
+    worker_self.__BRYTHON__.add_files(worker_self.JSON.parse(workspace_brython_files_json))
+except Exception:
+    pass
+
+try:
+    worker_self.eval("""
+(function(workspaceFilesJson) {
+  const workspaceFiles = JSON.parse(workspaceFilesJson);
+  const NativeXMLHttpRequest = self.XMLHttpRequest;
+  if (!NativeXMLHttpRequest || self.mobcodeWorkspaceXMLHttpRequestInstalled) return;
+  self.mobcodeWorkspaceXMLHttpRequestInstalled = true;
+  // Brython's native importer fetches bare workspace modules with XHR before Python hooks run.
+  function normalizeWorkspaceUrl(url) {
+    const withoutSuffix = String(url).split('#')[0].split('?')[0];
+    try {
+      return new URL(withoutSuffix, self.location.href).pathname.replace(/^\\/+/, '');
+    } catch {
+      return withoutSuffix.replace(/^\\/+/, '').replace(/^(?:\\.\\.\\/|\\.\\/)+/, '');
+    }
+  }
+  function resolveWorkspacePath(url) {
+    const normalized = normalizeWorkspaceUrl(url);
+    const dottedAsPath = normalized.replaceAll('.', '/');
+    const basename = normalized.slice(normalized.lastIndexOf('/') + 1);
+    const basenameAsPath = basename.replaceAll('.', '/');
+    const candidates = [
+      normalized,
+      normalized + '.py',
+      normalized + '/__init__.py',
+      dottedAsPath,
+      dottedAsPath + '.py',
+      dottedAsPath + '/__init__.py',
+      basename,
+      basename + '.py',
+      basename + '/__init__.py',
+      basenameAsPath,
+      basenameAsPath + '.py',
+      basenameAsPath + '/__init__.py',
+    ];
+    for (const candidate of candidates) {
+      if (Object.prototype.hasOwnProperty.call(workspaceFiles, candidate)) return candidate;
+    }
+    for (const workspacePath of Object.keys(workspaceFiles)) {
+      if (normalized.endsWith('/' + workspacePath)) return workspacePath;
+      if (dottedAsPath.endsWith('/' + workspacePath)) return workspacePath;
+    }
+    return null;
+  }
+  function decodeWorkspaceContent(base64Content) {
+    const binaryContent = atob(base64Content);
+    const bytes = new Uint8Array(binaryContent.length);
+    for (let index = 0; index < binaryContent.length; index += 1) {
+      bytes[index] = binaryContent.charCodeAt(index);
+    }
+    return new TextDecoder().decode(bytes);
+  }
+  self.XMLHttpRequest = class MobCodeWorkspaceXMLHttpRequest {
+    constructor() {
+      this.nativeRequest = null;
+      this.workspacePath = null;
+      this.readyState = 0;
+      this.status = 0;
+      this.responseText = '';
+      this.onreadystatechange = null;
+    }
+    overrideMimeType(...args) {
+      if (this.nativeRequest) this.nativeRequest.overrideMimeType(...args);
+    }
+    getResponseHeader(name) {
+      if (this.nativeRequest) return this.nativeRequest.getResponseHeader(name);
+      return null;
+    }
+    getAllResponseHeaders() {
+      if (this.nativeRequest) return this.nativeRequest.getAllResponseHeaders();
+      return '';
+    }
+    abort() {
+      if (this.nativeRequest) this.nativeRequest.abort();
+    }
+    open(method, url, async = true, user, password) {
+      const workspacePath = String(method).toUpperCase() === 'GET' ? resolveWorkspacePath(url) : null;
+      if (workspacePath !== null) {
+        this.workspacePath = workspacePath;
+        this.readyState = 1;
+        return;
+      }
+      this.nativeRequest = new NativeXMLHttpRequest();
+      try {
+        this.nativeRequest.open(method, url, async, user, password);
+      } catch {
+        this.nativeRequest = null;
+        this.workspacePath = '';
+        this.readyState = 1;
+      }
+    }
+    send(body) {
+      if (this.nativeRequest) {
+        this.nativeRequest.onreadystatechange = () => {
+          this.readyState = this.nativeRequest.readyState;
+          this.status = this.nativeRequest.status;
+          this.responseText = this.nativeRequest.responseText;
+          if (typeof this.onreadystatechange === 'function') this.onreadystatechange.call(this);
+        };
+        this.nativeRequest.send(body);
+        return;
+      }
+      const fileRecord = workspaceFiles[this.workspacePath];
+      this.status = fileRecord ? 200 : 404;
+      this.responseText = fileRecord ? decodeWorkspaceContent(fileRecord.content) : '';
+      this.readyState = 4;
+      if (typeof this.onreadystatechange === 'function') {
+        setTimeout(() => this.onreadystatechange.call(this), 0);
+      }
+    }
+  };
+})(%s);
+""" % repr(workspace_brython_files_json))
+except Exception:
+    pass
 
 class MobCodeWorkerOutput:
     def __init__(self, message_type):
@@ -1063,14 +1236,37 @@ def mobcode_open(path, mode='r', buffering=-1, encoding=None, errors=None, newli
         raise
     return MobCodeReadOnlyFile(workspace_path, workspace_files[workspace_path], 'b' in mode_text)
 
-def mobcode_module_path(name):
-    return str(name).replace('.', '/') + '.py'
+def mobcode_module_base_path(name):
+    return str(name).replace('.', '/')
+
+def mobcode_module_path_candidates(name):
+    base_path = mobcode_module_base_path(name)
+    return [base_path + '.py', base_path + '/__init__.py']
+
+def mobcode_parent_package_paths(name):
+    parts = str(name).split('.')
+    paths = []
+    for index in range(len(parts) - 1):
+        paths.append('/'.join(parts[:index + 1]) + '/__init__.py')
+    return paths
+
+def mobcode_find_workspace_module_path(name):
+    for parent_path in mobcode_parent_package_paths(name):
+        if parent_path not in workspace_python_modules:
+            return None
+    for path in mobcode_module_path_candidates(name):
+        if path in workspace_python_modules:
+            return path
+    return None
 
 def mobcode_create_workspace_module(name, path):
     module_type = original_import('types').ModuleType
     module = module_type(name)
+    is_package = path.endswith('/__init__.py')
     module.__file__ = path
-    module.__package__ = name.rsplit('.', 1)[0] if '.' in name else ''
+    module.__package__ = name if is_package else name.rsplit('.', 1)[0] if '.' in name else ''
+    if is_package:
+        module.__path__ = [path.rsplit('/', 1)[0]]
     sys.modules[name] = module
     module_globals = module.__dict__
     module_globals.update({
@@ -1083,6 +1279,26 @@ def mobcode_create_workspace_module(name, path):
     exec(compiled_module, module_globals)
     return module
 
+def mobcode_ensure_workspace_module(name):
+    module_name = str(name)
+    if module_name in sys.modules:
+        return sys.modules[module_name]
+    if '.' in module_name:
+        parent_name, child_name = module_name.rsplit('.', 1)
+        parent_module = mobcode_ensure_workspace_module(parent_name)
+        if parent_module is None:
+            return None
+    else:
+        parent_module = None
+        child_name = ''
+    workspace_module_path = mobcode_find_workspace_module_path(module_name)
+    if workspace_module_path is None:
+        return None
+    module = mobcode_create_workspace_module(module_name, workspace_module_path)
+    if parent_module is not None:
+        setattr(parent_module, child_name, module)
+    return module
+
 def mobcode_import(name, globals=None, locals=None, fromlist=(), level=0):
     root_name = str(name).split('.', 1)[0]
     if level != 0:
@@ -1090,11 +1306,18 @@ def mobcode_import(name, globals=None, locals=None, fromlist=(), level=0):
     if root_name in blocked_import_roots:
         raise ImportError("Module '" + root_name + "' is not available in the terminal runner.")
     module_name = str(name)
-    if module_name in sys.modules:
-        return sys.modules[module_name]
-    workspace_module_path = mobcode_module_path(module_name)
-    if workspace_module_path in workspace_python_modules:
-        return mobcode_create_workspace_module(module_name, workspace_module_path)
+    workspace_module = mobcode_ensure_workspace_module(module_name)
+    if workspace_module is not None:
+        for item in fromlist or ():
+            item_name = str(item)
+            if item_name == '*':
+                continue
+            child_module = mobcode_ensure_workspace_module(module_name + '.' + item_name)
+            if child_module is not None:
+                setattr(workspace_module, item_name, child_module)
+        if fromlist:
+            return workspace_module
+        return sys.modules[root_name]
     if root_name not in allowed_import_roots:
         raise ImportError("Module '" + module_name + "' is not available in the terminal runner.")
     try:
@@ -1159,7 +1382,13 @@ def stop_active_worker():
 
 @bind(document['stop-runner'], 'click')
 def handle_stop_click(event):
+    if window.mobcodeRunnerGetState() != 'running':
+        return
     stop_active_worker()
+
+@bind(document['done-runner'], 'click')
+def handle_done_click(event):
+    window.mobcodeCloseRunnerWindow()
 
 def submit_input_response(request_id, value):
     if active_worker is None:
