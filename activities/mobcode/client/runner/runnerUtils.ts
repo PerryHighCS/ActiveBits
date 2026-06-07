@@ -126,11 +126,11 @@ function escapeScriptJson(value: unknown): string {
 
 function encodeBase64Utf8(value: string): string {
   const bytes = new TextEncoder().encode(value)
-  let binary = ''
+  const binaryCharacters: string[] = []
   for (const byte of bytes) {
-    binary += String.fromCharCode(byte)
+    binaryCharacters.push(String.fromCharCode(byte))
   }
-  return btoa(binary)
+  return btoa(binaryCharacters.join(''))
 }
 
 function modulePath(moduleName: string): string {
