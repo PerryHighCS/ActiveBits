@@ -137,8 +137,22 @@ function modulePath(moduleName: string): string {
   return `${moduleName.replaceAll('.', '/')}.py`
 }
 
+function modulePackagePath(moduleName: string): string {
+  return `${moduleName.replaceAll('.', '/')}/__init__.py`
+}
+
+function modulePathCandidates(moduleName: string): string[] {
+  return [modulePath(moduleName), modulePackagePath(moduleName)]
+}
+
+function moduleParentPackagePaths(moduleName: string): string[] {
+  const parts = moduleName.split('.')
+  return parts.slice(0, -1).map((_, index) => `${parts.slice(0, index + 1).join('/')}/__init__.py`)
+}
+
 function isWorkspacePythonModule(moduleName: string, files: Record<string, string>): boolean {
-  return Object.hasOwn(files, modulePath(moduleName))
+  return modulePathCandidates(moduleName).some((path) => Object.hasOwn(files, path))
+    && moduleParentPackagePaths(moduleName).every((path) => Object.hasOwn(files, path))
 }
 
 function isTerminalAllowedModule(moduleName: string, files: Record<string, string>): boolean {
@@ -895,17 +909,34 @@ try:
     try {
       return new URL(withoutSuffix, self.location.href).pathname.replace(/^\\/+/, '');
     } catch {
-      return withoutSuffix.replace(/^\\/+/, '');
+      return withoutSuffix.replace(/^\\/+/, '').replace(/^(?:\\.\\.\\/|\\.\\/)+/, '');
     }
   }
   function resolveWorkspacePath(url) {
     const normalized = normalizeWorkspaceUrl(url);
+    const dottedAsPath = normalized.replaceAll('.', '/');
+    const basename = normalized.slice(normalized.lastIndexOf('/') + 1);
+    const basenameAsPath = basename.replaceAll('.', '/');
     const candidates = [
       normalized,
-      normalized.slice(normalized.lastIndexOf('/') + 1),
+      normalized + '.py',
+      normalized + '/__init__.py',
+      dottedAsPath,
+      dottedAsPath + '.py',
+      dottedAsPath + '/__init__.py',
+      basename,
+      basename + '.py',
+      basename + '/__init__.py',
+      basenameAsPath,
+      basenameAsPath + '.py',
+      basenameAsPath + '/__init__.py',
     ];
     for (const candidate of candidates) {
       if (Object.prototype.hasOwnProperty.call(workspaceFiles, candidate)) return candidate;
+    }
+    for (const workspacePath of Object.keys(workspaceFiles)) {
+      if (normalized.endsWith('/' + workspacePath)) return workspacePath;
+      if (dottedAsPath.endsWith('/' + workspacePath)) return workspacePath;
     }
     return null;
   }
@@ -948,7 +979,13 @@ try:
         return;
       }
       this.nativeRequest = new NativeXMLHttpRequest();
-      this.nativeRequest.open(method, url, async, user, password);
+      try {
+        this.nativeRequest.open(method, url, async, user, password);
+      } catch {
+        this.nativeRequest = null;
+        this.workspacePath = '';
+        this.readyState = 1;
+      }
     }
     send(body) {
       if (this.nativeRequest) {
@@ -1199,14 +1236,37 @@ def mobcode_open(path, mode='r', buffering=-1, encoding=None, errors=None, newli
         raise
     return MobCodeReadOnlyFile(workspace_path, workspace_files[workspace_path], 'b' in mode_text)
 
-def mobcode_module_path(name):
-    return str(name).replace('.', '/') + '.py'
+def mobcode_module_base_path(name):
+    return str(name).replace('.', '/')
+
+def mobcode_module_path_candidates(name):
+    base_path = mobcode_module_base_path(name)
+    return [base_path + '.py', base_path + '/__init__.py']
+
+def mobcode_parent_package_paths(name):
+    parts = str(name).split('.')
+    paths = []
+    for index in range(len(parts) - 1):
+        paths.append('/'.join(parts[:index + 1]) + '/__init__.py')
+    return paths
+
+def mobcode_find_workspace_module_path(name):
+    for parent_path in mobcode_parent_package_paths(name):
+        if parent_path not in workspace_python_modules:
+            return None
+    for path in mobcode_module_path_candidates(name):
+        if path in workspace_python_modules:
+            return path
+    return None
 
 def mobcode_create_workspace_module(name, path):
     module_type = original_import('types').ModuleType
     module = module_type(name)
+    is_package = path.endswith('/__init__.py')
     module.__file__ = path
-    module.__package__ = name.rsplit('.', 1)[0] if '.' in name else ''
+    module.__package__ = name if is_package else name.rsplit('.', 1)[0] if '.' in name else ''
+    if is_package:
+        module.__path__ = [path.rsplit('/', 1)[0]]
     sys.modules[name] = module
     module_globals = module.__dict__
     module_globals.update({
@@ -1219,6 +1279,26 @@ def mobcode_create_workspace_module(name, path):
     exec(compiled_module, module_globals)
     return module
 
+def mobcode_ensure_workspace_module(name):
+    module_name = str(name)
+    if module_name in sys.modules:
+        return sys.modules[module_name]
+    if '.' in module_name:
+        parent_name, child_name = module_name.rsplit('.', 1)
+        parent_module = mobcode_ensure_workspace_module(parent_name)
+        if parent_module is None:
+            return None
+    else:
+        parent_module = None
+        child_name = ''
+    workspace_module_path = mobcode_find_workspace_module_path(module_name)
+    if workspace_module_path is None:
+        return None
+    module = mobcode_create_workspace_module(module_name, workspace_module_path)
+    if parent_module is not None:
+        setattr(parent_module, child_name, module)
+    return module
+
 def mobcode_import(name, globals=None, locals=None, fromlist=(), level=0):
     root_name = str(name).split('.', 1)[0]
     if level != 0:
@@ -1226,11 +1306,18 @@ def mobcode_import(name, globals=None, locals=None, fromlist=(), level=0):
     if root_name in blocked_import_roots:
         raise ImportError("Module '" + root_name + "' is not available in the terminal runner.")
     module_name = str(name)
-    if module_name in sys.modules:
-        return sys.modules[module_name]
-    workspace_module_path = mobcode_module_path(module_name)
-    if workspace_module_path in workspace_python_modules:
-        return mobcode_create_workspace_module(module_name, workspace_module_path)
+    workspace_module = mobcode_ensure_workspace_module(module_name)
+    if workspace_module is not None:
+        for item in fromlist or ():
+            item_name = str(item)
+            if item_name == '*':
+                continue
+            child_module = mobcode_ensure_workspace_module(module_name + '.' + item_name)
+            if child_module is not None:
+                setattr(workspace_module, item_name, child_module)
+        if fromlist:
+            return workspace_module
+        return sys.modules[root_name]
     if root_name not in allowed_import_roots:
         raise ImportError("Module '" + module_name + "' is not available in the terminal runner.")
     try:

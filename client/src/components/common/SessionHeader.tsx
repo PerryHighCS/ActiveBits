@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useClipboard } from '@src/hooks/useClipboard'
 import Button from '../ui/Button'
 import Modal from '../ui/Modal'
-import { isEmbeddedChildSessionId } from './sessionHeaderUtils'
+import { buildStudentJoinUrl, isEmbeddedChildSessionId } from './sessionHeaderUtils'
 
 export interface SessionHeaderProps {
   activityName: string
@@ -44,7 +44,7 @@ export default function SessionHeader({
   const resolvedActionMenuRole = actionMenuContent != null ? actionMenuRole ?? 'menu' : undefined
 
   const studentJoinUrl =
-    sessionId && typeof window !== 'undefined' ? `${window.location.origin}/${sessionId}` : ''
+    sessionId && typeof window !== 'undefined' ? buildStudentJoinUrl(window.location.origin, sessionId) : ''
   const embeddedChildSession = isEmbeddedChildSessionId(sessionId)
 
   const copyLink = () => copyToClipboard(studentJoinUrl)

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { MemoryRouter } from 'react-router-dom'
 import SessionHeader from './SessionHeader'
+import { buildStudentJoinUrl } from './sessionHeaderUtils'
 
 void test('SessionHeader simple mode renders only the activity title', () => {
   const html = renderToStaticMarkup(
@@ -28,6 +29,13 @@ void test('SessionHeader full mode renders join controls and action buttons', ()
   assert.match(html, /Copy Join URL/)
   assert.match(html, /End Session/)
   assert.match(html, /mb-6/)
+})
+
+void test('buildStudentJoinUrl encodes reserved session id characters', () => {
+  assert.equal(
+    buildStudentJoinUrl('https://example.test', 'CHILD:abc/def?x=1'),
+    'https://example.test/CHILD%3Aabc%2Fdef%3Fx%3D1',
+  )
 })
 
 void test('SessionHeader can opt out of default bottom margin', () => {

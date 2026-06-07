@@ -112,8 +112,10 @@ test('MobCode Python runner popup prints terminal output', async ({ page }) => {
 test('MobCode Python runner popup imports workspace Python modules', async ({ page }) => {
   const session = await createMobCodeSession(page)
   await seedMobCodeFiles(page, session, {
-    'main.py': 'from greeter import Greeter\n\ng = Greeter()\nprint(g.greet("World"))\n',
-    'greeter.py': 'class Greeter:\n    def greet(self, name):\n        return f"Olá, {name}!"\n',
+    'main.py': 'import greeter.messages\nfrom greeter import Greeter\nfrom greeter import messages\n\ng = Greeter()\nprint(g.greet("World"))\nprint(messages.punctuation())\nprint(greeter.messages.punctuation())\n',
+    'greeter/__init__.py': 'from greeter.core import Greeter\n',
+    'greeter/core.py': 'class Greeter:\n    def greet(self, name):\n        return f"Olá, {name}!"\n',
+    'greeter/messages.py': 'def punctuation():\n    return "!"\n',
     'README.md': 'Expected output: `Olá, World!` and ${not_js}\n',
   }, 'main.py')
   await openMobCodeManager(page, session)
@@ -122,6 +124,7 @@ test('MobCode Python runner popup imports workspace Python modules', async ({ pa
   const terminal = popup.locator('#terminal')
 
   await expect(terminal).toContainText('Olá, World!', { timeout: 15_000 })
+  await expect(terminal).toContainText('!\n!', { timeout: 15_000 })
   await expect(terminal).not.toContainText('Invalid URL')
   await expect(terminal).not.toContainText('XMLHttpRequest')
 })
