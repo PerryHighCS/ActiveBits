@@ -901,6 +901,10 @@ try:
 (function(workspaceFilesJson) {
   const workspaceFiles = JSON.parse(workspaceFilesJson);
   const NativeXMLHttpRequest = self.XMLHttpRequest;
+  self.mobcodeResolveInputFuture = (future, value) => {
+    future._done = true;
+    future._methods.resolve(value);
+  };
   if (!NativeXMLHttpRequest || self.mobcodeWorkspaceXMLHttpRequestInstalled) return;
   self.mobcodeWorkspaceXMLHttpRequestInstalled = true;
   // Brython's native importer fetches bare workspace modules with XHR before Python hooks run.
@@ -1051,7 +1055,7 @@ def handle_worker_message(event):
     request_id = str(message.get('id', ''))
     input_future = input_futures.pop(request_id, None)
     if input_future is not None:
-        input_future.set_result(str(message.get('value', '')))
+        worker_self.mobcodeResolveInputFuture(input_future, str(message.get('value', '')))
 
 def find_user_error_line(error):
     if entry_import_diagnostic is not None:
