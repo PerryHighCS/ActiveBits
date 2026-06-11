@@ -33,22 +33,22 @@
     "jszip": "^3.10.1",
     "qrcode.react": "^4.2.0",
     "react-markdown": "^10.1.0",
-    "react-zxing": "^2.1.0",
+    "react-zxing": "^3.0.0",
     "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@testing-library/react": "^16.3.2",
-    "@types/jsdom": "^28.0.2",
-    "@types/node": "^24.12.4",
-    "@types/react": "^19.0.10",
-    "@types/react-dom": "^19.0.4",
-    "@typescript-eslint/eslint-plugin": "^8.59.3",
-    "@typescript-eslint/parser": "^8.59.3",
-    "eslint": "^10.3.0",
-    "eslint-plugin-jsdoc": "^62.9.0",
+    "@types/jsdom": "^28.0.3",
+    "@types/node": "^24.13.2",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@typescript-eslint/eslint-plugin": "^8.61.0",
+    "@typescript-eslint/parser": "^8.61.0",
+    "eslint": "^10.4.1",
+    "eslint-plugin-jsdoc": "^63.0.2",
     "globals": "^17.6.0",
     "jsdom": "^29.1.1",
-    "typescript": "^6.0.2"
+    "typescript": "^6.0.3"
   }
 }
