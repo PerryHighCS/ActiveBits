@@ -1,5 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { useZxing } from 'react-zxing'
+import zxingReaderWasmUrl from 'zxing-wasm/reader/zxing_reader.wasm?url'
 import Button from '@src/components/ui/Button'
 import { getQrScannerErrorCode, getQrScannerErrorMessage, type ScannerErrorCode } from './qrScannerUtils'
 
@@ -29,10 +30,11 @@ export default function QrScannerPanel({ onDetected, onError, onClose }: QrScann
   const { ref } = useZxing({
     paused: hasDetected,
     constraints,
+    wasmUrl: zxingReaderWasmUrl,
     onDecodeResult: (result) => {
-      if (result === null || result === undefined) return
+      if (!result.rawValue) return
       setHasDetected(true)
-      onDetected?.(result.getText())
+      onDetected?.(result.rawValue)
     },
     onError: (error) => {
       if (hasDetected) return
