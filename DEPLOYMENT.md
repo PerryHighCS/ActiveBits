@@ -141,6 +141,10 @@ ActiveBits intentionally ships source maps in production for debugging and teach
    - Confirm `.map` files are present in deployment artifacts.
    - Verify stack traces map to original TypeScript source during incident debugging.
 
+## Bundled Client Runtime Assets
+
+- The shared QR scanner uses `react-zxing` with the `zxing-wasm` reader binary imported through Vite. Production client builds emit `zxing_reader-*.wasm` under `client/dist/assets/`; deploy that file with the rest of the built client assets so QR scanning does not fall back to a third-party CDN.
+
 ## Dev-Only Presentation Assets
 
 SyncDeck sample decks that exist only for local development live under `activities/syncdeck/dev-presentations/`.

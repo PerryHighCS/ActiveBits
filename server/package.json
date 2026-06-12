@@ -22,26 +22,26 @@
   "license": "MIT",
   "description": "",
   "dependencies": {
-    "brython": "^3.13.2",
+    "brython": "^3.14.1",
     "cookie-parser": "^1.4.7",
-    "express": "^5.2.0",
+    "express": "^5.2.1",
     "express-rate-limit": "^8.5.2",
-    "http-proxy-middleware": "^4.0.0",
-    "ioredis": "^5.10.1",
-    "ws": "^8.20.1"
+    "http-proxy-middleware": "^4.1.0",
+    "ioredis": "^5.11.1",
+    "ws": "^8.21.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/cookie-parser": "^1.4.10",
-    "@types/express": "^5.0.3",
-    "@types/node": "^24.12.4",
+    "@types/express": "^5.0.6",
+    "@types/node": "^24.13.2",
     "@types/ws": "^8.18.1",
-    "@typescript-eslint/eslint-plugin": "^8.59.3",
-    "@typescript-eslint/parser": "^8.59.3",
-    "eslint": "^10.3.0",
-    "eslint-plugin-jsdoc": "^62.9.0",
+    "@typescript-eslint/eslint-plugin": "^8.61.0",
+    "@typescript-eslint/parser": "^8.61.0",
+    "eslint": "^10.4.1",
+    "eslint-plugin-jsdoc": "^63.0.2",
     "globals": "^17.6.0",
-    "tsx": "^4.20.6",
-    "typescript": "^6.0.2"
+    "tsx": "^4.22.4",
+    "typescript": "^6.0.3"
   }
 }

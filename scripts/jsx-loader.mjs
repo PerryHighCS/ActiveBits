@@ -44,10 +44,23 @@ export async function resolve(specifier, context, defaultResolve) {
 }
 
 export async function load(url, context, defaultLoad) {
+  const moduleUrl = new URL(url);
+  const pathname = moduleUrl.pathname;
+
   if (url.endsWith('.css')) {
     return {
       format: 'module',
       source: 'export default "";',
+      shortCircuit: true,
+    };
+  }
+
+  if (pathname.endsWith('.wasm')) {
+    moduleUrl.search = '';
+    moduleUrl.hash = '';
+    return {
+      format: 'module',
+      source: `export default ${JSON.stringify(moduleUrl.href)};`,
       shortCircuit: true,
     };
   }

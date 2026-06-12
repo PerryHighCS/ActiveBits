@@ -901,6 +901,14 @@ try:
 (function(workspaceFilesJson) {
   const workspaceFiles = JSON.parse(workspaceFilesJson);
   const NativeXMLHttpRequest = self.XMLHttpRequest;
+  self.mobcodeResolveInputFuture = (future, value) => {
+    // Brython 3.14 does not expose a reliable JS-side set_result() path for
+    // worker-created aio.Future instances, so resolve through its internals.
+    const resolve = future?._methods?.resolve;
+    if (typeof resolve !== 'function') throw new Error('Brython Future resolver unavailable');
+    resolve(value);
+    future._done = true;
+  };
   if (!NativeXMLHttpRequest || self.mobcodeWorkspaceXMLHttpRequestInstalled) return;
   self.mobcodeWorkspaceXMLHttpRequestInstalled = true;
   // Brython's native importer fetches bare workspace modules with XHR before Python hooks run.
@@ -1032,6 +1040,28 @@ def mobcode_input(prompt=''):
     worker_self.send({'type': 'input-request', 'id': request_id, 'prompt': str(prompt)})
     return input_future
 
+def resolve_input_future(input_future, value):
+    primary_error = None
+    try:
+        worker_self.mobcodeResolveInputFuture(input_future, value)
+        return True
+    except Exception as error:
+        primary_error = error
+    try:
+        input_future.set_result(value)
+        return True
+    except Exception as fallback_error:
+        try:
+            input_future.set_exception(fallback_error)
+            return True
+        except Exception:
+            worker_self.send({
+                'type': 'stderr',
+                'data': '\\n[error] Interactive input could not be delivered: '
+                    + str(fallback_error or primary_error) + '\\n',
+            })
+            return False
+
 async def mobcode_sleep(seconds=0):
     try:
         delay = float(seconds)
@@ -1049,9 +1079,10 @@ def handle_worker_message(event):
     if not isinstance(message, dict) or message.get('type') != 'input-response':
         return
     request_id = str(message.get('id', ''))
-    input_future = input_futures.pop(request_id, None)
+    input_future = input_futures.get(request_id, None)
     if input_future is not None:
-        input_future.set_result(str(message.get('value', '')))
+        if resolve_input_future(input_future, str(message.get('value', ''))):
+            input_futures.pop(request_id, None)
 
 def find_user_error_line(error):
     if entry_import_diagnostic is not None:
