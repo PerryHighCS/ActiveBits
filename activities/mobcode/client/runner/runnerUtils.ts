@@ -1038,6 +1038,17 @@ def mobcode_input(prompt=''):
     worker_self.send({'type': 'input-request', 'id': request_id, 'prompt': str(prompt)})
     return input_future
 
+def resolve_input_future(input_future, value):
+    try:
+        worker_self.mobcodeResolveInputFuture(input_future, value)
+        return
+    except Exception:
+        pass
+    try:
+        input_future.set_result(value)
+    except Exception:
+        pass
+
 async def mobcode_sleep(seconds=0):
     try:
         delay = float(seconds)
@@ -1057,7 +1068,7 @@ def handle_worker_message(event):
     request_id = str(message.get('id', ''))
     input_future = input_futures.pop(request_id, None)
     if input_future is not None:
-        worker_self.mobcodeResolveInputFuture(input_future, str(message.get('value', '')))
+        resolve_input_future(input_future, str(message.get('value', '')))
 
 def find_user_error_line(error):
     if entry_import_diagnostic is not None:
