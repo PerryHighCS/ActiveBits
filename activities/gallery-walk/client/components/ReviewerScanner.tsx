@@ -1,5 +1,9 @@
 import React, { useCallback } from 'react';
-import QrScannerPanel from '@src/components/common/QrScannerPanel';
+import QrScannerPanel, { type QrScannerPanelProps } from '@src/components/common/QrScannerPanel';
+
+const galleryWalkScannerFormats: NonNullable<QrScannerPanelProps['formats']> = ['qr_code'];
+const galleryWalkScannerErrorMessage =
+  'Unable to scan from this browser. Use your camera app to open the QR code instead.';
 
 interface ScannerSuccessData {
   pathname: string;
@@ -12,7 +16,8 @@ interface ReviewerScannerProps {
   sessionId?: string | null;
   onClose: () => void;
   onSuccess: (data: ScannerSuccessData) => void;
-  onError: (code: string | null) => void;
+  onError: (code: 'scanner-invalid' | 'scanner-unavailable' | null) => void;
+  ScannerPanelComponent?: React.ComponentType<QrScannerPanelProps>;
 }
 
 export default function ReviewerScanner({
@@ -21,6 +26,7 @@ export default function ReviewerScanner({
   onClose,
   onSuccess,
   onError,
+  ScannerPanelComponent = QrScannerPanel,
 }: ReviewerScannerProps): React.JSX.Element | null {
   const validateAndHandle = useCallback((content: string) => {
     onClose();
@@ -52,18 +58,21 @@ export default function ReviewerScanner({
     }
   }, [onClose, onError, onSuccess, sessionId]);
 
-  const handleScannerError = useCallback(() => {
-    onClose();
+  const handleScannerError = useCallback<NonNullable<QrScannerPanelProps['onError']>>((_code, _error) => {
     onError('scanner-unavailable');
-  }, [onClose, onError]);
+  }, [onError]);
 
   if (isOpen !== true) return null;
 
   return (
-    <QrScannerPanel
+    <ScannerPanelComponent
+      title="Scan review QR code"
+      errorMessage={galleryWalkScannerErrorMessage}
+      formats={galleryWalkScannerFormats}
       onDetected={validateAndHandle}
       onError={handleScannerError}
       onClose={onClose}
+      timeBetweenDecodingAttempts={300}
     />
   );
 }

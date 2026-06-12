@@ -1741,3 +1741,9 @@ Use this log for durable findings that future contributors and agents should reu
 - Evidence: `activities/syncdeck/client/student/SyncDeckStudent.tsx`; `activities/syncdeck/client/shared/embeddedOverlayNavigation.ts`
 - Follow-up action: For any cross-platform icon-only control in shared overlays, prefer inline SVG or CSS-drawn shapes over text glyphs unless platform rendering is explicitly desired.
 - Owner: Codex
+- Date: 2026-06-12
+- Area: client | shared QR scanner
+- Discovery: `client/src/components/common/QrScannerPanel.tsx` is an intentional shared scanner shell over `react-zxing`. Keep scanner mechanics there (`formats`, `timeBetweenDecodingAttempts`, mapped `ScannerErrorCode` plus original error), while activity wrappers such as GalleryWalk own URL validation, routing decisions, and activity-specific copy.
+- Why it matters: Future QR use cases can reuse camera setup and error mapping without pushing activity protocol details into shared client components.
+- Evidence: `client/src/components/common/QrScannerPanel.tsx`; `client/src/components/common/qrScannerPanelUtils.ts`; `activities/gallery-walk/client/components/ReviewerScanner.tsx`
+- Owner: Codex

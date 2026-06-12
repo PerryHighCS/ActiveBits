@@ -20,15 +20,19 @@ void test('buildQrScannerOptions wires wasmUrl, constraints, and rawValue detect
   const errorCodes: string[] = []
   const options = buildQrScannerOptions({
     constraints,
+    formats: ['qr_code'],
     hasDetected: false,
     onDetected: (text) => detectedTexts.push(text),
     setErrorCode: (code) => errorCodes.push(code),
     setHasDetected: (hasDetected) => detectedStates.push(hasDetected),
+    timeBetweenDecodingAttempts: 300,
     wasmUrl: '/assets/zxing_reader.wasm',
   })
 
   assert.equal(options.paused, false)
   assert.equal(options.constraints, constraints)
+  assert.deepEqual(options.formats, ['qr_code'])
+  assert.equal(options.timeBetweenDecodingAttempts, 300)
   assert.equal(options.wasmUrl, '/assets/zxing_reader.wasm')
 
   options.onDecodeResult({ rawValue: 'https://bits.example/gallery?reviewee=a' })
@@ -43,13 +47,17 @@ void test('buildQrScannerOptions wires wasmUrl, constraints, and rawValue detect
 
 void test('buildQrScannerOptions reports scanner errors before detection and ignores them after detection', () => {
   const beforeDetectionErrors: string[] = []
+  const beforeDetectionCallbackErrorCodes: string[] = []
   const beforeDetectionRawErrors: unknown[] = []
   const cameraError = { name: 'NotAllowedError' }
 
   const beforeDetection = buildQrScannerOptions({
     constraints,
     hasDetected: false,
-    onError: (error) => beforeDetectionRawErrors.push(error),
+    onError: (code, error) => {
+      beforeDetectionCallbackErrorCodes.push(code)
+      beforeDetectionRawErrors.push(error)
+    },
     setErrorCode: (code) => beforeDetectionErrors.push(code),
     setHasDetected: () => {
       throw new Error('setHasDetected should not be called for scanner errors')
@@ -61,6 +69,7 @@ void test('buildQrScannerOptions reports scanner errors before detection and ign
   beforeDetection.onError(cameraError)
 
   assert.deepEqual(beforeDetectionErrors, ['camera-error'])
+  assert.deepEqual(beforeDetectionCallbackErrorCodes, ['camera-error'])
   assert.deepEqual(beforeDetectionRawErrors, [cameraError])
 
   const afterDetection = buildQrScannerOptions({

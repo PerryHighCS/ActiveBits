@@ -1,4 +1,5 @@
 import { getQrScannerErrorCode, type ScannerErrorCode } from './qrScannerUtils'
+import type { BarcodeFormat } from 'react-zxing'
 
 interface QrScannerDecodeResult {
   rawValue?: string | null
@@ -6,11 +7,13 @@ interface QrScannerDecodeResult {
 
 interface BuildQrScannerOptionsArgs {
   constraints: MediaStreamConstraints
+  formats?: BarcodeFormat[]
   hasDetected: boolean
   onDetected?: (text: string) => void
-  onError?: (error: unknown) => void
+  onError?: (code: ScannerErrorCode, error: unknown) => void
   setErrorCode: (code: ScannerErrorCode) => void
   setHasDetected: (hasDetected: boolean) => void
+  timeBetweenDecodingAttempts?: number
   wasmUrl: string
 }
 
@@ -20,17 +23,21 @@ export function getQrScannerDetectedText(result: QrScannerDecodeResult): string 
 
 export function buildQrScannerOptions({
   constraints,
+  formats,
   hasDetected,
   onDetected,
   onError,
   setErrorCode,
   setHasDetected,
+  timeBetweenDecodingAttempts,
   wasmUrl,
 }: BuildQrScannerOptionsArgs) {
   let detected = hasDetected
   return {
     paused: detected,
     constraints,
+    formats,
+    timeBetweenDecodingAttempts,
     wasmUrl,
     onDecodeResult: (result: QrScannerDecodeResult) => {
       if (detected) return
@@ -42,8 +49,9 @@ export function buildQrScannerOptions({
     },
     onError: (error: unknown) => {
       if (detected) return
-      setErrorCode(getQrScannerErrorCode(error))
-      onError?.(error)
+      const errorCode = getQrScannerErrorCode(error)
+      setErrorCode(errorCode)
+      onError?.(errorCode, error)
     },
   }
 }
