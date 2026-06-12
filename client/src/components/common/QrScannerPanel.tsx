@@ -5,12 +5,15 @@ import QrScannerPanelView from './QrScannerPanelView'
 import type { ScannerErrorCode } from './qrScannerUtils'
 import { buildQrScannerOptions } from './qrScannerPanelUtils'
 
+export type QrScannerHook = typeof useZxing
+
 export interface QrScannerPanelProps {
   errorMessage?: string
   formats?: BarcodeFormat[]
   onDetected?: (text: string) => void
   onError?: (code: ScannerErrorCode, error: unknown) => void
   onClose: () => void
+  scannerHook?: QrScannerHook
   timeBetweenDecodingAttempts?: number
   title?: string
 }
@@ -21,6 +24,7 @@ export default function QrScannerPanel({
   onDetected,
   onError,
   onClose,
+  scannerHook = useZxing,
   timeBetweenDecodingAttempts,
   title = 'Scan QR Code',
 }: QrScannerPanelProps) {
@@ -36,7 +40,7 @@ export default function QrScannerPanel({
     [],
   )
 
-  const { ref } = useZxing(buildQrScannerOptions({
+  const { ref } = scannerHook(buildQrScannerOptions({
     constraints,
     formats,
     hasDetected,
