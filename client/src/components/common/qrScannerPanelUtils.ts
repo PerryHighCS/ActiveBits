@@ -33,6 +33,7 @@ export function buildQrScannerOptions({
     constraints,
     wasmUrl,
     onDecodeResult: (result: QrScannerDecodeResult) => {
+      if (detected) return
       const detectedText = getQrScannerDetectedText(result)
       if (!detectedText) return
       detected = true

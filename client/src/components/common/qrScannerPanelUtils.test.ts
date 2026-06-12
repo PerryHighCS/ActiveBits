@@ -33,6 +33,7 @@ void test('buildQrScannerOptions wires wasmUrl, constraints, and rawValue detect
 
   options.onDecodeResult({ rawValue: 'https://bits.example/gallery?reviewee=a' })
   options.onError({ name: 'NotAllowedError' })
+  options.onDecodeResult({ rawValue: 'https://bits.example/gallery?reviewee=b' })
   options.onDecodeResult({ rawValue: '' })
 
   assert.deepEqual(detectedStates, [true])
