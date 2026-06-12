@@ -5,7 +5,7 @@ import { getQrScannerErrorMessage, type ScannerErrorCode } from './qrScannerUtil
 export interface QrScannerPanelViewProps {
   errorCode: ScannerErrorCode | null
   errorMessage?: string
-  onClose?: () => void
+  onClose: () => void
   title: string
   videoRef?: Ref<HTMLVideoElement>
 }
@@ -35,7 +35,7 @@ export default function QrScannerPanelView({
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key === 'Escape') {
       event.preventDefault()
-      onClose?.()
+      onClose()
       return
     }
     if (event.key !== 'Tab') return

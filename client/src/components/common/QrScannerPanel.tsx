@@ -10,7 +10,7 @@ export interface QrScannerPanelProps {
   formats?: BarcodeFormat[]
   onDetected?: (text: string) => void
   onError?: (code: ScannerErrorCode, error: unknown) => void
-  onClose?: () => void
+  onClose: () => void
   timeBetweenDecodingAttempts?: number
   title?: string
 }

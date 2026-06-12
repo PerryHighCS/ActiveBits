@@ -17,6 +17,7 @@ interface ReviewerScannerProps {
   onClose: () => void;
   onSuccess: (data: ScannerSuccessData) => void;
   onError: (code: 'scanner-invalid' | 'scanner-unavailable' | null) => void;
+  ScannerPanelComponent?: React.ComponentType<QrScannerPanelProps>;
 }
 
 export default function ReviewerScanner({
@@ -25,6 +26,7 @@ export default function ReviewerScanner({
   onClose,
   onSuccess,
   onError,
+  ScannerPanelComponent = QrScannerPanel,
 }: ReviewerScannerProps): React.JSX.Element | null {
   const validateAndHandle = useCallback((content: string) => {
     onClose();
@@ -63,7 +65,7 @@ export default function ReviewerScanner({
   if (isOpen !== true) return null;
 
   return (
-    <QrScannerPanel
+    <ScannerPanelComponent
       title="Scan review QR code"
       errorMessage={galleryWalkScannerErrorMessage}
       formats={galleryWalkScannerFormats}

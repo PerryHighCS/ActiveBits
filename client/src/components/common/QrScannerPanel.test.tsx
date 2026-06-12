@@ -41,6 +41,7 @@ void test('QrScannerPanelView renders custom title and video state', () => {
   const html = renderToStaticMarkup(
     <QrScannerPanelView
       errorCode={null}
+      onClose={() => {}}
       title="Scan review QR code"
     />,
   )
@@ -58,6 +59,7 @@ void test('QrScannerPanelView renders custom error copy with dialog description 
     <QrScannerPanelView
       errorCode="camera-error"
       errorMessage="Use your camera app to open the QR code instead."
+      onClose={() => {}}
       title="Scan review QR code"
     />,
   )
