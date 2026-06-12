@@ -902,6 +902,8 @@ try:
   const workspaceFiles = JSON.parse(workspaceFilesJson);
   const NativeXMLHttpRequest = self.XMLHttpRequest;
   self.mobcodeResolveInputFuture = (future, value) => {
+    // Brython 3.14 does not expose a reliable JS-side set_result() path for
+    // worker-created aio.Future instances, so resolve through its internals.
     future._done = true;
     future._methods.resolve(value);
   };

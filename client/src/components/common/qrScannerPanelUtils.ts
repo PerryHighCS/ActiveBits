@@ -27,18 +27,20 @@ export function buildQrScannerOptions({
   setHasDetected,
   wasmUrl,
 }: BuildQrScannerOptionsArgs) {
+  let detected = hasDetected
   return {
-    paused: hasDetected,
+    paused: detected,
     constraints,
     wasmUrl,
     onDecodeResult: (result: QrScannerDecodeResult) => {
       const detectedText = getQrScannerDetectedText(result)
       if (!detectedText) return
+      detected = true
       setHasDetected(true)
       onDetected?.(detectedText)
     },
     onError: (error: unknown) => {
-      if (hasDetected) return
+      if (detected) return
       setErrorCode(getQrScannerErrorCode(error))
       onError?.(error)
     },

@@ -17,13 +17,12 @@ void test('getQrScannerDetectedText returns rawValue only when present', () => {
 void test('buildQrScannerOptions wires wasmUrl, constraints, and rawValue detection', () => {
   const detectedTexts: string[] = []
   const detectedStates: boolean[] = []
+  const errorCodes: string[] = []
   const options = buildQrScannerOptions({
     constraints,
     hasDetected: false,
     onDetected: (text) => detectedTexts.push(text),
-    setErrorCode: () => {
-      throw new Error('setErrorCode should not be called during successful detection')
-    },
+    setErrorCode: (code) => errorCodes.push(code),
     setHasDetected: (hasDetected) => detectedStates.push(hasDetected),
     wasmUrl: '/assets/zxing_reader.wasm',
   })
@@ -33,10 +32,12 @@ void test('buildQrScannerOptions wires wasmUrl, constraints, and rawValue detect
   assert.equal(options.wasmUrl, '/assets/zxing_reader.wasm')
 
   options.onDecodeResult({ rawValue: 'https://bits.example/gallery?reviewee=a' })
+  options.onError({ name: 'NotAllowedError' })
   options.onDecodeResult({ rawValue: '' })
 
   assert.deepEqual(detectedStates, [true])
   assert.deepEqual(detectedTexts, ['https://bits.example/gallery?reviewee=a'])
+  assert.deepEqual(errorCodes, [])
 })
 
 void test('buildQrScannerOptions reports scanner errors before detection and ignores them after detection', () => {
@@ -55,6 +56,7 @@ void test('buildQrScannerOptions reports scanner errors before detection and ign
     wasmUrl: '/assets/zxing_reader.wasm',
   })
 
+  console.log('[TEST] Triggering expected scanner error before QR detection', cameraError, beforeDetection)
   beforeDetection.onError(cameraError)
 
   assert.deepEqual(beforeDetectionErrors, ['camera-error'])
@@ -75,5 +77,6 @@ void test('buildQrScannerOptions reports scanner errors before detection and ign
     wasmUrl: '/assets/zxing_reader.wasm',
   })
 
+  console.log('[TEST] Triggering expected scanner error after QR detection', cameraError, afterDetection)
   afterDetection.onError(cameraError)
 })
