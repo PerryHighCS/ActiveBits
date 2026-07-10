@@ -133,7 +133,7 @@ export default function PostboardManager(): React.JSX.Element {
         'Content-Type': 'application/json',
         'x-instructor-passcode': instructorPasscode,
       },
-      body: JSON.stringify({ ...body, instructorPasscode }),
+      body: JSON.stringify(body),
     })
     if (!response.ok) {
       const payload = await response.json().catch(() => ({})) as { error?: string }
