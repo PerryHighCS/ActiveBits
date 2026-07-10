@@ -24,7 +24,7 @@ interface LocationState {
 
 const POLL_INTERVAL_MS = 2500
 
-function readInstructorPasscode(sessionId: string | undefined, state: unknown): string {
+export function readInstructorPasscode(sessionId: string | undefined, state: unknown): string {
   const locationState = state != null && typeof state === 'object' && !Array.isArray(state)
     ? state as LocationState
     : {}
@@ -34,9 +34,22 @@ function readInstructorPasscode(sessionId: string | undefined, state: unknown): 
       ? locationState.instructorPasscode
       : ''
 
-  if (statePasscode) return statePasscode
+  if (statePasscode) {
+    if (sessionId && typeof window !== 'undefined') {
+      try {
+        window.sessionStorage.setItem(`postboard_instructor_${sessionId}`, statePasscode)
+      } catch {
+        // Storage can be unavailable in privacy-restricted embedded contexts.
+      }
+    }
+    return statePasscode
+  }
   if (!sessionId || typeof window === 'undefined') return ''
-  return window.sessionStorage.getItem(`postboard_instructor_${sessionId}`) ?? ''
+  try {
+    return window.sessionStorage.getItem(`postboard_instructor_${sessionId}`) ?? ''
+  } catch {
+    return ''
+  }
 }
 
 function getLaunchDefaults(search: string): { prompt: string; autoApprove: boolean | null } {
@@ -61,7 +74,7 @@ export function reorderPostIds(currentIds: string[], draggedId: string, targetId
 export default function PostboardManager(): React.JSX.Element {
   const { sessionId } = useParams<{ sessionId?: string }>()
   const location = useLocation()
-  const [instructorPasscode] = useState(() => readInstructorPasscode(sessionId, location.state))
+  const [instructorPasscode, setInstructorPasscode] = useState(() => readInstructorPasscode(sessionId, location.state))
   const [snapshot, setSnapshot] = useState<PostboardInstructorSnapshot | null>(null)
   const [promptDraft, setPromptDraft] = useState('')
   const [autoApprove, setAutoApprove] = useState(false)
@@ -79,6 +92,18 @@ export default function PostboardManager(): React.JSX.Element {
   const fetchRequestIdRef = useRef(0)
 
   const launchDefaults = useMemo(() => getLaunchDefaults(location.search), [location.search])
+
+  useEffect(() => {
+    setInstructorPasscode(readInstructorPasscode(sessionId, location.state))
+    setSnapshot(null)
+    setPromptDraft('')
+    setAutoApprove(false)
+    setLaunchDefaultsApplied(false)
+    setError(null)
+    autoApproveDirtyRef.current = false
+    setupInitializedRef.current = false
+    fetchRequestIdRef.current += 1
+  }, [location.state, sessionId])
 
   const fetchState = useCallback(async () => {
     if (!sessionId || !instructorPasscode) return false
@@ -184,11 +209,12 @@ export default function PostboardManager(): React.JSX.Element {
   }
 
   const toggleAutoApprove = useCallback(() => {
+    if (!snapshot) return
     autoApproveDirtyRef.current = true
     const nextAutoApprove = !autoApprove
     setAutoApprove(nextAutoApprove)
-    void saveSetup(promptDraft, nextAutoApprove)
-  }, [autoApprove, promptDraft, saveSetup])
+    void saveSetup(promptDraft || snapshot.prompt.text, nextAutoApprove)
+  }, [autoApprove, promptDraft, saveSetup, snapshot])
 
   const handleInstructorPost = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -307,6 +333,7 @@ export default function PostboardManager(): React.JSX.Element {
               role="switch"
               className="postboard-header-toggle"
               onClick={toggleAutoApprove}
+              disabled={!snapshot || isSavingSetup}
               aria-checked={autoApprove}
               aria-label={autoApprove ? 'Auto-approve is on. Turn off to require moderation.' : 'Auto-approve is off. Turn on to skip moderation.'}
               title={autoApprove ? 'Auto-approve: on' : 'Auto-approve: off'}
