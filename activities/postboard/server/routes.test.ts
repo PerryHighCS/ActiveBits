@@ -161,14 +161,13 @@ function createPost(overrides: Partial<PostboardPost> = {}): PostboardPost {
 }
 
 void test('normalizePostboardSessionData applies selected option defaults and repairs shapes', () => {
-  const data = normalizePostboardSessionData({
+  const rawData = {
     selectedOptions: {
       prompt: '  Share a debugging strategy  ',
       autoApprove: 'true',
     },
     posts: [
       {
-        id: 'p1',
         text: '  Use print statements  ',
         authorId: 'student-1',
         authorName: 'Ada',
@@ -176,20 +175,42 @@ void test('normalizePostboardSessionData applies selected option defaults and re
         createdAt: 100,
       },
     ],
-    reactions: {
-      p1: {
-        byUser: {
-          'student-2': '👍',
-          'student-3': 'not-real',
-        },
+  }
+  const data = normalizePostboardSessionData(rawData)
+  const repeated = normalizePostboardSessionData(rawData)
+  const postId = data.posts[0]?.id
+  const repeatedPostId = repeated.posts[0]?.id
+
+  assert.ok(postId)
+
+  const flaggedRawData = {
+    posts: [
+      {
+        id: postId,
+        text: 'Use print statements',
+        authorId: 'student-1',
+        authorName: 'Ada',
+        status: 'approved',
+        createdAt: 100,
       },
+    ],
+    flags: {
+      [postId]: [
+        {
+          flaggedBy: 'instructor',
+          createdAt: 200,
+        },
+      ],
     },
-  })
+  }
+  const flagged = normalizePostboardSessionData(flaggedRawData)
+  const flaggedAgain = normalizePostboardSessionData(flaggedRawData)
 
   assert.equal(data.prompt.text, 'Share a debugging strategy')
   assert.equal(data.settings.autoApprove, true)
   assert.equal(data.posts[0]?.approvedAt, 100)
-  assert.deepEqual(data.reactions.p1?.byUser, { 'student-2': '👍' })
+  assert.equal(postId, repeatedPostId)
+  assert.equal(flagged.flags[postId]?.[0]?.id, flaggedAgain.flags[postId]?.[0]?.id)
   assert.equal(typeof data.instructorPasscode, 'string')
 })
 

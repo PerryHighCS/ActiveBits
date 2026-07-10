@@ -85,6 +85,15 @@ function createId(prefix: string): string {
   return `${prefix}_${randomBytes(8).toString('hex')}`
 }
 
+function createDeterministicId(prefix: string, parts: readonly unknown[]): string {
+  const key = parts.map((part) => {
+    if (typeof part === 'string') return sanitizeText(part, 160) || '_'
+    if (typeof part === 'number' && Number.isFinite(part)) return String(part)
+    return '_'
+  }).join('_')
+  return `${prefix}_${Buffer.from(key).toString('hex').slice(0, 32) || 'unknown'}`
+}
+
 function createInstructorPasscode(): string {
   return randomBytes(INSTRUCTOR_PASSCODE_BYTES).toString('hex')
 }
@@ -183,12 +192,18 @@ function normalizePosts(value: unknown, promptId: string): PostboardPost[] {
 
   for (const entry of value) {
     if (!isPlainObject(entry)) continue
-    const id = sanitizeText(entry.id, 120) || createId('post')
     const text = sanitizeText(entry.text, MAX_POST_TEXT_LENGTH)
     if (!text) continue
     const authorRole = normalizeAuthorRole(entry.authorRole)
     const status = normalizePostStatus(entry.status)
     const createdAt = normalizeTimestamp(entry.createdAt)
+    const authorId = sanitizeText(entry.authorId, 160) || (authorRole === 'instructor' ? 'instructor' : 'unknown-student')
+    const id = sanitizeText(entry.id, 120) || createDeterministicId('post', [
+      entry.promptId,
+      authorId,
+      text,
+      createdAt,
+    ])
     const approvedAt = status === 'approved'
       ? normalizeNullableTimestamp(entry.approvedAt) ?? createdAt
       : normalizeNullableTimestamp(entry.approvedAt)
@@ -202,7 +217,7 @@ function normalizePosts(value: unknown, promptId: string): PostboardPost[] {
     posts.push({
       id,
       promptId: sanitizeText(entry.promptId, 120) || promptId,
-      authorId: sanitizeText(entry.authorId, 160) || (authorRole === 'instructor' ? 'instructor' : 'unknown-student'),
+      authorId,
       authorName: sanitizeText(entry.authorName, 160) || (authorRole === 'instructor' ? 'Instructor' : 'Student'),
       authorRole,
       text,
@@ -262,12 +277,19 @@ function normalizeFlags(value: unknown, posts: readonly PostboardPost[]): Record
     for (const rawFlag of rawFlags) {
       if (!isPlainObject(rawFlag)) continue
       const reason = sanitizeOptionalText(rawFlag.reason, MAX_FLAG_REASON_LENGTH)
+      const flaggedBy = sanitizeText(rawFlag.flaggedBy, 160) || 'instructor'
+      const createdAt = normalizeTimestamp(rawFlag.createdAt)
       normalizedFlags.push({
-        id: sanitizeText(rawFlag.id, 120) || createId('flag'),
+        id: sanitizeText(rawFlag.id, 120) || createDeterministicId('flag', [
+          postId,
+          flaggedBy,
+          reason,
+          createdAt,
+        ]),
         postId,
-        flaggedBy: sanitizeText(rawFlag.flaggedBy, 160) || 'instructor',
+        flaggedBy,
         ...(reason ? { reason } : {}),
-        createdAt: normalizeTimestamp(rawFlag.createdAt),
+        createdAt,
       })
       if (normalizedFlags.length >= MAX_FLAGS_PER_POST) break
     }
@@ -690,7 +712,8 @@ export default function setupPostboardRoutes(app: PostboardRouteApp, sessions: S
         if (leftOrder != null && rightOrder != null) return leftOrder - rightOrder
         if (leftOrder != null) return -1
         if (rightOrder != null) return 1
-        return 0
+        if (left.order !== right.order) return left.order - right.order
+        return left.createdAt - right.createdAt
       })
     orderedBoardPosts.forEach((post, index) => {
       post.order = index
