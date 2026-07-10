@@ -35,7 +35,7 @@ void test('ResponseCard renders drag, star, flag, and emoji controls in the lead
   const leadingActionOrder = [
     'aria-label="Drag to reorder response from Taylor"',
     'aria-label="Unstar response"',
-    'aria-label="Flag response"',
+    'aria-label="Flag submission"',
     'aria-label="Add emoji annotation"',
   ]
 
