@@ -99,8 +99,8 @@ export default function InstructorFeedbackControls({
   }
 
   const flagLabel = flagMode === 'add'
-    ? (annotation.flagged ? 'Flagged note' : 'Flag note')
-    : (annotation.flagged ? 'Unflag response' : 'Flag response')
+    ? (annotation.flagged ? 'Flagged submission' : 'Flag submission')
+    : (annotation.flagged ? 'Unflag submission' : 'Flag submission')
 
   return (
     <div className={`flex flex-col items-center gap-2 shrink-0 pt-0.5${className ? ` ${className}` : ''}`}>

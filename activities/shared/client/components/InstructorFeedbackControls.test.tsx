@@ -53,7 +53,7 @@ void test('InstructorFeedbackControls renders star, flag, and emoji controls in 
 
   const actionOrder = [
     'aria-label="Unstar response"',
-    'aria-label="Flag response"',
+    'aria-label="Flag submission"',
     'aria-label="Add emoji annotation"',
   ]
 
@@ -116,7 +116,7 @@ void test('InstructorFeedbackControls supports add-mode flagging and emoji keybo
       ),
     )
 
-    fireEvent.click(rendered.getByRole('button', { name: 'Flag note' }))
+    fireEvent.click(rendered.getByRole('button', { name: 'Flag submission' }))
     assert.deepEqual(flagStates, [true])
 
     const emojiButton = rendered.getByRole('button', { name: 'Add emoji annotation' })
