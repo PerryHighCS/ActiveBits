@@ -8,7 +8,7 @@ import setupPostboardRoutes, {
   buildStudentSnapshot,
   normalizePostboardSessionData,
 } from './routes.js'
-import type { PostboardSessionData } from '../shared/types.js'
+import type { PostboardPost, PostboardSessionData } from '../shared/types.js'
 
 interface HandlerRequest {
   params: Record<string, string | undefined>
@@ -100,6 +100,20 @@ function createWsRouter(): WsRouter {
   }
 }
 
+function createBroadcastCapture(sessionId = 'session-1'): { ws: WsRouter; messages: string[] } {
+  const messages: string[] = []
+  const socket = {
+    readyState: 1,
+    sessionId,
+    send(message: string) {
+      messages.push(message)
+    },
+  } as ActiveBitsWebSocket
+  const ws = createWsRouter()
+  ws.wss.clients.add(socket)
+  return { ws, messages }
+}
+
 function createSession(data: Partial<PostboardSessionData> = {}): SessionRecord & { type: 'postboard'; data: PostboardSessionData } {
   return {
     id: 'session-1',
@@ -122,6 +136,27 @@ function createSession(data: Partial<PostboardSessionData> = {}): SessionRecord 
       flags: {},
       ...data,
     }),
+  }
+}
+
+function createPost(overrides: Partial<PostboardPost> = {}): PostboardPost {
+  return {
+    id: 'post-1',
+    promptId: 'prompt-1',
+    authorId: 'student-1',
+    authorName: 'Ada Lovelace',
+    authorRole: 'student',
+    text: 'A note',
+    styleId: 'lemon',
+    createdAt: 100,
+    updatedAt: 100,
+    status: 'approved',
+    approvedAt: 100,
+    rejectedAt: null,
+    deletedAt: null,
+    hiddenAt: null,
+    order: 0,
+    ...overrides,
   }
 }
 
@@ -456,6 +491,314 @@ void test('post submit route keeps manual student notes pending and instructor n
   assert.equal(storedData?.posts[0]?.authorName, 'Ada Lovelace')
   assert.equal(storedData?.posts[1]?.status, 'approved')
   assert.equal(storedData?.posts[1]?.authorRole, 'instructor')
+})
+
+void test('create route generates instructor passcode and applies selected option defaults', async () => {
+  const app = new TestApp()
+  const store = new MemoryStore()
+  setupPostboardRoutes(app, store, createWsRouter())
+
+  const handler = app.handlers.post['/api/postboard/create']
+  assert.ok(handler)
+
+  const response = createResponse()
+  await handler({
+    params: {},
+    body: {
+      selectedOptions: {
+        prompt: '  What changed your mind?  ',
+        autoApprove: 'true',
+      },
+    },
+  }, response)
+
+  assert.equal(response.statusCode, 200)
+  const body = response.body as { id?: string; instructorPasscode?: string }
+  assert.equal(typeof body.id, 'string')
+  assert.equal(typeof body.instructorPasscode, 'string')
+
+  const stored = body.id ? await store.get(body.id) : null
+  const storedData = stored?.data as PostboardSessionData | undefined
+  assert.equal(stored?.type, 'postboard')
+  assert.equal(storedData?.prompt.text, 'What changed your mind?')
+  assert.equal(storedData?.settings.autoApprove, true)
+  assert.equal(storedData?.instructorPasscode, body.instructorPasscode)
+})
+
+void test('student-state route returns a student-safe snapshot for the requester', async () => {
+  const app = new TestApp()
+  const store = new MemoryStore()
+  const session = createSession({
+    posts: [
+      createPost({
+        id: 'approved-peer',
+        authorId: 'student-2',
+        authorName: 'Grace Hopper',
+        text: 'Visible peer note',
+      }),
+      createPost({
+        id: 'pending-own',
+        authorId: 'student-1',
+        authorName: 'Ada Lovelace',
+        text: 'Waiting for review',
+        status: 'pending',
+        approvedAt: null,
+        order: 1,
+      }),
+      createPost({
+        id: 'pending-peer',
+        authorId: 'student-3',
+        authorName: 'Katherine Johnson',
+        text: 'Hidden peer note',
+        status: 'pending',
+        approvedAt: null,
+        order: 2,
+      }),
+    ],
+    reactions: {
+      'approved-peer': { byUser: { 'student-1': '👍' } },
+      'pending-peer': { byUser: { 'student-4': '🔥' } },
+    },
+  })
+  await store.set(session.id, session)
+  setupPostboardRoutes(app, store, createWsRouter())
+
+  const handler = app.handlers.get['/api/postboard/:sessionId/student-state']
+  assert.ok(handler)
+
+  const response = createResponse()
+  await handler({
+    params: { sessionId: session.id },
+    query: { studentId: 'student-1' },
+  }, response)
+
+  assert.equal(response.statusCode, 200)
+  const body = response.body as ReturnType<typeof buildStudentSnapshot>
+  assert.deepEqual(body.posts.map((post) => post.id), ['approved-peer', 'pending-own'])
+  assert.equal(body.posts[0]?.authorLabel, 'Student')
+  assert.equal(body.posts[1]?.isOwnPost, true)
+  assert.equal('authorName' in (body.posts[0] ?? {}), false)
+  assert.deepEqual(body.reactionCounts, { 'approved-peer': { '👍': 1 } })
+})
+
+void test('setup route requires instructor auth, persists prompt settings, and broadcasts', async () => {
+  const app = new TestApp()
+  const store = new MemoryStore()
+  const session = createSession()
+  const { ws, messages } = createBroadcastCapture(session.id)
+  await store.set(session.id, session)
+  setupPostboardRoutes(app, store, ws)
+
+  const handler = app.handlers.post['/api/postboard/:sessionId/setup']
+  assert.ok(handler)
+
+  const rejected = createResponse()
+  await handler({
+    params: { sessionId: session.id },
+    body: { prompt: 'Nope', autoApprove: true },
+  }, rejected)
+  assert.equal(rejected.statusCode, 403)
+  assert.equal(messages.length, 0)
+
+  const accepted = createResponse()
+  await handler({
+    params: { sessionId: session.id },
+    headers: { 'x-instructor-passcode': 'teacher-pass' },
+    body: { prompt: '  Updated prompt  ', autoApprove: 'true' },
+  }, accepted)
+
+  assert.equal(accepted.statusCode, 200)
+  const stored = await store.get(session.id)
+  const storedData = stored?.data as PostboardSessionData | undefined
+  assert.equal(storedData?.prompt.text, 'Updated prompt')
+  assert.equal(storedData?.settings.autoApprove, true)
+  assert.deepEqual(messages, [JSON.stringify({ type: 'postboard:updated', sessionId: session.id })])
+})
+
+void test('hide and unhide routes require instructor auth, update hiddenAt, and broadcast', async () => {
+  const app = new TestApp()
+  const store = new MemoryStore()
+  const session = createSession({
+    posts: [createPost()],
+  })
+  const { ws, messages } = createBroadcastCapture(session.id)
+  await store.set(session.id, session)
+  setupPostboardRoutes(app, store, ws)
+
+  const hide = app.handlers.post['/api/postboard/:sessionId/posts/:postId/hide']
+  const unhide = app.handlers.post['/api/postboard/:sessionId/posts/:postId/unhide']
+  assert.ok(hide)
+  assert.ok(unhide)
+
+  const rejected = createResponse()
+  await hide({
+    params: { sessionId: session.id, postId: 'post-1' },
+    body: {},
+  }, rejected)
+  assert.equal(rejected.statusCode, 403)
+  assert.equal(messages.length, 0)
+
+  const hidden = createResponse()
+  await hide({
+    params: { sessionId: session.id, postId: 'post-1' },
+    headers: { 'x-instructor-passcode': 'teacher-pass' },
+  }, hidden)
+  assert.equal(hidden.statusCode, 200)
+  assert.equal(typeof ((hidden.body as { posts?: PostboardPost[] }).posts?.[0]?.hiddenAt), 'number')
+  assert.equal(messages.length, 1)
+
+  const unhidden = createResponse()
+  await unhide({
+    params: { sessionId: session.id, postId: 'post-1' },
+    headers: { 'x-instructor-passcode': 'teacher-pass' },
+  }, unhidden)
+  assert.equal(unhidden.statusCode, 200)
+  assert.equal((unhidden.body as { posts?: PostboardPost[] }).posts?.[0]?.hiddenAt, null)
+  assert.equal(messages.length, 2)
+})
+
+void test('reorder route applies provided post order and ignores unknown ids', async () => {
+  const app = new TestApp()
+  const store = new MemoryStore()
+  const session = createSession({
+    posts: [
+      createPost({ id: 'post-a', order: 0, text: 'A' }),
+      createPost({ id: 'post-b', order: 1, text: 'B' }),
+      createPost({ id: 'post-c', order: 2, text: 'C' }),
+    ],
+  })
+  const { ws, messages } = createBroadcastCapture(session.id)
+  await store.set(session.id, session)
+  setupPostboardRoutes(app, store, ws)
+
+  const handler = app.handlers.post['/api/postboard/:sessionId/reorder']
+  assert.ok(handler)
+
+  const rejected = createResponse()
+  await handler({
+    params: { sessionId: session.id },
+    body: { postIds: ['post-c', 'post-a'] },
+  }, rejected)
+  assert.equal(rejected.statusCode, 403)
+  assert.equal(messages.length, 0)
+
+  const accepted = createResponse()
+  await handler({
+    params: { sessionId: session.id },
+    headers: { 'x-instructor-passcode': 'teacher-pass' },
+    body: { postIds: ['post-c', 'missing-post', 'post-a'] },
+  }, accepted)
+
+  assert.equal(accepted.statusCode, 200)
+  const body = accepted.body as { posts?: PostboardPost[] }
+  assert.deepEqual(body.posts?.map((post) => post.id), ['post-c', 'post-b', 'post-a'])
+  assert.deepEqual(body.posts?.map((post) => post.order), [0, 1, 2])
+  assert.equal(messages.length, 1)
+})
+
+void test('react route validates input, protects hidden and self posts, and toggles reactions', async () => {
+  const app = new TestApp()
+  const store = new MemoryStore()
+  const session = createSession({
+    posts: [
+      createPost({
+        id: 'peer-approved',
+        authorId: 'student-2',
+        text: 'Visible peer note',
+      }),
+      createPost({
+        id: 'own-approved',
+        authorId: 'student-1',
+        text: 'Own visible note',
+        order: 1,
+      }),
+      createPost({
+        id: 'pending-peer',
+        authorId: 'student-2',
+        status: 'pending',
+        approvedAt: null,
+        order: 2,
+      }),
+      createPost({
+        id: 'hidden-peer',
+        authorId: 'student-2',
+        hiddenAt: 120,
+        order: 3,
+      }),
+    ],
+  })
+  const { ws, messages } = createBroadcastCapture(session.id)
+  await store.set(session.id, session)
+  setupPostboardRoutes(app, store, ws)
+
+  const handler = app.handlers.post['/api/postboard/:sessionId/posts/:postId/react']
+  assert.ok(handler)
+
+  const missingStudent = createResponse()
+  await handler({
+    params: { sessionId: session.id, postId: 'peer-approved' },
+    body: { reactionId: '👍' },
+  }, missingStudent)
+  assert.equal(missingStudent.statusCode, 400)
+
+  const invalidReaction = createResponse()
+  await handler({
+    params: { sessionId: session.id, postId: 'peer-approved' },
+    body: { studentId: 'student-1', reactionId: 'not-real' },
+  }, invalidReaction)
+  assert.equal(invalidReaction.statusCode, 400)
+
+  const selfReaction = createResponse()
+  await handler({
+    params: { sessionId: session.id, postId: 'own-approved' },
+    body: { studentId: 'student-1', reactionId: '👍' },
+  }, selfReaction)
+  assert.equal(selfReaction.statusCode, 403)
+
+  const pendingReaction = createResponse()
+  await handler({
+    params: { sessionId: session.id, postId: 'pending-peer' },
+    body: { studentId: 'student-1', reactionId: '👍' },
+  }, pendingReaction)
+  assert.equal(pendingReaction.statusCode, 403)
+
+  const hiddenReaction = createResponse()
+  await handler({
+    params: { sessionId: session.id, postId: 'hidden-peer' },
+    body: { studentId: 'student-1', reactionId: '👍' },
+  }, hiddenReaction)
+  assert.equal(hiddenReaction.statusCode, 403)
+
+  const added = createResponse()
+  await handler({
+    params: { sessionId: session.id, postId: 'peer-approved' },
+    body: { studentId: 'student-1', reactionId: '👍' },
+  }, added)
+  assert.equal(added.statusCode, 200)
+  assert.deepEqual((added.body as { reactionCounts?: unknown }).reactionCounts, { 'peer-approved': { '👍': 1 } })
+
+  const changed = createResponse()
+  await handler({
+    params: { sessionId: session.id, postId: 'peer-approved' },
+    body: { studentId: 'student-1', reactionId: '❤️' },
+  }, changed)
+  assert.deepEqual((changed.body as { reactionCounts?: unknown }).reactionCounts, { 'peer-approved': { '❤️': 1 } })
+
+  const removed = createResponse()
+  await handler({
+    params: { sessionId: session.id, postId: 'peer-approved' },
+    body: { studentId: 'student-1', reactionId: null },
+  }, removed)
+  assert.deepEqual((removed.body as { reactionCounts?: unknown }).reactionCounts, {})
+
+  const instructorReaction = createResponse()
+  await handler({
+    params: { sessionId: session.id, postId: 'hidden-peer' },
+    headers: { 'x-instructor-passcode': 'teacher-pass' },
+    body: { reactionId: '🔥' },
+  }, instructorReaction)
+  assert.deepEqual((instructorReaction.body as { reactionCounts?: unknown }).reactionCounts, { 'hidden-peer': { '🔥': 1 } })
+  assert.equal(messages.length, 4)
 })
 
 void test('flag route toggles a single instructor flag state', async () => {
