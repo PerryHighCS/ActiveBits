@@ -36,6 +36,7 @@ export default function ReactionSummary({
   const reactionEntries = Object.entries(reactions).filter(([, count]) => (count ?? 0) > 0)
   const selectedOption = viewerReaction != null ? optionByValue.get(viewerReaction) : undefined
   const selectedIndex = Math.max(0, options.findIndex((option) => option.value === viewerReaction))
+  const canChooseReaction = options.length > 0
 
   const closePicker = (restoreFocus = false) => {
     setIsPickerOpen(false)
@@ -69,6 +70,7 @@ export default function ReactionSummary({
   }, [isPickerOpen, selectedIndex])
 
   const focusOption = (index: number) => {
+    if (options.length === 0) return
     const boundedIndex = Math.min(Math.max(index, 0), options.length - 1)
     setFocusedIndex(boundedIndex)
     optionRefs.current[boundedIndex]?.focus()
@@ -106,7 +108,12 @@ export default function ReactionSummary({
         aria-haspopup="listbox"
         aria-expanded={isPickerOpen}
         aria-controls={isPickerOpen ? listboxId : undefined}
-        onClick={() => setIsPickerOpen((current) => !current)}
+        onClick={() => {
+          if (canChooseReaction) {
+            setIsPickerOpen((current) => !current)
+          }
+        }}
+        disabled={!canChooseReaction}
         className={`rounded-full border px-2 py-1 text-sm transition ${
           viewerReaction !== null
             ? 'border-indigo-500 bg-indigo-600 text-white'
@@ -115,7 +122,7 @@ export default function ReactionSummary({
       >
         {selectedOption?.symbol ?? viewerReaction ?? '☺'}
       </button>
-      {isPickerOpen && (
+      {isPickerOpen && canChooseReaction && (
         <ul
           id={listboxId}
           role="listbox"

@@ -666,11 +666,24 @@ export default function setupPostboardRoutes(app: PostboardRouteApp, sessions: S
     const body = getBody(req)
     const postIds = Array.isArray(body.postIds) ? body.postIds.filter((entry): entry is string => typeof entry === 'string') : []
     const orderById = new Map(postIds.map((postId, index) => [postId, index]))
-    for (const post of session.data.posts) {
-      const nextOrder = orderById.get(post.id)
-      if (nextOrder != null) {
-        post.order = nextOrder
+    const orderedBoardPosts = sortPostsForBoard(session.data.posts.filter((post) => post.status !== 'pending'))
+      .sort((left, right) => {
+        const leftOrder = orderById.get(left.id)
+        const rightOrder = orderById.get(right.id)
+        if (leftOrder != null && rightOrder != null) return leftOrder - rightOrder
+        if (leftOrder != null) return -1
+        if (rightOrder != null) return 1
+        return 0
+      })
+    orderedBoardPosts.forEach((post, index) => {
+      post.order = index
+    })
+    let pendingOrder = orderedBoardPosts.length
+    for (const post of sortPostsForBoard(session.data.posts.filter((entry) => entry.status === 'pending'))) {
+      if (!Number.isFinite(post.order) || post.order < pendingOrder) {
+        post.order = pendingOrder
       }
+      pendingOrder = Math.max(pendingOrder, post.order + 1)
     }
     await persistAndBroadcast(sessions, ws, session)
     logModeration('reorder', { sessionId: session.id, count: orderById.size })

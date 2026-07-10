@@ -157,3 +157,25 @@ void test('ReactionSummary supports keyboard movement, Escape, and outside dismi
     restoreDomEnvironment()
   }
 })
+
+void test('ReactionSummary disables the reaction picker when there are no options', async () => {
+  const restoreDomEnvironment = installDomEnvironment()
+  const { render } = await import('@testing-library/react')
+
+  try {
+    const rendered = render(
+      React.createElement(ReactionSummary, {
+        reactions: {},
+        canReact: true,
+        options: [],
+        onReact: () => undefined,
+      }),
+    )
+
+    const pickerButton = rendered.getByRole('button', { name: 'Choose reaction' })
+    assert.equal((pickerButton as HTMLButtonElement).disabled, true)
+    assert.equal(rendered.container.querySelector('[role="listbox"]'), null)
+  } finally {
+    restoreDomEnvironment()
+  }
+})

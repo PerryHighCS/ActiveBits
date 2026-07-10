@@ -689,7 +689,7 @@ void test('hide and unhide routes require instructor auth, update hiddenAt, and 
   assert.equal(messages.length, 2)
 })
 
-void test('reorder route applies provided post order and ignores unknown ids', async () => {
+void test('reorder route applies provided post order and normalizes omitted board posts', async () => {
   const app = new TestApp()
   const store = new MemoryStore()
   const session = createSession({
@@ -697,6 +697,7 @@ void test('reorder route applies provided post order and ignores unknown ids', a
       createPost({ id: 'post-a', order: 0, text: 'A' }),
       createPost({ id: 'post-b', order: 1, text: 'B' }),
       createPost({ id: 'post-c', order: 2, text: 'C' }),
+      createPost({ id: 'pending-post', order: 3, text: 'Pending', status: 'pending', approvedAt: null }),
     ],
   })
   const { ws, messages } = createBroadcastCapture(session.id)
@@ -718,13 +719,13 @@ void test('reorder route applies provided post order and ignores unknown ids', a
   await handler({
     params: { sessionId: session.id },
     headers: { 'x-instructor-passcode': 'teacher-pass' },
-    body: { postIds: ['post-c', 'missing-post', 'post-a'] },
+    body: { postIds: ['post-c', 'missing-post', 'post-c', 'post-a'] },
   }, accepted)
 
   assert.equal(accepted.statusCode, 200)
   const body = accepted.body as { posts?: PostboardPost[] }
-  assert.deepEqual(body.posts?.map((post) => post.id), ['post-c', 'post-b', 'post-a'])
-  assert.deepEqual(body.posts?.map((post) => post.order), [0, 1, 2])
+  assert.deepEqual(body.posts?.map((post) => post.id), ['post-c', 'post-a', 'post-b', 'pending-post'])
+  assert.deepEqual(body.posts?.map((post) => post.order), [0, 1, 2, 3])
   assert.equal(messages.length, 1)
 })
 
