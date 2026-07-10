@@ -107,7 +107,6 @@ export interface PostboardStudentSnapshot {
   prompt: PostboardPrompt
   settings: Pick<PostboardSettings, 'autoApprove'>
   posts: PostboardStudentPost[]
-  ownRejectedPosts: PostboardPost[]
   reactionCounts: PostboardReactionCounts
   viewerReactions: Record<string, PostboardReactionId>
 }

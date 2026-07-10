@@ -293,7 +293,6 @@ void test('student snapshot hides peer names, pending posts, hidden posts, flags
   assert.equal('authorName' in (snapshot.posts[1] ?? {}), false)
   assert.equal(snapshot.posts[2]?.isOwnPost, true)
   assert.equal(snapshot.posts[2]?.status, 'rejected')
-  assert.deepEqual(snapshot.ownRejectedPosts, [])
   assert.deepEqual(snapshot.reactionCounts, { 'approved-peer': { '👍': 1 } })
   assert.equal('flags' in snapshot, false)
   assert.equal('reactions' in snapshot, false)

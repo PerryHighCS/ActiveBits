@@ -73,6 +73,49 @@ void test('NoteStyleSelect opens and selects an option with the pointer', async 
   }
 })
 
+void test('NoteStyleSelect marks the fallback style selected when value is omitted', async () => {
+  const restoreDomEnvironment = installDomEnvironment()
+  const { fireEvent, render } = await import('@testing-library/react')
+  let rendered: ReturnType<typeof render> | undefined
+
+  try {
+    rendered = render(
+      React.createElement(NoteStyleSelect, {
+        onChange: () => undefined,
+      }),
+    )
+
+    fireEvent.click(rendered.getByRole('button', { name: 'Note style' }))
+
+    assert.equal(rendered.getByRole('option', { name: 'Lemon' }).getAttribute('aria-selected'), 'true')
+  } finally {
+    rendered?.unmount()
+    restoreDomEnvironment()
+  }
+})
+
+void test('NoteStyleSelect marks the fallback style selected when value is invalid', async () => {
+  const restoreDomEnvironment = installDomEnvironment()
+  const { fireEvent, render } = await import('@testing-library/react')
+  let rendered: ReturnType<typeof render> | undefined
+
+  try {
+    rendered = render(
+      React.createElement(NoteStyleSelect, {
+        value: 'not-a-style',
+        onChange: () => undefined,
+      }),
+    )
+
+    fireEvent.click(rendered.getByRole('button', { name: 'Note style' }))
+
+    assert.equal(rendered.getByRole('option', { name: 'Lemon' }).getAttribute('aria-selected'), 'true')
+  } finally {
+    rendered?.unmount()
+    restoreDomEnvironment()
+  }
+})
+
 void test('NoteStyleSelect supports keyboard selection and Escape close', async () => {
   const restoreDomEnvironment = installDomEnvironment()
   const { fireEvent, render } = await import('@testing-library/react')

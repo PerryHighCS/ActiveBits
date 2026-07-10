@@ -40,6 +40,7 @@ export default function NoteStyleSelect({
     [value],
   )
   const selected: NoteStyleOption = NOTE_STYLE_OPTIONS[selectedIndex] ?? NOTE_STYLE_OPTIONS[0]!
+  const selectedId = selected.id
 
   const updatePlacement = useCallback(() => {
     if (triggerRef.current == null) return
@@ -185,7 +186,7 @@ export default function NoteStyleSelect({
         >
           <div className="grid grid-cols-2 gap-2">
             {NOTE_STYLE_OPTIONS.map((option, index) => {
-              const isSelected = option.id === value
+              const isSelected = option.id === selectedId
               const isHighlighted = index === highlightedIndex
               const optionId = `note-style-option-${option.id}`
               return (

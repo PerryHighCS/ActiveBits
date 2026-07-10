@@ -388,7 +388,6 @@ export function buildStudentSnapshot(session: PostboardSession, viewerStudentId:
       autoApprove: session.data.settings.autoApprove,
     },
     posts: sortPostsForBoard(visiblePosts).map((post) => toStudentPost(post, viewerStudentId)),
-    ownRejectedPosts: [],
     reactionCounts: buildReactionCounts(visibleReactions),
     viewerReactions: buildViewerReactions(visibleReactions, viewerStudentId),
   }
