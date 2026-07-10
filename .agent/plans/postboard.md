@@ -1,6 +1,6 @@
 # Postboard Plan
 
-## Status: Design / Pre-Implementation
+## Status: Implemented / PR Review
 
 This document tracks the Postboard activity design and implementation plan. It is intended to
 stay aligned with the repository's current activity conventions, the `ActivityConfig` schema,
@@ -562,6 +562,17 @@ Notes:
 - [x] Implement server-side instructor/student snapshot builders.
 - [x] Implement owner-only rejected-post recovery for resubmission.
 - [x] Build instructor and student views with privacy-aware rendering.
-- [ ] Verify SyncDeck embedded launch/reconnect behavior.
-- [ ] Add tests for auth, moderation, privacy, reactions, launch options, and live updates.
-- [ ] Update repository notes/docs if the implementation introduces durable patterns.
+- [x] Verify SyncDeck embedded launch/reconnect behavior.
+  - Server coverage verifies Postboard child-session creation from SyncDeck `activityOptions`,
+    embedded location/state persistence, manager bootstrap passcode, and prompt/approval-mode
+    normalization. Generic SyncDeck embedded replay/reconnect tests cover stored child activity
+    activation on reconnect.
+- [x] Add tests for auth, moderation, privacy, reactions, launch options, and live updates.
+  - Postboard route tests cover instructor auth, moderation state transitions, hide/unhide,
+    reorder, binary flagging, reaction validation/toggle/change/remove behavior, student-safe
+    privacy snapshots, rejected/deleted owner handling, selected options, and broadcasts.
+  - Shared UI tests cover note style selection, reaction summaries, and instructor feedback
+    controls used by Postboard.
+- [x] Update repository notes/docs if the implementation introduces durable patterns.
+  - SyncDeck payload docs now include Postboard launch payloads, and data-contract notes record
+    the Postboard embedded launch normalization contract.
