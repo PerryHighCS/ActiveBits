@@ -47,10 +47,11 @@ function installDomEnvironment() {
 void test('NoteStyleSelect opens and selects an option with the pointer', async () => {
   const restoreDomEnvironment = installDomEnvironment()
   const { fireEvent, render } = await import('@testing-library/react')
+  let rendered: ReturnType<typeof render> | undefined
 
   try {
     const selected: string[] = []
-    const rendered = render(
+    rendered = render(
       React.createElement(NoteStyleSelect, {
         value: 'lemon',
         onChange: (value: string) => {
@@ -67,6 +68,7 @@ void test('NoteStyleSelect opens and selects an option with the pointer', async 
     assert.deepEqual(selected, ['peach'])
     assert.equal(trigger.getAttribute('aria-expanded'), 'false')
   } finally {
+    rendered?.unmount()
     restoreDomEnvironment()
   }
 })
@@ -74,10 +76,11 @@ void test('NoteStyleSelect opens and selects an option with the pointer', async 
 void test('NoteStyleSelect supports keyboard selection and Escape close', async () => {
   const restoreDomEnvironment = installDomEnvironment()
   const { fireEvent, render } = await import('@testing-library/react')
+  let rendered: ReturnType<typeof render> | undefined
 
   try {
     const selected: string[] = []
-    const rendered = render(
+    rendered = render(
       React.createElement(NoteStyleSelect, {
         value: 'lemon',
         onChange: (value: string) => {
@@ -99,6 +102,7 @@ void test('NoteStyleSelect supports keyboard selection and Escape close', async 
     assert.equal(trigger.getAttribute('aria-expanded'), 'false')
     assert.equal(globalThis.document.activeElement, trigger)
   } finally {
+    rendered?.unmount()
     restoreDomEnvironment()
   }
 })
@@ -106,9 +110,10 @@ void test('NoteStyleSelect supports keyboard selection and Escape close', async 
 void test('NoteStyleSelect closes on outside click', async () => {
   const restoreDomEnvironment = installDomEnvironment()
   const { fireEvent, render } = await import('@testing-library/react')
+  let rendered: ReturnType<typeof render> | undefined
 
   try {
-    const rendered = render(
+    rendered = render(
       React.createElement(
         'div',
         {},
@@ -126,6 +131,7 @@ void test('NoteStyleSelect closes on outside click', async () => {
     fireEvent.mouseDown(rendered.getByRole('button', { name: 'Outside' }))
     assert.equal(trigger.getAttribute('aria-expanded'), 'false')
   } finally {
+    rendered?.unmount()
     restoreDomEnvironment()
   }
 })
