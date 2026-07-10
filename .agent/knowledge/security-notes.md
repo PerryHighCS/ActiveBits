@@ -15,6 +15,24 @@ Track security-relevant boundaries, risks, and mitigation decisions.
 
 ## Notes
 
+- Date: 2026-06-24
+- Area: dependency update audit
+- Threat or risk: Dependabot PR `#279` identified current npm security updates for `undici`, `http-proxy-middleware`, `vite`, and `esbuild`; additional direct dependency patch/minor releases were also available.
+- Control or mitigation: Refreshed root and standalone workspace npm locks; updated `undici` to `7.28.0`, `http-proxy-middleware` to `^4.1.1`, updated `esbuild` to `0.28.1`, and moved current direct ranges for Vite, React Router, TypeScript ESLint, JSDoc ESLint plugin, globals, React plugin, React refresh plugin, and Brython. Kept `@types/node` on the Node 24 line because the repo engine is `>=24 <25`. 
+- Residual risk: `npm outdated --workspaces --include-workspace-root` still reports `@types/node` 26.x as latest, but this is intentionally held until the runtime engine moves beyond Node 24.
+- Validation (test/review/path): `package.json`; `package-lock.json`; `client/package.json`; `client/package-lock.json`; `server/package.json`; `server/package-lock.json`; `activities/package.json`; `activities/package-lock.json`; root and standalone workspace audits; `npm run test:codex`; `npm run verify:deploy`; `npm run verify:node-version-sync`; `npm run verify:playwright-version-sync`; `npm run verify:activity-test-groups`; `npm run verify:server`.
+- Follow-up action: Revisit `@types/node` only with a coordinated runtime engine update.
+- Owner: Codex
+
+- Date: 2026-06-13
+- Area: dependency update audit
+- Threat or risk: Dependabot flagged the transitive `esbuild` version, and stale workspace lockfiles can keep vulnerable transitive packages even when the root lock is already refreshed.
+- Control or mitigation: Refreshed root and standalone workspace npm locks; `server/package-lock.json` now resolves `tsx` through `esbuild@0.28.1`, and direct dependency ranges were bumped for `@tailwindcss/vite`, `tailwindcss`, `brython`, and `eslint`. Kept `@types/node` on the Node 24 line because the repo engine is `>=24 <25`.
+- Residual risk: `npm outdated --workspaces --include-workspace-root` still reports `@types/node` 25.x as latest, but this is intentionally held on 24.x until the repo's Node engine moves beyond `>=24 <25`.
+- Validation (test/review/path): `package-lock.json`; `client/package-lock.json`; `server/package-lock.json`; `activities/package-lock.json`; `client/package.json`; `server/package.json`; `activities/package.json`; `npm audit --include=dev --workspaces --include-workspace-root`; standalone workspace audits; `npm run test:codex`; `npm run verify:deploy`; `npm run verify:server`.
+- Follow-up action: Revisit `@types/node` only with a coordinated runtime engine update.
+- Owner: Codex
+
 - Date: 2026-06-11
 - Area: dependency update audit
 - Threat or risk: Dependency updates can leave stale vulnerable transitive packages or accidentally move type/runtime assumptions ahead of the deployed Node major.
