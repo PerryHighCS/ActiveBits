@@ -41,7 +41,7 @@ function installDomEnvironment() {
 
 void test('ReactionSummary opens a reaction picker and emits selected values', async () => {
   const restoreDomEnvironment = installDomEnvironment()
-  const { fireEvent, render } = await import('@testing-library/react')
+  const { cleanup, fireEvent, render } = await import('@testing-library/react')
 
   try {
     const reactions: string[] = []
@@ -72,13 +72,14 @@ void test('ReactionSummary opens a reaction picker and emits selected values', a
     assert.equal(pickerButton.getAttribute('aria-expanded'), 'false')
     assert.equal(rendered.getByText('👍 2').tagName, 'SPAN')
   } finally {
+    cleanup()
     restoreDomEnvironment()
   }
 })
 
 void test('ReactionSummary returns null when reactions are read-only and empty', async () => {
   const restoreDomEnvironment = installDomEnvironment()
-  const { render } = await import('@testing-library/react')
+  const { cleanup, render } = await import('@testing-library/react')
 
   try {
     const rendered = render(
@@ -91,13 +92,14 @@ void test('ReactionSummary returns null when reactions are read-only and empty',
 
     assert.equal(rendered.container.firstChild, null)
   } finally {
+    cleanup()
     restoreDomEnvironment()
   }
 })
 
 void test('ReactionSummary renders existing reactions without a picker in read-only mode', async () => {
   const restoreDomEnvironment = installDomEnvironment()
-  const { render } = await import('@testing-library/react')
+  const { cleanup, render } = await import('@testing-library/react')
 
   try {
     const rendered = render(
@@ -111,13 +113,14 @@ void test('ReactionSummary renders existing reactions without a picker in read-o
     assert.equal(rendered.getByText('👍 3').tagName, 'SPAN')
     assert.throws(() => rendered.getByRole('button'))
   } finally {
+    cleanup()
     restoreDomEnvironment()
   }
 })
 
 void test('ReactionSummary supports keyboard movement, Escape, and outside dismissal', async () => {
   const restoreDomEnvironment = installDomEnvironment()
-  const { fireEvent, render } = await import('@testing-library/react')
+  const { cleanup, fireEvent, render } = await import('@testing-library/react')
 
   try {
     const reactions: string[] = []
@@ -154,13 +157,14 @@ void test('ReactionSummary supports keyboard movement, Escape, and outside dismi
     fireEvent.mouseDown(rendered.getByRole('button', { name: 'Outside' }))
     assert.equal(pickerButton.getAttribute('aria-expanded'), 'false')
   } finally {
+    cleanup()
     restoreDomEnvironment()
   }
 })
 
 void test('ReactionSummary disables the reaction picker when there are no options', async () => {
   const restoreDomEnvironment = installDomEnvironment()
-  const { render } = await import('@testing-library/react')
+  const { cleanup, render } = await import('@testing-library/react')
 
   try {
     const rendered = render(
@@ -176,6 +180,7 @@ void test('ReactionSummary disables the reaction picker when there are no option
     assert.equal((pickerButton as HTMLButtonElement).disabled, true)
     assert.equal(rendered.container.querySelector('[role="listbox"]'), null)
   } finally {
+    cleanup()
     restoreDomEnvironment()
   }
 })

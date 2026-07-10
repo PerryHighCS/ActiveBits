@@ -169,7 +169,7 @@ export default function PostboardManager(): React.JSX.Element {
       setPromptDraft(nextSnapshot.prompt.text)
       setAutoApprove(nextSnapshot.settings.autoApprove)
       autoApproveDirtyRef.current = false
-      setIsSetupOpen(false)
+      setIsSetupOpen(nextSnapshot.prompt.text.length === 0)
       setError(null)
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : String(saveError))

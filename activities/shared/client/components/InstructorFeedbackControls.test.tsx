@@ -92,7 +92,7 @@ void test('InstructorFeedbackControls renders disabled feedback buttons', () => 
 
 void test('InstructorFeedbackControls supports add-mode flagging and emoji keyboard dismissal', async () => {
   const restoreDomEnvironment = installDomEnvironment()
-  const { fireEvent, render } = await import('@testing-library/react')
+  const { cleanup, fireEvent, render } = await import('@testing-library/react')
 
   try {
     const flagStates: boolean[] = []
@@ -134,6 +134,7 @@ void test('InstructorFeedbackControls supports add-mode flagging and emoji keybo
     fireEvent.keyDown(rendered.getByRole('listbox', { name: 'Choose emoji' }), { key: 'Escape' })
     assert.equal(globalThis.document.activeElement, emojiButton)
   } finally {
+    cleanup()
     restoreDomEnvironment()
   }
 })
