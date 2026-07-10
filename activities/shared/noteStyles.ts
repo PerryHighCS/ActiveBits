@@ -23,10 +23,10 @@ export const DEFAULT_NOTE_STYLE_ID = NOTE_STYLE_OPTIONS[0]?.id ?? 'lemon'
 const STYLE_MAP = NOTE_STYLE_OPTIONS.reduce<Record<string, NoteStyleOption>>((acc, style) => {
   acc[style.id] = style
   return acc
-}, {})
+}, Object.create(null) as Record<string, NoteStyleOption>)
 
 export function isNoteStyleId(value: unknown): value is string {
-  return typeof value === 'string' && Boolean(STYLE_MAP[value])
+  return typeof value === 'string' && Object.hasOwn(STYLE_MAP, value)
 }
 
 export function normalizeNoteStyleId(value: unknown): string {
