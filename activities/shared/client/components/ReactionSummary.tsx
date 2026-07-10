@@ -12,6 +12,7 @@ interface ReactionSummaryProps {
   className?: string
   chooseLabel?: string
   listLabel?: string
+  triggerPosition?: 'start' | 'end'
 }
 
 export default function ReactionSummary({
@@ -23,6 +24,7 @@ export default function ReactionSummary({
   className = '',
   chooseLabel = 'Choose reaction',
   listLabel = 'Choose reaction emoji',
+  triggerPosition = 'start',
 }: ReactionSummaryProps): ReactElement | null {
   const [isPickerOpen, setIsPickerOpen] = useState(false)
   const [focusedIndex, setFocusedIndex] = useState(0)
@@ -95,85 +97,92 @@ export default function ReactionSummary({
     return null
   }
 
+  const trigger = canReact && onReact !== undefined && (
+    <div className="relative" ref={containerRef}>
+      <button
+        type="button"
+        ref={triggerRef}
+        aria-label={chooseLabel}
+        aria-haspopup="listbox"
+        aria-expanded={isPickerOpen}
+        aria-controls={isPickerOpen ? listboxId : undefined}
+        onClick={() => setIsPickerOpen((current) => !current)}
+        className={`rounded-full border px-2 py-1 text-sm transition ${
+          viewerReaction !== null
+            ? 'border-indigo-500 bg-indigo-600 text-white'
+            : 'border-indigo-200 dark:border-indigo-700 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-300 hover:border-indigo-300 dark:hover:border-indigo-600'
+        }`}
+      >
+        {selectedOption?.symbol ?? viewerReaction ?? '☺'}
+      </button>
+      {isPickerOpen && (
+        <ul
+          id={listboxId}
+          role="listbox"
+          aria-label={listLabel}
+          onKeyDown={handleListboxKeyDown}
+          className={`absolute z-10 flex w-40 flex-wrap gap-1 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-1.5 shadow-lg ${
+            triggerPosition === 'end' ? 'right-0 bottom-full mb-1' : 'left-0 top-full mt-1'
+          }`}
+        >
+          {options.map((entry, index) => (
+            <li
+              key={entry.value}
+              role="option"
+              aria-label={`React with ${entry.label}`}
+              aria-selected={viewerReaction === entry.value}
+              onClick={(event) => {
+                if (event.target !== event.currentTarget) return
+                onReact(entry.value)
+                closePicker(true)
+              }}
+            >
+              <button
+                type="button"
+                ref={(node) => {
+                  optionRefs.current[index] = node
+                }}
+                aria-label={`React with ${entry.label}`}
+                className={`rounded-lg px-1.5 py-1 text-base hover:bg-slate-100 dark:hover:bg-slate-700 ${
+                  viewerReaction === entry.value
+                    ? 'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300'
+                    : ''
+                }`}
+                onClick={() => {
+                  onReact(entry.value)
+                  closePicker(true)
+                }}
+              >
+                {entry.symbol}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+
+  const chips = reactionEntries.map(([reaction, count]) => {
+    const option = optionByValue.get(reaction)
+    return (
+      <span
+        key={reaction}
+        className={`inline-flex items-center rounded-full border px-2 py-1 ${
+          viewerReaction === reaction
+            ? 'border-indigo-200 dark:border-indigo-700 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-300'
+            : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
+        }`}
+      >
+        {option?.symbol ?? reaction} {count}
+      </span>
+    )
+  })
+
   return (
     <div className={`flex flex-wrap items-center gap-1.5 text-xs text-slate-400${className ? ` ${className}` : ''}`}>
-      {canReact && onReact !== undefined && (
-        <div className="relative" ref={containerRef}>
-          <button
-            type="button"
-            ref={triggerRef}
-            aria-label={chooseLabel}
-            aria-haspopup="listbox"
-            aria-expanded={isPickerOpen}
-            aria-controls={isPickerOpen ? listboxId : undefined}
-            onClick={() => setIsPickerOpen((current) => !current)}
-            className={`rounded-full border px-2 py-1 text-sm transition ${
-              viewerReaction !== null
-                ? 'border-indigo-500 bg-indigo-600 text-white'
-                : 'border-indigo-200 dark:border-indigo-700 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-300 hover:border-indigo-300 dark:hover:border-indigo-600'
-            }`}
-          >
-            {selectedOption?.symbol ?? viewerReaction ?? '☺'}
-          </button>
-          {isPickerOpen && (
-            <ul
-              id={listboxId}
-              role="listbox"
-              aria-label={listLabel}
-              onKeyDown={handleListboxKeyDown}
-              className="absolute left-0 top-full z-10 mt-1 flex w-40 flex-wrap gap-1 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-1.5 shadow-lg"
-            >
-              {options.map((entry, index) => (
-                <li
-                  key={entry.value}
-                  role="option"
-                  aria-label={`React with ${entry.label}`}
-                  aria-selected={viewerReaction === entry.value}
-                  onClick={(event) => {
-                    if (event.target !== event.currentTarget) return
-                    onReact(entry.value)
-                    closePicker(true)
-                  }}
-                >
-                  <button
-                    type="button"
-                    ref={(node) => {
-                      optionRefs.current[index] = node
-                    }}
-                    aria-label={`React with ${entry.label}`}
-                    className={`rounded-lg px-1.5 py-1 text-base hover:bg-slate-100 dark:hover:bg-slate-700 ${
-                      viewerReaction === entry.value
-                        ? 'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300'
-                        : ''
-                    }`}
-                    onClick={() => {
-                      onReact(entry.value)
-                      closePicker(true)
-                    }}
-                  >
-                    {entry.symbol}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      )}
-      {reactionEntries.map(([reaction, count]) => {
-        const option = optionByValue.get(reaction)
-        return (
-          <span
-            key={reaction}
-            className={`inline-flex items-center rounded-full border px-2 py-1 ${
-              viewerReaction === reaction
-                ? 'border-indigo-200 dark:border-indigo-700 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-300'
-                : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
-            }`}
-          >
-            {option?.symbol ?? reaction} {count}
-          </span>
-        )
-      })}
+      {triggerPosition === 'start' && trigger}
+      {chips}
+      {triggerPosition === 'end' && trigger}
     </div>
   )
 }

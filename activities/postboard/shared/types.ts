@@ -81,6 +81,7 @@ export interface PostboardInstructorSnapshot {
   settings: PostboardSettings
   posts: PostboardPost[]
   reactionCounts: PostboardReactionCounts
+  viewerReactions: Record<string, PostboardReactionId>
   flags: Record<string, PostboardFlag[]>
 }
 
@@ -108,6 +109,7 @@ export interface PostboardStudentSnapshot {
   posts: PostboardStudentPost[]
   ownRejectedPosts: PostboardPost[]
   reactionCounts: PostboardReactionCounts
+  viewerReactions: Record<string, PostboardReactionId>
 }
 
 export function isPostboardReactionId(value: unknown): value is PostboardReactionId {

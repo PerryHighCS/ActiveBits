@@ -318,6 +318,19 @@ export function buildReactionCounts(reactions: PostboardReactionState): Postboar
   return counts
 }
 
+export function buildViewerReactions(
+  reactions: PostboardReactionState,
+  viewerId: string | null,
+): Record<string, PostboardReactionId> {
+  const result: Record<string, PostboardReactionId> = {}
+  if (!viewerId) return result
+  for (const [postId, entry] of Object.entries(reactions)) {
+    const reactionId = entry.byUser[viewerId]
+    if (reactionId) result[postId] = reactionId
+  }
+  return result
+}
+
 function sortPostsForBoard(posts: readonly PostboardPost[]): PostboardPost[] {
   return [...posts].sort((left, right) => {
     if (left.order !== right.order) return left.order - right.order
@@ -331,6 +344,7 @@ export function buildInstructorSnapshot(session: PostboardSession): PostboardIns
     settings: session.data.settings,
     posts: sortPostsForBoard(session.data.posts),
     reactionCounts: buildReactionCounts(session.data.reactions),
+    viewerReactions: buildViewerReactions(session.data.reactions, 'instructor'),
     flags: session.data.flags,
   }
 }
@@ -376,6 +390,7 @@ export function buildStudentSnapshot(session: PostboardSession, viewerStudentId:
     posts: sortPostsForBoard(visiblePosts).map((post) => toStudentPost(post, viewerStudentId)),
     ownRejectedPosts: [],
     reactionCounts: buildReactionCounts(visibleReactions),
+    viewerReactions: buildViewerReactions(visibleReactions, viewerStudentId),
   }
 }
 

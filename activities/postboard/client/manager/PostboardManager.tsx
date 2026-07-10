@@ -59,7 +59,9 @@ export default function PostboardManager(): React.JSX.Element {
   const [isSavingSetup, setIsSavingSetup] = useState(false)
   const [isPosting, setIsPosting] = useState(false)
   const [launchDefaultsApplied, setLaunchDefaultsApplied] = useState(false)
+  const [isSetupOpen, setIsSetupOpen] = useState(false)
   const autoApproveDirtyRef = useRef(false)
+  const setupInitializedRef = useRef(false)
 
   const launchDefaults = useMemo(() => getLaunchDefaults(location.search), [location.search])
 
@@ -75,6 +77,10 @@ export default function PostboardManager(): React.JSX.Element {
     setPromptDraft((current) => current || nextSnapshot.prompt.text)
     if (!autoApproveDirtyRef.current) {
       setAutoApprove(nextSnapshot.settings.autoApprove)
+    }
+    if (!setupInitializedRef.current) {
+      setupInitializedRef.current = true
+      setIsSetupOpen(nextSnapshot.prompt.text.length === 0)
     }
   }, [instructorPasscode, sessionId])
 
@@ -127,6 +133,7 @@ export default function PostboardManager(): React.JSX.Element {
       setPromptDraft(nextSnapshot.prompt.text)
       setAutoApprove(nextSnapshot.settings.autoApprove)
       autoApproveDirtyRef.current = false
+      setIsSetupOpen(false)
       setError(null)
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : String(saveError))
@@ -155,6 +162,13 @@ export default function PostboardManager(): React.JSX.Element {
     event.preventDefault()
     void saveSetup()
   }
+
+  const toggleAutoApprove = useCallback(() => {
+    autoApproveDirtyRef.current = true
+    const nextAutoApprove = !autoApprove
+    setAutoApprove(nextAutoApprove)
+    void saveSetup(promptDraft, nextAutoApprove)
+  }, [autoApprove, promptDraft, saveSetup])
 
   const handleInstructorPost = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -229,156 +243,194 @@ export default function PostboardManager(): React.JSX.Element {
 
   const pendingPosts = snapshot?.posts.filter((post) => post.status === 'pending') ?? []
   const boardPosts = snapshot?.posts.filter((post) => post.status !== 'pending') ?? []
+  const showModerationQueue = !autoApprove || pendingPosts.length > 0
 
   return (
     <main className="postboard-shell">
-      <SessionHeader activityName="Postboard" sessionId={sessionId} />
+      <SessionHeader
+        activityName="Postboard"
+        sessionId={sessionId}
+        centerHeaderActions={(
+          <div className="postboard-header-setup">
+            <span className="postboard-header-prompt" title={snapshot?.prompt.text || 'No prompt set'}>
+              {snapshot?.prompt.text || 'No prompt set'}
+            </span>
+            <button
+              type="button"
+              className="postboard-header-icon-button"
+              onClick={() => setIsSetupOpen((open) => !open)}
+              aria-expanded={isSetupOpen}
+              aria-controls="postboard-setup-form"
+              aria-label={isSetupOpen ? 'Close prompt editor' : 'Edit prompt'}
+              title={isSetupOpen ? 'Close prompt editor' : 'Edit prompt'}
+            >
+              ✏️
+            </button>
+            <button
+              type="button"
+              role="switch"
+              className="postboard-header-toggle"
+              onClick={toggleAutoApprove}
+              aria-checked={autoApprove}
+              aria-label={autoApprove ? 'Auto-approve is on. Turn off to require moderation.' : 'Auto-approve is off. Turn on to skip moderation.'}
+              title={autoApprove ? 'Auto-approve: on' : 'Auto-approve: off'}
+            >
+              <span className="postboard-header-toggle-label">Auto-approve</span>
+              <span className="postboard-header-toggle-track" aria-hidden="true">
+                <span className="postboard-header-toggle-thumb" />
+              </span>
+            </button>
+          </div>
+        )}
+      />
 
       {error && <div className="postboard-alert" role="alert">{error}</div>}
 
-      <section className="postboard-panel" aria-labelledby="postboard-setup-title">
-        <h2 id="postboard-setup-title">Prompt</h2>
-        <form className="postboard-form" onSubmit={handleSetupSubmit}>
-          <label>
-            <span>Prompt text</span>
-            <textarea
-              value={promptDraft}
-              onChange={(event) => setPromptDraft(event.target.value)}
-              rows={3}
-              maxLength={1000}
-            />
-          </label>
-          <label className="postboard-checkbox">
-            <input
-              type="checkbox"
-              checked={autoApprove}
-              onChange={(event) => {
-                setAutoApprove(event.target.checked)
-                autoApproveDirtyRef.current = true
-              }}
-            />
-            <span>Auto-approve student notes</span>
-          </label>
-          <Button type="submit" disabled={isSavingSetup} aria-disabled={isSavingSetup}>
-            {isSavingSetup ? 'Saving...' : 'Save prompt'}
-          </Button>
-        </form>
-      </section>
+      <div className="postboard-layout">
+        <div className="postboard-main">
+          {isSetupOpen && (
+            <section className="postboard-panel" aria-label="Edit prompt">
+              <form id="postboard-setup-form" className="postboard-form" onSubmit={handleSetupSubmit}>
+                <label>
+                  <span>Prompt text</span>
+                  <textarea
+                    value={promptDraft}
+                    onChange={(event) => setPromptDraft(event.target.value)}
+                    rows={3}
+                    maxLength={1000}
+                  />
+                </label>
+                <Button type="submit" disabled={isSavingSetup} aria-disabled={isSavingSetup}>
+                  {isSavingSetup ? 'Saving...' : 'Save prompt'}
+                </Button>
+              </form>
+            </section>
+          )}
 
-      <section className="postboard-panel" aria-labelledby="postboard-moderation-title">
-        <h2 id="postboard-moderation-title">Moderation Queue ({pendingPosts.length})</h2>
-        {snapshot == null ? (
-          <p className="postboard-empty">Loading notes...</p>
-        ) : pendingPosts.length === 0 ? (
-          <p className="postboard-empty">No pending notes.</p>
-        ) : null}
-        <div className="postboard-card-list">
-          {pendingPosts.map((post) => (
-            <article key={post.id} className={`postboard-card ${getNoteStyleClassName(post.styleId)} postboard-card-pending`}>
-              <p>{post.text}</p>
-              <p className="postboard-meta">{post.authorName}</p>
-              <div className="postboard-actions">
-                <Button type="button" onClick={() => void runPostAction(post.id, 'approve')}>Approve</Button>
-                <Button type="button" onClick={() => void runPostAction(post.id, 'reject')}>Reject</Button>
-              </div>
-            </article>
-          ))}
-        </div>
-      </section>
-
-      <section className="postboard-panel" aria-labelledby="postboard-all-posts-title">
-        <h2 id="postboard-all-posts-title">All Posts ({boardPosts.length})</h2>
-        {snapshot == null ? (
-          <p className="postboard-empty">Loading notes...</p>
-        ) : boardPosts.length === 0 ? (
-          <p className="postboard-empty">No board notes yet.</p>
-        ) : null}
-        <div className="postboard-board">
-          {boardPosts.map((post, index) => (
-            <article
-              key={post.id}
-              className={`postboard-card ${getNoteStyleClassName(post.styleId)}${post.status === 'rejected' || post.status === 'deleted' ? ' postboard-card-rejected' : ''}`}
-            >
-              <div className="postboard-card-header">
-                <div className="postboard-card-titleline">
-                  <p className="postboard-meta">{post.authorName}{post.hiddenAt != null ? ' · hidden' : ''}</p>
-                  {post.status === 'rejected' && (
-                    <span className="postboard-status-badge">
-                      Rejected
-                      <button
-                        type="button"
-                        onClick={() => void runPostAction(post.id, 'unreject')}
-                        aria-label="Undo rejection"
-                        title="Undo rejection"
-                      >
-                        ↻
-                      </button>
-                    </span>
-                  )}
-                  {post.status === 'deleted' && <span className="postboard-status-badge postboard-status-badge-muted">Deleted</span>}
-                </div>
-                <div className="postboard-move-actions">
-                  <button type="button" onClick={() => void reorderPost(post.id, -1)} disabled={index === 0} aria-label="Move note up" title="Move note up">▲</button>
-                  <button type="button" onClick={() => void reorderPost(post.id, 1)} disabled={index === boardPosts.length - 1} aria-label="Move note down" title="Move note down">▼</button>
-                  {post.status === 'approved' && (
-                    <button
-                      type="button"
-                      onClick={() => void runPostAction(post.id, post.hiddenAt == null ? 'hide' : 'unhide')}
-                      aria-label={post.hiddenAt == null ? 'Hide note' : 'Unhide note'}
-                      aria-pressed={post.hiddenAt != null}
-                      title={post.hiddenAt == null ? 'Hide note' : 'Unhide note'}
-                    >
-                      {post.hiddenAt == null ? '👁️' : '🙈'}
-                    </button>
-                  )}
-                </div>
-              </div>
-              <p>{post.text}</p>
-              <div className="postboard-actions">
-                <InstructorFeedbackControls
-                  annotation={{
-                    starred: false,
-                    flagged: (snapshot?.flags[post.id]?.length ?? 0) > 0,
-                    emoji: null,
-                  }}
-                  onToggleFlag={(flagged) => void runPostAction(post.id, 'flag', { flagged, reason: 'Follow up' })}
-                  className="postboard-feedback-controls"
-                />
-                <ReactionSummary
-                  reactions={snapshot?.reactionCounts[post.id] ?? {}}
-                  options={POSTBOARD_REACTION_OPTIONS}
-                  canReact
-                  onReact={(reactionId) => void reactToPost(post.id, reactionId as PostboardReactionId)}
-                  className="postboard-reactions"
-                />
-              </div>
-            </article>
-          ))}
-        </div>
-      </section>
-
-      <section className="postboard-panel postboard-compose-panel" aria-labelledby="postboard-instructor-post-title">
-        <h2 id="postboard-instructor-post-title">Add a note</h2>
-        <form className="postboard-form" onSubmit={handleInstructorPost}>
-          <label>
-            <span className="postboard-sr-only">Instructor note</span>
-            <div className={`note-style-field ${composeStyleClass}`}>
-              <textarea
-                value={postDraft}
-                onChange={(event) => setPostDraft(event.target.value)}
-                rows={3}
-                maxLength={1200}
-              />
+          <section className="postboard-panel" aria-labelledby="postboard-all-posts-title">
+            <h2 id="postboard-all-posts-title">All Posts ({boardPosts.length})</h2>
+            {snapshot == null ? (
+              <p className="postboard-empty">Loading notes...</p>
+            ) : boardPosts.length === 0 ? (
+              <p className="postboard-empty">No board notes yet.</p>
+            ) : null}
+            <div className="postboard-board">
+              {boardPosts.map((post, index) => {
+                const isFaded = post.status === 'rejected' || post.status === 'deleted'
+                return (
+                <article
+                  key={post.id}
+                  className={`postboard-card postboard-card-with-flag ${getNoteStyleClassName(post.styleId)}${isFaded ? ' postboard-card-rejected' : ''}`}
+                >
+                  <InstructorFeedbackControls
+                    annotation={{
+                      starred: false,
+                      flagged: (snapshot?.flags[post.id]?.length ?? 0) > 0,
+                      emoji: null,
+                    }}
+                    onToggleFlag={(flagged) => void runPostAction(post.id, 'flag', { flagged, reason: 'Follow up' })}
+                    className="postboard-flag-corner"
+                  />
+                  <div className="postboard-card-header">
+                    <div className="postboard-card-titleline">
+                      <p className="postboard-meta">{post.authorName}{post.hiddenAt != null ? ' · hidden' : ''}</p>
+                      {post.status === 'rejected' && (
+                        <span className="postboard-status-badge">
+                          Rejected
+                          <button
+                            type="button"
+                            onClick={() => void runPostAction(post.id, 'unreject')}
+                            aria-label="Undo rejection"
+                            title="Undo rejection"
+                          >
+                            ↻
+                          </button>
+                        </span>
+                      )}
+                      {post.status === 'deleted' && <span className="postboard-status-badge postboard-status-badge-muted">Deleted</span>}
+                    </div>
+                    <div className="postboard-move-actions">
+                      <button type="button" onClick={() => void reorderPost(post.id, -1)} disabled={index === 0} aria-label="Move note up" title="Move note up">▲</button>
+                      <button type="button" onClick={() => void reorderPost(post.id, 1)} disabled={index === boardPosts.length - 1} aria-label="Move note down" title="Move note down">▼</button>
+                      {post.status === 'approved' && (
+                        <button
+                          type="button"
+                          onClick={() => void runPostAction(post.id, post.hiddenAt == null ? 'hide' : 'unhide')}
+                          aria-label={post.hiddenAt == null ? 'Hide note' : 'Unhide note'}
+                          aria-pressed={post.hiddenAt != null}
+                          title={post.hiddenAt == null ? 'Hide note' : 'Unhide note'}
+                        >
+                          {post.hiddenAt == null ? '👁️' : '🙈'}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  <p className={isFaded ? 'postboard-card-fade' : undefined}>{post.text}</p>
+                  <div className={`postboard-reactions${isFaded ? ' postboard-card-fade' : ''}`}>
+                    <ReactionSummary
+                      reactions={snapshot?.reactionCounts[post.id] ?? {}}
+                      options={POSTBOARD_REACTION_OPTIONS}
+                      viewerReaction={snapshot?.viewerReactions[post.id] ?? null}
+                      canReact
+                      onReact={(reactionId) => void reactToPost(post.id, reactionId as PostboardReactionId)}
+                      triggerPosition="end"
+                    />
+                  </div>
+                </article>
+                )
+              })}
             </div>
-          </label>
-          <div className="postboard-compose-actions">
-            <NoteStyleSelect value={postStyleId} onChange={setPostStyleId} className="postboard-note-style-select" />
-            <Button type="submit" disabled={isPosting || postDraft.trim().length === 0} aria-disabled={isPosting || postDraft.trim().length === 0}>
-              {isPosting ? 'Posting...' : 'Post note'}
-            </Button>
-          </div>
-        </form>
-      </section>
+          </section>
+        </div>
+
+        <div className="postboard-side postboard-sticky-side">
+          {showModerationQueue && (
+            <section className="postboard-panel postboard-moderation-panel" aria-labelledby="postboard-moderation-title">
+              <h2 id="postboard-moderation-title">Moderation Queue ({pendingPosts.length})</h2>
+              {snapshot == null ? (
+                <p className="postboard-empty">Loading notes...</p>
+              ) : pendingPosts.length === 0 ? (
+                <p className="postboard-empty">No pending notes.</p>
+              ) : null}
+              <div className="postboard-card-list">
+                {pendingPosts.map((post) => (
+                  <article key={post.id} className={`postboard-card ${getNoteStyleClassName(post.styleId)} postboard-card-pending`}>
+                    <p>{post.text}</p>
+                    <p className="postboard-meta">{post.authorName}</p>
+                    <div className="postboard-actions">
+                      <Button type="button" onClick={() => void runPostAction(post.id, 'approve')}>Approve</Button>
+                      <Button type="button" onClick={() => void runPostAction(post.id, 'reject')}>Reject</Button>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </section>
+          )}
+
+          <section className="postboard-panel postboard-compose-panel" aria-labelledby="postboard-instructor-post-title">
+            <h2 id="postboard-instructor-post-title">Add a note</h2>
+            <form className="postboard-form" onSubmit={handleInstructorPost}>
+              <label>
+                <span className="postboard-sr-only">Instructor note</span>
+                <div className={`note-style-field ${composeStyleClass}`}>
+                  <textarea
+                    value={postDraft}
+                    onChange={(event) => setPostDraft(event.target.value)}
+                    rows={3}
+                    maxLength={1200}
+                  />
+                </div>
+              </label>
+              <div className="postboard-compose-actions">
+                <NoteStyleSelect value={postStyleId} onChange={setPostStyleId} className="postboard-note-style-select" />
+                <Button type="submit" disabled={isPosting || postDraft.trim().length === 0} aria-disabled={isPosting || postDraft.trim().length === 0}>
+                  {isPosting ? 'Posting...' : 'Post note'}
+                </Button>
+              </div>
+            </form>
+          </section>
+        </div>
+      </div>
     </main>
   )
 }

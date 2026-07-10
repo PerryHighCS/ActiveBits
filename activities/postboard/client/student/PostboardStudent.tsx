@@ -182,86 +182,96 @@ export default function PostboardStudent({ sessionData }: PostboardStudentProps)
 
   return (
     <main className="postboard-shell postboard-student-shell">
-      <section className="postboard-panel postboard-prompt-panel" aria-labelledby="postboard-student-prompt">
-        <p className="postboard-eyebrow">Postboard</p>
-        <h1 id="postboard-student-prompt">{promptText}</h1>
-      </section>
+      <div className="postboard-layout">
+        <div className="postboard-main">
+          <section className="postboard-panel postboard-prompt-panel" aria-labelledby="postboard-student-prompt">
+            <p className="postboard-eyebrow">Postboard</p>
+            <h1 id="postboard-student-prompt">{promptText}</h1>
+          </section>
 
-      {error && <div className="postboard-alert" role="alert">{error}</div>}
+          {error && <div className="postboard-alert" role="alert">{error}</div>}
 
-      <section className="postboard-board" aria-label="Shared notes">
-        {snapshot == null && <p className="postboard-empty">Loading notes...</p>}
-        {snapshot != null && boardPosts.length === 0 && <p className="postboard-empty">No notes have been approved yet.</p>}
-        {boardPosts.map((post) => (
-          <article
-            key={post.id}
-            className={`postboard-card ${getNoteStyleClassName(post.styleId)}${post.status === 'pending' && post.isOwnPost ? ' postboard-card-own-pending' : ''}${post.status === 'rejected' && post.isOwnPost ? ' postboard-card-rejected' : ''}`}
-          >
-            {post.status === 'rejected' && post.isOwnPost && (
-              <div className="postboard-card-header">
-                <span className="postboard-status-badge">Returned</span>
-                <div className="postboard-move-actions">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setDraft(post.text)
-                      setStyleId(post.styleId)
-                      setDismissedOwnPostIds((current) => new Set(current).add(post.id))
-                    }}
-                    aria-label="Edit returned note"
-                    title="Edit returned note"
-                  >
-                    ✏️
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void deleteRejectedPost(post.id)
-                    }}
-                    aria-label="Dismiss returned note"
-                    title="Dismiss returned note"
-                  >
-                    🗑️
-                  </button>
-                </div>
+          <section className="postboard-board" aria-label="Shared notes">
+            {snapshot == null && <p className="postboard-empty">Loading notes...</p>}
+            {snapshot != null && boardPosts.length === 0 && <p className="postboard-empty">No notes have been posted.</p>}
+            {boardPosts.map((post) => {
+              const isRejectedOwn = post.status === 'rejected' && post.isOwnPost
+              const isFaded = isRejectedOwn || (post.status === 'pending' && post.isOwnPost)
+              return (
+                <article
+                  key={post.id}
+                  className={`postboard-card ${getNoteStyleClassName(post.styleId)}${isRejectedOwn ? ' postboard-card-rejected' : ''}`}
+                >
+                  {isRejectedOwn && (
+                    <div className="postboard-card-header">
+                      <span className="postboard-status-badge">Returned</span>
+                      <div className="postboard-move-actions">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setDraft(post.text)
+                            setStyleId(post.styleId)
+                            setDismissedOwnPostIds((current) => new Set(current).add(post.id))
+                          }}
+                          aria-label="Edit returned note"
+                          title="Edit returned note"
+                        >
+                          ✏️
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            void deleteRejectedPost(post.id)
+                          }}
+                          aria-label="Dismiss returned note"
+                          title="Dismiss returned note"
+                        >
+                          🗑️
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  <p className={isFaded ? 'postboard-card-fade' : undefined}>{post.text}</p>
+                  {!post.isOwnPost && (
+                    <ReactionSummary
+                      reactions={snapshot?.reactionCounts[post.id] ?? {}}
+                      options={POSTBOARD_REACTION_OPTIONS}
+                      viewerReaction={snapshot?.viewerReactions[post.id] ?? null}
+                      canReact
+                      onReact={(reactionId) => void reactToPost(post.id, reactionId as PostboardReactionId)}
+                      className={`postboard-reactions${isFaded ? ' postboard-card-fade' : ''}`}
+                      triggerPosition="end"
+                    />
+                  )}
+                </article>
+              )
+            })}
+          </section>
+        </div>
+
+        <section className="postboard-panel postboard-compose-panel postboard-sticky-side" aria-labelledby="postboard-submit-title">
+          <h2 id="postboard-submit-title">Add a note</h2>
+          <form className="postboard-form" onSubmit={handleSubmit}>
+            <label>
+              <span className="postboard-sr-only">Note</span>
+              <div className={`note-style-field ${composeStyleClass}`}>
+                <textarea
+                  value={draft}
+                  onChange={(event) => setDraft(event.target.value)}
+                  rows={4}
+                  maxLength={1200}
+                />
               </div>
-            )}
-            <p>{post.text}</p>
-            {!post.isOwnPost && (
-              <ReactionSummary
-                reactions={snapshot?.reactionCounts[post.id] ?? {}}
-                options={POSTBOARD_REACTION_OPTIONS}
-                canReact
-                onReact={(reactionId) => void reactToPost(post.id, reactionId as PostboardReactionId)}
-                className="postboard-reactions"
-              />
-            )}
-          </article>
-        ))}
-      </section>
-
-      <section className="postboard-panel postboard-compose-panel" aria-labelledby="postboard-submit-title">
-        <h2 id="postboard-submit-title">Add a note</h2>
-        <form className="postboard-form" onSubmit={handleSubmit}>
-          <label>
-            <span className="postboard-sr-only">Note</span>
-            <div className={`note-style-field ${composeStyleClass}`}>
-              <textarea
-                value={draft}
-                onChange={(event) => setDraft(event.target.value)}
-                rows={4}
-                maxLength={1200}
-              />
+            </label>
+            <div className="postboard-compose-actions">
+              <NoteStyleSelect value={styleId} onChange={setStyleId} className="postboard-note-style-select" />
+              <Button type="submit" disabled={isSubmitting || draft.trim().length === 0} aria-disabled={isSubmitting || draft.trim().length === 0}>
+                {isSubmitting ? 'Submitting...' : 'Submit note'}
+              </Button>
             </div>
-          </label>
-          <div className="postboard-compose-actions">
-            <NoteStyleSelect value={styleId} onChange={setStyleId} className="postboard-note-style-select" />
-            <Button type="submit" disabled={isSubmitting || draft.trim().length === 0} aria-disabled={isSubmitting || draft.trim().length === 0}>
-              {isSubmitting ? 'Submitting...' : 'Submit note'}
-            </Button>
-          </div>
-        </form>
-      </section>
+          </form>
+        </section>
+      </div>
     </main>
   )
 }
