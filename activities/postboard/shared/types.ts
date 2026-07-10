@@ -1,28 +1,24 @@
-export type PostboardPostStatus = 'pending' | 'approved' | 'rejected'
+import { SHARED_REACTION_OPTIONS, SHARED_REACTION_VALUES, isSharedReactionValue } from '../../shared/reactions.js'
+
+export type PostboardPostStatus = 'pending' | 'approved' | 'rejected' | 'deleted'
 export type PostboardAuthorRole = 'student' | 'instructor'
 
-export type PostboardReactionId = 'heart' | 'spark' | 'plus-one' | 'question'
+export type PostboardReactionId = (typeof SHARED_REACTION_VALUES)[number]
 
-export const POSTBOARD_REACTION_IDS: readonly PostboardReactionId[] = [
-  'heart',
-  'spark',
-  'plus-one',
-  'question',
-]
+export const POSTBOARD_REACTION_IDS: readonly PostboardReactionId[] = SHARED_REACTION_VALUES
 
-export const POSTBOARD_REACTION_LABELS: Record<PostboardReactionId, string> = {
-  heart: 'Heart',
-  spark: 'Spark',
-  'plus-one': 'Plus one',
-  question: 'Question',
-}
+export const POSTBOARD_REACTION_LABELS = Object.fromEntries(
+  SHARED_REACTION_OPTIONS.map((reaction) => [reaction.value, reaction.label]),
+) as Record<PostboardReactionId, string>
 
-export const POSTBOARD_REACTION_SYMBOLS: Record<PostboardReactionId, string> = {
-  heart: 'Heart',
-  spark: 'Spark',
-  'plus-one': '+1',
-  question: '?',
-}
+export const POSTBOARD_REACTION_SYMBOLS = Object.fromEntries(
+  SHARED_REACTION_OPTIONS.map((reaction) => [reaction.value, reaction.symbol]),
+) as Record<PostboardReactionId, string>
+
+export const POSTBOARD_REACTION_OPTIONS = SHARED_REACTION_OPTIONS.map((reaction) => ({
+  ...reaction,
+  value: reaction.value as PostboardReactionId,
+}))
 
 export interface PostboardPrompt {
   id: string
@@ -48,6 +44,7 @@ export interface PostboardPost {
   status: PostboardPostStatus
   approvedAt: number | null
   rejectedAt: number | null
+  deletedAt: number | null
   hiddenAt: number | null
   order: number
 }
@@ -99,6 +96,7 @@ export interface PostboardStudentPost {
   status: PostboardPostStatus
   approvedAt: number | null
   rejectedAt: number | null
+  deletedAt: number | null
   hiddenAt: number | null
   order: number
   isOwnPost: boolean
@@ -113,5 +111,5 @@ export interface PostboardStudentSnapshot {
 }
 
 export function isPostboardReactionId(value: unknown): value is PostboardReactionId {
-  return typeof value === 'string' && POSTBOARD_REACTION_IDS.includes(value as PostboardReactionId)
+  return isSharedReactionValue(value)
 }

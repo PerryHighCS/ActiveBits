@@ -144,7 +144,7 @@ void test('normalizePostboardSessionData applies selected option defaults and re
     reactions: {
       p1: {
         byUser: {
-          'student-2': 'heart',
+          'student-2': '👍',
           'student-3': 'not-real',
         },
       },
@@ -154,13 +154,30 @@ void test('normalizePostboardSessionData applies selected option defaults and re
   assert.equal(data.prompt.text, 'Share a debugging strategy')
   assert.equal(data.settings.autoApprove, true)
   assert.equal(data.posts[0]?.approvedAt, 100)
-  assert.deepEqual(data.reactions.p1?.byUser, { 'student-2': 'heart' })
+  assert.deepEqual(data.reactions.p1?.byUser, { 'student-2': '👍' })
   assert.equal(typeof data.instructorPasscode, 'string')
 })
 
 void test('student snapshot hides peer names, pending posts, hidden posts, flags, and raw reactions', () => {
   const session = createSession({
     posts: [
+      {
+        id: 'pending-own',
+        promptId: 'prompt-1',
+        authorId: 'student-1',
+        authorName: 'Ada Lovelace',
+        authorRole: 'student',
+        text: 'Pending own note',
+        styleId: 'lemon',
+        createdAt: 99,
+        updatedAt: 99,
+        status: 'pending',
+        approvedAt: null,
+        rejectedAt: null,
+        deletedAt: null,
+        hiddenAt: null,
+        order: -1,
+      },
       {
         id: 'approved-peer',
         promptId: 'prompt-1',
@@ -174,6 +191,7 @@ void test('student snapshot hides peer names, pending posts, hidden posts, flags
         status: 'approved',
         approvedAt: 100,
         rejectedAt: null,
+        deletedAt: null,
         hiddenAt: null,
         order: 0,
       },
@@ -190,6 +208,7 @@ void test('student snapshot hides peer names, pending posts, hidden posts, flags
         status: 'pending',
         approvedAt: null,
         rejectedAt: null,
+        deletedAt: null,
         hiddenAt: null,
         order: 1,
       },
@@ -206,6 +225,7 @@ void test('student snapshot hides peer names, pending posts, hidden posts, flags
         status: 'rejected',
         approvedAt: null,
         rejectedAt: 103,
+        deletedAt: null,
         hiddenAt: null,
         order: 2,
       },
@@ -213,7 +233,7 @@ void test('student snapshot hides peer names, pending posts, hidden posts, flags
     reactions: {
       'approved-peer': {
         byUser: {
-          'student-1': 'heart',
+          'student-1': '👍',
         },
       },
     },
@@ -231,11 +251,15 @@ void test('student snapshot hides peer names, pending posts, hidden posts, flags
 
   const snapshot = buildStudentSnapshot(session, 'student-1')
 
-  assert.deepEqual(snapshot.posts.map((post) => post.id), ['approved-peer'])
-  assert.equal(snapshot.posts[0]?.authorLabel, 'Student')
-  assert.equal('authorName' in (snapshot.posts[0] ?? {}), false)
-  assert.deepEqual(snapshot.ownRejectedPosts.map((post) => post.id), ['rejected-own'])
-  assert.deepEqual(snapshot.reactionCounts, { 'approved-peer': { heart: 1 } })
+  assert.deepEqual(snapshot.posts.map((post) => post.id), ['pending-own', 'approved-peer', 'rejected-own'])
+  assert.equal(snapshot.posts[0]?.isOwnPost, true)
+  assert.equal(snapshot.posts[0]?.status, 'pending')
+  assert.equal(snapshot.posts[1]?.authorLabel, 'Student')
+  assert.equal('authorName' in (snapshot.posts[1] ?? {}), false)
+  assert.equal(snapshot.posts[2]?.isOwnPost, true)
+  assert.equal(snapshot.posts[2]?.status, 'rejected')
+  assert.deepEqual(snapshot.ownRejectedPosts, [])
+  assert.deepEqual(snapshot.reactionCounts, { 'approved-peer': { '👍': 1 } })
   assert.equal('flags' in snapshot, false)
   assert.equal('reactions' in snapshot, false)
 })
@@ -256,6 +280,7 @@ void test('instructor snapshot includes names, flags, and moderation states', ()
         status: 'pending',
         approvedAt: null,
         rejectedAt: null,
+        deletedAt: null,
         hiddenAt: null,
         order: 1,
       },
@@ -283,17 +308,17 @@ void test('buildReactionCounts deduplicates by reactor and supports changed reac
   const counts = buildReactionCounts({
     post1: {
       byUser: {
-        student1: 'heart',
-        student2: 'heart',
-        student3: 'question',
+        student1: '👍',
+        student2: '👍',
+        student3: '🤔',
       },
     },
   })
 
   assert.deepEqual(counts, {
     post1: {
-      heart: 2,
-      question: 1,
+      '👍': 2,
+      '🤔': 1,
     },
   })
 })
@@ -363,4 +388,147 @@ void test('post submit route keeps manual student notes pending and instructor n
   assert.equal(storedData?.posts[0]?.authorName, 'Ada Lovelace')
   assert.equal(storedData?.posts[1]?.status, 'approved')
   assert.equal(storedData?.posts[1]?.authorRole, 'instructor')
+})
+
+void test('flag route toggles a single instructor flag state', async () => {
+  const app = new TestApp()
+  const store = new MemoryStore()
+  const session = createSession({
+    posts: [
+      {
+        id: 'post-1',
+        promptId: 'prompt-1',
+        authorId: 'student-1',
+        authorName: 'Ada Lovelace',
+        authorRole: 'student',
+        text: 'Needs follow up',
+        styleId: 'lemon',
+        createdAt: 100,
+        updatedAt: 100,
+        status: 'approved',
+        approvedAt: 100,
+        rejectedAt: null,
+        deletedAt: null,
+        hiddenAt: null,
+        order: 0,
+      },
+    ],
+  })
+  await store.set(session.id, session)
+  setupPostboardRoutes(app, store, createWsRouter())
+
+  const handler = app.handlers.post['/api/postboard/:sessionId/posts/:postId/flag']
+  assert.ok(handler)
+
+  const flagResponse = createResponse()
+  await handler({
+    params: { sessionId: session.id, postId: 'post-1' },
+    headers: { 'x-instructor-passcode': 'teacher-pass' },
+    body: { flagged: true },
+  }, flagResponse)
+  assert.equal(flagResponse.statusCode, 200)
+  assert.equal(((flagResponse.body as { flags?: PostboardSessionData['flags'] }).flags?.['post-1'] ?? []).length, 1)
+
+  const secondFlagResponse = createResponse()
+  await handler({
+    params: { sessionId: session.id, postId: 'post-1' },
+    headers: { 'x-instructor-passcode': 'teacher-pass' },
+    body: { flagged: true },
+  }, secondFlagResponse)
+  assert.equal(((secondFlagResponse.body as { flags?: PostboardSessionData['flags'] }).flags?.['post-1'] ?? []).length, 1)
+
+  const unflagResponse = createResponse()
+  await handler({
+    params: { sessionId: session.id, postId: 'post-1' },
+    headers: { 'x-instructor-passcode': 'teacher-pass' },
+    body: { flagged: false },
+  }, unflagResponse)
+  assert.equal((unflagResponse.body as { flags?: PostboardSessionData['flags'] }).flags?.['post-1'], undefined)
+})
+
+void test('student delete marks an own rejected post deleted for instructor view', async () => {
+  const app = new TestApp()
+  const store = new MemoryStore()
+  const session = createSession({
+    posts: [
+      {
+        id: 'post-1',
+        promptId: 'prompt-1',
+        authorId: 'student-1',
+        authorName: 'Ada Lovelace',
+        authorRole: 'student',
+        text: 'Returned note',
+        styleId: 'lemon',
+        createdAt: 100,
+        updatedAt: 101,
+        status: 'rejected',
+        approvedAt: null,
+        rejectedAt: 101,
+        deletedAt: null,
+        hiddenAt: null,
+        order: 0,
+      },
+    ],
+  })
+  await store.set(session.id, session)
+  setupPostboardRoutes(app, store, createWsRouter())
+
+  const handler = app.handlers.post['/api/postboard/:sessionId/posts/:postId/delete']
+  assert.ok(handler)
+
+  const response = createResponse()
+  await handler({
+    params: { sessionId: session.id, postId: 'post-1' },
+    body: { studentId: 'student-1' },
+  }, response)
+
+  assert.equal(response.statusCode, 200)
+  const stored = await store.get(session.id)
+  const storedData = stored?.data as PostboardSessionData | undefined
+  assert.equal(storedData?.posts[0]?.status, 'deleted')
+  assert.equal(typeof storedData?.posts[0]?.deletedAt, 'number')
+  assert.deepEqual(buildStudentSnapshot(stored as SessionRecord & { type: 'postboard'; data: PostboardSessionData }, 'student-1').posts, [])
+  assert.equal(buildInstructorSnapshot(stored as SessionRecord & { type: 'postboard'; data: PostboardSessionData }).posts[0]?.status, 'deleted')
+})
+
+void test('unreject route returns a rejected post to pending moderation', async () => {
+  const app = new TestApp()
+  const store = new MemoryStore()
+  const session = createSession({
+    posts: [
+      {
+        id: 'post-1',
+        promptId: 'prompt-1',
+        authorId: 'student-1',
+        authorName: 'Ada Lovelace',
+        authorRole: 'student',
+        text: 'Returned note',
+        styleId: 'lemon',
+        createdAt: 100,
+        updatedAt: 101,
+        status: 'rejected',
+        approvedAt: null,
+        rejectedAt: 101,
+        deletedAt: null,
+        hiddenAt: null,
+        order: 0,
+      },
+    ],
+  })
+  await store.set(session.id, session)
+  setupPostboardRoutes(app, store, createWsRouter())
+
+  const handler = app.handlers.post['/api/postboard/:sessionId/posts/:postId/unreject']
+  assert.ok(handler)
+
+  const response = createResponse()
+  await handler({
+    params: { sessionId: session.id, postId: 'post-1' },
+    headers: { 'x-instructor-passcode': 'teacher-pass' },
+  }, response)
+
+  assert.equal(response.statusCode, 200)
+  const body = response.body as { posts?: Array<{ status?: string; rejectedAt?: number | null }> }
+  assert.equal(body.posts?.[0]?.status, 'pending')
+  assert.equal(body.posts?.[0]?.rejectedAt, null)
 })

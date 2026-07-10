@@ -1,3 +1,5 @@
+import { SHARED_REACTION_OPTIONS } from '../../shared/reactions.js'
+
 /**
  * Curated emoji sets for Resonance instructor annotations and student reactions.
  *
@@ -27,12 +29,7 @@ export const INSTRUCTOR_ANNOTATION_EMOJIS: EmojiEntry[] = [
 
 /** Emojis available for student reactions to shared responses. */
 export const STUDENT_REACTION_EMOJIS: EmojiEntry[] = [
-  { emoji: '👍', label: 'Agree' },
-  { emoji: '❤️', label: 'Love it' },
-  { emoji: '🔥', label: 'Fire' },
-  { emoji: '💡', label: 'Lightbulb' },
-  { emoji: '😮', label: 'Surprised' },
-  { emoji: '🤔', label: 'Hmm' },
+  ...SHARED_REACTION_OPTIONS.map((entry) => ({ emoji: entry.symbol, label: entry.label })),
 ]
 
 export const INSTRUCTOR_ANNOTATION_EMOJI_VALUES = INSTRUCTOR_ANNOTATION_EMOJIS.map((e) => e.emoji)

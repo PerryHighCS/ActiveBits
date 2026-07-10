@@ -165,7 +165,8 @@
 
 .postboard-card-list {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(14rem, 16rem));
+  justify-content: start;
   gap: 0.75rem;
 }
 
@@ -184,8 +185,13 @@
   border-color: #fde68a;
 }
 
+.postboard-card-own-pending {
+  opacity: 0.58;
+}
+
 .postboard-card-rejected {
   border-color: #fecdd3;
+  opacity: 0.58;
 }
 
 .postboard-card p {
@@ -211,6 +217,7 @@
 .postboard-status-badge {
   display: inline-flex;
   align-items: center;
+  gap: 0.25rem;
   min-height: 1.4rem;
   border: 1px solid #fb7185;
   border-radius: 999px;
@@ -219,6 +226,27 @@
   color: #9f1239;
   font-size: 0.75rem;
   font-weight: 700;
+}
+
+.postboard-status-badge button {
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  line-height: 1;
+  padding: 0 0.1rem;
+}
+
+.postboard-status-badge button:hover {
+  background: rgba(159, 18, 57, 0.12);
+}
+
+.postboard-status-badge-muted {
+  border-color: #cbd5e1;
+  background: #f1f5f9;
+  color: #475569;
 }
 
 .postboard-meta {
@@ -240,20 +268,25 @@
   align-items: center;
 }
 
-.postboard-reactions button,
+.postboard-feedback-controls {
+  flex-direction: row;
+  gap: 0.25rem;
+  padding-top: 0;
+}
+
 .postboard-move-actions button {
-  min-height: 2rem;
+  min-height: 1.9rem;
+  min-width: 1.9rem;
   border: 1px solid #cbd5e1;
-  border-radius: 6px;
+  border-radius: 8px;
   background: #ffffff;
-  padding: 0.25rem 0.55rem;
+  padding: 0.25rem;
   color: #334155;
   font: inherit;
-  font-size: 0.875rem;
+  line-height: 1;
   cursor: pointer;
 }
 
-.postboard-reactions button:hover,
 .postboard-move-actions button:hover:not(:disabled) {
   border-color: #0f766e;
   color: #0f766e;
@@ -262,6 +295,11 @@
 .postboard-move-actions button:disabled {
   cursor: not-allowed;
   opacity: 0.45;
+}
+
+.postboard-move-actions button[aria-pressed="true"] {
+  border-color: #64748b;
+  background: #f1f5f9;
 }
 
 @media (max-width: 900px) {

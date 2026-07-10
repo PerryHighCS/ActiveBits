@@ -2,11 +2,11 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react
 import { useLocation, useParams } from 'react-router-dom'
 import SessionHeader from '@src/components/common/SessionHeader'
 import Button from '@src/components/ui/Button'
+import InstructorFeedbackControls from '../../../shared/client/components/InstructorFeedbackControls'
 import NoteStyleSelect from '../../../shared/client/components/NoteStyleSelect'
+import ReactionSummary from '../../../shared/client/components/ReactionSummary'
 import {
-  POSTBOARD_REACTION_IDS,
-  POSTBOARD_REACTION_LABELS,
-  POSTBOARD_REACTION_SYMBOLS,
+  POSTBOARD_REACTION_OPTIONS,
   type PostboardInstructorSnapshot,
   type PostboardReactionId,
 } from '../../shared/types'
@@ -281,42 +281,60 @@ export default function PostboardManager(): React.JSX.Element {
           {boardPosts.map((post, index) => (
             <article
               key={post.id}
-              className={`postboard-card ${getNoteStyleClassName(post.styleId)}${post.status === 'rejected' ? ' postboard-card-rejected' : ''}`}
+              className={`postboard-card ${getNoteStyleClassName(post.styleId)}${post.status === 'rejected' || post.status === 'deleted' ? ' postboard-card-rejected' : ''}`}
             >
               <div className="postboard-card-header">
                 <div className="postboard-card-titleline">
                   <p className="postboard-meta">{post.authorName}{post.hiddenAt != null ? ' · hidden' : ''}</p>
-                  {post.status === 'rejected' && <span className="postboard-status-badge">Rejected</span>}
+                  {post.status === 'rejected' && (
+                    <span className="postboard-status-badge">
+                      Rejected
+                      <button
+                        type="button"
+                        onClick={() => void runPostAction(post.id, 'unreject')}
+                        aria-label="Undo rejection"
+                        title="Undo rejection"
+                      >
+                        ↻
+                      </button>
+                    </span>
+                  )}
+                  {post.status === 'deleted' && <span className="postboard-status-badge postboard-status-badge-muted">Deleted</span>}
                 </div>
                 <div className="postboard-move-actions">
-                  <button type="button" onClick={() => void reorderPost(post.id, -1)} disabled={index === 0} aria-label="Move note up">Up</button>
-                  <button type="button" onClick={() => void reorderPost(post.id, 1)} disabled={index === boardPosts.length - 1} aria-label="Move note down">Down</button>
+                  <button type="button" onClick={() => void reorderPost(post.id, -1)} disabled={index === 0} aria-label="Move note up" title="Move note up">▲</button>
+                  <button type="button" onClick={() => void reorderPost(post.id, 1)} disabled={index === boardPosts.length - 1} aria-label="Move note down" title="Move note down">▼</button>
+                  {post.status === 'approved' && (
+                    <button
+                      type="button"
+                      onClick={() => void runPostAction(post.id, post.hiddenAt == null ? 'hide' : 'unhide')}
+                      aria-label={post.hiddenAt == null ? 'Hide note' : 'Unhide note'}
+                      aria-pressed={post.hiddenAt != null}
+                      title={post.hiddenAt == null ? 'Hide note' : 'Unhide note'}
+                    >
+                      {post.hiddenAt == null ? '👁️' : '🙈'}
+                    </button>
+                  )}
                 </div>
               </div>
               <p>{post.text}</p>
-              <div className="postboard-reactions" aria-label="Instructor reactions">
-                {POSTBOARD_REACTION_IDS.map((reactionId) => (
-                  <button
-                    key={reactionId}
-                    type="button"
-                    onClick={() => void reactToPost(post.id, reactionId)}
-                    aria-label={`React with ${POSTBOARD_REACTION_LABELS[reactionId]}`}
-                  >
-                    {POSTBOARD_REACTION_SYMBOLS[reactionId]} {snapshot?.reactionCounts[post.id]?.[reactionId] ?? 0}
-                  </button>
-                ))}
-              </div>
               <div className="postboard-actions">
-                {post.status === 'rejected' ? (
-                  <Button type="button" onClick={() => void runPostAction(post.id, 'approve')}>Approve</Button>
-                ) : (
-                  <Button type="button" onClick={() => void runPostAction(post.id, post.hiddenAt == null ? 'hide' : 'unhide')}>
-                    {post.hiddenAt == null ? 'Hide' : 'Unhide'}
-                  </Button>
-                )}
-                <Button type="button" onClick={() => void runPostAction(post.id, 'flag', { reason: 'Follow up' })}>
-                  Flag ({snapshot?.flags[post.id]?.length ?? 0})
-                </Button>
+                <InstructorFeedbackControls
+                  annotation={{
+                    starred: false,
+                    flagged: (snapshot?.flags[post.id]?.length ?? 0) > 0,
+                    emoji: null,
+                  }}
+                  onToggleFlag={(flagged) => void runPostAction(post.id, 'flag', { flagged, reason: 'Follow up' })}
+                  className="postboard-feedback-controls"
+                />
+                <ReactionSummary
+                  reactions={snapshot?.reactionCounts[post.id] ?? {}}
+                  options={POSTBOARD_REACTION_OPTIONS}
+                  canReact
+                  onReact={(reactionId) => void reactToPost(post.id, reactionId as PostboardReactionId)}
+                  className="postboard-reactions"
+                />
               </div>
             </article>
           ))}

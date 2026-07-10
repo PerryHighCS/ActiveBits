@@ -168,7 +168,7 @@ function normalizeSettings(source: Record<string, unknown>): PostboardSettings {
 }
 
 function normalizePostStatus(value: unknown): PostboardPostStatus {
-  return value === 'approved' || value === 'rejected' ? value : 'pending'
+  return value === 'approved' || value === 'rejected' || value === 'deleted' ? value : 'pending'
 }
 
 function normalizeAuthorRole(value: unknown): 'student' | 'instructor' {
@@ -193,6 +193,9 @@ function normalizePosts(value: unknown, promptId: string): PostboardPost[] {
     const rejectedAt = status === 'rejected'
       ? normalizeNullableTimestamp(entry.rejectedAt) ?? createdAt
       : normalizeNullableTimestamp(entry.rejectedAt)
+    const deletedAt = status === 'deleted'
+      ? normalizeNullableTimestamp(entry.deletedAt) ?? createdAt
+      : normalizeNullableTimestamp(entry.deletedAt)
 
     posts.push({
       id,
@@ -207,6 +210,7 @@ function normalizePosts(value: unknown, promptId: string): PostboardPost[] {
       status,
       approvedAt,
       rejectedAt,
+      deletedAt,
       hiddenAt: normalizeNullableTimestamp(entry.hiddenAt),
       order: typeof entry.order === 'number' && Number.isFinite(entry.order) ? entry.order : posts.length,
     })
@@ -341,6 +345,7 @@ function toStudentPost(post: PostboardPost, viewerStudentId: string | null): Pos
     status: post.status,
     approvedAt: post.approvedAt,
     rejectedAt: post.rejectedAt,
+    deletedAt: post.deletedAt,
     hiddenAt: post.hiddenAt,
     order: post.order,
     isOwnPost: viewerStudentId != null && post.authorId === viewerStudentId,
@@ -348,10 +353,10 @@ function toStudentPost(post: PostboardPost, viewerStudentId: string | null): Pos
 }
 
 export function buildStudentSnapshot(session: PostboardSession, viewerStudentId: string | null): PostboardStudentSnapshot {
-  const visiblePosts = session.data.posts.filter((post) => post.status === 'approved' && post.hiddenAt == null)
-  const ownRejectedPosts = viewerStudentId
-    ? session.data.posts.filter((post) => post.status === 'rejected' && post.authorId === viewerStudentId)
-    : []
+  const visiblePosts = session.data.posts.filter((post) => {
+    if (post.status === 'approved' && post.hiddenAt == null) return true
+    return viewerStudentId != null && (post.status === 'pending' || post.status === 'rejected') && post.authorId === viewerStudentId
+  })
 
   return {
     prompt: session.data.prompt,
@@ -359,7 +364,7 @@ export function buildStudentSnapshot(session: PostboardSession, viewerStudentId:
       autoApprove: session.data.settings.autoApprove,
     },
     posts: sortPostsForBoard(visiblePosts).map((post) => toStudentPost(post, viewerStudentId)),
-    ownRejectedPosts,
+    ownRejectedPosts: [],
     reactionCounts: buildReactionCounts(session.data.reactions),
   }
 }
@@ -502,6 +507,7 @@ export default function setupPostboardRoutes(app: PostboardRouteApp, sessions: S
       status,
       approvedAt: status === 'approved' ? now : null,
       rejectedAt: null,
+      deletedAt: null,
       hiddenAt: null,
       order: session.data.posts.length,
     }
@@ -523,6 +529,7 @@ export default function setupPostboardRoutes(app: PostboardRouteApp, sessions: S
     post.status = 'approved'
     post.approvedAt = now
     post.rejectedAt = null
+    post.deletedAt = null
     post.updatedAt = now
     await persistAndBroadcast(sessions, ws, session)
     logModeration('approve', { sessionId: session.id, postId: post.id })
@@ -541,10 +548,51 @@ export default function setupPostboardRoutes(app: PostboardRouteApp, sessions: S
     post.status = 'rejected'
     post.rejectedAt = now
     post.approvedAt = null
+    post.deletedAt = null
     post.updatedAt = now
     await persistAndBroadcast(sessions, ws, session)
     logModeration('reject', { sessionId: session.id, postId: post.id })
     res.json(buildInstructorSnapshot(session))
+  })
+
+  app.post('/api/postboard/:sessionId/posts/:postId/unreject', async (req, res) => {
+    const session = await getPostboardSession(req, res, sessions)
+    if (!session || !requireInstructor(session, req, res)) return
+    const post = findPost(session, req.params.postId)
+    if (!post) {
+      res.status(404).json({ error: 'invalid post' })
+      return
+    }
+    const now = Date.now()
+    post.status = 'pending'
+    post.rejectedAt = null
+    post.deletedAt = null
+    post.updatedAt = now
+    await persistAndBroadcast(sessions, ws, session)
+    logModeration('unreject', { sessionId: session.id, postId: post.id })
+    res.json(buildInstructorSnapshot(session))
+  })
+
+  app.post('/api/postboard/:sessionId/posts/:postId/delete', async (req, res) => {
+    const session = await getPostboardSession(req, res, sessions)
+    if (!session) return
+    const post = findPost(session, req.params.postId)
+    if (!post) {
+      res.status(404).json({ error: 'invalid post' })
+      return
+    }
+    const studentId = readStudentId(req)
+    if (!studentId || post.authorId !== studentId || post.status !== 'rejected') {
+      res.status(403).json({ error: 'cannot delete this post' })
+      return
+    }
+    const now = Date.now()
+    post.status = 'deleted'
+    post.deletedAt = now
+    post.updatedAt = now
+    await persistAndBroadcast(sessions, ws, session)
+    logModeration('delete', { sessionId: session.id, postId: post.id })
+    res.json(buildStudentSnapshot(session, studentId))
   })
 
   app.post('/api/postboard/:sessionId/posts/:postId/hide', async (req, res) => {
@@ -603,16 +651,23 @@ export default function setupPostboardRoutes(app: PostboardRouteApp, sessions: S
       return
     }
     const body = getBody(req)
-    const flag: PostboardFlag = {
-      id: createId('flag'),
-      postId: post.id,
-      flaggedBy: 'instructor',
-      ...(sanitizeOptionalText(body.reason, MAX_FLAG_REASON_LENGTH) ? { reason: sanitizeOptionalText(body.reason, MAX_FLAG_REASON_LENGTH) } : {}),
-      createdAt: Date.now(),
+    const isCurrentlyFlagged = (session.data.flags[post.id]?.length ?? 0) > 0
+    const shouldFlag = typeof body.flagged === 'boolean' ? body.flagged : !isCurrentlyFlagged
+
+    if (shouldFlag) {
+      const flag: PostboardFlag = {
+        id: createId('flag'),
+        postId: post.id,
+        flaggedBy: 'instructor',
+        ...(sanitizeOptionalText(body.reason, MAX_FLAG_REASON_LENGTH) ? { reason: sanitizeOptionalText(body.reason, MAX_FLAG_REASON_LENGTH) } : {}),
+        createdAt: Date.now(),
+      }
+      session.data.flags[post.id] = [flag]
+    } else {
+      delete session.data.flags[post.id]
     }
-    session.data.flags[post.id] = [...(session.data.flags[post.id] ?? []), flag].slice(-MAX_FLAGS_PER_POST)
     await persistAndBroadcast(sessions, ws, session)
-    logModeration('flag', { sessionId: session.id, postId: post.id })
+    logModeration(shouldFlag ? 'flag' : 'unflag', { sessionId: session.id, postId: post.id })
     res.json(buildInstructorSnapshot(session))
   })
 

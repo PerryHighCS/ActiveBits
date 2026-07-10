@@ -2,10 +2,9 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react
 import { readSessionParticipantContext } from '@src/components/common/sessionParticipantContext'
 import Button from '@src/components/ui/Button'
 import NoteStyleSelect from '../../../shared/client/components/NoteStyleSelect'
+import ReactionSummary from '../../../shared/client/components/ReactionSummary'
 import {
-  POSTBOARD_REACTION_IDS,
-  POSTBOARD_REACTION_LABELS,
-  POSTBOARD_REACTION_SYMBOLS,
+  POSTBOARD_REACTION_OPTIONS,
   type PostboardReactionId,
   type PostboardStudentSnapshot,
 } from '../../shared/types'
@@ -50,6 +49,7 @@ export default function PostboardStudent({ sessionData }: PostboardStudentProps)
   const [snapshot, setSnapshot] = useState<PostboardStudentSnapshot | null>(null)
   const [draft, setDraft] = useState('')
   const [styleId, setStyleId] = useState(DEFAULT_NOTE_STYLE_ID)
+  const [dismissedOwnPostIds, setDismissedOwnPostIds] = useState<Set<string>>(() => new Set())
   const [error, setError] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
 
@@ -149,12 +149,36 @@ export default function PostboardStudent({ sessionData }: PostboardStudentProps)
     }
   }
 
+  const deleteRejectedPost = async (postId: string) => {
+    if (!sessionId || !identity.studentId) {
+      setError('Join the session with your name before deleting a returned note.')
+      return
+    }
+    try {
+      const response = await fetch(`/api/postboard/${encodeURIComponent(sessionId)}/posts/${encodeURIComponent(postId)}/delete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ studentId: identity.studentId }),
+      })
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({})) as { error?: string }
+        throw new Error(payload.error || 'Could not delete returned note')
+      }
+      setDismissedOwnPostIds((current) => new Set(current).add(postId))
+      await fetchState()
+      setError(null)
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : String(deleteError))
+    }
+  }
+
   if (!sessionId) {
     return <main className="postboard-shell"><p>Missing Postboard session.</p></main>
   }
 
   const promptText = snapshot?.prompt.text || 'Your teacher is setting up the prompt.'
   const composeStyleClass = getNoteStyleClassName(styleId)
+  const boardPosts = snapshot?.posts.filter((post) => !dismissedOwnPostIds.has(post.id)) ?? []
 
   return (
     <main className="postboard-shell postboard-student-shell">
@@ -167,49 +191,54 @@ export default function PostboardStudent({ sessionData }: PostboardStudentProps)
 
       <section className="postboard-board" aria-label="Shared notes">
         {snapshot == null && <p className="postboard-empty">Loading notes...</p>}
-        {snapshot != null && snapshot.posts.length === 0 && <p className="postboard-empty">No notes have been approved yet.</p>}
-        {snapshot?.posts.map((post) => (
-          <article key={post.id} className={`postboard-card ${getNoteStyleClassName(post.styleId)}`}>
+        {snapshot != null && boardPosts.length === 0 && <p className="postboard-empty">No notes have been approved yet.</p>}
+        {boardPosts.map((post) => (
+          <article
+            key={post.id}
+            className={`postboard-card ${getNoteStyleClassName(post.styleId)}${post.status === 'pending' && post.isOwnPost ? ' postboard-card-own-pending' : ''}${post.status === 'rejected' && post.isOwnPost ? ' postboard-card-rejected' : ''}`}
+          >
+            {post.status === 'rejected' && post.isOwnPost && (
+              <div className="postboard-card-header">
+                <span className="postboard-status-badge">Returned</span>
+                <div className="postboard-move-actions">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDraft(post.text)
+                      setStyleId(post.styleId)
+                      setDismissedOwnPostIds((current) => new Set(current).add(post.id))
+                    }}
+                    aria-label="Edit returned note"
+                    title="Edit returned note"
+                  >
+                    ✏️
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void deleteRejectedPost(post.id)
+                    }}
+                    aria-label="Dismiss returned note"
+                    title="Dismiss returned note"
+                  >
+                    🗑️
+                  </button>
+                </div>
+              </div>
+            )}
             <p>{post.text}</p>
             {!post.isOwnPost && (
-              <div className="postboard-reactions" aria-label="React to note">
-                {POSTBOARD_REACTION_IDS.map((reactionId) => (
-                  <button
-                    key={reactionId}
-                    type="button"
-                    onClick={() => void reactToPost(post.id, reactionId)}
-                    aria-label={`React with ${POSTBOARD_REACTION_LABELS[reactionId]}`}
-                  >
-                    {POSTBOARD_REACTION_SYMBOLS[reactionId]} {snapshot.reactionCounts[post.id]?.[reactionId] ?? 0}
-                  </button>
-                ))}
-              </div>
+              <ReactionSummary
+                reactions={snapshot?.reactionCounts[post.id] ?? {}}
+                options={POSTBOARD_REACTION_OPTIONS}
+                canReact
+                onReact={(reactionId) => void reactToPost(post.id, reactionId as PostboardReactionId)}
+                className="postboard-reactions"
+              />
             )}
           </article>
         ))}
       </section>
-
-      {snapshot?.ownRejectedPosts && snapshot.ownRejectedPosts.length > 0 && (
-        <section className="postboard-panel" aria-labelledby="postboard-rejected-title">
-          <h2 id="postboard-rejected-title">Revise a returned note</h2>
-          <div className="postboard-card-list">
-            {snapshot.ownRejectedPosts.map((post) => (
-              <article key={post.id} className={`postboard-card ${getNoteStyleClassName(post.styleId)} postboard-card-rejected`}>
-                <p>{post.text}</p>
-                <Button
-                  type="button"
-                  onClick={() => {
-                    setDraft(post.text)
-                    setStyleId(post.styleId)
-                  }}
-                >
-                  Move to editor
-                </Button>
-              </article>
-            ))}
-          </div>
-        </section>
-      )}
 
       <section className="postboard-panel postboard-compose-panel" aria-labelledby="postboard-submit-title">
         <h2 id="postboard-submit-title">Add a note</h2>
