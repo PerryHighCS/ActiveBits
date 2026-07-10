@@ -318,6 +318,19 @@
   border-color: #fecdd3;
 }
 
+.postboard-card[draggable="true"] {
+  cursor: grab;
+}
+
+.postboard-card-dragging {
+  opacity: 0.5;
+}
+
+.postboard-card-drag-over {
+  outline: 2px dashed #0f766e;
+  outline-offset: 2px;
+}
+
 .postboard-card p {
   margin: 0;
   white-space: pre-wrap;

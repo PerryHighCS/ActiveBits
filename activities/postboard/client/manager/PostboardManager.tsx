@@ -46,6 +46,18 @@ function getLaunchDefaults(search: string): { prompt: string; autoApprove: boole
   return { prompt, autoApprove }
 }
 
+export function reorderPostIds(currentIds: string[], draggedId: string, targetId: string): string[] {
+  if (draggedId === targetId) return currentIds
+  const fromIndex = currentIds.indexOf(draggedId)
+  const targetIndex = currentIds.indexOf(targetId)
+  if (fromIndex === -1 || targetIndex === -1) return currentIds
+  const reordered = [...currentIds]
+  const [moved] = reordered.splice(fromIndex, 1)
+  if (moved === undefined) return currentIds
+  reordered.splice(targetIndex, 0, moved)
+  return reordered
+}
+
 export default function PostboardManager(): React.JSX.Element {
   const { sessionId } = useParams<{ sessionId?: string }>()
   const location = useLocation()
@@ -60,6 +72,8 @@ export default function PostboardManager(): React.JSX.Element {
   const [isPosting, setIsPosting] = useState(false)
   const [launchDefaultsApplied, setLaunchDefaultsApplied] = useState(false)
   const [isSetupOpen, setIsSetupOpen] = useState(false)
+  const [draggedPostId, setDraggedPostId] = useState<string | null>(null)
+  const [dragOverPostId, setDragOverPostId] = useState<string | null>(null)
   const autoApproveDirtyRef = useRef(false)
   const setupInitializedRef = useRef(false)
 
@@ -217,6 +231,22 @@ export default function PostboardManager(): React.JSX.Element {
     }
   }
 
+  const dropPostOnTarget = async (targetPostId: string) => {
+    const sourcePostId = draggedPostId
+    setDraggedPostId(null)
+    setDragOverPostId(null)
+    if (!snapshot || !sourcePostId || sourcePostId === targetPostId) return
+    const currentBoardIds = snapshot.posts.filter((post) => post.status !== 'pending').map((post) => post.id)
+    const reorderedIds = reorderPostIds(currentBoardIds, sourcePostId, targetPostId)
+    try {
+      const nextSnapshot = await postJson('/reorder', { postIds: reorderedIds }) as PostboardInstructorSnapshot
+      setSnapshot(nextSnapshot)
+      setError(null)
+    } catch (reorderError) {
+      setError(reorderError instanceof Error ? reorderError.message : String(reorderError))
+    }
+  }
+
   const reactToPost = async (postId: string, reactionId: PostboardReactionId) => {
     try {
       await postJson(`/posts/${encodeURIComponent(postId)}/react`, { reactionId })
@@ -320,7 +350,31 @@ export default function PostboardManager(): React.JSX.Element {
                 return (
                 <article
                   key={post.id}
-                  className={`postboard-card postboard-card-with-flag ${getNoteStyleClassName(post.styleId)}${isFaded ? ' postboard-card-rejected' : ''}`}
+                  className={`postboard-card postboard-card-with-flag ${getNoteStyleClassName(post.styleId)}${isFaded ? ' postboard-card-rejected' : ''}${draggedPostId === post.id ? ' postboard-card-dragging' : ''}${dragOverPostId === post.id && draggedPostId !== post.id ? ' postboard-card-drag-over' : ''}`}
+                  draggable
+                  aria-grabbed={draggedPostId === post.id}
+                  onDragStart={(event) => {
+                    setDraggedPostId(post.id)
+                    event.dataTransfer.effectAllowed = 'move'
+                    event.dataTransfer.setData('text/plain', post.id)
+                  }}
+                  onDragOver={(event) => {
+                    if (draggedPostId == null || draggedPostId === post.id) return
+                    event.preventDefault()
+                    event.dataTransfer.dropEffect = 'move'
+                    setDragOverPostId(post.id)
+                  }}
+                  onDragLeave={() => {
+                    setDragOverPostId((current) => (current === post.id ? null : current))
+                  }}
+                  onDrop={(event) => {
+                    event.preventDefault()
+                    void dropPostOnTarget(post.id)
+                  }}
+                  onDragEnd={() => {
+                    setDraggedPostId(null)
+                    setDragOverPostId(null)
+                  }}
                 >
                   <InstructorFeedbackControls
                     annotation={{
