@@ -162,20 +162,16 @@ export default function InstructorFeedbackControls({
               className="absolute left-full top-0 z-10 ml-2 flex w-32 flex-wrap gap-1 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-1.5 shadow-lg"
             >
               <li
-                role="option"
-                aria-label="No emoji annotation"
-                aria-selected={annotation.emoji === null}
-                onClick={(event) => {
-                  if (event.target !== event.currentTarget) return
-                  onEmojiChange(null)
-                  closeEmojiPicker(true)
-                }}
+                role="presentation"
               >
                 <button
                   type="button"
+                  role="option"
                   ref={(node) => {
                     emojiOptionRefs.current[0] = node
                   }}
+                  aria-label="No emoji annotation"
+                  aria-selected={annotation.emoji === null}
                   onClick={() => {
                     onEmojiChange(null)
                     closeEmojiPicker(true)
@@ -188,26 +184,21 @@ export default function InstructorFeedbackControls({
               {emojiOptions.map((entry, index) => (
                 <li
                   key={entry.emoji}
-                  role="option"
-                  aria-label={entry.label}
-                  aria-selected={annotation.emoji === entry.emoji}
-                  onClick={(event) => {
-                    if (event.target !== event.currentTarget) return
-                    onEmojiChange(entry.emoji)
-                    closeEmojiPicker(true)
-                  }}
+                  role="presentation"
                 >
                   <button
                     type="button"
+                    role="option"
                     ref={(node) => {
                       emojiOptionRefs.current[index + 1] = node
                     }}
+                    aria-label={entry.label}
+                    aria-selected={annotation.emoji === entry.emoji}
                     onClick={() => {
                       onEmojiChange(entry.emoji)
                       closeEmojiPicker(true)
                     }}
                     className="text-base hover:bg-slate-100 dark:hover:bg-slate-700 rounded px-0.5"
-                    aria-label={entry.label}
                   >
                     {entry.emoji}
                   </button>

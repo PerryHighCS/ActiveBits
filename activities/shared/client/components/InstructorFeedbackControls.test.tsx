@@ -124,8 +124,9 @@ void test('InstructorFeedbackControls supports add-mode flagging and emoji keybo
     assert.equal(emojiButton.getAttribute('aria-expanded'), 'true')
     const listbox = rendered.getByRole('listbox', { name: 'Choose emoji' })
     fireEvent.keyDown(listbox, { key: 'ArrowDown' })
-    assert.equal(globalThis.document.activeElement, rendered.getByRole('button', { name: 'On fire' }))
-    fireEvent.click(rendered.getByRole('button', { name: 'On fire' }))
+    const onFireOption = rendered.getByRole('option', { name: 'On fire' })
+    assert.equal(globalThis.document.activeElement, onFireOption)
+    fireEvent.click(onFireOption)
     assert.deepEqual(emojiStates, ['🔥'])
     assert.equal(emojiButton.getAttribute('aria-expanded'), 'false')
 

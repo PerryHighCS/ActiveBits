@@ -616,6 +616,37 @@ void test('setup route requires instructor auth, persists prompt settings, and b
   assert.deepEqual(messages, [JSON.stringify({ type: 'postboard:updated', sessionId: session.id })])
 })
 
+void test('post route rejects new posts once the session reaches the post limit', async () => {
+  const app = new TestApp()
+  const store = new MemoryStore()
+  const posts = Array.from({ length: 500 }, (_, index) => createPost({
+    id: `post-${index}`,
+    text: `Note ${index}`,
+    createdAt: index,
+    updatedAt: index,
+    approvedAt: index,
+    order: index,
+  }))
+  const session = createSession({ posts })
+  await store.set(session.id, session)
+  setupPostboardRoutes(app, store, createWsRouter())
+
+  const handler = app.handlers.post['/api/postboard/:sessionId/posts']
+  assert.ok(handler)
+
+  const response = createResponse()
+  await handler({
+    params: { sessionId: session.id },
+    body: { studentId: 'student-501', text: 'One note too many' },
+  }, response)
+
+  assert.equal(response.statusCode, 409)
+  assert.deepEqual(response.body, { error: 'post limit reached' })
+  const stored = await store.get(session.id)
+  const storedData = stored?.data as PostboardSessionData | undefined
+  assert.equal(storedData?.posts.length, 500)
+})
+
 void test('hide and unhide routes require instructor auth, update hiddenAt, and broadcast', async () => {
   const app = new TestApp()
   const store = new MemoryStore()
@@ -727,6 +758,9 @@ void test('react route validates input, protects hidden and self posts, and togg
         order: 3,
       }),
     ],
+    reactions: {
+      'hidden-peer': { byUser: { 'student-3': '🔥' } },
+    },
   })
   const { ws, messages } = createBroadcastCapture(session.id)
   await store.set(session.id, session)
@@ -803,7 +837,7 @@ void test('react route validates input, protects hidden and self posts, and togg
     headers: { 'x-instructor-passcode': 'teacher-pass' },
     body: { reactionId: '🔥' },
   }, instructorReaction)
-  assert.deepEqual((instructorReaction.body as ReactResponseBody).reactionCounts, { 'hidden-peer': { '🔥': 1 } })
+  assert.deepEqual((instructorReaction.body as ReactResponseBody).reactionCounts, { 'hidden-peer': { '🔥': 2 } })
   assert.deepEqual((instructorReaction.body as ReactResponseBody).viewerReactions, { 'hidden-peer': '🔥' })
   assert.equal(messages.length, 4)
 })

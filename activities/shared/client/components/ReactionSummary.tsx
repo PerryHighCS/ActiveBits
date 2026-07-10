@@ -128,21 +128,16 @@ export default function ReactionSummary({
           {options.map((entry, index) => (
             <li
               key={entry.value}
-              role="option"
-              aria-label={`React with ${entry.label}`}
-              aria-selected={viewerReaction === entry.value}
-              onClick={(event) => {
-                if (event.target !== event.currentTarget) return
-                onReact(entry.value)
-                closePicker(true)
-              }}
+              role="presentation"
             >
               <button
                 type="button"
+                role="option"
                 ref={(node) => {
                   optionRefs.current[index] = node
                 }}
                 aria-label={`React with ${entry.label}`}
+                aria-selected={viewerReaction === entry.value}
                 className={`rounded-lg px-1.5 py-1 text-base hover:bg-slate-100 dark:hover:bg-slate-700 ${
                   viewerReaction === entry.value
                     ? 'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300'

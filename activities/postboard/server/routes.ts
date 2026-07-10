@@ -522,6 +522,10 @@ export default function setupPostboardRoutes(app: PostboardRouteApp, sessions: S
       res.status(400).json({ error: 'studentId is required' })
       return
     }
+    if (session.data.posts.length >= MAX_POSTS) {
+      res.status(409).json({ error: 'post limit reached' })
+      return
+    }
 
     const now = Date.now()
     const status: PostboardPostStatus = isInstructor || session.data.settings.autoApprove ? 'approved' : 'pending'
@@ -740,10 +744,15 @@ export default function setupPostboardRoutes(app: PostboardRouteApp, sessions: S
     if (Object.keys(reactionEntry.byUser).length === 0) {
       delete session.data.reactions[post.id]
     }
+    const changedPostReactions: PostboardReactionState = {}
+    const changedReactionEntry = session.data.reactions[post.id]
+    if (changedReactionEntry) {
+      changedPostReactions[post.id] = changedReactionEntry
+    }
     await persistAndBroadcast(sessions, ws, session)
     res.json({
-      reactionCounts: buildReactionCounts(session.data.reactions),
-      viewerReactions: buildViewerReactions(session.data.reactions, reactorId),
+      reactionCounts: buildReactionCounts(changedPostReactions),
+      viewerReactions: buildViewerReactions(changedPostReactions, reactorId),
     })
   }))
 }
