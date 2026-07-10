@@ -76,17 +76,21 @@ export default function PostboardManager(): React.JSX.Element {
   const [dragOverPostId, setDragOverPostId] = useState<string | null>(null)
   const autoApproveDirtyRef = useRef(false)
   const setupInitializedRef = useRef(false)
+  const fetchRequestIdRef = useRef(0)
 
   const launchDefaults = useMemo(() => getLaunchDefaults(location.search), [location.search])
 
   const fetchState = useCallback(async () => {
-    if (!sessionId || !instructorPasscode) return
+    if (!sessionId || !instructorPasscode) return false
+    const requestId = fetchRequestIdRef.current + 1
+    fetchRequestIdRef.current = requestId
     const response = await fetch(`/api/postboard/${encodeURIComponent(sessionId)}/instructor-state`, {
       headers: { 'x-instructor-passcode': instructorPasscode },
       cache: 'no-store',
     })
     if (!response.ok) throw new Error('Could not load Postboard')
     const nextSnapshot = await response.json() as PostboardInstructorSnapshot
+    if (requestId !== fetchRequestIdRef.current) return false
     setSnapshot(nextSnapshot)
     setPromptDraft((current) => current || nextSnapshot.prompt.text)
     if (!autoApproveDirtyRef.current) {
@@ -96,6 +100,7 @@ export default function PostboardManager(): React.JSX.Element {
       setupInitializedRef.current = true
       setIsSetupOpen(nextSnapshot.prompt.text.length === 0)
     }
+    return true
   }, [instructorPasscode, sessionId])
 
   useEffect(() => {
@@ -103,8 +108,8 @@ export default function PostboardManager(): React.JSX.Element {
     let cancelled = false
     const load = async () => {
       try {
-        await fetchState()
-        if (!cancelled) setError(null)
+        const didCommit = await fetchState()
+        if (!cancelled && didCommit) setError(null)
       } catch (loadError) {
         if (!cancelled) setError(loadError instanceof Error ? loadError.message : String(loadError))
       }
@@ -115,6 +120,7 @@ export default function PostboardManager(): React.JSX.Element {
     }, POLL_INTERVAL_MS)
     return () => {
       cancelled = true
+      fetchRequestIdRef.current += 1
       window.clearInterval(interval)
     }
   }, [fetchState, instructorPasscode, sessionId])

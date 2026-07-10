@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { readSessionParticipantContext } from '@src/components/common/sessionParticipantContext'
 import Button from '@src/components/ui/Button'
 import NoteStyleSelect from '../../../shared/client/components/NoteStyleSelect'
@@ -52,9 +52,12 @@ export default function PostboardStudent({ sessionData }: PostboardStudentProps)
   const [dismissedOwnPostIds, setDismissedOwnPostIds] = useState<Set<string>>(() => new Set())
   const [error, setError] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const fetchRequestIdRef = useRef(0)
 
   const fetchState = useCallback(async () => {
-    if (!sessionId) return
+    if (!sessionId) return false
+    const requestId = fetchRequestIdRef.current + 1
+    fetchRequestIdRef.current = requestId
     const params = new URLSearchParams()
     if (identity.studentId) params.set('studentId', identity.studentId)
     const query = params.toString()
@@ -62,7 +65,10 @@ export default function PostboardStudent({ sessionData }: PostboardStudentProps)
       cache: 'no-store',
     })
     if (!response.ok) throw new Error('Could not load Postboard')
-    setSnapshot(await response.json() as PostboardStudentSnapshot)
+    const nextSnapshot = await response.json() as PostboardStudentSnapshot
+    if (requestId !== fetchRequestIdRef.current) return false
+    setSnapshot(nextSnapshot)
+    return true
   }, [identity.studentId, sessionId])
 
   useEffect(() => {
@@ -70,8 +76,8 @@ export default function PostboardStudent({ sessionData }: PostboardStudentProps)
     let cancelled = false
     const load = async () => {
       try {
-        await fetchState()
-        if (!cancelled) setError(null)
+        const didCommit = await fetchState()
+        if (!cancelled && didCommit) setError(null)
       } catch (loadError) {
         if (!cancelled) setError(loadError instanceof Error ? loadError.message : String(loadError))
       }
@@ -82,6 +88,7 @@ export default function PostboardStudent({ sessionData }: PostboardStudentProps)
     }, POLL_INTERVAL_MS)
     return () => {
       cancelled = true
+      fetchRequestIdRef.current += 1
       window.clearInterval(interval)
     }
   }, [fetchState, sessionId])
