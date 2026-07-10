@@ -52,13 +52,14 @@ void test('reorderPostIds leaves the order unchanged for no-op or invalid drags'
   )
 })
 
-void test('readInstructorPasscode stores passcode from route state when storage is available', () => {
+void test('readInstructorPasscode reads passcode from route state without persisting it', () => {
   const stored = new Map<string, string>()
+  let writeCount = 0
 
   withMockWindow({
     getItem: (key) => stored.get(key) ?? null,
-    setItem: (key, value) => {
-      stored.set(key, value)
+    setItem: () => {
+      writeCount += 1
     },
   }, () => {
     assert.equal(
@@ -67,7 +68,7 @@ void test('readInstructorPasscode stores passcode from route state when storage 
     )
   })
 
-  assert.equal(stored.get('postboard_instructor_session-1'), 'teacher-pass')
+  assert.equal(writeCount, 0)
 })
 
 void test('readInstructorPasscode falls back safely when sessionStorage throws', () => {

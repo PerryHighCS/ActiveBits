@@ -34,16 +34,7 @@ export function readInstructorPasscode(sessionId: string | undefined, state: unk
       ? locationState.instructorPasscode
       : ''
 
-  if (statePasscode) {
-    if (sessionId && typeof window !== 'undefined') {
-      try {
-        window.sessionStorage.setItem(`postboard_instructor_${sessionId}`, statePasscode)
-      } catch {
-        // Storage can be unavailable in privacy-restricted embedded contexts.
-      }
-    }
-    return statePasscode
-  }
+  if (statePasscode) return statePasscode
   if (!sessionId || typeof window === 'undefined') return ''
   try {
     return window.sessionStorage.getItem(`postboard_instructor_${sessionId}`) ?? ''
