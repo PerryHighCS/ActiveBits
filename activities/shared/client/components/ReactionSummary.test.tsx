@@ -63,10 +63,94 @@ void test('ReactionSummary opens a reaction picker and emits selected values', a
     const pickerButton = rendered.getByRole('button', { name: 'Choose reaction' })
     assert.equal(pickerButton.textContent, '👍')
     fireEvent.click(pickerButton)
-    fireEvent.click(rendered.getByRole('option', { name: 'React with Lightbulb' }))
+    assert.equal(pickerButton.getAttribute('aria-expanded'), 'true')
+    fireEvent.click(rendered.getByRole('button', { name: 'React with Lightbulb' }))
 
     assert.deepEqual(reactions, ['lightbulb'])
+    assert.equal(pickerButton.getAttribute('aria-expanded'), 'false')
     assert.equal(rendered.getByText('👍 2').tagName, 'SPAN')
+  } finally {
+    restoreDomEnvironment()
+  }
+})
+
+void test('ReactionSummary returns null when reactions are read-only and empty', async () => {
+  const restoreDomEnvironment = installDomEnvironment()
+  const { render } = await import('@testing-library/react')
+
+  try {
+    const rendered = render(
+      React.createElement(ReactionSummary, {
+        reactions: {},
+        canReact: false,
+        options: [],
+      }),
+    )
+
+    assert.equal(rendered.container.firstChild, null)
+  } finally {
+    restoreDomEnvironment()
+  }
+})
+
+void test('ReactionSummary renders existing reactions without a picker in read-only mode', async () => {
+  const restoreDomEnvironment = installDomEnvironment()
+  const { render } = await import('@testing-library/react')
+
+  try {
+    const rendered = render(
+      React.createElement(ReactionSummary, {
+        reactions: { agree: 3 },
+        canReact: false,
+        options: [{ value: 'agree', label: 'Agree', symbol: '👍' }],
+      }),
+    )
+
+    assert.equal(rendered.getByText('👍 3').tagName, 'SPAN')
+    assert.throws(() => rendered.getByRole('button'))
+  } finally {
+    restoreDomEnvironment()
+  }
+})
+
+void test('ReactionSummary supports keyboard movement, Escape, and outside dismissal', async () => {
+  const restoreDomEnvironment = installDomEnvironment()
+  const { fireEvent, render } = await import('@testing-library/react')
+
+  try {
+    const reactions: string[] = []
+    const rendered = render(
+      React.createElement(
+        'div',
+        {},
+        React.createElement(ReactionSummary, {
+          reactions: {},
+          canReact: true,
+          options: [
+            { value: 'agree', label: 'Agree', symbol: '👍' },
+            { value: 'lightbulb', label: 'Lightbulb', symbol: '💡' },
+          ],
+          onReact: (reaction: string) => {
+            reactions.push(reaction)
+          },
+        }),
+        React.createElement('button', { type: 'button' }, 'Outside'),
+      ),
+    )
+
+    const pickerButton = rendered.getByRole('button', { name: 'Choose reaction' })
+    fireEvent.click(pickerButton)
+    const listbox = rendered.getByRole('listbox')
+    fireEvent.keyDown(listbox, { key: 'ArrowDown' })
+    assert.equal(globalThis.document.activeElement, rendered.getByRole('button', { name: 'React with Lightbulb' }))
+    fireEvent.keyDown(listbox, { key: 'Escape' })
+    assert.equal(pickerButton.getAttribute('aria-expanded'), 'false')
+    assert.equal(globalThis.document.activeElement, pickerButton)
+
+    fireEvent.click(pickerButton)
+    assert.equal(pickerButton.getAttribute('aria-expanded'), 'true')
+    fireEvent.mouseDown(rendered.getByRole('button', { name: 'Outside' }))
+    assert.equal(pickerButton.getAttribute('aria-expanded'), 'false')
   } finally {
     restoreDomEnvironment()
   }

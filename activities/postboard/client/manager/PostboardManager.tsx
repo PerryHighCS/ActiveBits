@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { useLocation, useParams } from 'react-router-dom'
 import SessionHeader from '@src/components/common/SessionHeader'
 import Button from '@src/components/ui/Button'
@@ -59,6 +59,7 @@ export default function PostboardManager(): React.JSX.Element {
   const [isSavingSetup, setIsSavingSetup] = useState(false)
   const [isPosting, setIsPosting] = useState(false)
   const [launchDefaultsApplied, setLaunchDefaultsApplied] = useState(false)
+  const autoApproveDirtyRef = useRef(false)
 
   const launchDefaults = useMemo(() => getLaunchDefaults(location.search), [location.search])
 
@@ -72,7 +73,9 @@ export default function PostboardManager(): React.JSX.Element {
     const nextSnapshot = await response.json() as PostboardInstructorSnapshot
     setSnapshot(nextSnapshot)
     setPromptDraft((current) => current || nextSnapshot.prompt.text)
-    setAutoApprove(nextSnapshot.settings.autoApprove)
+    if (!autoApproveDirtyRef.current) {
+      setAutoApprove(nextSnapshot.settings.autoApprove)
+    }
   }, [instructorPasscode, sessionId])
 
   useEffect(() => {
@@ -95,21 +98,6 @@ export default function PostboardManager(): React.JSX.Element {
       window.clearInterval(interval)
     }
   }, [fetchState, instructorPasscode, sessionId])
-
-  useEffect(() => {
-    if (!snapshot || launchDefaultsApplied || !instructorPasscode || !sessionId) return
-    if (snapshot.prompt.text || (!launchDefaults.prompt && launchDefaults.autoApprove == null)) {
-      setLaunchDefaultsApplied(true)
-      return
-    }
-
-    setLaunchDefaultsApplied(true)
-    const nextPrompt = launchDefaults.prompt || snapshot.prompt.text
-    const nextAutoApprove = launchDefaults.autoApprove ?? snapshot.settings.autoApprove
-    setPromptDraft(nextPrompt)
-    setAutoApprove(nextAutoApprove)
-    void saveSetup(nextPrompt, nextAutoApprove)
-  }, [instructorPasscode, launchDefaults, launchDefaultsApplied, sessionId, snapshot])
 
   const postJson = useCallback(async (path: string, body: Record<string, unknown> = {}) => {
     if (!sessionId) throw new Error('Missing session id')
@@ -138,6 +126,7 @@ export default function PostboardManager(): React.JSX.Element {
       setSnapshot(nextSnapshot)
       setPromptDraft(nextSnapshot.prompt.text)
       setAutoApprove(nextSnapshot.settings.autoApprove)
+      autoApproveDirtyRef.current = false
       setError(null)
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : String(saveError))
@@ -145,6 +134,22 @@ export default function PostboardManager(): React.JSX.Element {
       setIsSavingSetup(false)
     }
   }, [autoApprove, postJson, promptDraft])
+
+  useEffect(() => {
+    if (!snapshot || launchDefaultsApplied || !instructorPasscode || !sessionId) return
+    if (snapshot.prompt.text || (!launchDefaults.prompt && launchDefaults.autoApprove == null)) {
+      setLaunchDefaultsApplied(true)
+      return
+    }
+
+    setLaunchDefaultsApplied(true)
+    const nextPrompt = launchDefaults.prompt || snapshot.prompt.text
+    const nextAutoApprove = launchDefaults.autoApprove ?? snapshot.settings.autoApprove
+    setPromptDraft(nextPrompt)
+    setAutoApprove(nextAutoApprove)
+    autoApproveDirtyRef.current = true
+    void saveSetup(nextPrompt, nextAutoApprove)
+  }, [instructorPasscode, launchDefaults, launchDefaultsApplied, saveSetup, sessionId, snapshot])
 
   const handleSetupSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -247,7 +252,10 @@ export default function PostboardManager(): React.JSX.Element {
             <input
               type="checkbox"
               checked={autoApprove}
-              onChange={(event) => setAutoApprove(event.target.checked)}
+              onChange={(event) => {
+                setAutoApprove(event.target.checked)
+                autoApproveDirtyRef.current = true
+              }}
             />
             <span>Auto-approve student notes</span>
           </label>
@@ -259,7 +267,11 @@ export default function PostboardManager(): React.JSX.Element {
 
       <section className="postboard-panel" aria-labelledby="postboard-moderation-title">
         <h2 id="postboard-moderation-title">Moderation Queue ({pendingPosts.length})</h2>
-        {pendingPosts.length === 0 && <p className="postboard-empty">No pending notes.</p>}
+        {snapshot == null ? (
+          <p className="postboard-empty">Loading notes...</p>
+        ) : pendingPosts.length === 0 ? (
+          <p className="postboard-empty">No pending notes.</p>
+        ) : null}
         <div className="postboard-card-list">
           {pendingPosts.map((post) => (
             <article key={post.id} className={`postboard-card ${getNoteStyleClassName(post.styleId)} postboard-card-pending`}>
@@ -276,7 +288,11 @@ export default function PostboardManager(): React.JSX.Element {
 
       <section className="postboard-panel" aria-labelledby="postboard-all-posts-title">
         <h2 id="postboard-all-posts-title">All Posts ({boardPosts.length})</h2>
-        {boardPosts.length === 0 && <p className="postboard-empty">No board notes yet.</p>}
+        {snapshot == null ? (
+          <p className="postboard-empty">Loading notes...</p>
+        ) : boardPosts.length === 0 ? (
+          <p className="postboard-empty">No board notes yet.</p>
+        ) : null}
         <div className="postboard-board">
           {boardPosts.map((post, index) => (
             <article

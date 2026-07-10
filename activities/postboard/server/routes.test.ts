@@ -264,6 +264,74 @@ void test('student snapshot hides peer names, pending posts, hidden posts, flags
   assert.equal('reactions' in snapshot, false)
 })
 
+void test('student snapshot excludes reaction counts for non-visible posts', () => {
+  const basePost = {
+    promptId: 'prompt-1',
+    authorId: 'student-2',
+    authorName: 'Grace Hopper',
+    authorRole: 'student' as const,
+    text: 'Peer note',
+    styleId: 'lemon',
+    createdAt: 100,
+    updatedAt: 100,
+    approvedAt: null,
+    rejectedAt: null,
+    deletedAt: null,
+    hiddenAt: null,
+    order: 0,
+  }
+  const session = createSession({
+    posts: [
+      {
+        ...basePost,
+        id: 'approved-visible',
+        status: 'approved',
+        approvedAt: 100,
+      },
+      {
+        ...basePost,
+        id: 'pending-peer',
+        status: 'pending',
+        order: 1,
+      },
+      {
+        ...basePost,
+        id: 'hidden-peer',
+        status: 'approved',
+        approvedAt: 102,
+        hiddenAt: 103,
+        order: 2,
+      },
+      {
+        ...basePost,
+        id: 'deleted-peer',
+        status: 'deleted',
+        deletedAt: 104,
+        order: 3,
+      },
+      {
+        ...basePost,
+        id: 'rejected-peer',
+        status: 'rejected',
+        rejectedAt: 105,
+        order: 4,
+      },
+    ],
+    reactions: {
+      'approved-visible': { byUser: { 'student-1': '👍' } },
+      'pending-peer': { byUser: { 'student-3': '🤔' } },
+      'hidden-peer': { byUser: { 'student-3': '❤️' } },
+      'deleted-peer': { byUser: { 'student-3': '🔥' } },
+      'rejected-peer': { byUser: { 'student-3': '💡' } },
+    },
+  })
+
+  const snapshot = buildStudentSnapshot(session, 'student-1')
+
+  assert.deepEqual(snapshot.posts.map((post) => post.id), ['approved-visible'])
+  assert.deepEqual(snapshot.reactionCounts, { 'approved-visible': { '👍': 1 } })
+})
+
 void test('instructor snapshot includes names, flags, and moderation states', () => {
   const session = createSession({
     posts: [

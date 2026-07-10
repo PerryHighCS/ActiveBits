@@ -37,6 +37,8 @@ interface PostboardRouteApp {
   post(path: string, handler: (req: RouteRequest, res: JsonResponse) => void | Promise<void>): void
 }
 
+type RouteHandler = (req: RouteRequest, res: JsonResponse) => void | Promise<void>
+
 interface PostboardSession extends SessionRecord {
   type: 'postboard'
   data: PostboardSessionData
@@ -259,11 +261,12 @@ function normalizeFlags(value: unknown, posts: readonly PostboardPost[]): Record
     const normalizedFlags: PostboardFlag[] = []
     for (const rawFlag of rawFlags) {
       if (!isPlainObject(rawFlag)) continue
+      const reason = sanitizeOptionalText(rawFlag.reason, MAX_FLAG_REASON_LENGTH)
       normalizedFlags.push({
         id: sanitizeText(rawFlag.id, 120) || createId('flag'),
         postId,
         flaggedBy: sanitizeText(rawFlag.flaggedBy, 160) || 'instructor',
-        ...(sanitizeOptionalText(rawFlag.reason, MAX_FLAG_REASON_LENGTH) ? { reason: sanitizeOptionalText(rawFlag.reason, MAX_FLAG_REASON_LENGTH) } : {}),
+        ...(reason ? { reason } : {}),
         createdAt: normalizeTimestamp(rawFlag.createdAt),
       })
       if (normalizedFlags.length >= MAX_FLAGS_PER_POST) break
@@ -357,6 +360,13 @@ export function buildStudentSnapshot(session: PostboardSession, viewerStudentId:
     if (post.status === 'approved' && post.hiddenAt == null) return true
     return viewerStudentId != null && (post.status === 'pending' || post.status === 'rejected') && post.authorId === viewerStudentId
   })
+  const visiblePostIds = new Set(visiblePosts.map((post) => post.id))
+  const visibleReactions: PostboardReactionState = {}
+  for (const [postId, entry] of Object.entries(session.data.reactions)) {
+    if (visiblePostIds.has(postId)) {
+      visibleReactions[postId] = entry
+    }
+  }
 
   return {
     prompt: session.data.prompt,
@@ -365,7 +375,7 @@ export function buildStudentSnapshot(session: PostboardSession, viewerStudentId:
     },
     posts: sortPostsForBoard(visiblePosts).map((post) => toStudentPost(post, viewerStudentId)),
     ownRejectedPosts: [],
-    reactionCounts: buildReactionCounts(session.data.reactions),
+    reactionCounts: buildReactionCounts(visibleReactions),
   }
 }
 
@@ -422,40 +432,46 @@ function logModeration(action: string, details: Record<string, unknown>): void {
   console.info('[postboard] moderation action', { action, ...details })
 }
 
+function routeHandler(name: string, handler: RouteHandler): RouteHandler {
+  return async (req, res) => {
+    try {
+      await handler(req, res)
+    } catch (error) {
+      console.error('[postboard] Route failed', { route: name, error })
+      res.status(500).json({ error: 'internal server error' })
+    }
+  }
+}
+
 registerSessionNormalizer(ACTIVITY_ID, (session) => {
   session.data = normalizePostboardSessionData(session.data)
 })
 
 export default function setupPostboardRoutes(app: PostboardRouteApp, sessions: SessionStore, ws: WsRouter): void {
-  app.post('/api/postboard/create', async (req, res) => {
-    try {
-      const body = getBody(req)
-      const selectedOptions = isPlainObject(body.selectedOptions) ? body.selectedOptions : {}
-      const data = normalizePostboardSessionData({ selectedOptions })
-      const session = await createSession(sessions, { data })
-      session.type = ACTIVITY_ID
-      session.data = data
-      await sessions.set(session.id, session)
-      res.json({ id: session.id, instructorPasscode: data.instructorPasscode })
-    } catch (error) {
-      console.error('[postboard] Failed to create session', { error })
-      res.status(500).json({ error: 'internal server error' })
-    }
-  })
+  app.post('/api/postboard/create', routeHandler('create', async (req, res) => {
+    const body = getBody(req)
+    const selectedOptions = isPlainObject(body.selectedOptions) ? body.selectedOptions : {}
+    const data = normalizePostboardSessionData({ selectedOptions })
+    const session = await createSession(sessions, { data })
+    session.type = ACTIVITY_ID
+    session.data = data
+    await sessions.set(session.id, session)
+    res.json({ id: session.id, instructorPasscode: data.instructorPasscode })
+  }))
 
-  app.get('/api/postboard/:sessionId/instructor-state', async (req, res) => {
+  app.get('/api/postboard/:sessionId/instructor-state', routeHandler('instructor-state', async (req, res) => {
     const session = await getPostboardSession(req, res, sessions)
     if (!session || !requireInstructor(session, req, res)) return
     res.json(buildInstructorSnapshot(session))
-  })
+  }))
 
-  app.get('/api/postboard/:sessionId/student-state', async (req, res) => {
+  app.get('/api/postboard/:sessionId/student-state', routeHandler('student-state', async (req, res) => {
     const session = await getPostboardSession(req, res, sessions)
     if (!session) return
     res.json(buildStudentSnapshot(session, readStudentId(req)))
-  })
+  }))
 
-  app.post('/api/postboard/:sessionId/setup', async (req, res) => {
+  app.post('/api/postboard/:sessionId/setup', routeHandler('setup', async (req, res) => {
     const session = await getPostboardSession(req, res, sessions)
     if (!session || !requireInstructor(session, req, res)) return
     const body = getBody(req)
@@ -472,9 +488,9 @@ export default function setupPostboardRoutes(app: PostboardRouteApp, sessions: S
     await persistAndBroadcast(sessions, ws, session)
     logModeration('setup', { sessionId: session.id, autoApprove: session.data.settings.autoApprove })
     res.json(buildInstructorSnapshot(session))
-  })
+  }))
 
-  app.post('/api/postboard/:sessionId/posts', async (req, res) => {
+  app.post('/api/postboard/:sessionId/posts', routeHandler('posts', async (req, res) => {
     const session = await getPostboardSession(req, res, sessions)
     if (!session) return
     const body = getBody(req)
@@ -515,9 +531,9 @@ export default function setupPostboardRoutes(app: PostboardRouteApp, sessions: S
     session.data.posts.push(post)
     await persistAndBroadcast(sessions, ws, session)
     res.json({ post, instructor: isInstructor })
-  })
+  }))
 
-  app.post('/api/postboard/:sessionId/posts/:postId/approve', async (req, res) => {
+  app.post('/api/postboard/:sessionId/posts/:postId/approve', routeHandler('approve', async (req, res) => {
     const session = await getPostboardSession(req, res, sessions)
     if (!session || !requireInstructor(session, req, res)) return
     const post = findPost(session, req.params.postId)
@@ -534,9 +550,9 @@ export default function setupPostboardRoutes(app: PostboardRouteApp, sessions: S
     await persistAndBroadcast(sessions, ws, session)
     logModeration('approve', { sessionId: session.id, postId: post.id })
     res.json(buildInstructorSnapshot(session))
-  })
+  }))
 
-  app.post('/api/postboard/:sessionId/posts/:postId/reject', async (req, res) => {
+  app.post('/api/postboard/:sessionId/posts/:postId/reject', routeHandler('reject', async (req, res) => {
     const session = await getPostboardSession(req, res, sessions)
     if (!session || !requireInstructor(session, req, res)) return
     const post = findPost(session, req.params.postId)
@@ -553,9 +569,9 @@ export default function setupPostboardRoutes(app: PostboardRouteApp, sessions: S
     await persistAndBroadcast(sessions, ws, session)
     logModeration('reject', { sessionId: session.id, postId: post.id })
     res.json(buildInstructorSnapshot(session))
-  })
+  }))
 
-  app.post('/api/postboard/:sessionId/posts/:postId/unreject', async (req, res) => {
+  app.post('/api/postboard/:sessionId/posts/:postId/unreject', routeHandler('unreject', async (req, res) => {
     const session = await getPostboardSession(req, res, sessions)
     if (!session || !requireInstructor(session, req, res)) return
     const post = findPost(session, req.params.postId)
@@ -571,9 +587,9 @@ export default function setupPostboardRoutes(app: PostboardRouteApp, sessions: S
     await persistAndBroadcast(sessions, ws, session)
     logModeration('unreject', { sessionId: session.id, postId: post.id })
     res.json(buildInstructorSnapshot(session))
-  })
+  }))
 
-  app.post('/api/postboard/:sessionId/posts/:postId/delete', async (req, res) => {
+  app.post('/api/postboard/:sessionId/posts/:postId/delete', routeHandler('delete', async (req, res) => {
     const session = await getPostboardSession(req, res, sessions)
     if (!session) return
     const post = findPost(session, req.params.postId)
@@ -593,9 +609,9 @@ export default function setupPostboardRoutes(app: PostboardRouteApp, sessions: S
     await persistAndBroadcast(sessions, ws, session)
     logModeration('delete', { sessionId: session.id, postId: post.id })
     res.json(buildStudentSnapshot(session, studentId))
-  })
+  }))
 
-  app.post('/api/postboard/:sessionId/posts/:postId/hide', async (req, res) => {
+  app.post('/api/postboard/:sessionId/posts/:postId/hide', routeHandler('hide', async (req, res) => {
     const session = await getPostboardSession(req, res, sessions)
     if (!session || !requireInstructor(session, req, res)) return
     const post = findPost(session, req.params.postId)
@@ -608,9 +624,9 @@ export default function setupPostboardRoutes(app: PostboardRouteApp, sessions: S
     await persistAndBroadcast(sessions, ws, session)
     logModeration('hide', { sessionId: session.id, postId: post.id })
     res.json(buildInstructorSnapshot(session))
-  })
+  }))
 
-  app.post('/api/postboard/:sessionId/posts/:postId/unhide', async (req, res) => {
+  app.post('/api/postboard/:sessionId/posts/:postId/unhide', routeHandler('unhide', async (req, res) => {
     const session = await getPostboardSession(req, res, sessions)
     if (!session || !requireInstructor(session, req, res)) return
     const post = findPost(session, req.params.postId)
@@ -623,9 +639,9 @@ export default function setupPostboardRoutes(app: PostboardRouteApp, sessions: S
     await persistAndBroadcast(sessions, ws, session)
     logModeration('unhide', { sessionId: session.id, postId: post.id })
     res.json(buildInstructorSnapshot(session))
-  })
+  }))
 
-  app.post('/api/postboard/:sessionId/reorder', async (req, res) => {
+  app.post('/api/postboard/:sessionId/reorder', routeHandler('reorder', async (req, res) => {
     const session = await getPostboardSession(req, res, sessions)
     if (!session || !requireInstructor(session, req, res)) return
     const body = getBody(req)
@@ -640,9 +656,9 @@ export default function setupPostboardRoutes(app: PostboardRouteApp, sessions: S
     await persistAndBroadcast(sessions, ws, session)
     logModeration('reorder', { sessionId: session.id, count: orderById.size })
     res.json(buildInstructorSnapshot(session))
-  })
+  }))
 
-  app.post('/api/postboard/:sessionId/posts/:postId/flag', async (req, res) => {
+  app.post('/api/postboard/:sessionId/posts/:postId/flag', routeHandler('flag', async (req, res) => {
     const session = await getPostboardSession(req, res, sessions)
     if (!session || !requireInstructor(session, req, res)) return
     const post = findPost(session, req.params.postId)
@@ -651,6 +667,7 @@ export default function setupPostboardRoutes(app: PostboardRouteApp, sessions: S
       return
     }
     const body = getBody(req)
+    const reason = sanitizeOptionalText(body.reason, MAX_FLAG_REASON_LENGTH)
     const isCurrentlyFlagged = (session.data.flags[post.id]?.length ?? 0) > 0
     const shouldFlag = typeof body.flagged === 'boolean' ? body.flagged : !isCurrentlyFlagged
 
@@ -659,7 +676,7 @@ export default function setupPostboardRoutes(app: PostboardRouteApp, sessions: S
         id: createId('flag'),
         postId: post.id,
         flaggedBy: 'instructor',
-        ...(sanitizeOptionalText(body.reason, MAX_FLAG_REASON_LENGTH) ? { reason: sanitizeOptionalText(body.reason, MAX_FLAG_REASON_LENGTH) } : {}),
+        ...(reason ? { reason } : {}),
         createdAt: Date.now(),
       }
       session.data.flags[post.id] = [flag]
@@ -669,9 +686,9 @@ export default function setupPostboardRoutes(app: PostboardRouteApp, sessions: S
     await persistAndBroadcast(sessions, ws, session)
     logModeration(shouldFlag ? 'flag' : 'unflag', { sessionId: session.id, postId: post.id })
     res.json(buildInstructorSnapshot(session))
-  })
+  }))
 
-  app.post('/api/postboard/:sessionId/posts/:postId/react', async (req, res) => {
+  app.post('/api/postboard/:sessionId/posts/:postId/react', routeHandler('react', async (req, res) => {
     const session = await getPostboardSession(req, res, sessions)
     if (!session) return
     const post = findPost(session, req.params.postId)
@@ -710,5 +727,5 @@ export default function setupPostboardRoutes(app: PostboardRouteApp, sessions: S
     }
     await persistAndBroadcast(sessions, ws, session)
     res.json({ reactionCounts: buildReactionCounts(session.data.reactions) })
-  })
+  }))
 }

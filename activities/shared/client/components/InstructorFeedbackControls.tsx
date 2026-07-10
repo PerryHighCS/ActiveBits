@@ -1,4 +1,4 @@
-import { type ReactElement } from 'react'
+import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactElement } from 'react'
 
 export interface InstructorFeedbackAnnotation {
   starred: boolean
@@ -32,6 +32,68 @@ export default function InstructorFeedbackControls({
   onEmojiChange,
   className = '',
 }: InstructorFeedbackControlsProps): ReactElement | null {
+  const [emojiOpen, setEmojiOpen] = useState(false)
+  const [focusedEmojiIndex, setFocusedEmojiIndex] = useState(0)
+  const emojiContainerRef = useRef<HTMLDivElement | null>(null)
+  const emojiTriggerRef = useRef<HTMLButtonElement | null>(null)
+  const emojiOptionRefs = useRef<Array<HTMLButtonElement | null>>([])
+  const emojiListboxId = useId()
+  const emojiOptionCount = emojiOptions.length + 1
+
+  const closeEmojiPicker = (restoreFocus = false) => {
+    setEmojiOpen(false)
+    if (restoreFocus) {
+      emojiTriggerRef.current?.focus()
+    }
+  }
+
+  useEffect(() => {
+    if (!emojiOpen) return undefined
+    setFocusedEmojiIndex(0)
+    const scheduleFrame = typeof window.requestAnimationFrame === 'function'
+      ? window.requestAnimationFrame.bind(window)
+      : window.setTimeout.bind(window)
+    const cancelFrame = typeof window.cancelAnimationFrame === 'function'
+      ? window.cancelAnimationFrame.bind(window)
+      : window.clearTimeout.bind(window)
+    const animationFrame = scheduleFrame(() => emojiOptionRefs.current[0]?.focus())
+    function handleOutsideClick(event: MouseEvent) {
+      if (emojiContainerRef.current?.contains(event.target as Node | null) !== true) {
+        closeEmojiPicker()
+      }
+    }
+    window.addEventListener('mousedown', handleOutsideClick)
+    return () => {
+      cancelFrame(animationFrame)
+      window.removeEventListener('mousedown', handleOutsideClick)
+    }
+  }, [emojiOpen])
+
+  const focusEmojiOption = (index: number) => {
+    const boundedIndex = Math.min(Math.max(index, 0), emojiOptionCount - 1)
+    setFocusedEmojiIndex(boundedIndex)
+    emojiOptionRefs.current[boundedIndex]?.focus()
+  }
+
+  const handleEmojiListboxKeyDown = (event: KeyboardEvent<HTMLUListElement>) => {
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      closeEmojiPicker(true)
+    } else if (event.key === 'ArrowDown') {
+      event.preventDefault()
+      focusEmojiOption(focusedEmojiIndex + 1)
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault()
+      focusEmojiOption(focusedEmojiIndex - 1)
+    } else if (event.key === 'Home') {
+      event.preventDefault()
+      focusEmojiOption(0)
+    } else if (event.key === 'End') {
+      event.preventDefault()
+      focusEmojiOption(emojiOptionCount - 1)
+    }
+  }
+
   if (onToggleStar === undefined && onToggleFlag === undefined && onEmojiChange === undefined) {
     return null
   }
@@ -77,47 +139,82 @@ export default function InstructorFeedbackControls({
       )}
 
       {onEmojiChange !== undefined && (
-        <div className="relative group">
+        <div className="relative" ref={emojiContainerRef}>
           <button
             type="button"
+            ref={emojiTriggerRef}
             aria-label="Add emoji annotation"
             aria-haspopup="listbox"
+            aria-expanded={emojiOpen}
+            aria-controls={emojiOpen ? emojiListboxId : undefined}
+            onClick={() => setEmojiOpen((open) => !open)}
             disabled={disabled}
             className="rounded-lg px-1.5 py-1 text-sm leading-none text-slate-400 dark:text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-50"
           >
             {annotation.emoji ?? '☺'}
           </button>
-          <ul
-            role="listbox"
-            aria-label="Choose emoji"
-            className="absolute left-full top-0 z-10 ml-2 hidden w-32 flex-wrap gap-1 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-1.5 shadow-lg group-focus-within:flex"
-          >
-            <li>
-              <button
-                type="button"
+          {emojiOpen && (
+            <ul
+              id={emojiListboxId}
+              role="listbox"
+              aria-label="Choose emoji"
+              onKeyDown={handleEmojiListboxKeyDown}
+              className="absolute left-full top-0 z-10 ml-2 flex w-32 flex-wrap gap-1 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-1.5 shadow-lg"
+            >
+              <li
                 role="option"
+                aria-label="No emoji annotation"
                 aria-selected={annotation.emoji === null}
-                onClick={() => onEmojiChange(null)}
-                className="px-1 text-xs text-slate-400 dark:text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700 rounded"
+                onClick={(event) => {
+                  if (event.target !== event.currentTarget) return
+                  onEmojiChange(null)
+                  closeEmojiPicker(true)
+                }}
               >
-                none
-              </button>
-            </li>
-            {emojiOptions.map((entry) => (
-              <li key={entry.emoji}>
                 <button
                   type="button"
-                  role="option"
-                  aria-selected={annotation.emoji === entry.emoji}
-                  onClick={() => onEmojiChange(entry.emoji)}
-                  className="text-base hover:bg-slate-100 dark:hover:bg-slate-700 rounded px-0.5"
-                  aria-label={entry.label}
+                  ref={(node) => {
+                    emojiOptionRefs.current[0] = node
+                  }}
+                  onClick={() => {
+                    onEmojiChange(null)
+                    closeEmojiPicker(true)
+                  }}
+                  className="px-1 text-xs text-slate-400 dark:text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700 rounded"
                 >
-                  {entry.emoji}
+                  none
                 </button>
               </li>
-            ))}
-          </ul>
+              {emojiOptions.map((entry, index) => (
+                <li
+                  key={entry.emoji}
+                  role="option"
+                  aria-label={entry.label}
+                  aria-selected={annotation.emoji === entry.emoji}
+                  onClick={(event) => {
+                    if (event.target !== event.currentTarget) return
+                    onEmojiChange(entry.emoji)
+                    closeEmojiPicker(true)
+                  }}
+                >
+                  <button
+                    type="button"
+                    ref={(node) => {
+                      emojiOptionRefs.current[index + 1] = node
+                    }}
+                    onClick={() => {
+                      onEmojiChange(entry.emoji)
+                      closeEmojiPicker(true)
+                    }}
+                    className="text-base hover:bg-slate-100 dark:hover:bg-slate-700 rounded px-0.5"
+                    aria-label={entry.label}
+                  >
+                    {entry.emoji}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       )}
     </div>
