@@ -16,6 +16,7 @@ import type { ActiveBitsWebSocket, WsConnectionHandler, WsRouter } from '../../.
 import { initializeActivityRegistry } from '../../../server/activities/activityRegistry.js'
 import setupSyncDeckRoutes, { waitForInstructorAuthMessage } from './routes.js'
 import '../../gallery-walk/server/routes.js'
+import '../../postboard/server/routes.js'
 import '../../resonance/server/routes.js'
 import '../../video-sync/server/routes.js'
 
@@ -2263,6 +2264,90 @@ void test('embedded-activity start route creates a child session, stores keyed m
   assert.equal(studentStart?.childSessionId, body.childSessionId)
   assert.deepEqual(studentStart?.location, { h: 3, v: 0 })
   assert.equal(typeof studentStart?.entryParticipantToken, 'string')
+})
+
+void test('embedded-activity start route bootstraps Postboard prompt and approval settings', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const storeState = createSessionStore({
+    s1: {
+      ...createSyncDeckSession('s1', 'teacher-passcode-1'),
+      data: {
+        ...createSyncDeckSession('s1', 'teacher-passcode-1').data,
+        lastInstructorStatePayload: {
+          type: 'slidechanged',
+          payload: { h: 5, v: 0, f: 0 },
+        },
+        students: [{
+          studentId: 'student-1',
+          name: 'Ada Lovelace',
+          joinedAt: 100,
+          lastSeenAt: 110,
+          lastIndices: null,
+          lastStudentStateAt: null,
+        }],
+      },
+    },
+  })
+  setupSyncDeckRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.post['/api/syncdeck/:sessionId/embedded-activity/start']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.(
+    createRequest(
+      { sessionId: 's1' },
+      {
+        instructorPasscode: 'teacher-passcode-1',
+        activityId: 'postboard',
+        instanceKey: 'postboard:5:0',
+        location: { h: 5, v: 0 },
+        activityOptions: {
+          prompt: '  What should we add to the board?  ',
+          autoApprove: 'true',
+        },
+      },
+    ),
+    res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  const body = res.body as {
+    childSessionId: string
+    instanceKey: string
+    location?: { h: number; v: number }
+    managerBootstrap?: { instructorPasscode?: string }
+  }
+  assert.equal(body.instanceKey, 'postboard:5:0')
+  assert.deepEqual(body.location, { h: 5, v: 0 })
+  assert.match(body.childSessionId, /^CHILD:s1:[a-f0-9]{5}:postboard$/)
+  assert.equal(typeof body.managerBootstrap?.instructorPasscode, 'string')
+  assert.equal(body.managerBootstrap?.instructorPasscode?.length, 32)
+
+  const childSession = storeState.store[body.childSessionId] as SessionRecord | undefined
+  assert.equal(childSession?.type, 'postboard')
+  const childData = asRecord(childSession?.data)
+  assert.ok(childData)
+  assert.deepEqual(childData.embeddedLaunch, {
+    parentSessionId: 's1',
+    instanceKey: 'postboard:5:0',
+    location: { h: 5, v: 0 },
+    selectedOptions: {
+      prompt: '  What should we add to the board?  ',
+      autoApprove: 'true',
+    },
+  })
+  assert.equal(asRecord(childData.prompt)?.text, 'What should we add to the board?')
+  assert.deepEqual(childData.settings, { autoApprove: true })
+  assert.equal(childData.instructorPasscode, body.managerBootstrap?.instructorPasscode)
+
+  const parentSession = storeState.store.s1 as SessionRecord & {
+    data: { embeddedActivities: Record<string, { childSessionId: string; activityId: string; location?: { h: number; v: number } }> }
+  }
+  assert.equal(parentSession.data.embeddedActivities['postboard:5:0']?.childSessionId, body.childSessionId)
+  assert.equal(parentSession.data.embeddedActivities['postboard:5:0']?.activityId, 'postboard')
+  assert.deepEqual(parentSession.data.embeddedActivities['postboard:5:0']?.location, { h: 5, v: 0 })
 })
 
 void test('embedded-activity start route returns manager bootstrap and starter files for MobCode child sessions', async () => {

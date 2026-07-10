@@ -254,6 +254,35 @@ Practical guidance:
 
 Gallery Walk currently behaves more like a session-configured embedded activity than a deep-link-heavy one. Treat `title` as a host-seeded config value rather than a broad standalone permalink contract.
 
+## Postboard
+
+### Deck launch payload
+
+Postboard can seed a single moderated note board prompt and approval mode.
+
+```html
+<section
+  data-activity-id="postboard"
+  data-activity-trigger="slide-enter"
+  data-activity-options='{"prompt":"What should we add to the board?","autoApprove":"false"}'
+>
+```
+
+Field guidance:
+
+- `prompt` seeds the board prompt shown to instructors and students
+- `autoApprove` accepts `"true"` or `"false"`; omit it to default to manual instructor approval
+- students still join through the normal embedded child session entry flow and provide the required display name
+- instructor-authored notes are approved immediately; student notes follow the selected approval mode
+
+### Child embedded launch state
+
+Postboard reads `embeddedLaunch.selectedOptions.prompt` and `embeddedLaunch.selectedOptions.autoApprove` when SyncDeck creates the child session. The child session normalizer copies those values into live Postboard session state:
+
+- `prompt` becomes `session.data.prompt.text`
+- `autoApprove` becomes `session.data.settings.autoApprove`
+- `embeddedLaunch.selectedOptions` remains available for launch/recovery metadata
+
 ## MobCode
 
 ### Deck launch payload

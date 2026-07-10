@@ -101,6 +101,7 @@ Choose:
 - `raffle` for “quick lightweight interaction”
 - `binary-breach` for “binary number-sense practice mission”
 - `mobcode` for “live coding or code walkthroughs”
+- `postboard` for “moderated note board or exit-ticket collection”
 - `embedded-test` for “verify the embedding contract itself”
 
 ## Maintenance Rule
