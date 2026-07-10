@@ -1,0 +1,207 @@
+.postboard-shell {
+  width: min(1180px, 100%);
+  margin: 0 auto;
+  padding: 1rem;
+  color: #172033;
+}
+
+.postboard-student-shell {
+  max-width: 920px;
+}
+
+.postboard-panel {
+  margin-bottom: 1rem;
+  border: 1px solid #d8e2ea;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 1rem;
+}
+
+.postboard-panel h1,
+.postboard-panel h2,
+.postboard-column h2 {
+  margin: 0 0 0.75rem;
+  color: #111827;
+  letter-spacing: 0;
+}
+
+.postboard-panel h1 {
+  font-size: 1.75rem;
+  line-height: 1.2;
+}
+
+.postboard-panel h2,
+.postboard-column h2 {
+  font-size: 1.125rem;
+}
+
+.postboard-eyebrow {
+  margin: 0 0 0.25rem;
+  color: #0f766e;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.postboard-form {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.postboard-form label {
+  display: grid;
+  gap: 0.35rem;
+  color: #334155;
+  font-weight: 700;
+}
+
+.postboard-form textarea {
+  width: 100%;
+  min-height: 5rem;
+  resize: vertical;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 0.65rem;
+  color: #111827;
+  font: inherit;
+}
+
+.postboard-checkbox {
+  display: flex !important;
+  grid-template-columns: none;
+  align-items: center;
+  gap: 0.5rem !important;
+}
+
+.postboard-checkbox input {
+  width: 1rem;
+  height: 1rem;
+}
+
+.postboard-alert {
+  margin-bottom: 1rem;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  background: #fef2f2;
+  padding: 0.75rem;
+  color: #991b1b;
+  font-weight: 700;
+}
+
+.postboard-grid {
+  display: grid;
+  grid-template-columns: minmax(14rem, 0.9fr) minmax(18rem, 1.5fr) minmax(14rem, 0.9fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.postboard-column {
+  display: grid;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.postboard-column-wide {
+  min-width: 0;
+}
+
+.postboard-board,
+.postboard-card-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: 0.75rem;
+}
+
+.postboard-card {
+  display: grid;
+  gap: 0.7rem;
+  align-content: start;
+  min-height: 8rem;
+  border: 1px solid #d7ded6;
+  border-radius: 8px;
+  background: #fbfdf9;
+  padding: 0.9rem;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+}
+
+.postboard-card-pending {
+  background: #fffbeb;
+  border-color: #fde68a;
+}
+
+.postboard-card-rejected {
+  background: #fff1f2;
+  border-color: #fecdd3;
+}
+
+.postboard-card p {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.postboard-card-header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.postboard-meta {
+  color: #64748b;
+  font-size: 0.875rem;
+}
+
+.postboard-empty {
+  margin: 0;
+  color: #64748b;
+}
+
+.postboard-actions,
+.postboard-reactions,
+.postboard-move-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  align-items: center;
+}
+
+.postboard-reactions button,
+.postboard-move-actions button {
+  min-height: 2rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #ffffff;
+  padding: 0.25rem 0.55rem;
+  color: #334155;
+  font: inherit;
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+.postboard-reactions button:hover,
+.postboard-move-actions button:hover:not(:disabled) {
+  border-color: #0f766e;
+  color: #0f766e;
+}
+
+.postboard-move-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+@media (max-width: 900px) {
+  .postboard-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 520px) {
+  .postboard-shell {
+    padding: 0.75rem;
+  }
+
+  .postboard-panel {
+    padding: 0.85rem;
+  }
+}

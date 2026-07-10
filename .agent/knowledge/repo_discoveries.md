@@ -14,6 +14,14 @@ Use this log for durable findings that future contributors and agents should reu
 
 ## Discoveries
 
+- Date: 2026-07-10
+- Area: activities | postboard
+- Discovery: Postboard is registered as a production standalone/permalink-capable activity under `activities/postboard`, with required waiting-room `displayName`, generic `deepLinkOptions` for `prompt` and `autoApprove`, manager passcode bootstrap under `postboard_instructor_${sessionId}`, server-side instructor/student snapshot builders, and internal per-user reaction state that is exposed to students only as counts.
+- Why it matters: Future Postboard work should preserve server-owned privacy boundaries rather than relying on client filtering, and production activity guard tests must include `postboard` in both client and server expected lists.
+- Evidence: `activities/postboard/activity.config.ts`; `activities/postboard/server/routes.ts`; `activities/postboard/shared/types.ts`; `client/src/activities/index.test.ts`; `server/activities/activityRegistry.test.ts`
+- Follow-up action: Verify SyncDeck embedded launch/reconnect behavior with `activityOptions: { prompt, autoApprove }` and add browser-level coverage if embedded or waiting-room flows change.
+- Owner: Codex
+
 - Date: 2026-06-05
 - Area: activities | mobcode
 - Discovery: MobCode runner launch is activity-contained under `activities/mobcode/client/runner`, with the first implementation using a same-origin popup that loads Brython from the npm-installed `brython` package via the server's `/vendor/brython/...` route, executes the selected Python entry file in a Brython worker, and captures terminal-style stdout/stderr. Interactive `input()` is handled by compiling the entry file into an async worker wrapper and passing prompt responses through worker messages, avoiding browser shared-memory requirements. Top-level functions and class methods that call `input()` are converted to `async def`; nested functions remain a follow-up case. The terminal runner replaces `__import__` to block direct imports of browser/JavaScript/system escape-hatch modules while leaving ordinary library imports available, and resolves simple workspace `.py` imports plus read-only `open(...)` from the MobCode file payload. Students also get a Run control, but their options collapse to the instructor-selected runner rather than exposing an independent runtime selector.

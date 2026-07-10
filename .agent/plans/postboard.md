@@ -553,15 +553,15 @@ Notes:
 
 ## Implementation Checklist
 
-- [ ] Add the Postboard activity folder and config.
-- [ ] Define the Postboard session and post TypeScript types.
-- [ ] Add waiting-room display-name collection and launch selected-options for `prompt` and `autoApprove`.
-- [ ] Implement session creation, prompt initialization, and instructor passcode bootstrap.
-- [ ] Implement student note submission and approval routing.
-- [ ] Implement hide, unhide, reorder, flag, and reaction actions.
-- [ ] Implement server-side instructor/student snapshot builders.
-- [ ] Implement owner-only rejected-post recovery for resubmission.
-- [ ] Build instructor and student views with privacy-aware rendering.
+- [x] Add the Postboard activity folder and config.
+- [x] Define the Postboard session and post TypeScript types.
+- [x] Add waiting-room display-name collection and launch selected-options for `prompt` and `autoApprove`.
+- [x] Implement session creation, prompt initialization, and instructor passcode bootstrap.
+- [x] Implement student note submission and approval routing.
+- [x] Implement hide, unhide, reorder, flag, and reaction actions.
+- [x] Implement server-side instructor/student snapshot builders.
+- [x] Implement owner-only rejected-post recovery for resubmission.
+- [x] Build instructor and student views with privacy-aware rendering.
 - [ ] Verify SyncDeck embedded launch/reconnect behavior.
 - [ ] Add tests for auth, moderation, privacy, reactions, launch options, and live updates.
 - [ ] Update repository notes/docs if the implementation introduces durable patterns.

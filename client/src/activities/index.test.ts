@@ -26,6 +26,7 @@ const EXPECTED_ACTIVITIES = [
   'raffle',
   'gallery-walk',
   'mobcode',
+  'postboard',
   'traveling-salesman',
   'www-sim',
 ]
