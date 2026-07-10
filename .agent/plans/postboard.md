@@ -348,13 +348,21 @@ Notes:
 
 ---
 
-## Open Questions
+## Resolved Decisions
 
-1. Should rejected posts remain visible to the submitting student as private feedback, or should
-   they disappear entirely?
-2. Should the instructor be able to edit the prompt after the session starts, or should that
-   require a new session?
-3. Should the reaction palette be fixed from day one, or should it be configurable later?
+1. Rejected posts should be removed from the board, but the submitting student should be able to
+   edit what they posted and move it back into the editor for resubmission.
+2. The instructor should be able to edit the prompt after the session starts.
+3. Postboard should use the same reaction palette as Resonance, with a possible future move to a
+   shared reaction component if that proves useful.
+
+## Post UI Note
+
+1. Model the editor UI after the Gallery Walk feedback UI.
+2. Posts do not need to be square when posted, since a shorter rectangular card saves vertical
+   height.
+3. Keep the student post composition flow lightweight so the board stays compact even when
+   multiple notes are visible.
 
 ---
 
@@ -369,4 +377,3 @@ Notes:
 - [ ] Verify SyncDeck embedded launch/reconnect behavior.
 - [ ] Add tests for moderation, privacy, and live updates.
 - [ ] Update repository notes/docs if the implementation introduces durable patterns.
-
