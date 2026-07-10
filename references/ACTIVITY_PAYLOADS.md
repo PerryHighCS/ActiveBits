@@ -31,6 +31,44 @@ Minimal free-response example:
 >
 ```
 
+Question `text` fields and multiple-choice `options[].text` fields may contain Markdown. Plain text remains valid.
+
+Markdown-formatted question example:
+
+```json
+{
+  "questions": [
+    {
+      "id": "q1",
+      "type": "multiple-choice",
+      "text": "Given this code, what is printed?\n\n```python\nvalues = [2, 4, 6]\nprint(values[1])\n```",
+      "order": 0,
+      "responseTimeLimitMs": 30000,
+      "options": [
+        { "id": "q1a", "text": "`2`", "isCorrect": false },
+        { "id": "q1b", "text": "`4`", "isCorrect": true },
+        { "id": "q1c", "text": "`6`", "isCorrect": false }
+      ]
+    }
+  ]
+}
+```
+
+Markdown table and image example:
+
+```json
+{
+  "questions": [
+    {
+      "id": "q1",
+      "type": "free-response",
+      "text": "Use the data table to justify your answer.\n\n| Input | Output |\n| ---: | ---: |\n| 1 | 3 |\n| 2 | 5 |\n| 3 | 7 |\n\n![Graph of the pattern](https://example.com/pattern.png)",
+      "order": 0
+    }
+  ]
+}
+```
+
 Mixed question-set example:
 
 ```json
@@ -59,15 +97,44 @@ Mixed question-set example:
 }
 ```
 
+Staged presentation example:
+
+```json
+{
+  "presentationMode": "staged",
+  "questions": [
+    {
+      "id": "q1",
+      "type": "multiple-choice",
+      "text": "Which function creates a sequence of numbers that a for loop can use?",
+      "order": 0,
+      "responseTimeLimitMs": 30000,
+      "options": [
+        { "id": "q1a", "text": "print()?", "isCorrect": false },
+        { "id": "q1b", "text": "range()?", "isCorrect": true },
+        { "id": "q1c", "text": "input()?", "isCorrect": false },
+        { "id": "q1d", "text": "len()?", "isCorrect": false }
+      ]
+    }
+  ]
+}
+```
+
 Field guidance:
 
 - `questions` is the main launch payload
+- `presentationMode` may be `standard` or `staged`; omit it for standard behavior
 - each question should have a stable `id`
 - `type` should match the activity's supported question types such as `free-response` or `multiple-choice`
 - `order` should be explicit and zero-based
 - `responseTimeLimitMs` should be provided when timed launch behavior matters
 - multiple-choice questions should carry an `options` array
+- `text` and `options[].text` support Markdown for emphasis, lists, links, inline code, fenced code blocks, tables, and images
+- Markdown images may use `http:`, `https:`, or non-SVG base64 image MIME `data:` URLs such as `data:image/png;base64,...`; SVG data URLs, non-base64 data URLs, and unsafe URL schemes such as `javascript:` or `file:` are not supported
 - a resonance MCQ with zero correct options is poll mode and remains single-select; with one correct option it behaves as single-select; with multiple correct options it behaves as multi-select and requires the full correct set
+- with `presentationMode: "staged"`, Resonance presents the question set one question at a time; multiple-choice questions show stem-only first, then start their response timer when the teacher reveals choices
+- in solo/self-paced Resonance launches with no active run, `presentationMode: "staged"` does not hide choices; students still see and answer the full question set
+- when SyncDeck adds `autoActivateAllQuestions: true` to a Resonance launch with `presentationMode: "staged"`, the host starts the staged sequence at the first question; for a multiple-choice first question this shows the stem only and waits for the instructor to reveal choices
 
 ### Child embedded launch state
 
@@ -75,6 +142,7 @@ Resonance persistent and embedded recovery paths may store encrypted question ma
 
 - `q` for encoded question payload
 - `h` for the associated hash
+- `presentationMode` for the set/run presentation mode when a host wants to restore or launch staged behavior
 
 That storage shape is a host/runtime detail. Deck authors should usually provide plain `questions` in the launch payload and let the host normalize as needed.
 
@@ -137,6 +205,32 @@ Note:
 - the current conversion-lab deck uses `{"seed":"syncdeck-ui-check"}` as a lightweight conversion-check payload
 - for a real authored deck, prefer the activity's actual `algorithm` option unless you intentionally need host-only test metadata
 
+## Binary Breach
+
+### Deck launch payload
+
+Binary Breach reads the same option keys used by its permanent-link builder. Omit fields to use the activity defaults.
+
+```html
+<section
+  data-activity-id="binary-breach"
+  data-activity-trigger="slide-enter"
+  data-activity-options='{"maxBits":"6","missionLength":"5","challengeTypes":"binary-to-decimal,decimal-to-binary,compare-binary","hintsEnabled":"true","placeValueSupport":"optional"}'
+>
+```
+
+Field guidance:
+
+- `maxBits` accepts `"4"` through `"8"`
+- `missionLength` accepts `"3"` through `"12"`
+- `challengeTypes` is a comma-separated list using `binary-to-decimal`, `decimal-to-binary`, `compare-binary`, and `order-binary`
+- `hintsEnabled` accepts `"true"` or `"false"`
+- `placeValueSupport` accepts `visible`, `optional`, or `hidden`
+
+### Child embedded launch state
+
+Binary Breach reads these values from `embeddedLaunch.selectedOptions` and normalizes them into the live session's mission settings before students receive challenges.
+
 ## Gallery Walk
 
 ### Deck launch payload
@@ -159,6 +253,37 @@ Practical guidance:
 ### Child embedded launch state
 
 Gallery Walk currently behaves more like a session-configured embedded activity than a deep-link-heavy one. Treat `title` as a host-seeded config value rather than a broad standalone permalink contract.
+
+## MobCode
+
+### Deck launch payload
+
+MobCode can seed starter files for an embedded live coding session.
+
+Example:
+
+```html
+<section
+  data-activity-id="mobcode"
+  data-activity-trigger="slide-enter"
+  data-activity-options='{"files":{"main.py":"name = input(\"Name? \")\nprint(f\"Hello, {name}!\")\n","README.md":"Pair on the starter code and explain each change.\n"},"activeFile":"main.py","runnerId":"brython-terminal"}'
+>
+```
+
+Field guidance:
+
+- `files` is an object map of relative virtual paths to UTF-8 text content
+- `activeFile` is optional and should match one of the `files` keys when provided
+- `runnerId` is optional; use `brython-terminal` to preselect the Python popup runner for Python-focused launches
+- paths are normalized as safe relative virtual paths such as `src/Main.java`; traversal segments such as `../`, empty paths, oversized paths, and reserved JavaScript object segments such as `__proto__`, `constructor`, or `prototype` are rejected and will not load
+- MobCode currently keeps up to 250 starter files, truncates individual file content at 1 MB, and stops accepting starter content once the total workspace seed reaches 4 MiB
+- omit `files` to start with an empty MobCode workspace
+
+### Child embedded launch state
+
+MobCode reads `embeddedLaunch.selectedOptions.files` and `embeddedLaunch.selectedOptions.activeFile` only when the child session is first created without an existing MobCode file tree. After that, the live session state under `groups.default` is authoritative, so later reloads or reconnects do not overwrite instructor edits with the original starter payload.
+
+MobCode also reads `embeddedLaunch.selectedOptions.runnerId` through the child session API so the instructor and students use the instructor-selected runner. The current supported value is `brython-terminal`; unsupported values are ignored and the activity falls back to the default runner. In the student view, available runner options collapse to the instructor-selected runner so students cannot switch to a different implementation.
 
 ## Raffle
 
@@ -183,9 +308,11 @@ The current deck example uses:
 
 Use a tiny payload like this for harness or diagnostics activities where the purpose is contract validation rather than rich child configuration.
 
-## Instance-Key Examples
+## Embedded Identity And Location
 
-Current position-based examples from the deck:
+Deck authors should not provide embedded instance IDs. SyncDeck derives runtime identity from the activity id and the slide's actual Reveal position when the instructor loads or enters the deck.
+
+Examples of generated runtime keys:
 
 - `resonance:2:0`
 - `embedded-test:3:0`
@@ -194,7 +321,13 @@ Current position-based examples from the deck:
 - `video-sync:4:0`
 - `gallery-walk:5:0`
 
-These are derived from `activityId` plus slide position and are usually the best default.
+The runtime also stores a separate embedded location such as `{ "h": 3, "v": 1 }`. Student activation should use that location contract rather than any ID authored into the presentation markup. Keep deck markup focused on:
+
+- `data-activity-id`
+- `data-activity-trigger`
+- `data-activity-options`
+
+When a launch request includes `location`, `h` and `v` must be finite integers and the `instanceKey` must match the generated key for that activity and location, such as `raffle:3:1`. Fractional coordinates and mismatched key/location pairs are rejected before a child session is created.
 
 ## Authoring Rules
 
