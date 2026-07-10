@@ -196,6 +196,7 @@ void test('normalizePostboardSessionData applies selected option defaults and re
       [postId]: [
         {
           flaggedBy: 'instructor',
+          reason: 'private moderation note',
         },
       ],
     },
@@ -207,7 +208,9 @@ void test('normalizePostboardSessionData applies selected option defaults and re
   assert.equal(data.settings.autoApprove, true)
   assert.equal(data.posts[0]?.approvedAt, 1)
   assert.equal(postId, repeatedPostId)
+  assert.ok(!postId.includes(Buffer.from('Use print statements').toString('hex').slice(0, 12)))
   assert.equal(flagged.flags[postId]?.[0]?.id, flaggedAgain.flags[postId]?.[0]?.id)
+  assert.ok(!flagged.flags[postId]?.[0]?.id.includes(Buffer.from('private moderation note').toString('hex').slice(0, 12)))
   assert.equal(typeof data.instructorPasscode, 'string')
 })
 

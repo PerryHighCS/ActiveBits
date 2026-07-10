@@ -1,4 +1,4 @@
-import { randomBytes, timingSafeEqual } from 'node:crypto'
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { createSession, type SessionRecord, type SessionStore } from 'activebits-server/core/sessions.js'
 import { registerSessionNormalizer } from 'activebits-server/core/sessionNormalization.js'
 import { findAcceptedEntryParticipant } from 'activebits-server/core/acceptedEntryParticipants.js'
@@ -91,7 +91,8 @@ function createDeterministicId(prefix: string, parts: readonly unknown[]): strin
     if (typeof part === 'number' && Number.isFinite(part)) return String(part)
     return '_'
   }).join('_')
-  return `${prefix}_${Buffer.from(key).toString('hex').slice(0, 32) || 'unknown'}`
+  const digest = createHash('sha256').update(key).digest('hex').slice(0, 32)
+  return `${prefix}_${digest || 'unknown'}`
 }
 
 function createInstructorPasscode(): string {

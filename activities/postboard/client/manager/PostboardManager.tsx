@@ -313,7 +313,7 @@ export default function PostboardManager(): React.JSX.Element {
               className="postboard-header-icon-button"
               onClick={() => setIsSetupOpen((open) => !open)}
               aria-expanded={isSetupOpen}
-              aria-controls="postboard-setup-form"
+              aria-controls={isSetupOpen ? 'postboard-setup-form' : undefined}
               aria-label={isSetupOpen ? 'Close prompt editor' : 'Edit prompt'}
               title={isSetupOpen ? 'Close prompt editor' : 'Edit prompt'}
             >
