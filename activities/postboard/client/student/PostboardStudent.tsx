@@ -1,17 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { readSessionParticipantContext } from '@src/components/common/sessionParticipantContext'
 import Button from '@src/components/ui/Button'
-import NoteStyleSelect from '../../../shared/client/components/NoteStyleSelect'
-import ReactionSummary from '../../../shared/client/components/ReactionSummary'
+import NoteStyleSelect from '../../../shared/client/components/NoteStyleSelect.js'
+import ReactionSummary from '../../../shared/client/components/ReactionSummary.js'
 import {
   POSTBOARD_REACTION_OPTIONS,
   type PostboardReactionId,
   type PostboardStudentSnapshot,
-} from '../../shared/types'
+} from '../../shared/types.js'
 import {
   DEFAULT_NOTE_STYLE_ID,
   getNoteStyleClassName,
-} from '../../../shared/noteStyles'
+} from '../../../shared/noteStyles.js'
 
 interface PostboardStudentProps {
   sessionData?: {

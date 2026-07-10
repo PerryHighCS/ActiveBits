@@ -2,18 +2,18 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } fro
 import { useLocation, useParams } from 'react-router-dom'
 import SessionHeader from '@src/components/common/SessionHeader'
 import Button from '@src/components/ui/Button'
-import InstructorFeedbackControls from '../../../shared/client/components/InstructorFeedbackControls'
-import NoteStyleSelect from '../../../shared/client/components/NoteStyleSelect'
-import ReactionSummary from '../../../shared/client/components/ReactionSummary'
+import InstructorFeedbackControls from '../../../shared/client/components/InstructorFeedbackControls.js'
+import NoteStyleSelect from '../../../shared/client/components/NoteStyleSelect.js'
+import ReactionSummary from '../../../shared/client/components/ReactionSummary.js'
 import {
   POSTBOARD_REACTION_OPTIONS,
   type PostboardInstructorSnapshot,
   type PostboardReactionId,
-} from '../../shared/types'
+} from '../../shared/types.js'
 import {
   DEFAULT_NOTE_STYLE_ID,
   getNoteStyleClassName,
-} from '../../../shared/noteStyles'
+} from '../../../shared/noteStyles.js'
 
 interface LocationState {
   createSessionPayload?: {
