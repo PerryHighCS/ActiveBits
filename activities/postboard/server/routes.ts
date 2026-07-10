@@ -749,9 +749,20 @@ export default function setupPostboardRoutes(app: PostboardRouteApp, sessions: S
     if (changedReactionEntry) {
       changedPostReactions[post.id] = changedReactionEntry
     }
+    const visibleReactionCountsSource: PostboardReactionState = {}
+    if (!isInstructor) {
+      const visiblePostIds = new Set(session.data.posts
+        .filter((entry) => entry.status === 'approved' && entry.hiddenAt == null && entry.authorId !== studentId)
+        .map((entry) => entry.id))
+      for (const [reactionPostId, entry] of Object.entries(session.data.reactions)) {
+        if (visiblePostIds.has(reactionPostId)) {
+          visibleReactionCountsSource[reactionPostId] = entry
+        }
+      }
+    }
     await persistAndBroadcast(sessions, ws, session)
     res.json({
-      reactionCounts: buildReactionCounts(changedPostReactions),
+      reactionCounts: buildReactionCounts(isInstructor ? session.data.reactions : visibleReactionCountsSource),
       viewerReactions: buildViewerReactions(changedPostReactions, reactorId),
     })
   }))

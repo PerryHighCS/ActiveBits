@@ -760,6 +760,7 @@ void test('react route validates input, protects hidden and self posts, and togg
     ],
     reactions: {
       'hidden-peer': { byUser: { 'student-3': '🔥' } },
+      'own-approved': { byUser: { 'student-2': '👍' } },
     },
   })
   const { ws, messages } = createBroadcastCapture(session.id)
@@ -837,7 +838,10 @@ void test('react route validates input, protects hidden and self posts, and togg
     headers: { 'x-instructor-passcode': 'teacher-pass' },
     body: { reactionId: '🔥' },
   }, instructorReaction)
-  assert.deepEqual((instructorReaction.body as ReactResponseBody).reactionCounts, { 'hidden-peer': { '🔥': 2 } })
+  assert.deepEqual((instructorReaction.body as ReactResponseBody).reactionCounts, {
+    'hidden-peer': { '🔥': 2 },
+    'own-approved': { '👍': 1 },
+  })
   assert.deepEqual((instructorReaction.body as ReactResponseBody).viewerReactions, { 'hidden-peer': '🔥' })
   assert.equal(messages.length, 4)
 })
