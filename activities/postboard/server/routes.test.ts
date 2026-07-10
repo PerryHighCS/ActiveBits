@@ -172,7 +172,6 @@ void test('normalizePostboardSessionData applies selected option defaults and re
         authorId: 'student-1',
         authorName: 'Ada',
         status: 'approved',
-        createdAt: 100,
       },
     ],
   }
@@ -191,14 +190,12 @@ void test('normalizePostboardSessionData applies selected option defaults and re
         authorId: 'student-1',
         authorName: 'Ada',
         status: 'approved',
-        createdAt: 100,
       },
     ],
     flags: {
       [postId]: [
         {
           flaggedBy: 'instructor',
-          createdAt: 200,
         },
       ],
     },
@@ -208,7 +205,7 @@ void test('normalizePostboardSessionData applies selected option defaults and re
 
   assert.equal(data.prompt.text, 'Share a debugging strategy')
   assert.equal(data.settings.autoApprove, true)
-  assert.equal(data.posts[0]?.approvedAt, 100)
+  assert.equal(data.posts[0]?.approvedAt, 1)
   assert.equal(postId, repeatedPostId)
   assert.equal(flagged.flags[postId]?.[0]?.id, flaggedAgain.flags[postId]?.[0]?.id)
   assert.equal(typeof data.instructorPasscode, 'string')

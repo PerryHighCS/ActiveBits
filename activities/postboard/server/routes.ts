@@ -190,13 +190,13 @@ function normalizePosts(value: unknown, promptId: string): PostboardPost[] {
   if (!Array.isArray(value)) return []
   const posts: PostboardPost[] = []
 
-  for (const entry of value) {
+  for (const [entryIndex, entry] of value.entries()) {
     if (!isPlainObject(entry)) continue
     const text = sanitizeText(entry.text, MAX_POST_TEXT_LENGTH)
     if (!text) continue
     const authorRole = normalizeAuthorRole(entry.authorRole)
     const status = normalizePostStatus(entry.status)
-    const createdAt = normalizeTimestamp(entry.createdAt)
+    const createdAt = normalizeTimestamp(entry.createdAt, entryIndex + 1)
     const authorId = sanitizeText(entry.authorId, 160) || (authorRole === 'instructor' ? 'instructor' : 'unknown-student')
     const id = sanitizeText(entry.id, 120) || createDeterministicId('post', [
       entry.promptId,
@@ -274,11 +274,11 @@ function normalizeFlags(value: unknown, posts: readonly PostboardPost[]): Record
   for (const [postId, rawFlags] of Object.entries(value)) {
     if (!validPostIds.has(postId) || !Array.isArray(rawFlags)) continue
     const normalizedFlags: PostboardFlag[] = []
-    for (const rawFlag of rawFlags) {
+    for (const [flagIndex, rawFlag] of rawFlags.entries()) {
       if (!isPlainObject(rawFlag)) continue
       const reason = sanitizeOptionalText(rawFlag.reason, MAX_FLAG_REASON_LENGTH)
       const flaggedBy = sanitizeText(rawFlag.flaggedBy, 160) || 'instructor'
-      const createdAt = normalizeTimestamp(rawFlag.createdAt)
+      const createdAt = normalizeTimestamp(rawFlag.createdAt, flagIndex + 1)
       normalizedFlags.push({
         id: sanitizeText(rawFlag.id, 120) || createDeterministicId('flag', [
           postId,

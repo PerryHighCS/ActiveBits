@@ -358,7 +358,6 @@ export default function PostboardManager(): React.JSX.Element {
                   key={post.id}
                   className={`postboard-card postboard-card-with-flag ${getNoteStyleClassName(post.styleId)}${isFaded ? ' postboard-card-rejected' : ''}${draggedPostId === post.id ? ' postboard-card-dragging' : ''}${dragOverPostId === post.id && draggedPostId !== post.id ? ' postboard-card-drag-over' : ''}`}
                   draggable
-                  aria-grabbed={draggedPostId === post.id}
                   onDragStart={(event) => {
                     setDraggedPostId(post.id)
                     event.dataTransfer.effectAllowed = 'move'
