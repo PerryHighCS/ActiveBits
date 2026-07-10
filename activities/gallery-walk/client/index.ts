@@ -2,6 +2,7 @@ import type { ComponentType } from 'react'
 import type { ActivityClientModule } from '../../../types/activity.js'
 import ManagerPage from './manager/ManagerPage'
 import StudentPage from './student/StudentPage'
+import '../../shared/client/noteStyles.css'
 import './galleryWalk.css'
 
 const galleryWalkActivity: ActivityClientModule = {

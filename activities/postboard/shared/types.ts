@@ -42,6 +42,7 @@ export interface PostboardPost {
   authorName: string
   authorRole: PostboardAuthorRole
   text: string
+  styleId: string
   createdAt: number
   updatedAt: number
   status: PostboardPostStatus
@@ -92,6 +93,7 @@ export interface PostboardStudentPost {
   authorRole: PostboardAuthorRole
   authorLabel: 'Instructor' | 'Student'
   text: string
+  styleId: string
   createdAt: number
   updatedAt: number
   status: PostboardPostStatus

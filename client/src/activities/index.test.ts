@@ -33,6 +33,7 @@ const EXPECTED_ACTIVITIES = [
 
 const CONFIG_FILE_CANDIDATES = ['activity.config.ts', 'activity.config.js']
 const CLIENT_ENTRY_CANDIDATES = ['index.tsx', 'index.ts', 'index.jsx', 'index.js']
+const ACTIVITY_INFRASTRUCTURE_DIRS = new Set(['node_modules', 'shared'])
 
 function firstExistingPath(paths: string[]): string | null {
   return paths.find((path) => existsSync(path)) || null
@@ -87,7 +88,7 @@ void test('no unexpected activities in activities directory', async () => {
 
   const activityDirs = entries.filter((entry) => {
     const entryPath = join(activitiesDir, entry)
-    return statSync(entryPath).isDirectory() && entry !== 'node_modules'
+    return statSync(entryPath).isDirectory() && !ACTIVITY_INFRASTRUCTURE_DIRS.has(entry)
   })
 
   const unexpectedActivities: string[] = []

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
 import { readSessionParticipantContext } from '@src/components/common/sessionParticipantContext'
 import Button from '@src/components/ui/Button'
+import NoteStyleSelect from '../../../shared/client/components/NoteStyleSelect'
 import {
   POSTBOARD_REACTION_IDS,
   POSTBOARD_REACTION_LABELS,
@@ -8,6 +9,10 @@ import {
   type PostboardReactionId,
   type PostboardStudentSnapshot,
 } from '../../shared/types'
+import {
+  DEFAULT_NOTE_STYLE_ID,
+  getNoteStyleClassName,
+} from '../../../shared/noteStyles'
 
 interface PostboardStudentProps {
   sessionData?: {
@@ -44,6 +49,7 @@ export default function PostboardStudent({ sessionData }: PostboardStudentProps)
   const identity = useMemo(() => readStudentIdentity(sessionId, sessionData), [sessionData, sessionId])
   const [snapshot, setSnapshot] = useState<PostboardStudentSnapshot | null>(null)
   const [draft, setDraft] = useState('')
+  const [styleId, setStyleId] = useState(DEFAULT_NOTE_STYLE_ID)
   const [error, setError] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
 
@@ -92,6 +98,7 @@ export default function PostboardStudent({ sessionData }: PostboardStudentProps)
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           text,
+          styleId,
           studentId: identity.studentId,
           studentName: identity.studentName,
         }),
@@ -147,58 +154,23 @@ export default function PostboardStudent({ sessionData }: PostboardStudentProps)
   }
 
   const promptText = snapshot?.prompt.text || 'Your teacher is setting up the prompt.'
+  const composeStyleClass = getNoteStyleClassName(styleId)
 
   return (
     <main className="postboard-shell postboard-student-shell">
       <section className="postboard-panel postboard-prompt-panel" aria-labelledby="postboard-student-prompt">
         <p className="postboard-eyebrow">Postboard</p>
         <h1 id="postboard-student-prompt">{promptText}</h1>
-        <p className="postboard-meta">
-          {snapshot?.settings.autoApprove ? 'Notes appear right away.' : 'Your teacher will approve notes before they appear.'}
-        </p>
       </section>
 
       {error && <div className="postboard-alert" role="alert">{error}</div>}
-
-      {snapshot?.ownRejectedPosts && snapshot.ownRejectedPosts.length > 0 && (
-        <section className="postboard-panel" aria-labelledby="postboard-rejected-title">
-          <h2 id="postboard-rejected-title">Revise a returned note</h2>
-          <div className="postboard-card-list">
-            {snapshot.ownRejectedPosts.map((post) => (
-              <article key={post.id} className="postboard-card postboard-card-rejected">
-                <p>{post.text}</p>
-                <Button type="button" onClick={() => setDraft(post.text)}>Move to editor</Button>
-              </article>
-            ))}
-          </div>
-        </section>
-      )}
-
-      <section className="postboard-panel" aria-labelledby="postboard-submit-title">
-        <h2 id="postboard-submit-title">Add a note</h2>
-        <form className="postboard-form" onSubmit={handleSubmit}>
-          <label>
-            <span>Your note</span>
-            <textarea
-              value={draft}
-              onChange={(event) => setDraft(event.target.value)}
-              rows={4}
-              maxLength={1200}
-            />
-          </label>
-          <Button type="submit" disabled={isSubmitting || draft.trim().length === 0} aria-disabled={isSubmitting || draft.trim().length === 0}>
-            {isSubmitting ? 'Submitting...' : 'Submit note'}
-          </Button>
-        </form>
-      </section>
 
       <section className="postboard-board" aria-label="Shared notes">
         {snapshot == null && <p className="postboard-empty">Loading notes...</p>}
         {snapshot != null && snapshot.posts.length === 0 && <p className="postboard-empty">No notes have been approved yet.</p>}
         {snapshot?.posts.map((post) => (
-          <article key={post.id} className="postboard-card">
+          <article key={post.id} className={`postboard-card ${getNoteStyleClassName(post.styleId)}`}>
             <p>{post.text}</p>
-            <p className="postboard-meta">{post.authorLabel}{post.isOwnPost ? ' (you)' : ''}</p>
             {!post.isOwnPost && (
               <div className="postboard-reactions" aria-label="React to note">
                 {POSTBOARD_REACTION_IDS.map((reactionId) => (
@@ -215,6 +187,51 @@ export default function PostboardStudent({ sessionData }: PostboardStudentProps)
             )}
           </article>
         ))}
+      </section>
+
+      {snapshot?.ownRejectedPosts && snapshot.ownRejectedPosts.length > 0 && (
+        <section className="postboard-panel" aria-labelledby="postboard-rejected-title">
+          <h2 id="postboard-rejected-title">Revise a returned note</h2>
+          <div className="postboard-card-list">
+            {snapshot.ownRejectedPosts.map((post) => (
+              <article key={post.id} className={`postboard-card ${getNoteStyleClassName(post.styleId)} postboard-card-rejected`}>
+                <p>{post.text}</p>
+                <Button
+                  type="button"
+                  onClick={() => {
+                    setDraft(post.text)
+                    setStyleId(post.styleId)
+                  }}
+                >
+                  Move to editor
+                </Button>
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
+
+      <section className="postboard-panel postboard-compose-panel" aria-labelledby="postboard-submit-title">
+        <h2 id="postboard-submit-title">Add a note</h2>
+        <form className="postboard-form" onSubmit={handleSubmit}>
+          <label>
+            <span className="postboard-sr-only">Note</span>
+            <div className={`note-style-field ${composeStyleClass}`}>
+              <textarea
+                value={draft}
+                onChange={(event) => setDraft(event.target.value)}
+                rows={4}
+                maxLength={1200}
+              />
+            </div>
+          </label>
+          <div className="postboard-compose-actions">
+            <NoteStyleSelect value={styleId} onChange={setStyleId} className="postboard-note-style-select" />
+            <Button type="submit" disabled={isSubmitting || draft.trim().length === 0} aria-disabled={isSubmitting || draft.trim().length === 0}>
+              {isSubmitting ? 'Submitting...' : 'Submit note'}
+            </Button>
+          </div>
+        </form>
       </section>
     </main>
   )

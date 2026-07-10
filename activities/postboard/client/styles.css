@@ -17,6 +17,23 @@
   padding: 1rem;
 }
 
+.postboard-compose-panel {
+  width: min(30rem, 100%);
+  margin: 1rem 0 1rem auto;
+}
+
+.postboard-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .postboard-panel h1,
 .postboard-panel h2,
 .postboard-column h2 {
@@ -60,10 +77,44 @@
   min-height: 5rem;
   resize: vertical;
   border: 1px solid #cbd5e1;
-  border-radius: 6px;
+  border-radius: 8px;
+  background: #ffffff;
   padding: 0.65rem;
   color: #111827;
   font: inherit;
+}
+
+.postboard-form textarea:focus {
+  border-color: #0f766e;
+  box-shadow: 0 0 0 2px rgba(15, 118, 110, 0.14);
+  outline: none;
+}
+
+.postboard-form .note-style-field textarea {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.postboard-note-style-select {
+  width: min(16rem, 100%);
+}
+
+.postboard-note-style-select > button {
+  width: 100%;
+}
+
+.postboard-compose-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.postboard-compose-actions > button {
+  margin-left: auto;
 }
 
 .postboard-checkbox {
@@ -90,7 +141,7 @@
 
 .postboard-grid {
   display: grid;
-  grid-template-columns: minmax(14rem, 0.9fr) minmax(18rem, 1.5fr) minmax(14rem, 0.9fr);
+  grid-template-columns: minmax(14rem, 0.85fr) minmax(18rem, 1.65fr);
   gap: 1rem;
   align-items: start;
 }
@@ -105,7 +156,13 @@
   min-width: 0;
 }
 
-.postboard-board,
+.postboard-board {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(14rem, 16rem));
+  justify-content: start;
+  gap: 0.75rem;
+}
+
 .postboard-card-list {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
@@ -119,18 +176,15 @@
   min-height: 8rem;
   border: 1px solid #d7ded6;
   border-radius: 8px;
-  background: #fbfdf9;
   padding: 0.9rem;
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
 }
 
 .postboard-card-pending {
-  background: #fffbeb;
   border-color: #fde68a;
 }
 
 .postboard-card-rejected {
-  background: #fff1f2;
   border-color: #fecdd3;
 }
 
@@ -145,6 +199,26 @@
   align-items: start;
   justify-content: space-between;
   gap: 0.5rem;
+}
+
+.postboard-card-titleline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.postboard-status-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.4rem;
+  border: 1px solid #fb7185;
+  border-radius: 999px;
+  background: #ffe4e6;
+  padding: 0.05rem 0.45rem;
+  color: #9f1239;
+  font-size: 0.75rem;
+  font-weight: 700;
 }
 
 .postboard-meta {
@@ -199,6 +273,14 @@
 @media (max-width: 520px) {
   .postboard-shell {
     padding: 0.75rem;
+  }
+
+  .postboard-board {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .postboard-compose-panel {
+    width: 100%;
   }
 
   .postboard-panel {

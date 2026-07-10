@@ -18,6 +18,7 @@ import {
   type PostboardStudentPost,
   type PostboardStudentSnapshot,
 } from '../shared/types.js'
+import { normalizeNoteStyleId } from '../../shared/noteStyles.js'
 
 interface RouteRequest {
   params: Record<string, string | undefined>
@@ -200,6 +201,7 @@ function normalizePosts(value: unknown, promptId: string): PostboardPost[] {
       authorName: sanitizeText(entry.authorName, 160) || (authorRole === 'instructor' ? 'Instructor' : 'Student'),
       authorRole,
       text,
+      styleId: normalizeNoteStyleId(entry.styleId),
       createdAt,
       updatedAt: normalizeTimestamp(entry.updatedAt, createdAt),
       status,
@@ -333,6 +335,7 @@ function toStudentPost(post: PostboardPost, viewerStudentId: string | null): Pos
     authorRole: post.authorRole,
     authorLabel: post.authorRole === 'instructor' ? 'Instructor' : 'Student',
     text: post.text,
+    styleId: post.styleId,
     createdAt: post.createdAt,
     updatedAt: post.updatedAt,
     status: post.status,
@@ -493,6 +496,7 @@ export default function setupPostboardRoutes(app: PostboardRouteApp, sessions: S
       authorName: isInstructor ? 'Instructor' : resolveStudentName(session, studentId as string, body),
       authorRole: isInstructor ? 'instructor' : 'student',
       text,
+      styleId: normalizeNoteStyleId(body.styleId),
       createdAt: now,
       updatedAt: now,
       status,

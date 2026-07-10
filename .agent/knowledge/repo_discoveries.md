@@ -1755,3 +1755,11 @@ Use this log for durable findings that future contributors and agents should reu
 - Why it matters: Future QR use cases can reuse camera setup and error mapping without pushing activity protocol details into shared client components.
 - Evidence: `client/src/components/common/QrScannerPanel.tsx`; `client/src/components/common/qrScannerPanelUtils.ts`; `activities/gallery-walk/client/components/ReviewerScanner.tsx`
 - Owner: Codex
+
+- Date: 2026-07-10
+- Area: activities | shared components
+- Discovery: Activity-level reusable UI and data can live under `activities/shared`; the activities TypeScript config includes that folder, and client/server activity registry tests explicitly ignore it as infrastructure rather than a runnable activity.
+- Why it matters: Cross-activity pieces such as note background styles and the Gallery Walk-style note background picker can be reused without coupling one activity to another activity's internals.
+- Evidence: `activities/shared/noteStyles.ts`; `activities/shared/client/components/NoteStyleSelect.tsx`; `activities/tsconfig.json`; `client/src/activities/index.test.ts`; `server/activities/activityRegistry.test.ts`
+- Follow-up action: Prefer `activities/shared` for generic activity primitives, with activity-local wrappers only when preserving existing import paths.
+- Owner: Codex

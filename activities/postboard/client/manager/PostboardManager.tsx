@@ -2,14 +2,18 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react
 import { useLocation, useParams } from 'react-router-dom'
 import SessionHeader from '@src/components/common/SessionHeader'
 import Button from '@src/components/ui/Button'
+import NoteStyleSelect from '../../../shared/client/components/NoteStyleSelect'
 import {
   POSTBOARD_REACTION_IDS,
   POSTBOARD_REACTION_LABELS,
   POSTBOARD_REACTION_SYMBOLS,
   type PostboardInstructorSnapshot,
-  type PostboardPost,
   type PostboardReactionId,
 } from '../../shared/types'
+import {
+  DEFAULT_NOTE_STYLE_ID,
+  getNoteStyleClassName,
+} from '../../../shared/noteStyles'
 
 interface LocationState {
   createSessionPayload?: {
@@ -42,11 +46,6 @@ function getLaunchDefaults(search: string): { prompt: string; autoApprove: boole
   return { prompt, autoApprove }
 }
 
-function getPostStatusLabel(post: PostboardPost): string {
-  if (post.hiddenAt != null) return `${post.status}, hidden`
-  return post.status
-}
-
 export default function PostboardManager(): React.JSX.Element {
   const { sessionId } = useParams<{ sessionId?: string }>()
   const location = useLocation()
@@ -55,6 +54,7 @@ export default function PostboardManager(): React.JSX.Element {
   const [promptDraft, setPromptDraft] = useState('')
   const [autoApprove, setAutoApprove] = useState(false)
   const [postDraft, setPostDraft] = useState('')
+  const [postStyleId, setPostStyleId] = useState(DEFAULT_NOTE_STYLE_ID)
   const [error, setError] = useState<string | null>(null)
   const [isSavingSetup, setIsSavingSetup] = useState(false)
   const [isPosting, setIsPosting] = useState(false)
@@ -157,7 +157,7 @@ export default function PostboardManager(): React.JSX.Element {
     if (!text) return
     setIsPosting(true)
     try {
-      await postJson('/posts', { text })
+      await postJson('/posts', { text, styleId: postStyleId })
       setPostDraft('')
       await fetchState()
       setError(null)
@@ -167,6 +167,8 @@ export default function PostboardManager(): React.JSX.Element {
       setIsPosting(false)
     }
   }
+
+  const composeStyleClass = getNoteStyleClassName(postStyleId)
 
   const runPostAction = async (postId: string, action: string, body: Record<string, unknown> = {}) => {
     try {
@@ -221,8 +223,7 @@ export default function PostboardManager(): React.JSX.Element {
   }
 
   const pendingPosts = snapshot?.posts.filter((post) => post.status === 'pending') ?? []
-  const boardPosts = snapshot?.posts.filter((post) => post.status === 'approved') ?? []
-  const rejectedPosts = snapshot?.posts.filter((post) => post.status === 'rejected') ?? []
+  const boardPosts = snapshot?.posts.filter((post) => post.status !== 'pending') ?? []
 
   return (
     <main className="postboard-shell">
@@ -256,30 +257,12 @@ export default function PostboardManager(): React.JSX.Element {
         </form>
       </section>
 
-      <section className="postboard-panel" aria-labelledby="postboard-instructor-post-title">
-        <h2 id="postboard-instructor-post-title">Add Instructor Note</h2>
-        <form className="postboard-form" onSubmit={handleInstructorPost}>
-          <label>
-            <span>Note text</span>
-            <textarea
-              value={postDraft}
-              onChange={(event) => setPostDraft(event.target.value)}
-              rows={3}
-              maxLength={1200}
-            />
-          </label>
-          <Button type="submit" disabled={isPosting || postDraft.trim().length === 0} aria-disabled={isPosting || postDraft.trim().length === 0}>
-            {isPosting ? 'Posting...' : 'Post note'}
-          </Button>
-        </form>
-      </section>
-
-      <section className="postboard-grid" aria-label="Postboard moderation and board">
-        <div className="postboard-column">
-          <h2>Moderation Queue ({pendingPosts.length})</h2>
-          {pendingPosts.length === 0 && <p className="postboard-empty">No pending notes.</p>}
+      <section className="postboard-panel" aria-labelledby="postboard-moderation-title">
+        <h2 id="postboard-moderation-title">Moderation Queue ({pendingPosts.length})</h2>
+        {pendingPosts.length === 0 && <p className="postboard-empty">No pending notes.</p>}
+        <div className="postboard-card-list">
           {pendingPosts.map((post) => (
-            <article key={post.id} className="postboard-card postboard-card-pending">
+            <article key={post.id} className={`postboard-card ${getNoteStyleClassName(post.styleId)} postboard-card-pending`}>
               <p>{post.text}</p>
               <p className="postboard-meta">{post.authorName}</p>
               <div className="postboard-actions">
@@ -289,14 +272,22 @@ export default function PostboardManager(): React.JSX.Element {
             </article>
           ))}
         </div>
+      </section>
 
-        <div className="postboard-column postboard-column-wide">
-          <h2>Board ({boardPosts.length})</h2>
-          {boardPosts.length === 0 && <p className="postboard-empty">No approved notes yet.</p>}
+      <section className="postboard-panel" aria-labelledby="postboard-all-posts-title">
+        <h2 id="postboard-all-posts-title">All Posts ({boardPosts.length})</h2>
+        {boardPosts.length === 0 && <p className="postboard-empty">No board notes yet.</p>}
+        <div className="postboard-board">
           {boardPosts.map((post, index) => (
-            <article key={post.id} className="postboard-card">
+            <article
+              key={post.id}
+              className={`postboard-card ${getNoteStyleClassName(post.styleId)}${post.status === 'rejected' ? ' postboard-card-rejected' : ''}`}
+            >
               <div className="postboard-card-header">
-                <p className="postboard-meta">{post.authorName} · {getPostStatusLabel(post)}</p>
+                <div className="postboard-card-titleline">
+                  <p className="postboard-meta">{post.authorName}{post.hiddenAt != null ? ' · hidden' : ''}</p>
+                  {post.status === 'rejected' && <span className="postboard-status-badge">Rejected</span>}
+                </div>
                 <div className="postboard-move-actions">
                   <button type="button" onClick={() => void reorderPost(post.id, -1)} disabled={index === 0} aria-label="Move note up">Up</button>
                   <button type="button" onClick={() => void reorderPost(post.id, 1)} disabled={index === boardPosts.length - 1} aria-label="Move note down">Down</button>
@@ -316,9 +307,13 @@ export default function PostboardManager(): React.JSX.Element {
                 ))}
               </div>
               <div className="postboard-actions">
-                <Button type="button" onClick={() => void runPostAction(post.id, post.hiddenAt == null ? 'hide' : 'unhide')}>
-                  {post.hiddenAt == null ? 'Hide' : 'Unhide'}
-                </Button>
+                {post.status === 'rejected' ? (
+                  <Button type="button" onClick={() => void runPostAction(post.id, 'approve')}>Approve</Button>
+                ) : (
+                  <Button type="button" onClick={() => void runPostAction(post.id, post.hiddenAt == null ? 'hide' : 'unhide')}>
+                    {post.hiddenAt == null ? 'Hide' : 'Unhide'}
+                  </Button>
+                )}
                 <Button type="button" onClick={() => void runPostAction(post.id, 'flag', { reason: 'Follow up' })}>
                   Flag ({snapshot?.flags[post.id]?.length ?? 0})
                 </Button>
@@ -326,17 +321,29 @@ export default function PostboardManager(): React.JSX.Element {
             </article>
           ))}
         </div>
+      </section>
 
-        <div className="postboard-column">
-          <h2>Rejected ({rejectedPosts.length})</h2>
-          {rejectedPosts.length === 0 && <p className="postboard-empty">No rejected notes.</p>}
-          {rejectedPosts.map((post) => (
-            <article key={post.id} className="postboard-card postboard-card-rejected">
-              <p>{post.text}</p>
-              <p className="postboard-meta">{post.authorName}</p>
-            </article>
-          ))}
-        </div>
+      <section className="postboard-panel postboard-compose-panel" aria-labelledby="postboard-instructor-post-title">
+        <h2 id="postboard-instructor-post-title">Add a note</h2>
+        <form className="postboard-form" onSubmit={handleInstructorPost}>
+          <label>
+            <span className="postboard-sr-only">Instructor note</span>
+            <div className={`note-style-field ${composeStyleClass}`}>
+              <textarea
+                value={postDraft}
+                onChange={(event) => setPostDraft(event.target.value)}
+                rows={3}
+                maxLength={1200}
+              />
+            </div>
+          </label>
+          <div className="postboard-compose-actions">
+            <NoteStyleSelect value={postStyleId} onChange={setPostStyleId} className="postboard-note-style-select" />
+            <Button type="submit" disabled={isPosting || postDraft.trim().length === 0} aria-disabled={isPosting || postDraft.trim().length === 0}>
+              {isPosting ? 'Posting...' : 'Post note'}
+            </Button>
+          </div>
+        </form>
       </section>
     </main>
   )
