@@ -29,7 +29,7 @@ export const INSTRUCTOR_ANNOTATION_EMOJIS: EmojiEntry[] = [
 
 /** Emojis available for student reactions to shared responses. */
 export const STUDENT_REACTION_EMOJIS: EmojiEntry[] = [
-  ...SHARED_REACTION_OPTIONS.map((entry) => ({ emoji: entry.symbol, label: entry.label })),
+  ...SHARED_REACTION_OPTIONS.map((entry) => ({ emoji: entry.value, label: entry.label })),
 ]
 
 export const INSTRUCTOR_ANNOTATION_EMOJI_VALUES = INSTRUCTOR_ANNOTATION_EMOJIS.map((e) => e.emoji)

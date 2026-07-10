@@ -214,6 +214,23 @@ void test('normalizePostboardSessionData applies selected option defaults and re
   assert.equal(typeof data.instructorPasscode, 'string')
 })
 
+void test('normalizePostboardSessionData falls back to selected prompt when prompt object text is blank', () => {
+  const data = normalizePostboardSessionData({
+    selectedOptions: {
+      prompt: '  Use this launch prompt  ',
+    },
+    prompt: {
+      id: 'prompt-1',
+      text: '   ',
+      createdAt: 100,
+      updatedAt: 100,
+    },
+  })
+
+  assert.equal(data.prompt.id, 'prompt-1')
+  assert.equal(data.prompt.text, 'Use this launch prompt')
+})
+
 void test('student snapshot hides peer names, pending posts, hidden posts, flags, and raw reactions', () => {
   const session = createSession({
     posts: [

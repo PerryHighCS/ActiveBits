@@ -157,10 +157,10 @@ function normalizePrompt(source: Record<string, unknown>, now = Date.now()): Pos
   const selectedOptions = readSelectedOptions(source)
   const promptSource = isPlainObject(source.prompt) ? source.prompt : null
   const selectedPrompt = sanitizeText(selectedOptions?.prompt, MAX_PROMPT_LENGTH)
-  const rawPromptText = promptSource
-    ? promptSource.text
-    : (typeof source.prompt === 'string' ? source.prompt : selectedPrompt)
-  const text = sanitizeText(rawPromptText, MAX_PROMPT_LENGTH)
+  const sourcePromptText = promptSource
+    ? sanitizeText(promptSource.text, MAX_PROMPT_LENGTH)
+    : sanitizeText(source.prompt, MAX_PROMPT_LENGTH)
+  const text = sourcePromptText || selectedPrompt
   const createdAt = promptSource ? normalizeTimestamp(promptSource.createdAt, now) : now
   return {
     id: sanitizeText(promptSource?.id, 120) || DEFAULT_PROMPT_ID,
