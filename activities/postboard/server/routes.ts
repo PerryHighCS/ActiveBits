@@ -741,6 +741,9 @@ export default function setupPostboardRoutes(app: PostboardRouteApp, sessions: S
       delete session.data.reactions[post.id]
     }
     await persistAndBroadcast(sessions, ws, session)
-    res.json({ reactionCounts: buildReactionCounts(session.data.reactions) })
+    res.json({
+      reactionCounts: buildReactionCounts(session.data.reactions),
+      viewerReactions: buildViewerReactions(session.data.reactions, reactorId),
+    })
   }))
 }

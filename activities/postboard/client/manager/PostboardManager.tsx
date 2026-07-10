@@ -215,15 +215,15 @@ export default function PostboardManager(): React.JSX.Element {
 
   const reorderPost = async (postId: string, direction: -1 | 1) => {
     if (!snapshot) return
-    const posts = [...snapshot.posts]
-    const index = posts.findIndex((post) => post.id === postId)
-    const nextIndex = index + direction
-    if (index < 0 || nextIndex < 0 || nextIndex >= posts.length) return
-    const [post] = posts.splice(index, 1)
-    if (post == null) return
-    posts.splice(nextIndex, 0, post)
+    const boardIds = snapshot.posts.filter((post) => post.status !== 'pending').map((post) => post.id)
+    const index = boardIds.indexOf(postId)
+    const targetIndex = index + direction
+    if (index < 0 || targetIndex < 0 || targetIndex >= boardIds.length) return
+    const targetPostId = boardIds[targetIndex]
+    if (targetPostId == null) return
+    const reorderedIds = reorderPostIds(boardIds, postId, targetPostId)
     try {
-      const nextSnapshot = await postJson('/reorder', { postIds: posts.map((entry) => entry.id) }) as PostboardInstructorSnapshot
+      const nextSnapshot = await postJson('/reorder', { postIds: reorderedIds }) as PostboardInstructorSnapshot
       setSnapshot(nextSnapshot)
       setError(null)
     } catch (reorderError) {

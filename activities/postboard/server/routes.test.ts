@@ -579,6 +579,7 @@ void test('student-state route returns a student-safe snapshot for the requester
   assert.equal(body.posts[1]?.isOwnPost, true)
   assert.equal('authorName' in (body.posts[0] ?? {}), false)
   assert.deepEqual(body.reactionCounts, { 'approved-peer': { '👍': 1 } })
+  assert.deepEqual(body.viewerReactions, { 'approved-peer': '👍' })
 })
 
 void test('setup route requires instructor auth, persists prompt settings, and broadcasts', async () => {
@@ -769,27 +770,32 @@ void test('react route validates input, protects hidden and self posts, and togg
   }, hiddenReaction)
   assert.equal(hiddenReaction.statusCode, 403)
 
+  type ReactResponseBody = { reactionCounts?: unknown; viewerReactions?: unknown }
+
   const added = createResponse()
   await handler({
     params: { sessionId: session.id, postId: 'peer-approved' },
     body: { studentId: 'student-1', reactionId: '👍' },
   }, added)
   assert.equal(added.statusCode, 200)
-  assert.deepEqual((added.body as { reactionCounts?: unknown }).reactionCounts, { 'peer-approved': { '👍': 1 } })
+  assert.deepEqual((added.body as ReactResponseBody).reactionCounts, { 'peer-approved': { '👍': 1 } })
+  assert.deepEqual((added.body as ReactResponseBody).viewerReactions, { 'peer-approved': '👍' })
 
   const changed = createResponse()
   await handler({
     params: { sessionId: session.id, postId: 'peer-approved' },
     body: { studentId: 'student-1', reactionId: '❤️' },
   }, changed)
-  assert.deepEqual((changed.body as { reactionCounts?: unknown }).reactionCounts, { 'peer-approved': { '❤️': 1 } })
+  assert.deepEqual((changed.body as ReactResponseBody).reactionCounts, { 'peer-approved': { '❤️': 1 } })
+  assert.deepEqual((changed.body as ReactResponseBody).viewerReactions, { 'peer-approved': '❤️' })
 
   const removed = createResponse()
   await handler({
     params: { sessionId: session.id, postId: 'peer-approved' },
     body: { studentId: 'student-1', reactionId: null },
   }, removed)
-  assert.deepEqual((removed.body as { reactionCounts?: unknown }).reactionCounts, {})
+  assert.deepEqual((removed.body as ReactResponseBody).reactionCounts, {})
+  assert.deepEqual((removed.body as ReactResponseBody).viewerReactions, {})
 
   const instructorReaction = createResponse()
   await handler({
@@ -797,7 +803,8 @@ void test('react route validates input, protects hidden and self posts, and togg
     headers: { 'x-instructor-passcode': 'teacher-pass' },
     body: { reactionId: '🔥' },
   }, instructorReaction)
-  assert.deepEqual((instructorReaction.body as { reactionCounts?: unknown }).reactionCounts, { 'hidden-peer': { '🔥': 1 } })
+  assert.deepEqual((instructorReaction.body as ReactResponseBody).reactionCounts, { 'hidden-peer': { '🔥': 1 } })
+  assert.deepEqual((instructorReaction.body as ReactResponseBody).viewerReactions, { 'hidden-peer': '🔥' })
   assert.equal(messages.length, 4)
 })
 
