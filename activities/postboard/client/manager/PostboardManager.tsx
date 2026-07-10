@@ -388,7 +388,7 @@ export default function PostboardManager(): React.JSX.Element {
                       flagged: (snapshot?.flags[post.id]?.length ?? 0) > 0,
                       emoji: null,
                     }}
-                    onToggleFlag={(flagged) => void runPostAction(post.id, 'flag', { flagged, reason: 'Follow up' })}
+                    onToggleFlag={(flagged) => void runPostAction(post.id, 'flag', { flagged })}
                     className="postboard-flag-corner"
                   />
                   <div className="postboard-card-header">

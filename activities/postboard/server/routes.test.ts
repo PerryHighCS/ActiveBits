@@ -491,6 +491,16 @@ void test('post submit route keeps manual student notes pending and instructor n
   assert.equal(storedData?.posts[0]?.authorName, 'Ada Lovelace')
   assert.equal(storedData?.posts[1]?.status, 'approved')
   assert.equal(storedData?.posts[1]?.authorRole, 'instructor')
+
+  const spoofedStudentResponse = createResponse()
+  await handler({
+    params: { sessionId: session.id },
+    body: {
+      studentId: 'student-2',
+      text: 'Spoofed note',
+    },
+  }, spoofedStudentResponse)
+  assert.equal(spoofedStudentResponse.statusCode, 403)
 })
 
 void test('create route generates instructor passcode and applies selected option defaults', async () => {
@@ -529,6 +539,13 @@ void test('student-state route returns a student-safe snapshot for the requester
   const app = new TestApp()
   const store = new MemoryStore()
   const session = createSession({
+    acceptedEntryParticipants: {
+      'student-1': {
+        participantId: 'student-1',
+        displayName: 'Ada Lovelace',
+        acceptedAt: 100,
+      },
+    },
     posts: [
       createPost({
         id: 'approved-peer',
@@ -580,6 +597,15 @@ void test('student-state route returns a student-safe snapshot for the requester
   assert.equal('authorName' in (body.posts[0] ?? {}), false)
   assert.deepEqual(body.reactionCounts, { 'approved-peer': { '👍': 1 } })
   assert.deepEqual(body.viewerReactions, { 'approved-peer': '👍' })
+
+  const spoofedResponse = createResponse()
+  await handler({
+    params: { sessionId: session.id },
+    query: { studentId: 'student-3' },
+  }, spoofedResponse)
+  assert.equal(spoofedResponse.statusCode, 200)
+  const spoofedBody = spoofedResponse.body as ReturnType<typeof buildStudentSnapshot>
+  assert.deepEqual(spoofedBody.posts.map((post) => post.id), ['approved-peer'])
 })
 
 void test('setup route requires instructor auth, persists prompt settings, and broadcasts', async () => {
@@ -627,7 +653,16 @@ void test('post route rejects new posts once the session reaches the post limit'
     approvedAt: index,
     order: index,
   }))
-  const session = createSession({ posts })
+  const session = createSession({
+    acceptedEntryParticipants: {
+      'student-501': {
+        participantId: 'student-501',
+        displayName: 'Overflow Student',
+        acceptedAt: 100,
+      },
+    },
+    posts,
+  })
   await store.set(session.id, session)
   setupPostboardRoutes(app, store, createWsRouter())
 
@@ -693,6 +728,13 @@ void test('reorder route applies provided post order and normalizes omitted boar
   const app = new TestApp()
   const store = new MemoryStore()
   const session = createSession({
+    acceptedEntryParticipants: {
+      'student-1': {
+        participantId: 'student-1',
+        displayName: 'Ada Lovelace',
+        acceptedAt: 100,
+      },
+    },
     posts: [
       createPost({ id: 'post-a', order: 0, text: 'A' }),
       createPost({ id: 'post-b', order: 1, text: 'B' }),
@@ -733,6 +775,13 @@ void test('react route validates input, protects hidden and self posts, and togg
   const app = new TestApp()
   const store = new MemoryStore()
   const session = createSession({
+    acceptedEntryParticipants: {
+      'student-1': {
+        participantId: 'student-1',
+        displayName: 'Ada Lovelace',
+        acceptedAt: 100,
+      },
+    },
     posts: [
       createPost({
         id: 'peer-approved',
@@ -851,6 +900,13 @@ void test('flag route toggles a single instructor flag state', async () => {
   const app = new TestApp()
   const store = new MemoryStore()
   const session = createSession({
+    acceptedEntryParticipants: {
+      'student-1': {
+        participantId: 'student-1',
+        displayName: 'Ada Lovelace',
+        acceptedAt: 100,
+      },
+    },
     posts: [
       {
         id: 'post-1',
@@ -907,6 +963,13 @@ void test('student delete marks an own rejected post deleted for instructor view
   const app = new TestApp()
   const store = new MemoryStore()
   const session = createSession({
+    acceptedEntryParticipants: {
+      'student-1': {
+        participantId: 'student-1',
+        displayName: 'Ada Lovelace',
+        acceptedAt: 100,
+      },
+    },
     posts: [
       {
         id: 'post-1',

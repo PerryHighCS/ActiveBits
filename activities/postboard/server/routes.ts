@@ -401,6 +401,25 @@ function readStudentId(req: RouteRequest): string | null {
   return studentId || null
 }
 
+function readAcceptedStudentId(session: PostboardSession, req: RouteRequest): string | null {
+  const studentId = readStudentId(req)
+  if (!studentId) return null
+  return findAcceptedEntryParticipant(session, studentId) ? studentId : null
+}
+
+function requireAcceptedStudentId(session: PostboardSession, req: RouteRequest, res: JsonResponse): string | null {
+  const studentId = readStudentId(req)
+  if (!studentId) {
+    res.status(400).json({ error: 'studentId is required' })
+    return null
+  }
+  if (!findAcceptedEntryParticipant(session, studentId)) {
+    res.status(403).json({ error: 'invalid studentId' })
+    return null
+  }
+  return studentId
+}
+
 function resolveStudentName(session: PostboardSession, studentId: string, body: Record<string, unknown>): string {
   const accepted = findAcceptedEntryParticipant(session, studentId)
   return accepted?.displayName ?? (sanitizeText(body.studentName, 160) || 'Student')
@@ -483,7 +502,7 @@ export default function setupPostboardRoutes(app: PostboardRouteApp, sessions: S
   app.get('/api/postboard/:sessionId/student-state', routeHandler('student-state', async (req, res) => {
     const session = await getPostboardSession(req, res, sessions)
     if (!session) return
-    res.json(buildStudentSnapshot(session, readStudentId(req)))
+    res.json(buildStudentSnapshot(session, readAcceptedStudentId(session, req)))
   }))
 
   app.post('/api/postboard/:sessionId/setup', routeHandler('setup', async (req, res) => {
@@ -517,11 +536,9 @@ export default function setupPostboardRoutes(app: PostboardRouteApp, sessions: S
 
     const instructorPasscode = readInstructorPasscode(req)
     const isInstructor = verifyPasscode(session.data.instructorPasscode, instructorPasscode)
-    const studentId = readStudentId(req)
-    if (!isInstructor && !studentId) {
-      res.status(400).json({ error: 'studentId is required' })
-      return
-    }
+    const studentId = isInstructor ? null : requireAcceptedStudentId(session, req, res)
+    if (!isInstructor && !studentId) return
+    const authorStudentId = studentId ?? ''
     if (session.data.posts.length >= MAX_POSTS) {
       res.status(409).json({ error: 'post limit reached' })
       return
@@ -532,8 +549,8 @@ export default function setupPostboardRoutes(app: PostboardRouteApp, sessions: S
     const post: PostboardPost = {
       id: createId('post'),
       promptId: session.data.prompt.id,
-      authorId: isInstructor ? 'instructor' : studentId as string,
-      authorName: isInstructor ? 'Instructor' : resolveStudentName(session, studentId as string, body),
+      authorId: isInstructor ? 'instructor' : authorStudentId,
+      authorName: isInstructor ? 'Instructor' : resolveStudentName(session, authorStudentId, body),
       authorRole: isInstructor ? 'instructor' : 'student',
       text,
       styleId: normalizeNoteStyleId(body.styleId),
@@ -616,8 +633,9 @@ export default function setupPostboardRoutes(app: PostboardRouteApp, sessions: S
       res.status(404).json({ error: 'invalid post' })
       return
     }
-    const studentId = readStudentId(req)
-    if (!studentId || post.authorId !== studentId || post.status !== 'rejected') {
+    const studentId = requireAcceptedStudentId(session, req, res)
+    if (!studentId) return
+    if (post.authorId !== studentId || post.status !== 'rejected') {
       res.status(403).json({ error: 'cannot delete this post' })
       return
     }
@@ -736,12 +754,10 @@ export default function setupPostboardRoutes(app: PostboardRouteApp, sessions: S
     }
 
     const isInstructor = verifyPasscode(session.data.instructorPasscode, readInstructorPasscode(req))
-    const studentId = readStudentId(req)
+    const studentId = isInstructor ? null : requireAcceptedStudentId(session, req, res)
+    if (!isInstructor && !studentId) return
     const reactorId = isInstructor ? 'instructor' : studentId
-    if (!reactorId) {
-      res.status(400).json({ error: 'studentId is required' })
-      return
-    }
+    if (!reactorId) return
     if (!isInstructor && (post.status !== 'approved' || post.hiddenAt != null || post.authorId === studentId)) {
       res.status(403).json({ error: 'cannot react to this post' })
       return
