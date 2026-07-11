@@ -29,12 +29,14 @@ const EXPECTED_ACTIVITIES = [
   'raffle',
   'gallery-walk',
   'mobcode',
+  'postboard',
   'traveling-salesman',
   'www-sim',
 ]
 
 const CONFIG_FILE_CANDIDATES = ['activity.config.ts', 'activity.config.js']
 const SERVER_ENTRY_CANDIDATES = ['routes.ts', 'routes.js']
+const ACTIVITY_INFRASTRUCTURE_DIRS = new Set(['node_modules', 'shared'])
 
 interface ActivityConfigLike extends Record<string, unknown> {
   id?: string
@@ -129,7 +131,7 @@ void test('no unexpected activities in activities directory', async () => {
 
   const activityDirs = entries.filter((entry) => {
     const entryPath = join(activitiesDir, entry)
-    return statSync(entryPath).isDirectory() && entry !== 'node_modules'
+    return statSync(entryPath).isDirectory() && !ACTIVITY_INFRASTRUCTURE_DIRS.has(entry)
   })
 
   // Filter out dev activities by checking their configs

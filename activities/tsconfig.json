@@ -17,6 +17,7 @@
     "*/server/**/*",
     "*/shared/**/*",
     "*/playwright/**/*",
+    "shared/**/*",
     "*/activity.config.*",
     "../types/**/*.d.ts"
   ],

@@ -1,4 +1,5 @@
 import type { DragEvent } from 'react'
+import InstructorFeedbackControls from '../../../shared/client/components/InstructorFeedbackControls.js'
 import type { InstructorAnnotation, ResponseProgressStatus, ResponseWithName } from '../../shared/types.js'
 import { INSTRUCTOR_ANNOTATION_EMOJIS } from '../../shared/emojiSet.js'
 
@@ -127,80 +128,14 @@ export default function ResponseCard({
         </button>
       )}
 
-      <div className="flex flex-col items-center gap-2 shrink-0 pt-0.5">
-        <button
-          type="button"
-          aria-label={annotation.starred ? 'Unstar response' : 'Star response'}
-          aria-pressed={annotation.starred}
-          onClick={() => onAnnotate({ starred: !annotation.starred })}
-          disabled={status !== 'submitted'}
-          className={`rounded-lg px-1.5 py-1 text-lg leading-none ${
-            annotation.starred
-              ? 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-500'
-              : 'text-slate-300 dark:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700'
-          } disabled:opacity-50`}
-        >
-          ★
-        </button>
-
-        <button
-          type="button"
-          aria-label={annotation.flagged ? 'Unflag response' : 'Flag response'}
-          aria-pressed={annotation.flagged}
-          onClick={() => onAnnotate({ flagged: !annotation.flagged })}
-          disabled={status !== 'submitted'}
-          className={`rounded-lg px-1.5 py-1 text-sm leading-none ${
-            annotation.flagged
-              ? 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 ring-1 ring-red-200 dark:ring-red-700'
-              : 'text-slate-300 dark:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700'
-          } disabled:opacity-50`}
-        >
-          🚩
-        </button>
-
-        <div className="relative group">
-          <button
-            type="button"
-            aria-label="Add emoji annotation"
-            aria-haspopup="listbox"
-            disabled={status !== 'submitted'}
-            className="rounded-lg px-1.5 py-1 text-sm leading-none text-slate-400 dark:text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-50"
-          >
-            {annotation.emoji ?? '☺'}
-          </button>
-          <ul
-            role="listbox"
-            aria-label="Choose emoji"
-            className="absolute left-full top-0 z-10 ml-2 hidden w-32 flex-wrap gap-1 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-1.5 shadow-lg group-focus-within:flex"
-          >
-            <li>
-              <button
-                type="button"
-                role="option"
-                aria-selected={annotation.emoji === null}
-                onClick={() => onAnnotate({ emoji: null })}
-                className="px-1 text-xs text-slate-400 dark:text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700 rounded"
-              >
-                none
-              </button>
-            </li>
-            {INSTRUCTOR_ANNOTATION_EMOJIS.map((em) => (
-              <li key={em.emoji}>
-                <button
-                  type="button"
-                  role="option"
-                  aria-selected={annotation.emoji === em.emoji}
-                  onClick={() => onAnnotate({ emoji: em.emoji })}
-                  className="text-base hover:bg-slate-100 dark:hover:bg-slate-700 rounded px-0.5"
-                  aria-label={em.label}
-                >
-                  {em.emoji}
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      </div>
+      <InstructorFeedbackControls
+        annotation={annotation}
+        emojiOptions={INSTRUCTOR_ANNOTATION_EMOJIS}
+        disabled={status !== 'submitted'}
+        onToggleStar={(starred) => onAnnotate({ starred })}
+        onToggleFlag={(flagged) => onAnnotate({ flagged })}
+        onEmojiChange={(emoji) => onAnnotate({ emoji })}
+      />
 
       {/* Content */}
       <div className="flex-1 min-w-0">

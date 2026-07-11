@@ -1,8 +1,14 @@
-import { useState } from 'react'
+import ReactionSummary, { type ReactionOption } from '../../../shared/client/components/ReactionSummary.js'
 import { STUDENT_REACTION_EMOJIS } from '../../shared/emojiSet.js'
 import { getAnswerSelectedOptionIds, isMcqAnswerCorrect } from '../../shared/mcq.js'
 import type { QuestionReveal, ReviewedResponse, SharedResponse, StudentQuestion } from '../../shared/types.js'
 import FormattedMarkdown from '../components/FormattedMarkdown.js'
+
+const STUDENT_REACTION_OPTIONS: ReactionOption[] = STUDENT_REACTION_EMOJIS.map((entry) => ({
+  value: entry.emoji,
+  label: entry.label,
+  symbol: entry.emoji,
+}))
 
 interface Props {
   reveals: QuestionReveal[]
@@ -64,89 +70,6 @@ function FormattedOptionList({
   )
 }
 
-function ReactionSummary({
-  reactions,
-  viewerReaction,
-  canReact,
-  onReact,
-}: {
-  reactions: Record<string, number>
-  viewerReaction: string | null
-  canReact: boolean
-  onReact?: (emoji: string) => void
-}) {
-  const [isPickerOpen, setIsPickerOpen] = useState(false)
-  const reactionEntries = Object.entries(reactions).filter(([, count]) => count > 0)
-
-  if (!canReact && reactionEntries.length === 0) {
-    return null
-  }
-
-  return (
-    <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-400">
-      {canReact && onReact !== undefined && (
-        <div className="relative">
-          <button
-            type="button"
-            aria-label="Choose reaction"
-            aria-haspopup="listbox"
-            aria-expanded={isPickerOpen}
-            onClick={() => setIsPickerOpen((current) => !current)}
-            className={`rounded-full border px-2 py-1 text-sm transition ${
-              viewerReaction !== null
-                ? 'border-indigo-500 bg-indigo-600 text-white'
-                : 'border-indigo-200 dark:border-indigo-700 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-300 hover:border-indigo-300 dark:hover:border-indigo-600'
-            }`}
-          >
-            {viewerReaction ?? '☺'}
-          </button>
-          {isPickerOpen && (
-            <ul
-              role="listbox"
-              aria-label="Choose reaction emoji"
-              className="absolute left-0 top-full z-10 mt-1 flex w-40 flex-wrap gap-1 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-1.5 shadow-lg"
-            >
-              {STUDENT_REACTION_EMOJIS.map((entry) => (
-                <li key={entry.emoji}>
-                  <button
-                    type="button"
-                    role="option"
-                    aria-label={`React with ${entry.label}`}
-                    aria-selected={viewerReaction === entry.emoji}
-                    className={`rounded-lg px-1.5 py-1 text-base hover:bg-slate-100 dark:hover:bg-slate-700 ${
-                      viewerReaction === entry.emoji
-                        ? 'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300'
-                        : ''
-                    }`}
-                    onClick={() => {
-                      onReact(entry.emoji)
-                      setIsPickerOpen(false)
-                    }}
-                  >
-                    {entry.emoji}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      )}
-      {reactionEntries.map(([emoji, count]) => (
-        <span
-          key={emoji}
-          className={`inline-flex items-center rounded-full border px-2 py-1 ${
-            viewerReaction === emoji
-              ? 'border-indigo-200 dark:border-indigo-700 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-300'
-              : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
-          }`}
-        >
-          {emoji} {count}
-        </span>
-      ))}
-    </div>
-  )
-}
-
 function ResponseCard({
   response,
   question,
@@ -191,6 +114,7 @@ function ResponseCard({
       </div>
       <ReactionSummary
         reactions={reactions}
+        options={STUDENT_REACTION_OPTIONS}
         viewerReaction={viewerReaction}
         canReact={canReact}
         onReact={

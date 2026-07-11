@@ -554,6 +554,15 @@ Document API and data-shape assumptions that must stay compatible over time.
 - Follow-up action: If future activities rely on persistent-session websocket starts for manager credentials, add the needed response fields to their `createSessionBootstrap` config rather than adding activity-specific waiting-room code.
 - Owner: Codex
 
+- Date: 2026-07-10
+- Surface: SyncDeck embedded activities | Postboard session normalization
+- Contract: Postboard embedded launches use the same selected-option keys as Postboard permalinks: `prompt` and `autoApprove`. SyncDeck stores those values under the child session's `embeddedLaunch.selectedOptions`; the Postboard normalizer preserves the embedded envelope and hydrates live `session.data.prompt.text`, `session.data.settings.autoApprove`, and a generated `instructorPasscode`.
+- Compatibility constraints: Deck-authored `activityOptions` remain launch metadata under `embeddedLaunch.selectedOptions`, while live prompt/settings fields become authoritative session state after normalization. Future Postboard embedded fields should use `activity.config.ts` deep-link options and normalizer hydration rather than SyncDeck-specific routes.
+- Validation rules: SyncDeck server tests assert embedded child creation for `postboard` stores the selected options, location, manager bootstrap passcode, parent embedded activity map entry, and normalized Postboard prompt/settings state.
+- Evidence (schema/tests/path): `activities/postboard/activity.config.ts`; `activities/postboard/server/routes.ts`; `activities/syncdeck/server/routes.test.ts`; `skills/syncdeck/references/ACTIVITY_PAYLOADS.md`
+- Follow-up action: If Postboard adds more launch options, keep `skills/syncdeck/references/ACTIVITY_PAYLOADS.md` and `activity.config.ts` aligned with the normalizer.
+- Owner: Codex
+
 - Date: 2026-04-20
 - Surface: SyncDeck embedded activities
 - Contract: Embedded activity starts carry a generated `instanceKey` and, when anchored to a Reveal slide, an explicit `location: { h, v }`. New deck-driven launches derive both values from the actual instructor/deck indices at load/request time; presentation-authored `instanceKey` values are not trusted when position context is available.

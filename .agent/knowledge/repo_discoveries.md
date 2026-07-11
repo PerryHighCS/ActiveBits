@@ -14,6 +14,14 @@ Use this log for durable findings that future contributors and agents should reu
 
 ## Discoveries
 
+- Date: 2026-07-10
+- Area: activities | postboard
+- Discovery: Postboard is registered as a production standalone/permalink-capable activity under `activities/postboard`, with required waiting-room `displayName`, generic `deepLinkOptions` for `prompt` and `autoApprove`, manager passcode bootstrap under `postboard_instructor_${sessionId}`, server-side instructor/student snapshot builders, and internal per-user reaction state that is exposed to students only as counts.
+- Why it matters: Future Postboard work should preserve server-owned privacy boundaries rather than relying on client filtering, and production activity guard tests must include `postboard` in both client and server expected lists.
+- Evidence: `activities/postboard/activity.config.ts`; `activities/postboard/server/routes.ts`; `activities/postboard/shared/types.ts`; `client/src/activities/index.test.ts`; `server/activities/activityRegistry.test.ts`
+- Follow-up action: Verify SyncDeck embedded launch/reconnect behavior with `activityOptions: { prompt, autoApprove }` and add browser-level coverage if embedded or waiting-room flows change.
+- Owner: Codex
+
 - Date: 2026-06-05
 - Area: activities | mobcode
 - Discovery: MobCode runner launch is activity-contained under `activities/mobcode/client/runner`, with the first implementation using a same-origin popup that loads Brython from the npm-installed `brython` package via the server's `/vendor/brython/...` route, executes the selected Python entry file in a Brython worker, and captures terminal-style stdout/stderr. Interactive `input()` is handled by compiling the entry file into an async worker wrapper and passing prompt responses through worker messages, avoiding browser shared-memory requirements. Top-level functions and class methods that call `input()` are converted to `async def`; nested functions remain a follow-up case. The terminal runner replaces `__import__` to block direct imports of browser/JavaScript/system escape-hatch modules while leaving ordinary library imports available, and resolves simple workspace `.py` imports plus read-only `open(...)` from the MobCode file payload. Students also get a Run control, but their options collapse to the instructor-selected runner rather than exposing an independent runtime selector.
@@ -1746,4 +1754,12 @@ Use this log for durable findings that future contributors and agents should reu
 - Discovery: `client/src/components/common/QrScannerPanel.tsx` is an intentional shared scanner shell over `react-zxing`. Keep scanner mechanics there (`formats`, `timeBetweenDecodingAttempts`, mapped `ScannerErrorCode` plus original error), while activity wrappers such as GalleryWalk own URL validation, routing decisions, and activity-specific copy.
 - Why it matters: Future QR use cases can reuse camera setup and error mapping without pushing activity protocol details into shared client components.
 - Evidence: `client/src/components/common/QrScannerPanel.tsx`; `client/src/components/common/qrScannerPanelUtils.ts`; `activities/gallery-walk/client/components/ReviewerScanner.tsx`
+- Owner: Codex
+
+- Date: 2026-07-10
+- Area: activities | shared components
+- Discovery: Activity-level reusable UI and data can live under `activities/shared`; the activities TypeScript config includes that folder, and client/server activity registry tests explicitly ignore it as infrastructure rather than a runnable activity.
+- Why it matters: Cross-activity pieces such as note background styles and the Gallery Walk-style note background picker can be reused without coupling one activity to another activity's internals.
+- Evidence: `activities/shared/noteStyles.ts`; `activities/shared/client/components/NoteStyleSelect.tsx`; `activities/tsconfig.json`; `client/src/activities/index.test.ts`; `server/activities/activityRegistry.test.ts`
+- Follow-up action: Prefer `activities/shared` for generic activity primitives, with activity-local wrappers only when preserving existing import paths.
 - Owner: Codex
