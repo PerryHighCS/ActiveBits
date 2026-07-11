@@ -161,8 +161,8 @@ export default {
     selectedOptionsToSessionData: ['presentationUrl'], // optional selectedOptions keys to hydrate onto live session.data
     sessionStorage: [
       {
-        keyPrefix: 'my_activity_instructor_',
-        responseField: 'instructorPasscode',
+        keyPrefix: 'my_activity_student_',
+        responseField: 'studentId',
       },
     ],
     historyState: [
@@ -184,7 +184,7 @@ export default {
 - `historyState`: Array of response field names. Matching fields are attached to React Router navigation state when transitioning from `/manage/:activityId` to `/manage/:activityId/:sessionId`.
 - `selectedOptionsToSessionData`: Array of persistent-link `selectedOptions` keys to copy onto top-level live `session.data` when a teacher starts a persistent session from the waiting-room WebSocket. This is intended for values that the live manager/student runtime needs as authoritative session state, such as SyncDeck's `presentationUrl`; other selected options remain available under `session.data.embeddedLaunch.selectedOptions`.
 
-Use `historyState` when the value only needs to survive the immediate in-app navigation and should not be persisted in browser storage. Use `sessionStorage` when the value should still be recoverable after reloads or later manager re-entry in the same tab.
+Use `historyState` when the value only needs to survive the immediate in-app navigation and should not be persisted in browser storage. Use `sessionStorage` only for non-sensitive values that should still be recoverable after reloads or later re-entry in the same tab. Instructor passcodes and manager credentials must never be written to Web Storage.
 
 `reportEndpoint` is optional activity metadata for embedded-session reporting. When present, SyncDeck can treat it as the child activity's authoritative download surface during embedded end/report flows instead of hard-coding per-activity routes in shared code.
 

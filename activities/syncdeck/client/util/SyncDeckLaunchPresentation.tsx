@@ -39,11 +39,19 @@ export function resolveSyncDeckLaunchMode(value: string | null | undefined): Syn
 }
 
 export function resolveSyncDeckLaunchPresentationUrl(searchParams: URLSearchParams): string {
-  return (
-    searchParams.get('presentationUrl')
-    ?? searchParams.get('presentation-url')
-    ?? ''
-  ).trim()
+  const candidates = [
+    searchParams.get('presentationUrl'),
+    searchParams.get('presentation-url'),
+  ]
+
+  for (const candidate of candidates) {
+    const trimmed = candidate?.trim() ?? ''
+    if (trimmed.length > 0) {
+      return trimmed
+    }
+  }
+
+  return ''
 }
 
 function buildSyncDeckLaunchRedirect(params: {

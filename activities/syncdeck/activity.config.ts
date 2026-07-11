@@ -58,12 +58,7 @@ const syncdeckConfig: ActivityConfig = {
   ],
   createSessionBootstrap: {
     selectedOptionsToSessionData: ['presentationUrl'],
-    sessionStorage: [
-      {
-        keyPrefix: 'syncdeck_instructor_',
-        responseField: 'instructorPasscode',
-      },
-    ],
+    historyState: ['instructorPasscode'],
   },
   manageDashboard: {
     customPersistentLinkBuilder: true,

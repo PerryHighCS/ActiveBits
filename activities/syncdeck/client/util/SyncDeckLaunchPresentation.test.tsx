@@ -377,8 +377,12 @@ void test('SyncDeckLaunchPresentation parses presentation-url alias and instruct
   const params = new URLSearchParams(
     'presentation-url=https%3A%2F%2Fslides.example%2Fdeck&mode=instructor',
   )
+  const paramsWithBlankCanonical = new URLSearchParams(
+    'presentationUrl=%20%20%20&presentation-url=https%3A%2F%2Fslides.example%2Falias',
+  )
 
   assert.equal(resolveSyncDeckLaunchPresentationUrl(params), 'https://slides.example/deck')
+  assert.equal(resolveSyncDeckLaunchPresentationUrl(paramsWithBlankCanonical), 'https://slides.example/alias')
   assert.equal(resolveSyncDeckLaunchMode(params.get('mode')), 'instructor')
   assert.equal(resolveSyncDeckLaunchMode('student'), 'student')
   assert.equal(resolveSyncDeckLaunchMode('unexpected'), 'student')

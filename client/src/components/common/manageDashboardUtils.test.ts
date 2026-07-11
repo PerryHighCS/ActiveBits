@@ -12,6 +12,7 @@ import {
   describeSelectedOptions,
   filterPersistentEntryPolicyOptionsForActivity,
   initializeDeepLinkOptions,
+  hasSensitiveCreateSessionBootstrapPayload,
   normalizePersistentEntryPolicyForActivity,
   normalizeMultiselectValue,
   normalizeSelectedOptions,
@@ -421,7 +422,48 @@ void test('parseCreateSessionBootstrap validates sessionStorage bootstrap metada
   )
 })
 
-void test('persistCreateSessionBootstrapToSessionStorage stores declared create response fields', () => {
+void test('hasSensitiveCreateSessionBootstrapPayload detects credential-like fields', () => {
+  assert.equal(hasSensitiveCreateSessionBootstrapPayload({ instructorPasscode: 'teacher-passcode' }), true)
+  assert.equal(hasSensitiveCreateSessionBootstrapPayload({ managerCredential: 'secret' }), true)
+  assert.equal(hasSensitiveCreateSessionBootstrapPayload({ studentId: 'student-1' }), false)
+})
+
+void test('persistCreateSessionBootstrapToSessionStorage stores declared non-sensitive create response fields', () => {
+  const originalWindow = globalThis.window
+  const { backing: writes, storage: fakeSessionStorage } = createFakeSessionStorage()
+
+  Object.defineProperty(globalThis, 'window', {
+    value: { sessionStorage: fakeSessionStorage },
+    configurable: true,
+    writable: true,
+  })
+
+  try {
+    persistCreateSessionBootstrapToSessionStorage(
+      {
+        sessionStorage: [
+          { keyPrefix: 'student_', responseField: 'studentId' },
+          { keyPrefix: 'x_', responseField: 'missingField' },
+        ],
+      },
+      'session-123',
+      {
+        id: 'session-123',
+        studentId: 'student-1',
+      },
+    )
+
+    assert.deepEqual(Array.from(writes.entries()), [['student_session-123', 'student-1']])
+  } finally {
+    Object.defineProperty(globalThis, 'window', {
+      value: originalWindow,
+      configurable: true,
+      writable: true,
+    })
+  }
+})
+
+void test('persistCreateSessionBootstrapToSessionStorage skips sensitive declared create response fields', () => {
   const originalWindow = globalThis.window
   const { backing: writes, storage: fakeSessionStorage } = createFakeSessionStorage()
 
@@ -436,17 +478,18 @@ void test('persistCreateSessionBootstrapToSessionStorage stores declared create 
       {
         sessionStorage: [
           { keyPrefix: 'syncdeck_instructor_', responseField: 'instructorPasscode' },
-          { keyPrefix: 'x_', responseField: 'missingField' },
+          { keyPrefix: 'student_', responseField: 'studentId' },
         ],
       },
       'session-123',
       {
         id: 'session-123',
         instructorPasscode: 'teacher-passcode',
+        studentId: 'student-1',
       },
     )
 
-    assert.deepEqual(Array.from(writes.entries()), [['syncdeck_instructor_session-123', 'teacher-passcode']])
+    assert.deepEqual(Array.from(writes.entries()), [['student_session-123', 'student-1']])
   } finally {
     Object.defineProperty(globalThis, 'window', {
       value: originalWindow,
@@ -456,7 +499,7 @@ void test('persistCreateSessionBootstrapToSessionStorage stores declared create 
   }
 })
 
-void test('persistCreateSessionBootstrapToSessionStorage ignores sessionStorage write failures', () => {
+void test('persistCreateSessionBootstrapToSessionStorage ignores non-sensitive sessionStorage write failures', () => {
   const originalWindow = globalThis.window
   const originalWarn = console.warn
   const warnings: string[] = []
@@ -482,12 +525,12 @@ void test('persistCreateSessionBootstrapToSessionStorage ignores sessionStorage 
     persistCreateSessionBootstrapToSessionStorage(
       {
         sessionStorage: [
-          { keyPrefix: 'syncdeck_instructor_', responseField: 'instructorPasscode' },
+          { keyPrefix: 'student_', responseField: 'studentId' },
         ],
       },
       'session-123',
       {
-        instructorPasscode: 'teacher-passcode',
+        studentId: 'student-1',
       },
     )
 
@@ -506,19 +549,37 @@ void test('persistCreateSessionBootstrapToSessionStorage ignores sessionStorage 
 })
 
 void test('storeCreateSessionBootstrapPayload keeps a same-tab bootstrap payload until first consume', () => {
-  storeCreateSessionBootstrapPayload('video-sync', 'session-123', {
-    id: 'session-123',
-    instructorPasscode: 'teacher-passcode',
+  const originalWindow = globalThis.window
+  const { backing: sessionStorage, storage: fakeSessionStorage } = createFakeSessionStorage()
+
+  Object.defineProperty(globalThis, 'window', {
+    value: { sessionStorage: fakeSessionStorage },
+    configurable: true,
+    writable: true,
   })
 
-  assert.deepEqual(
-    consumeCreateSessionBootstrapPayload('video-sync', 'session-123'),
-    {
+  try {
+    storeCreateSessionBootstrapPayload('video-sync', 'session-123', {
       id: 'session-123',
       instructorPasscode: 'teacher-passcode',
-    },
-  )
-  assert.equal(consumeCreateSessionBootstrapPayload('video-sync', 'session-123'), null)
+    })
+
+    assert.equal(sessionStorage.size, 0)
+    assert.deepEqual(
+      consumeCreateSessionBootstrapPayload('video-sync', 'session-123'),
+      {
+        id: 'session-123',
+        instructorPasscode: 'teacher-passcode',
+      },
+    )
+    assert.equal(consumeCreateSessionBootstrapPayload('video-sync', 'session-123'), null)
+  } finally {
+    Object.defineProperty(globalThis, 'window', {
+      value: originalWindow,
+      configurable: true,
+      writable: true,
+    })
+  }
 })
 
 void test('consumeCreateSessionBootstrapPayload clears sessionStorage even when the same-tab cache entry exists', () => {
@@ -536,7 +597,7 @@ void test('consumeCreateSessionBootstrapPayload clears sessionStorage even when 
   try {
     storeCreateSessionBootstrapPayload('video-sync', 'session-123', {
       id: 'session-123',
-      instructorPasscode: 'teacher-passcode',
+      studentId: 'student-1',
     }, 10)
 
     assert.equal(
@@ -548,7 +609,7 @@ void test('consumeCreateSessionBootstrapPayload clears sessionStorage even when 
       consumeCreateSessionBootstrapPayload('video-sync', 'session-123', 10),
       {
         id: 'session-123',
-        instructorPasscode: 'teacher-passcode',
+        studentId: 'student-1',
       },
     )
 
@@ -896,7 +957,7 @@ void test('storeCreateSessionBootstrapPayload evicts oldest sessionStorage boots
         `stored-session-${index}`,
         {
           id: `stored-session-${index}`,
-          instructorPasscode: `teacher-passcode-${index}`,
+          studentId: `student-${index}`,
         },
         index,
       )
@@ -932,7 +993,7 @@ void test('storeCreateSessionBootstrapPayload prunes stale sessionStorage entrie
   const staleValue = JSON.stringify({
     createdAtMs: staleCreatedAtMs,
     payload: {
-      instructorPasscode: 'stale-passcode',
+      studentId: 'stale-student',
     },
   })
   const writes = new Map<string, string>([[staleKey, staleValue]])
@@ -974,7 +1035,7 @@ void test('storeCreateSessionBootstrapPayload prunes stale sessionStorage entrie
       'fresh-session',
       {
         id: 'fresh-session',
-        instructorPasscode: 'fresh-passcode',
+        studentId: 'fresh-student',
       },
       freshNowMs,
     )

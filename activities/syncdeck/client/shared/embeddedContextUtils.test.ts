@@ -73,7 +73,7 @@ void test('fetchSyncDeckEmbeddedContext returns null on forbidden response', asy
   assert.equal(result, null)
 })
 
-void test('resolveSyncDeckEmbeddedContextRequestFromStorage prefers instructor passcode over student id', () => {
+void test('resolveSyncDeckEmbeddedContextRequestFromStorage ignores stored instructor passcodes', () => {
   const storage = new Map<string, string>([
     ['syncdeck_instructor_session-1', ' teacher-pass '],
     ['syncdeck_student_id_session-1', ' student-1 '],
@@ -87,7 +87,7 @@ void test('resolveSyncDeckEmbeddedContextRequestFromStorage prefers instructor p
 
   assert.deepEqual(result, {
     sessionId: 'session-1',
-    instructorPasscode: 'teacher-pass',
+    studentId: 'student-1',
   })
 })
 

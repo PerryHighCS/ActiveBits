@@ -2,7 +2,6 @@ import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
 import { storeCreateSessionBootstrapPayload } from '@src/components/common/manageDashboardUtils'
 import { resolvePersistentSessionEntryPolicy, type PersistentSessionEntryPolicy } from '../../../../types/waitingRoom.js'
 import { runSyncDeckPresentationPreflight } from '../shared/presentationPreflight.js'
-import { buildSyncDeckPasscodeKey } from '../shared/authStorage.js'
 import {
   getStudentPresentationCompatibilityError,
 } from '../shared/presentationUrlCompatibility.js'
@@ -525,7 +524,7 @@ function buildSyncDeckChalkboardOpenKey(sessionId: string): string {
   return `${SYNCDECK_CHALKBOARD_OPEN_KEY_PREFIX}${sessionId}`
 }
 
-export function normalizeStoredInstructorPasscode(value: string | null): string | null {
+export function normalizeInstructorPasscode(value: string | null): string | null {
   if (typeof value !== 'string') {
     return null
   }
@@ -546,7 +545,7 @@ export function readRouterStateInstructorPasscode(locationState: unknown): strin
 
   const instructorPasscode = (createSessionPayload as { instructorPasscode?: unknown }).instructorPasscode
   return typeof instructorPasscode === 'string'
-    ? normalizeStoredInstructorPasscode(instructorPasscode)
+    ? normalizeInstructorPasscode(instructorPasscode)
     : null
 }
 
@@ -2475,13 +2474,9 @@ const SyncDeckManager: FC = () => {
 
     const loadInstructorPasscode = async (): Promise<void> => {
       const routerStatePasscode = readRouterStateInstructorPasscode(location.state)
-      const storedPasscode = normalizeStoredInstructorPasscode(
-        window.sessionStorage.getItem(buildSyncDeckPasscodeKey(sessionId)),
-      )
-      const cachedPasscode = routerStatePasscode ?? storedPasscode
 
       if (!isCancelled) {
-        setInstructorPasscode(cachedPasscode)
+        setInstructorPasscode(routerStatePasscode)
         setPersistentUrlHashFallback(null)
         setPersistentEntryPolicyFallback(null)
       }
@@ -2492,7 +2487,7 @@ const SyncDeckManager: FC = () => {
         })
         if (!response.ok) {
           if (!isCancelled) {
-            if (!cachedPasscode) {
+            if (!routerStatePasscode) {
               setInstructorPasscode(null)
             }
             setPersistentUrlHashFallback(null)
@@ -2503,11 +2498,10 @@ const SyncDeckManager: FC = () => {
 
         const payload = (await response.json()) as InstructorPasscodeResponsePayload
         if (typeof payload.instructorPasscode === 'string' && payload.instructorPasscode.length > 0) {
-          window.sessionStorage.setItem(buildSyncDeckPasscodeKey(sessionId), payload.instructorPasscode)
           if (!isCancelled) {
             setInstructorPasscode(payload.instructorPasscode)
           }
-        } else if (!isCancelled && !cachedPasscode) {
+        } else if (!isCancelled && !routerStatePasscode) {
           setInstructorPasscode(null)
         }
 
@@ -2533,7 +2527,7 @@ const SyncDeckManager: FC = () => {
         }
       } catch {
         if (!isCancelled) {
-          if (!cachedPasscode) {
+          if (!routerStatePasscode) {
             setInstructorPasscode(null)
           }
           setPersistentUrlHashFallback(null)

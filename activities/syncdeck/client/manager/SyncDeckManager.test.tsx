@@ -24,7 +24,7 @@ import { validatePresentationUrl } from './SyncDeckManager.js'
 import { shouldReopenConfigurePanel } from './SyncDeckManager.js'
 import { shouldAutoActivatePresentationUrl } from './SyncDeckManager.js'
 import { resolveRecoveredPresentationUrl } from './SyncDeckManager.js'
-import { normalizeStoredInstructorPasscode } from './SyncDeckManager.js'
+import { normalizeInstructorPasscode } from './SyncDeckManager.js'
 import { readRouterStateInstructorPasscode } from './SyncDeckManager.js'
 import { resolvePersistentEntryPolicyForConfigure } from './SyncDeckManager.js'
 import { resolvePersistentUrlHashForConfigure } from './SyncDeckManager.js'
@@ -185,10 +185,10 @@ void test('resolveRecoveredPresentationUrl preserves incompatible recovered URLs
   )
 })
 
-void test('normalizeStoredInstructorPasscode trims and rejects empty cached values', () => {
-  assert.equal(normalizeStoredInstructorPasscode(' teacher-pass '), 'teacher-pass')
-  assert.equal(normalizeStoredInstructorPasscode('   '), null)
-  assert.equal(normalizeStoredInstructorPasscode(null), null)
+void test('normalizeInstructorPasscode trims and rejects empty values', () => {
+  assert.equal(normalizeInstructorPasscode(' teacher-pass '), 'teacher-pass')
+  assert.equal(normalizeInstructorPasscode('   '), null)
+  assert.equal(normalizeInstructorPasscode(null), null)
 })
 
 void test('readRouterStateInstructorPasscode reads only valid create-session router state', () => {
