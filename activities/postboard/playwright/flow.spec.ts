@@ -59,8 +59,7 @@ async function openPostboardManager(
   session: PostboardCreateResponse,
   query = '',
 ): Promise<void> {
-  await page.addInitScript(({ instructorPasscode, sessionId }) => {
-    window.sessionStorage.setItem(`postboard_instructor_${sessionId}`, instructorPasscode)
+  await page.addInitScript(({ instructorPasscode }) => {
     window.history.replaceState(
       {
         usr: { createSessionPayload: { instructorPasscode } },
@@ -70,7 +69,7 @@ async function openPostboardManager(
       '',
       window.location.href,
     )
-  }, { instructorPasscode: session.instructorPasscode, sessionId: session.id })
+  }, { instructorPasscode: session.instructorPasscode })
   await page.goto(`/manage/postboard/${encodeURIComponent(session.id)}${query}`)
   await expect(page.getByRole('heading', { name: /Board Posts/ })).toBeVisible()
 }
