@@ -44,6 +44,14 @@ For concrete launch payloads, read `ACTIVITY_PAYLOADS.md`.
 - notes:
   has an activity-owned report endpoint, which makes it stronger for sessions that need post-activity reporting
 
+### Postboard
+
+- id: `postboard`
+- best for: moderated note boards, exit tickets, brainstorming, and quick whole-class collection prompts
+- classroom shape: launch a shared board from the deck, let students add styled notes, moderate or auto-approve posts, then return to the deck with the board as a visible discussion artifact
+- notes:
+  supports deck-authored prompt text and auto-approval defaults
+
 ### Raffle
 
 - id: `raffle`
