@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { readInstructorPasscode, reorderPostIds } from './PostboardManager.js'
+import { getInstructorBoardCardClassName, readInstructorPasscode, reorderPostIds } from './PostboardManager.js'
 
 function withMockWindow(
   sessionStorage: Pick<Storage, 'getItem' | 'setItem'>,
@@ -50,6 +50,32 @@ void test('reorderPostIds leaves the order unchanged for no-op or invalid drags'
     reorderPostIds(['p1', 'p2', 'p3'], 'p1', 'missing'),
     ['p1', 'p2', 'p3'],
   )
+})
+
+void test('getInstructorBoardCardClassName only reserves flag space for flagged posts', () => {
+  const unflaggedClassName = getInstructorBoardCardClassName(
+    { id: 'post-1', status: 'approved', styleId: 'default' },
+    {},
+  )
+  assert.ok(!unflaggedClassName.includes('postboard-card-with-flag'))
+
+  const flaggedClassName = getInstructorBoardCardClassName(
+    { id: 'post-1', status: 'approved', styleId: 'default' },
+    { 'post-1': [{ id: 'flag-1', postId: 'post-1', createdAt: 1, flaggedBy: 'instructor' }] },
+  )
+  assert.ok(flaggedClassName.includes('postboard-card-with-flag'))
+})
+
+void test('getInstructorBoardCardClassName includes faded and drag states', () => {
+  const className = getInstructorBoardCardClassName(
+    { id: 'post-1', status: 'deleted', styleId: 'default' },
+    {},
+    { isDragging: true, isDragOver: true },
+  )
+
+  assert.ok(className.includes('postboard-card-rejected'))
+  assert.ok(className.includes('postboard-card-dragging'))
+  assert.ok(className.includes('postboard-card-drag-over'))
 })
 
 void test('readInstructorPasscode reads passcode from route state without persisting it', () => {

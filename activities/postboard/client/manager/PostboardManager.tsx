@@ -62,6 +62,23 @@ export function reorderPostIds(currentIds: string[], draggedId: string, targetId
   return reordered
 }
 
+export function getInstructorBoardCardClassName(
+  post: Pick<PostboardInstructorSnapshot['posts'][number], 'id' | 'status' | 'styleId'>,
+  flags: PostboardInstructorSnapshot['flags'],
+  options: { isDragging?: boolean; isDragOver?: boolean } = {},
+): string {
+  const isFaded = post.status === 'rejected' || post.status === 'deleted'
+  const isFlagged = (flags[post.id]?.length ?? 0) > 0
+  return [
+    'postboard-card',
+    isFlagged ? 'postboard-card-with-flag' : '',
+    getNoteStyleClassName(post.styleId),
+    isFaded ? 'postboard-card-rejected' : '',
+    options.isDragging ? 'postboard-card-dragging' : '',
+    options.isDragOver ? 'postboard-card-drag-over' : '',
+  ].filter(Boolean).join(' ')
+}
+
 export default function PostboardManager(): React.JSX.Element {
   const { sessionId } = useParams<{ sessionId?: string }>()
   const location = useLocation()
@@ -376,11 +393,15 @@ export default function PostboardManager(): React.JSX.Element {
             ) : null}
             <div className="postboard-board">
               {boardPosts.map((post, index) => {
+                const isFlagged = (snapshot?.flags[post.id]?.length ?? 0) > 0
                 const isFaded = post.status === 'rejected' || post.status === 'deleted'
                 return (
                 <article
                   key={post.id}
-                  className={`postboard-card postboard-card-with-flag ${getNoteStyleClassName(post.styleId)}${isFaded ? ' postboard-card-rejected' : ''}${draggedPostId === post.id ? ' postboard-card-dragging' : ''}${dragOverPostId === post.id && draggedPostId !== post.id ? ' postboard-card-drag-over' : ''}`}
+                  className={getInstructorBoardCardClassName(post, snapshot?.flags ?? {}, {
+                    isDragging: draggedPostId === post.id,
+                    isDragOver: dragOverPostId === post.id && draggedPostId !== post.id,
+                  })}
                   draggable
                   onDragStart={(event) => {
                     setDraggedPostId(post.id)
@@ -408,7 +429,7 @@ export default function PostboardManager(): React.JSX.Element {
                   <InstructorFeedbackControls
                     annotation={{
                       starred: false,
-                      flagged: (snapshot?.flags[post.id]?.length ?? 0) > 0,
+                      flagged: isFlagged,
                       emoji: null,
                     }}
                     onToggleFlag={(flagged) => void runPostAction(post.id, 'flag', { flagged })}
