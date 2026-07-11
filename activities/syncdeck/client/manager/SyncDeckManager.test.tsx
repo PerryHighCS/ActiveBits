@@ -59,6 +59,9 @@ import { extractManagerNavigationCapabilitiesFromRevealMessage } from './SyncDec
 import { resolveSyncDeckActivityPickerEntries } from './SyncDeckManager.js'
 import { parseDownloadFilenameFromContentDisposition } from './SyncDeckManager.js'
 import { resolveDeckActivityRequestsFromDeckDocument } from './SyncDeckManager.js'
+import { buildReportContributionMap } from './SyncDeckManager.js'
+import { resolveReportContributionLabel } from './SyncDeckManager.js'
+import { buildReportPreviewSummary } from './SyncDeckManager.js'
 
 void test('SyncDeckManager renders setup copy without a session id', () => {
   const html = renderToStaticMarkup(
@@ -85,6 +88,7 @@ void test('SyncDeckManager shows the active session id when provided', () => {
   assert.match(html, /Running activities:/i)
   assert.match(html, /session-123/i)
   assert.match(html, /Copy Join URL/i)
+  assert.match(html, /Preview Report/i)
   assert.match(html, /Download Session Report/i)
   assert.match(html, /End Session/i)
   assert.match(html, /Force sync students to current position/i)
@@ -136,6 +140,142 @@ void test('parseDownloadFilenameFromContentDisposition handles standard and utf-
     'critique day.html',
   )
   assert.equal(parseDownloadFilenameFromContentDisposition(null), null)
+})
+
+void test('buildReportContributionMap maps manifest report states by embedded instance key', () => {
+  const contributions = buildReportContributionMap({
+    activities: [
+      {
+        activityId: 'gallery-walk',
+        activityName: 'Gallery Walk',
+        childSessionId: 'child-1',
+        instanceKey: 'gallery-walk:1:0',
+        startedAt: 100,
+        report: {
+          activityId: 'gallery-walk',
+          childSessionId: 'child-1',
+          instanceKey: 'gallery-walk:1:0',
+          title: 'Gallery Walk',
+          generatedAt: 120,
+          reportStatus: 'available',
+          supportsScopes: ['activity-session'],
+          students: [{ studentId: 'student-1', displayName: 'Ada' }],
+          payload: {},
+        },
+      },
+      {
+        activityId: 'video-sync',
+        activityName: 'Video Sync',
+        childSessionId: 'child-2',
+        instanceKey: 'video-sync:2:0',
+        startedAt: 110,
+        report: {
+          activityId: 'video-sync',
+          childSessionId: 'child-2',
+          instanceKey: 'video-sync:2:0',
+          title: 'Video Sync Report Unsupported',
+          generatedAt: 120,
+          reportStatus: 'unsupported',
+          supportsScopes: ['activity-session'],
+          students: [],
+          payload: { status: 'unsupported' },
+        },
+      },
+    ],
+  })
+
+  assert.deepEqual(contributions, {
+    'gallery-walk:1:0': { status: 'available', studentCount: 1 },
+    'video-sync:2:0': { status: 'unsupported', studentCount: 0 },
+  })
+})
+
+void test('resolveReportContributionLabel summarizes loading, unavailable, and included report states', () => {
+  assert.equal(resolveReportContributionLabel(undefined, true, false), 'Checking report')
+  assert.equal(resolveReportContributionLabel(undefined, false, true), 'Report status unavailable')
+  assert.equal(resolveReportContributionLabel(undefined, false, false), 'Report status pending')
+  assert.equal(
+    resolveReportContributionLabel({ status: 'available', studentCount: 2 }, false, false),
+    'Included in report (2 students)',
+  )
+  assert.equal(
+    resolveReportContributionLabel({ status: 'unsupported', studentCount: 0 }, false, false),
+    'Report unsupported',
+  )
+  assert.equal(
+    resolveReportContributionLabel({ status: 'unavailable', studentCount: 0 }, false, false),
+    'Report unavailable',
+  )
+})
+
+void test('buildReportPreviewSummary counts report availability states', () => {
+  const summary = buildReportPreviewSummary({
+    students: [
+      { studentId: 'student-1', displayName: 'Ada' },
+      { studentId: 'student-2', displayName: 'Grace' },
+    ],
+    activities: [
+      {
+        activityId: 'gallery-walk',
+        activityName: 'Gallery Walk',
+        childSessionId: 'child-1',
+        instanceKey: 'gallery-walk:1:0',
+        startedAt: 100,
+        report: {
+          activityId: 'gallery-walk',
+          childSessionId: 'child-1',
+          instanceKey: 'gallery-walk:1:0',
+          title: 'Gallery Walk',
+          generatedAt: 120,
+          reportStatus: 'available',
+          supportsScopes: ['activity-session'],
+          payload: {},
+        },
+      },
+      {
+        activityId: 'video-sync',
+        activityName: 'Video Sync',
+        childSessionId: 'child-2',
+        instanceKey: 'video-sync:2:0',
+        startedAt: 110,
+        report: {
+          activityId: 'video-sync',
+          childSessionId: 'child-2',
+          instanceKey: 'video-sync:2:0',
+          title: 'Video Sync Unsupported',
+          generatedAt: 120,
+          reportStatus: 'unsupported',
+          supportsScopes: ['activity-session'],
+          payload: {},
+        },
+      },
+      {
+        activityId: 'postboard',
+        activityName: 'Postboard',
+        childSessionId: 'child-3',
+        instanceKey: 'postboard:3:0',
+        startedAt: 120,
+        report: {
+          activityId: 'postboard',
+          childSessionId: 'child-3',
+          instanceKey: 'postboard:3:0',
+          title: 'Postboard Unavailable',
+          generatedAt: 120,
+          reportStatus: 'unavailable',
+          supportsScopes: ['activity-session'],
+          payload: {},
+        },
+      },
+    ],
+  })
+
+  assert.deepEqual(summary, {
+    activityCount: 3,
+    studentCount: 2,
+    availableCount: 1,
+    unsupportedCount: 1,
+    unavailableCount: 1,
+  })
 })
 
 void test('validatePresentationUrl rejects empty and whitespace-only values', () => {

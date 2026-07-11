@@ -36,6 +36,8 @@ Build complete activity reporting across ActiveBits, with special attention to S
 
 - 2026-07-11: Completed the first implementation slice. Resonance now contributes structured report data to SyncDeck aggregate reports. SyncDeck aggregate manifests include supported, unsupported, and unavailable embedded activity records in `startedAt` order. The per-child SyncDeck report redirect route and manager child download button were removed so the single parent session report is the canonical embedded export. The SyncDeck manager now shows user-visible report download failure feedback. Report contract docs were updated in `ADDING_ACTIVITIES.md` and `.agent/knowledge/data-contracts.md`.
 - 2026-07-11: Added Postboard reporting. Postboard now has an instructor-authenticated standalone HTML report endpoint and a structured builder for SyncDeck aggregation. The report includes prompt/settings, moderation status counts, reactions, flags, hidden/deleted state, and per-student contribution drill-downs. Remaining activity report builders moved to Phase 8.
+- 2026-07-11: Started Phase 5 UX polish. The SyncDeck running activities panel now fetches the session report manifest and shows whether each embedded activity is included in the single session report, unsupported, unavailable, pending, or temporarily unavailable.
+- 2026-07-11: Added a SyncDeck session report preview dialog that reuses the report manifest to summarize activity count, represented students, included sections, unsupported sections, unavailable sections, and per-activity report status before download.
 
 ## Phase 1: Harden The Shared Report Contract
 
@@ -88,9 +90,9 @@ Build complete activity reporting across ActiveBits, with special attention to S
 
 ## Phase 5: Improve Instructor And Student UX
 
-- [ ] Add clear report contribution indicators in the SyncDeck running activities panel, focused on whether each activity will appear in the single session report.
+- [x] Add clear report contribution indicators in the SyncDeck running activities panel, focused on whether each activity will appear in the single session report.
 - [x] Add error/status copy for failed report downloads.
-- [ ] Consider an instructor report preview route or modal before download.
+- [x] Consider an instructor report preview route or modal before download.
 - [ ] Add activity-manager report buttons for standalone activity session reports.
 - [ ] Keep instructor-generated reports as the first release workflow.
 - [ ] Track a later solo-mode proof-of-work report flow where asynchronous students can generate their own report.
