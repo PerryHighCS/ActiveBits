@@ -35,7 +35,7 @@ Build complete activity reporting across ActiveBits, with special attention to S
 
 - [ ] Add report-section validation or normalization helpers for `ActivityStructuredReportSection`.
 - [ ] Add a structured representation for unsupported or unavailable embedded reports.
-- [ ] Decide whether `payload` is archival raw data, diagnostic-only data, or part of the renderable contract.
+- [ ] Treat embedded report payload data as part of the self-contained render contract when it is needed to render the offline report after download.
 - [ ] Document required report builder behavior in `ADDING_ACTIVITIES.md`.
 - [ ] Record durable report contract notes in `.agent/knowledge/data-contracts.md`.
 
@@ -55,6 +55,7 @@ Build complete activity reporting across ActiveBits, with special attention to S
 
 - [ ] Treat `GET /api/syncdeck/:sessionId/report` as the canonical SyncDeck export.
 - [ ] Embed all child activity report data needed for summary, activity drill-down, and student drill-down inside the parent HTML.
+- [ ] Generate the parent report while child session data is still available, because embedded child sessions should end with the parent session.
 - [ ] Stop relying on child activity report downloads for SyncDeck aggregate reporting.
 - [ ] Remove `GET /api/syncdeck/:sessionId/embedded-activity/report/:instanceKey` after the parent report contains child activity report data.
 - [ ] Preserve direct activity `reportEndpoint` behavior for standalone activity sessions.
@@ -106,13 +107,18 @@ Build complete activity reporting across ActiveBits, with special attention to S
 - [ ] Add error/status copy for failed report downloads.
 - [ ] Consider an instructor report preview route or modal before download.
 - [ ] Add activity-manager report buttons for standalone activity session reports.
-- [ ] Decide whether students need access to their own report views from live sessions, exported files only, or a later authenticated route.
+- [ ] Keep instructor-generated reports as the first release workflow.
+- [ ] Track a later solo-mode proof-of-work report flow where asynchronous students can generate their own report.
+- [ ] Allow solo-mode student report generation for that student's own work, without requiring instructor auth.
 
 ## Phase 6: Persistence, Lifecycle, And Privacy
 
 - [ ] Audit each reportable activity for state that is currently only transient.
-- [ ] Add end-of-activity or session-end report snapshots where needed.
+- [ ] Generate reports from current session state; after a session ends, the ended-state snapshot is the current state used for reporting.
+- [ ] Add end-of-activity or session-end report snapshots only where current state would otherwise be lost.
 - [ ] Ensure child sessions remain available long enough for SyncDeck report generation.
+- [ ] Require instructor/parent-session auth for report generation; session id alone is not sufficient authorization.
+- [ ] For standalone activity reports, follow each activity's existing role/auth model: instructor-authenticated reports where instructor auth exists, and student-scoped reports for solo-mode student proof-of-work.
 - [ ] Exclude secrets, passcodes, entry tokens, and unsafe hidden state from exported payloads.
 - [ ] Add tests for report generation after embedded activity end and parent session continuation.
 
@@ -132,10 +138,12 @@ Build complete activity reporting across ActiveBits, with special attention to S
 - [ ] Add user-visible SyncDeck manager download failure feedback.
 - [ ] Update docs and knowledge notes for the finalized report contract.
 
-## Open Questions
+## Decisions
 
-- [ ] Should the single SyncDeck report include raw activity payloads for archival fidelity, or should exports contain only generic renderable sections plus minimal metadata?
-- [ ] Should standalone report endpoints require instructor auth for every activity, including Gallery Walk, or should some reports remain open by possession of session id?
-- [ ] How long after a class should temporary child session report data remain available?
-- [ ] Do students need direct access to their own report view, or is an instructor-generated export with per-student filtering enough for the first release?
-- [ ] Should report generation happen live from session state every time, or should activities snapshot report data when ended?
+- [x] Use one self-contained SyncDeck parent report as the primary export; embedded child activity data needed for rendering must live inside that file.
+- [x] Treat session id as insufficient authorization for report generation. Embedded report generation should flow from authenticated parent instructor access.
+- [x] End embedded child sessions with the parent session, and embed child report data into the parent report instead of depending on child sessions/files afterward.
+- [x] Start with instructor-generated reports for live sessions.
+- [x] Defer student-generated proof-of-work reports to a later solo/asynchronous mode slice.
+- [x] Generate reports from current session state. If the session has ended, the ended-state snapshot is the current state for reporting.
+- [x] Standalone report auth should follow the activity's role model as reports are added: use instructor auth when the activity has it, and allow solo-mode students to generate reports scoped to their own work.
