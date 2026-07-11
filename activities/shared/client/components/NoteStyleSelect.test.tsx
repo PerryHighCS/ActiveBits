@@ -61,6 +61,9 @@ void test('NoteStyleSelect opens and selects an option with the pointer', async 
     )
 
     const trigger = rendered.getByRole('button', { name: 'Note style' })
+    const selectedDescriptionId = trigger.getAttribute('aria-describedby')
+    assert.ok(selectedDescriptionId)
+    assert.equal(rendered.container.querySelector(`#${selectedDescriptionId}`)?.textContent, 'Current style: Lemon')
     fireEvent.click(trigger)
     assert.equal(trigger.getAttribute('aria-expanded'), 'true')
     fireEvent.click(rendered.getByRole('option', { name: 'Peach' }))

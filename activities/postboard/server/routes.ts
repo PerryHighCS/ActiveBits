@@ -2,7 +2,7 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { createSession, type SessionRecord, type SessionStore } from 'activebits-server/core/sessions.js'
 import { registerSessionNormalizer } from 'activebits-server/core/sessionNormalization.js'
 import { findAcceptedEntryParticipant } from 'activebits-server/core/acceptedEntryParticipants.js'
-import type { ActiveBitsWebSocket, WsRouter } from '../../../types/websocket.js'
+import type { WsRouter } from '../../../types/websocket.js'
 import {
   isPostboardReactionId,
   type PostboardFlag,
@@ -53,8 +53,6 @@ const MAX_POST_TEXT_LENGTH = 1200
 const MAX_FLAG_REASON_LENGTH = 240
 const MAX_POSTS = 500
 const MAX_FLAGS_PER_POST = 25
-const WS_OPEN = 1
-
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return value != null && typeof value === 'object' && !Array.isArray(value)
 }
@@ -470,18 +468,8 @@ function findPost(session: PostboardSession, postId: string | undefined): Postbo
   return session.data.posts.find((post) => post.id === normalizedPostId) ?? null
 }
 
-function sendBroadcast(ws: WsRouter, sessionId: string): void {
-  const payload = JSON.stringify({ type: 'postboard:updated', sessionId })
-  for (const socket of ws.wss.clients as Set<ActiveBitsWebSocket>) {
-    if (socket.readyState === WS_OPEN && socket.sessionId === sessionId) {
-      socket.send(payload)
-    }
-  }
-}
-
-async function persistAndBroadcast(sessions: SessionStore, ws: WsRouter, session: PostboardSession): Promise<void> {
+async function persistSession(sessions: SessionStore, session: PostboardSession): Promise<void> {
   await sessions.set(session.id, session)
-  sendBroadcast(ws, session.id)
 }
 
 function logModeration(action: string, details: Record<string, unknown>): void {
@@ -503,7 +491,7 @@ registerSessionNormalizer(ACTIVITY_ID, (session) => {
   session.data = normalizePostboardSessionData(session.data)
 })
 
-export default function setupPostboardRoutes(app: PostboardRouteApp, sessions: SessionStore, ws: WsRouter): void {
+export default function setupPostboardRoutes(app: PostboardRouteApp, sessions: SessionStore, _ws: WsRouter): void {
   app.post('/api/postboard/create', routeHandler('create', async (req, res) => {
     const body = getBody(req)
     const selectedOptions = isPlainObject(body.selectedOptions) ? body.selectedOptions : {}
@@ -541,7 +529,7 @@ export default function setupPostboardRoutes(app: PostboardRouteApp, sessions: S
     session.data.settings = {
       autoApprove: normalizeAutoApprove(body.autoApprove),
     }
-    await persistAndBroadcast(sessions, ws, session)
+    await persistSession(sessions, session)
     logModeration('setup', { sessionId: session.id, autoApprove: session.data.settings.autoApprove })
     res.json(buildInstructorSnapshot(session))
   }))
@@ -587,7 +575,7 @@ export default function setupPostboardRoutes(app: PostboardRouteApp, sessions: S
     }
 
     session.data.posts.push(post)
-    await persistAndBroadcast(sessions, ws, session)
+    await persistSession(sessions, session)
     res.json({ post, instructor: isInstructor })
   }))
 
@@ -605,7 +593,7 @@ export default function setupPostboardRoutes(app: PostboardRouteApp, sessions: S
     post.rejectedAt = null
     post.deletedAt = null
     post.updatedAt = now
-    await persistAndBroadcast(sessions, ws, session)
+    await persistSession(sessions, session)
     logModeration('approve', { sessionId: session.id, postId: post.id })
     res.json(buildInstructorSnapshot(session))
   }))
@@ -624,7 +612,7 @@ export default function setupPostboardRoutes(app: PostboardRouteApp, sessions: S
     post.approvedAt = null
     post.deletedAt = null
     post.updatedAt = now
-    await persistAndBroadcast(sessions, ws, session)
+    await persistSession(sessions, session)
     logModeration('reject', { sessionId: session.id, postId: post.id })
     res.json(buildInstructorSnapshot(session))
   }))
@@ -642,7 +630,7 @@ export default function setupPostboardRoutes(app: PostboardRouteApp, sessions: S
     post.rejectedAt = null
     post.deletedAt = null
     post.updatedAt = now
-    await persistAndBroadcast(sessions, ws, session)
+    await persistSession(sessions, session)
     logModeration('unreject', { sessionId: session.id, postId: post.id })
     res.json(buildInstructorSnapshot(session))
   }))
@@ -665,7 +653,7 @@ export default function setupPostboardRoutes(app: PostboardRouteApp, sessions: S
     post.status = 'deleted'
     post.deletedAt = now
     post.updatedAt = now
-    await persistAndBroadcast(sessions, ws, session)
+    await persistSession(sessions, session)
     logModeration('delete', { sessionId: session.id, postId: post.id })
     res.json(buildStudentSnapshot(session, studentId))
   }))
@@ -680,7 +668,7 @@ export default function setupPostboardRoutes(app: PostboardRouteApp, sessions: S
     }
     post.hiddenAt = Date.now()
     post.updatedAt = post.hiddenAt
-    await persistAndBroadcast(sessions, ws, session)
+    await persistSession(sessions, session)
     logModeration('hide', { sessionId: session.id, postId: post.id })
     res.json(buildInstructorSnapshot(session))
   }))
@@ -695,7 +683,7 @@ export default function setupPostboardRoutes(app: PostboardRouteApp, sessions: S
     }
     post.hiddenAt = null
     post.updatedAt = Date.now()
-    await persistAndBroadcast(sessions, ws, session)
+    await persistSession(sessions, session)
     logModeration('unhide', { sessionId: session.id, postId: post.id })
     res.json(buildInstructorSnapshot(session))
   }))
@@ -726,7 +714,7 @@ export default function setupPostboardRoutes(app: PostboardRouteApp, sessions: S
       }
       pendingOrder = Math.max(pendingOrder, post.order + 1)
     }
-    await persistAndBroadcast(sessions, ws, session)
+    await persistSession(sessions, session)
     logModeration('reorder', { sessionId: session.id, count: orderById.size })
     res.json(buildInstructorSnapshot(session))
   }))
@@ -756,7 +744,7 @@ export default function setupPostboardRoutes(app: PostboardRouteApp, sessions: S
     } else {
       delete session.data.flags[post.id]
     }
-    await persistAndBroadcast(sessions, ws, session)
+    await persistSession(sessions, session)
     logModeration(shouldFlag ? 'flag' : 'unflag', { sessionId: session.id, postId: post.id })
     res.json(buildInstructorSnapshot(session))
   }))
@@ -812,7 +800,7 @@ export default function setupPostboardRoutes(app: PostboardRouteApp, sessions: S
         }
       }
     }
-    await persistAndBroadcast(sessions, ws, session)
+    await persistSession(sessions, session)
     res.json({
       reactionCounts: buildReactionCounts(isInstructor ? session.data.reactions : visibleReactionCountsSource),
       viewerReactions: buildViewerReactions(changedPostReactions, reactorId),

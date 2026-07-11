@@ -100,20 +100,6 @@ function createWsRouter(): WsRouter {
   }
 }
 
-function createBroadcastCapture(sessionId = 'session-1'): { ws: WsRouter; messages: string[] } {
-  const messages: string[] = []
-  const socket = {
-    readyState: 1,
-    sessionId,
-    send(message: string) {
-      messages.push(message)
-    },
-  } as ActiveBitsWebSocket
-  const ws = createWsRouter()
-  ws.wss.clients.add(socket)
-  return { ws, messages }
-}
-
 function createSession(data: Partial<PostboardSessionData> = {}): SessionRecord & { type: 'postboard'; data: PostboardSessionData } {
   return {
     id: 'session-1',
@@ -645,13 +631,12 @@ void test('student-state route returns a student-safe snapshot for the requester
   assert.deepEqual(spoofedBody.posts.map((post) => post.id), ['approved-peer'])
 })
 
-void test('setup route requires instructor auth, persists prompt settings, and broadcasts', async () => {
+void test('setup route requires instructor auth and persists prompt settings', async () => {
   const app = new TestApp()
   const store = new MemoryStore()
   const session = createSession()
-  const { ws, messages } = createBroadcastCapture(session.id)
   await store.set(session.id, session)
-  setupPostboardRoutes(app, store, ws)
+  setupPostboardRoutes(app, store, createWsRouter())
 
   const handler = app.handlers.post['/api/postboard/:sessionId/setup']
   assert.ok(handler)
@@ -662,7 +647,6 @@ void test('setup route requires instructor auth, persists prompt settings, and b
     body: { prompt: 'Nope', autoApprove: true },
   }, rejected)
   assert.equal(rejected.statusCode, 403)
-  assert.equal(messages.length, 0)
 
   const accepted = createResponse()
   await handler({
@@ -676,7 +660,6 @@ void test('setup route requires instructor auth, persists prompt settings, and b
   const storedData = stored?.data as PostboardSessionData | undefined
   assert.equal(storedData?.prompt.text, 'Updated prompt')
   assert.equal(storedData?.settings.autoApprove, true)
-  assert.deepEqual(messages, [JSON.stringify({ type: 'postboard:updated', sessionId: session.id })])
 })
 
 void test('post route rejects new posts once the session reaches the post limit', async () => {
@@ -719,15 +702,14 @@ void test('post route rejects new posts once the session reaches the post limit'
   assert.equal(storedData?.posts.length, 500)
 })
 
-void test('hide and unhide routes require instructor auth, update hiddenAt, and broadcast', async () => {
+void test('hide and unhide routes require instructor auth and update hiddenAt', async () => {
   const app = new TestApp()
   const store = new MemoryStore()
   const session = createSession({
     posts: [createPost()],
   })
-  const { ws, messages } = createBroadcastCapture(session.id)
   await store.set(session.id, session)
-  setupPostboardRoutes(app, store, ws)
+  setupPostboardRoutes(app, store, createWsRouter())
 
   const hide = app.handlers.post['/api/postboard/:sessionId/posts/:postId/hide']
   const unhide = app.handlers.post['/api/postboard/:sessionId/posts/:postId/unhide']
@@ -740,7 +722,6 @@ void test('hide and unhide routes require instructor auth, update hiddenAt, and 
     body: {},
   }, rejected)
   assert.equal(rejected.statusCode, 403)
-  assert.equal(messages.length, 0)
 
   const hidden = createResponse()
   await hide({
@@ -749,7 +730,6 @@ void test('hide and unhide routes require instructor auth, update hiddenAt, and 
   }, hidden)
   assert.equal(hidden.statusCode, 200)
   assert.equal(typeof ((hidden.body as { posts?: PostboardPost[] }).posts?.[0]?.hiddenAt), 'number')
-  assert.equal(messages.length, 1)
 
   const unhidden = createResponse()
   await unhide({
@@ -758,7 +738,6 @@ void test('hide and unhide routes require instructor auth, update hiddenAt, and 
   }, unhidden)
   assert.equal(unhidden.statusCode, 200)
   assert.equal((unhidden.body as { posts?: PostboardPost[] }).posts?.[0]?.hiddenAt, null)
-  assert.equal(messages.length, 2)
 })
 
 void test('reorder route applies provided post order and normalizes omitted board posts', async () => {
@@ -779,9 +758,8 @@ void test('reorder route applies provided post order and normalizes omitted boar
       createPost({ id: 'pending-post', order: 3, text: 'Pending', status: 'pending', approvedAt: null }),
     ],
   })
-  const { ws, messages } = createBroadcastCapture(session.id)
   await store.set(session.id, session)
-  setupPostboardRoutes(app, store, ws)
+  setupPostboardRoutes(app, store, createWsRouter())
 
   const handler = app.handlers.post['/api/postboard/:sessionId/reorder']
   assert.ok(handler)
@@ -792,7 +770,6 @@ void test('reorder route applies provided post order and normalizes omitted boar
     body: { postIds: ['post-c', 'post-a'] },
   }, rejected)
   assert.equal(rejected.statusCode, 403)
-  assert.equal(messages.length, 0)
 
   const accepted = createResponse()
   await handler({
@@ -805,7 +782,6 @@ void test('reorder route applies provided post order and normalizes omitted boar
   const body = accepted.body as { posts?: PostboardPost[] }
   assert.deepEqual(body.posts?.map((post) => post.id), ['post-c', 'post-a', 'post-b', 'pending-post'])
   assert.deepEqual(body.posts?.map((post) => post.order), [0, 1, 2, 3])
-  assert.equal(messages.length, 1)
 })
 
 void test('react route validates input, protects hidden and self posts, and toggles reactions', async () => {
@@ -850,9 +826,8 @@ void test('react route validates input, protects hidden and self posts, and togg
       'own-approved': { byUser: { 'student-2': '👍' } },
     },
   })
-  const { ws, messages } = createBroadcastCapture(session.id)
   await store.set(session.id, session)
-  setupPostboardRoutes(app, store, ws)
+  setupPostboardRoutes(app, store, createWsRouter())
 
   const handler = app.handlers.post['/api/postboard/:sessionId/posts/:postId/react']
   assert.ok(handler)
@@ -930,7 +905,6 @@ void test('react route validates input, protects hidden and self posts, and togg
     'own-approved': { '👍': 1 },
   })
   assert.deepEqual((instructorReaction.body as ReactResponseBody).viewerReactions, { 'hidden-peer': '🔥' })
-  assert.equal(messages.length, 4)
 })
 
 void test('flag route toggles a single instructor flag state', async () => {

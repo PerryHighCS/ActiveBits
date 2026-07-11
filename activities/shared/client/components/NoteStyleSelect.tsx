@@ -34,6 +34,7 @@ export default function NoteStyleSelect({
   const optionRefs = useRef<Array<HTMLButtonElement | null>>([])
   const labelId = useId()
   const listboxId = useId()
+  const selectedDescriptionId = useId()
 
   const selectedIndex = useMemo(
     () => Math.max(0, NOTE_STYLE_OPTIONS.findIndex((option) => option.id === value)),
@@ -155,6 +156,7 @@ export default function NoteStyleSelect({
   return (
     <div className={`relative flex flex-col gap-2${className ? ` ${className}` : ''}`} ref={containerRef}>
       <span id={labelId} className="text-sm font-semibold text-gray-700">{label}</span>
+      <span id={selectedDescriptionId} className="sr-only">Current style: {selected.label}</span>
       <button
         type="button"
         ref={triggerRef}
@@ -163,6 +165,7 @@ export default function NoteStyleSelect({
         aria-haspopup="listbox"
         aria-expanded={isOpen}
         aria-labelledby={labelId}
+        aria-describedby={selectedDescriptionId}
         aria-controls={isOpen ? listboxId : undefined}
         onKeyDown={handleTriggerKeyDown}
       >

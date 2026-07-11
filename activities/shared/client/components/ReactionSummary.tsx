@@ -32,9 +32,11 @@ export default function ReactionSummary({
   const triggerRef = useRef<HTMLButtonElement | null>(null)
   const optionRefs = useRef<Array<HTMLButtonElement | null>>([])
   const listboxId = useId()
+  const selectedDescriptionId = useId()
   const optionByValue = new Map(options.map((option) => [option.value, option]))
   const reactionEntries = Object.entries(reactions).filter(([, count]) => (count ?? 0) > 0)
   const selectedOption = viewerReaction != null ? optionByValue.get(viewerReaction) : undefined
+  const selectedDescription = selectedOption?.label ?? viewerReaction ?? 'None'
   const selectedIndex = Math.max(0, options.findIndex((option) => option.value === viewerReaction))
   const canChooseReaction = options.length > 0
 
@@ -105,6 +107,7 @@ export default function ReactionSummary({
         type="button"
         ref={triggerRef}
         aria-label={chooseLabel}
+        aria-describedby={selectedDescriptionId}
         aria-haspopup="listbox"
         aria-expanded={isPickerOpen}
         aria-controls={isPickerOpen ? listboxId : undefined}
@@ -120,6 +123,7 @@ export default function ReactionSummary({
             : 'border-indigo-200 dark:border-indigo-700 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-300 hover:border-indigo-300 dark:hover:border-indigo-600'
         }`}
       >
+        <span id={selectedDescriptionId} className="sr-only">Current reaction: {selectedDescription}</span>
         {selectedOption?.symbol ?? viewerReaction ?? '☺'}
       </button>
       {isPickerOpen && canChooseReaction && (
