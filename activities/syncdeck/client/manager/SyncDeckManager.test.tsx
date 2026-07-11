@@ -55,7 +55,6 @@ import { resolveMountedEmbeddedManagerInstanceKeys } from './SyncDeckManager.js'
 import { resolveEmbeddedManagerIframeAccessibilityProps } from './SyncDeckManager.js'
 import { extractManagerNavigationCapabilitiesFromRevealMessage } from './SyncDeckManager.js'
 import { resolveSyncDeckActivityPickerEntries } from './SyncDeckManager.js'
-import { activitySupportsEmbeddedReport } from './SyncDeckManager.js'
 import { parseDownloadFilenameFromContentDisposition } from './SyncDeckManager.js'
 import { resolveDeckActivityRequestsFromDeckDocument } from './SyncDeckManager.js'
 
@@ -115,15 +114,14 @@ void test('SyncDeckManager pre-fills presentation URL from query params', () => 
   assert.match(html, /value="https:\/\/slides\.example\/deck"/i)
 })
 
-void test('activitySupportsEmbeddedReport reflects shared activity config metadata', () => {
+void test('resolveSyncDeckActivityPickerEntries sorts and omits SyncDeck itself', () => {
   const entries = resolveSyncDeckActivityPickerEntries([
     { id: 'gallery-walk', name: 'Gallery Walk', description: 'Peer feedback', reportEndpoint: '/api/gallery-walk/:sessionId/report' },
     { id: 'video-sync', name: 'Video Sync', description: 'Shared video' },
+    { id: 'syncdeck', name: 'SyncDeck', description: 'Parent deck' },
   ])
 
-  assert.equal(activitySupportsEmbeddedReport('gallery-walk', entries), true)
-  assert.equal(activitySupportsEmbeddedReport('video-sync', entries), false)
-  assert.equal(activitySupportsEmbeddedReport('missing-activity', entries), false)
+  assert.deepEqual(entries.map((entry) => entry.activityId), ['gallery-walk', 'video-sync'])
 })
 
 void test('parseDownloadFilenameFromContentDisposition handles standard and utf-8 filenames', () => {
@@ -1171,8 +1169,8 @@ void test('resolveSyncDeckActivityPickerEntries excludes SyncDeck and sorts entr
       { id: 'algorithm-demo', name: 'Algorithm Demo', description: 'Visualize algorithms' },
     ]),
     [
-      { activityId: 'algorithm-demo', name: 'Algorithm Demo', description: 'Visualize algorithms', supportsReport: false },
-      { activityId: 'video-sync', name: 'Video Sync', description: 'Watch together', supportsReport: false },
+      { activityId: 'algorithm-demo', name: 'Algorithm Demo', description: 'Visualize algorithms' },
+      { activityId: 'video-sync', name: 'Video Sync', description: 'Watch together' },
     ],
   )
 })

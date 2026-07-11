@@ -15,6 +15,15 @@ Document API and data-shape assumptions that must stay compatible over time.
 
 ## Contracts
 
+- Date: 2026-07-11
+- Surface: activity interface | SyncDeck report aggregation
+- Contract: `ActivityStructuredReportSection.reportStatus` may be `available`, `unsupported`, or `unavailable`. Activity-owned structured builders should return `available` sections with generic `summaryCards`, `scopeBlocks`, `studentScopeBlocks`, and a JSON-serializable `payload` that contains any data required for offline rendering. SyncDeck session reports now include every current embedded activity with a valid parent record: child sessions without a registered builder are represented as `unsupported`, and missing or unbuildable child sessions are represented as `unavailable`.
+- Compatibility constraints: `reportStatus` is optional so existing builders remain valid and are treated as available by convention. SyncDeck no longer exposes the per-child embedded report redirect path as the normal workflow; `GET /api/syncdeck/:sessionId/report` is the canonical single self-contained parent export for embedded activity sessions.
+- Validation rules: Builders must normalize legacy activity state before reading it, must not include instructor passcodes, entry tokens, or other secrets, and must keep block/payload data JSON-serializable. Unsupported/unavailable sections should include visible rich-text status blocks so offline reports do not silently omit activities.
+- Evidence (schema/tests/path): `types/activity.ts`; `server/activities/activityReportRegistry.ts`; `activities/syncdeck/server/routes.ts`; `activities/syncdeck/server/routes.test.ts`; `activities/syncdeck/server/reportHtml.test.ts`; `activities/resonance/server/reportRenderer.ts`; `activities/resonance/server/reportRenderer.test.ts`; `ADDING_ACTIVITIES.md`
+- Follow-up action: Add structured builders for the remaining priority activities and expand the generic block vocabulary only when multiple activities need a new structure.
+- Owner: Codex
+
 - Date: 2026-06-04
 - Surface: activity interface | SyncDeck embedded launch
 - Contract: MobCode embedded launches may seed a starter workspace through `embeddedLaunch.selectedOptions` using `{ files: Record<string, string>, activeFile?: string }`. `files` is a virtual path to UTF-8 text map, and `activeFile` is optional.

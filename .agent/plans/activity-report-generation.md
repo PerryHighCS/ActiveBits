@@ -16,9 +16,9 @@ Build complete activity reporting across ActiveBits, with special attention to S
 - [x] SyncDeck's exported HTML report already has whole-session, activity, and student views.
 - [x] Gallery Walk has a self-contained HTML report and a structured report builder.
 - [x] Resonance has a self-contained standalone report endpoint.
-- [ ] Register Resonance as a structured report builder for SyncDeck aggregation.
-- [ ] Include embedded activities without report builders in SyncDeck aggregate reports with a clear unsupported/unavailable state.
-- [ ] Remove the SyncDeck per-child embedded report download path in favor of one self-contained parent report that embeds child activity report data.
+- [x] Register Resonance as a structured report builder for SyncDeck aggregation.
+- [x] Include embedded activities without report builders in SyncDeck aggregate reports with a clear unsupported/unavailable state.
+- [x] Remove the SyncDeck per-child embedded report download path in favor of one self-contained parent report that embeds child activity report data.
 - [ ] Add activity-level reports for the main activities that capture meaningful student work.
 
 ## Design Principles
@@ -31,48 +31,52 @@ Build complete activity reporting across ActiveBits, with special attention to S
 - [ ] Make unsupported report states visible in SyncDeck reports instead of silently dropping activities.
 - [ ] Add focused tests for each report builder and route touched.
 
+## Implementation Notes
+
+- 2026-07-11: Completed the first implementation slice. Resonance now contributes structured report data to SyncDeck aggregate reports. SyncDeck aggregate manifests include supported, unsupported, and unavailable embedded activity records in `startedAt` order. The per-child SyncDeck report redirect route and manager child download button were removed so the single parent session report is the canonical embedded export. The SyncDeck manager now shows user-visible report download failure feedback. Report contract docs were updated in `ADDING_ACTIVITIES.md` and `.agent/knowledge/data-contracts.md`.
+
 ## Phase 1: Harden The Shared Report Contract
 
 - [ ] Add report-section validation or normalization helpers for `ActivityStructuredReportSection`.
-- [ ] Add a structured representation for unsupported or unavailable embedded reports.
-- [ ] Treat embedded report payload data as part of the self-contained render contract when it is needed to render the offline report after download.
-- [ ] Document required report builder behavior in `ADDING_ACTIVITIES.md`.
-- [ ] Record durable report contract notes in `.agent/knowledge/data-contracts.md`.
+- [x] Add a structured representation for unsupported or unavailable embedded reports.
+- [x] Treat embedded report payload data as part of the self-contained render contract when it is needed to render the offline report after download.
+- [x] Document required report builder behavior in `ADDING_ACTIVITIES.md`.
+- [x] Record durable report contract notes in `.agent/knowledge/data-contracts.md`.
 
 ## Phase 2: Make SyncDeck Aggregation Complete
 
-- [ ] Update SyncDeck manifest generation so every embedded activity appears in the aggregate, including unsupported or expired child sessions.
-- [ ] Preserve useful ordering, ideally by embedded activity `startedAt` and/or slide `location`.
-- [ ] Add visible aggregate report sections for:
-  - [ ] session summary
-  - [ ] per-activity drill-down
-  - [ ] per-student drill-down
-  - [ ] unsupported or unavailable reports
-- [ ] Add route tests for supported, unsupported, missing, and expired child sessions.
-- [ ] Add report HTML tests for mixed report availability.
+- [x] Update SyncDeck manifest generation so every embedded activity appears in the aggregate, including unsupported or expired child sessions.
+- [x] Preserve useful ordering, ideally by embedded activity `startedAt` and/or slide `location`.
+- [x] Add visible aggregate report sections for:
+  - [x] session summary
+  - [x] per-activity drill-down
+  - [x] per-student drill-down
+  - [x] unsupported or unavailable reports
+- [x] Add route tests for supported, unsupported, missing, and expired child sessions.
+- [x] Add report HTML tests for mixed report availability.
 
 ## Phase 3: Make One Session Report The Primary Export
 
-- [ ] Treat `GET /api/syncdeck/:sessionId/report` as the canonical SyncDeck export.
-- [ ] Embed all child activity report data needed for summary, activity drill-down, and student drill-down inside the parent HTML.
+- [x] Treat `GET /api/syncdeck/:sessionId/report` as the canonical SyncDeck export.
+- [x] Embed all child activity report data needed for summary, activity drill-down, and student drill-down inside the parent HTML.
 - [ ] Generate the parent report while child session data is still available, because embedded child sessions should end with the parent session.
-- [ ] Stop relying on child activity report downloads for SyncDeck aggregate reporting.
-- [ ] Remove `GET /api/syncdeck/:sessionId/embedded-activity/report/:instanceKey` after the parent report contains child activity report data.
-- [ ] Preserve direct activity `reportEndpoint` behavior for standalone activity sessions.
-- [ ] Add tests proving the SyncDeck session report can be opened offline and viewed without follow-up child report requests.
-- [ ] Add user-visible failure feedback in the SyncDeck manager when the single session report download fails.
+- [x] Stop relying on child activity report downloads for SyncDeck aggregate reporting.
+- [x] Remove `GET /api/syncdeck/:sessionId/embedded-activity/report/:instanceKey` after the parent report contains child activity report data.
+- [x] Preserve direct activity `reportEndpoint` behavior for standalone activity sessions.
+- [x] Add tests proving the SyncDeck session report can be opened offline and viewed without follow-up child report requests.
+- [x] Add user-visible failure feedback in the SyncDeck manager when the single session report download fails.
 
 ## Phase 4: Add Structured Builders For Priority Activities
 
 ### Resonance
 
-- [ ] Add `buildResonanceStructuredReportSection(...)`.
-- [ ] Register `registerActivityReportBuilder('resonance', ...)`.
-- [ ] Include per-question summary blocks.
-- [ ] Include per-student answer blocks.
-- [ ] Include multiple-choice correctness and poll counts.
-- [ ] Include free-response annotations, shared responses, and instructor emoji where appropriate.
-- [ ] Add server tests for standalone report compatibility and SyncDeck aggregation.
+- [x] Add `buildResonanceStructuredReportSection(...)`.
+- [x] Register `registerActivityReportBuilder('resonance', ...)`.
+- [x] Include per-question summary blocks.
+- [x] Include per-student answer blocks.
+- [x] Include multiple-choice correctness and poll counts.
+- [x] Include free-response annotations, shared responses, and instructor emoji where appropriate.
+- [x] Add server tests for standalone report compatibility and SyncDeck aggregation.
 
 ### Postboard
 
@@ -104,7 +108,7 @@ Build complete activity reporting across ActiveBits, with special attention to S
 ## Phase 5: Improve Instructor And Student UX
 
 - [ ] Add clear report contribution indicators in the SyncDeck running activities panel, focused on whether each activity will appear in the single session report.
-- [ ] Add error/status copy for failed report downloads.
+- [x] Add error/status copy for failed report downloads.
 - [ ] Consider an instructor report preview route or modal before download.
 - [ ] Add activity-manager report buttons for standalone activity session reports.
 - [ ] Keep instructor-generated reports as the first release workflow.
@@ -124,19 +128,19 @@ Build complete activity reporting across ActiveBits, with special attention to S
 
 ## Phase 7: Verification
 
-- [ ] Run scoped tests for each modified activity.
-- [ ] Run SyncDeck server and manager tests after aggregation changes.
+- [x] Run scoped tests for each modified activity.
+- [x] Run SyncDeck server and manager tests after aggregation changes.
 - [ ] Run `npm test` before merge.
 - [ ] Add `npm run test:e2e` if browser-visible report flows, downloads, routing, or SyncDeck manager surfaces change.
 - [ ] If sandbox port binding blocks e2e tests, document the limitation and run the strongest available scoped checks.
 
 ## Recommended First Implementation Slice
 
-- [ ] Add Resonance structured report aggregation into the single SyncDeck parent report.
-- [ ] Make SyncDeck aggregate reports include unsupported child activities visibly.
-- [ ] Remove SyncDeck's child report redirect path so the normal workflow never depends on separate child report files.
-- [ ] Add user-visible SyncDeck manager download failure feedback.
-- [ ] Update docs and knowledge notes for the finalized report contract.
+- [x] Add Resonance structured report aggregation into the single SyncDeck parent report.
+- [x] Make SyncDeck aggregate reports include unsupported child activities visibly.
+- [x] Remove SyncDeck's child report redirect path so the normal workflow never depends on separate child report files.
+- [x] Add user-visible SyncDeck manager download failure feedback.
+- [x] Update docs and knowledge notes for the finalized report contract.
 
 ## Decisions
 
