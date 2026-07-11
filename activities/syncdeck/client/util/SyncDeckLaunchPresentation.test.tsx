@@ -103,6 +103,67 @@ void test('launchStandaloneSyncDeckPresentation rejects presentations that fail 
   )
 })
 
+void test('launchStandaloneSyncDeckPresentation can launch instructor mode from a presentation URL', async () => {
+  const { launchStandaloneSyncDeckPresentation } = await import('./SyncDeckLaunchPresentation.js')
+  const requests: Array<{ input: string; init?: RequestInit }> = []
+  const redirects: string[] = []
+  const storageWrites = new Map<string, string>()
+
+  const result = await launchStandaloneSyncDeckPresentation({
+    presentationUrl: 'https://slides.example/deck?unit=arrays',
+    mode: 'instructor',
+    hostProtocol: 'https:',
+    userAgent: 'Mozilla/5.0 Chrome/123.0.0.0 Safari/537.36',
+    preflightRunner: async () => ({ valid: true, warning: null }),
+    fetchFn: (async (input, init) => {
+      requests.push({ input: String(input), init })
+      if (String(input) === '/api/syncdeck/create') {
+        return {
+          ok: true,
+          json: async () => ({
+            id: 'syncdeck-instructor-1',
+            instructorPasscode: 'launch-passcode',
+          }),
+        } as Response
+      }
+
+      if (String(input) === '/api/syncdeck/syncdeck-instructor-1/configure') {
+        return {
+          ok: true,
+          json: async () => ({}),
+        } as Response
+      }
+
+      throw new Error(`[TEST] unexpected fetch: ${String(input)}`)
+    }) as typeof fetch,
+    storage: {
+      setItem(key, value) {
+        storageWrites.set(key, value)
+      },
+    },
+    redirectTo(url) {
+      redirects.push(url)
+    },
+  })
+
+  assert.deepEqual(result, { sessionId: 'syncdeck-instructor-1' })
+  assert.equal(requests[1]?.input, '/api/syncdeck/syncdeck-instructor-1/configure')
+  assert.deepEqual(
+    JSON.parse(String(requests[1]?.init?.body ?? '{}')),
+    {
+      presentationUrl: 'https://slides.example/deck?unit=arrays',
+      instructorPasscode: 'launch-passcode',
+      standaloneMode: false,
+    },
+  )
+  assert.deepEqual(Array.from(storageWrites.entries()), [
+    ['syncdeck_instructor_syncdeck-instructor-1', 'launch-passcode'],
+  ])
+  assert.deepEqual(redirects, [
+    '/manage/syncdeck/syncdeck-instructor-1?presentationUrl=https%3A%2F%2Fslides.example%2Fdeck%3Funit%3Darrays',
+  ])
+})
+
 void test('SyncDeckLaunchPresentation shows a launch form when presentationUrl is missing', async () => {
   const restoreDomEnvironment = installDomEnvironment('https://bits.mycode.run/util/syncdeck/launch-presentation')
   const { render, waitFor } = await import('@testing-library/react')
@@ -127,4 +188,20 @@ void test('SyncDeckLaunchPresentation shows a launch form when presentationUrl i
   } finally {
     restoreDomEnvironment()
   }
+})
+
+void test('SyncDeckLaunchPresentation parses presentation-url alias and instructor mode', async () => {
+  const {
+    resolveSyncDeckLaunchMode,
+    resolveSyncDeckLaunchPresentationUrl,
+  } = await import('./SyncDeckLaunchPresentation.js')
+
+  const params = new URLSearchParams(
+    'presentation-url=https%3A%2F%2Fslides.example%2Fdeck&mode=instructor',
+  )
+
+  assert.equal(resolveSyncDeckLaunchPresentationUrl(params), 'https://slides.example/deck')
+  assert.equal(resolveSyncDeckLaunchMode(params.get('mode')), 'instructor')
+  assert.equal(resolveSyncDeckLaunchMode('student'), 'student')
+  assert.equal(resolveSyncDeckLaunchMode('unexpected'), 'student')
 })

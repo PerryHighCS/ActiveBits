@@ -310,7 +310,7 @@ export const myActivity = {
 
 Activities can also support standalone via permalink without supporting `/solo/:activityId`. SyncDeck is the motivating example for that split.
 
-SyncDeck also supports an ActiveBits-owned utility launch flow for statically hosted decks. In that flow, the external presentation redirects the browser to `/util/syncdeck/launch-presentation?presentationUrl=...`, ActiveBits runs the normal SyncDeck Reveal preflight on its own origin, then creates/configures a standalone SyncDeck session and redirects into `/:sessionId` so the deck opens in solo student mode. This avoids cross-origin browser fetch/CORS requirements while keeping all session creation on the ActiveBits origin.
+SyncDeck also supports an ActiveBits-owned utility launch flow for statically hosted decks. In that flow, the external presentation redirects the browser to `/util/syncdeck/launch-presentation?presentationUrl=...`, ActiveBits runs the normal SyncDeck Reveal preflight on its own origin, then creates/configures a temporary SyncDeck session. By default the utility redirects into `/:sessionId` so the deck opens in solo student mode. Adding `mode=instructor` creates a hosted instructor session, stores the same-tab instructor bootstrap credential, and redirects into `/manage/syncdeck/:sessionId?presentationUrl=...`. The utility also accepts `presentation-url` as an alias for `presentationUrl`. This avoids cross-origin browser fetch/CORS requirements while keeping all session creation on the ActiveBits origin.
 
 ### Solo Mode vs. Teacher Mode
 

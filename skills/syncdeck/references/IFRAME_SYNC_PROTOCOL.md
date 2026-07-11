@@ -52,8 +52,10 @@ The most important commands to support are:
 The standalone "Activate SyncDeck" CTA is outside the iframe command protocol.
 
 - opt in with `standaloneHosting.activeBitsOrigin`
-- the runtime redirects to ActiveBits under `/util/syncdeck/launch-presentation`
-- pass a canonical absolute deck URL as `presentationUrl` when needed
+- the runtime redirects to ActiveBits under `/util/syncdeck/launch-presentation?presentationUrl=<encoded-url>`
+- pass a canonical absolute deck URL as `presentationUrl` when needed; `presentation-url` is accepted as an alias for manually authored links
+- add `mode=instructor` only when the link should immediately create a temporary hosted instructor session and redirect to the manager; omit `mode` for the default standalone student session
+- permanent links use `/api/syncdeck/generate-url`, not the immediate-launch utility
 
 ### Boundary Control
 

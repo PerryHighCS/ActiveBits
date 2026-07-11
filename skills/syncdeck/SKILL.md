@@ -239,7 +239,10 @@ Standalone hosting launch:
 
 - the standalone CTA is opt-in and only appears when `standaloneHosting.activeBitsOrigin` is provided
 - the deck should provide a canonical absolute `http(s)` presentation URL; if omitted, the runtime uses the current page URL without the hash
-- the runtime opens ActiveBits at `/util/syncdeck/launch-presentation`
+- the runtime opens ActiveBits at `/util/syncdeck/launch-presentation?presentationUrl=<encoded-url>`
+- use `mode=instructor` only when the link should immediately create a temporary hosted instructor session and redirect to `/manage/syncdeck/:sessionId`; omit `mode` for the default standalone student session redirect to `/:sessionId`
+- `presentation-url` is accepted as a query-string alias for `presentationUrl`, but generated links should prefer `presentationUrl`
+- permalink generation is a separate ActiveBits flow and should use `/api/syncdeck/generate-url` rather than this immediate-launch utility
 - this launch flow is separate from normal hosted iframe sync behavior
 
 Overview routing:

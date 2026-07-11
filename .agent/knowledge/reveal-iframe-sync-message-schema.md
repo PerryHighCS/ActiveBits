@@ -16,10 +16,18 @@ Target flow:
 https://bits.mycode.run/util/syncdeck/launch-presentation?presentationUrl=<encoded-absolute-url>
 ```
 
+For immediate hosted instructor sessions from the presentation link, add
+`mode=instructor`:
+
+```text
+https://bits.mycode.run/util/syncdeck/launch-presentation?presentationUrl=<encoded-absolute-url>&mode=instructor
+```
+
 3. ActiveBits validates that `presentationUrl` passes the normal SyncDeck preflight
    checks and is actually a supported SyncDeck presentation.
 4. ActiveBits creates and configures the SyncDeck session entirely on its own origin.
-5. ActiveBits redirects into the standalone SyncDeck student session for that new session.
+5. ActiveBits redirects into the standalone SyncDeck student session for that new session,
+   or into the instructor manager when `mode=instructor` is present.
 
 Why this is the preferred contract:
 - Static presentation hosts do not need CORS support.
@@ -32,9 +40,13 @@ Why this is the preferred contract:
 
 Presentation-team expectations:
 - Provide a stable absolute `http(s)` `presentationUrl`.
+- Prefer `presentationUrl` in generated links. ActiveBits also accepts
+  `presentation-url` as an alias for manually authored links.
 - Redirect the browser to the ActiveBits
   `/util/syncdeck/launch-presentation` route when the user clicks the
   "Activate SyncDeck" control.
+- Use `mode=instructor` only for immediate temporary session creation from a
+  presentation link. Permanent links use `/api/syncdeck/generate-url`.
 
 ActiveBits-side validation expectations:
 - The launch route should run the same Reveal/SyncDeck preflight checks already used to

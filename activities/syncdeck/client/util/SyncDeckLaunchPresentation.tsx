@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
+import { buildSyncDeckPasscodeKey } from '../shared/authStorage.js'
 import { runSyncDeckPresentationPreflight, type SyncDeckPreflightResult } from '../shared/presentationPreflight.js'
 import { getStudentPresentationCompatibilityError } from '../shared/presentationUrlCompatibility.js'
 import { createConfiguredSyncDeckSession } from '../shared/sessionLaunch.js'
@@ -18,19 +19,69 @@ function normalizePreflightWarning(warning: string | null): string {
   return trimmed.replace(/\s*You can continue anyway\.?\s*$/i, '').trim()
 }
 
+export type SyncDeckLaunchMode = 'student' | 'instructor'
+
+interface SyncDeckLaunchStorage {
+  setItem(key: string, value: string): void
+}
+
+export function resolveSyncDeckLaunchMode(value: string | null | undefined): SyncDeckLaunchMode {
+  return value === 'instructor' ? 'instructor' : 'student'
+}
+
+export function resolveSyncDeckLaunchPresentationUrl(searchParams: URLSearchParams): string {
+  return (
+    searchParams.get('presentationUrl')
+    ?? searchParams.get('presentation-url')
+    ?? ''
+  ).trim()
+}
+
+function buildSyncDeckLaunchRedirect(params: {
+  mode: SyncDeckLaunchMode
+  sessionId: string
+  presentationUrl: string
+}): string {
+  if (params.mode === 'instructor') {
+    const query = new URLSearchParams({ presentationUrl: params.presentationUrl })
+    return `/manage/syncdeck/${encodeURIComponent(params.sessionId)}?${query.toString()}`
+  }
+
+  return `/${encodeURIComponent(params.sessionId)}`
+}
+
+function storeInstructorPasscode(params: {
+  sessionId: string
+  instructorPasscode: string
+  storage?: SyncDeckLaunchStorage | null
+}): void {
+  const storage =
+    params.storage
+    ?? (typeof window !== 'undefined' ? window.sessionStorage : null)
+
+  try {
+    storage?.setItem(buildSyncDeckPasscodeKey(params.sessionId), params.instructorPasscode)
+  } catch {
+    // The manager can still show a credential error if storage is unavailable.
+  }
+}
+
 export interface LaunchStandaloneSyncDeckPresentationParams {
   presentationUrl: string
+  mode?: SyncDeckLaunchMode
   hostProtocol?: string | null
   userAgent?: string | null
   preflightRunner?: (url: string) => Promise<SyncDeckPreflightResult>
   fetchFn?: typeof fetch
   redirectTo?: (url: string) => void
+  storage?: SyncDeckLaunchStorage | null
 }
 
 export async function launchStandaloneSyncDeckPresentation(
   params: LaunchStandaloneSyncDeckPresentationParams,
 ): Promise<{ sessionId: string }> {
   const presentationUrl = params.presentationUrl.trim()
+  const mode = params.mode ?? 'student'
   if (presentationUrl.length === 0) {
     throw new Error('Presentation URL is required.')
   }
@@ -50,22 +101,31 @@ export async function launchStandaloneSyncDeckPresentation(
     throw new Error(normalizePreflightWarning(preflightResult.warning))
   }
 
-  const { sessionId } = await createConfiguredSyncDeckSession({
+  const { sessionId, instructorPasscode } = await createConfiguredSyncDeckSession({
     presentationUrl,
-    standaloneMode: true,
+    standaloneMode: mode !== 'instructor',
     fetchFn: params.fetchFn,
   })
 
-  params.redirectTo?.(`/${encodeURIComponent(sessionId)}`)
+  if (mode === 'instructor') {
+    storeInstructorPasscode({
+      sessionId,
+      instructorPasscode,
+      storage: params.storage,
+    })
+  }
+
+  params.redirectTo?.(buildSyncDeckLaunchRedirect({ mode, sessionId, presentationUrl }))
 
   return { sessionId }
 }
 
 export default function SyncDeckLaunchPresentation() {
   const [searchParams] = useSearchParams()
-  const [presentationUrlInput, setPresentationUrlInput] = useState(() => searchParams.get('presentationUrl')?.trim() ?? '')
+  const [presentationUrlInput, setPresentationUrlInput] = useState(() => resolveSyncDeckLaunchPresentationUrl(searchParams))
+  const launchMode = resolveSyncDeckLaunchMode(searchParams.get('mode'))
   const [launchState, setLaunchState] = useState<LaunchState>(() => {
-    const initialPresentationUrl = searchParams.get('presentationUrl')?.trim() ?? ''
+    const initialPresentationUrl = resolveSyncDeckLaunchPresentationUrl(searchParams)
     return initialPresentationUrl.length > 0
       ? { phase: 'launching', detail: 'Validating presentation...' }
       : { phase: 'idle', detail: null }
@@ -73,7 +133,8 @@ export default function SyncDeckLaunchPresentation() {
 
   useEffect(() => {
     let cancelled = false
-    const presentationUrl = searchParams.get('presentationUrl')?.trim() ?? ''
+    const presentationUrl = resolveSyncDeckLaunchPresentationUrl(searchParams)
+    const mode = resolveSyncDeckLaunchMode(searchParams.get('mode'))
     if (presentationUrl.length === 0) {
       setPresentationUrlInput('')
       setLaunchState({
@@ -93,13 +154,16 @@ export default function SyncDeckLaunchPresentation() {
       try {
         await launchStandaloneSyncDeckPresentation({
           presentationUrl,
+          mode,
           hostProtocol: window.location.protocol,
           userAgent: window.navigator.userAgent,
           redirectTo: (url) => {
             if (!cancelled) {
               setLaunchState({
                 phase: 'launching',
-                detail: 'Starting standalone SyncDeck session...',
+                detail: mode === 'instructor'
+                  ? 'Starting instructor SyncDeck session...'
+                  : 'Starting standalone SyncDeck session...',
               })
               window.location.assign(url)
             }
@@ -141,12 +205,15 @@ export default function SyncDeckLaunchPresentation() {
       try {
         await launchStandaloneSyncDeckPresentation({
           presentationUrl,
+          mode: launchMode,
           hostProtocol: window.location.protocol,
           userAgent: window.navigator.userAgent,
           redirectTo: (url) => {
             setLaunchState({
               phase: 'launching',
-              detail: 'Starting standalone SyncDeck session...',
+              detail: launchMode === 'instructor'
+                ? 'Starting instructor SyncDeck session...'
+                : 'Starting standalone SyncDeck session...',
             })
             window.location.assign(url)
           },
@@ -171,8 +238,8 @@ export default function SyncDeckLaunchPresentation() {
           <p className="text-sm font-semibold uppercase tracking-[0.28em] text-cyan-300">SyncDeck Utility</p>
           <h1 className="text-4xl font-semibold tracking-tight">Launch Presentation</h1>
           <p className="max-w-2xl text-base leading-7 text-slate-300">
-            Launch a SyncDeck standalone session from a public presentation URL. ActiveBits validates the
-            presentation first, then creates and opens the solo student session on this origin.
+            Launch a SyncDeck session from a public presentation URL. ActiveBits validates the
+            presentation first, then creates and opens the session on this origin.
           </p>
         </div>
 
@@ -183,7 +250,9 @@ export default function SyncDeckLaunchPresentation() {
           <p className="mt-3 text-sm leading-6 text-slate-300">
             {isLaunching
               ? launchState.detail
-              : 'Paste the public presentation URL you want ActiveBits to open in SyncDeck solo mode.'}
+              : launchMode === 'instructor'
+                ? 'Paste the public presentation URL you want ActiveBits to open in a new instructor SyncDeck session.'
+                : 'Paste the public presentation URL you want ActiveBits to open in SyncDeck solo mode.'}
           </p>
           {showForm && (
             <form className="mt-6 space-y-4" onSubmit={handleSubmit}>
@@ -214,7 +283,7 @@ export default function SyncDeckLaunchPresentation() {
                   className="rounded-full bg-cyan-400 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-cyan-300 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-300"
                   disabled={presentationUrlInput.trim().length === 0}
                 >
-                  Launch Solo in SyncDeck
+                  {launchMode === 'instructor' ? 'Launch Instructor Session' : 'Launch Solo in SyncDeck'}
                 </button>
                 <Link
                   to="/manage"
