@@ -204,8 +204,8 @@ export default function PostboardManager(): React.JSX.Element {
     autoApproveDirtyRef.current = true
     const nextAutoApprove = !autoApprove
     setAutoApprove(nextAutoApprove)
-    void saveSetup(promptDraft || snapshot.prompt.text, nextAutoApprove)
-  }, [autoApprove, promptDraft, saveSetup, snapshot])
+    void saveSetup(snapshot.prompt.text, nextAutoApprove)
+  }, [autoApprove, saveSetup, snapshot])
 
   const handleInstructorPost = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()

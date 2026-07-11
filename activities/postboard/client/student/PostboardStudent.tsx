@@ -186,6 +186,7 @@ export default function PostboardStudent({ sessionData }: PostboardStudentProps)
   const promptText = snapshot?.prompt.text || 'Your teacher is setting up the prompt.'
   const composeStyleClass = getNoteStyleClassName(styleId)
   const boardPosts = snapshot?.posts.filter((post) => !dismissedOwnPostIds.has(post.id)) ?? []
+  const canReact = Boolean(identity.studentId)
 
   return (
     <main className="postboard-shell postboard-student-shell">
@@ -244,8 +245,8 @@ export default function PostboardStudent({ sessionData }: PostboardStudentProps)
                       reactions={snapshot?.reactionCounts[post.id] ?? {}}
                       options={POSTBOARD_REACTION_OPTIONS}
                       viewerReaction={snapshot?.viewerReactions[post.id] ?? null}
-                      canReact
-                      onReact={(reactionId) => void reactToPost(post.id, reactionId as PostboardReactionId)}
+                      canReact={canReact}
+                      onReact={canReact ? (reactionId) => void reactToPost(post.id, reactionId as PostboardReactionId) : undefined}
                       className={`postboard-reactions${isFaded ? ' postboard-card-fade' : ''}`}
                       triggerPosition="end"
                     />
