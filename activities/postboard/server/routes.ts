@@ -549,7 +549,8 @@ export default function setupPostboardRoutes(app: PostboardRouteApp, sessions: S
     const studentId = isInstructor ? null : requireAcceptedStudentId(session, req, res)
     if (!isInstructor && !studentId) return
     const authorStudentId = studentId ?? ''
-    if (session.data.posts.length >= MAX_POSTS) {
+    const livePostCount = session.data.posts.filter((post) => post.status !== 'deleted').length
+    if (livePostCount >= MAX_POSTS) {
       res.status(409).json({ error: 'post limit reached' })
       return
     }

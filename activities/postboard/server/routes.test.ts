@@ -702,6 +702,48 @@ void test('post route rejects new posts once the session reaches the post limit'
   assert.equal(storedData?.posts.length, 500)
 })
 
+void test('post route excludes deleted posts from the post limit', async () => {
+  const app = new TestApp()
+  const store = new MemoryStore()
+  const posts = Array.from({ length: 500 }, (_, index) => createPost({
+    id: `post-${index}`,
+    text: `Note ${index}`,
+    createdAt: index,
+    updatedAt: index,
+    approvedAt: index,
+    deletedAt: index === 499 ? index : null,
+    status: index === 499 ? 'deleted' : 'approved',
+    order: index,
+  }))
+  const session = createSession({
+    acceptedEntryParticipants: {
+      'student-500': {
+        participantId: 'student-500',
+        displayName: 'Room Student',
+        acceptedAt: 100,
+      },
+    },
+    posts,
+  })
+  await store.set(session.id, session)
+  setupPostboardRoutes(app, store, createWsRouter())
+
+  const handler = app.handlers.post['/api/postboard/:sessionId/posts']
+  assert.ok(handler)
+
+  const response = createResponse()
+  await handler({
+    params: { sessionId: session.id },
+    body: { studentId: 'student-500', text: 'A live note still fits' },
+  }, response)
+
+  assert.equal(response.statusCode, 200)
+  const stored = await store.get(session.id)
+  const storedData = stored?.data as PostboardSessionData | undefined
+  assert.equal(storedData?.posts.length, 501)
+  assert.equal(storedData?.posts.at(-1)?.text, 'A live note still fits')
+})
+
 void test('hide and unhide routes require instructor auth and update hiddenAt', async () => {
   const app = new TestApp()
   const store = new MemoryStore()
