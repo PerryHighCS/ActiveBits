@@ -11,8 +11,8 @@ type LaunchState =
 
 type PermalinkState =
   | { phase: 'idle'; detail: string | null; permalink: string | null }
-  | { phase: 'verifying'; detail: string; permalink: string | null }
-  | { phase: 'verified'; detail: string; permalink: string | null }
+  | { phase: 'verifying'; detail: string; permalink: string | null; verifiedPresentationUrl: string | null }
+  | { phase: 'verified'; detail: string; permalink: string | null; verifiedPresentationUrl: string }
   | { phase: 'creating'; detail: string; permalink: string | null }
   | { phase: 'created'; detail: string; permalink: string }
   | { phase: 'error'; detail: string; permalink: string | null }
@@ -389,6 +389,7 @@ export default function SyncDeckLaunchPresentation() {
       phase: 'verifying',
       detail: 'Validating presentation...',
       permalink: null,
+      verifiedPresentationUrl: null,
     })
 
     void (async () => {
@@ -401,6 +402,7 @@ export default function SyncDeckLaunchPresentation() {
           phase: 'verified',
           detail: 'URL verified. Add a teacher code to create the permanent link.',
           permalink: null,
+          verifiedPresentationUrl: presentationUrl,
         })
       } catch (error) {
         setPermalinkState({
@@ -428,6 +430,25 @@ export default function SyncDeckLaunchPresentation() {
       setPermalinkState({
         phase: 'error',
         detail: 'Teacher code is required.',
+        permalink: null,
+      })
+      return
+    }
+    if (permalinkState.phase !== 'verified' && permalinkState.phase !== 'created') {
+      setPermalinkState({
+        phase: 'error',
+        detail: 'Verify the presentation URL before creating a permanent link.',
+        permalink: null,
+      })
+      return
+    }
+    if (
+      permalinkState.phase === 'verified'
+      && permalinkState.verifiedPresentationUrl !== presentationUrl
+    ) {
+      setPermalinkState({
+        phase: 'error',
+        detail: 'Verify the current presentation URL before creating a permanent link.',
         permalink: null,
       })
       return

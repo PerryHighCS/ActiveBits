@@ -175,6 +175,14 @@ export function hasSensitiveCreateSessionBootstrapPayload(payload: Record<string
   return Object.keys(payload).some((key) => SENSITIVE_BOOTSTRAP_FIELD_PATTERN.test(key))
 }
 
+export function filterSensitiveCreateSessionBootstrapPayload(
+  payload: Record<string, unknown>,
+): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(payload).filter(([key]) => !SENSITIVE_BOOTSTRAP_FIELD_PATTERN.test(key)),
+  )
+}
+
 function persistCreateSessionBootstrapPayloadToSessionStorage(
   activityId: string,
   sessionId: string,
@@ -185,14 +193,15 @@ function persistCreateSessionBootstrapPayloadToSessionStorage(
   if (typeof window === 'undefined' || window.sessionStorage == null) {
     return
   }
-  if (hasSensitiveCreateSessionBootstrapPayload(payload)) {
+  const storagePayload = filterSensitiveCreateSessionBootstrapPayload(payload)
+  if (Object.keys(storagePayload).length === 0) {
     return
   }
 
   const storageKey = buildCreateSessionBootstrapStorageKey(activityId, sessionId)
   const serializedEntry = JSON.stringify({
     createdAtMs,
-    payload,
+    payload: storagePayload,
   } satisfies CreateSessionBootstrapPayloadEntry)
 
   try {

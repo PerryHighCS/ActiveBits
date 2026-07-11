@@ -286,6 +286,51 @@ void test('SyncDeckLaunchPresentation shows a permalink builder with a prefilled
   }
 })
 
+void test('SyncDeckLaunchPresentation refuses to generate a permalink before URL verification', async () => {
+  const restoreDomEnvironment = installDomEnvironment(
+    'https://bits.mycode.run/util/syncdeck/permalink?presentationUrl=https%3A%2F%2Fslides.example%2Fdeck',
+  )
+  const previousFetch = globalThis.fetch
+  let fetchCalls = 0
+  const { fireEvent, render, waitFor } = await import('@testing-library/react')
+  const { MemoryRouter } = await import('react-router-dom')
+  const { default: SyncDeckLaunchPresentation } = await import('./SyncDeckLaunchPresentation.js')
+
+  ;(globalThis as { fetch: typeof fetch }).fetch = (async () => {
+    fetchCalls += 1
+    throw new Error('[TEST] permalink generation should not run before verification')
+  }) as typeof fetch
+
+  try {
+    const rendered = render(
+      React.createElement(
+        MemoryRouter,
+        {
+          initialEntries: [
+            '/util/syncdeck/permalink?presentationUrl=https%3A%2F%2Fslides.example%2Fdeck',
+          ],
+        },
+        React.createElement(SyncDeckLaunchPresentation),
+      ),
+    )
+
+    fireEvent.change(rendered.getByLabelText(/teacher code/i), {
+      target: { value: 'teacher-123' },
+    })
+    const form = rendered.getByLabelText(/teacher code/i).closest('form')
+    assert.notEqual(form, null)
+    fireEvent.submit(form as HTMLFormElement)
+
+    await waitFor(() => {
+      assert.notEqual(rendered.queryByText(/verify the presentation url before creating/i), null)
+    })
+    assert.equal(fetchCalls, 0)
+  } finally {
+    ;(globalThis as { fetch?: typeof fetch }).fetch = previousFetch
+    restoreDomEnvironment()
+  }
+})
+
 void test('SyncDeckLaunchPresentation copies a generated permalink to the clipboard', async () => {
   const restoreDomEnvironment = installDomEnvironment(
     'https://bits.mycode.run/util/syncdeck/permalink?presentationUrl=https%3A%2F%2Fslides.example%2Fdeck',

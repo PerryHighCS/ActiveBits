@@ -11,6 +11,7 @@ import {
   consumeCreateSessionBootstrapPayload,
   describeSelectedOptions,
   filterPersistentEntryPolicyOptionsForActivity,
+  filterSensitiveCreateSessionBootstrapPayload,
   initializeDeepLinkOptions,
   hasSensitiveCreateSessionBootstrapPayload,
   normalizePersistentEntryPolicyForActivity,
@@ -426,6 +427,15 @@ void test('hasSensitiveCreateSessionBootstrapPayload detects credential-like fie
   assert.equal(hasSensitiveCreateSessionBootstrapPayload({ instructorPasscode: 'teacher-passcode' }), true)
   assert.equal(hasSensitiveCreateSessionBootstrapPayload({ managerCredential: 'secret' }), true)
   assert.equal(hasSensitiveCreateSessionBootstrapPayload({ studentId: 'student-1' }), false)
+  assert.deepEqual(
+    filterSensitiveCreateSessionBootstrapPayload({
+      instructorPasscode: 'teacher-passcode',
+      studentId: 'student-1',
+    }),
+    {
+      studentId: 'student-1',
+    },
+  )
 })
 
 void test('persistCreateSessionBootstrapToSessionStorage stores declared non-sensitive create response fields', () => {
@@ -560,7 +570,6 @@ void test('storeCreateSessionBootstrapPayload keeps a same-tab bootstrap payload
 
   try {
     storeCreateSessionBootstrapPayload('video-sync', 'session-123', {
-      id: 'session-123',
       instructorPasscode: 'teacher-passcode',
     })
 
@@ -568,11 +577,51 @@ void test('storeCreateSessionBootstrapPayload keeps a same-tab bootstrap payload
     assert.deepEqual(
       consumeCreateSessionBootstrapPayload('video-sync', 'session-123'),
       {
-        id: 'session-123',
         instructorPasscode: 'teacher-passcode',
       },
     )
     assert.equal(consumeCreateSessionBootstrapPayload('video-sync', 'session-123'), null)
+  } finally {
+    Object.defineProperty(globalThis, 'window', {
+      value: originalWindow,
+      configurable: true,
+      writable: true,
+    })
+  }
+})
+
+void test('storeCreateSessionBootstrapPayload persists only non-sensitive mixed payload fields', () => {
+  const originalWindow = globalThis.window
+  const { backing: sessionStorage, storage: fakeSessionStorage } = createFakeSessionStorage()
+
+  Object.defineProperty(globalThis, 'window', {
+    value: { sessionStorage: fakeSessionStorage },
+    configurable: true,
+    writable: true,
+  })
+
+  try {
+    storeCreateSessionBootstrapPayload('video-sync', 'session-123', {
+      id: 'session-123',
+      instructorPasscode: 'teacher-passcode',
+      studentId: 'student-1',
+    }, 10)
+
+    const stored = JSON.parse(
+      sessionStorage.get('create-session-bootstrap:video-sync:session-123') ?? '{}',
+    ) as { payload?: unknown }
+    assert.deepEqual(stored.payload, {
+      id: 'session-123',
+      studentId: 'student-1',
+    })
+    assert.deepEqual(
+      consumeCreateSessionBootstrapPayload('video-sync', 'session-123', 10),
+      {
+        id: 'session-123',
+        instructorPasscode: 'teacher-passcode',
+        studentId: 'student-1',
+      },
+    )
   } finally {
     Object.defineProperty(globalThis, 'window', {
       value: originalWindow,

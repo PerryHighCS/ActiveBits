@@ -549,6 +549,24 @@ export function readRouterStateInstructorPasscode(locationState: unknown): strin
     : null
 }
 
+export function resolveRouterStateInstructorPasscodeHandoff(params: {
+  locationState: unknown
+  consumedInstructorPasscode?: string | null
+}): { instructorPasscode: string | null; shouldClearLocationState: boolean } {
+  const routerStatePasscode = readRouterStateInstructorPasscode(params.locationState)
+  if (routerStatePasscode != null) {
+    return {
+      instructorPasscode: routerStatePasscode,
+      shouldClearLocationState: true,
+    }
+  }
+
+  return {
+    instructorPasscode: params.consumedInstructorPasscode ?? null,
+    shouldClearLocationState: false,
+  }
+}
+
 export function validatePresentationUrl(value: string, hostProtocol?: string | null, userAgent?: string | null): boolean {
   return value.trim().length > 0 && getStudentPresentationCompatibilityError({
     value,
@@ -1954,6 +1972,7 @@ const SyncDeckManager: FC = () => {
   const pendingEmbeddedBootstrapChildSessionIdsRef = useRef<Set<string>>(new Set())
   const embeddedBootstrapBackfillRetryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const embeddedBootstrapBackfillRetryAttemptRef = useRef(0)
+  const consumedRouterStatePasscodeRef = useRef<{ sessionId: string; instructorPasscode: string } | null>(null)
   const syncDebugEnabledRef = useRef(isSyncDeckDebugEnabled())
 
   useEffect(() => {
@@ -2474,9 +2493,31 @@ const SyncDeckManager: FC = () => {
 
     const loadInstructorPasscode = async (): Promise<void> => {
       const routerStatePasscode = readRouterStateInstructorPasscode(location.state)
+      const consumedRouterStatePasscode =
+        consumedRouterStatePasscodeRef.current?.sessionId === sessionId
+          ? consumedRouterStatePasscodeRef.current.instructorPasscode
+          : null
+      const bootstrapHandoff = resolveRouterStateInstructorPasscodeHandoff({
+        locationState: location.state,
+        consumedInstructorPasscode: consumedRouterStatePasscode,
+      })
+      const bootstrapPasscode = bootstrapHandoff.instructorPasscode
+
+      if (routerStatePasscode != null) {
+        consumedRouterStatePasscodeRef.current = {
+          sessionId,
+          instructorPasscode: routerStatePasscode,
+        }
+      }
+      if (bootstrapHandoff.shouldClearLocationState) {
+        void navigate(location.pathname + location.search, {
+          replace: true,
+          state: null,
+        })
+      }
 
       if (!isCancelled) {
-        setInstructorPasscode(routerStatePasscode)
+        setInstructorPasscode(bootstrapPasscode)
         setPersistentUrlHashFallback(null)
         setPersistentEntryPolicyFallback(null)
       }
@@ -2487,7 +2528,7 @@ const SyncDeckManager: FC = () => {
         })
         if (!response.ok) {
           if (!isCancelled) {
-            if (!routerStatePasscode) {
+            if (!bootstrapPasscode) {
               setInstructorPasscode(null)
             }
             setPersistentUrlHashFallback(null)
@@ -2501,7 +2542,7 @@ const SyncDeckManager: FC = () => {
           if (!isCancelled) {
             setInstructorPasscode(payload.instructorPasscode)
           }
-        } else if (!isCancelled && !routerStatePasscode) {
+        } else if (!isCancelled && !bootstrapPasscode) {
           setInstructorPasscode(null)
         }
 
@@ -2527,7 +2568,7 @@ const SyncDeckManager: FC = () => {
         }
       } catch {
         if (!isCancelled) {
-          if (!routerStatePasscode) {
+          if (!bootstrapPasscode) {
             setInstructorPasscode(null)
           }
           setPersistentUrlHashFallback(null)
@@ -2546,7 +2587,7 @@ const SyncDeckManager: FC = () => {
     return () => {
       isCancelled = true
     }
-  }, [hostProtocol, location.state, sessionId, userAgent])
+  }, [hostProtocol, location.pathname, location.search, location.state, navigate, sessionId, userAgent])
 
   useEffect(() => {
     if (!sessionId || !instructorPasscode) {

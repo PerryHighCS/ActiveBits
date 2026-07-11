@@ -26,6 +26,7 @@ import { shouldAutoActivatePresentationUrl } from './SyncDeckManager.js'
 import { resolveRecoveredPresentationUrl } from './SyncDeckManager.js'
 import { normalizeInstructorPasscode } from './SyncDeckManager.js'
 import { readRouterStateInstructorPasscode } from './SyncDeckManager.js'
+import { resolveRouterStateInstructorPasscodeHandoff } from './SyncDeckManager.js'
 import { resolvePersistentEntryPolicyForConfigure } from './SyncDeckManager.js'
 import { resolvePersistentUrlHashForConfigure } from './SyncDeckManager.js'
 import { normalizeSyncDeckEmbeddedActivities } from './SyncDeckManager.js'
@@ -204,6 +205,33 @@ void test('readRouterStateInstructorPasscode reads only valid create-session rou
   assert.equal(readRouterStateInstructorPasscode({ createSessionPayload: {} }), null)
   assert.equal(readRouterStateInstructorPasscode({ createSessionPayload: [] }), null)
   assert.equal(readRouterStateInstructorPasscode(null), null)
+})
+
+void test('resolveRouterStateInstructorPasscodeHandoff clears only router-state passcodes', () => {
+  assert.deepEqual(
+    resolveRouterStateInstructorPasscodeHandoff({
+      locationState: {
+        createSessionPayload: {
+          instructorPasscode: ' teacher-pass ',
+        },
+      },
+      consumedInstructorPasscode: 'consumed-pass',
+    }),
+    {
+      instructorPasscode: 'teacher-pass',
+      shouldClearLocationState: true,
+    },
+  )
+  assert.deepEqual(
+    resolveRouterStateInstructorPasscodeHandoff({
+      locationState: null,
+      consumedInstructorPasscode: 'consumed-pass',
+    }),
+    {
+      instructorPasscode: 'consumed-pass',
+      shouldClearLocationState: false,
+    },
+  )
 })
 
 void test('resolvePersistentEntryPolicyForConfigure prefers recovered policy when query is absent', () => {
