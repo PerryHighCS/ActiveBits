@@ -103,6 +103,7 @@ export default function ReactionSummary({
 
   const trigger = canReact && onReact !== undefined && (
     <div className="relative" ref={containerRef}>
+      <span id={selectedDescriptionId} className="sr-only">Current reaction: {selectedDescription}</span>
       <button
         type="button"
         ref={triggerRef}
@@ -123,7 +124,6 @@ export default function ReactionSummary({
             : 'border-indigo-200 dark:border-indigo-700 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-300 hover:border-indigo-300 dark:hover:border-indigo-600'
         }`}
       >
-        <span id={selectedDescriptionId} className="sr-only">Current reaction: {selectedDescription}</span>
         {selectedOption?.symbol ?? viewerReaction ?? '☺'}
       </button>
       {isPickerOpen && canChooseReaction && (

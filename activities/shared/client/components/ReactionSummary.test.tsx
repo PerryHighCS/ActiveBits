@@ -64,7 +64,7 @@ void test('ReactionSummary opens a reaction picker and emits selected values', a
     const selectedDescriptionId = pickerButton.getAttribute('aria-describedby')
     assert.ok(selectedDescriptionId)
     assert.equal(rendered.container.querySelector(`#${selectedDescriptionId}`)?.textContent, 'Current reaction: Agree')
-    assert.equal(pickerButton.textContent, 'Current reaction: Agree👍')
+    assert.equal(pickerButton.textContent, '👍')
     fireEvent.click(pickerButton)
     assert.equal(pickerButton.getAttribute('aria-expanded'), 'true')
     const lightbulbOption = rendered.getByRole('option', { name: 'React with Lightbulb' })
