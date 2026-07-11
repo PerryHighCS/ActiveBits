@@ -2492,7 +2492,6 @@ const SyncDeckManager: FC = () => {
     let isCancelled = false
 
     const loadInstructorPasscode = async (): Promise<void> => {
-      const routerStatePasscode = readRouterStateInstructorPasscode(location.state)
       const consumedRouterStatePasscode =
         consumedRouterStatePasscodeRef.current?.sessionId === sessionId
           ? consumedRouterStatePasscodeRef.current.instructorPasscode
@@ -2503,10 +2502,10 @@ const SyncDeckManager: FC = () => {
       })
       const bootstrapPasscode = bootstrapHandoff.instructorPasscode
 
-      if (routerStatePasscode != null) {
+      if (bootstrapHandoff.shouldClearLocationState && bootstrapPasscode != null) {
         consumedRouterStatePasscodeRef.current = {
           sessionId,
-          instructorPasscode: routerStatePasscode,
+          instructorPasscode: bootstrapPasscode,
         }
       }
       if (bootstrapHandoff.shouldClearLocationState) {

@@ -273,10 +273,10 @@ export default function SyncDeckLaunchPresentation() {
                   : 'Starting standalone SyncDeck session...',
               })
               if (state) {
-                void navigate(url, { state })
+                void navigate(url, { replace: true, state })
                 return
               }
-              window.location.assign(url)
+              window.location.replace(url)
             }
           },
         })
@@ -344,10 +344,10 @@ export default function SyncDeckLaunchPresentation() {
                 : 'Starting standalone SyncDeck session...',
             })
             if (state) {
-              void navigate(url, { state })
+              void navigate(url, { replace: true, state })
               return
             }
-            window.location.assign(url)
+            window.location.replace(url)
           },
         })
       } catch (error) {
@@ -588,7 +588,10 @@ export default function SyncDeckLaunchPresentation() {
               </div>
 
               {permalinkState.detail !== null && (
-                <p className={`text-sm leading-6 ${permalinkState.phase === 'error' ? 'text-rose-300' : 'text-cyan-200'}`}>
+                <p
+                  className={`text-sm leading-6 ${permalinkState.phase === 'error' ? 'text-rose-300' : 'text-cyan-200'}`}
+                  role="status"
+                >
                   {permalinkState.detail}
                 </p>
               )}
