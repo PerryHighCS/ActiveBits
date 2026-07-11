@@ -59,7 +59,8 @@ async function openPostboardManager(
   session: PostboardCreateResponse,
   query = '',
 ): Promise<void> {
-  await page.addInitScript(({ instructorPasscode }) => {
+  await page.addInitScript(({ instructorPasscode, sessionId }) => {
+    window.sessionStorage.setItem(`postboard_instructor_${sessionId}`, instructorPasscode)
     window.history.replaceState(
       {
         usr: { createSessionPayload: { instructorPasscode } },
@@ -69,7 +70,7 @@ async function openPostboardManager(
       '',
       window.location.href,
     )
-  }, { instructorPasscode: session.instructorPasscode })
+  }, { instructorPasscode: session.instructorPasscode, sessionId: session.id })
   await page.goto(`/manage/postboard/${encodeURIComponent(session.id)}${query}`)
   await expect(page.getByRole('heading', { name: /Board Posts/ })).toBeVisible()
 }
@@ -92,6 +93,11 @@ async function openPostboardStudent(
   }, { sessionId, student })
   await page.goto(`/${encodeURIComponent(sessionId)}`)
   await expect(page.getByRole('heading', { name: 'Add a note' })).toBeVisible()
+}
+
+async function chooseNoteStyle(page: Page, styleLabel: string): Promise<void> {
+  await page.getByRole('button', { name: 'Note style' }).click()
+  await page.getByRole('option', { name: styleLabel }).click()
 }
 
 async function submitStudentNote(page: Page, text: string): Promise<void> {
@@ -168,6 +174,55 @@ test('student reactions require accepted identity and expose current reaction ac
 
   await seedPage.close()
   await anonymousPage.close()
+  await studentPage.close()
+})
+
+test('student can edit or dismiss returned notes while instructor sees deleted state', async ({ browser }) => {
+  const instructorPage = await browser.newPage()
+  const studentPage = await browser.newPage()
+  const session = await createPostboardSession(instructorPage, {
+    prompt: 'Revise notes when needed',
+    autoApprove: false,
+  })
+  const ada = await acceptStudent(instructorPage, session.id, 'Ada Lovelace')
+
+  await openPostboardStudent(studentPage, session.id, ada)
+  await chooseNoteStyle(studentPage, 'Peach')
+  await submitStudentNote(studentPage, 'Needs another look')
+
+  await openPostboardManager(instructorPage, session)
+  await instructorPage.locator('.postboard-moderation-panel .postboard-card', { hasText: 'Needs another look' })
+    .getByRole('button', { name: 'Reject' })
+    .click()
+  await expect(instructorPage.locator('.postboard-board .postboard-card', { hasText: 'Needs another look' })).toBeVisible()
+
+  const returnedNote = studentPage.locator('.postboard-card', { hasText: 'Needs another look' })
+  await expect(returnedNote.getByText('Returned')).toBeVisible()
+  await returnedNote.getByRole('button', { name: 'Edit returned note' }).click()
+  await expect(studentPage.getByRole('textbox', { name: 'Note' })).toHaveValue('Needs another look')
+  await expect.poll(() => describedByText(studentPage, 'button[aria-labelledby]')).toBe('Current style: Peach')
+  await expect(studentPage.locator('.postboard-card', { hasText: 'Needs another look' })).toHaveCount(0)
+
+  await studentPage.getByRole('textbox', { name: 'Note' }).fill('')
+  await chooseNoteStyle(studentPage, 'Lemon')
+  await submitStudentNote(studentPage, 'Delete this returned note')
+
+  await expect(instructorPage.getByRole('heading', { name: 'Moderation Queue (1)' })).toBeVisible({
+    timeout: 4_000,
+  })
+  await instructorPage.locator('.postboard-moderation-panel .postboard-card', { hasText: 'Delete this returned note' })
+    .getByRole('button', { name: 'Reject' })
+    .click()
+
+  const returnedForDelete = studentPage.locator('.postboard-card', { hasText: 'Delete this returned note' })
+  await expect(returnedForDelete.getByText('Returned')).toBeVisible()
+  await returnedForDelete.getByRole('button', { name: 'Dismiss returned note' }).click()
+  await expect(studentPage.locator('.postboard-card', { hasText: 'Delete this returned note' })).toHaveCount(0)
+
+  await expect(instructorPage.locator('.postboard-board .postboard-card', { hasText: 'Delete this returned note' })
+    .getByText('Deleted')).toBeVisible({ timeout: 4_000 })
+
+  await instructorPage.close()
   await studentPage.close()
 })
 
