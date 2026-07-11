@@ -2514,6 +2514,7 @@ const SyncDeckManager: FC = () => {
           replace: true,
           state: null,
         })
+        return
       }
 
       if (!isCancelled) {
