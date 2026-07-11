@@ -161,8 +161,8 @@ export default {
     selectedOptionsToSessionData: ['presentationUrl'], // optional selectedOptions keys to hydrate onto live session.data
     sessionStorage: [
       {
-        keyPrefix: 'my_activity_instructor_',
-        responseField: 'instructorPasscode',
+        keyPrefix: 'my_activity_student_',
+        responseField: 'studentId',
       },
     ],
     historyState: [
@@ -184,7 +184,7 @@ export default {
 - `historyState`: Array of response field names. Matching fields are attached to React Router navigation state when transitioning from `/manage/:activityId` to `/manage/:activityId/:sessionId`.
 - `selectedOptionsToSessionData`: Array of persistent-link `selectedOptions` keys to copy onto top-level live `session.data` when a teacher starts a persistent session from the waiting-room WebSocket. This is intended for values that the live manager/student runtime needs as authoritative session state, such as SyncDeck's `presentationUrl`; other selected options remain available under `session.data.embeddedLaunch.selectedOptions`.
 
-Use `historyState` when the value only needs to survive the immediate in-app navigation and should not be persisted in browser storage. Use `sessionStorage` when the value should still be recoverable after reloads or later manager re-entry in the same tab.
+Use `historyState` when the value only needs to survive the immediate in-app navigation and should not be persisted in browser storage. Use `sessionStorage` only for non-sensitive values that should still be recoverable after reloads or later re-entry in the same tab. Instructor passcodes and manager credentials must never be written to Web Storage.
 
 `reportEndpoint` is optional activity metadata for embedded-session reporting. When present, SyncDeck can treat it as the child activity's authoritative download surface during embedded end/report flows instead of hard-coding per-activity routes in shared code.
 
@@ -310,7 +310,7 @@ export const myActivity = {
 
 Activities can also support standalone via permalink without supporting `/solo/:activityId`. SyncDeck is the motivating example for that split.
 
-SyncDeck also supports an ActiveBits-owned utility launch flow for statically hosted decks. In that flow, the external presentation redirects the browser to `/util/syncdeck/launch-presentation?presentationUrl=...`, ActiveBits runs the normal SyncDeck Reveal preflight on its own origin, then creates/configures a standalone SyncDeck session and redirects into `/:sessionId` so the deck opens in solo student mode. This avoids cross-origin browser fetch/CORS requirements while keeping all session creation on the ActiveBits origin.
+SyncDeck also supports ActiveBits-owned utility flows for statically hosted decks. For immediate temporary sessions, the external presentation redirects the browser to `/util/syncdeck/launch-presentation?presentationUrl=...`; ActiveBits runs the normal SyncDeck Reveal preflight on its own origin, then creates/configures a temporary SyncDeck session. By default the utility redirects into `/:sessionId` so the deck opens in solo student mode. Adding `mode=instructor` creates a hosted instructor session, hands the generated instructor credential to the manager through same-tab router state, and redirects into `/manage/syncdeck/:sessionId?presentationUrl=...`. For permanent links, `/util/syncdeck/permalink?presentationUrl=...` renders a builder page with the URL prefilled; after the teacher verifies the deck and enters a teacher code, the page calls the existing `POST /api/syncdeck/generate-url` endpoint. Both utility flows accept `presentation-url` as an alias for `presentationUrl`. This avoids cross-origin browser fetch/CORS requirements while keeping all session creation and permalink generation on the ActiveBits origin.
 
 ### Solo Mode vs. Teacher Mode
 

@@ -2,7 +2,6 @@ import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
 import { storeCreateSessionBootstrapPayload } from '@src/components/common/manageDashboardUtils'
 import { resolvePersistentSessionEntryPolicy, type PersistentSessionEntryPolicy } from '../../../../types/waitingRoom.js'
 import { runSyncDeckPresentationPreflight } from '../shared/presentationPreflight.js'
-import { buildSyncDeckPasscodeKey } from '../shared/authStorage.js'
 import {
   getStudentPresentationCompatibilityError,
 } from '../shared/presentationUrlCompatibility.js'
@@ -525,13 +524,47 @@ function buildSyncDeckChalkboardOpenKey(sessionId: string): string {
   return `${SYNCDECK_CHALKBOARD_OPEN_KEY_PREFIX}${sessionId}`
 }
 
-export function normalizeStoredInstructorPasscode(value: string | null): string | null {
+export function normalizeInstructorPasscode(value: string | null): string | null {
   if (typeof value !== 'string') {
     return null
   }
 
   const trimmed = value.trim()
   return trimmed.length > 0 ? trimmed : null
+}
+
+export function readRouterStateInstructorPasscode(locationState: unknown): string | null {
+  if (locationState == null || typeof locationState !== 'object' || Array.isArray(locationState)) {
+    return null
+  }
+
+  const createSessionPayload = (locationState as { createSessionPayload?: unknown }).createSessionPayload
+  if (createSessionPayload == null || typeof createSessionPayload !== 'object' || Array.isArray(createSessionPayload)) {
+    return null
+  }
+
+  const instructorPasscode = (createSessionPayload as { instructorPasscode?: unknown }).instructorPasscode
+  return typeof instructorPasscode === 'string'
+    ? normalizeInstructorPasscode(instructorPasscode)
+    : null
+}
+
+export function resolveRouterStateInstructorPasscodeHandoff(params: {
+  locationState: unknown
+  consumedInstructorPasscode?: string | null
+}): { instructorPasscode: string | null; shouldClearLocationState: boolean } {
+  const routerStatePasscode = readRouterStateInstructorPasscode(params.locationState)
+  if (routerStatePasscode != null) {
+    return {
+      instructorPasscode: routerStatePasscode,
+      shouldClearLocationState: true,
+    }
+  }
+
+  return {
+    instructorPasscode: params.consumedInstructorPasscode ?? null,
+    shouldClearLocationState: false,
+  }
 }
 
 export function validatePresentationUrl(value: string, hostProtocol?: string | null, userAgent?: string | null): boolean {
@@ -1939,6 +1972,7 @@ const SyncDeckManager: FC = () => {
   const pendingEmbeddedBootstrapChildSessionIdsRef = useRef<Set<string>>(new Set())
   const embeddedBootstrapBackfillRetryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const embeddedBootstrapBackfillRetryAttemptRef = useRef(0)
+  const consumedRouterStatePasscodeRef = useRef<{ sessionId: string; instructorPasscode: string } | null>(null)
   const syncDebugEnabledRef = useRef(isSyncDeckDebugEnabled())
 
   useEffect(() => {
@@ -2458,12 +2492,32 @@ const SyncDeckManager: FC = () => {
     let isCancelled = false
 
     const loadInstructorPasscode = async (): Promise<void> => {
-      const cachedPasscode = normalizeStoredInstructorPasscode(
-        window.sessionStorage.getItem(buildSyncDeckPasscodeKey(sessionId)),
-      )
+      const consumedRouterStatePasscode =
+        consumedRouterStatePasscodeRef.current?.sessionId === sessionId
+          ? consumedRouterStatePasscodeRef.current.instructorPasscode
+          : null
+      const bootstrapHandoff = resolveRouterStateInstructorPasscodeHandoff({
+        locationState: location.state,
+        consumedInstructorPasscode: consumedRouterStatePasscode,
+      })
+      const bootstrapPasscode = bootstrapHandoff.instructorPasscode
+
+      if (bootstrapHandoff.shouldClearLocationState && bootstrapPasscode != null) {
+        consumedRouterStatePasscodeRef.current = {
+          sessionId,
+          instructorPasscode: bootstrapPasscode,
+        }
+      }
+      if (bootstrapHandoff.shouldClearLocationState) {
+        void navigate(location.pathname + location.search, {
+          replace: true,
+          state: null,
+        })
+        return
+      }
 
       if (!isCancelled) {
-        setInstructorPasscode(cachedPasscode)
+        setInstructorPasscode(bootstrapPasscode)
         setPersistentUrlHashFallback(null)
         setPersistentEntryPolicyFallback(null)
       }
@@ -2474,7 +2528,7 @@ const SyncDeckManager: FC = () => {
         })
         if (!response.ok) {
           if (!isCancelled) {
-            if (!cachedPasscode) {
+            if (!bootstrapPasscode) {
               setInstructorPasscode(null)
             }
             setPersistentUrlHashFallback(null)
@@ -2485,11 +2539,10 @@ const SyncDeckManager: FC = () => {
 
         const payload = (await response.json()) as InstructorPasscodeResponsePayload
         if (typeof payload.instructorPasscode === 'string' && payload.instructorPasscode.length > 0) {
-          window.sessionStorage.setItem(buildSyncDeckPasscodeKey(sessionId), payload.instructorPasscode)
           if (!isCancelled) {
             setInstructorPasscode(payload.instructorPasscode)
           }
-        } else if (!isCancelled && !cachedPasscode) {
+        } else if (!isCancelled && !bootstrapPasscode) {
           setInstructorPasscode(null)
         }
 
@@ -2515,7 +2568,7 @@ const SyncDeckManager: FC = () => {
         }
       } catch {
         if (!isCancelled) {
-          if (!cachedPasscode) {
+          if (!bootstrapPasscode) {
             setInstructorPasscode(null)
           }
           setPersistentUrlHashFallback(null)
@@ -2534,7 +2587,7 @@ const SyncDeckManager: FC = () => {
     return () => {
       isCancelled = true
     }
-  }, [hostProtocol, sessionId, userAgent])
+  }, [hostProtocol, location.pathname, location.search, location.state, navigate, sessionId, userAgent])
 
   useEffect(() => {
     if (!sessionId || !instructorPasscode) {

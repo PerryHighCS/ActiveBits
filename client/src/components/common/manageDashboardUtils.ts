@@ -94,6 +94,7 @@ interface CreateSessionBootstrapPayloadEntry {
 }
 
 const createSessionBootstrapPayloads = new Map<string, CreateSessionBootstrapPayloadEntry>()
+const SENSITIVE_BOOTSTRAP_FIELD_PATTERN = /(passcode|password|secret|token|credential)/i
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
@@ -170,6 +171,18 @@ function buildCreateSessionBootstrapStorageKey(activityId: string, sessionId: st
   return `${CREATE_SESSION_BOOTSTRAP_SESSION_STORAGE_PREFIX}${activityId}:${sessionId}`
 }
 
+export function hasSensitiveCreateSessionBootstrapPayload(payload: Record<string, unknown>): boolean {
+  return Object.keys(payload).some((key) => SENSITIVE_BOOTSTRAP_FIELD_PATTERN.test(key))
+}
+
+export function filterSensitiveCreateSessionBootstrapPayload(
+  payload: Record<string, unknown>,
+): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(payload).filter(([key]) => !SENSITIVE_BOOTSTRAP_FIELD_PATTERN.test(key)),
+  )
+}
+
 function persistCreateSessionBootstrapPayloadToSessionStorage(
   activityId: string,
   sessionId: string,
@@ -180,11 +193,15 @@ function persistCreateSessionBootstrapPayloadToSessionStorage(
   if (typeof window === 'undefined' || window.sessionStorage == null) {
     return
   }
+  const storagePayload = filterSensitiveCreateSessionBootstrapPayload(payload)
+  if (Object.keys(storagePayload).length === 0) {
+    return
+  }
 
   const storageKey = buildCreateSessionBootstrapStorageKey(activityId, sessionId)
   const serializedEntry = JSON.stringify({
     createdAtMs,
-    payload,
+    payload: storagePayload,
   } satisfies CreateSessionBootstrapPayloadEntry)
 
   try {
@@ -473,6 +490,10 @@ export function persistCreateSessionBootstrapToSessionStorage(
   }
 
   for (const entry of createSessionBootstrap.sessionStorage) {
+    if (SENSITIVE_BOOTSTRAP_FIELD_PATTERN.test(entry.responseField)) {
+      continue
+    }
+
     const value = payload[entry.responseField]
     if (typeof value !== 'string' || value.length === 0) {
       continue

@@ -141,11 +141,29 @@ void test('runSyncDeckPresentationPreflight accepts ready handshake from present
 
     assert.deepEqual(result, { valid: true, warning: null })
     assert.equal(dom.appendedNodes.length, 1)
+    assert.equal(dom.iframe.src, 'https://slides.example/deck')
     assert.equal(dom.iframe.attributes.sandbox, 'allow-scripts allow-same-origin')
     assert.equal(dom.iframe.contentWindow.postMessageCalls.length, 1)
     assert.equal((dom.iframe.contentWindow.postMessageCalls[0]?.message as { version?: unknown })?.version, REVEAL_SYNC_PROTOCOL_VERSION)
     assert.equal((dom.iframe.contentWindow.postMessageCalls[0]?.message as { payload?: { name?: unknown } })?.payload?.name, 'ping')
     assert.equal(dom.iframe.removed, true)
+  } finally {
+    dom.restore()
+  }
+})
+
+void test('runSyncDeckPresentationPreflight rejects non-http presentation URLs before creating an iframe', async () => {
+  const dom = installFakeDom()
+
+  try {
+    const result = await runSyncDeckPresentationPreflight('javascript:alert(1)', { timeoutMs: 100 })
+
+    assert.deepEqual(result, {
+      valid: false,
+      warning: 'Presentation URL must be a valid http(s) URL',
+    })
+    assert.equal(dom.appendedNodes.length, 0)
+    assert.equal(dom.iframe.src, '')
   } finally {
     dom.restore()
   }

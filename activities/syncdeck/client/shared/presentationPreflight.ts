@@ -15,16 +15,22 @@ export async function runSyncDeckPresentationPreflight(
     return { valid: false, warning: 'Presentation validation is unavailable in this environment.' }
   }
 
-  let targetOrigin: string
+  let presentationUrl: URL
   try {
-    targetOrigin = new URL(url).origin
+    presentationUrl = new URL(url)
   } catch {
     return { valid: false, warning: 'Presentation URL must be a valid http(s) URL' }
   }
+  if (presentationUrl.protocol !== 'http:' && presentationUrl.protocol !== 'https:') {
+    return { valid: false, warning: 'Presentation URL must be a valid http(s) URL' }
+  }
+
+  const targetOrigin = presentationUrl.origin
+  const presentationHref = presentationUrl.href
 
   return await new Promise((resolve) => {
     const iframe = document.createElement('iframe')
-    iframe.src = url
+    iframe.src = presentationHref
     iframe.setAttribute('aria-hidden', 'true')
     iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin')
     iframe.style.position = 'fixed'

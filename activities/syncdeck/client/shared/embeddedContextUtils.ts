@@ -1,5 +1,3 @@
-import { buildSyncDeckPasscodeKey } from './authStorage.js'
-
 export interface SyncDeckEmbeddedContextRequest {
   sessionId: string
   instructorPasscode?: string | null
@@ -57,14 +55,6 @@ export function resolveSyncDeckEmbeddedContextRequestFromStorage(
 ): SyncDeckEmbeddedContextRequest | null {
   if (!storage) {
     return null
-  }
-
-  const instructorPasscode = getTrimmedStorageValue(storage, buildSyncDeckPasscodeKey(sessionId))
-  if (instructorPasscode) {
-    return {
-      sessionId,
-      instructorPasscode,
-    }
   }
 
   const studentId = getTrimmedStorageValue(storage, `syncdeck_student_id_${sessionId}`)

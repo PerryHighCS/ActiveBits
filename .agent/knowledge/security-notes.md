@@ -131,6 +131,15 @@ Track security-relevant boundaries, risks, and mitigation decisions.
 - Follow-up action: If preserving manager control across full reloads for temporary sessions becomes a requirement, prefer an httpOnly server-issued recovery cookie or short-lived recovery token over reintroducing Web Storage.
 - Owner: Codex
 
+- Date: 2026-07-11
+- Area: syncdeck static-presentation instructor launch
+- Threat or risk: Storing the generated SyncDeck `instructorPasscode` in `sessionStorage` for `/util/syncdeck/launch-presentation?mode=instructor` triggers CodeQL clear-text sensitive-storage alerts and exposes the temporary manager credential to any same-origin JavaScript for the life of the tab.
+- Control or mitigation: Immediate instructor launches now pass the generated passcode to `/manage/syncdeck/:sessionId` through same-tab React Router state. The SyncDeck manager reads that one-shot router state before falling back to cookie-backed recovery, so the presentation launch path does not write the passcode to Web Storage.
+- Residual risk: The passcode still exists in live React state while the manager page is open and travels in manager-authenticated requests/websocket auth messages. A full-page reload of this temporary launch path may lose manager credentials unless an authenticated recovery path exists.
+- Validation (test/review/path): `activities/syncdeck/client/util/SyncDeckLaunchPresentation.tsx`; `activities/syncdeck/client/util/SyncDeckLaunchPresentation.test.tsx`; `activities/syncdeck/client/manager/SyncDeckManager.tsx`.
+- Follow-up action: If reload-stable manager recovery is needed for presentation-launched temporary sessions, prefer an httpOnly server-issued recovery cookie or short-lived recovery token over Web Storage.
+- Owner: Codex
+
 - Date: 2026-03-03
 - Area: video-sync persistent teacher-cookie parsing
 - Threat or risk: The `persistent_sessions` cookie is client-controlled input, so logging JSON parse failures at error level lets attackers generate noisy server log spam without affecting authorization.

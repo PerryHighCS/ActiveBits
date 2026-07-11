@@ -84,12 +84,6 @@ void test('parseActivityConfig accepts valid shared contracts', () => {
       createSessionBootstrap: {
         historyState: ['instructorPasscode'],
         selectedOptionsToSessionData: ['presentationUrl'],
-        sessionStorage: [
-          {
-            keyPrefix: 'syncdeck_instructor_',
-            responseField: 'instructorPasscode',
-          },
-        ],
       },
       manageDashboard: {
         customPersistentLinkBuilder: true,
@@ -140,10 +134,7 @@ void test('parseActivityConfig accepts valid shared contracts', () => {
   assert.equal(parsed.deepLinkOptions?.hintsEnabled?.defaultValue, true)
   assert.deepEqual(parsed.deepLinkOptions?.challengeTypes?.defaultValue, ['binary-to-decimal', 'decimal-to-binary'])
   assert.equal(parsed.deepLinkGenerator?.preflight?.timeoutMs, 4000)
-  assert.deepEqual(parsed.createSessionBootstrap?.sessionStorage?.[0], {
-    keyPrefix: 'syncdeck_instructor_',
-    responseField: 'instructorPasscode',
-  })
+  assert.equal(parsed.createSessionBootstrap?.sessionStorage, undefined)
   assert.deepEqual(parsed.createSessionBootstrap?.historyState, ['instructorPasscode'])
   assert.deepEqual(parsed.createSessionBootstrap?.selectedOptionsToSessionData, ['presentationUrl'])
   assert.equal(parsed.manageDashboard?.customPersistentLinkBuilder, true)

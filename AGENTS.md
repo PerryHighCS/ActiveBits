@@ -27,10 +27,11 @@ Before making changes, read these files when relevant:
 7. All API endpoints must include proper error handling and logging.
 8. Use structured logging for all server-side events.
 9. Never expose, log, or commit secrets, API keys, or other sensitive information.
-10. Plans should be iterative and include checklists of steps for the plan. Checklists must be updated as tasks are created and completed.
-11. When adding or changing SyncDeck-embedded activity launch formats, update `skills/syncdeck/references/ACTIVITY_PAYLOADS.md` in the same branch so the shared skill docs stay aligned with the real payloads used by the repo.
-12. If a `skills/syncdeck/...` doc change is intended to be shared across repos, push the updated subtree back to `syncdeck-agent-skills` as part of the completion flow.
-13. Always perform `git subtree pull` and other subtree sync operations on a non-`main` branch. Keep local `main` aligned with `origin/main`, and branch first before pulling subtree updates.
+10. Never write instructor passcodes or manager credentials to `sessionStorage`, `localStorage`, IndexedDB, or other browser storage. Use same-tab router state, in-memory handoff, httpOnly cookies, or short-lived server-issued recovery tokens instead.
+11. Plans should be iterative and include checklists of steps for the plan. Checklists must be updated as tasks are created and completed.
+12. When adding or changing SyncDeck-embedded activity launch formats, update `skills/syncdeck/references/ACTIVITY_PAYLOADS.md` in the same branch so the shared skill docs stay aligned with the real payloads used by the repo.
+13. If a `skills/syncdeck/...` doc change is intended to be shared across repos, push the updated subtree back to `syncdeck-agent-skills` as part of the completion flow.
+14. Always perform `git subtree pull` and other subtree sync operations on a non-`main` branch. Keep local `main` aligned with `origin/main`, and branch first before pulling subtree updates.
  
 ## Preflight Checklist
 
