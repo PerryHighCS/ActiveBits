@@ -106,8 +106,7 @@ void test('launchStandaloneSyncDeckPresentation rejects presentations that fail 
 void test('launchStandaloneSyncDeckPresentation can launch instructor mode from a presentation URL', async () => {
   const { launchStandaloneSyncDeckPresentation } = await import('./SyncDeckLaunchPresentation.js')
   const requests: Array<{ input: string; init?: RequestInit }> = []
-  const redirects: string[] = []
-  const storageWrites = new Map<string, string>()
+  const redirects: Array<{ url: string; state: unknown }> = []
 
   const result = await launchStandaloneSyncDeckPresentation({
     presentationUrl: 'https://slides.example/deck?unit=arrays',
@@ -136,13 +135,8 @@ void test('launchStandaloneSyncDeckPresentation can launch instructor mode from 
 
       throw new Error(`[TEST] unexpected fetch: ${String(input)}`)
     }) as typeof fetch,
-    storage: {
-      setItem(key, value) {
-        storageWrites.set(key, value)
-      },
-    },
-    redirectTo(url) {
-      redirects.push(url)
+    redirectTo(url, state) {
+      redirects.push({ url, state })
     },
   })
 
@@ -156,11 +150,15 @@ void test('launchStandaloneSyncDeckPresentation can launch instructor mode from 
       standaloneMode: false,
     },
   )
-  assert.deepEqual(Array.from(storageWrites.entries()), [
-    ['syncdeck_instructor_syncdeck-instructor-1', 'launch-passcode'],
-  ])
   assert.deepEqual(redirects, [
-    '/manage/syncdeck/syncdeck-instructor-1?presentationUrl=https%3A%2F%2Fslides.example%2Fdeck%3Funit%3Darrays',
+    {
+      url: '/manage/syncdeck/syncdeck-instructor-1?presentationUrl=https%3A%2F%2Fslides.example%2Fdeck%3Funit%3Darrays',
+      state: {
+        createSessionPayload: {
+          instructorPasscode: 'launch-passcode',
+        },
+      },
+    },
   ])
 })
 

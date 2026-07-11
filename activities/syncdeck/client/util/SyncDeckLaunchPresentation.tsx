@@ -1,6 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
-import { buildSyncDeckPasscodeKey } from '../shared/authStorage.js'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { runSyncDeckPresentationPreflight, type SyncDeckPreflightResult } from '../shared/presentationPreflight.js'
 import { getStudentPresentationCompatibilityError } from '../shared/presentationUrlCompatibility.js'
 import { createConfiguredSyncDeckSession } from '../shared/sessionLaunch.js'
@@ -20,10 +19,6 @@ function normalizePreflightWarning(warning: string | null): string {
 }
 
 export type SyncDeckLaunchMode = 'student' | 'instructor'
-
-interface SyncDeckLaunchStorage {
-  setItem(key: string, value: string): void
-}
 
 export function resolveSyncDeckLaunchMode(value: string | null | undefined): SyncDeckLaunchMode {
   return value === 'instructor' ? 'instructor' : 'student'
@@ -50,22 +45,6 @@ function buildSyncDeckLaunchRedirect(params: {
   return `/${encodeURIComponent(params.sessionId)}`
 }
 
-function storeInstructorPasscode(params: {
-  sessionId: string
-  instructorPasscode: string
-  storage?: SyncDeckLaunchStorage | null
-}): void {
-  const storage =
-    params.storage
-    ?? (typeof window !== 'undefined' ? window.sessionStorage : null)
-
-  try {
-    storage?.setItem(buildSyncDeckPasscodeKey(params.sessionId), params.instructorPasscode)
-  } catch {
-    // The manager can still show a credential error if storage is unavailable.
-  }
-}
-
 export interface LaunchStandaloneSyncDeckPresentationParams {
   presentationUrl: string
   mode?: SyncDeckLaunchMode
@@ -73,8 +52,13 @@ export interface LaunchStandaloneSyncDeckPresentationParams {
   userAgent?: string | null
   preflightRunner?: (url: string) => Promise<SyncDeckPreflightResult>
   fetchFn?: typeof fetch
-  redirectTo?: (url: string) => void
-  storage?: SyncDeckLaunchStorage | null
+  redirectTo?: (url: string, state?: SyncDeckLaunchRedirectState) => void
+}
+
+export interface SyncDeckLaunchRedirectState {
+  createSessionPayload?: {
+    instructorPasscode: string
+  }
 }
 
 export async function launchStandaloneSyncDeckPresentation(
@@ -107,21 +91,22 @@ export async function launchStandaloneSyncDeckPresentation(
     fetchFn: params.fetchFn,
   })
 
-  if (mode === 'instructor') {
-    storeInstructorPasscode({
-      sessionId,
-      instructorPasscode,
-      storage: params.storage,
-    })
-  }
+  const redirectState = mode === 'instructor'
+    ? {
+        createSessionPayload: {
+          instructorPasscode,
+        },
+      } satisfies SyncDeckLaunchRedirectState
+    : undefined
 
-  params.redirectTo?.(buildSyncDeckLaunchRedirect({ mode, sessionId, presentationUrl }))
+  params.redirectTo?.(buildSyncDeckLaunchRedirect({ mode, sessionId, presentationUrl }), redirectState)
 
   return { sessionId }
 }
 
 export default function SyncDeckLaunchPresentation() {
   const [searchParams] = useSearchParams()
+  const navigate = useNavigate()
   const [presentationUrlInput, setPresentationUrlInput] = useState(() => resolveSyncDeckLaunchPresentationUrl(searchParams))
   const launchMode = resolveSyncDeckLaunchMode(searchParams.get('mode'))
   const [launchState, setLaunchState] = useState<LaunchState>(() => {
@@ -157,7 +142,7 @@ export default function SyncDeckLaunchPresentation() {
           mode,
           hostProtocol: window.location.protocol,
           userAgent: window.navigator.userAgent,
-          redirectTo: (url) => {
+          redirectTo: (url, state) => {
             if (!cancelled) {
               setLaunchState({
                 phase: 'launching',
@@ -165,6 +150,10 @@ export default function SyncDeckLaunchPresentation() {
                   ? 'Starting instructor SyncDeck session...'
                   : 'Starting standalone SyncDeck session...',
               })
+              if (state) {
+                void navigate(url, { state })
+                return
+              }
               window.location.assign(url)
             }
           },
@@ -183,7 +172,7 @@ export default function SyncDeckLaunchPresentation() {
     return () => {
       cancelled = true
     }
-  }, [searchParams])
+  }, [navigate, searchParams])
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -208,13 +197,17 @@ export default function SyncDeckLaunchPresentation() {
           mode: launchMode,
           hostProtocol: window.location.protocol,
           userAgent: window.navigator.userAgent,
-          redirectTo: (url) => {
+          redirectTo: (url, state) => {
             setLaunchState({
               phase: 'launching',
               detail: launchMode === 'instructor'
                 ? 'Starting instructor SyncDeck session...'
                 : 'Starting standalone SyncDeck session...',
             })
+            if (state) {
+              void navigate(url, { state })
+              return
+            }
             window.location.assign(url)
           },
         })

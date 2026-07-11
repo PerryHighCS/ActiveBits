@@ -534,6 +534,22 @@ export function normalizeStoredInstructorPasscode(value: string | null): string 
   return trimmed.length > 0 ? trimmed : null
 }
 
+export function readRouterStateInstructorPasscode(locationState: unknown): string | null {
+  if (locationState == null || typeof locationState !== 'object' || Array.isArray(locationState)) {
+    return null
+  }
+
+  const createSessionPayload = (locationState as { createSessionPayload?: unknown }).createSessionPayload
+  if (createSessionPayload == null || typeof createSessionPayload !== 'object' || Array.isArray(createSessionPayload)) {
+    return null
+  }
+
+  const instructorPasscode = (createSessionPayload as { instructorPasscode?: unknown }).instructorPasscode
+  return typeof instructorPasscode === 'string'
+    ? normalizeStoredInstructorPasscode(instructorPasscode)
+    : null
+}
+
 export function validatePresentationUrl(value: string, hostProtocol?: string | null, userAgent?: string | null): boolean {
   return value.trim().length > 0 && getStudentPresentationCompatibilityError({
     value,
@@ -2458,9 +2474,11 @@ const SyncDeckManager: FC = () => {
     let isCancelled = false
 
     const loadInstructorPasscode = async (): Promise<void> => {
-      const cachedPasscode = normalizeStoredInstructorPasscode(
+      const routerStatePasscode = readRouterStateInstructorPasscode(location.state)
+      const storedPasscode = normalizeStoredInstructorPasscode(
         window.sessionStorage.getItem(buildSyncDeckPasscodeKey(sessionId)),
       )
+      const cachedPasscode = routerStatePasscode ?? storedPasscode
 
       if (!isCancelled) {
         setInstructorPasscode(cachedPasscode)
@@ -2534,7 +2552,7 @@ const SyncDeckManager: FC = () => {
     return () => {
       isCancelled = true
     }
-  }, [hostProtocol, sessionId, userAgent])
+  }, [hostProtocol, location.state, sessionId, userAgent])
 
   useEffect(() => {
     if (!sessionId || !instructorPasscode) {

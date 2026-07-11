@@ -25,6 +25,7 @@ import { shouldReopenConfigurePanel } from './SyncDeckManager.js'
 import { shouldAutoActivatePresentationUrl } from './SyncDeckManager.js'
 import { resolveRecoveredPresentationUrl } from './SyncDeckManager.js'
 import { normalizeStoredInstructorPasscode } from './SyncDeckManager.js'
+import { readRouterStateInstructorPasscode } from './SyncDeckManager.js'
 import { resolvePersistentEntryPolicyForConfigure } from './SyncDeckManager.js'
 import { resolvePersistentUrlHashForConfigure } from './SyncDeckManager.js'
 import { normalizeSyncDeckEmbeddedActivities } from './SyncDeckManager.js'
@@ -188,6 +189,21 @@ void test('normalizeStoredInstructorPasscode trims and rejects empty cached valu
   assert.equal(normalizeStoredInstructorPasscode(' teacher-pass '), 'teacher-pass')
   assert.equal(normalizeStoredInstructorPasscode('   '), null)
   assert.equal(normalizeStoredInstructorPasscode(null), null)
+})
+
+void test('readRouterStateInstructorPasscode reads only valid create-session router state', () => {
+  assert.equal(
+    readRouterStateInstructorPasscode({
+      createSessionPayload: {
+        instructorPasscode: ' teacher-pass ',
+      },
+    }),
+    'teacher-pass',
+  )
+  assert.equal(readRouterStateInstructorPasscode({ createSessionPayload: { instructorPasscode: '   ' } }), null)
+  assert.equal(readRouterStateInstructorPasscode({ createSessionPayload: {} }), null)
+  assert.equal(readRouterStateInstructorPasscode({ createSessionPayload: [] }), null)
+  assert.equal(readRouterStateInstructorPasscode(null), null)
 })
 
 void test('resolvePersistentEntryPolicyForConfigure prefers recovered policy when query is absent', () => {
