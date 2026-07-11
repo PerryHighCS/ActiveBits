@@ -158,7 +158,11 @@ export default function PostboardManager(): React.JSX.Element {
     return response.json() as Promise<unknown>
   }, [instructorPasscode, sessionId])
 
-  const saveSetup = useCallback(async (nextPrompt = promptDraft, nextAutoApprove = autoApprove) => {
+  const saveSetup = useCallback(async (
+    nextPrompt = promptDraft,
+    nextAutoApprove = autoApprove,
+    options: { preservePromptDraft?: boolean } = {},
+  ) => {
     setIsSavingSetup(true)
     try {
       const nextSnapshot = await postJson('/setup', {
@@ -166,7 +170,9 @@ export default function PostboardManager(): React.JSX.Element {
         autoApprove: nextAutoApprove,
       }) as PostboardInstructorSnapshot
       setSnapshot(nextSnapshot)
-      setPromptDraft(nextSnapshot.prompt.text)
+      if (options.preservePromptDraft !== true) {
+        setPromptDraft(nextSnapshot.prompt.text)
+      }
       setAutoApprove(nextSnapshot.settings.autoApprove)
       autoApproveDirtyRef.current = false
       setIsSetupOpen(nextSnapshot.prompt.text.length === 0)
@@ -204,7 +210,7 @@ export default function PostboardManager(): React.JSX.Element {
     autoApproveDirtyRef.current = true
     const nextAutoApprove = !autoApprove
     setAutoApprove(nextAutoApprove)
-    void saveSetup(snapshot.prompt.text, nextAutoApprove)
+    void saveSetup(snapshot.prompt.text, nextAutoApprove, { preservePromptDraft: true })
   }, [autoApprove, saveSetup, snapshot])
 
   const handleInstructorPost = async (event: FormEvent<HTMLFormElement>) => {
