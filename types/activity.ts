@@ -150,6 +150,7 @@ export interface ActivityStructuredReportSection {
   instanceKey: string
   title: string
   generatedAt: number
+  reportStatus?: 'available' | 'unsupported' | 'unavailable'
   supportsScopes: ActivityReportScope[]
   students?: ActivityReportStudentRef[]
   summaryCards?: ActivityReportSummaryCard[]

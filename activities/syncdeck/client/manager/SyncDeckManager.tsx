@@ -486,7 +486,6 @@ interface SyncDeckActivityPickerEntry {
   activityId: string
   name: string
   description: string
-  supportsReport: boolean
 }
 
 interface SyncDeckActivityLaunchRequest {
@@ -1064,13 +1063,6 @@ export function resolveNextPendingEmbeddedEndConfirmation(
   return { nextPending: targetInstanceKey, shouldEnd: false }
 }
 
-export function activitySupportsEmbeddedReport(
-  activityId: string,
-  activityEntries: SyncDeckActivityPickerEntry[],
-): boolean {
-  return activityEntries.some((entry) => entry.activityId === activityId && entry.supportsReport)
-}
-
 export function parseDownloadFilenameFromContentDisposition(headerValue: string | null): string | null {
   if (typeof headerValue !== 'string' || headerValue.trim().length === 0) {
     return null
@@ -1468,7 +1460,6 @@ export function resolveSyncDeckActivityPickerEntries(
       activityId: entry.id,
       name: entry.name,
       description: entry.description,
-      supportsReport: typeof entry.reportEndpoint === 'string' && entry.reportEndpoint.trim().length > 0,
     }))
     .sort((left, right) => left.name.localeCompare(right.name))
 }
@@ -1910,8 +1901,8 @@ const SyncDeckManager: FC = () => {
   const [isActivityPickerOpen, setIsActivityPickerOpen] = useState(false)
   const [endingEmbeddedInstanceKey, setEndingEmbeddedInstanceKey] = useState<string | null>(null)
   const [pendingEmbeddedEndConfirmInstanceKey, setPendingEmbeddedEndConfirmInstanceKey] = useState<string | null>(null)
-  const [downloadingEmbeddedReportInstanceKey, setDownloadingEmbeddedReportInstanceKey] = useState<string | null>(null)
   const [isDownloadingSessionReport, setIsDownloadingSessionReport] = useState(false)
+  const [sessionReportError, setSessionReportError] = useState<string | null>(null)
   const [overlayNavigationCapabilities, setOverlayNavigationCapabilities] = useState<SyncDeckManagerNavigationCapabilities | null>(null)
   const [overlayNavigationCapabilityIndices, setOverlayNavigationCapabilityIndices] =
     useState<{ h: number; v: number; f: number } | null>(null)
@@ -3974,49 +3965,13 @@ const SyncDeckManager: FC = () => {
     }
   }
 
-  const downloadEmbeddedActivityReport = async (instanceKey: string): Promise<void> => {
-    if (!sessionId || !instructorPasscode) {
-      return
-    }
-
-    setDownloadingEmbeddedReportInstanceKey(instanceKey)
-    try {
-      const response = await fetch(
-        `/api/syncdeck/${encodeURIComponent(sessionId)}/embedded-activity/report/${encodeURIComponent(instanceKey)}`,
-        {
-          headers: {
-            'x-syncdeck-instructor-passcode': instructorPasscode,
-          },
-        },
-      )
-      if (!response.ok) {
-        throw new Error('Failed to download embedded activity report')
-      }
-
-      const blob = await response.blob()
-      const objectUrl = URL.createObjectURL(blob)
-      const downloadLink = document.createElement('a')
-      downloadLink.href = objectUrl
-      downloadLink.download =
-        parseDownloadFilenameFromContentDisposition(response.headers.get('Content-Disposition'))
-        ?? `${instanceKey}.html`
-      document.body.appendChild(downloadLink)
-      downloadLink.click()
-      document.body.removeChild(downloadLink)
-      URL.revokeObjectURL(objectUrl)
-    } catch {
-      // Keep the confirmation state visible so the instructor can retry the download.
-    } finally {
-      setDownloadingEmbeddedReportInstanceKey(null)
-    }
-  }
-
   const downloadSessionReport = async (): Promise<void> => {
     if (!sessionId || !instructorPasscode) {
       return
     }
 
     setIsDownloadingSessionReport(true)
+    setSessionReportError(null)
     try {
       const response = await fetch(
         `/api/syncdeck/${encodeURIComponent(sessionId)}/report`,
@@ -4042,7 +3997,7 @@ const SyncDeckManager: FC = () => {
       document.body.removeChild(downloadLink)
       URL.revokeObjectURL(objectUrl)
     } catch {
-      // Keep the session toolbar stable if the download fails so the instructor can retry.
+      setSessionReportError('Session report download failed. Check your connection and try again.')
     } finally {
       setIsDownloadingSessionReport(false)
     }
@@ -4223,6 +4178,13 @@ const SyncDeckManager: FC = () => {
             </button>
           </div>
         </div>
+        {sessionReportError && (
+          <div className="px-6 pb-3">
+            <p id="syncdeck-session-report-error" className="text-sm font-medium text-red-700" role="status">
+              {sessionReportError}
+            </p>
+          </div>
+        )}
 
         {isEmbeddedPanelOpen && (
           <div
@@ -4254,18 +4216,6 @@ const SyncDeckManager: FC = () => {
                     <div className="mt-2 flex items-center justify-between gap-2">
                       <span className="text-xs text-gray-600 truncate">{record.childSessionId}</span>
                       <div className="flex items-center gap-2">
-                        {pendingEmbeddedEndConfirmInstanceKey === instanceKey && activitySupportsEmbeddedReport(record.activityId, activityPickerEntries) && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              void downloadEmbeddedActivityReport(instanceKey)
-                            }}
-                            disabled={downloadingEmbeddedReportInstanceKey === instanceKey}
-                            className="px-2 py-1 rounded border border-gray-300 text-xs font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-60"
-                          >
-                            {downloadingEmbeddedReportInstanceKey === instanceKey ? 'Downloading…' : 'Download report'}
-                          </button>
-                        )}
                         <button
                           type="button"
                           onClick={() => {

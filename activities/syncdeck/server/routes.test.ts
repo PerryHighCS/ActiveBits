@@ -2757,63 +2757,6 @@ void test('embedded-activity start route rejects instance-key reuse for a differ
   assert.equal(parentSession.data.embeddedActivities['video-sync:3:0']?.activityId, 'video-sync')
 })
 
-void test('embedded-activity report route redirects to the child activity report endpoint when available', async () => {
-  await initializeActivityRegistry()
-  const app = createMockApp()
-  const ws = createMockWs()
-  const storeState = createSessionStore({
-    s1: {
-      ...createSyncDeckSession('s1', 'teacher-passcode-1'),
-      data: {
-        ...createSyncDeckSession('s1', 'teacher-passcode-1').data,
-        embeddedActivities: {
-          'gallery-walk:4:0': {
-            childSessionId: 'CHILD:s1:abc12:gallery-walk',
-            activityId: 'gallery-walk',
-            startedAt: 123,
-            owner: 'syncdeck-instructor',
-          },
-        },
-      },
-    },
-    'CHILD:s1:abc12:gallery-walk': {
-      id: 'CHILD:s1:abc12:gallery-walk',
-      type: 'gallery-walk',
-      created: Date.now(),
-      lastActivity: Date.now(),
-      data: {
-        stage: 'review',
-        config: { title: 'Critique Day' },
-        reviewees: {},
-        reviewers: {},
-        feedback: [],
-        stats: { reviewees: {}, reviewers: {} },
-      },
-    },
-  })
-  setupSyncDeckRoutes(app, storeState.sessions, ws)
-
-  const handler = app.handlers.get['/api/syncdeck/:sessionId/embedded-activity/report/:instanceKey']
-  assert.equal(typeof handler, 'function')
-
-  const res = createResponse()
-  await handler?.(
-    createRequest(
-      { sessionId: 's1', instanceKey: 'gallery-walk:4:0' },
-      {},
-      {},
-      { 'x-syncdeck-instructor-passcode': 'teacher-passcode-1' },
-    ),
-    res,
-  )
-
-  assert.equal(res.statusCode, 302)
-  assert.equal(res.headers.Location, '/api/gallery-walk/CHILD%3As1%3Aabc12%3Agallery-walk/report')
-  assert.deepEqual(res.body, {
-    location: '/api/gallery-walk/CHILD%3As1%3Aabc12%3Agallery-walk/report',
-  })
-})
-
 void test('report-manifest route aggregates structured child activity reports', async () => {
   await initializeActivityRegistry()
   const app = createMockApp()
@@ -2836,7 +2779,54 @@ void test('report-manifest route aggregates structured child activity reports', 
             startedAt: 100,
             owner: 'syncdeck-instructor',
           },
+          'resonance:2:0': {
+            childSessionId: 'CHILD:s1:ghi67:resonance',
+            activityId: 'resonance',
+            startedAt: 110,
+            owner: 'syncdeck-instructor',
+          },
         },
+      },
+    },
+    'CHILD:s1:ghi67:resonance': {
+      id: 'CHILD:s1:ghi67:resonance',
+      type: 'resonance',
+      created: Date.now(),
+      lastActivity: Date.now(),
+      data: {
+        questions: [
+          {
+            id: 'rq1',
+            type: 'multiple-choice',
+            text: 'Which value is binary 10?',
+            order: 1,
+            options: [
+              { id: 'rq1-a', text: '1' },
+              { id: 'rq1-b', text: '2', isCorrect: true },
+            ],
+          },
+        ],
+        students: {
+          studentB: { studentId: 'studentB', name: 'Blair', joinedAt: Date.now() },
+        },
+        responses: [
+          {
+            id: 'rr1',
+            questionId: 'rq1',
+            studentId: 'studentB',
+            submittedAt: Date.now(),
+            answer: { type: 'multiple-choice', selectedOptionIds: ['rq1-b'] },
+          },
+        ],
+        annotations: {},
+        reveals: [
+          {
+            questionId: 'rq1',
+            sharedAt: Date.now(),
+            correctOptionIds: ['rq1-b'],
+            sharedResponses: [],
+          },
+        ],
       },
     },
     'CHILD:s1:abc12:gallery-walk': {
@@ -2902,17 +2892,82 @@ void test('report-manifest route aggregates structured child activity reports', 
   assert.equal(res.statusCode, 200)
   const body = res.body as {
     parentSessionId: string
-    activities: Array<{ activityId: string; activityName: string; report: { instanceKey: string; students?: Array<{ studentId: string }> } }>
+    activities: Array<{
+      activityId: string
+      activityName: string
+      report: {
+        instanceKey: string
+        reportStatus?: string
+        students?: Array<{ studentId: string }>
+        payload?: { status?: string }
+      }
+    }>
     students: Array<{ studentId: string; displayName?: string | null }>
   }
   assert.equal(body.parentSessionId, 's1')
-  assert.equal(body.activities.length, 1)
-  assert.equal(body.activities[0]?.activityId, 'gallery-walk')
-  assert.equal(body.activities[0]?.activityName, 'Gallery Walk')
-  assert.equal(body.activities[0]?.report.instanceKey, 'gallery-walk:4:0')
+  assert.equal(body.activities.length, 3)
+  assert.equal(body.activities[0]?.activityId, 'video-sync')
+  assert.equal(body.activities[0]?.activityName, 'Video Sync')
+  assert.equal(body.activities[0]?.report.instanceKey, 'video-sync:3:0')
+  assert.equal(body.activities[0]?.report.reportStatus, 'unsupported')
+  assert.equal(body.activities[0]?.report.payload?.status, 'unsupported')
+  assert.equal(body.activities[1]?.activityId, 'resonance')
+  assert.equal(body.activities[1]?.activityName, 'Resonance')
+  assert.equal(body.activities[1]?.report.instanceKey, 'resonance:2:0')
+  assert.equal(body.activities[1]?.report.reportStatus, 'available')
+  assert.equal(body.activities[2]?.activityId, 'gallery-walk')
+  assert.equal(body.activities[2]?.activityName, 'Gallery Walk')
+  assert.equal(body.activities[2]?.report.instanceKey, 'gallery-walk:4:0')
   assert.deepEqual(body.students, [
+    { studentId: 'studentB', displayName: 'Blair' },
     { studentId: 'studentA', displayName: 'Avery - Bridge Design' },
   ])
+})
+
+void test('report-manifest route includes missing child sessions as unavailable report sections', async () => {
+  await initializeActivityRegistry()
+  const app = createMockApp()
+  const ws = createMockWs()
+  const storeState = createSessionStore({
+    s1: {
+      ...createSyncDeckSession('s1', 'teacher-passcode-1'),
+      data: {
+        ...createSyncDeckSession('s1', 'teacher-passcode-1').data,
+        embeddedActivities: {
+          'postboard:2:0': {
+            childSessionId: 'CHILD:s1:missing:postboard',
+            activityId: 'postboard',
+            startedAt: 222,
+            owner: 'syncdeck-instructor',
+          },
+        },
+      },
+    },
+  })
+  setupSyncDeckRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.get['/api/syncdeck/:sessionId/report-manifest']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.(
+    createRequest(
+      { sessionId: 's1' },
+      {},
+      {},
+      { 'x-syncdeck-instructor-passcode': 'teacher-passcode-1' },
+    ),
+    res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  const body = res.body as {
+    activities: Array<{ activityId: string; report: { reportStatus?: string; payload?: { status?: string } } }>
+  }
+  assert.equal(body.activities.length, 1)
+  assert.equal(body.activities[0]?.activityId, 'postboard')
+  assert.equal(body.activities[0]?.report.reportStatus, 'unavailable')
+  assert.equal(body.activities[0]?.report.payload?.status, 'unavailable')
 })
 
 void test('report route returns downloadable session-level HTML built from the manifest', async () => {
