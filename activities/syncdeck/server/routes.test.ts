@@ -2785,6 +2785,12 @@ void test('report-manifest route aggregates structured child activity reports', 
             startedAt: 110,
             owner: 'syncdeck-instructor',
           },
+          'postboard:3:0': {
+            childSessionId: 'CHILD:s1:jkl89:postboard',
+            activityId: 'postboard',
+            startedAt: 115,
+            owner: 'syncdeck-instructor',
+          },
         },
       },
     },
@@ -2827,6 +2833,44 @@ void test('report-manifest route aggregates structured child activity reports', 
             sharedResponses: [],
           },
         ],
+      },
+    },
+    'CHILD:s1:jkl89:postboard': {
+      id: 'CHILD:s1:jkl89:postboard',
+      type: 'postboard',
+      created: Date.now(),
+      lastActivity: Date.now(),
+      data: {
+        prompt: {
+          id: 'prompt-1',
+          text: 'Share a debugging strategy',
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        },
+        settings: { autoApprove: false },
+        posts: [
+          {
+            id: 'pb1',
+            promptId: 'prompt-1',
+            authorId: 'studentC',
+            authorName: 'Casey',
+            authorRole: 'student',
+            text: 'Trace variables in a table.',
+            styleId: 'mint',
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+            status: 'approved',
+            approvedAt: Date.now(),
+            rejectedAt: null,
+            deletedAt: null,
+            hiddenAt: null,
+            order: 0,
+          },
+        ],
+        reactions: {
+          pb1: { byUser: { studentB: '👍' } },
+        },
+        flags: {},
       },
     },
     'CHILD:s1:abc12:gallery-walk': {
@@ -2905,7 +2949,7 @@ void test('report-manifest route aggregates structured child activity reports', 
     students: Array<{ studentId: string; displayName?: string | null }>
   }
   assert.equal(body.parentSessionId, 's1')
-  assert.equal(body.activities.length, 3)
+  assert.equal(body.activities.length, 4)
   assert.equal(body.activities[0]?.activityId, 'video-sync')
   assert.equal(body.activities[0]?.activityName, 'Video Sync')
   assert.equal(body.activities[0]?.report.instanceKey, 'video-sync:3:0')
@@ -2915,11 +2959,16 @@ void test('report-manifest route aggregates structured child activity reports', 
   assert.equal(body.activities[1]?.activityName, 'Resonance')
   assert.equal(body.activities[1]?.report.instanceKey, 'resonance:2:0')
   assert.equal(body.activities[1]?.report.reportStatus, 'available')
-  assert.equal(body.activities[2]?.activityId, 'gallery-walk')
-  assert.equal(body.activities[2]?.activityName, 'Gallery Walk')
-  assert.equal(body.activities[2]?.report.instanceKey, 'gallery-walk:4:0')
+  assert.equal(body.activities[2]?.activityId, 'postboard')
+  assert.equal(body.activities[2]?.activityName, 'Postboard')
+  assert.equal(body.activities[2]?.report.instanceKey, 'postboard:3:0')
+  assert.equal(body.activities[2]?.report.reportStatus, 'available')
+  assert.equal(body.activities[3]?.activityId, 'gallery-walk')
+  assert.equal(body.activities[3]?.activityName, 'Gallery Walk')
+  assert.equal(body.activities[3]?.report.instanceKey, 'gallery-walk:4:0')
   assert.deepEqual(body.students, [
     { studentId: 'studentB', displayName: 'Blair' },
+    { studentId: 'studentC', displayName: 'Casey' },
     { studentId: 'studentA', displayName: 'Avery - Bridge Design' },
   ])
 })

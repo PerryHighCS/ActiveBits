@@ -16,6 +16,7 @@ Build complete activity reporting across ActiveBits, with special attention to S
 - [x] SyncDeck's exported HTML report already has whole-session, activity, and student views.
 - [x] Gallery Walk has a self-contained HTML report and a structured report builder.
 - [x] Resonance has a self-contained standalone report endpoint.
+- [x] Postboard has a self-contained standalone report endpoint and structured report builder.
 - [x] Register Resonance as a structured report builder for SyncDeck aggregation.
 - [x] Include embedded activities without report builders in SyncDeck aggregate reports with a clear unsupported/unavailable state.
 - [x] Remove the SyncDeck per-child embedded report download path in favor of one self-contained parent report that embeds child activity report data.
@@ -34,6 +35,7 @@ Build complete activity reporting across ActiveBits, with special attention to S
 ## Implementation Notes
 
 - 2026-07-11: Completed the first implementation slice. Resonance now contributes structured report data to SyncDeck aggregate reports. SyncDeck aggregate manifests include supported, unsupported, and unavailable embedded activity records in `startedAt` order. The per-child SyncDeck report redirect route and manager child download button were removed so the single parent session report is the canonical embedded export. The SyncDeck manager now shows user-visible report download failure feedback. Report contract docs were updated in `ADDING_ACTIVITIES.md` and `.agent/knowledge/data-contracts.md`.
+- 2026-07-11: Added Postboard reporting. Postboard now has an instructor-authenticated standalone HTML report endpoint and a structured builder for SyncDeck aggregation. The report includes prompt/settings, moderation status counts, reactions, flags, hidden/deleted state, and per-student contribution drill-downs. Remaining activity report builders moved to Phase 8.
 
 ## Phase 1: Harden The Shared Report Contract
 
@@ -80,30 +82,9 @@ Build complete activity reporting across ActiveBits, with special attention to S
 
 ### Postboard
 
-- [ ] Add a self-contained HTML report endpoint.
-- [ ] Add a structured builder with prompt, approved posts, pending/rejected counts, per-student contributions, and reactions.
-- [ ] Decide how moderation state should appear in instructor-only exports.
-
-### Binary Breach
-
-- [ ] Add a report endpoint.
-- [ ] Add a structured builder with mission settings, per-student progress, completion, accuracy, hints, and challenge history where available.
-- [ ] Identify any missing state needed for a useful report and add persistence before report rendering.
-
-### MobCode
-
-- [ ] Add a report endpoint.
-- [ ] Add a structured builder with final workspace state, selected runner, and student participation where available.
-- [ ] Decide whether edit/run event history is needed; add event capture if current state is insufficient.
-
-### Practice And Utility Activities
-
-- [ ] Inventory student work state for `java-string-practice`, `java-format-practice`, `python-list-practice`, `traveling-salesman`, `www-sim`, `algorithm-demo`, `video-sync`, and `raffle`.
-- [ ] Classify each as:
-  - [ ] student-work report
-  - [ ] engagement/state report
-  - [ ] intentionally unsupported
-- [ ] Add report endpoints/builders for activities with meaningful persisted student work.
+- [x] Add a self-contained HTML report endpoint.
+- [x] Add a structured builder with prompt, approved posts, pending/rejected counts, per-student contributions, and reactions.
+- [x] Decide how moderation state should appear in instructor-only exports.
 
 ## Phase 5: Improve Instructor And Student UX
 
@@ -133,6 +114,29 @@ Build complete activity reporting across ActiveBits, with special attention to S
 - [ ] Run `npm test` before merge.
 - [ ] Add `npm run test:e2e` if browser-visible report flows, downloads, routing, or SyncDeck manager surfaces change.
 - [ ] If sandbox port binding blocks e2e tests, document the limitation and run the strongest available scoped checks.
+
+## Phase 8: Add Remaining Activity Reports
+
+### Binary Breach
+
+- [ ] Add a report endpoint.
+- [ ] Add a structured builder with mission settings, per-student progress, completion, accuracy, hints, and challenge history where available.
+- [ ] Identify any missing state needed for a useful report and add persistence before report rendering.
+
+### MobCode
+
+- [ ] Add a report endpoint.
+- [ ] Add a structured builder with final workspace state, selected runner, and student participation where available.
+- [ ] Decide whether edit/run event history is needed; add event capture if current state is insufficient.
+
+### Practice And Utility Activities
+
+- [ ] Inventory student work state for `java-string-practice`, `java-format-practice`, `python-list-practice`, `traveling-salesman`, `www-sim`, `algorithm-demo`, `video-sync`, and `raffle`.
+- [ ] Classify each as:
+  - [ ] student-work report
+  - [ ] engagement/state report
+  - [ ] intentionally unsupported
+- [ ] Add report endpoints/builders for activities with meaningful persisted student work.
 
 ## Recommended First Implementation Slice
 
