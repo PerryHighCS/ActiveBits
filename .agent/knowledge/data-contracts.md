@@ -537,6 +537,15 @@ Document API and data-shape assumptions that must stay compatible over time.
 - Evidence (schema/tests/path): `activities/syncdeck/client/util/SyncDeckLaunchPresentation.tsx`; `activities/syncdeck/client/util/SyncDeckLaunchPresentation.test.tsx`; `skills/syncdeck/SKILL.md`; `skills/syncdeck/references/IFRAME_SYNC_PROTOCOL.md`
 - Follow-up action: If the bundled deck runtime gains a first-class option for instructor-mode CTA links, document that runtime option here and in the SyncDeck skill alongside the URL contract.
 - Owner: Codex
+
+- Date: 2026-07-11
+- Surface: browser route | SyncDeck permalink builder
+- Contract: `/util/syncdeck/permalink?presentationUrl=<absolute-url>` renders an ActiveBits-hosted permalink builder page with the presentation URL prefilled. The GET route must not create a persistent link by itself; link creation still requires browser-side Reveal preflight plus a teacher code and then posts to `POST /api/syncdeck/generate-url`.
+- Compatibility constraints: Keep `presentationUrl` as the canonical generated query parameter and accept `presentation-url` as an alias for manually authored links. The builder is a UI flow for externally hosted decks that cannot call ActiveBits APIs cross-origin; it should preserve the same server-side signing and cookie behavior as dashboard-created SyncDeck permalinks by using the existing generator endpoint.
+- Validation rules: Invalid or preflight-failing presentation URLs must stop before `POST /api/syncdeck/generate-url`. Teacher-code validation remains server-owned by the generator endpoint.
+- Evidence (schema/tests/path): `activities/syncdeck/activity.config.ts`; `activities/syncdeck/client/util/SyncDeckLaunchPresentation.tsx`; `activities/syncdeck/client/util/SyncDeckLaunchPresentation.test.tsx`; `activities/syncdeck/server/routes.ts`
+- Follow-up action: If the dashboard and utility permalink builders drift visually or behaviorally, extract a shared SyncDeck permalink-builder component rather than forking validation semantics.
+- Owner: Codex
 - Date: 2026-03-24
 - Surface: Resonance student snapshot
 - Contract: `StudentSessionSnapshot` now includes `selfPacedMode: boolean`. For Resonance launched from a standalone SyncDeck parent, this flag reflects the effective fallback mode, not just session origin: it is `true` only while no instructor-activated run is active. In that mode, `activeQuestions`/`activeQuestionIds` fall back to the full question set, and once the viewer has submitted every question the snapshot synthesizes MCQ reveal entries with `correctOptionIds` and `viewerResponse` even though no instructor explicitly shared results.

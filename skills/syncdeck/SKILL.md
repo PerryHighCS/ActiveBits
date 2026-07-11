@@ -242,7 +242,7 @@ Standalone hosting launch:
 - the runtime opens ActiveBits at `/util/syncdeck/launch-presentation?presentationUrl=<encoded-url>`
 - use `mode=instructor` only when the link should immediately create a temporary hosted instructor session and redirect to `/manage/syncdeck/:sessionId`; omit `mode` for the default standalone student session redirect to `/:sessionId`
 - `presentation-url` is accepted as a query-string alias for `presentationUrl`, but generated links should prefer `presentationUrl`
-- permalink generation is a separate ActiveBits flow and should use `/api/syncdeck/generate-url` rather than this immediate-launch utility
+- permalink generation is a separate ActiveBits browser flow: link to `/util/syncdeck/permalink?presentationUrl=<encoded-url>` to show the teacher-code builder page, which then calls `/api/syncdeck/generate-url`
 - this launch flow is separate from normal hosted iframe sync behavior
 
 Overview routing:

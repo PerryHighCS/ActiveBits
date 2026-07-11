@@ -47,6 +47,14 @@ const syncdeckConfig: ActivityConfig = {
       description: 'Validate a public presentation URL and start a standalone SyncDeck session.',
       renderTarget: 'util',
     },
+    {
+      id: 'permalink',
+      label: 'Build Permalink',
+      action: 'go-to-url',
+      path: '/util/syncdeck/permalink',
+      description: 'Validate a public presentation URL and build a permanent SyncDeck link.',
+      renderTarget: 'util',
+    },
   ],
   createSessionBootstrap: {
     selectedOptionsToSessionData: ['presentationUrl'],

@@ -162,6 +162,56 @@ void test('launchStandaloneSyncDeckPresentation can launch instructor mode from 
   ])
 })
 
+void test('generateSyncDeckPermalink posts selected presentation options and returns an absolute link', async () => {
+  const { generateSyncDeckPermalink } = await import('./SyncDeckLaunchPresentation.js')
+  const requests: Array<{ input: string; init?: RequestInit }> = []
+
+  const result = await generateSyncDeckPermalink({
+    presentationUrl: ' https://slides.example/deck ',
+    teacherCode: ' teacher-123 ',
+    origin: 'https://bits.example',
+    fetchFn: (async (input, init) => {
+      requests.push({ input: String(input), init })
+      return {
+        ok: true,
+        json: async () => ({
+          hash: 'abc123',
+          url: '/activity/syncdeck/abc123?presentationUrl=https%3A%2F%2Fslides.example%2Fdeck&urlHash=deadbeef',
+        }),
+      } as Response
+    }) as typeof fetch,
+  })
+
+  assert.deepEqual(result, {
+    hash: 'abc123',
+    permalink: 'https://bits.example/activity/syncdeck/abc123?presentationUrl=https%3A%2F%2Fslides.example%2Fdeck&urlHash=deadbeef',
+  })
+  assert.equal(requests[0]?.input, '/api/syncdeck/generate-url')
+  assert.deepEqual(JSON.parse(String(requests[0]?.init?.body ?? '{}')), {
+    activityName: 'syncdeck',
+    teacherCode: 'teacher-123',
+    selectedOptions: {
+      presentationUrl: 'https://slides.example/deck',
+    },
+  })
+})
+
+void test('generateSyncDeckPermalink surfaces server validation errors', async () => {
+  const { generateSyncDeckPermalink } = await import('./SyncDeckLaunchPresentation.js')
+
+  await assert.rejects(
+    generateSyncDeckPermalink({
+      presentationUrl: 'https://slides.example/deck',
+      teacherCode: 'short',
+      fetchFn: (async () => ({
+        ok: false,
+        json: async () => ({ error: 'Teacher code must be at least 6 characters' }),
+      } as Response)) as typeof fetch,
+    }),
+    /teacher code must be at least 6 characters/i,
+  )
+})
+
 void test('SyncDeckLaunchPresentation shows a launch form when presentationUrl is missing', async () => {
   const restoreDomEnvironment = installDomEnvironment('https://bits.mycode.run/util/syncdeck/launch-presentation')
   const { render, waitFor } = await import('@testing-library/react')
@@ -182,6 +232,41 @@ void test('SyncDeckLaunchPresentation shows a launch form when presentationUrl i
     await waitFor(() => {
       assert.notEqual(rendered.queryByLabelText(/presentation url/i), null)
       assert.notEqual(rendered.queryByRole('button', { name: /launch solo in syncdeck/i }), null)
+    })
+  } finally {
+    restoreDomEnvironment()
+  }
+})
+
+void test('SyncDeckLaunchPresentation shows a permalink builder with a prefilled presentation URL', async () => {
+  const restoreDomEnvironment = installDomEnvironment(
+    'https://bits.mycode.run/util/syncdeck/permalink?presentationUrl=https%3A%2F%2Fslides.example%2Fdeck',
+  )
+  const { render, waitFor } = await import('@testing-library/react')
+  const { MemoryRouter } = await import('react-router-dom')
+  const { default: SyncDeckLaunchPresentation } = await import('./SyncDeckLaunchPresentation.js')
+
+  try {
+    const rendered = render(
+      React.createElement(
+        MemoryRouter,
+        {
+          initialEntries: [
+            '/util/syncdeck/permalink?presentationUrl=https%3A%2F%2Fslides.example%2Fdeck',
+          ],
+        },
+        React.createElement(SyncDeckLaunchPresentation),
+      ),
+    )
+
+    await waitFor(() => {
+      assert.notEqual(rendered.queryByRole('heading', { name: /build permalink/i }), null)
+      assert.equal(
+        (rendered.getByLabelText(/presentation url/i) as HTMLInputElement).value,
+        'https://slides.example/deck',
+      )
+      assert.notEqual(rendered.queryByLabelText(/teacher code/i), null)
+      assert.notEqual(rendered.queryByRole('button', { name: /create permanent link/i }), null)
     })
   } finally {
     restoreDomEnvironment()
