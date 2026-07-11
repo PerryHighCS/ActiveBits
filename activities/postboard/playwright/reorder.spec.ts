@@ -31,7 +31,7 @@ async function openPostboardManager(page: Page, session: PostboardCreateResponse
     )
   }, { instructorPasscode: session.instructorPasscode })
   await page.goto(`/manage/postboard/${encodeURIComponent(session.id)}`)
-  await expect(page.getByRole('heading', { name: /All Posts/ })).toBeVisible()
+  await expect(page.getByRole('heading', { name: /Board Posts/ })).toBeVisible()
 }
 
 function boardCardTexts(page: Page): Promise<string[]> {

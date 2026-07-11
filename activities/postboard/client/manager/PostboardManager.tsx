@@ -368,7 +368,7 @@ export default function PostboardManager(): React.JSX.Element {
           )}
 
           <section className="postboard-panel" aria-labelledby="postboard-all-posts-title">
-            <h2 id="postboard-all-posts-title">All Posts ({boardPosts.length})</h2>
+            <h2 id="postboard-all-posts-title">Board Posts ({boardPosts.length})</h2>
             {snapshot == null ? (
               <p className="postboard-empty">Loading notes...</p>
             ) : boardPosts.length === 0 ? (
