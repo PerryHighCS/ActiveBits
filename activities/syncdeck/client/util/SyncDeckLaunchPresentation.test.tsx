@@ -212,6 +212,19 @@ void test('generateSyncDeckPermalink surfaces server validation errors', async (
   )
 })
 
+void test('copyTextToClipboard writes trimmed text to the clipboard', async () => {
+  const { copyTextToClipboard } = await import('./SyncDeckLaunchPresentation.js')
+  const writes: string[] = []
+
+  await copyTextToClipboard(' https://bits.example/activity/syncdeck/abc123 ', {
+    writeText: async (text) => {
+      writes.push(text)
+    },
+  })
+
+  assert.deepEqual(writes, ['https://bits.example/activity/syncdeck/abc123'])
+})
+
 void test('SyncDeckLaunchPresentation shows a launch form when presentationUrl is missing', async () => {
   const restoreDomEnvironment = installDomEnvironment('https://bits.mycode.run/util/syncdeck/launch-presentation')
   const { render, waitFor } = await import('@testing-library/react')
@@ -269,6 +282,88 @@ void test('SyncDeckLaunchPresentation shows a permalink builder with a prefilled
       assert.notEqual(rendered.queryByRole('button', { name: /create permanent link/i }), null)
     })
   } finally {
+    restoreDomEnvironment()
+  }
+})
+
+void test('SyncDeckLaunchPresentation copies a generated permalink to the clipboard', async () => {
+  const restoreDomEnvironment = installDomEnvironment(
+    'https://bits.mycode.run/util/syncdeck/permalink?presentationUrl=https%3A%2F%2Fslides.example%2Fdeck',
+  )
+  const previousFetch = globalThis.fetch
+  const writes: string[] = []
+  const { fireEvent, render, waitFor } = await import('@testing-library/react')
+  const { MemoryRouter } = await import('react-router-dom')
+  const { default: SyncDeckLaunchPresentation } = await import('./SyncDeckLaunchPresentation.js')
+
+  Object.defineProperty(globalThis.navigator, 'clipboard', {
+    configurable: true,
+    value: {
+      writeText: async (text: string) => {
+        writes.push(text)
+      },
+    },
+  })
+  ;(globalThis as { fetch: typeof fetch }).fetch = (async (input, init) => {
+    assert.equal(String(input), '/api/syncdeck/generate-url')
+    assert.equal(JSON.parse(String(init?.body ?? '{}')).teacherCode, 'teacher-123')
+    return {
+      ok: true,
+      json: async () => ({
+        hash: 'abc123',
+        url: '/activity/syncdeck/abc123?presentationUrl=https%3A%2F%2Fslides.example%2Fdeck&urlHash=deadbeef',
+      }),
+    } as Response
+  }) as typeof fetch
+
+  try {
+    const rendered = render(
+      React.createElement(
+        MemoryRouter,
+        {
+          initialEntries: [
+            '/util/syncdeck/permalink?presentationUrl=https%3A%2F%2Fslides.example%2Fdeck',
+          ],
+        },
+        React.createElement(SyncDeckLaunchPresentation),
+      ),
+    )
+
+    fireEvent.click(rendered.getByRole('button', { name: /verify url/i }))
+
+    await waitFor(() => {
+      assert.notEqual(document.querySelector('iframe'), null)
+    })
+    const iframe = document.querySelector('iframe')
+    window.dispatchEvent(new window.MessageEvent('message', {
+      origin: 'https://slides.example',
+      source: iframe?.contentWindow ?? null,
+      data: { type: 'reveal-sync', action: 'ready' },
+    }))
+
+    await waitFor(() => {
+      assert.match(rendered.getByText(/url verified/i).textContent ?? '', /url verified/i)
+    })
+
+    fireEvent.change(rendered.getByLabelText(/teacher code/i), {
+      target: { value: 'teacher-123' },
+    })
+    fireEvent.click(rendered.getByRole('button', { name: /create permanent link/i }))
+
+    const generatedUrl = 'https://bits.mycode.run/activity/syncdeck/abc123?presentationUrl=https%3A%2F%2Fslides.example%2Fdeck&urlHash=deadbeef'
+    await waitFor(() => {
+      assert.notEqual(rendered.queryByRole('link', { name: generatedUrl }), null)
+      assert.notEqual(rendered.queryByRole('button', { name: /^copy$/i }), null)
+    })
+
+    fireEvent.click(rendered.getByRole('button', { name: /^copy$/i }))
+
+    await waitFor(() => {
+      assert.deepEqual(writes, [generatedUrl])
+      assert.notEqual(rendered.queryByText(/copied link to clipboard/i), null)
+    })
+  } finally {
+    ;(globalThis as { fetch?: typeof fetch }).fetch = previousFetch
     restoreDomEnvironment()
   }
 })

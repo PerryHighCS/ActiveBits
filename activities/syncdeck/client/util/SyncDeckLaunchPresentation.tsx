@@ -17,6 +17,12 @@ type PermalinkState =
   | { phase: 'created'; detail: string; permalink: string }
   | { phase: 'error'; detail: string; permalink: string | null }
 
+type CopyState =
+  | { phase: 'idle'; detail: string | null }
+  | { phase: 'copying'; detail: string }
+  | { phase: 'copied'; detail: string }
+  | { phase: 'error'; detail: string }
+
 function normalizePreflightWarning(warning: string | null): string {
   const trimmed = typeof warning === 'string' ? warning.trim() : ''
   if (trimmed.length === 0) {
@@ -79,6 +85,23 @@ export interface GenerateSyncDeckPermalinkParams {
 export interface GenerateSyncDeckPermalinkResult {
   hash: string
   permalink: string
+}
+
+export async function copyTextToClipboard(
+  text: string,
+  clipboard: Pick<Clipboard, 'writeText'> | null | undefined = typeof navigator !== 'undefined'
+    ? navigator.clipboard
+    : undefined,
+): Promise<void> {
+  const value = text.trim()
+  if (value.length === 0) {
+    throw new Error('Nothing to copy.')
+  }
+  if (clipboard == null || typeof clipboard.writeText !== 'function') {
+    throw new Error('Clipboard copy is unavailable in this browser.')
+  }
+
+  await clipboard.writeText(value)
 }
 
 function isSyncDeckPermalinkUtilityPath(pathname: string): boolean {
@@ -198,6 +221,10 @@ export default function SyncDeckLaunchPresentation() {
     detail: null,
     permalink: null,
   })
+  const [copyState, setCopyState] = useState<CopyState>({
+    phase: 'idle',
+    detail: null,
+  })
 
   useEffect(() => {
     if (isPermalinkUtility) {
@@ -271,6 +298,10 @@ export default function SyncDeckLaunchPresentation() {
       phase: 'idle',
       detail: null,
       permalink: null,
+    })
+    setCopyState({
+      phase: 'idle',
+      detail: null,
     })
   }, [isPermalinkUtility, searchParams])
 
@@ -406,6 +437,10 @@ export default function SyncDeckLaunchPresentation() {
           presentationUrl,
           teacherCode: normalizedTeacherCode,
         })
+        setCopyState({
+          phase: 'idle',
+          detail: null,
+        })
         setPermalinkState({
           phase: 'created',
           detail: 'Permanent SyncDeck link created.',
@@ -416,6 +451,33 @@ export default function SyncDeckLaunchPresentation() {
           phase: 'error',
           detail: error instanceof Error ? error.message : 'Unable to generate SyncDeck permalink.',
           permalink: null,
+        })
+      }
+    })()
+  }
+
+  const handleCopyPermalink = (): void => {
+    const permalink = permalinkState.permalink
+    if (permalink == null) {
+      return
+    }
+
+    setCopyState({
+      phase: 'copying',
+      detail: 'Copying link...',
+    })
+
+    void (async () => {
+      try {
+        await copyTextToClipboard(permalink)
+        setCopyState({
+          phase: 'copied',
+          detail: 'Copied link to clipboard.',
+        })
+      } catch (error) {
+        setCopyState({
+          phase: 'error',
+          detail: error instanceof Error ? error.message : 'Unable to copy link.',
         })
       }
     })()
@@ -457,6 +519,10 @@ export default function SyncDeckLaunchPresentation() {
                         phase: 'idle',
                         detail: null,
                         permalink: null,
+                      })
+                      setCopyState({
+                        phase: 'idle',
+                        detail: null,
                       })
                     }}
                     placeholder="https://slides.example/deck"
@@ -501,12 +567,30 @@ export default function SyncDeckLaunchPresentation() {
               {permalinkState.permalink !== null && (
                 <div className="rounded-2xl border border-slate-700 bg-slate-950 p-4">
                   <p className="text-sm font-semibold text-slate-200">Permanent Link</p>
-                  <a
-                    href={permalinkState.permalink}
-                    className="mt-2 block break-all text-sm text-cyan-200 underline decoration-cyan-500 underline-offset-4"
-                  >
-                    {permalinkState.permalink}
-                  </a>
+                  <div className="mt-2 flex flex-col gap-3 sm:flex-row sm:items-start">
+                    <a
+                      href={permalinkState.permalink}
+                      className="min-w-0 flex-1 break-all text-sm text-cyan-200 underline decoration-cyan-500 underline-offset-4"
+                    >
+                      {permalinkState.permalink}
+                    </a>
+                    <button
+                      type="button"
+                      onClick={handleCopyPermalink}
+                      disabled={copyState.phase === 'copying'}
+                      className="shrink-0 rounded-full border border-cyan-400 px-4 py-2 text-sm font-semibold text-cyan-200 transition hover:bg-cyan-950 disabled:cursor-wait disabled:border-slate-700 disabled:text-slate-500"
+                    >
+                      {copyState.phase === 'copying' ? 'Copying...' : copyState.phase === 'copied' ? 'Copied' : 'Copy'}
+                    </button>
+                  </div>
+                  {copyState.detail !== null && (
+                    <p
+                      className={`mt-3 text-sm ${copyState.phase === 'error' ? 'text-rose-300' : 'text-cyan-200'}`}
+                      role="status"
+                    >
+                      {copyState.detail}
+                    </p>
+                  )}
                 </div>
               )}
 
