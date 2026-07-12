@@ -55,6 +55,7 @@ import { shouldRetryEmbeddedBootstrapBackfill } from './SyncDeckManager.js'
 import { extractRevealSyncActionWithoutParsing } from './SyncDeckManager.js'
 import { resolveMountedEmbeddedManagerInstanceKeys } from './SyncDeckManager.js'
 import { resolveEvictedEmbeddedManagerChildSessionIds } from './SyncDeckManager.js'
+import { resolveEvictedEmbeddedManagerTokenCache } from './SyncDeckManager.js'
 import { resolveEmbeddedManagerIframeAccessibilityProps } from './SyncDeckManager.js'
 import { extractManagerNavigationCapabilitiesFromRevealMessage } from './SyncDeckManager.js'
 import { resolveSyncDeckActivityPickerEntries } from './SyncDeckManager.js'
@@ -1205,6 +1206,19 @@ void test('resolveEvictedEmbeddedManagerChildSessionIds identifies only child se
       },
     }),
     ['child-resonance'],
+  )
+})
+
+void test('resolveEvictedEmbeddedManagerTokenCache requests backfill even when an evicted child has no cached token', () => {
+  assert.deepEqual(
+    resolveEvictedEmbeddedManagerTokenCache({
+      cachedTokensByChildSessionId: { 'child-active': 'active-token' },
+      evictedChildSessionIds: ['child-evicted'],
+    }),
+    {
+      cachedTokensByChildSessionId: { 'child-active': 'active-token' },
+      shouldBackfill: true,
+    },
   )
 })
 

@@ -11,7 +11,7 @@ void test('session data tokens are consumed only once under concurrent requests'
     id: 'token-session',
     type: 'test',
     created: Date.now(),
-    lastActivity: Date.now(),
+    lastActivity: 1,
     data: {
       oneTimeToken: { value: 'token-value' },
     },
@@ -26,5 +26,7 @@ void test('session data tokens are consumed only once under concurrent requests'
   ])
 
   assert.equal(results.filter((result) => result !== null).length, 1)
-  assert.equal((await sessions.get(session.id))?.data.oneTimeToken, undefined)
+  const consumedSession = await sessions.get(session.id)
+  assert.equal(consumedSession?.data.oneTimeToken, undefined)
+  assert.ok((consumedSession?.lastActivity ?? 0) > 1)
 })

@@ -2023,6 +2023,23 @@ export function resolveEvictedEmbeddedManagerChildSessionIds(params: {
   return [...childSessionIds]
 }
 
+export function resolveEvictedEmbeddedManagerTokenCache(params: {
+  cachedTokensByChildSessionId: Record<string, string>
+  evictedChildSessionIds: Iterable<string>
+}): {
+  cachedTokensByChildSessionId: Record<string, string>
+  shouldBackfill: boolean
+} {
+  const evictedChildSessionIdSet = new Set(params.evictedChildSessionIds)
+  return {
+    cachedTokensByChildSessionId: Object.fromEntries(
+      Object.entries(params.cachedTokensByChildSessionId)
+        .filter(([childSessionId]) => !evictedChildSessionIdSet.has(childSessionId)),
+    ),
+    shouldBackfill: evictedChildSessionIdSet.size > 0,
+  }
+}
+
 export function resolveEmbeddedManagerIframeAccessibilityProps(
   isActive: boolean,
 ): { 'aria-hidden'?: 'true'; tabIndex?: -1; inert?: true } {
@@ -2287,21 +2304,22 @@ const SyncDeckManager: FC = () => {
       return
     }
 
-    const evictedChildSessionIdSet = new Set(evictedChildSessionIds)
-    const nextTokens = Object.fromEntries(
-      Object.entries(embeddedManagerEntryTokensByChildSessionIdRef.current)
-        .filter(([childSessionId]) => !evictedChildSessionIdSet.has(childSessionId)),
-    )
-    if (Object.keys(nextTokens).length === Object.keys(embeddedManagerEntryTokensByChildSessionIdRef.current).length) {
-      return
+    const tokenCacheUpdate = resolveEvictedEmbeddedManagerTokenCache({
+      cachedTokensByChildSessionId: embeddedManagerEntryTokensByChildSessionIdRef.current,
+      evictedChildSessionIds,
+    })
+    const nextTokens = tokenCacheUpdate.cachedTokensByChildSessionId
+    if (Object.keys(nextTokens).length !== Object.keys(embeddedManagerEntryTokensByChildSessionIdRef.current).length) {
+      embeddedManagerEntryTokensByChildSessionIdRef.current = nextTokens
+      setEmbeddedManagerEntryTokensByChildSessionId(nextTokens)
     }
 
-    embeddedManagerEntryTokensByChildSessionIdRef.current = nextTokens
-    setEmbeddedManagerEntryTokensByChildSessionId(nextTokens)
     for (const childSessionId of evictedChildSessionIds) {
       completedEmbeddedBootstrapChildSessionIdsRef.current.delete(childSessionId)
     }
-    setEmbeddedBootstrapBackfillRetryNonce((current) => current + 1)
+    if (tokenCacheUpdate.shouldBackfill) {
+      setEmbeddedBootstrapBackfillRetryNonce((current) => current + 1)
+    }
   }, [embeddedActivities, mountedEmbeddedManagerInstanceKeys])
 
   useEffect(
