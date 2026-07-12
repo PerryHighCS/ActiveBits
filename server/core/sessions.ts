@@ -49,6 +49,7 @@ function toSessionRecord(session: SessionLike): SessionRecord {
 export interface SessionStore extends SharedSessionStore<Record<string, unknown>> {
   get(id: string): Promise<SessionRecord | null>
   set(id: string, session: SessionRecord, ttl?: number | null): Promise<void>
+  consumeSessionDataToken?(id: string, field: string, token: string): Promise<SessionRecord | null>
   delete(id: string): Promise<boolean>
   touch(id: string): Promise<boolean>
   getAll(): Promise<SessionRecord[]>
@@ -106,6 +107,20 @@ class InMemorySessionStore implements SessionStore {
 
   async set(id: string, session: SessionRecord): Promise<void> {
     this.store[id] = normalizeSessionData(session)
+  }
+
+  async consumeSessionDataToken(id: string, field: string, token: string): Promise<SessionRecord | null> {
+    const session = this.store[id]
+    const data = ensurePlainObject(session?.data)
+    const entry = ensurePlainObject(data[field])
+    if (!session || entry.value !== token) {
+      return null
+    }
+
+    delete data[field]
+    session.data = data
+    session.lastActivity = Date.now()
+    return normalizeSessionData(session)
   }
 
   async delete(id: string): Promise<boolean> {
@@ -190,6 +205,22 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
     cache.set(id, normalized, false)
   }
 
+  const consumeSessionDataToken = async (id: string, field: string, token: string): Promise<SessionRecord | null> => {
+    cache.invalidate(id)
+    const consumed = await valkeyStore.consumeSessionDataToken(id, field, token)
+    if (!consumed) {
+      return null
+    }
+
+    const session = normalizeSessionData(toSessionRecord(consumed))
+    cache.set(id, session, false)
+    const embeddedParentSessionId = getEmbeddedParentSessionId(session)
+    if (embeddedParentSessionId && embeddedParentSessionId !== id) {
+      await touch(embeddedParentSessionId)
+    }
+    return session
+  }
+
   const del = async (id: string): Promise<boolean> => {
     cache.invalidate(id)
     return await valkeyStore.delete(id)
@@ -259,6 +290,7 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
     cache,
     get,
     set,
+    consumeSessionDataToken,
     delete: del,
     touch,
     getAll,

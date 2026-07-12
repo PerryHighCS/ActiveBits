@@ -1917,9 +1917,25 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       return
     }
 
-    if (session) {
-      delete session.data.embeddedManagerEntryToken
-      await sessions.set(session.id, session)
+    const consumeSessionDataToken = sessions.consumeSessionDataToken
+    if (!consumeSessionDataToken) {
+      console.error(JSON.stringify({
+        activity: 'syncdeck',
+        event: 'embedded-manager-token-consume-unavailable',
+        sessionId,
+      }))
+      res.status(500).json({ error: 'embedded manager credentials unavailable' })
+      return
+    }
+
+    if (!await consumeSessionDataToken.call(
+      sessions,
+      sessionId,
+      'embeddedManagerEntryToken',
+      token,
+    )) {
+      res.status(403).json({ error: 'invalid embedded manager credentials' })
+      return
     }
 
     console.info(JSON.stringify({

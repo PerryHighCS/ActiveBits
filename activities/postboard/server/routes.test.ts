@@ -56,6 +56,22 @@ class MemoryStore implements SessionStore {
     this.sessions.set(id, session)
   }
 
+  async consumeSessionDataToken(id: string, field: string, token: string): Promise<SessionRecord | null> {
+    const session = this.sessions.get(id)
+    const entry = session?.data[field]
+    if (
+      !session
+      || entry == null
+      || typeof entry !== 'object'
+      || Array.isArray(entry)
+      || (entry as { value?: unknown }).value !== token
+    ) {
+      return null
+    }
+    delete session.data[field]
+    return session
+  }
+
   async delete(id: string): Promise<boolean> {
     return this.sessions.delete(id)
   }

@@ -138,6 +138,24 @@ function createSessionStore(initial: Record<string, SessionRecord>) {
     async set(id: string, session: SessionRecord) {
       store[id] = session
     },
+    async consumeSessionDataToken(id: string, field: string, token: string) {
+      const session = store[id]
+      if (!session) {
+        return null
+      }
+      const data = session.data
+      const entry = data[field]
+      if (
+        entry == null
+        || typeof entry !== 'object'
+        || Array.isArray(entry)
+        || (entry as { value?: unknown }).value !== token
+      ) {
+        return null
+      }
+      delete data[field]
+      return session
+    },
     async delete(id: string) {
       const existed = Boolean(store[id])
       delete store[id]
@@ -2657,6 +2675,54 @@ void test('embedded manager passcode exchange validates and consumes short-lived
     reusedRes,
   )
   assert.equal(reusedRes.statusCode, 403)
+})
+
+void test('embedded manager passcode exchange allows only one concurrent token redemption', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const now = Date.now()
+  const storeState = createSessionStore({
+    'child-concurrent': {
+      id: 'child-concurrent',
+      type: 'video-sync',
+      created: now,
+      lastActivity: now,
+      data: {
+        instructorPasscode: 'child-passcode',
+        embeddedManagerEntryToken: { value: 'concurrent-entry-token', expiresAt: now + 60_000 },
+      },
+    },
+  })
+  setupSyncDeckRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.get['/api/syncdeck/embedded-manager-passcode']
+  assert.equal(typeof handler, 'function')
+  const firstResponse = createResponse()
+  const secondResponse = createResponse()
+  const request = () => createRequest(
+    {},
+    undefined,
+    {},
+    {},
+    { sessionId: 'child-concurrent', token: 'concurrent-entry-token' },
+  )
+
+  await Promise.all([
+    handler?.(request(), firstResponse),
+    handler?.(request(), secondResponse),
+  ])
+
+  assert.deepEqual(
+    [firstResponse.statusCode, secondResponse.statusCode].sort(),
+    [200, 403],
+  )
+  assert.equal(
+    [firstResponse.body, secondResponse.body].filter(
+      (body) => (body as { instructorPasscode?: unknown }).instructorPasscode === 'child-passcode',
+    ).length,
+    1,
+  )
+  assert.equal((storeState.store['child-concurrent']?.data as { embeddedManagerEntryToken?: unknown }).embeddedManagerEntryToken, undefined)
 })
 
 void test('embedded-activity start route serializes concurrent creation for the same instance key', async () => {

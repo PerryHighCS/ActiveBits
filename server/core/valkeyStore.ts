@@ -130,6 +130,42 @@ export class ValkeySessionStore {
     }
   }
 
+  async consumeSessionDataToken(id: string, field: string, token: string): Promise<SessionLike | null> {
+    try {
+      const script = `
+                local key = KEYS[1]
+                local field = ARGV[1]
+                local token = ARGV[2]
+                local data = redis.call('GET', key)
+                if not data then
+                    return nil
+                end
+                local session = cjson.decode(data)
+                if type(session.data) ~= 'table' then
+                    return nil
+                end
+                local entry = session.data[field]
+                if type(entry) ~= 'table' or entry.value ~= token then
+                    return nil
+                end
+                session.data[field] = nil
+                local updated = cjson.encode(session)
+                local ttl = redis.call('PTTL', key)
+                if ttl > 0 then
+                    redis.call('SET', key, updated, 'PX', ttl)
+                else
+                    redis.call('SET', key, updated)
+                end
+                return updated
+            `
+      const result = await this.client.eval(script, 1, `session:${id}`, field, token)
+      return typeof result === 'string' ? JSON.parse(result) as SessionLike : null
+    } catch (err) {
+      console.error(`Failed to consume session token ${id}:${field}:`, err)
+      return null
+    }
+  }
+
   async delete(id: string): Promise<boolean> {
     try {
       const result = await this.client.del(`session:${id}`)

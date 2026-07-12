@@ -79,6 +79,24 @@ function createSessionStore(initial: Record<string, SessionRecord>) {
     async set(id: string, session: SessionRecord) {
       store[id] = session
     },
+    async consumeSessionDataToken(id: string, field: string, token: string) {
+      const session = store[id]
+      if (!session) {
+        return null
+      }
+      const data = session.data
+      const entry = data[field]
+      if (
+        entry == null
+        || typeof entry !== 'object'
+        || Array.isArray(entry)
+        || (entry as { value?: unknown }).value !== token
+      ) {
+        return null
+      }
+      delete data[field]
+      return session
+    },
     async delete(id: string) {
       const existed = Boolean(store[id])
       delete store[id]
