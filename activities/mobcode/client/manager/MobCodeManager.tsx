@@ -516,8 +516,20 @@ export default function MobCodeManager() {
           </div>
         )}
       />
-      {!instructorPasscode && (
-        <div className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800">
+      {!instructorPasscode && embeddedManagerPasscodeExchange.isResolving && (
+        <div
+          className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800"
+          role="status"
+          aria-live="polite"
+        >
+          Loading instructor access…
+        </div>
+      )}
+      {!instructorPasscode && !embeddedManagerPasscodeExchange.isResolving && (
+        <div
+          className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800"
+          role="alert"
+        >
           Instructor edit credentials are not available in this tab. Rejoin from the create-session flow to persist changes.
         </div>
       )}

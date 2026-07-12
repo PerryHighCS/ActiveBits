@@ -320,6 +320,9 @@ export default function ResonanceManager() {
         setIsResolvingPasscode(false)
         return
       }
+      if (embeddedManagerPasscodeExchange.error !== null) {
+        console.error('Failed to exchange embedded manager token:', embeddedManagerPasscodeExchange.error)
+      }
 
       try {
         const response = await fetch(`/api/resonance/${encodeURIComponent(sessionId)}/instructor-passcode`, {
@@ -362,6 +365,7 @@ export default function ResonanceManager() {
   }, [
     embeddedManagerPasscodeExchange.isResolving,
     embeddedManagerPasscodeExchange.passcode,
+    embeddedManagerPasscodeExchange.error,
     sessionId,
   ])
 

@@ -18,6 +18,7 @@ import {
 } from './sessionEntryParticipants.js'
 import { buildSessionEntryStatus } from './entryStatus.js'
 import { acceptEntryParticipant } from './acceptedEntryParticipants.js'
+import { consumeSessionDataToken } from './sessionTokenUtils.js'
 
 export interface SessionRecord extends SharedSession<Record<string, unknown>> {
   [key: string]: unknown
@@ -110,15 +111,11 @@ class InMemorySessionStore implements SessionStore {
   }
 
   async consumeSessionDataToken(id: string, field: string, token: string): Promise<SessionRecord | null> {
-    const session = this.store[id]
-    const data = ensurePlainObject(session?.data)
-    const entry = ensurePlainObject(data[field])
-    if (!session || entry.value !== token) {
+    const session = consumeSessionDataToken(this.store[id], field, token)
+    if (!session) {
       return null
     }
 
-    delete data[field]
-    session.data = data
     session.lastActivity = Date.now()
     return normalizeSessionData(session)
   }

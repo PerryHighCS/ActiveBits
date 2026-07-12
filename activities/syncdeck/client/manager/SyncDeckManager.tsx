@@ -948,6 +948,10 @@ export function resolveEmbeddedBootstrapBackfillRetryDelayMs(attemptCount: numbe
   )
 }
 
+export function shouldShowEmbeddedBootstrapFailure(retryAttemptCount: number): boolean {
+  return retryAttemptCount >= MAX_EMBEDDED_BOOTSTRAP_RETRY_ATTEMPTS
+}
+
 export function shouldRetryEmbeddedBootstrapBackfill(status: number): boolean {
   return status >= 500
 }
@@ -1982,6 +1986,7 @@ function buildEmbeddedManagerIframeSrc(record: SyncDeckEmbeddedActivityRecord, m
 }
 
 const MAX_MOUNTED_EMBEDDED_MANAGER_IFRAMES = 2
+const MAX_EMBEDDED_BOOTSTRAP_RETRY_ATTEMPTS = 3
 
 function areStringArraysEqual(left: readonly string[], right: readonly string[]): boolean {
   return left.length === right.length && left.every((value, index) => value === right[index])
@@ -2127,6 +2132,7 @@ const SyncDeckManager: FC = () => {
   const [embeddedManagerRenderNonceByChildSessionId, setEmbeddedManagerRenderNonceByChildSessionId] = useState<Record<string, number>>({})
   const [embeddedManagerEntryTokensByChildSessionId, setEmbeddedManagerEntryTokensByChildSessionId] = useState<Record<string, string>>({})
   const [embeddedBootstrapBackfillRetryNonce, setEmbeddedBootstrapBackfillRetryNonce] = useState(0)
+  const [failedEmbeddedBootstrapChildSessionIds, setFailedEmbeddedBootstrapChildSessionIds] = useState<string[]>([])
   const presentationIframeRef = useRef<HTMLIFrameElement | null>(null)
   const reportPreviewTriggerRef = useRef<HTMLButtonElement | null>(null)
   const reportPreviewDialogRef = useRef<HTMLDivElement | null>(null)
@@ -2699,6 +2705,7 @@ const SyncDeckManager: FC = () => {
     embeddedBootstrapBackfillRetryAttemptRef.current = 0
     clearEmbeddedBootstrapBackfillRetryTimeout()
     setEmbeddedManagerRenderNonceByChildSessionId({})
+    setFailedEmbeddedBootstrapChildSessionIds([])
     embeddedManagerEntryTokensByChildSessionIdRef.current = {}
     previouslyMountedEmbeddedManagerInstanceKeysRef.current.clear()
     setEmbeddedManagerEntryTokensByChildSessionId({})
@@ -2919,10 +2926,18 @@ const SyncDeckManager: FC = () => {
       }
 
       if (results.some(Boolean)) {
+        const failedChildSessionIds = requests
+          .filter((_, index) => results[index])
+          .map((request) => request.childSessionId)
+        const retryAttemptCount = embeddedBootstrapBackfillRetryAttemptRef.current + 1
+        embeddedBootstrapBackfillRetryAttemptRef.current = retryAttemptCount
+        if (shouldShowEmbeddedBootstrapFailure(retryAttemptCount)) {
+          setFailedEmbeddedBootstrapChildSessionIds((current) => [...new Set([...current, ...failedChildSessionIds])])
+          return
+        }
         const retryDelayMs = resolveEmbeddedBootstrapBackfillRetryDelayMs(
-          embeddedBootstrapBackfillRetryAttemptRef.current,
+          retryAttemptCount - 1,
         )
-        embeddedBootstrapBackfillRetryAttemptRef.current += 1
         embeddedBootstrapBackfillRetryTimeoutRef.current = setTimeout(() => {
           embeddedBootstrapBackfillRetryTimeoutRef.current = null
           setEmbeddedBootstrapBackfillRetryNonce((current) => current + 1)
@@ -2931,6 +2946,7 @@ const SyncDeckManager: FC = () => {
       }
 
       embeddedBootstrapBackfillRetryAttemptRef.current = 0
+      setFailedEmbeddedBootstrapChildSessionIds([])
     })
 
     return () => {
@@ -3221,16 +3237,18 @@ const SyncDeckManager: FC = () => {
 
             const payload = (await response.json()) as SyncDeckEmbeddedActivityStartResponse
             const childSessionId = typeof payload.childSessionId === 'string' ? payload.childSessionId.trim() : ''
-            if (childSessionId && isPlainObject(payload.managerBootstrap)) {
-              const managerEntryToken = typeof payload.managerEntryToken === 'string' ? payload.managerEntryToken.trim() : ''
-              storeCreateSessionBootstrapPayload(request.activityId, childSessionId, payload.managerBootstrap)
-              if (managerEntryToken.length > 0) {
-                if (cacheEmbeddedManagerEntryToken(childSessionId, managerEntryToken)) {
-                  setLoadedEmbeddedManagerInstanceKeys((current) => clearLoadedEmbeddedManagerInstanceKey(
-                    current,
-                    request.instanceKey,
-                  ))
-                }
+            const managerCredentials = resolveEmbeddedBootstrapManagerCredentials(payload)
+            if (childSessionId && managerCredentials) {
+              storeCreateSessionBootstrapPayload(
+                request.activityId,
+                childSessionId,
+                managerCredentials.managerBootstrap,
+              )
+              if (cacheEmbeddedManagerEntryToken(childSessionId, managerCredentials.managerEntryToken)) {
+                setLoadedEmbeddedManagerInstanceKeys((current) => clearLoadedEmbeddedManagerInstanceKey(
+                  current,
+                  request.instanceKey,
+                ))
               }
             }
 
@@ -4865,6 +4883,7 @@ const SyncDeckManager: FC = () => {
                     return null
                   }
                   const managerEntryToken = embeddedManagerEntryTokensByChildSessionId[record.childSessionId] ?? null
+                  const hasBootstrapFailure = failedEmbeddedBootstrapChildSessionIds.includes(record.childSessionId)
                   const isActive = instanceKey === activeEmbeddedInstanceKey
                   const inactiveIframeAccessibilityProps = resolveEmbeddedManagerIframeAccessibilityProps(isActive)
 
@@ -4905,7 +4924,24 @@ const SyncDeckManager: FC = () => {
                           {isActive && !isActiveEmbeddedManagerLoaded ? (
                             <div className="absolute inset-0 flex items-center justify-center bg-white/92">
                               <div className="rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm text-gray-700 shadow-sm">
-                                Loading embedded manager…
+                                {hasBootstrapFailure ? (
+                                  <div className="space-y-2" role="alert">
+                                    <p>Could not start the embedded manager.</p>
+                                    <button
+                                      type="button"
+                                      className="rounded bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700"
+                                      onClick={() => {
+                                        embeddedBootstrapBackfillRetryAttemptRef.current = 0
+                                        setFailedEmbeddedBootstrapChildSessionIds((current) => current.filter(
+                                          (childSessionId) => childSessionId !== record.childSessionId,
+                                        ))
+                                        setEmbeddedBootstrapBackfillRetryNonce((current) => current + 1)
+                                      }}
+                                    >
+                                      Retry embedded manager
+                                    </button>
+                                  </div>
+                                ) : 'Loading embedded manager…'}
                               </div>
                             </div>
                           ) : null}

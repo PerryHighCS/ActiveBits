@@ -51,6 +51,7 @@ import { resolveEmbeddedBootstrapManagerCredentials } from './SyncDeckManager.js
 import { advanceEmbeddedManagerRenderNonce } from './SyncDeckManager.js'
 import { clearLoadedEmbeddedManagerInstanceKey } from './SyncDeckManager.js'
 import { resolveEmbeddedBootstrapBackfillRetryDelayMs } from './SyncDeckManager.js'
+import { shouldShowEmbeddedBootstrapFailure } from './SyncDeckManager.js'
 import { resolveEmbeddedBootstrapBackfillRequests } from './SyncDeckManager.js'
 import { shouldRetryEmbeddedBootstrapBackfill } from './SyncDeckManager.js'
 import { extractRevealSyncActionWithoutParsing } from './SyncDeckManager.js'
@@ -841,6 +842,11 @@ void test('resolveEmbeddedBootstrapBackfillRetryDelayMs applies capped exponenti
   assert.equal(resolveEmbeddedBootstrapBackfillRetryDelayMs(Number.NaN), 1000)
 })
 
+void test('shouldShowEmbeddedBootstrapFailure waits for the bounded retry threshold', () => {
+  assert.equal(shouldShowEmbeddedBootstrapFailure(2), false)
+  assert.equal(shouldShowEmbeddedBootstrapFailure(3), true)
+})
+
 void test('shouldRetryEmbeddedBootstrapBackfill only retries transient server failures', () => {
   assert.equal(shouldRetryEmbeddedBootstrapBackfill(400), false)
   assert.equal(shouldRetryEmbeddedBootstrapBackfill(403), false)
@@ -1229,6 +1235,22 @@ void test('resolveEvictedEmbeddedManagerTokenCache requests backfill even when a
   assert.deepEqual(
     resolveEvictedEmbeddedManagerTokenCache({
       cachedTokensByChildSessionId: { 'child-active': 'active-token' },
+      evictedChildSessionIds: ['child-evicted'],
+    }),
+    {
+      cachedTokensByChildSessionId: { 'child-active': 'active-token' },
+      shouldBackfill: true,
+    },
+  )
+})
+
+void test('resolveEvictedEmbeddedManagerTokenCache removes the cached token for an evicted child', () => {
+  assert.deepEqual(
+    resolveEvictedEmbeddedManagerTokenCache({
+      cachedTokensByChildSessionId: {
+        'child-active': 'active-token',
+        'child-evicted': 'stale-token',
+      },
       evictedChildSessionIds: ['child-evicted'],
     }),
     {
