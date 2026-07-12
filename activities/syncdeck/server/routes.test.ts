@@ -3058,7 +3058,9 @@ void test('report-manifest route isolates child report builder exceptions', asyn
   assert.equal(typeof handler, 'function')
 
   const originalWarn = console.warn
-  console.warn = () => {}
+  console.warn = (...args: unknown[]) => {
+    originalWarn('[TEST] expected report-builder failure log:', ...args)
+  }
   try {
     const res = createResponse()
     await handler?.(
