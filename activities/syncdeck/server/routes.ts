@@ -932,8 +932,8 @@ function buildEmbeddedManagerBootstrapPayload(session: SessionRecord): SyncDeckE
 function mintEmbeddedManagerEntryToken(session: SessionRecord): string {
   const token = randomBytes(32).toString('hex')
   session.data.embeddedManagerEntryToken = {
-      value: token,
-      expiresAt: Date.now() + EMBEDDED_MANAGER_ENTRY_TOKEN_TTL_MS,
+    value: token,
+    expiresAt: Date.now() + EMBEDDED_MANAGER_ENTRY_TOKEN_TTL_MS,
   } satisfies SyncDeckEmbeddedManagerEntryToken
   return token
 }
@@ -1901,6 +1901,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
   })
 
   app.get('/api/syncdeck/embedded-manager-passcode', async (req, res) => {
+    res.setHeader?.('Cache-Control', 'no-store')
     const sessionId = typeof req.query?.sessionId === 'string' ? req.query.sessionId.trim() : ''
     const token = typeof req.query?.token === 'string' ? req.query.token.trim() : ''
     if (!sessionId || !token) {

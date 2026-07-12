@@ -4817,6 +4817,7 @@ const SyncDeckManager: FC = () => {
                               title={`Embedded ${record.activityId} manager`}
                               src={buildEmbeddedManagerIframeSrc(record, managerEntryToken)}
                               className="w-full h-full"
+                              referrerPolicy="no-referrer"
                               {...inactiveIframeAccessibilityProps}
                               onLoad={() => {
                                 setLoadedEmbeddedManagerInstanceKeys((current) => (

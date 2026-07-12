@@ -2634,6 +2634,7 @@ void test('embedded manager passcode exchange validates and consumes short-lived
   )
   assert.equal(validRes.statusCode, 200)
   assert.deepEqual(validRes.body, { instructorPasscode: 'child-passcode' })
+  assert.equal(validRes.headers['Cache-Control'], 'no-store')
   assert.equal((storeState.store['child-valid']?.data as { embeddedManagerEntryToken?: unknown }).embeddedManagerEntryToken, undefined)
 
   const reusedRes = createResponse()

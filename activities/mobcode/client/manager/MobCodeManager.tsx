@@ -135,7 +135,7 @@ export default function MobCodeManager() {
       try {
         const response = await fetch(
           `/api/syncdeck/embedded-manager-passcode?sessionId=${encodeURIComponent(sessionId)}&token=${encodeURIComponent(embeddedManagerToken)}`,
-          { credentials: 'same-origin' },
+          { credentials: 'same-origin', cache: 'no-store' },
         )
         const payload = response.ok ? await response.json() as { instructorPasscode?: unknown } : null
         const passcode = typeof payload?.instructorPasscode === 'string' ? payload.instructorPasscode.trim() : ''

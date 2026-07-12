@@ -322,7 +322,7 @@ export default function ResonanceManager() {
           }
           const response = await fetch(
             `/api/syncdeck/embedded-manager-passcode?sessionId=${encodeURIComponent(sessionId)}&token=${encodeURIComponent(embeddedManagerToken)}`,
-            { credentials: 'same-origin' },
+            { credentials: 'same-origin', cache: 'no-store' },
           )
           if (response.ok) {
             const payload = await response.json() as { instructorPasscode?: unknown }
