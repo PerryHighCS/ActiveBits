@@ -32,6 +32,7 @@ void test('resolvePostboardInstructorAccessState keeps token recovery loading se
   assert.equal(resolvePostboardInstructorAccessState({ isResolvingCredentials: true, instructorPasscode: '' }), 'loading')
   assert.equal(resolvePostboardInstructorAccessState({ isResolvingCredentials: false, instructorPasscode: '' }), 'missing')
   assert.equal(resolvePostboardInstructorAccessState({ isResolvingCredentials: false, instructorPasscode: 'teacher-pass' }), 'ready')
+  assert.equal(resolvePostboardInstructorAccessState({ isResolvingCredentials: true, instructorPasscode: 'teacher-pass' }), 'ready')
 })
 
 void test('reorderPostIds moves the dragged post to the target position', () => {

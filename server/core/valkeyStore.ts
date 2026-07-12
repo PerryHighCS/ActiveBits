@@ -149,6 +149,9 @@ export class ValkeySessionStore {
                 if type(entry) ~= 'table' or entry.value ~= token then
                     return nil
                 end
+                if type(entry.expiresAt) == 'number' and entry.expiresAt <= tonumber(now) then
+                    return nil
+                end
                 session.data[field] = nil
                 session.lastActivity = tonumber(now)
                 local updated = cjson.encode(session)

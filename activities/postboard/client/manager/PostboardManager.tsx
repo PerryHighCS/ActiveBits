@@ -48,10 +48,10 @@ export function resolvePostboardInstructorAccessState(params: {
   isResolvingCredentials: boolean
   instructorPasscode: string
 }): 'loading' | 'missing' | 'ready' {
-  if (params.isResolvingCredentials) {
-    return 'loading'
+  if (params.instructorPasscode) {
+    return 'ready'
   }
-  return params.instructorPasscode ? 'ready' : 'missing'
+  return params.isResolvingCredentials ? 'loading' : 'missing'
 }
 
 function getLaunchDefaults(search: string): { prompt: string; autoApprove: boolean | null } {
