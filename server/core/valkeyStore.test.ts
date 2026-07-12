@@ -15,8 +15,10 @@ void test('ValkeySessionStore consume script checks token expiry atomically', as
       },
     },
   })
+  Object.defineProperty(store, 'ttlMs', { value: 60_000 })
 
   await store.consumeSessionDataToken('session-1', 'embeddedManagerEntryToken', 'token-value')
 
   assert.match(script, /entry\.expiresAt.*<= tonumber\(now\)/)
+  assert.match(script, /SET', key, updated, 'PX', tonumber\(ttl\)/)
 })

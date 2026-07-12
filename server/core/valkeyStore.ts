@@ -137,6 +137,7 @@ export class ValkeySessionStore {
                 local field = ARGV[1]
                 local token = ARGV[2]
                 local now = ARGV[3]
+                local ttl = ARGV[4]
                 local data = redis.call('GET', key)
                 if not data then
                     return nil
@@ -155,10 +156,10 @@ export class ValkeySessionStore {
                 session.data[field] = nil
                 session.lastActivity = tonumber(now)
                 local updated = cjson.encode(session)
-                redis.call('SET', key, updated, 'KEEPTTL')
+                redis.call('SET', key, updated, 'PX', tonumber(ttl))
                 return updated
             `
-      const result = await this.client.eval(script, 1, `session:${id}`, field, token, Date.now())
+      const result = await this.client.eval(script, 1, `session:${id}`, field, token, Date.now(), this.ttlMs)
       return typeof result === 'string' ? JSON.parse(result) as SessionLike : null
     } catch (err) {
       console.error(JSON.stringify({
