@@ -150,8 +150,15 @@ export class ValkeySessionStore {
                 if type(entry) ~= 'table' or entry.value ~= token then
                     return nil
                 end
-                if type(entry.expiresAt) == 'number' and entry.expiresAt <= tonumber(now) then
-                    return nil
+                if entry.expiresAt ~= nil then
+                    local expiresAt = entry.expiresAt
+                    if type(expiresAt) ~= 'number'
+                        or expiresAt ~= expiresAt
+                        or expiresAt == math.huge
+                        or expiresAt == -math.huge
+                        or expiresAt <= tonumber(now) then
+                        return nil
+                    end
                 end
                 session.data[field] = nil
                 session.lastActivity = tonumber(now)
