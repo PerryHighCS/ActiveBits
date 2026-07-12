@@ -58,6 +58,7 @@ import { extractRevealSyncActionWithoutParsing } from './SyncDeckManager.js'
 import { resolveMountedEmbeddedManagerInstanceKeys } from './SyncDeckManager.js'
 import { resolveEvictedEmbeddedManagerChildSessionIds } from './SyncDeckManager.js'
 import { resolveEvictedEmbeddedManagerTokenCache } from './SyncDeckManager.js'
+import { shouldShowEmbeddedManagerBootstrapOverlay } from './SyncDeckManager.js'
 import { resolveEmbeddedManagerIframeAccessibilityProps } from './SyncDeckManager.js'
 import { extractManagerNavigationCapabilitiesFromRevealMessage } from './SyncDeckManager.js'
 import { resolveSyncDeckActivityPickerEntries } from './SyncDeckManager.js'
@@ -1253,6 +1254,24 @@ void test('resolveEvictedEmbeddedManagerTokenCache removes the cached token for 
       shouldBackfill: true,
     },
   )
+})
+
+void test('shouldShowEmbeddedManagerBootstrapOverlay keeps active managers recoverable after their token is evicted', () => {
+  assert.equal(shouldShowEmbeddedManagerBootstrapOverlay({
+    isActive: true,
+    managerEntryToken: null,
+    isLoaded: true,
+  }), true)
+  assert.equal(shouldShowEmbeddedManagerBootstrapOverlay({
+    isActive: true,
+    managerEntryToken: 'token-1',
+    isLoaded: true,
+  }), false)
+  assert.equal(shouldShowEmbeddedManagerBootstrapOverlay({
+    isActive: false,
+    managerEntryToken: null,
+    isLoaded: true,
+  }), false)
 })
 
 void test('resolveEmbeddedManagerIframeAccessibilityProps hides inactive embedded managers from focus and assistive tech', () => {

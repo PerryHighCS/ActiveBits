@@ -2061,6 +2061,14 @@ export function resolveEvictedEmbeddedManagerTokenCache(params: {
   }
 }
 
+export function shouldShowEmbeddedManagerBootstrapOverlay(params: {
+  isActive: boolean
+  managerEntryToken: string | null
+  isLoaded: boolean
+}): boolean {
+  return params.isActive && (!params.managerEntryToken || !params.isLoaded)
+}
+
 export function resolveEmbeddedManagerIframeAccessibilityProps(
   isActive: boolean,
 ): { 'aria-hidden'?: 'true'; tabIndex?: -1; inert?: true } {
@@ -4953,7 +4961,11 @@ const SyncDeckManager: FC = () => {
                               }}
                             />
                           ) : null}
-                          {isActive && !isActiveEmbeddedManagerLoaded ? (
+                          {shouldShowEmbeddedManagerBootstrapOverlay({
+                            isActive,
+                            managerEntryToken,
+                            isLoaded: isActiveEmbeddedManagerLoaded,
+                          }) ? (
                             <div className="absolute inset-0 flex items-center justify-center bg-white/92">
                               <div className="rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm text-gray-700 shadow-sm">
                                 {hasBootstrapFailure ? (
