@@ -23,7 +23,7 @@ interface HandlerResponse {
   headers: Record<string, string>
   status(code: number): HandlerResponse
   json(payload: unknown): void
-  send(payload: unknown): void
+  send?(payload: unknown): void
   setHeader(name: string, value: string): void
 }
 
@@ -532,6 +532,29 @@ void test('report route requires instructor auth and returns downloadable self-c
   assert.match(String(accepted.body), /Discuss later/)
   assert.doesNotMatch(String(accepted.body), /teacher-pass/)
   assert.doesNotMatch(String(accepted.body), /<script[^>]+src=/)
+})
+
+void test('report route returns 500 instead of JSON-encoding HTML when send is unavailable', async () => {
+  const app = new TestApp()
+  const store = new MemoryStore()
+  const session = createSession()
+  await store.set(session.id, session)
+  setupPostboardRoutes(app, store, createWsRouter())
+
+  const handler = app.handlers.get['/api/postboard/:sessionId/report']
+  assert.ok(handler)
+
+  const response = createResponse()
+  delete response.send
+  await handler({
+    params: { sessionId: session.id },
+    headers: { 'x-instructor-passcode': 'teacher-pass' },
+  }, response)
+
+  assert.equal(response.statusCode, 500)
+  assert.deepEqual(response.body, { error: 'html response unsupported' })
+  assert.equal(response.headers['Content-Type'], undefined)
+  assert.equal(response.headers['Content-Disposition'], undefined)
 })
 
 void test('post submit route keeps manual student notes pending and instructor notes approved', async () => {

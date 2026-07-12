@@ -546,13 +546,13 @@ export default function setupPostboardRoutes(app: PostboardRouteApp, sessions: S
     const html = buildPostboardReportHtml(bundle)
     const filename = buildPostboardReportFilename(bundle)
     console.info('[postboard] Report HTML exported', { sessionId: session.id })
-    res.setHeader?.('Content-Type', 'text/html; charset=utf-8')
-    res.setHeader?.('Content-Disposition', `attachment; filename="${filename}"`)
-    if (typeof res.send === 'function') {
-      res.send(html)
+    if (typeof res.send !== 'function') {
+      res.status(500).json({ error: 'html response unsupported' })
       return
     }
-    res.json(html)
+    res.setHeader?.('Content-Type', 'text/html; charset=utf-8')
+    res.setHeader?.('Content-Disposition', `attachment; filename="${filename}"`)
+    res.send(html)
   }))
 
   app.get('/api/postboard/:sessionId/student-state', routeHandler('student-state', async (req, res) => {

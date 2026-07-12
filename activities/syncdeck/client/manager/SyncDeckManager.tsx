@@ -3923,6 +3923,7 @@ const SyncDeckManager: FC = () => {
       return manifest
     } catch {
       setReportContributionError('Report status unavailable')
+      setReportContributionByInstanceKey({})
       return null
     } finally {
       setIsReportContributionLoading(false)

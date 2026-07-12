@@ -2942,6 +2942,7 @@ void test('report-manifest route aggregates structured child activity reports', 
       report: {
         instanceKey: string
         reportStatus?: string
+        supportsScopes?: string[]
         students?: Array<{ studentId: string }>
         payload?: { status?: string }
       }
@@ -2954,6 +2955,7 @@ void test('report-manifest route aggregates structured child activity reports', 
   assert.equal(body.activities[0]?.activityName, 'Video Sync')
   assert.equal(body.activities[0]?.report.instanceKey, 'video-sync:3:0')
   assert.equal(body.activities[0]?.report.reportStatus, 'unsupported')
+  assert.deepEqual(body.activities[0]?.report.supportsScopes, ['activity-session', 'session-summary'])
   assert.equal(body.activities[0]?.report.payload?.status, 'unsupported')
   assert.equal(body.activities[1]?.activityId, 'resonance')
   assert.equal(body.activities[1]?.activityName, 'Resonance')
