@@ -244,8 +244,9 @@ through activity-specific props.
   with `activeQuestionIds` plus a shared `activeQuestionDeadlineAt`, while still backfilling
   `activeQuestionId` for compatibility with older snapshots.
 - Embedded instructor iframes receive a short-lived, server-issued manager-entry token only after
-  the authenticated parent start response arrives, then exchange it for the child passcode. This
-  avoids putting instructor credentials in browser storage while preventing an iframe bootstrap race.
+  the authenticated parent start response arrives, then exchange it for the child passcode and
+  replace the iframe URL to remove the consumed token. This avoids putting instructor credentials
+  in browser storage while preventing an iframe bootstrap race.
 
 `client/index.ts` (components/footer only, lazy-loaded chunk):
 ```typescript

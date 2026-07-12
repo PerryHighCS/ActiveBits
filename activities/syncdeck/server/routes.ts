@@ -1922,7 +1922,11 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       await sessions.set(session.id, session)
     }
 
-    console.info('[syncdeck] Embedded manager passcode exchanged', { sessionId })
+    console.info(JSON.stringify({
+      activity: 'syncdeck',
+      event: 'embedded-manager-passcode-exchanged',
+      sessionId,
+    }))
     res.json({ instructorPasscode })
   })
 

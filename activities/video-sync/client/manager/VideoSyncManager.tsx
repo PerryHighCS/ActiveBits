@@ -1,5 +1,8 @@
 import SessionHeader from '@src/components/common/SessionHeader'
-import { readEmbeddedManagerToken } from '@src/components/common/embeddedManagerBootstrap'
+import {
+  clearEmbeddedManagerTokenFromUrl,
+  readEmbeddedManagerToken,
+} from '@src/components/common/embeddedManagerBootstrap'
 import { fetchEmbeddedLaunchSelectedOptions } from '@src/components/common/embeddedLaunchBootstrap'
 import {
   consumeCreateSessionBootstrapPayload,
@@ -688,6 +691,7 @@ export default function VideoSyncManager() {
           if (response.ok) {
             const payload = (await response.json()) as InstructorPasscodeResponse
             if (typeof payload.instructorPasscode === 'string' && payload.instructorPasscode.length > 0 && !isCancelled) {
+              clearEmbeddedManagerTokenFromUrl()
               setInstructorPasscode(payload.instructorPasscode)
               setPersistentRecoverySourceUrl(null)
               setIsPasscodeReady(true)

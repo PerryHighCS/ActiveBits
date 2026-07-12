@@ -2627,15 +2627,29 @@ void test('embedded manager passcode exchange validates and consumes short-lived
   )
   assert.equal(expiredRes.statusCode, 403)
 
+  const infoMessages: unknown[][] = []
+  const originalInfo = console.info
+  console.info = (...args: unknown[]) => {
+    infoMessages.push(args)
+  }
   const validRes = createResponse()
-  await handler?.(
-    createRequest({}, undefined, {}, {}, { sessionId: 'child-valid', token: 'valid-entry-token' }),
-    validRes,
-  )
+  try {
+    await handler?.(
+      createRequest({}, undefined, {}, {}, { sessionId: 'child-valid', token: 'valid-entry-token' }),
+      validRes,
+    )
+  } finally {
+    console.info = originalInfo
+  }
   assert.equal(validRes.statusCode, 200)
   assert.deepEqual(validRes.body, { instructorPasscode: 'child-passcode' })
   assert.equal(validRes.headers['Cache-Control'], 'no-store')
   assert.equal((storeState.store['child-valid']?.data as { embeddedManagerEntryToken?: unknown }).embeddedManagerEntryToken, undefined)
+  assert.deepEqual(infoMessages, [[JSON.stringify({
+    activity: 'syncdeck',
+    event: 'embedded-manager-passcode-exchanged',
+    sessionId: 'child-valid',
+  })]])
 
   const reusedRes = createResponse()
   await handler?.(

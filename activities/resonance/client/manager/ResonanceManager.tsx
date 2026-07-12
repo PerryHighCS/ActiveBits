@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { consumeCreateSessionBootstrapPayload } from '@src/components/common/manageDashboardUtils'
-import { readEmbeddedManagerToken } from '@src/components/common/embeddedManagerBootstrap'
+import {
+  clearEmbeddedManagerTokenFromUrl,
+  readEmbeddedManagerToken,
+} from '@src/components/common/embeddedManagerBootstrap'
 import { isEmbeddedChildSessionId } from '@src/components/common/sessionHeaderUtils'
 import type { InstructorAnnotation, Question, ResonancePresentationMode, StagedRunState } from '../../shared/types.js'
 import { useInstructorState } from '../hooks/useInstructorState.js'
@@ -326,6 +329,7 @@ export default function ResonanceManager() {
               ? payload.instructorPasscode.trim()
               : null
             if (recoveredPasscode !== null && !isCancelled) {
+              clearEmbeddedManagerTokenFromUrl()
               setPasscode(recoveredPasscode)
               setIsResolvingPasscode(false)
               return
