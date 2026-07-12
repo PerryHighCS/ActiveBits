@@ -156,6 +156,7 @@ SyncDeck sample decks that exist only for local development live under `activiti
 ## SyncDeck Embedded Media
 
 - SyncDeck's internal embedded-activity iframes delegate `autoplay` and `fullscreen` so synchronized, muted media players (including Video Sync's nested YouTube player) can start from an instructor playback command. Keep this iframe permission policy intact when configuring a reverse proxy or content-security policy.
+- SyncDeck processes instructor websocket updates in arrival order before persisting session state. Deployments with Valkey should retain this single-connection ordering behavior; no additional proxy affinity setting is required beyond the websocket guidance above.
 
 ## Scaling Considerations
 

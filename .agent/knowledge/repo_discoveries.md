@@ -1771,3 +1771,10 @@ Use this log for durable findings that future contributors and agents should reu
 - Evidence: `activities/shared/noteStyles.ts`; `activities/shared/client/components/NoteStyleSelect.tsx`; `activities/tsconfig.json`; `client/src/activities/index.test.ts`; `server/activities/activityRegistry.test.ts`
 - Follow-up action: Prefer `activities/shared` for generic activity primitives, with activity-local wrappers only when preserving existing import paths.
 - Owner: Codex
+
+- Date: 2026-07-12
+- Area: SyncDeck websocket persistence
+- Discovery: Route-test session stores must clone records on get/set/consume to model Valkey serialization boundaries. That boundary exposed that concurrent instructor websocket handlers could overwrite each other's fetched snapshots.
+- Why it matters: Queueing updates per instructor socket preserves arrival order across asynchronous session reads and writes, preventing reveal or chalkboard state loss in both in-memory and Valkey deployments.
+- Evidence: `activities/syncdeck/server/routes.ts`; `activities/syncdeck/server/routes.test.ts`
+- Owner: Codex

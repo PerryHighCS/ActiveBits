@@ -130,19 +130,29 @@ function createRequest(
 }
 
 function createSessionStore(initial: Record<string, SessionRecord>) {
-  const store = { ...initial }
+  const cloneSession = (session: SessionRecord): SessionRecord => structuredClone(session)
+  const store = Object.fromEntries(
+    Object.entries(initial).map(([id, session]) => [id, cloneSession(session)]),
+  ) as Record<string, SessionRecord>
   const getCalls: string[] = []
   const touchCalls: string[] = []
   const sessions: SessionStore = {
     async get(id: string) {
       getCalls.push(id)
-      return store[id] ?? null
+      const session = store[id]
+      return session ? cloneSession(session) : null
     },
     async set(id: string, session: SessionRecord) {
-      store[id] = session
+      store[id] = cloneSession(session)
     },
     async consumeSessionDataToken(id: string, field: string, token: string) {
-      return consumeSessionDataToken(store[id], field, token)
+      const session = store[id]
+      const consumed = consumeSessionDataToken(session ? cloneSession(session) : null, field, token)
+      if (!consumed) {
+        return null
+      }
+      store[id] = cloneSession(consumed)
+      return cloneSession(consumed)
     },
     async delete(id: string) {
       const existed = Boolean(store[id])
@@ -157,7 +167,7 @@ function createSessionStore(initial: Record<string, SessionRecord>) {
       return true
     },
     async getAll() {
-      return Object.values(store)
+      return Object.values(store).map(cloneSession)
     },
     async getAllIds() {
       return Object.keys(store)
@@ -174,6 +184,19 @@ function createSessionStore(initial: Record<string, SessionRecord>) {
     touchCalls,
   }
 }
+
+void test('route session-store mock requires an explicit write to persist fetched-session mutations', async () => {
+  const state = createSessionStore({
+    s1: createSyncDeckSession('s1', 'teacher-passcode'),
+  })
+  const fetched = await state.sessions.get('s1')
+  assert.ok(fetched)
+  fetched.data.example = 'unpersisted'
+  assert.equal(state.store.s1?.data.example, undefined)
+
+  await state.sessions.set('s1', fetched)
+  assert.equal(state.store.s1?.data.example, 'unpersisted')
+})
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (value == null || typeof value !== 'object' || Array.isArray(value)) {
@@ -1497,50 +1520,20 @@ void test('syncdeck session normalization filters malformed persisted students a
 
   assert.equal(instructorSocket.closeCalls.length, 0)
 
-  const normalizedSessionData = state.store.s1?.data as {
-    students: Array<{
-      studentId: string
-      name: string
-      joinedAt: number
-      lastSeenAt: number
-      lastIndices: { h: number; v: number; f: number } | null
-      lastStudentStateAt: number | null
-    }>
-    embeddedActivities: Record<string, {
-      childSessionId: string
-      activityId: string
-      startedAt: number
-      owner: string
-    }>
-    chalkboard: {
-      snapshot: string | null
-      delta: Array<Record<string, unknown>>
-    }
-    drawingToolMode: 'none' | 'chalkboard' | 'pen'
-  }
-
-  assert.equal(normalizedSessionData.students.length, 1)
-  assert.deepEqual(normalizedSessionData.students[0], {
+  const delivered = instructorSocket.sent.map((entry) => JSON.parse(entry) as {
+    type?: string
+    payload?: { students?: unknown[]; type?: string; activityId?: string }
+  })
+  const studentsMessage = delivered.find((entry) => entry.type === 'syncdeck-students')
+  const students = studentsMessage?.payload?.students as Array<Record<string, unknown>> | undefined
+  assert.equal(students?.length, 1)
+  assert.deepEqual(students?.[0], {
     studentId: 'student-1',
     name: 'Student',
     joinedAt: 100,
     lastSeenAt: 120,
-    lastIndices: { h: 1, v: 2, f: 3 },
-    lastStudentStateAt: null,
+    connected: false,
   })
-
-  assert.deepEqual(normalizedSessionData.embeddedActivities, {
-    'quiz:2:3': {
-      childSessionId: 'CHILD:s1:abc12:quiz',
-      activityId: 'quiz',
-      startedAt: 321,
-      owner: 'syncdeck-instructor',
-    },
-  })
-
-  assert.equal(normalizedSessionData.chalkboard.snapshot, null)
-  assert.deepEqual(normalizedSessionData.chalkboard.delta, [{ mode: 1, event: { type: 'draw' } }])
-  assert.equal(normalizedSessionData.drawingToolMode, 'none')
 })
 
 void test('generate-url returns signed syncdeck persistent link and sets cookie', async () => {

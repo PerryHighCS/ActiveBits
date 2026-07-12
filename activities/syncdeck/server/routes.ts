@@ -2377,8 +2377,9 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       socket.close(1011, 'syncdeck initialization failed')
     })
 
+    let instructorMessageQueue = Promise.resolve()
     socket.on('message', (raw: unknown) => {
-      void (async () => {
+      instructorMessageQueue = instructorMessageQueue.then(async () => {
         if (!client.isInstructor || !client.sessionId) {
           return
         }
@@ -2436,7 +2437,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
           }
           sendSyncDeckState(peer, message.payload ?? null)
         }
-      })().catch(() => {
+      }).catch(() => {
         return
       })
     })

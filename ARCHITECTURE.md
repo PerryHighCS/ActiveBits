@@ -249,6 +249,8 @@ through activity-specific props.
   credentials in browser storage while preventing an iframe bootstrap race or concurrent reuse.
 - Internal embedded-activity iframes delegate `autoplay` and `fullscreen` to support synchronized,
   muted nested media players such as Video Sync without relaxing their sandbox policy.
+- Instructor websocket updates are serialized per SyncDeck connection before session persistence, so
+  closely spaced reveal/chalkboard commands cannot overwrite one another across storage boundaries.
 
 `client/index.ts` (components/footer only, lazy-loaded chunk):
 ```typescript
