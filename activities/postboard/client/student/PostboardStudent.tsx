@@ -134,7 +134,7 @@ export default function PostboardStudent({ sessionData }: PostboardStudentProps)
       fetchRequestIdRef.current += 1
       window.clearInterval(interval)
     }
-  }, [fetchState, sessionId])
+  }, [fetchState, identityResolved, sessionId])
 
   const submitPost = async (text: string) => {
     if (!sessionId || !identity.studentId) {
