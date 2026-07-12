@@ -68,9 +68,9 @@ test.describe('SyncDeck embedded instructor manager bootstrap', () => {
     })
     const manager = await openEmbeddedManagerIframe(page, 'video-sync', bootstrap)
 
+    await expect(manager.getByText('Video: mCq8-xTH7jA')).toBeVisible()
     await expect(manager.getByText('Instructor credentials missing. Open this session from the dashboard or authenticated permalink.')).toHaveCount(0)
     await expect(manager.getByRole('button', { name: 'Start instructor view' })).toHaveCount(0)
-    await expect(manager.getByText('Video: mCq8-xTH7jA')).toBeVisible()
   })
 
   test('Resonance exchanges its token in an iframe and loads its instructor view', async ({ page }) => {
@@ -85,8 +85,8 @@ test.describe('SyncDeck embedded instructor manager bootstrap', () => {
     })
     const manager = await openEmbeddedManagerIframe(page, 'resonance', bootstrap)
 
-    await expect(manager.getByText('Instructor passcode not found. Try re-entering from the session creation link.')).toHaveCount(0)
     await expect(manager.getByRole('button', { name: 'Select Embedded instructor bootstrap question' })).toBeVisible()
+    await expect(manager.getByText('Instructor passcode not found. Try re-entering from the session creation link.')).toHaveCount(0)
   })
 
   test('MobCode exchanges its token in an iframe and enables instructor file controls', async ({ page }) => {
@@ -106,8 +106,8 @@ test.describe('SyncDeck embedded instructor manager bootstrap', () => {
     })
     const manager = await openEmbeddedManagerIframe(page, 'postboard', bootstrap)
 
-    await expect(manager.getByText('Instructor credentials were not found for this tab. Start Postboard from the dashboard again to manage this session.')).toHaveCount(0)
     await expect(manager.getByRole('switch', { name: 'Auto-approve is on. Turn off to require moderation.' })).toBeVisible()
     await expect(manager.getByText('What should we add to the board?')).toHaveCount(1)
+    await expect(manager.getByText('Instructor credentials were not found for this tab. Start Postboard from the dashboard again to manage this session.')).toHaveCount(0)
   })
 })

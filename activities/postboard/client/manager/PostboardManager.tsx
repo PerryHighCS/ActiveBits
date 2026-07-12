@@ -48,6 +48,16 @@ export function readEmbeddedManagerToken(search: string): string | null {
   return typeof token === 'string' && token.trim().length > 0 ? token.trim() : null
 }
 
+export function resolvePostboardInstructorAccessState(params: {
+  isResolvingCredentials: boolean
+  instructorPasscode: string
+}): 'loading' | 'missing' | 'ready' {
+  if (params.isResolvingCredentials) {
+    return 'loading'
+  }
+  return params.instructorPasscode ? 'ready' : 'missing'
+}
+
 function getLaunchDefaults(search: string): { prompt: string; autoApprove: boolean | null } {
   const params = new URLSearchParams(search)
   const prompt = params.get('prompt')?.trim() ?? ''
@@ -89,6 +99,9 @@ export default function PostboardManager(): React.JSX.Element {
   const location = useLocation()
   const embeddedManagerToken = readEmbeddedManagerToken(location.search)
   const [instructorPasscode, setInstructorPasscode] = useState(() => readInstructorPasscode(sessionId, location.state))
+  const [isResolvingCredentials, setIsResolvingCredentials] = useState(() => (
+    Boolean(sessionId && embeddedManagerToken && !readInstructorPasscode(sessionId, location.state))
+  ))
   const [snapshot, setSnapshot] = useState<PostboardInstructorSnapshot | null>(null)
   const [promptDraft, setPromptDraft] = useState('')
   const [autoApprove, setAutoApprove] = useState(false)
@@ -109,6 +122,7 @@ export default function PostboardManager(): React.JSX.Element {
 
   useEffect(() => {
     setInstructorPasscode(readInstructorPasscode(sessionId, location.state))
+    setIsResolvingCredentials(Boolean(sessionId && embeddedManagerToken && !readInstructorPasscode(sessionId, location.state)))
     setSnapshot(null)
     setPromptDraft('')
     setAutoApprove(false)
@@ -123,10 +137,12 @@ export default function PostboardManager(): React.JSX.Element {
     const fallbackPasscode = readInstructorPasscode(sessionId, location.state)
     if (!sessionId || !embeddedManagerToken) {
       setInstructorPasscode(fallbackPasscode)
+      setIsResolvingCredentials(false)
       return
     }
 
     let cancelled = false
+    setIsResolvingCredentials(true)
     void (async () => {
       try {
         const response = await fetch(
@@ -137,10 +153,12 @@ export default function PostboardManager(): React.JSX.Element {
         const passcode = typeof payload?.instructorPasscode === 'string' ? payload.instructorPasscode.trim() : ''
         if (!cancelled) {
           setInstructorPasscode(passcode || fallbackPasscode)
+          setIsResolvingCredentials(false)
         }
       } catch {
         if (!cancelled) {
           setInstructorPasscode(fallbackPasscode)
+          setIsResolvingCredentials(false)
         }
       }
     })()
@@ -343,7 +361,21 @@ export default function PostboardManager(): React.JSX.Element {
     return <main className="postboard-shell"><p>Missing Postboard session.</p></main>
   }
 
-  if (!instructorPasscode) {
+  const instructorAccessState = resolvePostboardInstructorAccessState({
+    isResolvingCredentials,
+    instructorPasscode,
+  })
+
+  if (instructorAccessState === 'loading') {
+    return (
+      <main className="postboard-shell">
+        <SessionHeader activityName="Postboard" sessionId={sessionId} />
+        <p>Loading instructor access…</p>
+      </main>
+    )
+  }
+
+  if (instructorAccessState === 'missing') {
     return (
       <main className="postboard-shell">
         <SessionHeader activityName="Postboard" sessionId={sessionId} />

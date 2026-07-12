@@ -72,6 +72,21 @@ const LIVE_CONTENT_SYNC_INTERVAL_MS = 250
 const LIVE_PRESENCE_SYNC_INTERVAL_MS = 60
 const PERSIST_STATE_INTERVAL_MS = 5000
 
+export function createMobCodeManagerAuthMessage(
+  sessionId: string | undefined,
+  instructorPasscode: string,
+): string | null {
+  if (!sessionId || !instructorPasscode) {
+    return null
+  }
+
+  return JSON.stringify({
+    type: MOB_CODE_MESSAGE_TYPES.MANAGER_AUTH,
+    sessionId,
+    payload: { instructorPasscode },
+  })
+}
+
 export default function MobCodeManager() {
   const { sessionId } = useParams()
   const encodedSessionId = sessionId ? encodeURIComponent(sessionId) : ''
@@ -122,7 +137,8 @@ export default function MobCodeManager() {
         if (!cancelled) {
           setInstructorPasscode(passcode || fallbackPasscode)
         }
-      } catch {
+      } catch (error) {
+        console.error('Failed to exchange embedded manager token:', error)
         if (!cancelled) {
           setInstructorPasscode(fallbackPasscode)
         }
@@ -172,12 +188,10 @@ export default function MobCodeManager() {
     buildUrl: buildWsUrl,
     shouldReconnect: true,
     onOpen: (_event, ws) => {
-      if (!instructorPasscode) return
-      ws.send(JSON.stringify({
-        type: MOB_CODE_MESSAGE_TYPES.MANAGER_AUTH,
-        sessionId,
-        payload: { instructorPasscode },
-      }))
+      const authMessage = createMobCodeManagerAuthMessage(sessionId, instructorPasscode)
+      if (authMessage) {
+        ws.send(authMessage)
+      }
     },
     onMessage: (event) => {
       const msg = parseMobCodeMessage(event.data)
@@ -189,6 +203,18 @@ export default function MobCodeManager() {
       }
     },
   })
+
+  useEffect(() => {
+    const socket = socketRef.current
+    if (!sessionId || !instructorPasscode || !socket || socket.readyState !== WebSocket.OPEN) {
+      return
+    }
+
+    const authMessage = createMobCodeManagerAuthMessage(sessionId, instructorPasscode)
+    if (authMessage) {
+      socket.send(authMessage)
+    }
+  }, [instructorPasscode, sessionId, socketRef])
 
   const persistState = useCallback(
     async (payload: MobCodeStatePayload, messageType: DurableMobCodeMessageType = MOB_CODE_MESSAGE_TYPES.STATE_SYNC) => {

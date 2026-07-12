@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { getInstructorBoardCardClassName, readEmbeddedManagerToken, readInstructorPasscode, reorderPostIds } from './PostboardManager.js'
+import {
+  getInstructorBoardCardClassName,
+  readEmbeddedManagerToken,
+  readInstructorPasscode,
+  reorderPostIds,
+  resolvePostboardInstructorAccessState,
+} from './PostboardManager.js'
 
 function withMockWindow(
   sessionStorage: Pick<Storage, 'getItem' | 'setItem'>,
@@ -27,6 +33,12 @@ void test('readEmbeddedManagerToken accepts only non-empty SyncDeck iframe token
   assert.equal(readEmbeddedManagerToken('?embeddedManagerToken=token-123'), 'token-123')
   assert.equal(readEmbeddedManagerToken('?embeddedManagerToken=%20%20'), null)
   assert.equal(readEmbeddedManagerToken(''), null)
+})
+
+void test('resolvePostboardInstructorAccessState keeps token recovery loading separate from missing credentials', () => {
+  assert.equal(resolvePostboardInstructorAccessState({ isResolvingCredentials: true, instructorPasscode: '' }), 'loading')
+  assert.equal(resolvePostboardInstructorAccessState({ isResolvingCredentials: false, instructorPasscode: '' }), 'missing')
+  assert.equal(resolvePostboardInstructorAccessState({ isResolvingCredentials: false, instructorPasscode: 'teacher-pass' }), 'ready')
 })
 
 void test('reorderPostIds moves the dragged post to the target position', () => {

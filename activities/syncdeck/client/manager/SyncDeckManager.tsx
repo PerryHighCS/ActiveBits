@@ -2117,6 +2117,7 @@ const SyncDeckManager: FC = () => {
   } | null>(null)
   const pendingDeckActivityRequestsRef = useRef<Promise<SyncDeckDeckActivityRequestsByHorizontalIndex> | null>(null)
   const completedEmbeddedBootstrapChildSessionIdsRef = useRef<Set<string>>(new Set())
+  const embeddedManagerEntryTokensByChildSessionIdRef = useRef<Record<string, string>>({})
   const pendingEmbeddedBootstrapChildSessionIdsRef = useRef<Set<string>>(new Set())
   const embeddedBootstrapBackfillRetryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const embeddedBootstrapBackfillRetryAttemptRef = useRef(0)
@@ -2160,6 +2161,21 @@ const SyncDeckManager: FC = () => {
       clearTimeout(embeddedBootstrapBackfillRetryTimeoutRef.current)
       embeddedBootstrapBackfillRetryTimeoutRef.current = null
     }
+  }, [])
+
+  const cacheEmbeddedManagerEntryToken = useCallback((childSessionId: string, managerEntryToken: string): boolean => {
+    if (embeddedManagerEntryTokensByChildSessionIdRef.current[childSessionId] === managerEntryToken) {
+      return false
+    }
+
+    const next = {
+      ...embeddedManagerEntryTokensByChildSessionIdRef.current,
+      [childSessionId]: managerEntryToken,
+    }
+    embeddedManagerEntryTokensByChildSessionIdRef.current = next
+    setEmbeddedManagerEntryTokensByChildSessionId(next)
+    setEmbeddedManagerRenderNonceByChildSessionId((current) => advanceEmbeddedManagerRenderNonce(current, childSessionId))
+    return true
   }, [])
 
   const releaseRestoreSuppression = useCallback((): void => {
@@ -2602,6 +2618,7 @@ const SyncDeckManager: FC = () => {
     embeddedBootstrapBackfillRetryAttemptRef.current = 0
     clearEmbeddedBootstrapBackfillRetryTimeout()
     setEmbeddedManagerRenderNonceByChildSessionId({})
+    embeddedManagerEntryTokensByChildSessionIdRef.current = {}
     setEmbeddedManagerEntryTokensByChildSessionId({})
   }, [clearEmbeddedBootstrapBackfillRetryTimeout, sessionId])
 
@@ -2807,18 +2824,12 @@ const SyncDeckManager: FC = () => {
         }
 
         storeCreateSessionBootstrapPayload(request.activityId, resolvedChildSessionId, payload.managerBootstrap)
-        setEmbeddedManagerEntryTokensByChildSessionId((current) => ({
-          ...current,
-          [resolvedChildSessionId]: managerEntryToken,
-        }))
-        setEmbeddedManagerRenderNonceByChildSessionId((current) => advanceEmbeddedManagerRenderNonce(
-          current,
-          resolvedChildSessionId,
-        ))
-        setLoadedEmbeddedManagerInstanceKeys((current) => clearLoadedEmbeddedManagerInstanceKey(
-          current,
-          request.instanceKey,
-        ))
+        if (cacheEmbeddedManagerEntryToken(resolvedChildSessionId, managerEntryToken)) {
+          setLoadedEmbeddedManagerInstanceKeys((current) => clearLoadedEmbeddedManagerInstanceKey(
+            current,
+            request.instanceKey,
+          ))
+        }
         return false
       } catch {
         // Best-effort only. Embedded managers with their own recovery endpoints can still self-heal.
@@ -2853,7 +2864,7 @@ const SyncDeckManager: FC = () => {
         pendingEmbeddedBootstrapChildSessionIdsRef.current.delete(request.childSessionId)
       }
     }
-  }, [clearEmbeddedBootstrapBackfillRetryTimeout, embeddedActivities, embeddedBootstrapBackfillRetryNonce, instructorPasscode, sessionId])
+  }, [cacheEmbeddedManagerEntryToken, clearEmbeddedBootstrapBackfillRetryTimeout, embeddedActivities, embeddedBootstrapBackfillRetryNonce, instructorPasscode, sessionId])
 
   const copyValue = async (value: string): Promise<void> => {
     if (!value || typeof navigator === 'undefined' || navigator.clipboard === undefined) {
@@ -3138,19 +3149,13 @@ const SyncDeckManager: FC = () => {
               const managerEntryToken = typeof payload.managerEntryToken === 'string' ? payload.managerEntryToken.trim() : ''
               storeCreateSessionBootstrapPayload(request.activityId, childSessionId, payload.managerBootstrap)
               if (managerEntryToken.length > 0) {
-                setEmbeddedManagerEntryTokensByChildSessionId((current) => ({
-                  ...current,
-                  [childSessionId]: managerEntryToken,
-                }))
+                if (cacheEmbeddedManagerEntryToken(childSessionId, managerEntryToken)) {
+                  setLoadedEmbeddedManagerInstanceKeys((current) => clearLoadedEmbeddedManagerInstanceKey(
+                    current,
+                    request.instanceKey,
+                  ))
+                }
               }
-              setEmbeddedManagerRenderNonceByChildSessionId((current) => advanceEmbeddedManagerRenderNonce(
-                current,
-                childSessionId,
-              ))
-              setLoadedEmbeddedManagerInstanceKeys((current) => clearLoadedEmbeddedManagerInstanceKey(
-                current,
-                request.instanceKey,
-              ))
             }
 
             if (!background) {
@@ -3209,7 +3214,7 @@ const SyncDeckManager: FC = () => {
         },
       })
     },
-    [sessionId, instructorPasscode, embeddedActivities, instructorIndicesState],
+    [cacheEmbeddedManagerEntryToken, sessionId, instructorPasscode, embeddedActivities, instructorIndicesState],
   )
 
   const loadDeckActivityRequests = useCallback(async (): Promise<SyncDeckDeckActivityRequestsByHorizontalIndex> => {
@@ -4780,12 +4785,10 @@ const SyncDeckManager: FC = () => {
 
                 {renderedEmbeddedManagerInstanceKeys.map((instanceKey) => {
                   const record = embeddedActivities[instanceKey]
-                  const managerEntryToken = record
-                    ? embeddedManagerEntryTokensByChildSessionId[record.childSessionId]
-                    : null
-                  if (!record || !managerEntryToken) {
+                  if (!record) {
                     return null
                   }
+                  const managerEntryToken = embeddedManagerEntryTokensByChildSessionId[record.childSessionId] ?? null
                   const isActive = instanceKey === activeEmbeddedInstanceKey
                   const inactiveIframeAccessibilityProps = resolveEmbeddedManagerIframeAccessibilityProps(isActive)
 
@@ -4809,17 +4812,19 @@ const SyncDeckManager: FC = () => {
                       ) : null}
                       <div className={isActive ? 'absolute inset-0 p-14' : 'absolute inset-0'}>
                         <div className="relative w-full h-full rounded-lg border border-gray-200 bg-white shadow-sm overflow-hidden">
-                          <iframe
-                            title={`Embedded ${record.activityId} manager`}
-                            src={buildEmbeddedManagerIframeSrc(record, managerEntryToken)}
-                            className="w-full h-full"
-                            {...inactiveIframeAccessibilityProps}
-                            onLoad={() => {
-                              setLoadedEmbeddedManagerInstanceKeys((current) => (
-                                current[instanceKey] ? current : { ...current, [instanceKey]: true }
-                              ))
-                            }}
-                          />
+                          {managerEntryToken ? (
+                            <iframe
+                              title={`Embedded ${record.activityId} manager`}
+                              src={buildEmbeddedManagerIframeSrc(record, managerEntryToken)}
+                              className="w-full h-full"
+                              {...inactiveIframeAccessibilityProps}
+                              onLoad={() => {
+                                setLoadedEmbeddedManagerInstanceKeys((current) => (
+                                  current[instanceKey] ? current : { ...current, [instanceKey]: true }
+                                ))
+                              }}
+                            />
+                          ) : null}
                           {isActive && !isActiveEmbeddedManagerLoaded ? (
                             <div className="absolute inset-0 flex items-center justify-center bg-white/92">
                               <div className="rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm text-gray-700 shadow-sm">

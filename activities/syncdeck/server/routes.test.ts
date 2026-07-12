@@ -26,6 +26,7 @@ const DEFAULT_SYNCDECK_ENTRY_POLICY = 'instructor-required'
 interface RouteRequest {
   params: Record<string, string | undefined>
   body?: unknown
+  query?: Record<string, unknown>
   cookies?: Record<string, unknown>
   headers?: Record<string, unknown>
 }
@@ -122,8 +123,9 @@ function createRequest(
   body: unknown,
   cookies: Record<string, unknown> = {},
   headers: Record<string, unknown> = {},
+  query: Record<string, unknown> = {},
 ): RouteRequest {
-  return { params, body, cookies, headers }
+  return { params, body, cookies, headers, query }
 }
 
 function createSessionStore(initial: Record<string, SessionRecord>) {
@@ -2538,7 +2540,10 @@ void test('embedded-activity start route is idempotent per instance key', async 
       type: 'video-sync',
       created: Date.now(),
       lastActivity: Date.now(),
-      data: {},
+      data: {
+        instructorPasscode: 'child-passcode',
+        embeddedManagerEntryToken: { value: 'reusable-entry-token', expiresAt: Date.now() + 60_000 },
+      },
     },
   })
   setupSyncDeckRoutes(app, storeState.sessions, ws)
@@ -2563,7 +2568,73 @@ void test('embedded-activity start route is idempotent per instance key', async 
   const body = res.body as { childSessionId?: unknown; instanceKey?: unknown; managerEntryToken?: unknown }
   assert.equal(body.childSessionId, 'CHILD:s1:abc12:video-sync')
   assert.equal(body.instanceKey, 'video-sync:3:0')
-  assert.match(String(body.managerEntryToken), /^[a-f0-9]{64}$/)
+  assert.equal(body.managerEntryToken, 'reusable-entry-token')
+})
+
+void test('embedded manager passcode exchange validates and consumes short-lived tokens', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const now = Date.now()
+  const storeState = createSessionStore({
+    'child-valid': {
+      id: 'child-valid',
+      type: 'video-sync',
+      created: now,
+      lastActivity: now,
+      data: {
+        instructorPasscode: 'child-passcode',
+        embeddedManagerEntryToken: { value: 'valid-entry-token', expiresAt: now + 60_000 },
+      },
+    },
+    'child-expired': {
+      id: 'child-expired',
+      type: 'video-sync',
+      created: now,
+      lastActivity: now,
+      data: {
+        instructorPasscode: 'child-passcode',
+        embeddedManagerEntryToken: { value: 'expired-entry-token', expiresAt: now - 1 },
+      },
+    },
+  })
+  setupSyncDeckRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.get['/api/syncdeck/embedded-manager-passcode']
+  assert.equal(typeof handler, 'function')
+
+  const missingRes = createResponse()
+  await handler?.(createRequest({}, undefined), missingRes)
+  assert.equal(missingRes.statusCode, 400)
+
+  const invalidRes = createResponse()
+  await handler?.(
+    createRequest({}, undefined, {}, {}, { sessionId: 'child-valid', token: 'wrong-token' }),
+    invalidRes,
+  )
+  assert.equal(invalidRes.statusCode, 403)
+
+  const expiredRes = createResponse()
+  await handler?.(
+    createRequest({}, undefined, {}, {}, { sessionId: 'child-expired', token: 'expired-entry-token' }),
+    expiredRes,
+  )
+  assert.equal(expiredRes.statusCode, 403)
+
+  const validRes = createResponse()
+  await handler?.(
+    createRequest({}, undefined, {}, {}, { sessionId: 'child-valid', token: 'valid-entry-token' }),
+    validRes,
+  )
+  assert.equal(validRes.statusCode, 200)
+  assert.deepEqual(validRes.body, { instructorPasscode: 'child-passcode' })
+  assert.equal((storeState.store['child-valid']?.data as { embeddedManagerEntryToken?: unknown }).embeddedManagerEntryToken, undefined)
+
+  const reusedRes = createResponse()
+  await handler?.(
+    createRequest({}, undefined, {}, {}, { sessionId: 'child-valid', token: 'valid-entry-token' }),
+    reusedRes,
+  )
+  assert.equal(reusedRes.statusCode, 403)
 })
 
 void test('embedded-activity start route serializes concurrent creation for the same instance key', async () => {
@@ -4344,7 +4415,7 @@ void test('embedded-activity start is idempotent per key even when a concurrent 
       type: 'video-sync',
       created: Date.now(),
       lastActivity: Date.now(),
-      data: {},
+      data: { instructorPasscode: 'child-passcode' },
     },
   })
   setupSyncDeckRoutes(app, storeState.sessions, ws)
@@ -4413,7 +4484,7 @@ void test('syncdeck parent routes keep embedded child sessions alive while the p
       type: 'video-sync',
       created: Date.now(),
       lastActivity: 1,
-      data: {},
+      data: { instructorPasscode: 'child-passcode' },
     },
   })
   setupSyncDeckRoutes(app, storeState.sessions, ws)

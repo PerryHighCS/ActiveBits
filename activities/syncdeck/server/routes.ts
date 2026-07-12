@@ -1835,8 +1835,13 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
           const existingChildSession = await sessions.get(existing.childSessionId)
           if (existingChildSession) {
             const managerBootstrap = buildEmbeddedManagerBootstrapPayload(existingChildSession)
-            const managerEntryToken = mintEmbeddedManagerEntryToken(existingChildSession)
-            await sessions.set(existingChildSession.id, existingChildSession)
+            const existingEntryToken = readEmbeddedManagerEntryToken(existingChildSession)
+            const managerEntryToken = managerBootstrap
+              ? existingEntryToken?.value ?? mintEmbeddedManagerEntryToken(existingChildSession)
+              : null
+            if (managerBootstrap && !existingEntryToken) {
+              await sessions.set(existingChildSession.id, existingChildSession)
+            }
             return {
               statusCode: 200,
               body: {
@@ -1844,7 +1849,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
                 instanceKey,
                 ...(existing.location ? { location: existing.location } : {}),
                 ...(managerBootstrap ? { managerBootstrap } : {}),
-                managerEntryToken,
+                ...(managerEntryToken ? { managerEntryToken } : {}),
               },
             }
           }
@@ -1867,10 +1872,13 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
         const managerBootstrap = normalizedChildSession
           ? buildEmbeddedManagerBootstrapPayload(normalizedChildSession)
           : null
-        const managerEntryToken = normalizedChildSession
-          ? mintEmbeddedManagerEntryToken(normalizedChildSession)
+        const existingEntryToken = normalizedChildSession
+          ? readEmbeddedManagerEntryToken(normalizedChildSession)
           : null
-        if (normalizedChildSession) {
+        const managerEntryToken = normalizedChildSession && managerBootstrap
+          ? existingEntryToken?.value ?? mintEmbeddedManagerEntryToken(normalizedChildSession)
+          : null
+        if (normalizedChildSession && managerBootstrap && !existingEntryToken) {
           await sessions.set(normalizedChildSession.id, normalizedChildSession)
         }
         return {
@@ -1903,6 +1911,11 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
     if (!entryToken || !instructorPasscode || !verifyEmbeddedManagerEntryToken(entryToken.value, token)) {
       res.status(403).json({ error: 'invalid embedded manager credentials' })
       return
+    }
+
+    if (session) {
+      delete session.data.embeddedManagerEntryToken
+      await sessions.set(session.id, session)
     }
 
     console.info('[syncdeck] Embedded manager passcode exchanged', { sessionId })
