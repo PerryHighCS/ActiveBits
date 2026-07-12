@@ -331,6 +331,7 @@ export default function ResonanceManager() {
               : null
             if (recoveredPasscode !== null && !isCancelled) {
               setPasscode(recoveredPasscode)
+              setIsResolvingPasscode(false)
               return
             }
           }
