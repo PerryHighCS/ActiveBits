@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useLocation, useParams } from 'react-router-dom'
 import SessionHeader from '@src/components/common/SessionHeader'
-import { readEmbeddedManagerToken } from '@src/components/common/embeddedManagerBootstrap'
+import {
+  clearEmbeddedManagerTokenFromUrl,
+  readEmbeddedManagerToken,
+} from '@src/components/common/embeddedManagerBootstrap'
 import VirtualFileExplorer from '@src/components/common/VirtualFileExplorer'
 import type { VirtualFileEntry } from '@src/components/common/virtualFileExplorerTypes'
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
@@ -141,6 +144,9 @@ export default function MobCodeManager() {
         const payload = response.ok ? await response.json() as { instructorPasscode?: unknown } : null
         const passcode = typeof payload?.instructorPasscode === 'string' ? payload.instructorPasscode.trim() : ''
         if (!cancelled) {
+          if (passcode) {
+            clearEmbeddedManagerTokenFromUrl()
+          }
           setInstructorPasscode(passcode || fallbackPasscode)
         }
       } catch (error) {

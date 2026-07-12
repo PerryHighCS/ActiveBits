@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { useLocation, useParams } from 'react-router-dom'
 import SessionHeader from '@src/components/common/SessionHeader'
-import { readEmbeddedManagerToken } from '@src/components/common/embeddedManagerBootstrap'
+import {
+  clearEmbeddedManagerTokenFromUrl,
+  readEmbeddedManagerToken,
+} from '@src/components/common/embeddedManagerBootstrap'
 import Button from '@src/components/ui/Button'
 import InstructorFeedbackControls from '../../../shared/client/components/InstructorFeedbackControls.js'
 import NoteStyleSelect from '../../../shared/client/components/NoteStyleSelect.js'
@@ -153,6 +156,9 @@ export default function PostboardManager(): React.JSX.Element {
         const payload = response.ok ? await response.json() as { instructorPasscode?: unknown } : null
         const passcode = typeof payload?.instructorPasscode === 'string' ? payload.instructorPasscode.trim() : ''
         if (!cancelled) {
+          if (passcode) {
+            clearEmbeddedManagerTokenFromUrl()
+          }
           setInstructorPasscode(passcode || fallbackPasscode)
           setIsResolvingCredentials(false)
         }
