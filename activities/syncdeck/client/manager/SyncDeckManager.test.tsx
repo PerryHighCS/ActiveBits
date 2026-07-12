@@ -62,6 +62,8 @@ import { resolveDeckActivityRequestsFromDeckDocument } from './SyncDeckManager.j
 import { buildReportContributionMap } from './SyncDeckManager.js'
 import { resolveReportContributionLabel } from './SyncDeckManager.js'
 import { buildReportPreviewSummary } from './SyncDeckManager.js'
+import { getReportPreviewFocusableElements } from './SyncDeckManager.js'
+import { resolveReportPreviewDialogTabTarget } from './SyncDeckManager.js'
 
 void test('SyncDeckManager renders setup copy without a session id', () => {
   const html = renderToStaticMarkup(
@@ -122,12 +124,49 @@ void test('SyncDeckManager pre-fills presentation URL from query params', () => 
 
 void test('resolveSyncDeckActivityPickerEntries sorts and omits SyncDeck itself', () => {
   const entries = resolveSyncDeckActivityPickerEntries([
-    { id: 'gallery-walk', name: 'Gallery Walk', description: 'Peer feedback', reportEndpoint: '/api/gallery-walk/:sessionId/report' },
+    { id: 'gallery-walk', name: 'Gallery Walk', description: 'Peer feedback' },
     { id: 'video-sync', name: 'Video Sync', description: 'Shared video' },
     { id: 'syncdeck', name: 'SyncDeck', description: 'Parent deck' },
   ])
 
   assert.deepEqual(entries.map((entry) => entry.activityId), ['gallery-walk', 'video-sync'])
+})
+
+void test('report preview dialog focus helpers ignore disabled controls and wrap Tab at boundaries', () => {
+  const dom = new JSDOM(`
+    <div role="dialog">
+      <button id="close">Close</button>
+      <button id="disabled" disabled>Disabled</button>
+      <a id="download" href="/report">Download</a>
+    </div>
+  `)
+  const dialog = dom.window.document.querySelector<HTMLElement>('[role="dialog"]')
+  assert.ok(dialog)
+  const closeButton = dom.window.document.getElementById('close')
+  const downloadLink = dom.window.document.getElementById('download')
+  assert.ok(closeButton)
+  assert.ok(downloadLink)
+
+  assert.deepEqual(
+    getReportPreviewFocusableElements(dialog).map((element) => element.id),
+    ['close', 'download'],
+  )
+  assert.equal(
+    resolveReportPreviewDialogTabTarget({
+      dialog,
+      activeElement: downloadLink,
+      shiftKey: false,
+    }),
+    closeButton,
+  )
+  assert.equal(
+    resolveReportPreviewDialogTabTarget({
+      dialog,
+      activeElement: closeButton,
+      shiftKey: true,
+    }),
+    downloadLink,
+  )
 })
 
 void test('parseDownloadFilenameFromContentDisposition handles standard and utf-8 filenames', () => {

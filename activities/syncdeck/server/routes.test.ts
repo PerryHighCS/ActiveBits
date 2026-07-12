@@ -14,6 +14,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import type { ActiveBitsWebSocket, WsConnectionHandler, WsRouter } from '../../../types/websocket.js'
 import { initializeActivityRegistry } from '../../../server/activities/activityRegistry.js'
+import { registerActivityReportBuilder } from '../../../server/activities/activityReportRegistry.js'
 import setupSyncDeckRoutes, { waitForInstructorAuthMessage } from './routes.js'
 import '../../gallery-walk/server/routes.js'
 import '../../postboard/server/routes.js'
@@ -3019,6 +3020,69 @@ void test('report-manifest route includes missing child sessions as unavailable 
   assert.equal(body.activities[0]?.activityId, 'postboard')
   assert.equal(body.activities[0]?.report.reportStatus, 'unavailable')
   assert.equal(body.activities[0]?.report.payload?.status, 'unavailable')
+})
+
+void test('report-manifest route isolates child report builder exceptions', async () => {
+  await initializeActivityRegistry()
+  registerActivityReportBuilder('throwing-report-activity', () => {
+    throw new Error('expected report builder failure')
+  })
+  const app = createMockApp()
+  const ws = createMockWs()
+  const storeState = createSessionStore({
+    s1: {
+      ...createSyncDeckSession('s1', 'teacher-passcode-1'),
+      data: {
+        ...createSyncDeckSession('s1', 'teacher-passcode-1').data,
+        embeddedActivities: {
+          'throwing-report-activity:2:0': {
+            childSessionId: 'CHILD:s1:throwing:activity',
+            activityId: 'throwing-report-activity',
+            startedAt: 222,
+            owner: 'syncdeck-instructor',
+          },
+        },
+      },
+    },
+    'CHILD:s1:throwing:activity': {
+      id: 'CHILD:s1:throwing:activity',
+      type: 'throwing-report-activity',
+      created: Date.now(),
+      lastActivity: Date.now(),
+      data: {},
+    },
+  })
+  setupSyncDeckRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.get['/api/syncdeck/:sessionId/report-manifest']
+  assert.equal(typeof handler, 'function')
+
+  const originalWarn = console.warn
+  console.warn = () => {}
+  try {
+    const res = createResponse()
+    await handler?.(
+      createRequest(
+        { sessionId: 's1' },
+        {},
+        {},
+        { 'x-syncdeck-instructor-passcode': 'teacher-passcode-1' },
+      ),
+      res,
+    )
+
+    assert.equal(res.statusCode, 200)
+    const body = res.body as {
+      activities: Array<{ activityId: string; report: { reportStatus?: string; payload?: { status?: string; reason?: string } } }>
+    }
+    assert.equal(body.activities.length, 1)
+    assert.equal(body.activities[0]?.activityId, 'throwing-report-activity')
+    assert.equal(body.activities[0]?.report.reportStatus, 'unavailable')
+    assert.equal(body.activities[0]?.report.payload?.status, 'unavailable')
+    assert.equal(body.activities[0]?.report.payload?.reason, 'This activity encountered an error while generating its report.')
+  } finally {
+    console.warn = originalWarn
+  }
 })
 
 void test('report route returns downloadable session-level HTML built from the manifest', async () => {

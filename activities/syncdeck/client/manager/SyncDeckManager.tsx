@@ -41,7 +41,7 @@ import {
   resolveGroupedPreloadRequestBatchInputs,
   type SyncDeckGroupedActivityRequest,
 } from '../shared/groupedActivityRequests.js'
-import { useCallback, useEffect, useMemo, useRef, useState, type FC, type FormEvent, type MouseEvent, type PointerEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type FC, type FormEvent, type KeyboardEvent, type MouseEvent, type PointerEvent } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import type { SyncDeckSessionReportManifest } from '../../../../types/activity.js'
 import ConnectionStatusDot from '../components/ConnectionStatusDot.js'
@@ -55,6 +55,14 @@ const EMBEDDED_BOOTSTRAP_BACKFILL_BASE_RETRY_DELAY_MS = 1000
 const EMBEDDED_BOOTSTRAP_BACKFILL_MAX_RETRY_DELAY_MS = 10000
 const PRESENTATION_URL_ERROR_ID = 'syncdeck-presentation-url-error'
 const isDevMode = import.meta.env?.DEV === true
+const REPORT_PREVIEW_FOCUSABLE_SELECTOR = [
+  'button:not([disabled])',
+  '[href]',
+  'input:not([disabled])',
+  'select:not([disabled])',
+  'textarea:not([disabled])',
+  '[tabindex]:not([tabindex="-1"])',
+].join(',')
 interface SessionResponsePayload {
   session?: {
     data?: {
@@ -170,6 +178,47 @@ interface RevealSyncStatePayload {
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return value != null && typeof value === 'object' && !Array.isArray(value)
+}
+
+function isVisibleElement(element: HTMLElement): boolean {
+  if (element.hidden === true || element.getAttribute('aria-hidden') === 'true') return false
+  const view = element.ownerDocument.defaultView
+  if (!view) return true
+  const style = view.getComputedStyle(element)
+  return style.display !== 'none' && style.visibility !== 'hidden'
+}
+
+export function getReportPreviewFocusableElements(container: HTMLElement | null): HTMLElement[] {
+  if (!container) return []
+  return Array.from(container.querySelectorAll<HTMLElement>(REPORT_PREVIEW_FOCUSABLE_SELECTOR))
+    .filter((element) => (
+      !element.hasAttribute('disabled')
+      && element.tabIndex !== -1
+      && isVisibleElement(element)
+    ))
+}
+
+export function resolveReportPreviewDialogTabTarget(params: {
+  dialog: HTMLElement | null
+  activeElement: Element | null
+  shiftKey: boolean
+}): HTMLElement | null {
+  if (!params.dialog) return null
+  const focusableElements = getReportPreviewFocusableElements(params.dialog)
+  if (focusableElements.length === 0) {
+    return params.dialog
+  }
+
+  const first = focusableElements[0] ?? null
+  if (!first) return params.dialog
+  const last = focusableElements.at(-1) ?? first
+  if (params.shiftKey) {
+    return params.activeElement === first || !params.dialog.contains(params.activeElement)
+      ? last
+      : null
+  }
+
+  return params.activeElement === last ? first : null
 }
 
 export function buildSyncDeckInstructorWsUrl(params: {
@@ -1546,7 +1595,7 @@ export async function runEmbeddedStartWithPendingRetry(params: {
 }
 
 export function resolveSyncDeckActivityPickerEntries(
-  entries: Array<{ id: string; name: string; description: string; reportEndpoint?: string }>,
+  entries: Array<{ id: string; name: string; description: string }>,
 ): SyncDeckActivityPickerEntry[] {
   return entries
     .filter((entry) => entry.id !== 'syncdeck')
@@ -2024,6 +2073,8 @@ const SyncDeckManager: FC = () => {
   const [embeddedManagerRenderNonceByChildSessionId, setEmbeddedManagerRenderNonceByChildSessionId] = useState<Record<string, number>>({})
   const [embeddedBootstrapBackfillRetryNonce, setEmbeddedBootstrapBackfillRetryNonce] = useState(0)
   const presentationIframeRef = useRef<HTMLIFrameElement | null>(null)
+  const reportPreviewTriggerRef = useRef<HTMLButtonElement | null>(null)
+  const reportPreviewDialogRef = useRef<HTMLDivElement | null>(null)
   const restoreDocumentTitleRef = useRef<string | null>(null)
   const disconnectStatusTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastInstructorPayloadRef = useRef<unknown>(null)
@@ -3525,7 +3576,6 @@ const SyncDeckManager: FC = () => {
               ? entry.name
               : '',
           description: typeof entry.description === 'string' ? entry.description : '',
-          reportEndpoint: typeof entry.reportEndpoint === 'string' ? entry.reportEndpoint : undefined,
         }))
         .filter((entry) => entry.id.length > 0 && entry.name.length > 0 && entry.description.length > 0),
     ),
@@ -4167,6 +4217,49 @@ const SyncDeckManager: FC = () => {
     void endEmbeddedActivity(instanceKey)
   }
 
+  useEffect(() => {
+    if (!isReportPreviewOpen) {
+      return undefined
+    }
+
+    const focusTimer = window.setTimeout(() => {
+      const dialog = reportPreviewDialogRef.current
+      const focusTarget = getReportPreviewFocusableElements(dialog)[0] ?? dialog
+      focusTarget?.focus()
+    }, 0)
+
+    return () => {
+      window.clearTimeout(focusTimer)
+      window.setTimeout(() => {
+        reportPreviewTriggerRef.current?.focus()
+      }, 0)
+    }
+  }, [isReportPreviewOpen])
+
+  const handleReportPreviewDialogKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      setIsReportPreviewOpen(false)
+      return
+    }
+
+    if (event.key !== 'Tab') {
+      return
+    }
+
+    const focusTarget = resolveReportPreviewDialogTabTarget({
+      dialog: reportPreviewDialogRef.current,
+      activeElement: document.activeElement,
+      shiftKey: event.shiftKey,
+    })
+    if (!focusTarget) {
+      return
+    }
+
+    event.preventDefault()
+    focusTarget.focus()
+  }
+
   const showStartAnyway =
     Boolean(preflightWarning) &&
     allowUnverifiedStartForUrl === normalizedPresentationUrl &&
@@ -4313,6 +4406,7 @@ const SyncDeckManager: FC = () => {
               {copiedValue === studentJoinUrl ? '✓ Copied!' : 'Copy Join URL'}
             </button>
             <button
+              ref={reportPreviewTriggerRef}
               type="button"
               onClick={() => {
                 void openSessionReportPreview()
@@ -4320,6 +4414,7 @@ const SyncDeckManager: FC = () => {
               disabled={isReportPreviewLoading || !instructorPasscode}
               className="px-3 py-2 rounded border border-gray-300 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
               aria-haspopup="dialog"
+              aria-controls={isReportPreviewOpen ? 'syncdeck-report-preview-dialog' : undefined}
             >
               {isReportPreviewLoading ? 'Loading preview…' : 'Preview Report'}
             </button>
@@ -4355,11 +4450,17 @@ const SyncDeckManager: FC = () => {
         {isReportPreviewOpen && (
           <div
             className="fixed inset-0 z-40 flex items-start justify-center bg-black/40 px-4 py-16"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="syncdeck-report-preview-title"
           >
-            <div className="w-full max-w-3xl rounded border border-gray-200 bg-white shadow-xl">
+            <div
+              ref={reportPreviewDialogRef}
+              id="syncdeck-report-preview-dialog"
+              className="w-full max-w-3xl rounded border border-gray-200 bg-white shadow-xl"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="syncdeck-report-preview-title"
+              tabIndex={-1}
+              onKeyDown={handleReportPreviewDialogKeyDown}
+            >
               <div className="flex items-center justify-between gap-3 border-b border-gray-200 px-4 py-3">
                 <h2 id="syncdeck-report-preview-title" className="text-base font-semibold text-gray-800">
                   Session Report Preview

@@ -1035,14 +1035,33 @@ async function buildSyncDeckSessionReportManifest(
       activityId = childSession.type
       const builder = getActivityReportBuilder(childSession.type)
       if (builder) {
-        const builtReport = builder(childSession, { instanceKey })
-        report = builtReport ?? buildEmbeddedReportAvailabilitySection({
-          activityId: childSession.type,
-          childSessionId: childSession.id,
-          instanceKey,
-          status: 'unavailable',
-          reason: 'This activity could not build a report from the current child session state.',
-        })
+        try {
+          const builtReport = builder(childSession, { instanceKey })
+          report = builtReport ?? buildEmbeddedReportAvailabilitySection({
+            activityId: childSession.type,
+            childSessionId: childSession.id,
+            instanceKey,
+            status: 'unavailable',
+            reason: 'This activity could not build a report from the current child session state.',
+          })
+        } catch (error) {
+          console.warn('[SyncDeck][ReportBuilderError]', {
+            parentSessionId: session.id,
+            childSessionId: childSession.id,
+            activityId: childSession.type,
+            instanceKey,
+            error: error instanceof Error
+              ? { name: error.name, message: error.message, stack: error.stack }
+              : String(error),
+          })
+          report = buildEmbeddedReportAvailabilitySection({
+            activityId: childSession.type,
+            childSessionId: childSession.id,
+            instanceKey,
+            status: 'unavailable',
+            reason: 'This activity encountered an error while generating its report.',
+          })
+        }
       } else {
         report = buildEmbeddedReportAvailabilitySection({
           activityId: childSession.type,

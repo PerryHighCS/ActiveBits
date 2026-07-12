@@ -1,3 +1,4 @@
+import escapeHtmlString from 'escape-html'
 import type {
   ActivityReportBlock,
   ActivityReportStudentRef,
@@ -245,12 +246,7 @@ export function buildPostboardStructuredReportSection(
 }
 
 function escapeHtml(value: unknown): string {
-  return String(value ?? '')
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#39;')
+  return escapeHtmlString(String(value ?? ''))
 }
 
 function toSafeJson(value: unknown): string {
