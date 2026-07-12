@@ -2613,6 +2613,13 @@ void test('embedded manager passcode exchange validates and consumes short-lived
   )
   assert.equal(invalidRes.statusCode, 403)
 
+  const oversizedRes = createResponse()
+  await handler?.(
+    createRequest({}, undefined, {}, {}, { sessionId: 'child-valid', token: 'x'.repeat(100_000) }),
+    oversizedRes,
+  )
+  assert.equal(oversizedRes.statusCode, 403)
+
   const expiredRes = createResponse()
   await handler?.(
     createRequest({}, undefined, {}, {}, { sessionId: 'child-expired', token: 'expired-entry-token' }),

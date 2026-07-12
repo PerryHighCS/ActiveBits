@@ -315,6 +315,11 @@ export default function ResonanceManager() {
     const recoverPasscode = async () => {
       try {
         if (embeddedManagerToken) {
+          // Let React StrictMode's setup/cleanup pass cancel before consuming the single-use token.
+          await Promise.resolve()
+          if (isCancelled) {
+            return
+          }
           const response = await fetch(
             `/api/syncdeck/embedded-manager-passcode?sessionId=${encodeURIComponent(sessionId)}&token=${encodeURIComponent(embeddedManagerToken)}`,
             { credentials: 'same-origin' },

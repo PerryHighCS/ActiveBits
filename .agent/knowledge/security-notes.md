@@ -28,7 +28,7 @@ Track security-relevant boundaries, risks, and mitigation decisions.
 - Area: SyncDeck embedded instructor manager bootstrap
 - Threat or risk: Embedded manager iframes run in a separate JavaScript context, so an in-memory parent handoff cannot deliver an instructor passcode. Persisting that passcode to browser storage is prohibited.
 - Control or mitigation: SyncDeck mints a random, five-minute child-manager entry token server-side, passes it only to the same-origin iframe, and the child exchanges it once through the SyncDeck endpoint for its passcode. The iframe is not mounted until the token arrives from the authenticated embedded-start response.
-- Residual risk: The short-lived token is present in the iframe URL while it loads. Keep it same-origin, do not log query strings, and do not reuse it as an activity API credential.
+- Residual risk: The short-lived token is present in the iframe URL while it loads. Keep it same-origin, do not log query strings, and do not reuse it as an activity API credential. Child managers yield once before exchanging it so React StrictMode's development-only setup/cleanup pass cannot consume it before the durable mount commits.
 - Validation (test/review/path): `activities/syncdeck/server/routes.ts`; `activities/syncdeck/server/routes.test.ts`; `activities/video-sync/client/manager/VideoSyncManager.test.ts`; `activities/resonance/client/manager/ResonanceManager.test.ts`.
 - Follow-up action: If iframe URL query logging becomes a concern, replace the query handoff with an httpOnly one-time exchange cookie scoped to the child manager route.
 - Owner: Codex

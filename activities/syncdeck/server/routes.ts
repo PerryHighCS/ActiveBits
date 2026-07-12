@@ -950,6 +950,9 @@ function readEmbeddedManagerEntryToken(session: SessionRecord): SyncDeckEmbedded
 }
 
 function verifyEmbeddedManagerEntryToken(expected: string, candidate: string): boolean {
+  if (candidate.length !== expected.length) {
+    return false
+  }
   const expectedBuffer = Buffer.from(expected)
   const candidateBuffer = Buffer.from(candidate)
   return expectedBuffer.length === candidateBuffer.length && timingSafeEqual(expectedBuffer, candidateBuffer)

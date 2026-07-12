@@ -127,6 +127,11 @@ export default function MobCodeManager() {
 
     let cancelled = false
     void (async () => {
+      // Let React StrictMode's setup/cleanup pass cancel before consuming the single-use token.
+      await Promise.resolve()
+      if (cancelled) {
+        return
+      }
       try {
         const response = await fetch(
           `/api/syncdeck/embedded-manager-passcode?sessionId=${encodeURIComponent(sessionId)}&token=${encodeURIComponent(embeddedManagerToken)}`,
