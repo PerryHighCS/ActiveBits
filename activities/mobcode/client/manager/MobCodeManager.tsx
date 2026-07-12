@@ -99,7 +99,6 @@ export default function MobCodeManager() {
   const embeddedManagerPasscodeExchange = useEmbeddedManagerPasscodeExchange({
     sessionId,
     search: location.search,
-    enabled: !fallbackInstructorPasscode,
   })
   const [instructorPasscode, setInstructorPasscode] = useState(fallbackInstructorPasscode)
   const canEdit = instructorPasscode.length > 0

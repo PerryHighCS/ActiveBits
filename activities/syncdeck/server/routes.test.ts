@@ -130,9 +130,11 @@ function createRequest(
 
 function createSessionStore(initial: Record<string, SessionRecord>) {
   const store = { ...initial }
+  const getCalls: string[] = []
   const touchCalls: string[] = []
   const sessions: SessionStore = {
     async get(id: string) {
+      getCalls.push(id)
       return store[id] ?? null
     },
     async set(id: string, session: SessionRecord) {
@@ -181,6 +183,7 @@ function createSessionStore(initial: Record<string, SessionRecord>) {
 
   return {
     store,
+    getCalls,
     sessions,
     touchCalls,
   }
@@ -2632,11 +2635,22 @@ void test('embedded manager passcode exchange validates and consumes short-lived
   assert.equal(invalidRes.statusCode, 403)
 
   const oversizedRes = createResponse()
+  const getCallsBeforeOversizedToken = storeState.getCalls.length
   await handler?.(
     createRequest({}, undefined, {}, {}, { sessionId: 'child-valid', token: 'x'.repeat(100_000) }),
     oversizedRes,
   )
   assert.equal(oversizedRes.statusCode, 403)
+  assert.equal(storeState.getCalls.length, getCallsBeforeOversizedToken)
+
+  const oversizedSessionIdRes = createResponse()
+  const getCallsBeforeOversizedSessionId = storeState.getCalls.length
+  await handler?.(
+    createRequest({}, undefined, {}, {}, { sessionId: 's'.repeat(100_000), token: 'valid-entry-token' }),
+    oversizedSessionIdRes,
+  )
+  assert.equal(oversizedSessionIdRes.statusCode, 403)
+  assert.equal(storeState.getCalls.length, getCallsBeforeOversizedSessionId)
 
   const expiredRes = createResponse()
   await handler?.(

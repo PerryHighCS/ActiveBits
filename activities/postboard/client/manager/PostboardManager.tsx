@@ -100,7 +100,6 @@ export default function PostboardManager(): React.JSX.Element {
   const embeddedManagerPasscodeExchange = useEmbeddedManagerPasscodeExchange({
     sessionId,
     search: location.search,
-    enabled: !fallbackInstructorPasscode,
   })
   const [instructorPasscode, setInstructorPasscode] = useState(fallbackInstructorPasscode)
   const [isResolvingCredentials, setIsResolvingCredentials] = useState(

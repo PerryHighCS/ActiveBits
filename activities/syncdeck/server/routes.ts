@@ -48,6 +48,8 @@ import { buildSyncDeckReportFilename, buildSyncDeckSessionReportHtml } from './r
 
 const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000
 const MAX_SESSIONS_PER_COOKIE = 20
+const MAX_EMBEDDED_MANAGER_SESSION_ID_LENGTH = 256
+const MAX_EMBEDDED_MANAGER_TOKEN_LENGTH = 512
 const MAX_TEACHER_CODE_LENGTH = 100
 const DEFAULT_SYNCDECK_ENTRY_POLICY = 'instructor-required'
 
@@ -1906,6 +1908,13 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
     const token = typeof req.query?.token === 'string' ? req.query.token.trim() : ''
     if (!sessionId || !token) {
       res.status(400).json({ error: 'missing embedded manager credentials' })
+      return
+    }
+    if (
+      sessionId.length > MAX_EMBEDDED_MANAGER_SESSION_ID_LENGTH
+      || token.length > MAX_EMBEDDED_MANAGER_TOKEN_LENGTH
+    ) {
+      res.status(403).json({ error: 'invalid embedded manager credentials' })
       return
     }
 

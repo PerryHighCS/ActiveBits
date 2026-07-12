@@ -274,11 +274,9 @@ export default function ResonanceManager() {
   const { sessionId } = useParams<{ sessionId?: string }>()
   const location = useLocation()
   const navigate = useNavigate()
-  const cachedPasscode = sessionId ? getPasscode(sessionId) : null
   const embeddedManagerPasscodeExchange = useEmbeddedManagerPasscodeExchange({
     sessionId,
     search: location.search,
-    enabled: cachedPasscode === null,
   })
   const [passcode, setPasscode] = useState<string | null>(null)
   const [isResolvingPasscode, setIsResolvingPasscode] = useState(true)
