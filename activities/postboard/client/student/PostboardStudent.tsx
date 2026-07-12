@@ -1,5 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
-import { readSessionParticipantContext } from '@src/components/common/sessionParticipantContext'
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
+import {
+  persistSessionParticipantIdentity,
+  resolveInitialEntryParticipantIdentity,
+} from '@src/components/common/entryParticipantIdentityUtils'
 import Button from '@src/components/ui/Button'
 import NoteStyleSelect from '../../../shared/client/components/NoteStyleSelect.js'
 import ReactionSummary from '../../../shared/client/components/ReactionSummary.js'
@@ -28,24 +31,14 @@ interface StudentIdentity {
 
 const POLL_INTERVAL_MS = 2500
 
-function readStudentIdentity(sessionId: string | null, sessionData: PostboardStudentProps['sessionData']): StudentIdentity {
-  if (!sessionId || typeof window === 'undefined') {
-    return {
-      studentId: sessionData?.studentId ?? null,
-      studentName: sessionData?.studentName ?? null,
-    }
-  }
-
-  const context = readSessionParticipantContext(window.localStorage, sessionId)
-  return {
-    studentId: context?.studentId ?? sessionData?.studentId ?? null,
-    studentName: context?.studentName ?? sessionData?.studentName ?? null,
-  }
-}
-
 export default function PostboardStudent({ sessionData }: PostboardStudentProps): React.JSX.Element {
   const sessionId = sessionData?.sessionId ?? null
-  const identity = useMemo(() => readStudentIdentity(sessionId, sessionData), [sessionData, sessionId])
+  const isSoloSession = sessionId?.startsWith('solo-') === true
+  const [identity, setIdentity] = useState<StudentIdentity>(() => ({
+    studentId: sessionData?.studentId ?? null,
+    studentName: sessionData?.studentName ?? null,
+  }))
+  const [identityResolved, setIdentityResolved] = useState(false)
   const [snapshot, setSnapshot] = useState<PostboardStudentSnapshot | null>(null)
   const [draft, setDraft] = useState('')
   const [styleId, setStyleId] = useState(DEFAULT_NOTE_STYLE_ID)
@@ -54,8 +47,58 @@ export default function PostboardStudent({ sessionData }: PostboardStudentProps)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const fetchRequestIdRef = useRef(0)
 
+  useEffect(() => {
+    if (!sessionId || typeof window === 'undefined') {
+      setIdentity({
+        studentId: sessionData?.studentId ?? null,
+        studentName: sessionData?.studentName ?? null,
+      })
+      setIdentityResolved(true)
+      return undefined
+    }
+
+    let cancelled = false
+    setIdentityResolved(false)
+    void (async () => {
+      try {
+        const resolvedIdentity = await resolveInitialEntryParticipantIdentity({
+          activityName: 'postboard',
+          sessionId,
+          isSoloSession,
+          localStorage: window.localStorage,
+          sessionStorage: window.sessionStorage,
+          soloDisplayName: sessionData?.studentName ?? 'Solo Student',
+        })
+        if (cancelled) return
+
+        const studentName = resolvedIdentity.studentName || sessionData?.studentName || null
+        const studentId = resolvedIdentity.studentId ?? sessionData?.studentId ?? null
+        setIdentity({ studentName, studentId })
+        if (studentName || studentId) {
+          persistSessionParticipantIdentity(window.localStorage, sessionId, studentName ?? '', studentId)
+        }
+      } catch (identityError) {
+        console.error('[postboard] Failed to resolve student identity:', identityError)
+        if (!cancelled) {
+          setIdentity({
+            studentId: sessionData?.studentId ?? null,
+            studentName: sessionData?.studentName ?? null,
+          })
+        }
+      } finally {
+        if (!cancelled) {
+          setIdentityResolved(true)
+        }
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [isSoloSession, sessionData?.studentId, sessionData?.studentName, sessionId])
+
   const fetchState = useCallback(async () => {
-    if (!sessionId) return false
+    if (!sessionId || !identityResolved) return false
     const requestId = fetchRequestIdRef.current + 1
     fetchRequestIdRef.current = requestId
     const params = new URLSearchParams()
@@ -69,10 +112,10 @@ export default function PostboardStudent({ sessionData }: PostboardStudentProps)
     if (requestId !== fetchRequestIdRef.current) return false
     setSnapshot(nextSnapshot)
     return true
-  }, [identity.studentId, sessionId])
+  }, [identity.studentId, identityResolved, sessionId])
 
   useEffect(() => {
-    if (!sessionId) return undefined
+    if (!sessionId || !identityResolved) return undefined
     let cancelled = false
     const load = async () => {
       try {

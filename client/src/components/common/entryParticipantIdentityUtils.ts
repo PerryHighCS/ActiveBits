@@ -129,13 +129,6 @@ export async function resolveInitialEntryParticipantIdentity(
     }
   }
 
-  if (localStorage) {
-    const storedIdentity = readStoredSessionParticipantIdentity(localStorage, sessionId)
-    if (storedIdentity) {
-      return storedIdentity
-    }
-  }
-
   if (preflightDisplayName || preflightParticipantId) {
     if (localStorage) {
       persistSessionParticipantContext(localStorage, sessionId, {
@@ -148,6 +141,13 @@ export async function resolveInitialEntryParticipantIdentity(
       studentName: preflightDisplayName ?? '',
       studentId: preflightParticipantId,
       nameSubmitted: true,
+    }
+  }
+
+  if (localStorage) {
+    const storedIdentity = readStoredSessionParticipantIdentity(localStorage, sessionId)
+    if (storedIdentity) {
+      return storedIdentity
     }
   }
 
