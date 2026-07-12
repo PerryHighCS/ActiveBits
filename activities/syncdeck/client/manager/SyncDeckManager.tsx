@@ -213,7 +213,9 @@ export function resolveReportPreviewDialogTabTarget(params: {
   if (!first) return params.dialog
   const last = focusableElements.at(-1) ?? first
   if (params.shiftKey) {
-    return params.activeElement === first || !params.dialog.contains(params.activeElement)
+    return params.activeElement === first
+      || params.activeElement === params.dialog
+      || !params.dialog.contains(params.activeElement)
       ? last
       : null
   }

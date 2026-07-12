@@ -167,6 +167,14 @@ void test('report preview dialog focus helpers ignore disabled controls and wrap
     }),
     downloadLink,
   )
+  assert.equal(
+    resolveReportPreviewDialogTabTarget({
+      dialog,
+      activeElement: dialog,
+      shiftKey: true,
+    }),
+    downloadLink,
+  )
 })
 
 void test('parseDownloadFilenameFromContentDisposition handles standard and utf-8 filenames', () => {
