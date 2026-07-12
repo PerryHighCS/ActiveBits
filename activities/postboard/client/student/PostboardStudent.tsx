@@ -98,7 +98,7 @@ export default function PostboardStudent({ sessionData }: PostboardStudentProps)
   }, [isSoloSession, sessionData?.studentId, sessionData?.studentName, sessionId])
 
   const fetchState = useCallback(async () => {
-    if (!sessionId || !identityResolved) return false
+    if (!sessionId) return false
     const requestId = fetchRequestIdRef.current + 1
     fetchRequestIdRef.current = requestId
     const params = new URLSearchParams()
@@ -112,7 +112,7 @@ export default function PostboardStudent({ sessionData }: PostboardStudentProps)
     if (requestId !== fetchRequestIdRef.current) return false
     setSnapshot(nextSnapshot)
     return true
-  }, [identity.studentId, identityResolved, sessionId])
+  }, [identity.studentId, sessionId])
 
   useEffect(() => {
     if (!sessionId || !identityResolved) return undefined
