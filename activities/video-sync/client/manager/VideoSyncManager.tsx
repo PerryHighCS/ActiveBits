@@ -1,8 +1,4 @@
 import SessionHeader from '@src/components/common/SessionHeader'
-import {
-  clearEmbeddedManagerTokenFromUrl,
-  readEmbeddedManagerToken,
-} from '@src/components/common/embeddedManagerBootstrap'
 import { fetchEmbeddedLaunchSelectedOptions } from '@src/components/common/embeddedLaunchBootstrap'
 import {
   consumeCreateSessionBootstrapPayload,
@@ -11,6 +7,7 @@ import {
 import { isEmbeddedChildSessionId } from '@src/components/common/sessionHeaderUtils'
 import Button from '@src/components/ui/Button'
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
+import { useEmbeddedManagerPasscodeExchange } from '@src/hooks/useEmbeddedManagerPasscodeExchange'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import {
@@ -408,7 +405,10 @@ export default function VideoSyncManager() {
   const suppressPlayerEventsTimeoutRef = useRef<number | null>(null)
   const autoStartAttemptKeyRef = useRef<string | null>(null)
   const queryBootstrapSourceUrl = useMemo(() => readBootstrapSourceUrl(location.search), [location.search])
-  const embeddedManagerToken = useMemo(() => readEmbeddedManagerToken(location.search), [location.search])
+  const embeddedManagerPasscodeExchange = useEmbeddedManagerPasscodeExchange({
+    sessionId: sessionId ?? undefined,
+    search: location.search,
+  })
   const bootstrapSourceUrl = persistentRecoverySourceUrl ?? queryBootstrapSourceUrl ?? embeddedBootstrapSourceUrl
 
   useEffect(() => {
@@ -677,30 +677,14 @@ export default function VideoSyncManager() {
     let isCancelled = false
 
     const loadInstructorPasscode = async (): Promise<void> => {
-      if (embeddedManagerToken) {
-        // Let React StrictMode's setup/cleanup pass cancel before consuming the single-use token.
-        await Promise.resolve()
-        if (isCancelled) {
-          return
-        }
-        try {
-          const response = await fetch(
-            `/api/syncdeck/embedded-manager-passcode?sessionId=${encodeURIComponent(sessionId)}&token=${encodeURIComponent(embeddedManagerToken)}`,
-            { credentials: 'same-origin', cache: 'no-store' },
-          )
-          if (response.ok) {
-            const payload = (await response.json()) as InstructorPasscodeResponse
-            if (typeof payload.instructorPasscode === 'string' && payload.instructorPasscode.length > 0 && !isCancelled) {
-              clearEmbeddedManagerTokenFromUrl()
-              setInstructorPasscode(payload.instructorPasscode)
-              setPersistentRecoverySourceUrl(null)
-              setIsPasscodeReady(true)
-              return
-            }
-          }
-        } catch {
-          // Fall through to normal authenticated recovery.
-        }
+      if (embeddedManagerPasscodeExchange.isResolving) {
+        return
+      }
+      if (embeddedManagerPasscodeExchange.passcode) {
+        setInstructorPasscode(embeddedManagerPasscodeExchange.passcode)
+        setPersistentRecoverySourceUrl(null)
+        setIsPasscodeReady(true)
+        return
       }
 
       const bootstrap = resolveBootstrapInstructorPasscode({
@@ -771,7 +755,14 @@ export default function VideoSyncManager() {
     return () => {
       isCancelled = true
     }
-  }, [embeddedManagerToken, location.pathname, location.search, navigate, sessionId])
+  }, [
+    embeddedManagerPasscodeExchange.isResolving,
+    embeddedManagerPasscodeExchange.passcode,
+    location.pathname,
+    location.search,
+    navigate,
+    sessionId,
+  ])
 
   const handleEnvelope = useCallback((envelope: VideoSyncWsEnvelope) => {
     if (envelope.type === 'state-update' || envelope.type === 'state-snapshot' || envelope.type === 'heartbeat') {

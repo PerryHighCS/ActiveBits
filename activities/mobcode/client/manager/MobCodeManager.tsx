@@ -1,12 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useParams } from 'react-router-dom'
 import SessionHeader from '@src/components/common/SessionHeader'
-import {
-  clearEmbeddedManagerTokenFromUrl,
-  readEmbeddedManagerToken,
-} from '@src/components/common/embeddedManagerBootstrap'
 import VirtualFileExplorer from '@src/components/common/VirtualFileExplorer'
 import type { VirtualFileEntry } from '@src/components/common/virtualFileExplorerTypes'
+import { useEmbeddedManagerPasscodeExchange } from '@src/hooks/useEmbeddedManagerPasscodeExchange'
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
 import type {
   MobCodeMessageType,
@@ -95,11 +92,16 @@ export default function MobCodeManager() {
   const { sessionId } = useParams()
   const encodedSessionId = sessionId ? encodeURIComponent(sessionId) : ''
   const location = useLocation()
-  const embeddedManagerToken = readEmbeddedManagerToken(location.search)
-  const [instructorPasscode, setInstructorPasscode] = useState(() => resolveMobCodeInstructorPasscode({
+  const fallbackInstructorPasscode = useMemo(() => resolveMobCodeInstructorPasscode({
     sessionId,
     locationState: location.state,
-  }))
+  }), [location.state, sessionId])
+  const embeddedManagerPasscodeExchange = useEmbeddedManagerPasscodeExchange({
+    sessionId,
+    search: location.search,
+    enabled: !fallbackInstructorPasscode,
+  })
+  const [instructorPasscode, setInstructorPasscode] = useState(fallbackInstructorPasscode)
   const canEdit = instructorPasscode.length > 0
   const [files, setFiles] = useState<Record<string, string>>({})
   const [activeFile, setActiveFile] = useState('')
@@ -123,44 +125,19 @@ export default function MobCodeManager() {
   const lastPresenceSyncAtRef = useRef(0)
 
   useEffect(() => {
-    const fallbackPasscode = resolveMobCodeInstructorPasscode({ sessionId, locationState: location.state })
-    if (!sessionId || !embeddedManagerToken) {
-      setInstructorPasscode(fallbackPasscode)
+    if (embeddedManagerPasscodeExchange.isResolving) {
       return
     }
-
-    let cancelled = false
-    void (async () => {
-      // Let React StrictMode's setup/cleanup pass cancel before consuming the single-use token.
-      await Promise.resolve()
-      if (cancelled) {
-        return
-      }
-      try {
-        const response = await fetch(
-          `/api/syncdeck/embedded-manager-passcode?sessionId=${encodeURIComponent(sessionId)}&token=${encodeURIComponent(embeddedManagerToken)}`,
-          { credentials: 'same-origin', cache: 'no-store' },
-        )
-        const payload = response.ok ? await response.json() as { instructorPasscode?: unknown } : null
-        const passcode = typeof payload?.instructorPasscode === 'string' ? payload.instructorPasscode.trim() : ''
-        if (!cancelled) {
-          if (passcode) {
-            clearEmbeddedManagerTokenFromUrl()
-          }
-          setInstructorPasscode(passcode || fallbackPasscode)
-        }
-      } catch (error) {
-        console.error('Failed to exchange embedded manager token:', error)
-        if (!cancelled) {
-          setInstructorPasscode(fallbackPasscode)
-        }
-      }
-    })()
-
-    return () => {
-      cancelled = true
+    if (embeddedManagerPasscodeExchange.error !== null) {
+      console.error('Failed to exchange embedded manager token:', embeddedManagerPasscodeExchange.error)
     }
-  }, [embeddedManagerToken, location.state, sessionId])
+    setInstructorPasscode(embeddedManagerPasscodeExchange.passcode || fallbackInstructorPasscode)
+  }, [
+    embeddedManagerPasscodeExchange.error,
+    embeddedManagerPasscodeExchange.isResolving,
+    embeddedManagerPasscodeExchange.passcode,
+    fallbackInstructorPasscode,
+  ])
 
   useEffect(() => {
     latestStateRef.current = createStateSnapshot(files, activeFile)

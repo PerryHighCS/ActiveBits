@@ -26,11 +26,11 @@ Document API and data-shape assumptions that must stay compatible over time.
 
 - Date: 2026-07-12
 - Surface: SyncDeck embedded instructor managers
-- Contract: Credentialed embedded manager URLs carry `embeddedManagerToken`; client activities must parse it through `readEmbeddedManagerToken(search)` in `client/src/components/common/embeddedManagerBootstrap.ts`. The shared parser returns only a trimmed, non-empty token or `null`.
-- Compatibility constraints: The token remains an opaque short-lived server-issued recovery credential. Activity-specific code owns token exchange and passcode recovery, but must not duplicate URL parsing or broaden the accepted input.
-- Validation rules: The shared parser test covers valid, whitespace-padded, blank, and absent query values. VideoSync, Resonance, Postboard, and MobCode import the same parser.
-- Evidence (schema/tests/path): `client/src/components/common/embeddedManagerBootstrap.ts`; `client/src/components/common/embeddedManagerBootstrap.test.ts`; `activities/video-sync/client/manager/VideoSyncManager.tsx`; `activities/resonance/client/manager/ResonanceManager.tsx`; `activities/postboard/client/manager/PostboardManager.tsx`; `activities/mobcode/client/manager/MobCodeManager.tsx`
-- Follow-up action: New credentialed SyncDeck embedded activities should reuse this parser and add activity-owned token-exchange tests.
+- Contract: Credentialed embedded manager URLs carry `embeddedManagerToken`. `useEmbeddedManagerPasscodeExchange` in `client/src/hooks/useEmbeddedManagerPasscodeExchange.ts` parses the opaque token, performs the no-store same-origin exchange after the StrictMode-safe defer, clears a successfully consumed token from the URL, and exposes passcode/resolution state to the activity.
+- Compatibility constraints: Activities retain ownership of their local/cookie/bootstrap fallback credentials and manager UI; they must not duplicate the exchange request, URL cleanup, or URL parsing. The token remains a short-lived server-issued recovery credential and must not be broadened into an activity API credential.
+- Validation rules: The parser and exchange-helper tests cover token normalization, query cleanup, request encoding, no-store credentials, and invalid responses. VideoSync, Resonance, Postboard, and MobCode use the hook; the shared Playwright spec verifies every manager in a real iframe.
+- Evidence (schema/tests/path): `client/src/components/common/embeddedManagerBootstrap.ts`; `client/src/components/common/embeddedManagerBootstrap.test.ts`; `client/src/hooks/useEmbeddedManagerPasscodeExchange.ts`; `client/src/hooks/useEmbeddedManagerPasscodeExchange.test.ts`; `activities/syncdeck/playwright/embedded-manager-bootstrap.spec.ts`
+- Follow-up action: New credentialed SyncDeck embedded activities should use this hook and add an activity-specific browser readiness assertion.
 - Owner: Codex
 
 - Date: 2026-07-11

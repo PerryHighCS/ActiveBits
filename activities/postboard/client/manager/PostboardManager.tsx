@@ -1,11 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { useLocation, useParams } from 'react-router-dom'
 import SessionHeader from '@src/components/common/SessionHeader'
-import {
-  clearEmbeddedManagerTokenFromUrl,
-  readEmbeddedManagerToken,
-} from '@src/components/common/embeddedManagerBootstrap'
 import Button from '@src/components/ui/Button'
+import { useEmbeddedManagerPasscodeExchange } from '@src/hooks/useEmbeddedManagerPasscodeExchange'
 import InstructorFeedbackControls from '../../../shared/client/components/InstructorFeedbackControls.js'
 import NoteStyleSelect from '../../../shared/client/components/NoteStyleSelect.js'
 import ReactionSummary from '../../../shared/client/components/ReactionSummary.js'
@@ -96,11 +93,19 @@ export function getInstructorBoardCardClassName(
 export default function PostboardManager(): React.JSX.Element {
   const { sessionId } = useParams<{ sessionId?: string }>()
   const location = useLocation()
-  const embeddedManagerToken = readEmbeddedManagerToken(location.search)
-  const [instructorPasscode, setInstructorPasscode] = useState(() => readInstructorPasscode(sessionId, location.state))
-  const [isResolvingCredentials, setIsResolvingCredentials] = useState(() => (
-    Boolean(sessionId && embeddedManagerToken && !readInstructorPasscode(sessionId, location.state))
-  ))
+  const fallbackInstructorPasscode = useMemo(
+    () => readInstructorPasscode(sessionId, location.state),
+    [location.state, sessionId],
+  )
+  const embeddedManagerPasscodeExchange = useEmbeddedManagerPasscodeExchange({
+    sessionId,
+    search: location.search,
+    enabled: !fallbackInstructorPasscode,
+  })
+  const [instructorPasscode, setInstructorPasscode] = useState(fallbackInstructorPasscode)
+  const [isResolvingCredentials, setIsResolvingCredentials] = useState(
+    embeddedManagerPasscodeExchange.isResolving,
+  )
   const [snapshot, setSnapshot] = useState<PostboardInstructorSnapshot | null>(null)
   const [promptDraft, setPromptDraft] = useState('')
   const [autoApprove, setAutoApprove] = useState(false)
@@ -120,8 +125,7 @@ export default function PostboardManager(): React.JSX.Element {
   const launchDefaults = useMemo(() => getLaunchDefaults(location.search), [location.search])
 
   useEffect(() => {
-    setInstructorPasscode(readInstructorPasscode(sessionId, location.state))
-    setIsResolvingCredentials(Boolean(sessionId && embeddedManagerToken && !readInstructorPasscode(sessionId, location.state)))
+    setInstructorPasscode(fallbackInstructorPasscode)
     setSnapshot(null)
     setPromptDraft('')
     setAutoApprove(false)
@@ -130,50 +134,19 @@ export default function PostboardManager(): React.JSX.Element {
     autoApproveDirtyRef.current = false
     setupInitializedRef.current = false
     fetchRequestIdRef.current += 1
-  }, [embeddedManagerToken, location.state, sessionId])
+  }, [fallbackInstructorPasscode, location.state, sessionId])
 
   useEffect(() => {
-    const fallbackPasscode = readInstructorPasscode(sessionId, location.state)
-    if (!sessionId || !embeddedManagerToken) {
-      setInstructorPasscode(fallbackPasscode)
-      setIsResolvingCredentials(false)
+    setIsResolvingCredentials(embeddedManagerPasscodeExchange.isResolving)
+    if (embeddedManagerPasscodeExchange.isResolving) {
       return
     }
-
-    let cancelled = false
-    setIsResolvingCredentials(true)
-    void (async () => {
-      // Let React StrictMode's setup/cleanup pass cancel before consuming the single-use token.
-      await Promise.resolve()
-      if (cancelled) {
-        return
-      }
-      try {
-        const response = await fetch(
-          `/api/syncdeck/embedded-manager-passcode?sessionId=${encodeURIComponent(sessionId)}&token=${encodeURIComponent(embeddedManagerToken)}`,
-          { credentials: 'same-origin', cache: 'no-store' },
-        )
-        const payload = response.ok ? await response.json() as { instructorPasscode?: unknown } : null
-        const passcode = typeof payload?.instructorPasscode === 'string' ? payload.instructorPasscode.trim() : ''
-        if (!cancelled) {
-          if (passcode) {
-            clearEmbeddedManagerTokenFromUrl()
-          }
-          setInstructorPasscode(passcode || fallbackPasscode)
-          setIsResolvingCredentials(false)
-        }
-      } catch {
-        if (!cancelled) {
-          setInstructorPasscode(fallbackPasscode)
-          setIsResolvingCredentials(false)
-        }
-      }
-    })()
-
-    return () => {
-      cancelled = true
-    }
-  }, [embeddedManagerToken, location.state, sessionId])
+    setInstructorPasscode(embeddedManagerPasscodeExchange.passcode || fallbackInstructorPasscode)
+  }, [
+    embeddedManagerPasscodeExchange.isResolving,
+    embeddedManagerPasscodeExchange.passcode,
+    fallbackInstructorPasscode,
+  ])
 
   const fetchState = useCallback(async () => {
     if (!sessionId || !instructorPasscode) return false

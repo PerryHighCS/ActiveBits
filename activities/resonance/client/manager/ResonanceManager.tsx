@@ -1,11 +1,8 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { consumeCreateSessionBootstrapPayload } from '@src/components/common/manageDashboardUtils'
-import {
-  clearEmbeddedManagerTokenFromUrl,
-  readEmbeddedManagerToken,
-} from '@src/components/common/embeddedManagerBootstrap'
 import { isEmbeddedChildSessionId } from '@src/components/common/sessionHeaderUtils'
+import { useEmbeddedManagerPasscodeExchange } from '@src/hooks/useEmbeddedManagerPasscodeExchange'
 import type { InstructorAnnotation, Question, ResonancePresentationMode, StagedRunState } from '../../shared/types.js'
 import { useInstructorState } from '../hooks/useInstructorState.js'
 import ResponseViewer from './ResponseViewer.js'
@@ -277,7 +274,12 @@ export default function ResonanceManager() {
   const { sessionId } = useParams<{ sessionId?: string }>()
   const location = useLocation()
   const navigate = useNavigate()
-  const embeddedManagerToken = readEmbeddedManagerToken(location.search)
+  const cachedPasscode = sessionId ? getPasscode(sessionId) : null
+  const embeddedManagerPasscodeExchange = useEmbeddedManagerPasscodeExchange({
+    sessionId,
+    search: location.search,
+    enabled: cachedPasscode === null,
+  })
   const [passcode, setPasscode] = useState<string | null>(null)
   const [isResolvingPasscode, setIsResolvingPasscode] = useState(true)
   const [isEndingSession, setIsEndingSession] = useState(false)
@@ -312,32 +314,13 @@ export default function ResonanceManager() {
     setIsResolvingPasscode(true)
 
     const recoverPasscode = async () => {
-      if (embeddedManagerToken) {
-        // Let React StrictMode's setup/cleanup pass cancel before consuming the single-use token.
-        await Promise.resolve()
-        if (isCancelled) {
-          return
-        }
-        try {
-          const response = await fetch(
-            `/api/syncdeck/embedded-manager-passcode?sessionId=${encodeURIComponent(sessionId)}&token=${encodeURIComponent(embeddedManagerToken)}`,
-            { credentials: 'same-origin', cache: 'no-store' },
-          )
-          if (response.ok) {
-            const payload = await response.json() as { instructorPasscode?: unknown }
-            const recoveredPasscode = typeof payload.instructorPasscode === 'string' && payload.instructorPasscode.trim().length > 0
-              ? payload.instructorPasscode.trim()
-              : null
-            if (recoveredPasscode !== null && !isCancelled) {
-              clearEmbeddedManagerTokenFromUrl()
-              setPasscode(recoveredPasscode)
-              setIsResolvingPasscode(false)
-              return
-            }
-          }
-        } catch {
-          // Fall through to normal cookie-backed instructor recovery.
-        }
+      if (embeddedManagerPasscodeExchange.isResolving) {
+        return
+      }
+      if (embeddedManagerPasscodeExchange.passcode) {
+        setPasscode(embeddedManagerPasscodeExchange.passcode)
+        setIsResolvingPasscode(false)
+        return
       }
 
       try {
@@ -378,7 +361,11 @@ export default function ResonanceManager() {
     return () => {
       isCancelled = true
     }
-  }, [embeddedManagerToken, sessionId])
+  }, [
+    embeddedManagerPasscodeExchange.isResolving,
+    embeddedManagerPasscodeExchange.passcode,
+    sessionId,
+  ])
 
   const { snapshot, loading, error, refresh } = useInstructorState(
     sessionId ?? null,
