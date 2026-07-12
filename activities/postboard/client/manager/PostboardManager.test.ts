@@ -52,16 +52,16 @@ void test('reorderPostIds leaves the order unchanged for no-op or invalid drags'
   )
 })
 
-void test('getInstructorBoardCardClassName only reserves flag space for flagged posts', () => {
+void test('getInstructorBoardCardClassName always reserves space for the flag toggle control', () => {
+  // The flag toggle renders in every card corner regardless of flagged state,
+  // so the header must always reserve space for it to avoid overlapping the title.
   const unflaggedClassName = getInstructorBoardCardClassName(
     { id: 'post-1', status: 'approved', styleId: 'default' },
-    {},
   )
-  assert.ok(!unflaggedClassName.includes('postboard-card-with-flag'))
+  assert.ok(unflaggedClassName.includes('postboard-card-with-flag'))
 
   const flaggedClassName = getInstructorBoardCardClassName(
     { id: 'post-1', status: 'approved', styleId: 'default' },
-    { 'post-1': [{ id: 'flag-1', postId: 'post-1', createdAt: 1, flaggedBy: 'instructor' }] },
   )
   assert.ok(flaggedClassName.includes('postboard-card-with-flag'))
 })
@@ -69,7 +69,6 @@ void test('getInstructorBoardCardClassName only reserves flag space for flagged 
 void test('getInstructorBoardCardClassName includes faded and drag states', () => {
   const className = getInstructorBoardCardClassName(
     { id: 'post-1', status: 'deleted', styleId: 'default' },
-    {},
     { isDragging: true, isDragOver: true },
   )
 

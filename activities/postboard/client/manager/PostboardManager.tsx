@@ -64,14 +64,14 @@ export function reorderPostIds(currentIds: string[], draggedId: string, targetId
 
 export function getInstructorBoardCardClassName(
   post: Pick<PostboardInstructorSnapshot['posts'][number], 'id' | 'status' | 'styleId'>,
-  flags: PostboardInstructorSnapshot['flags'],
   options: { isDragging?: boolean; isDragOver?: boolean } = {},
 ): string {
   const isFaded = post.status === 'rejected' || post.status === 'deleted'
-  const isFlagged = (flags[post.id]?.length ?? 0) > 0
   return [
     'postboard-card',
-    isFlagged ? 'postboard-card-with-flag' : '',
+    // The flag toggle control is always rendered in the card corner (flagged or not),
+    // so the header must always reserve space for it to avoid overlapping the title.
+    'postboard-card-with-flag',
     getNoteStyleClassName(post.styleId),
     isFaded ? 'postboard-card-rejected' : '',
     options.isDragging ? 'postboard-card-dragging' : '',
@@ -398,7 +398,7 @@ export default function PostboardManager(): React.JSX.Element {
                 return (
                 <article
                   key={post.id}
-                  className={getInstructorBoardCardClassName(post, snapshot?.flags ?? {}, {
+                  className={getInstructorBoardCardClassName(post, {
                     isDragging: draggedPostId === post.id,
                     isDragOver: dragOverPostId === post.id && draggedPostId !== post.id,
                   })}
