@@ -127,7 +127,7 @@ export default function PostboardManager(): React.JSX.Element {
     autoApproveDirtyRef.current = false
     setupInitializedRef.current = false
     fetchRequestIdRef.current += 1
-  }, [location.state, sessionId])
+  }, [embeddedManagerToken, location.state, sessionId])
 
   useEffect(() => {
     const fallbackPasscode = readInstructorPasscode(sessionId, location.state)
