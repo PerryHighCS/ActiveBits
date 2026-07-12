@@ -14,14 +14,6 @@ Use this log for durable findings that future contributors and agents should reu
 
 ## Discoveries
 
-- Date: 2026-07-11
-- Area: client | activities | syncdeck | reporting
-- Discovery: SyncDeck's running activities panel derives report contribution indicators from `GET /api/syncdeck/:sessionId/report-manifest` rather than from client-side activity metadata. Each embedded activity can display included, unsupported, unavailable, pending, or temporary error states based on the parent report manifest.
-- Why it matters: The manifest is the authoritative source because structured report support is registered server-side. Future report UX should reuse the manifest path instead of trying to infer support from `reportEndpoint` or client activity config. The report preview dialog also uses this manifest so its totals and per-activity rows stay aligned with the final downloaded report.
-- Evidence: `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/client/manager/SyncDeckManager.test.tsx`; `.agent/plans/activity-report-generation.md`
-- Follow-up action: If report preview is added, build it from the same manifest fetch/cache so status indicators and preview content do not drift.
-- Owner: Codex
-
 - Date: 2026-07-10
 - Area: activities | postboard
 - Discovery: Postboard is registered as a production standalone/permalink-capable activity under `activities/postboard`, with required waiting-room `displayName`, generic `deepLinkOptions` for `prompt` and `autoApprove`, manager passcode bootstrap under `postboard_instructor_${sessionId}`, server-side instructor/student snapshot builders, and internal per-user reaction state that is exposed to students only as counts.

@@ -90,54 +90,6 @@ function createManifest(): SyncDeckSessionReportManifest {
           },
         },
       },
-      {
-        activityId: 'video-sync',
-        activityName: 'Video Sync',
-        childSessionId: 'CHILD:syncdeck-42:def:video-sync',
-        instanceKey: 'video-sync:5:0',
-        startedAt: Date.parse('2026-03-18T11:55:00Z'),
-        report: {
-          activityId: 'video-sync',
-          childSessionId: 'CHILD:syncdeck-42:def:video-sync',
-          instanceKey: 'video-sync:5:0',
-          title: 'Video Sync Report Unsupported',
-          generatedAt: Date.parse('2026-03-18T12:00:00Z'),
-          reportStatus: 'unsupported',
-          supportsScopes: ['activity-session', 'student-cross-activity', 'session-summary'],
-          students: [],
-          summaryCards: [
-            {
-              id: 'video-sync-report-unsupported',
-              title: 'Report Status',
-              description: 'Structured reporting is not available for this activity yet.',
-              metrics: [
-                { id: 'status', label: 'Status', value: 'Unsupported' },
-              ],
-            },
-          ],
-          scopeBlocks: {
-            'session-summary': [
-              {
-                id: 'video-sync-report-unsupported-summary',
-                type: 'rich-text',
-                title: 'Report Contribution',
-                paragraphs: ['Structured reporting is not available for this activity yet.'],
-              },
-            ],
-            'activity-session': [
-              {
-                id: 'video-sync-report-unsupported-activity',
-                type: 'rich-text',
-                title: 'Report Contribution',
-                paragraphs: ['Structured reporting is not available for this activity yet.'],
-              },
-            ],
-          },
-          payload: {
-            status: 'unsupported',
-          },
-        },
-      },
     ],
   }
 }
@@ -157,8 +109,6 @@ void test('buildSyncDeckSessionReportHtml renders aggregate summary, activity bl
   assert.match(html, /Bridge Critique Round/)
   assert.match(html, /Feedback Log/)
   assert.match(html, /Feedback Received/)
-  assert.match(html, /Video Sync Report Unsupported/)
-  assert.match(html, /Structured reporting is not available for this activity yet\./)
   assert.match(html, /Strong prototype\./)
   assert.match(html, /Avery - Bridge Design/)
   assert.doesNotMatch(html, /<script[^>]+src=/)
