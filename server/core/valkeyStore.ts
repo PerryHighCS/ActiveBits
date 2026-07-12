@@ -150,12 +150,7 @@ export class ValkeySessionStore {
                 end
                 session.data[field] = nil
                 local updated = cjson.encode(session)
-                local ttl = redis.call('PTTL', key)
-                if ttl > 0 then
-                    redis.call('SET', key, updated, 'PX', ttl)
-                else
-                    redis.call('SET', key, updated)
-                end
+                redis.call('SET', key, updated, 'KEEPTTL')
                 return updated
             `
       const result = await this.client.eval(script, 1, `session:${id}`, field, token)
