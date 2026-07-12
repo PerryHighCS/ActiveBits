@@ -900,6 +900,20 @@ export function resolveCompletedEmbeddedBootstrapChildSessionIds(params: {
   return [...completedIds]
 }
 
+export function resolveEmbeddedBootstrapManagerCredentials(payload: {
+  managerBootstrap?: unknown
+  managerEntryToken?: unknown
+}): { managerBootstrap: Record<string, unknown>; managerEntryToken: string } | null {
+  if (!isPlainObject(payload.managerBootstrap)) {
+    return null
+  }
+  const managerEntryToken = typeof payload.managerEntryToken === 'string' ? payload.managerEntryToken.trim() : ''
+  if (managerEntryToken.length === 0) {
+    return null
+  }
+  return { managerBootstrap: payload.managerBootstrap, managerEntryToken }
+}
+
 export function advanceEmbeddedManagerRenderNonce(
   current: Record<string, number>,
   childSessionId: string,
@@ -2873,30 +2887,24 @@ const SyncDeckManager: FC = () => {
           typeof payload.childSessionId === 'string' && payload.childSessionId.trim().length > 0
             ? payload.childSessionId.trim()
             : request.childSessionId
-        const completedChildSessionIds = resolveCompletedEmbeddedBootstrapChildSessionIds({
-          requestChildSessionId: request.childSessionId,
-          resolvedChildSessionId,
-        })
-
-        for (const completedChildSessionId of completedChildSessionIds) {
-          completedEmbeddedBootstrapChildSessionIdsRef.current.add(completedChildSessionId)
-        }
-
-        if (!isPlainObject(payload.managerBootstrap)) {
-          return false
-        }
-
-        const managerEntryToken = typeof payload.managerEntryToken === 'string' ? payload.managerEntryToken.trim() : ''
-        if (managerEntryToken.length === 0) {
+        const managerCredentials = resolveEmbeddedBootstrapManagerCredentials(payload)
+        if (!managerCredentials) {
           return true
         }
 
-        storeCreateSessionBootstrapPayload(request.activityId, resolvedChildSessionId, payload.managerBootstrap)
-        if (cacheEmbeddedManagerEntryToken(resolvedChildSessionId, managerEntryToken)) {
+        storeCreateSessionBootstrapPayload(request.activityId, resolvedChildSessionId, managerCredentials.managerBootstrap)
+        if (cacheEmbeddedManagerEntryToken(resolvedChildSessionId, managerCredentials.managerEntryToken)) {
           setLoadedEmbeddedManagerInstanceKeys((current) => clearLoadedEmbeddedManagerInstanceKey(
             current,
             request.instanceKey,
           ))
+        }
+        const completedChildSessionIds = resolveCompletedEmbeddedBootstrapChildSessionIds({
+          requestChildSessionId: request.childSessionId,
+          resolvedChildSessionId,
+        })
+        for (const completedChildSessionId of completedChildSessionIds) {
+          completedEmbeddedBootstrapChildSessionIdsRef.current.add(completedChildSessionId)
         }
         return false
       } catch {

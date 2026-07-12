@@ -47,6 +47,7 @@ import { processManagerBundlePreloadRequests } from './SyncDeckManager.js'
 import { processManagerPreloadRequests } from './SyncDeckManager.js'
 import { runEmbeddedStartWithPendingRetry } from './SyncDeckManager.js'
 import { resolveCompletedEmbeddedBootstrapChildSessionIds } from './SyncDeckManager.js'
+import { resolveEmbeddedBootstrapManagerCredentials } from './SyncDeckManager.js'
 import { advanceEmbeddedManagerRenderNonce } from './SyncDeckManager.js'
 import { clearLoadedEmbeddedManagerInstanceKey } from './SyncDeckManager.js'
 import { resolveEmbeddedBootstrapBackfillRetryDelayMs } from './SyncDeckManager.js'
@@ -787,6 +788,21 @@ void test('resolveCompletedEmbeddedBootstrapChildSessionIds marks both stale loc
       resolvedChildSessionId: 'same-child-id',
     }),
     ['same-child-id'],
+  )
+})
+
+void test('resolveEmbeddedBootstrapManagerCredentials requires both bootstrap data and an entry token', () => {
+  assert.equal(resolveEmbeddedBootstrapManagerCredentials({ managerBootstrap: {} }), null)
+  assert.equal(resolveEmbeddedBootstrapManagerCredentials({ managerEntryToken: 'token-1' }), null)
+  assert.deepEqual(
+    resolveEmbeddedBootstrapManagerCredentials({
+      managerBootstrap: { instructorPasscode: 'teacher-pass' },
+      managerEntryToken: ' token-1 ',
+    }),
+    {
+      managerBootstrap: { instructorPasscode: 'teacher-pass' },
+      managerEntryToken: 'token-1',
+    },
   )
 })
 
