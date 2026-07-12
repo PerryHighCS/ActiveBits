@@ -4414,7 +4414,8 @@ const SyncDeckManager: FC = () => {
               disabled={isReportPreviewLoading || !instructorPasscode}
               className="px-3 py-2 rounded border border-gray-300 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
               aria-haspopup="dialog"
-              aria-controls={isReportPreviewOpen ? 'syncdeck-report-preview-dialog' : undefined}
+              aria-expanded={isReportPreviewOpen}
+              aria-controls="syncdeck-report-preview-dialog"
             >
               {isReportPreviewLoading ? 'Loading preview…' : 'Preview Report'}
             </button>
