@@ -30,3 +30,26 @@ void test('session data tokens are consumed only once under concurrent requests'
   assert.equal(consumedSession?.data.oneTimeToken, undefined)
   assert.ok((consumedSession?.lastActivity ?? 0) > 1)
 })
+
+void test('consuming an embedded child token refreshes its parent session', async (t) => {
+  const sessions = createSessionStore(null, 1_000)
+  t.after(async () => {
+    await sessions.close()
+  })
+  const parent: SessionRecord = {
+    id: 'parent-session', type: 'syncdeck', created: Date.now(), lastActivity: 1, data: {},
+  }
+  const child: SessionRecord = {
+    id: 'child-session', type: 'video-sync', created: Date.now(), lastActivity: 1,
+    data: { embeddedParentSessionId: parent.id, oneTimeToken: { value: 'token-value' } },
+  }
+  await sessions.set(parent.id, parent)
+  await sessions.set(child.id, child)
+  const consumeSessionDataToken = sessions.consumeSessionDataToken
+  assert.ok(consumeSessionDataToken)
+
+  await consumeSessionDataToken.call(sessions, child.id, 'oneTimeToken', 'token-value')
+
+  const refreshedParent = await sessions.get(parent.id)
+  assert.ok((refreshedParent?.lastActivity ?? 0) > 1)
+})

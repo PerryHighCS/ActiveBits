@@ -686,10 +686,6 @@ export default function VideoSyncManager() {
         setIsPasscodeReady(true)
         return
       }
-      if (embeddedManagerPasscodeExchange.error !== null) {
-        console.error('Failed to exchange embedded manager token:', embeddedManagerPasscodeExchange.error)
-      }
-
       const bootstrap = resolveBootstrapInstructorPasscode({
         locationState: location.state,
         sessionId,
@@ -761,7 +757,6 @@ export default function VideoSyncManager() {
   }, [
     embeddedManagerPasscodeExchange.isResolving,
     embeddedManagerPasscodeExchange.passcode,
-    embeddedManagerPasscodeExchange.error,
     location.pathname,
     location.search,
     navigate,

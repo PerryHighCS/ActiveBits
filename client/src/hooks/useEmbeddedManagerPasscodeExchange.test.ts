@@ -21,7 +21,7 @@ function ExchangeProbe({ onState }: { onState: (state: ExchangeState) => void })
   })
   useEffect(() => {
     onState(state)
-  }, [onState, state.error, state.isResolving, state.passcode])
+  }, [onState, state])
   return null
 }
 

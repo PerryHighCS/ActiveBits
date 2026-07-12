@@ -764,14 +764,9 @@ void test('resolveEmbeddedBootstrapBackfillRequests only returns child sessions 
       },
       completedChildSessionIds: new Set(['child-video']),
       pendingChildSessionIds: new Set(['child-raffle']),
+      failedChildSessionIds: new Set(['child-resonance']),
     }),
-    [
-      {
-        activityId: 'resonance',
-        childSessionId: 'child-resonance',
-        instanceKey: 'resonance:1:0',
-      },
-    ],
+    [],
   )
 })
 

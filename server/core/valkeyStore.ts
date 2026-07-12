@@ -158,7 +158,14 @@ export class ValkeySessionStore {
       const result = await this.client.eval(script, 1, `session:${id}`, field, token, Date.now())
       return typeof result === 'string' ? JSON.parse(result) as SessionLike : null
     } catch (err) {
-      console.error(`Failed to consume session token ${id}:${field}:`, err)
+      console.error(JSON.stringify({
+        activity: 'session-store',
+        component: 'valkey-store',
+        event: 'consume-session-data-token-failed',
+        sessionId: id,
+        field,
+        error: err instanceof Error ? { name: err.name, message: err.message } : String(err),
+      }))
       return null
     }
   }

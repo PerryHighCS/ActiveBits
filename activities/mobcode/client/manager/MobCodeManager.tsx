@@ -88,6 +88,26 @@ export function createMobCodeManagerAuthMessage(
   })
 }
 
+export function resolveMobCodeManagerAccessBanner(params: {
+  instructorPasscode: string
+  isResolving: boolean
+}): 'loading' | 'missing' | null {
+  if (params.instructorPasscode) {
+    return null
+  }
+  return params.isResolving ? 'loading' : 'missing'
+}
+
+export function resolveOpenMobCodeManagerAuthMessage(params: {
+  sessionId: string | undefined
+  instructorPasscode: string
+  readyState: number | undefined
+}): string | null {
+  return params.readyState === 1
+    ? createMobCodeManagerAuthMessage(params.sessionId, params.instructorPasscode)
+    : null
+}
+
 export default function MobCodeManager() {
   const { sessionId } = useParams()
   const encodedSessionId = sessionId ? encodeURIComponent(sessionId) : ''
@@ -102,6 +122,10 @@ export default function MobCodeManager() {
   })
   const [instructorPasscode, setInstructorPasscode] = useState(fallbackInstructorPasscode)
   const canEdit = instructorPasscode.length > 0
+  const instructorAccessBanner = resolveMobCodeManagerAccessBanner({
+    instructorPasscode,
+    isResolving: embeddedManagerPasscodeExchange.isResolving,
+  })
   const [files, setFiles] = useState<Record<string, string>>({})
   const [activeFile, setActiveFile] = useState('')
   const [theme, setTheme] = useState<MobCodeThemeId>(() => getThemeFromCookie())
@@ -127,12 +151,8 @@ export default function MobCodeManager() {
     if (embeddedManagerPasscodeExchange.isResolving) {
       return
     }
-    if (embeddedManagerPasscodeExchange.error !== null) {
-      console.error('Failed to exchange embedded manager token:', embeddedManagerPasscodeExchange.error)
-    }
     setInstructorPasscode(embeddedManagerPasscodeExchange.passcode || fallbackInstructorPasscode)
   }, [
-    embeddedManagerPasscodeExchange.error,
     embeddedManagerPasscodeExchange.isResolving,
     embeddedManagerPasscodeExchange.passcode,
     fallbackInstructorPasscode,
@@ -194,14 +214,15 @@ export default function MobCodeManager() {
 
   useEffect(() => {
     const socket = socketRef.current
-    if (!sessionId || !instructorPasscode || !socket || socket.readyState !== WebSocket.OPEN) {
+    const authMessage = resolveOpenMobCodeManagerAuthMessage({
+      sessionId,
+      instructorPasscode,
+      readyState: socket?.readyState,
+    })
+    if (!socket || !authMessage) {
       return
     }
-
-    const authMessage = createMobCodeManagerAuthMessage(sessionId, instructorPasscode)
-    if (authMessage) {
-      socket.send(authMessage)
-    }
+    socket.send(authMessage)
   }, [instructorPasscode, sessionId, socketRef])
 
   const persistState = useCallback(
@@ -516,7 +537,7 @@ export default function MobCodeManager() {
           </div>
         )}
       />
-      {!instructorPasscode && embeddedManagerPasscodeExchange.isResolving && (
+      {instructorAccessBanner === 'loading' && (
         <div
           className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800"
           role="status"
@@ -525,7 +546,7 @@ export default function MobCodeManager() {
           Loading instructor access…
         </div>
       )}
-      {!instructorPasscode && !embeddedManagerPasscodeExchange.isResolving && (
+      {instructorAccessBanner === 'missing' && (
         <div
           className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800"
           role="alert"

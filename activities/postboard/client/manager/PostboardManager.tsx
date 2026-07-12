@@ -140,12 +140,8 @@ export default function PostboardManager(): React.JSX.Element {
     if (embeddedManagerPasscodeExchange.isResolving) {
       return
     }
-    if (embeddedManagerPasscodeExchange.error !== null) {
-      console.error('Failed to exchange embedded manager token:', embeddedManagerPasscodeExchange.error)
-    }
     setInstructorPasscode(embeddedManagerPasscodeExchange.passcode || fallbackInstructorPasscode)
   }, [
-    embeddedManagerPasscodeExchange.error,
     embeddedManagerPasscodeExchange.isResolving,
     embeddedManagerPasscodeExchange.passcode,
     fallbackInstructorPasscode,

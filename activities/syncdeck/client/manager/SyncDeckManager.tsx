@@ -864,6 +864,7 @@ export function resolveEmbeddedBootstrapBackfillRequests(params: {
   embeddedActivities: SyncDeckEmbeddedActivitiesMap
   completedChildSessionIds: ReadonlySet<string>
   pendingChildSessionIds: ReadonlySet<string>
+  failedChildSessionIds?: ReadonlySet<string>
 }): SyncDeckEmbeddedBootstrapBackfillRequest[] {
   const requests: SyncDeckEmbeddedBootstrapBackfillRequest[] = []
 
@@ -871,6 +872,7 @@ export function resolveEmbeddedBootstrapBackfillRequests(params: {
     if (
       params.completedChildSessionIds.has(record.childSessionId)
       || params.pendingChildSessionIds.has(record.childSessionId)
+      || params.failedChildSessionIds?.has(record.childSessionId)
     ) {
       continue
     }
@@ -2177,7 +2179,8 @@ const SyncDeckManager: FC = () => {
   const previouslyMountedEmbeddedManagerInstanceKeysRef = useRef<Set<string>>(new Set())
   const pendingEmbeddedBootstrapChildSessionIdsRef = useRef<Set<string>>(new Set())
   const embeddedBootstrapBackfillRetryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const embeddedBootstrapBackfillRetryAttemptRef = useRef(0)
+  const embeddedBootstrapBackfillRetryAttemptByChildSessionIdRef = useRef<Map<string, number>>(new Map())
+  const failedEmbeddedBootstrapChildSessionIdsRef = useRef<Set<string>>(new Set())
   const consumedRouterStatePasscodeRef = useRef<{ sessionId: string; instructorPasscode: string } | null>(null)
   const syncDebugEnabledRef = useRef(isSyncDeckDebugEnabled())
 
@@ -2702,7 +2705,8 @@ const SyncDeckManager: FC = () => {
   useEffect(() => {
     completedEmbeddedBootstrapChildSessionIdsRef.current.clear()
     pendingEmbeddedBootstrapChildSessionIdsRef.current.clear()
-    embeddedBootstrapBackfillRetryAttemptRef.current = 0
+    embeddedBootstrapBackfillRetryAttemptByChildSessionIdRef.current.clear()
+    failedEmbeddedBootstrapChildSessionIdsRef.current.clear()
     clearEmbeddedBootstrapBackfillRetryTimeout()
     setEmbeddedManagerRenderNonceByChildSessionId({})
     setFailedEmbeddedBootstrapChildSessionIds([])
@@ -2855,9 +2859,9 @@ const SyncDeckManager: FC = () => {
       embeddedActivities,
       completedChildSessionIds: completedEmbeddedBootstrapChildSessionIdsRef.current,
       pendingChildSessionIds: pendingEmbeddedBootstrapChildSessionIdsRef.current,
+      failedChildSessionIds: failedEmbeddedBootstrapChildSessionIdsRef.current,
     })
     if (requests.length === 0) {
-      embeddedBootstrapBackfillRetryAttemptRef.current = 0
       clearEmbeddedBootstrapBackfillRetryTimeout()
       return
     }
@@ -2925,16 +2929,48 @@ const SyncDeckManager: FC = () => {
         return
       }
 
-      if (results.some(Boolean)) {
-        const failedChildSessionIds = requests
-          .filter((_, index) => results[index])
-          .map((request) => request.childSessionId)
-        const retryAttemptCount = embeddedBootstrapBackfillRetryAttemptRef.current + 1
-        embeddedBootstrapBackfillRetryAttemptRef.current = retryAttemptCount
-        if (shouldShowEmbeddedBootstrapFailure(retryAttemptCount)) {
-          setFailedEmbeddedBootstrapChildSessionIds((current) => [...new Set([...current, ...failedChildSessionIds])])
-          return
+      const retryAttemptCounts = embeddedBootstrapBackfillRetryAttemptByChildSessionIdRef.current
+      const retryableRequests: SyncDeckEmbeddedBootstrapBackfillRequest[] = []
+      const newlyFailedChildSessionIds: string[] = []
+      const successfulChildSessionIds: string[] = []
+      for (const [index, request] of requests.entries()) {
+        if (!results[index]) {
+          retryAttemptCounts.delete(request.childSessionId)
+          successfulChildSessionIds.push(request.childSessionId)
+          continue
         }
+
+        const retryAttemptCount = (retryAttemptCounts.get(request.childSessionId) ?? 0) + 1
+        retryAttemptCounts.set(request.childSessionId, retryAttemptCount)
+        if (shouldShowEmbeddedBootstrapFailure(retryAttemptCount)) {
+          newlyFailedChildSessionIds.push(request.childSessionId)
+        } else {
+          retryableRequests.push(request)
+        }
+      }
+      if (newlyFailedChildSessionIds.length > 0 || successfulChildSessionIds.length > 0) {
+        for (const childSessionId of successfulChildSessionIds) {
+          failedEmbeddedBootstrapChildSessionIdsRef.current.delete(childSessionId)
+        }
+        for (const childSessionId of newlyFailedChildSessionIds) {
+          failedEmbeddedBootstrapChildSessionIdsRef.current.add(childSessionId)
+        }
+        setFailedEmbeddedBootstrapChildSessionIds((current) => {
+          const next = new Set(current)
+          for (const childSessionId of successfulChildSessionIds) {
+            next.delete(childSessionId)
+          }
+          for (const childSessionId of newlyFailedChildSessionIds) {
+            next.add(childSessionId)
+          }
+          return [...next]
+        })
+      }
+
+      if (retryableRequests.length > 0) {
+        const retryAttemptCount = Math.max(...retryableRequests.map((request) => (
+          retryAttemptCounts.get(request.childSessionId) ?? 0
+        )))
         const retryDelayMs = resolveEmbeddedBootstrapBackfillRetryDelayMs(
           retryAttemptCount - 1,
         )
@@ -2942,11 +2978,7 @@ const SyncDeckManager: FC = () => {
           embeddedBootstrapBackfillRetryTimeoutRef.current = null
           setEmbeddedBootstrapBackfillRetryNonce((current) => current + 1)
         }, retryDelayMs)
-        return
       }
-
-      embeddedBootstrapBackfillRetryAttemptRef.current = 0
-      setFailedEmbeddedBootstrapChildSessionIds([])
     })
 
     return () => {
@@ -4931,7 +4963,8 @@ const SyncDeckManager: FC = () => {
                                       type="button"
                                       className="rounded bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700"
                                       onClick={() => {
-                                        embeddedBootstrapBackfillRetryAttemptRef.current = 0
+                                        embeddedBootstrapBackfillRetryAttemptByChildSessionIdRef.current.delete(record.childSessionId)
+                                        failedEmbeddedBootstrapChildSessionIdsRef.current.delete(record.childSessionId)
                                         setFailedEmbeddedBootstrapChildSessionIds((current) => current.filter(
                                           (childSessionId) => childSessionId !== record.childSessionId,
                                         ))

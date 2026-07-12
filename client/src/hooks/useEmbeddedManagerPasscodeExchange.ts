@@ -70,6 +70,7 @@ export function useEmbeddedManagerPasscodeExchange(params: {
         setState({ key: exchangeKey, passcode, error: null, isResolving: false })
       } catch (error) {
         if (!cancelled) {
+          console.error('Failed to exchange embedded manager token:', error)
           setState({ key: exchangeKey, passcode: null, error, isResolving: false })
         }
       }

@@ -117,6 +117,10 @@ class InMemorySessionStore implements SessionStore {
     }
 
     session.lastActivity = Date.now()
+    const embeddedParentSessionId = getEmbeddedParentSessionId(session)
+    if (embeddedParentSessionId && embeddedParentSessionId !== id) {
+      await this.touch(embeddedParentSessionId)
+    }
     return normalizeSessionData(session)
   }
 

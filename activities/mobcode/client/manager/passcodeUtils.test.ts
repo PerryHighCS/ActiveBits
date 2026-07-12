@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { createMobCodeManagerAuthMessage } from './MobCodeManager.js'
+import {
+  createMobCodeManagerAuthMessage,
+  resolveMobCodeManagerAccessBanner,
+  resolveOpenMobCodeManagerAuthMessage,
+} from './MobCodeManager.js'
 import { resolveMobCodeInstructorPasscode } from './passcodeUtils'
 
 function createStorage(initial: Record<string, string> = {}) {
@@ -27,6 +31,29 @@ void test('createMobCodeManagerAuthMessage only emits authentication for complet
       payload: { instructorPasscode: 'teacher-pass' },
     },
   )
+})
+
+void test('resolveMobCodeManagerAccessBanner distinguishes token resolution from missing credentials', () => {
+  assert.equal(resolveMobCodeManagerAccessBanner({ instructorPasscode: '', isResolving: true }), 'loading')
+  assert.equal(resolveMobCodeManagerAccessBanner({ instructorPasscode: '', isResolving: false }), 'missing')
+  assert.equal(resolveMobCodeManagerAccessBanner({ instructorPasscode: 'teacher-pass', isResolving: true }), null)
+})
+
+void test('resolveOpenMobCodeManagerAuthMessage authenticates an existing socket after credentials arrive', () => {
+  assert.equal(resolveOpenMobCodeManagerAuthMessage({
+    sessionId: 'session-1',
+    instructorPasscode: 'teacher-pass',
+    readyState: 0,
+  }), null)
+  assert.deepEqual(JSON.parse(resolveOpenMobCodeManagerAuthMessage({
+    sessionId: 'session-1',
+    instructorPasscode: 'teacher-pass',
+    readyState: 1,
+  }) ?? '{}'), {
+    type: 'manager-auth',
+    sessionId: 'session-1',
+    payload: { instructorPasscode: 'teacher-pass' },
+  })
 })
 
 void test('resolveMobCodeInstructorPasscode prefers router state', () => {
