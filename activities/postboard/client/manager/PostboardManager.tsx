@@ -349,7 +349,7 @@ export default function PostboardManager(): React.JSX.Element {
     return (
       <main className="postboard-shell">
         <SessionHeader activityName="Postboard" sessionId={sessionId} />
-        <p>Loading instructor access…</p>
+        <p role="status" aria-live="polite">Loading instructor access…</p>
       </main>
     )
   }

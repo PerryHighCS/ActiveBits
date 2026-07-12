@@ -958,6 +958,12 @@ export function shouldRetryEmbeddedBootstrapBackfill(status: number): boolean {
   return status >= 500
 }
 
+export function resolveEmbeddedBootstrapBackfillHttpOutcome(
+  status: number,
+): 'retry' | 'failed' {
+  return shouldRetryEmbeddedBootstrapBackfill(status) ? 'retry' : 'failed'
+}
+
 export function resolveManagerActiveEmbeddedInstanceKey(
   embeddedActivities: SyncDeckEmbeddedActivitiesMap,
   instructorIndices: { h: number; v: number; f: number } | null,
@@ -2347,7 +2353,14 @@ const SyncDeckManager: FC = () => {
 
     for (const childSessionId of evictedChildSessionIds) {
       completedEmbeddedBootstrapChildSessionIdsRef.current.delete(childSessionId)
+      embeddedBootstrapBackfillRetryAttemptByChildSessionIdRef.current.delete(childSessionId)
+      failedEmbeddedBootstrapChildSessionIdsRef.current.delete(childSessionId)
     }
+    setFailedEmbeddedBootstrapChildSessionIds((current) => (
+      current.some((childSessionId) => evictedChildSessionIds.includes(childSessionId))
+        ? current.filter((childSessionId) => !evictedChildSessionIds.includes(childSessionId))
+        : current
+    ))
     if (tokenCacheUpdate.shouldBackfill) {
       setEmbeddedBootstrapBackfillRetryNonce((current) => current + 1)
     }
@@ -2880,7 +2893,7 @@ const SyncDeckManager: FC = () => {
       pendingEmbeddedBootstrapChildSessionIdsRef.current.add(request.childSessionId)
     }
 
-    void Promise.all(requests.map(async (request): Promise<boolean> => {
+    void Promise.all(requests.map(async (request): Promise<'success' | 'retry' | 'failed'> => {
       try {
         const response = await fetch(`/api/syncdeck/${encodeURIComponent(sessionId)}/embedded-activity/start`, {
           method: 'POST',
@@ -2894,12 +2907,12 @@ const SyncDeckManager: FC = () => {
         })
 
         if (!response.ok) {
-          return shouldRetryEmbeddedBootstrapBackfill(response.status)
+          return resolveEmbeddedBootstrapBackfillHttpOutcome(response.status)
         }
 
         const payload = (await response.json()) as SyncDeckEmbeddedActivityStartResponse
         if (isCancelled) {
-          return false
+          return 'success'
         }
 
         const resolvedChildSessionId =
@@ -2908,7 +2921,7 @@ const SyncDeckManager: FC = () => {
             : request.childSessionId
         const managerCredentials = resolveEmbeddedBootstrapManagerCredentials(payload)
         if (!managerCredentials) {
-          return true
+          return 'retry'
         }
 
         storeCreateSessionBootstrapPayload(request.activityId, resolvedChildSessionId, managerCredentials.managerBootstrap)
@@ -2925,10 +2938,10 @@ const SyncDeckManager: FC = () => {
         for (const completedChildSessionId of completedChildSessionIds) {
           completedEmbeddedBootstrapChildSessionIdsRef.current.add(completedChildSessionId)
         }
-        return false
+        return 'success'
       } catch {
         // Best-effort only. Embedded managers with their own recovery endpoints can still self-heal.
-        return true
+        return 'retry'
       } finally {
         pendingEmbeddedBootstrapChildSessionIdsRef.current.delete(request.childSessionId)
       }
@@ -2942,9 +2955,15 @@ const SyncDeckManager: FC = () => {
       const newlyFailedChildSessionIds: string[] = []
       const successfulChildSessionIds: string[] = []
       for (const [index, request] of requests.entries()) {
-        if (!results[index]) {
+        if (results[index] === 'success') {
           retryAttemptCounts.delete(request.childSessionId)
           successfulChildSessionIds.push(request.childSessionId)
+          continue
+        }
+
+        if (results[index] === 'failed') {
+          retryAttemptCounts.delete(request.childSessionId)
+          newlyFailedChildSessionIds.push(request.childSessionId)
           continue
         }
 

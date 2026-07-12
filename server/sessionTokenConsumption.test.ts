@@ -48,8 +48,16 @@ void test('consuming an embedded child token refreshes its parent session', asyn
   const consumeSessionDataToken = sessions.consumeSessionDataToken
   assert.ok(consumeSessionDataToken)
 
+  let touchedParentId: string | null = null
+  const originalTouch = sessions.touch.bind(sessions)
+  sessions.touch = async (id: string) => {
+    if (id === parent.id) {
+      touchedParentId = id
+    }
+    return originalTouch(id)
+  }
+
   await consumeSessionDataToken.call(sessions, child.id, 'oneTimeToken', 'token-value')
 
-  const refreshedParent = await sessions.get(parent.id)
-  assert.ok((refreshedParent?.lastActivity ?? 0) > 1)
+  assert.equal(touchedParentId, parent.id)
 })

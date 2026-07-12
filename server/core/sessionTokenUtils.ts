@@ -19,10 +19,16 @@ export function consumeSessionDataToken<T extends { data: Record<string, unknown
   }
 
   const expiresAt = (entry as { expiresAt?: unknown }).expiresAt
-  if (typeof expiresAt === 'number') {
-    if (!Number.isFinite(expiresAt) || expiresAt <= now) {
-      return null
-    }
+  const hasExpiresAt = Object.prototype.hasOwnProperty.call(entry, 'expiresAt')
+  if (
+    hasExpiresAt
+    && (
+      typeof expiresAt !== 'number'
+      || !Number.isFinite(expiresAt)
+      || expiresAt <= now
+    )
+  ) {
+    return null
   }
 
   delete session.data[field]

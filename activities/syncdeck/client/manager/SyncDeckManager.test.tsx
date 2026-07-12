@@ -54,6 +54,7 @@ import { resolveEmbeddedBootstrapBackfillRetryDelayMs } from './SyncDeckManager.
 import { shouldShowEmbeddedBootstrapFailure } from './SyncDeckManager.js'
 import { resolveEmbeddedBootstrapBackfillRequests } from './SyncDeckManager.js'
 import { shouldRetryEmbeddedBootstrapBackfill } from './SyncDeckManager.js'
+import { resolveEmbeddedBootstrapBackfillHttpOutcome } from './SyncDeckManager.js'
 import { extractRevealSyncActionWithoutParsing } from './SyncDeckManager.js'
 import { resolveMountedEmbeddedManagerInstanceKeys } from './SyncDeckManager.js'
 import { resolveEvictedEmbeddedManagerChildSessionIds } from './SyncDeckManager.js'
@@ -849,6 +850,12 @@ void test('shouldRetryEmbeddedBootstrapBackfill only retries transient server fa
   assert.equal(shouldRetryEmbeddedBootstrapBackfill(404), false)
   assert.equal(shouldRetryEmbeddedBootstrapBackfill(500), true)
   assert.equal(shouldRetryEmbeddedBootstrapBackfill(503), true)
+})
+
+void test('resolveEmbeddedBootstrapBackfillHttpOutcome immediately fails non-retryable responses', () => {
+  assert.equal(resolveEmbeddedBootstrapBackfillHttpOutcome(400), 'failed')
+  assert.equal(resolveEmbeddedBootstrapBackfillHttpOutcome(404), 'failed')
+  assert.equal(resolveEmbeddedBootstrapBackfillHttpOutcome(500), 'retry')
 })
 
 void test('buildManagerOverlayNavigationCommand builds reveal command envelopes for four directions and slide', () => {
