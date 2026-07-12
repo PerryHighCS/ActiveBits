@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { buildResonanceReportFilename, buildResonanceReportHtml } from './reportRenderer.js'
+import {
+  buildResonanceReportFilename,
+  buildResonanceReportHtml,
+  buildResonanceStructuredReportSection,
+} from './reportRenderer.js'
 import type { ResonanceReport } from '../shared/reportTypes.js'
 
 void test('buildResonanceReportFilename sanitizes session IDs to safe slug characters', () => {
@@ -152,4 +156,157 @@ void test('buildResonanceReportHtml renders Markdown in authored stems and MCQ c
   assert.match(html, /<code/)
   assert.doesNotMatch(html, /<script\b/i)
   assert.doesNotMatch(html, /javascript:alert/)
+})
+
+void test('buildResonanceStructuredReportSection includes summary, activity, and student drill-down data', () => {
+  const report: ResonanceReport = {
+    version: 1,
+    sessionId: 'resonance-session-1',
+    exportedAt: 12345,
+    students: [
+      { studentId: 'student-1', name: 'Avery', joinedAt: 100 },
+    ],
+    questions: [
+      {
+        question: {
+          id: 'q1',
+          type: 'multiple-choice',
+          text: 'Which value is binary 101?',
+          order: 1,
+          options: [
+            { id: 'a', text: '4' },
+            { id: 'b', text: '5', isCorrect: true },
+          ],
+        },
+        responses: [
+          {
+            id: 'r1',
+            questionId: 'q1',
+            studentId: 'student-1',
+            studentName: 'Avery',
+            submittedAt: 200,
+            answer: { type: 'multiple-choice', selectedOptionIds: ['b'] },
+          },
+        ],
+        reveal: {
+          questionId: 'q1',
+          sharedAt: 300,
+          correctOptionIds: ['b'],
+          sharedResponses: [],
+        },
+        annotations: {
+          r1: { starred: true, flagged: false, emoji: 'Nice' },
+        },
+      },
+      {
+        question: {
+          id: 'q2',
+          type: 'free-response',
+          text: 'Explain your strategy.',
+          order: 2,
+        },
+        responses: [
+          {
+            id: 'r2',
+            questionId: 'q2',
+            studentId: 'student-1',
+            studentName: 'Avery',
+            submittedAt: 250,
+            answer: { type: 'free-response', text: 'I converted place values.' },
+          },
+        ],
+        reveal: null,
+        annotations: {},
+      },
+    ],
+  }
+
+  const section = buildResonanceStructuredReportSection(report, { instanceKey: 'resonance:4:0' })
+
+  assert.equal(section.activityId, 'resonance')
+  assert.equal(section.childSessionId, 'resonance-session-1')
+  assert.equal(section.instanceKey, 'resonance:4:0')
+  assert.equal(section.reportStatus, 'available')
+  assert.deepEqual(section.students, [{ studentId: 'student-1', displayName: 'Avery' }])
+  assert.deepEqual(section.supportsScopes, ['activity-session', 'student-cross-activity', 'session-summary'])
+  assert.equal(section.summaryCards?.[0]?.metrics?.find((metric) => metric.id === 'response-count')?.value, 2)
+  assert.equal(section.summaryCards?.[0]?.metrics?.find((metric) => metric.id === 'correct-mcq-count')?.value, 1)
+  assert.equal(section.scopeBlocks?.['session-summary']?.[0]?.type, 'rich-text')
+  assert.equal(section.scopeBlocks?.['activity-session']?.some((block) => block.id === 'resonance-response-log'), true)
+  assert.equal(section.studentScopeBlocks?.['student-1']?.some((block) => block.id === 'resonance-student-responses-student-1'), true)
+  assert.equal((section.payload.report as ResonanceReport).sessionId, 'resonance-session-1')
+})
+
+void test('buildResonanceStructuredReportSection handles empty reports without drill-down blocks', () => {
+  const report: ResonanceReport = {
+    version: 1,
+    sessionId: 'empty-resonance-session',
+    exportedAt: 67890,
+    students: [],
+    questions: [],
+  }
+
+  const section = buildResonanceStructuredReportSection(report, { instanceKey: 'resonance:empty' })
+
+  assert.equal(section.reportStatus, 'available')
+  assert.equal(section.summaryCards?.[0]?.metrics?.find((metric) => metric.id === 'question-count')?.value, 0)
+  assert.equal(section.summaryCards?.[0]?.metrics?.find((metric) => metric.id === 'student-count')?.value, 0)
+  assert.deepEqual(section.students, [])
+  assert.deepEqual(section.studentScopeBlocks, {})
+  const activityBlocks = section.scopeBlocks?.['activity-session'] ?? []
+  const questionSummary = activityBlocks.find((block) => block.id === 'resonance-question-summary')
+  const responseLog = activityBlocks.find((block) => block.id === 'resonance-response-log')
+  assert.deepEqual(questionSummary?.type === 'table' ? questionSummary.rows : null, [])
+  assert.deepEqual(responseLog?.type === 'table' ? responseLog.rows : null, [])
+})
+
+void test('buildResonanceStructuredReportSection keeps unrevealed MCQ scoring unavailable while showing authored correct options', () => {
+  const report: ResonanceReport = {
+    version: 1,
+    sessionId: 'unrevealed-mcq-session',
+    exportedAt: 24680,
+    students: [
+      { studentId: 'student-1', name: 'Avery', joinedAt: 100 },
+    ],
+    questions: [
+      {
+        question: {
+          id: 'q1',
+          type: 'multiple-choice',
+          text: 'Which value is binary 11?',
+          order: 1,
+          options: [
+            { id: 'a', text: '2' },
+            { id: 'b', text: '3', isCorrect: true },
+          ],
+        },
+        responses: [
+          {
+            id: 'r1',
+            questionId: 'q1',
+            studentId: 'student-1',
+            studentName: 'Avery',
+            submittedAt: 200,
+            answer: { type: 'multiple-choice', selectedOptionIds: ['b'] },
+          },
+        ],
+        reveal: null,
+        annotations: {},
+      },
+    ],
+  }
+
+  const section = buildResonanceStructuredReportSection(report, { instanceKey: 'resonance:unrevealed' })
+  const activityBlocks = section.scopeBlocks?.['activity-session'] ?? []
+  const questionSummary = activityBlocks.find((block) => block.id === 'resonance-question-summary')
+  const optionSummary = activityBlocks.find((block) => block.id === 'resonance-options-q1')
+  const studentResponses = section.studentScopeBlocks?.['student-1']?.find((block) => block.id === 'resonance-student-responses-student-1')
+
+  assert.equal(questionSummary?.type, 'table')
+  assert.equal(questionSummary?.rows?.[0]?.cells[4], 'N/A')
+  assert.equal(optionSummary?.type, 'table')
+  assert.deepEqual(optionSummary?.rows?.map((row) => row.cells[3]), ['No', 'Yes'])
+  assert.equal(studentResponses?.type, 'table')
+  assert.equal(studentResponses?.rows?.[0]?.cells[2], 'N/A')
+  assert.equal(section.summaryCards?.[0]?.metrics?.find((metric) => metric.id === 'correct-mcq-count')?.value, 0)
 })

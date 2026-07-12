@@ -2,6 +2,7 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { createSession, type SessionRecord, type SessionStore } from 'activebits-server/core/sessions.js'
 import { registerSessionNormalizer } from 'activebits-server/core/sessionNormalization.js'
 import { findAcceptedEntryParticipant } from 'activebits-server/core/acceptedEntryParticipants.js'
+import { registerActivityReportBuilder } from '../../../server/activities/activityReportRegistry.js'
 import type { WsRouter } from '../../../types/websocket.js'
 import {
   isPostboardReactionId,
@@ -19,6 +20,12 @@ import {
   type PostboardStudentSnapshot,
 } from '../shared/types.js'
 import { normalizeNoteStyleId } from '../../shared/noteStyles.js'
+import {
+  buildPostboardReportBundle,
+  buildPostboardReportFilename,
+  buildPostboardReportHtml,
+  buildPostboardStructuredReportSection,
+} from './reportHtml.js'
 
 interface RouteRequest {
   params: Record<string, string | undefined>
@@ -30,6 +37,8 @@ interface RouteRequest {
 interface JsonResponse {
   status(code: number): JsonResponse
   json(payload: unknown): void
+  send?(payload: unknown): void
+  setHeader?(name: string, value: string): void
 }
 
 interface PostboardRouteApp {
@@ -491,6 +500,22 @@ registerSessionNormalizer(ACTIVITY_ID, (session) => {
   session.data = normalizePostboardSessionData(session.data)
 })
 
+registerActivityReportBuilder(ACTIVITY_ID, (session, params) => {
+  const normalizedSession = asPostboardSession(session)
+  if (!normalizedSession) {
+    return null
+  }
+
+  return buildPostboardStructuredReportSection(
+    buildPostboardReportBundle({
+      sessionId: normalizedSession.id,
+      data: normalizedSession.data,
+      reactionCounts: buildReactionCounts(normalizedSession.data.reactions),
+    }),
+    { instanceKey: params.instanceKey },
+  )
+})
+
 export default function setupPostboardRoutes(app: PostboardRouteApp, sessions: SessionStore, _ws: WsRouter): void {
   app.post('/api/postboard/create', routeHandler('create', async (req, res) => {
     const body = getBody(req)
@@ -507,6 +532,27 @@ export default function setupPostboardRoutes(app: PostboardRouteApp, sessions: S
     const session = await getPostboardSession(req, res, sessions)
     if (!session || !requireInstructor(session, req, res)) return
     res.json(buildInstructorSnapshot(session))
+  }))
+
+  app.get('/api/postboard/:sessionId/report', routeHandler('report', async (req, res) => {
+    const session = await getPostboardSession(req, res, sessions)
+    if (!session || !requireInstructor(session, req, res)) return
+
+    const bundle = buildPostboardReportBundle({
+      sessionId: session.id,
+      data: session.data,
+      reactionCounts: buildReactionCounts(session.data.reactions),
+    })
+    const html = buildPostboardReportHtml(bundle)
+    const filename = buildPostboardReportFilename(bundle)
+    console.info('[postboard] Report HTML exported', { sessionId: session.id })
+    if (typeof res.send !== 'function') {
+      res.status(500).json({ error: 'html response unsupported' })
+      return
+    }
+    res.setHeader?.('Content-Type', 'text/html; charset=utf-8')
+    res.setHeader?.('Content-Disposition', `attachment; filename="${filename}"`)
+    res.send(html)
   }))
 
   app.get('/api/postboard/:sessionId/student-state', routeHandler('student-state', async (req, res) => {

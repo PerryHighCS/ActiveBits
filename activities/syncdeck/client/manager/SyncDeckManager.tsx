@@ -41,8 +41,9 @@ import {
   resolveGroupedPreloadRequestBatchInputs,
   type SyncDeckGroupedActivityRequest,
 } from '../shared/groupedActivityRequests.js'
-import { useCallback, useEffect, useMemo, useRef, useState, type FC, type FormEvent, type MouseEvent, type PointerEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type FC, type FormEvent, type KeyboardEvent, type MouseEvent, type PointerEvent } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
+import type { SyncDeckSessionReportManifest } from '../../../../types/activity.js'
 import ConnectionStatusDot from '../components/ConnectionStatusDot.js'
 
 const SYNCDECK_CHALKBOARD_OPEN_KEY_PREFIX = 'syncdeck_chalkboard_open_'
@@ -54,6 +55,14 @@ const EMBEDDED_BOOTSTRAP_BACKFILL_BASE_RETRY_DELAY_MS = 1000
 const EMBEDDED_BOOTSTRAP_BACKFILL_MAX_RETRY_DELAY_MS = 10000
 const PRESENTATION_URL_ERROR_ID = 'syncdeck-presentation-url-error'
 const isDevMode = import.meta.env?.DEV === true
+const REPORT_PREVIEW_FOCUSABLE_SELECTOR = [
+  'button:not([disabled])',
+  '[href]',
+  'input:not([disabled])',
+  'select:not([disabled])',
+  'textarea:not([disabled])',
+  '[tabindex]:not([tabindex="-1"])',
+].join(',')
 interface SessionResponsePayload {
   session?: {
     data?: {
@@ -92,6 +101,20 @@ interface SyncDeckEmbeddedActivityRecord {
 }
 
 type SyncDeckEmbeddedActivitiesMap = Record<string, SyncDeckEmbeddedActivityRecord>
+type ReportContributionStatus = 'available' | 'unsupported' | 'unavailable'
+
+interface ReportContributionState {
+  status: ReportContributionStatus
+  studentCount: number
+}
+
+interface ReportPreviewSummary {
+  activityCount: number
+  studentCount: number
+  availableCount: number
+  unsupportedCount: number
+  unavailableCount: number
+}
 
 interface SyncDeckInstructorAuthMessage {
   type: 'authenticate'
@@ -155,6 +178,49 @@ interface RevealSyncStatePayload {
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return value != null && typeof value === 'object' && !Array.isArray(value)
+}
+
+function isVisibleElement(element: HTMLElement): boolean {
+  if (element.hidden === true || element.getAttribute('aria-hidden') === 'true') return false
+  const view = element.ownerDocument.defaultView
+  if (!view) return true
+  const style = view.getComputedStyle(element)
+  return style.display !== 'none' && style.visibility !== 'hidden'
+}
+
+export function getReportPreviewFocusableElements(container: HTMLElement | null): HTMLElement[] {
+  if (!container) return []
+  return Array.from(container.querySelectorAll<HTMLElement>(REPORT_PREVIEW_FOCUSABLE_SELECTOR))
+    .filter((element) => (
+      !element.hasAttribute('disabled')
+      && element.tabIndex !== -1
+      && isVisibleElement(element)
+    ))
+}
+
+export function resolveReportPreviewDialogTabTarget(params: {
+  dialog: HTMLElement | null
+  activeElement: Element | null
+  shiftKey: boolean
+}): HTMLElement | null {
+  if (!params.dialog) return null
+  const focusableElements = getReportPreviewFocusableElements(params.dialog)
+  if (focusableElements.length === 0) {
+    return params.dialog
+  }
+
+  const first = focusableElements[0] ?? null
+  if (!first) return params.dialog
+  const last = focusableElements.at(-1) ?? first
+  if (params.shiftKey) {
+    return params.activeElement === first
+      || params.activeElement === params.dialog
+      || !params.dialog.contains(params.activeElement)
+      ? last
+      : null
+  }
+
+  return params.activeElement === last ? first : null
 }
 
 export function buildSyncDeckInstructorWsUrl(params: {
@@ -486,7 +552,6 @@ interface SyncDeckActivityPickerEntry {
   activityId: string
   name: string
   description: string
-  supportsReport: boolean
 }
 
 interface SyncDeckActivityLaunchRequest {
@@ -1064,13 +1129,6 @@ export function resolveNextPendingEmbeddedEndConfirmation(
   return { nextPending: targetInstanceKey, shouldEnd: false }
 }
 
-export function activitySupportsEmbeddedReport(
-  activityId: string,
-  activityEntries: SyncDeckActivityPickerEntry[],
-): boolean {
-  return activityEntries.some((entry) => entry.activityId === activityId && entry.supportsReport)
-}
-
 export function parseDownloadFilenameFromContentDisposition(headerValue: string | null): string | null {
   if (typeof headerValue !== 'string' || headerValue.trim().length === 0) {
     return null
@@ -1088,6 +1146,85 @@ export function parseDownloadFilenameFromContentDisposition(headerValue: string 
   const plainMatch = headerValue.match(/filename="([^"]+)"|filename=([^;]+)/i)
   const candidate = plainMatch?.[1] ?? plainMatch?.[2] ?? null
   return typeof candidate === 'string' && candidate.trim().length > 0 ? candidate.trim() : null
+}
+
+export function buildReportContributionMap(
+  manifest: Pick<SyncDeckSessionReportManifest, 'activities'>,
+): Record<string, ReportContributionState> {
+  const contributions: Record<string, ReportContributionState> = {}
+  for (const activity of manifest.activities) {
+    const status = activity.report.reportStatus ?? 'available'
+    contributions[activity.instanceKey] = {
+      status,
+      studentCount: activity.report.students?.length ?? 0,
+    }
+  }
+  return contributions
+}
+
+export function resolveReportContributionLabel(
+  contribution: ReportContributionState | undefined,
+  isLoading: boolean,
+  hasError: boolean,
+): string {
+  if (contribution) {
+    if (contribution.status === 'available') {
+      return contribution.studentCount > 0
+        ? `Included in report (${contribution.studentCount} student${contribution.studentCount === 1 ? '' : 's'})`
+        : 'Included in report'
+    }
+    if (contribution.status === 'unsupported') {
+      return 'Report unsupported'
+    }
+    return 'Report unavailable'
+  }
+
+  if (isLoading) {
+    return 'Checking report'
+  }
+
+  return hasError ? 'Report status unavailable' : 'Report status pending'
+}
+
+export function buildReportPreviewSummary(
+  manifest: Pick<SyncDeckSessionReportManifest, 'activities' | 'students'>,
+): ReportPreviewSummary {
+  return manifest.activities.reduce<ReportPreviewSummary>((summary, activity) => {
+    const status = activity.report.reportStatus ?? 'available'
+    return {
+      ...summary,
+      availableCount: summary.availableCount + (status === 'available' ? 1 : 0),
+      unsupportedCount: summary.unsupportedCount + (status === 'unsupported' ? 1 : 0),
+      unavailableCount: summary.unavailableCount + (status === 'unavailable' ? 1 : 0),
+    }
+  }, {
+    activityCount: manifest.activities.length,
+    studentCount: manifest.students.length,
+    availableCount: 0,
+    unsupportedCount: 0,
+    unavailableCount: 0,
+  })
+}
+
+function resolveReportContributionClassName(
+  contribution: ReportContributionState | undefined,
+  isLoading: boolean,
+  hasError: boolean,
+): string {
+  const baseClassName = 'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold'
+  if (contribution?.status === 'available') {
+    return `${baseClassName} bg-emerald-50 text-emerald-700`
+  }
+  if (contribution?.status === 'unsupported') {
+    return `${baseClassName} bg-amber-50 text-amber-700`
+  }
+  if (contribution?.status === 'unavailable' || hasError) {
+    return `${baseClassName} bg-red-50 text-red-700`
+  }
+  if (isLoading) {
+    return `${baseClassName} bg-blue-50 text-blue-700`
+  }
+  return `${baseClassName} bg-gray-100 text-gray-600`
 }
 
 export function evaluateRestoreSuppressionForOutboundState(params: {
@@ -1460,7 +1597,7 @@ export async function runEmbeddedStartWithPendingRetry(params: {
 }
 
 export function resolveSyncDeckActivityPickerEntries(
-  entries: Array<{ id: string; name: string; description: string; reportEndpoint?: string }>,
+  entries: Array<{ id: string; name: string; description: string }>,
 ): SyncDeckActivityPickerEntry[] {
   return entries
     .filter((entry) => entry.id !== 'syncdeck')
@@ -1468,7 +1605,6 @@ export function resolveSyncDeckActivityPickerEntries(
       activityId: entry.id,
       name: entry.name,
       description: entry.description,
-      supportsReport: typeof entry.reportEndpoint === 'string' && entry.reportEndpoint.trim().length > 0,
     }))
     .sort((left, right) => left.name.localeCompare(right.name))
 }
@@ -1910,8 +2046,15 @@ const SyncDeckManager: FC = () => {
   const [isActivityPickerOpen, setIsActivityPickerOpen] = useState(false)
   const [endingEmbeddedInstanceKey, setEndingEmbeddedInstanceKey] = useState<string | null>(null)
   const [pendingEmbeddedEndConfirmInstanceKey, setPendingEmbeddedEndConfirmInstanceKey] = useState<string | null>(null)
-  const [downloadingEmbeddedReportInstanceKey, setDownloadingEmbeddedReportInstanceKey] = useState<string | null>(null)
   const [isDownloadingSessionReport, setIsDownloadingSessionReport] = useState(false)
+  const [sessionReportError, setSessionReportError] = useState<string | null>(null)
+  const [reportContributionByInstanceKey, setReportContributionByInstanceKey] =
+    useState<Record<string, ReportContributionState>>({})
+  const [isReportContributionLoading, setIsReportContributionLoading] = useState(false)
+  const [reportContributionError, setReportContributionError] = useState<string | null>(null)
+  const [isReportPreviewOpen, setIsReportPreviewOpen] = useState(false)
+  const [isReportPreviewLoading, setIsReportPreviewLoading] = useState(false)
+  const [reportPreviewManifest, setReportPreviewManifest] = useState<SyncDeckSessionReportManifest | null>(null)
   const [overlayNavigationCapabilities, setOverlayNavigationCapabilities] = useState<SyncDeckManagerNavigationCapabilities | null>(null)
   const [overlayNavigationCapabilityIndices, setOverlayNavigationCapabilityIndices] =
     useState<{ h: number; v: number; f: number } | null>(null)
@@ -1932,6 +2075,8 @@ const SyncDeckManager: FC = () => {
   const [embeddedManagerRenderNonceByChildSessionId, setEmbeddedManagerRenderNonceByChildSessionId] = useState<Record<string, number>>({})
   const [embeddedBootstrapBackfillRetryNonce, setEmbeddedBootstrapBackfillRetryNonce] = useState(0)
   const presentationIframeRef = useRef<HTMLIFrameElement | null>(null)
+  const reportPreviewTriggerRef = useRef<HTMLButtonElement | null>(null)
+  const reportPreviewDialogRef = useRef<HTMLDivElement | null>(null)
   const restoreDocumentTitleRef = useRef<string | null>(null)
   const disconnectStatusTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastInstructorPayloadRef = useRef<unknown>(null)
@@ -3433,7 +3578,6 @@ const SyncDeckManager: FC = () => {
               ? entry.name
               : '',
           description: typeof entry.description === 'string' ? entry.description : '',
-          reportEndpoint: typeof entry.reportEndpoint === 'string' ? entry.reportEndpoint : undefined,
         }))
         .filter((entry) => entry.id.length > 0 && entry.name.length > 0 && entry.description.length > 0),
     ),
@@ -3806,6 +3950,46 @@ const SyncDeckManager: FC = () => {
     [clearRestoreSuppressionTimeout],
   )
 
+  const refreshReportContributionStatus = useCallback(async (): Promise<SyncDeckSessionReportManifest | null> => {
+    if (!sessionId || !instructorPasscode) {
+      return null
+    }
+
+    setIsReportContributionLoading(true)
+    setReportContributionError(null)
+    try {
+      const response = await fetch(
+        `/api/syncdeck/${encodeURIComponent(sessionId)}/report-manifest`,
+        {
+          headers: {
+            'x-syncdeck-instructor-passcode': instructorPasscode,
+          },
+        },
+      )
+      if (!response.ok) {
+        throw new Error('Failed to load report manifest')
+      }
+
+      const manifest = await response.json() as SyncDeckSessionReportManifest
+      setReportContributionByInstanceKey(buildReportContributionMap(manifest))
+      return manifest
+    } catch {
+      setReportContributionError('Report status unavailable')
+      setReportContributionByInstanceKey({})
+      return null
+    } finally {
+      setIsReportContributionLoading(false)
+    }
+  }, [instructorPasscode, sessionId])
+
+  useEffect(() => {
+    if (!isEmbeddedPanelOpen || Object.keys(embeddedActivities).length === 0) {
+      return
+    }
+
+    void refreshReportContributionStatus()
+  }, [embeddedActivities, isEmbeddedPanelOpen, refreshReportContributionStatus])
+
   if (!sessionId) {
     return (
       <div className="p-6 max-w-3xl mx-auto space-y-3">
@@ -3974,49 +4158,13 @@ const SyncDeckManager: FC = () => {
     }
   }
 
-  const downloadEmbeddedActivityReport = async (instanceKey: string): Promise<void> => {
-    if (!sessionId || !instructorPasscode) {
-      return
-    }
-
-    setDownloadingEmbeddedReportInstanceKey(instanceKey)
-    try {
-      const response = await fetch(
-        `/api/syncdeck/${encodeURIComponent(sessionId)}/embedded-activity/report/${encodeURIComponent(instanceKey)}`,
-        {
-          headers: {
-            'x-syncdeck-instructor-passcode': instructorPasscode,
-          },
-        },
-      )
-      if (!response.ok) {
-        throw new Error('Failed to download embedded activity report')
-      }
-
-      const blob = await response.blob()
-      const objectUrl = URL.createObjectURL(blob)
-      const downloadLink = document.createElement('a')
-      downloadLink.href = objectUrl
-      downloadLink.download =
-        parseDownloadFilenameFromContentDisposition(response.headers.get('Content-Disposition'))
-        ?? `${instanceKey}.html`
-      document.body.appendChild(downloadLink)
-      downloadLink.click()
-      document.body.removeChild(downloadLink)
-      URL.revokeObjectURL(objectUrl)
-    } catch {
-      // Keep the confirmation state visible so the instructor can retry the download.
-    } finally {
-      setDownloadingEmbeddedReportInstanceKey(null)
-    }
-  }
-
   const downloadSessionReport = async (): Promise<void> => {
     if (!sessionId || !instructorPasscode) {
       return
     }
 
     setIsDownloadingSessionReport(true)
+    setSessionReportError(null)
     try {
       const response = await fetch(
         `/api/syncdeck/${encodeURIComponent(sessionId)}/report`,
@@ -4041,10 +4189,23 @@ const SyncDeckManager: FC = () => {
       downloadLink.click()
       document.body.removeChild(downloadLink)
       URL.revokeObjectURL(objectUrl)
+      void refreshReportContributionStatus()
     } catch {
-      // Keep the session toolbar stable if the download fails so the instructor can retry.
+      setSessionReportError('Session report download failed. Check your connection and try again.')
     } finally {
       setIsDownloadingSessionReport(false)
+    }
+  }
+
+  const openSessionReportPreview = async (): Promise<void> => {
+    setIsReportPreviewOpen(true)
+    setIsReportPreviewLoading(true)
+    setSessionReportError(null)
+    const manifest = await refreshReportContributionStatus()
+    setReportPreviewManifest(manifest)
+    setIsReportPreviewLoading(false)
+    if (!manifest) {
+      setSessionReportError('Session report preview failed. Check your connection and try again.')
     }
   }
 
@@ -4058,6 +4219,49 @@ const SyncDeckManager: FC = () => {
     void endEmbeddedActivity(instanceKey)
   }
 
+  useEffect(() => {
+    if (!isReportPreviewOpen) {
+      return undefined
+    }
+
+    const focusTimer = window.setTimeout(() => {
+      const dialog = reportPreviewDialogRef.current
+      const focusTarget = getReportPreviewFocusableElements(dialog)[0] ?? dialog
+      focusTarget?.focus()
+    }, 0)
+
+    return () => {
+      window.clearTimeout(focusTimer)
+      window.setTimeout(() => {
+        reportPreviewTriggerRef.current?.focus()
+      }, 0)
+    }
+  }, [isReportPreviewOpen])
+
+  const handleReportPreviewDialogKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      setIsReportPreviewOpen(false)
+      return
+    }
+
+    if (event.key !== 'Tab') {
+      return
+    }
+
+    const focusTarget = resolveReportPreviewDialogTabTarget({
+      dialog: reportPreviewDialogRef.current,
+      activeElement: document.activeElement,
+      shiftKey: event.shiftKey,
+    })
+    if (!focusTarget) {
+      return
+    }
+
+    event.preventDefault()
+    focusTarget.focus()
+  }
+
   const showStartAnyway =
     Boolean(preflightWarning) &&
     allowUnverifiedStartForUrl === normalizedPresentationUrl &&
@@ -4065,6 +4269,7 @@ const SyncDeckManager: FC = () => {
   const showConfirmStart =
     preflightValidatedUrl === normalizedPresentationUrl &&
     confirmStartForUrl === normalizedPresentationUrl
+  const reportPreviewSummary = reportPreviewManifest ? buildReportPreviewSummary(reportPreviewManifest) : null
 
   return (
     <div className={isConfigurePanelOpen ? 'min-h-screen flex flex-col' : 'h-screen flex flex-col overflow-hidden'}>
@@ -4203,6 +4408,20 @@ const SyncDeckManager: FC = () => {
               {copiedValue === studentJoinUrl ? '✓ Copied!' : 'Copy Join URL'}
             </button>
             <button
+              ref={reportPreviewTriggerRef}
+              type="button"
+              onClick={() => {
+                void openSessionReportPreview()
+              }}
+              disabled={isReportPreviewLoading || !instructorPasscode}
+              className="px-3 py-2 rounded border border-gray-300 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+              aria-haspopup="dialog"
+              aria-expanded={isReportPreviewOpen}
+              aria-controls="syncdeck-report-preview-dialog"
+            >
+              {isReportPreviewLoading ? 'Loading preview…' : 'Preview Report'}
+            </button>
+            <button
               type="button"
               onClick={() => {
                 void downloadSessionReport()
@@ -4223,6 +4442,123 @@ const SyncDeckManager: FC = () => {
             </button>
           </div>
         </div>
+        {sessionReportError && (
+          <div className="px-6 pb-3">
+            <p id="syncdeck-session-report-error" className="text-sm font-medium text-red-700" role="status">
+              {sessionReportError}
+            </p>
+          </div>
+        )}
+
+        {isReportPreviewOpen && (
+          <div
+            className="fixed inset-0 z-40 flex items-start justify-center bg-black/40 px-4 py-16"
+          >
+            <div
+              ref={reportPreviewDialogRef}
+              id="syncdeck-report-preview-dialog"
+              className="w-full max-w-3xl rounded border border-gray-200 bg-white shadow-xl"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="syncdeck-report-preview-title"
+              tabIndex={-1}
+              onKeyDown={handleReportPreviewDialogKeyDown}
+            >
+              <div className="flex items-center justify-between gap-3 border-b border-gray-200 px-4 py-3">
+                <h2 id="syncdeck-report-preview-title" className="text-base font-semibold text-gray-800">
+                  Session Report Preview
+                </h2>
+                <button
+                  type="button"
+                  onClick={() => setIsReportPreviewOpen(false)}
+                  className="rounded px-2 py-1 text-sm text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                >
+                  Close
+                </button>
+              </div>
+              <div className="max-h-[70vh] overflow-y-auto px-4 py-4">
+                {isReportPreviewLoading ? (
+                  <p className="text-sm text-gray-600">Loading report preview…</p>
+                ) : reportPreviewManifest && reportPreviewSummary ? (
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+                      <div className="rounded border border-gray-200 p-3">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Activities</p>
+                        <p className="mt-1 text-xl font-bold text-gray-800">{reportPreviewSummary.activityCount}</p>
+                      </div>
+                      <div className="rounded border border-gray-200 p-3">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Students</p>
+                        <p className="mt-1 text-xl font-bold text-gray-800">{reportPreviewSummary.studentCount}</p>
+                      </div>
+                      <div className="rounded border border-emerald-200 bg-emerald-50 p-3">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Included</p>
+                        <p className="mt-1 text-xl font-bold text-emerald-800">{reportPreviewSummary.availableCount}</p>
+                      </div>
+                      <div className="rounded border border-amber-200 bg-amber-50 p-3">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">Unsupported</p>
+                        <p className="mt-1 text-xl font-bold text-amber-800">{reportPreviewSummary.unsupportedCount}</p>
+                      </div>
+                      <div className="rounded border border-red-200 bg-red-50 p-3">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-red-700">Unavailable</p>
+                        <p className="mt-1 text-xl font-bold text-red-800">{reportPreviewSummary.unavailableCount}</p>
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      {reportPreviewManifest.activities.length === 0 ? (
+                        <p className="rounded border border-dashed border-gray-300 p-3 text-sm text-gray-600">
+                          No embedded activities are represented in this report yet.
+                        </p>
+                      ) : reportPreviewManifest.activities.map((activity) => {
+                        const contribution = reportContributionByInstanceKey[activity.instanceKey] ?? {
+                          status: activity.report.reportStatus ?? 'available',
+                          studentCount: activity.report.students?.length ?? 0,
+                        }
+                        return (
+                          <div key={activity.instanceKey} className="rounded border border-gray-200 p-3">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <div>
+                                <p className="text-sm font-semibold text-gray-800">{activity.activityName}</p>
+                                <p className="text-xs text-gray-600">{activity.instanceKey}</p>
+                              </div>
+                              <span
+                                className={resolveReportContributionClassName(contribution, false, false)}
+                                aria-label={`Report contribution: ${resolveReportContributionLabel(contribution, false, false)}`}
+                              >
+                                {resolveReportContributionLabel(contribution, false, false)}
+                              </span>
+                            </div>
+                            <p className="mt-2 text-sm text-gray-700">{activity.report.title}</p>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-sm text-red-700">Report preview is unavailable.</p>
+                )}
+              </div>
+              <div className="flex justify-end gap-2 border-t border-gray-200 px-4 py-3">
+                <button
+                  type="button"
+                  onClick={() => setIsReportPreviewOpen(false)}
+                  className="px-3 py-2 rounded border border-gray-300 text-sm font-semibold text-gray-700 hover:bg-gray-50"
+                >
+                  Close
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void downloadSessionReport()
+                  }}
+                  disabled={isDownloadingSessionReport || !instructorPasscode}
+                  className="px-3 py-2 rounded border border-gray-300 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isDownloadingSessionReport ? 'Downloading report…' : 'Download Session Report'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {isEmbeddedPanelOpen && (
           <div
@@ -4234,56 +4570,64 @@ const SyncDeckManager: FC = () => {
               <p className="text-sm text-gray-600">No embedded activities running.</p>
             ) : (
               <div className="space-y-2">
-                {Object.entries(embeddedActivities).map(([instanceKey, record]) => (
-                  <div key={instanceKey} className="rounded border border-gray-200 p-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="text-sm font-medium text-gray-800">{record.activityId}</p>
-                      {resolveManagerEmbeddedInstanceStatus(instanceKey, activeEmbeddedInstanceKey) === 'active' ? (
-                        <span className="inline-flex items-center gap-1 text-xs text-emerald-700" aria-label="Active overlay">
-                          <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" />
-                          Active
+                {Object.entries(embeddedActivities).map(([instanceKey, record]) => {
+                  const contribution = reportContributionByInstanceKey[instanceKey]
+                  const contributionLabel = resolveReportContributionLabel(
+                    contribution,
+                    isReportContributionLoading,
+                    reportContributionError != null,
+                  )
+                  return (
+                    <div key={instanceKey} className="rounded border border-gray-200 p-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-sm font-medium text-gray-800">{record.activityId}</p>
+                        {resolveManagerEmbeddedInstanceStatus(instanceKey, activeEmbeddedInstanceKey) === 'active' ? (
+                          <span className="inline-flex items-center gap-1 text-xs text-emerald-700" aria-label="Active overlay">
+                            <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" />
+                            Active
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-xs text-gray-500" aria-label="Idle overlay">
+                            <span className="inline-block h-2 w-2 rounded-full bg-gray-400" />
+                            Idle
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-gray-600">{instanceKey}</p>
+                      <div className="mt-2 flex items-center justify-between gap-2">
+                        <span
+                          className={resolveReportContributionClassName(
+                            contribution,
+                            isReportContributionLoading,
+                            reportContributionError != null,
+                          )}
+                          aria-label={`Report contribution: ${contributionLabel}`}
+                        >
+                          {contributionLabel}
                         </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 text-xs text-gray-500" aria-label="Idle overlay">
-                          <span className="inline-block h-2 w-2 rounded-full bg-gray-400" />
-                          Idle
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-xs text-gray-600">{instanceKey}</p>
-                    <div className="mt-2 flex items-center justify-between gap-2">
-                      <span className="text-xs text-gray-600 truncate">{record.childSessionId}</span>
-                      <div className="flex items-center gap-2">
-                        {pendingEmbeddedEndConfirmInstanceKey === instanceKey && activitySupportsEmbeddedReport(record.activityId, activityPickerEntries) && (
+                      </div>
+                      <div className="mt-2 flex items-center justify-between gap-2">
+                        <span className="text-xs text-gray-600 truncate">{record.childSessionId}</span>
+                        <div className="flex items-center gap-2">
                           <button
                             type="button"
                             onClick={() => {
-                              void downloadEmbeddedActivityReport(instanceKey)
+                              handleEmbeddedEndControlClick(instanceKey)
                             }}
-                            disabled={downloadingEmbeddedReportInstanceKey === instanceKey}
-                            className="px-2 py-1 rounded border border-gray-300 text-xs font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+                            disabled={endingEmbeddedInstanceKey === instanceKey}
+                            className="px-2 py-1 rounded border border-red-600 text-xs font-semibold text-red-600 hover:bg-red-50 disabled:opacity-60"
                           >
-                            {downloadingEmbeddedReportInstanceKey === instanceKey ? 'Downloading…' : 'Download report'}
+                            {endingEmbeddedInstanceKey === instanceKey
+                              ? 'Ending…'
+                              : pendingEmbeddedEndConfirmInstanceKey === instanceKey
+                                ? 'Confirm end'
+                                : 'End'}
                           </button>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            handleEmbeddedEndControlClick(instanceKey)
-                          }}
-                          disabled={endingEmbeddedInstanceKey === instanceKey}
-                          className="px-2 py-1 rounded border border-red-600 text-xs font-semibold text-red-600 hover:bg-red-50 disabled:opacity-60"
-                        >
-                          {endingEmbeddedInstanceKey === instanceKey
-                            ? 'Ending…'
-                            : pendingEmbeddedEndConfirmInstanceKey === instanceKey
-                              ? 'Confirm end'
-                              : 'End'}
-                        </button>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             )}
           </div>

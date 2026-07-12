@@ -38,7 +38,12 @@ import {
 import { getActivityReportBuilder } from '../../../server/activities/activityReportRegistry.js'
 import { getActivityConfig, initializeActivityRegistry } from '../../../server/activities/activityRegistry.js'
 import { connectSyncDeckStudent } from './studentParticipants.js'
-import type { ActivityReportStudentRef, SyncDeckSessionReportManifest } from '../../../types/activity.js'
+import type {
+  ActivityReportScope,
+  ActivityReportStudentRef,
+  ActivityStructuredReportSection,
+  SyncDeckSessionReportManifest,
+} from '../../../types/activity.js'
 import { buildSyncDeckReportFilename, buildSyncDeckSessionReportHtml } from './reportHtml.js'
 
 const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000
@@ -915,10 +920,6 @@ function buildEmbeddedManagerBootstrapPayload(session: SessionRecord): SyncDeckE
   }
 }
 
-function buildEmbeddedActivityReportPath(reportEndpoint: string, childSessionId: string): string {
-  return reportEndpoint.replaceAll(':sessionId', encodeURIComponent(childSessionId))
-}
-
 function buildEmbeddedActivityStartLockKey(sessionId: string, instanceKey: string): string {
   return `${sessionId}:${instanceKey}`
 }
@@ -935,38 +936,148 @@ function mergeReportStudents(sections: Array<{ students?: ActivityReportStudentR
   return [...byStudentId.values()]
 }
 
+const EMBEDDED_REPORT_SCOPES: ActivityReportScope[] = ['activity-session', 'session-summary']
+
+function resolveActivityDisplayName(activityId: string): string {
+  const activityConfig = getActivityConfig(activityId)
+  return typeof activityConfig?.title === 'string' && activityConfig.title.trim().length > 0
+    ? activityConfig.title.trim()
+    : typeof activityConfig?.name === 'string' && activityConfig.name.trim().length > 0
+      ? activityConfig.name.trim()
+      : activityId
+}
+
+function buildEmbeddedReportAvailabilitySection(params: {
+  activityId: string
+  childSessionId: string
+  instanceKey: string
+  status: 'unsupported' | 'unavailable'
+  reason: string
+}): ActivityStructuredReportSection {
+  const statusLabel = params.status === 'unsupported' ? 'Unsupported' : 'Unavailable'
+  return {
+    activityId: params.activityId,
+    childSessionId: params.childSessionId,
+    instanceKey: params.instanceKey,
+    title: `${resolveActivityDisplayName(params.activityId)} Report ${statusLabel}`,
+    generatedAt: Date.now(),
+    reportStatus: params.status,
+    supportsScopes: EMBEDDED_REPORT_SCOPES,
+    students: [],
+    summaryCards: [
+      {
+        id: `${params.activityId}-report-${params.status}`,
+        title: 'Report Status',
+        description: params.reason,
+        metrics: [
+          { id: 'status', label: 'Status', value: statusLabel },
+        ],
+      },
+    ],
+    scopeBlocks: {
+      'session-summary': [
+        {
+          id: `${params.activityId}-report-${params.status}-summary`,
+          type: 'rich-text',
+          title: 'Report Contribution',
+          paragraphs: [params.reason],
+        },
+      ],
+      'activity-session': [
+        {
+          id: `${params.activityId}-report-${params.status}-activity`,
+          type: 'rich-text',
+          title: 'Report Contribution',
+          paragraphs: [params.reason],
+        },
+      ],
+    },
+    payload: {
+      status: params.status,
+      reason: params.reason,
+    },
+  }
+}
+
 async function buildSyncDeckSessionReportManifest(
   session: SyncDeckSession,
   sessions: SessionStore,
 ): Promise<SyncDeckSessionReportManifest> {
   const activities: SyncDeckSessionReportManifest['activities'] = []
-  for (const [instanceKey, embeddedActivity] of Object.entries(session.data.embeddedActivities)) {
+  const entries = Object.entries(session.data.embeddedActivities)
+    .filter((entry): entry is [string, SyncDeckEmbeddedActivityRecord] => {
+      const embeddedActivity = entry[1]
+      return isPlainObject(embeddedActivity)
+        && typeof embeddedActivity.childSessionId === 'string'
+        && embeddedActivity.childSessionId.trim().length > 0
+        && typeof embeddedActivity.activityId === 'string'
+        && embeddedActivity.activityId.trim().length > 0
+    })
+    .sort(([, left], [, right]) => {
+      const leftStartedAt = Number.isFinite(left.startedAt) ? left.startedAt : 0
+      const rightStartedAt = Number.isFinite(right.startedAt) ? right.startedAt : 0
+      return leftStartedAt - rightStartedAt
+    })
+
+  for (const [instanceKey, embeddedActivity] of entries) {
     const childSession = await sessions.get(embeddedActivity.childSessionId)
+    const startedAt = Number.isFinite(embeddedActivity.startedAt) ? embeddedActivity.startedAt : 0
+    let report: ActivityStructuredReportSection
     if (!childSession || typeof childSession.type !== 'string') {
-      continue
+      report = buildEmbeddedReportAvailabilitySection({
+        activityId: embeddedActivity.activityId,
+        childSessionId: embeddedActivity.childSessionId,
+        instanceKey,
+        status: 'unavailable',
+        reason: 'This embedded activity session was no longer available when the SyncDeck report was generated.',
+      })
+    } else {
+      const builder = getActivityReportBuilder(childSession.type)
+      if (builder) {
+        try {
+          const builtReport = builder(childSession, { instanceKey })
+          report = builtReport ?? buildEmbeddedReportAvailabilitySection({
+            activityId: childSession.type,
+            childSessionId: childSession.id,
+            instanceKey,
+            status: 'unavailable',
+            reason: 'This activity could not build a report from the current child session state.',
+          })
+        } catch (error) {
+          console.warn('[SyncDeck][ReportBuilderError]', {
+            parentSessionId: session.id,
+            childSessionId: childSession.id,
+            activityId: childSession.type,
+            instanceKey,
+            error: error instanceof Error
+              ? { name: error.name, message: error.message, stack: error.stack }
+              : String(error),
+          })
+          report = buildEmbeddedReportAvailabilitySection({
+            activityId: childSession.type,
+            childSessionId: childSession.id,
+            instanceKey,
+            status: 'unavailable',
+            reason: 'This activity encountered an error while generating its report.',
+          })
+        }
+      } else {
+        report = buildEmbeddedReportAvailabilitySection({
+          activityId: childSession.type,
+          childSessionId: childSession.id,
+          instanceKey,
+          status: 'unsupported',
+          reason: 'This activity has not added structured reporting support yet, so detailed student work is not available in this SyncDeck report.',
+        })
+      }
     }
 
-    const builder = getActivityReportBuilder(childSession.type)
-    if (!builder) {
-      continue
-    }
-
-    const report = builder(childSession, { instanceKey })
-    if (!report) {
-      continue
-    }
-
-    const activityConfig = getActivityConfig(childSession.type)
     activities.push({
-      activityId: embeddedActivity.activityId,
-      activityName: typeof activityConfig?.title === 'string' && activityConfig.title.trim().length > 0
-        ? activityConfig.title.trim()
-        : typeof activityConfig?.name === 'string' && activityConfig.name.trim().length > 0
-          ? activityConfig.name.trim()
-          : embeddedActivity.activityId,
-      childSessionId: embeddedActivity.childSessionId,
+      activityId: report.activityId,
+      activityName: resolveActivityDisplayName(report.activityId),
+      childSessionId: report.childSessionId,
       instanceKey,
-      startedAt: embeddedActivity.startedAt,
+      startedAt,
       report,
     })
   }
@@ -1769,54 +1880,6 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
     broadcastEmbeddedActivityEnd(session, instanceKey, existing.childSessionId)
 
     res.json({ ok: true, instanceKey, childSessionId: existing.childSessionId })
-  })
-
-  app.get('/api/syncdeck/:sessionId/embedded-activity/report/:instanceKey', async (req, res) => {
-    const sessionId = req.params.sessionId
-    if (!sessionId) {
-      res.status(400).json({ error: 'missing sessionId' })
-      return
-    }
-
-    const session = await getSyncDeckSessionWithEmbeddedKeepalive(sessions, sessionId)
-    if (!session) {
-      res.status(404).json({ error: 'invalid session' })
-      return
-    }
-
-    const instructorPasscode = normalizeInstructorPasscode(readHeaderField(req.headers, 'x-syncdeck-instructor-passcode'))
-    const instanceKey = normalizeInstanceKey(req.params.instanceKey)
-    if (!instructorPasscode || !verifyInstructorPasscode(session.data.instructorPasscode, instructorPasscode)) {
-      res.status(403).json({ error: 'forbidden' })
-      return
-    }
-    if (!instanceKey) {
-      res.status(400).json({ error: 'invalid payload' })
-      return
-    }
-
-    const embeddedActivity = session.data.embeddedActivities[instanceKey]
-    if (!embeddedActivity) {
-      res.status(404).json({ error: 'embedded activity not found' })
-      return
-    }
-
-    const childSession = await sessions.get(embeddedActivity.childSessionId)
-    if (!childSession) {
-      res.status(404).json({ error: 'invalid child session' })
-      return
-    }
-
-    const activityConfig = getActivityConfig(childSession.type ?? '')
-    const reportEndpoint = typeof activityConfig?.reportEndpoint === 'string' ? activityConfig.reportEndpoint.trim() : ''
-    if (reportEndpoint.length === 0) {
-      res.status(404).json({ error: 'embedded activity report unavailable' })
-      return
-    }
-
-    const location = buildEmbeddedActivityReportPath(reportEndpoint, childSession.id)
-    res.setHeader?.('Location', location)
-    res.status(302).json({ location })
   })
 
   app.get('/api/syncdeck/:sessionId/report-manifest', async (req, res) => {

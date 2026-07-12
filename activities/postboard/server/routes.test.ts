@@ -20,8 +20,11 @@ interface HandlerRequest {
 interface HandlerResponse {
   statusCode: number
   body: unknown
+  headers: Record<string, string>
   status(code: number): HandlerResponse
   json(payload: unknown): void
+  send?(payload: unknown): void
+  setHeader(name: string, value: string): void
 }
 
 type Handler = (req: HandlerRequest, res: HandlerResponse) => void | Promise<void>
@@ -78,12 +81,19 @@ function createResponse(): HandlerResponse {
   return {
     statusCode: 200,
     body: undefined,
+    headers: {},
     status(code: number) {
       this.statusCode = code
       return this
     },
     json(payload: unknown) {
       this.body = payload
+    },
+    send(payload: unknown) {
+      this.body = payload
+    },
+    setHeader(name: string, value: string) {
+      this.headers[name] = value
     },
   }
 }
@@ -470,6 +480,81 @@ void test('instructor-state route rejects missing passcode and accepts valid pas
   }, accepted)
   assert.equal(accepted.statusCode, 200)
   assert.equal((accepted.body as { prompt?: { text?: string } }).prompt?.text, 'What did you notice?')
+})
+
+void test('report route requires instructor auth and returns downloadable self-contained HTML', async () => {
+  const app = new TestApp()
+  const store = new MemoryStore()
+  const session = createSession({
+    posts: [
+      createPost({
+        id: 'approved-post',
+        text: 'Use a small test case.',
+      }),
+    ],
+    reactions: {
+      'approved-post': { byUser: { 'student-2': '👍' } },
+    },
+    flags: {
+      'approved-post': [
+        {
+          id: 'flag-1',
+          postId: 'approved-post',
+          flaggedBy: 'instructor',
+          reason: 'Discuss later',
+          createdAt: 120,
+        },
+      ],
+    },
+  })
+  await store.set(session.id, session)
+  setupPostboardRoutes(app, store, createWsRouter())
+
+  const handler = app.handlers.get['/api/postboard/:sessionId/report']
+  assert.ok(handler)
+
+  const rejected = createResponse()
+  await handler({ params: { sessionId: session.id }, headers: {} }, rejected)
+  assert.equal(rejected.statusCode, 403)
+
+  const accepted = createResponse()
+  await handler({
+    params: { sessionId: session.id },
+    headers: { 'x-instructor-passcode': 'teacher-pass' },
+  }, accepted)
+
+  assert.equal(accepted.statusCode, 200)
+  assert.equal(accepted.headers['Content-Type'], 'text/html; charset=utf-8')
+  assert.match(accepted.headers['Content-Disposition'] ?? '', /attachment; filename="what-did-you-notice\.html"/)
+  assert.equal(typeof accepted.body, 'string')
+  assert.match(String(accepted.body), /Postboard Report/)
+  assert.match(String(accepted.body), /Use a small test case\./)
+  assert.match(String(accepted.body), /Discuss later/)
+  assert.doesNotMatch(String(accepted.body), /teacher-pass/)
+  assert.doesNotMatch(String(accepted.body), /<script[^>]+src=/)
+})
+
+void test('report route returns 500 instead of JSON-encoding HTML when send is unavailable', async () => {
+  const app = new TestApp()
+  const store = new MemoryStore()
+  const session = createSession()
+  await store.set(session.id, session)
+  setupPostboardRoutes(app, store, createWsRouter())
+
+  const handler = app.handlers.get['/api/postboard/:sessionId/report']
+  assert.ok(handler)
+
+  const response = createResponse()
+  delete response.send
+  await handler({
+    params: { sessionId: session.id },
+    headers: { 'x-instructor-passcode': 'teacher-pass' },
+  }, response)
+
+  assert.equal(response.statusCode, 500)
+  assert.deepEqual(response.body, { error: 'html response unsupported' })
+  assert.equal(response.headers['Content-Type'], undefined)
+  assert.equal(response.headers['Content-Disposition'], undefined)
 })
 
 void test('post submit route keeps manual student notes pending and instructor notes approved', async () => {
