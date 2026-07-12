@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } fro
 import { useLocation, useParams } from 'react-router-dom'
 import SessionHeader from '@src/components/common/SessionHeader'
 import Button from '@src/components/ui/Button'
+import { useEmbeddedManagerPasscodeExchange } from '@src/hooks/useEmbeddedManagerPasscodeExchange'
 import InstructorFeedbackControls from '../../../shared/client/components/InstructorFeedbackControls.js'
 import NoteStyleSelect from '../../../shared/client/components/NoteStyleSelect.js'
 import ReactionSummary from '../../../shared/client/components/ReactionSummary.js'
@@ -43,6 +44,16 @@ export function readInstructorPasscode(sessionId: string | undefined, state: unk
   }
 }
 
+export function resolvePostboardInstructorAccessState(params: {
+  isResolvingCredentials: boolean
+  instructorPasscode: string
+}): 'loading' | 'missing' | 'ready' {
+  if (params.instructorPasscode) {
+    return 'ready'
+  }
+  return params.isResolvingCredentials ? 'loading' : 'missing'
+}
+
 function getLaunchDefaults(search: string): { prompt: string; autoApprove: boolean | null } {
   const params = new URLSearchParams(search)
   const prompt = params.get('prompt')?.trim() ?? ''
@@ -82,7 +93,18 @@ export function getInstructorBoardCardClassName(
 export default function PostboardManager(): React.JSX.Element {
   const { sessionId } = useParams<{ sessionId?: string }>()
   const location = useLocation()
-  const [instructorPasscode, setInstructorPasscode] = useState(() => readInstructorPasscode(sessionId, location.state))
+  const fallbackInstructorPasscode = useMemo(
+    () => readInstructorPasscode(sessionId, location.state),
+    [location.state, sessionId],
+  )
+  const embeddedManagerPasscodeExchange = useEmbeddedManagerPasscodeExchange({
+    sessionId,
+    search: location.search,
+  })
+  const [instructorPasscode, setInstructorPasscode] = useState(fallbackInstructorPasscode)
+  const [isResolvingCredentials, setIsResolvingCredentials] = useState(
+    embeddedManagerPasscodeExchange.isResolving,
+  )
   const [snapshot, setSnapshot] = useState<PostboardInstructorSnapshot | null>(null)
   const [promptDraft, setPromptDraft] = useState('')
   const [autoApprove, setAutoApprove] = useState(false)
@@ -102,7 +124,7 @@ export default function PostboardManager(): React.JSX.Element {
   const launchDefaults = useMemo(() => getLaunchDefaults(location.search), [location.search])
 
   useEffect(() => {
-    setInstructorPasscode(readInstructorPasscode(sessionId, location.state))
+    setInstructorPasscode(fallbackInstructorPasscode)
     setSnapshot(null)
     setPromptDraft('')
     setAutoApprove(false)
@@ -111,7 +133,19 @@ export default function PostboardManager(): React.JSX.Element {
     autoApproveDirtyRef.current = false
     setupInitializedRef.current = false
     fetchRequestIdRef.current += 1
-  }, [location.state, sessionId])
+  }, [fallbackInstructorPasscode, location.state, sessionId])
+
+  useEffect(() => {
+    setIsResolvingCredentials(embeddedManagerPasscodeExchange.isResolving)
+    if (embeddedManagerPasscodeExchange.isResolving) {
+      return
+    }
+    setInstructorPasscode(embeddedManagerPasscodeExchange.passcode || fallbackInstructorPasscode)
+  }, [
+    embeddedManagerPasscodeExchange.isResolving,
+    embeddedManagerPasscodeExchange.passcode,
+    fallbackInstructorPasscode,
+  ])
 
   const fetchState = useCallback(async () => {
     if (!sessionId || !instructorPasscode) return false
@@ -306,7 +340,21 @@ export default function PostboardManager(): React.JSX.Element {
     return <main className="postboard-shell"><p>Missing Postboard session.</p></main>
   }
 
-  if (!instructorPasscode) {
+  const instructorAccessState = resolvePostboardInstructorAccessState({
+    isResolvingCredentials,
+    instructorPasscode,
+  })
+
+  if (instructorAccessState === 'loading') {
+    return (
+      <main className="postboard-shell">
+        <SessionHeader activityName="Postboard" sessionId={sessionId} />
+        <p role="status" aria-live="polite">Loading instructor access…</p>
+      </main>
+    )
+  }
+
+  if (instructorAccessState === 'missing') {
     return (
       <main className="postboard-shell">
         <SessionHeader activityName="Postboard" sessionId={sessionId} />

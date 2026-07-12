@@ -130,6 +130,57 @@ export class ValkeySessionStore {
     }
   }
 
+  async consumeSessionDataToken(id: string, field: string, token: string): Promise<SessionLike | null> {
+    try {
+      const script = `
+                local key = KEYS[1]
+                local field = ARGV[1]
+                local token = ARGV[2]
+                local now = ARGV[3]
+                local ttl = ARGV[4]
+                local data = redis.call('GET', key)
+                if not data then
+                    return nil
+                end
+                local session = cjson.decode(data)
+                if type(session.data) ~= 'table' then
+                    return nil
+                end
+                local entry = session.data[field]
+                if type(entry) ~= 'table' or entry.value ~= token then
+                    return nil
+                end
+                if entry.expiresAt ~= nil then
+                    local expiresAt = entry.expiresAt
+                    if type(expiresAt) ~= 'number'
+                        or expiresAt ~= expiresAt
+                        or expiresAt == math.huge
+                        or expiresAt == -math.huge
+                        or expiresAt <= tonumber(now) then
+                        return nil
+                    end
+                end
+                session.data[field] = nil
+                session.lastActivity = tonumber(now)
+                local updated = cjson.encode(session)
+                redis.call('SET', key, updated, 'PX', tonumber(ttl))
+                return updated
+            `
+      const result = await this.client.eval(script, 1, `session:${id}`, field, token, Date.now(), this.ttlMs)
+      return typeof result === 'string' ? JSON.parse(result) as SessionLike : null
+    } catch (err) {
+      console.error(JSON.stringify({
+        activity: 'session-store',
+        component: 'valkey-store',
+        event: 'consume-session-data-token-failed',
+        sessionId: id,
+        field,
+        error: err instanceof Error ? { name: err.name, message: err.message } : String(err),
+      }))
+      return null
+    }
+  }
+
   async delete(id: string): Promise<boolean> {
     try {
       const result = await this.client.del(`session:${id}`)

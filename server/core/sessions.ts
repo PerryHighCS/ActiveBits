@@ -18,6 +18,7 @@ import {
 } from './sessionEntryParticipants.js'
 import { buildSessionEntryStatus } from './entryStatus.js'
 import { acceptEntryParticipant } from './acceptedEntryParticipants.js'
+import { consumeSessionDataToken } from './sessionTokenUtils.js'
 
 export interface SessionRecord extends SharedSession<Record<string, unknown>> {
   [key: string]: unknown
@@ -49,6 +50,7 @@ function toSessionRecord(session: SessionLike): SessionRecord {
 export interface SessionStore extends SharedSessionStore<Record<string, unknown>> {
   get(id: string): Promise<SessionRecord | null>
   set(id: string, session: SessionRecord, ttl?: number | null): Promise<void>
+  consumeSessionDataToken?(id: string, field: string, token: string): Promise<SessionRecord | null>
   delete(id: string): Promise<boolean>
   touch(id: string): Promise<boolean>
   getAll(): Promise<SessionRecord[]>
@@ -106,6 +108,20 @@ class InMemorySessionStore implements SessionStore {
 
   async set(id: string, session: SessionRecord): Promise<void> {
     this.store[id] = normalizeSessionData(session)
+  }
+
+  async consumeSessionDataToken(id: string, field: string, token: string): Promise<SessionRecord | null> {
+    const session = consumeSessionDataToken(this.store[id], field, token)
+    if (!session) {
+      return null
+    }
+
+    session.lastActivity = Date.now()
+    const embeddedParentSessionId = getEmbeddedParentSessionId(session)
+    if (embeddedParentSessionId && embeddedParentSessionId !== id) {
+      await this.touch(embeddedParentSessionId)
+    }
+    return normalizeSessionData(session)
   }
 
   async delete(id: string): Promise<boolean> {
@@ -190,6 +206,22 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
     cache.set(id, normalized, false)
   }
 
+  const consumeSessionDataToken = async (id: string, field: string, token: string): Promise<SessionRecord | null> => {
+    cache.invalidate(id)
+    const consumed = await valkeyStore.consumeSessionDataToken(id, field, token)
+    if (!consumed) {
+      return null
+    }
+
+    const session = normalizeSessionData(toSessionRecord(consumed))
+    cache.set(id, session, false)
+    const embeddedParentSessionId = getEmbeddedParentSessionId(session)
+    if (embeddedParentSessionId && embeddedParentSessionId !== id) {
+      await touch(embeddedParentSessionId)
+    }
+    return session
+  }
+
   const del = async (id: string): Promise<boolean> => {
     cache.invalidate(id)
     return await valkeyStore.delete(id)
@@ -259,6 +291,7 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
     cache,
     get,
     set,
+    consumeSessionDataToken,
     delete: del,
     touch,
     getAll,

@@ -1,9 +1,14 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
+  SYNCDECK_EMBEDDED_ACTIVITY_IFRAME_ALLOW,
   SYNCDECK_IFRAME_SANDBOX,
   SYNCDECK_PRESENTATION_IFRAME_SANDBOX_WITH_UNSANDBOXED_POPUPS,
 } from './iframeSandbox.js'
+
+void test('SYNCDECK_EMBEDDED_ACTIVITY_IFRAME_ALLOW delegates autoplay for synchronized media activities', () => {
+  assert.equal(SYNCDECK_EMBEDDED_ACTIVITY_IFRAME_ALLOW, 'autoplay; fullscreen')
+})
 
 function sandboxTokens(sandbox: string): string[] {
   return sandbox.trim().split(/\s+/).sort()

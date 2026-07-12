@@ -7,6 +7,7 @@ import {
 import { isEmbeddedChildSessionId } from '@src/components/common/sessionHeaderUtils'
 import Button from '@src/components/ui/Button'
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
+import { useEmbeddedManagerPasscodeExchange } from '@src/hooks/useEmbeddedManagerPasscodeExchange'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import {
@@ -404,6 +405,10 @@ export default function VideoSyncManager() {
   const suppressPlayerEventsTimeoutRef = useRef<number | null>(null)
   const autoStartAttemptKeyRef = useRef<string | null>(null)
   const queryBootstrapSourceUrl = useMemo(() => readBootstrapSourceUrl(location.search), [location.search])
+  const embeddedManagerPasscodeExchange = useEmbeddedManagerPasscodeExchange({
+    sessionId: sessionId ?? undefined,
+    search: location.search,
+  })
   const bootstrapSourceUrl = persistentRecoverySourceUrl ?? queryBootstrapSourceUrl ?? embeddedBootstrapSourceUrl
 
   useEffect(() => {
@@ -672,6 +677,15 @@ export default function VideoSyncManager() {
     let isCancelled = false
 
     const loadInstructorPasscode = async (): Promise<void> => {
+      if (embeddedManagerPasscodeExchange.isResolving) {
+        return
+      }
+      if (embeddedManagerPasscodeExchange.passcode) {
+        setInstructorPasscode(embeddedManagerPasscodeExchange.passcode)
+        setPersistentRecoverySourceUrl(null)
+        setIsPasscodeReady(true)
+        return
+      }
       const bootstrap = resolveBootstrapInstructorPasscode({
         locationState: location.state,
         sessionId,
@@ -740,7 +754,14 @@ export default function VideoSyncManager() {
     return () => {
       isCancelled = true
     }
-  }, [location.pathname, location.search, navigate, sessionId])
+  }, [
+    embeddedManagerPasscodeExchange.isResolving,
+    embeddedManagerPasscodeExchange.passcode,
+    location.pathname,
+    location.search,
+    navigate,
+    sessionId,
+  ])
 
   const handleEnvelope = useCallback((envelope: VideoSyncWsEnvelope) => {
     if (envelope.type === 'state-update' || envelope.type === 'state-snapshot' || envelope.type === 'heartbeat') {

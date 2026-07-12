@@ -47,6 +47,7 @@ import {
   shouldNavigateEmbeddedOverlayOnPointerDown,
 } from '../shared/embeddedOverlayNavigation.js'
 import {
+  SYNCDECK_EMBEDDED_ACTIVITY_IFRAME_ALLOW,
   SYNCDECK_IFRAME_SANDBOX,
   SYNCDECK_PRESENTATION_IFRAME_SANDBOX_WITH_UNSANDBOXED_POPUPS,
 } from '../shared/iframeSandbox.js'
@@ -3692,7 +3693,7 @@ const SyncDeckStudent: FC = () => {
                 title={`Embedded ${activeEmbeddedActivity.activityId} activity`}
                 src={`/${encodeURIComponent(activeEmbeddedActivity.childSessionId)}`}
                 className="w-full h-full border-0"
-                allow="fullscreen"
+                allow={SYNCDECK_EMBEDDED_ACTIVITY_IFRAME_ALLOW}
                 sandbox={SYNCDECK_IFRAME_SANDBOX}
                 onLoad={sendSyncContextToEmbeddedIframe}
               />
@@ -3709,7 +3710,7 @@ const SyncDeckStudent: FC = () => {
                   title={`Solo ${activeSoloOverlay.activityId} activity`}
                   src={activeSoloOverlay.src}
                   className="w-full h-full border-0"
-                  allow="fullscreen"
+                  allow={SYNCDECK_EMBEDDED_ACTIVITY_IFRAME_ALLOW}
                   sandbox={SYNCDECK_IFRAME_SANDBOX}
                   onLoad={sendSyncContextToEmbeddedIframe}
                 />

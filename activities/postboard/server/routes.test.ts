@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import type { SessionRecord, SessionStore } from 'activebits-server/core/sessions.js'
+import { consumeSessionDataToken } from 'activebits-server/core/sessionTokenUtils.js'
 import type { ActiveBitsWebSocket, WsRouter } from '../../../types/websocket.js'
 import setupPostboardRoutes, {
   buildInstructorSnapshot,
@@ -54,6 +55,10 @@ class MemoryStore implements SessionStore {
 
   async set(id: string, session: SessionRecord): Promise<void> {
     this.sessions.set(id, session)
+  }
+
+  async consumeSessionDataToken(id: string, field: string, token: string): Promise<SessionRecord | null> {
+    return consumeSessionDataToken(this.sessions.get(id), field, token)
   }
 
   async delete(id: string): Promise<boolean> {

@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useParams } from 'react-router-dom'
 import SessionHeader from '@src/components/common/SessionHeader'
 import VirtualFileExplorer from '@src/components/common/VirtualFileExplorer'
 import type { VirtualFileEntry } from '@src/components/common/virtualFileExplorerTypes'
+import { useEmbeddedManagerPasscodeExchange } from '@src/hooks/useEmbeddedManagerPasscodeExchange'
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
 import type {
   MobCodeMessageType,
@@ -72,15 +73,59 @@ const LIVE_CONTENT_SYNC_INTERVAL_MS = 250
 const LIVE_PRESENCE_SYNC_INTERVAL_MS = 60
 const PERSIST_STATE_INTERVAL_MS = 5000
 
+export function createMobCodeManagerAuthMessage(
+  sessionId: string | undefined,
+  instructorPasscode: string,
+): string | null {
+  if (!sessionId || !instructorPasscode) {
+    return null
+  }
+
+  return JSON.stringify({
+    type: MOB_CODE_MESSAGE_TYPES.MANAGER_AUTH,
+    sessionId,
+    payload: { instructorPasscode },
+  })
+}
+
+export function resolveMobCodeManagerAccessBanner(params: {
+  instructorPasscode: string
+  isResolving: boolean
+}): 'loading' | 'missing' | null {
+  if (params.instructorPasscode) {
+    return null
+  }
+  return params.isResolving ? 'loading' : 'missing'
+}
+
+export function resolveOpenMobCodeManagerAuthMessage(params: {
+  sessionId: string | undefined
+  instructorPasscode: string
+  readyState: number | undefined
+}): string | null {
+  return params.readyState === 1
+    ? createMobCodeManagerAuthMessage(params.sessionId, params.instructorPasscode)
+    : null
+}
+
 export default function MobCodeManager() {
   const { sessionId } = useParams()
   const encodedSessionId = sessionId ? encodeURIComponent(sessionId) : ''
   const location = useLocation()
-  const instructorPasscode = resolveMobCodeInstructorPasscode({
+  const fallbackInstructorPasscode = useMemo(() => resolveMobCodeInstructorPasscode({
     sessionId,
     locationState: location.state,
+  }), [location.state, sessionId])
+  const embeddedManagerPasscodeExchange = useEmbeddedManagerPasscodeExchange({
+    sessionId,
+    search: location.search,
   })
+  const [instructorPasscode, setInstructorPasscode] = useState(fallbackInstructorPasscode)
   const canEdit = instructorPasscode.length > 0
+  const instructorAccessBanner = resolveMobCodeManagerAccessBanner({
+    instructorPasscode,
+    isResolving: embeddedManagerPasscodeExchange.isResolving,
+  })
   const [files, setFiles] = useState<Record<string, string>>({})
   const [activeFile, setActiveFile] = useState('')
   const [theme, setTheme] = useState<MobCodeThemeId>(() => getThemeFromCookie())
@@ -101,6 +146,17 @@ export default function MobCodeManager() {
   const presenceDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pendingPresenceRef = useRef<{ path: string; selections: MobCodeSelectionRange[] } | null>(null)
   const lastPresenceSyncAtRef = useRef(0)
+
+  useEffect(() => {
+    if (embeddedManagerPasscodeExchange.isResolving) {
+      return
+    }
+    setInstructorPasscode(embeddedManagerPasscodeExchange.passcode || fallbackInstructorPasscode)
+  }, [
+    embeddedManagerPasscodeExchange.isResolving,
+    embeddedManagerPasscodeExchange.passcode,
+    fallbackInstructorPasscode,
+  ])
 
   useEffect(() => {
     latestStateRef.current = createStateSnapshot(files, activeFile)
@@ -140,12 +196,10 @@ export default function MobCodeManager() {
     buildUrl: buildWsUrl,
     shouldReconnect: true,
     onOpen: (_event, ws) => {
-      if (!instructorPasscode) return
-      ws.send(JSON.stringify({
-        type: MOB_CODE_MESSAGE_TYPES.MANAGER_AUTH,
-        sessionId,
-        payload: { instructorPasscode },
-      }))
+      const authMessage = createMobCodeManagerAuthMessage(sessionId, instructorPasscode)
+      if (authMessage) {
+        ws.send(authMessage)
+      }
     },
     onMessage: (event) => {
       const msg = parseMobCodeMessage(event.data)
@@ -157,6 +211,19 @@ export default function MobCodeManager() {
       }
     },
   })
+
+  useEffect(() => {
+    const socket = socketRef.current
+    const authMessage = resolveOpenMobCodeManagerAuthMessage({
+      sessionId,
+      instructorPasscode,
+      readyState: socket?.readyState,
+    })
+    if (!socket || !authMessage) {
+      return
+    }
+    socket.send(authMessage)
+  }, [instructorPasscode, sessionId, socketRef])
 
   const persistState = useCallback(
     async (payload: MobCodeStatePayload, messageType: DurableMobCodeMessageType = MOB_CODE_MESSAGE_TYPES.STATE_SYNC) => {
@@ -470,8 +537,20 @@ export default function MobCodeManager() {
           </div>
         )}
       />
-      {!instructorPasscode && (
-        <div className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800">
+      {instructorAccessBanner === 'loading' && (
+        <div
+          className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800"
+          role="status"
+          aria-live="polite"
+        >
+          Loading instructor access…
+        </div>
+      )}
+      {instructorAccessBanner === 'missing' && (
+        <div
+          className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800"
+          role="alert"
+        >
           Instructor edit credentials are not available in this tab. Rejoin from the create-session flow to persist changes.
         </div>
       )}

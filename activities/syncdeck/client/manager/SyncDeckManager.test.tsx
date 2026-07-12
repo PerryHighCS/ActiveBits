@@ -47,13 +47,19 @@ import { processManagerBundlePreloadRequests } from './SyncDeckManager.js'
 import { processManagerPreloadRequests } from './SyncDeckManager.js'
 import { runEmbeddedStartWithPendingRetry } from './SyncDeckManager.js'
 import { resolveCompletedEmbeddedBootstrapChildSessionIds } from './SyncDeckManager.js'
+import { resolveEmbeddedBootstrapManagerCredentials } from './SyncDeckManager.js'
 import { advanceEmbeddedManagerRenderNonce } from './SyncDeckManager.js'
 import { clearLoadedEmbeddedManagerInstanceKey } from './SyncDeckManager.js'
 import { resolveEmbeddedBootstrapBackfillRetryDelayMs } from './SyncDeckManager.js'
+import { shouldShowEmbeddedBootstrapFailure } from './SyncDeckManager.js'
 import { resolveEmbeddedBootstrapBackfillRequests } from './SyncDeckManager.js'
 import { shouldRetryEmbeddedBootstrapBackfill } from './SyncDeckManager.js'
+import { resolveEmbeddedBootstrapBackfillHttpOutcome } from './SyncDeckManager.js'
 import { extractRevealSyncActionWithoutParsing } from './SyncDeckManager.js'
 import { resolveMountedEmbeddedManagerInstanceKeys } from './SyncDeckManager.js'
+import { resolveEvictedEmbeddedManagerChildSessionIds } from './SyncDeckManager.js'
+import { resolveEvictedEmbeddedManagerTokenCache } from './SyncDeckManager.js'
+import { shouldShowEmbeddedManagerBootstrapOverlay } from './SyncDeckManager.js'
 import { resolveEmbeddedManagerIframeAccessibilityProps } from './SyncDeckManager.js'
 import { extractManagerNavigationCapabilitiesFromRevealMessage } from './SyncDeckManager.js'
 import { resolveSyncDeckActivityPickerEntries } from './SyncDeckManager.js'
@@ -760,14 +766,9 @@ void test('resolveEmbeddedBootstrapBackfillRequests only returns child sessions 
       },
       completedChildSessionIds: new Set(['child-video']),
       pendingChildSessionIds: new Set(['child-raffle']),
+      failedChildSessionIds: new Set(['child-resonance']),
     }),
-    [
-      {
-        activityId: 'resonance',
-        childSessionId: 'child-resonance',
-        instanceKey: 'resonance:1:0',
-      },
-    ],
+    [],
   )
 })
 
@@ -785,6 +786,21 @@ void test('resolveCompletedEmbeddedBootstrapChildSessionIds marks both stale loc
       resolvedChildSessionId: 'same-child-id',
     }),
     ['same-child-id'],
+  )
+})
+
+void test('resolveEmbeddedBootstrapManagerCredentials requires both bootstrap data and an entry token', () => {
+  assert.equal(resolveEmbeddedBootstrapManagerCredentials({ managerBootstrap: {} }), null)
+  assert.equal(resolveEmbeddedBootstrapManagerCredentials({ managerEntryToken: 'token-1' }), null)
+  assert.deepEqual(
+    resolveEmbeddedBootstrapManagerCredentials({
+      managerBootstrap: { instructorPasscode: 'teacher-pass' },
+      managerEntryToken: ' token-1 ',
+    }),
+    {
+      managerBootstrap: { instructorPasscode: 'teacher-pass' },
+      managerEntryToken: 'token-1',
+    },
   )
 })
 
@@ -823,12 +839,23 @@ void test('resolveEmbeddedBootstrapBackfillRetryDelayMs applies capped exponenti
   assert.equal(resolveEmbeddedBootstrapBackfillRetryDelayMs(Number.NaN), 1000)
 })
 
+void test('shouldShowEmbeddedBootstrapFailure waits for the bounded retry threshold', () => {
+  assert.equal(shouldShowEmbeddedBootstrapFailure(2), false)
+  assert.equal(shouldShowEmbeddedBootstrapFailure(3), true)
+})
+
 void test('shouldRetryEmbeddedBootstrapBackfill only retries transient server failures', () => {
   assert.equal(shouldRetryEmbeddedBootstrapBackfill(400), false)
   assert.equal(shouldRetryEmbeddedBootstrapBackfill(403), false)
   assert.equal(shouldRetryEmbeddedBootstrapBackfill(404), false)
   assert.equal(shouldRetryEmbeddedBootstrapBackfill(500), true)
   assert.equal(shouldRetryEmbeddedBootstrapBackfill(503), true)
+})
+
+void test('resolveEmbeddedBootstrapBackfillHttpOutcome immediately fails non-retryable responses', () => {
+  assert.equal(resolveEmbeddedBootstrapBackfillHttpOutcome(400), 'failed')
+  assert.equal(resolveEmbeddedBootstrapBackfillHttpOutcome(404), 'failed')
+  assert.equal(resolveEmbeddedBootstrapBackfillHttpOutcome(500), 'retry')
 })
 
 void test('buildManagerOverlayNavigationCommand builds reveal command envelopes for four directions and slide', () => {
@@ -1181,6 +1208,77 @@ void test('resolveMountedEmbeddedManagerInstanceKeys drops stale warm entries', 
     }),
     ['gallery-walk:0:0'],
   )
+})
+
+void test('resolveEvictedEmbeddedManagerChildSessionIds identifies only child sessions whose iframe was unmounted', () => {
+  assert.deepEqual(
+    resolveEvictedEmbeddedManagerChildSessionIds({
+      previousInstanceKeys: ['resonance:0:1', 'gallery-walk:0:0'],
+      mountedInstanceKeys: ['gallery-walk:0:0'],
+      embeddedActivities: {
+        'resonance:0:1': {
+          activityId: 'resonance',
+          childSessionId: 'child-resonance',
+          startedAt: 1,
+          owner: 'syncdeck-instructor',
+        },
+        'gallery-walk:0:0': {
+          activityId: 'gallery-walk',
+          childSessionId: 'child-gallery',
+          startedAt: 1,
+          owner: 'syncdeck-instructor',
+        },
+      },
+    }),
+    ['child-resonance'],
+  )
+})
+
+void test('resolveEvictedEmbeddedManagerTokenCache requests backfill even when an evicted child has no cached token', () => {
+  assert.deepEqual(
+    resolveEvictedEmbeddedManagerTokenCache({
+      cachedTokensByChildSessionId: { 'child-active': 'active-token' },
+      evictedChildSessionIds: ['child-evicted'],
+    }),
+    {
+      cachedTokensByChildSessionId: { 'child-active': 'active-token' },
+      shouldBackfill: true,
+    },
+  )
+})
+
+void test('resolveEvictedEmbeddedManagerTokenCache removes the cached token for an evicted child', () => {
+  assert.deepEqual(
+    resolveEvictedEmbeddedManagerTokenCache({
+      cachedTokensByChildSessionId: {
+        'child-active': 'active-token',
+        'child-evicted': 'stale-token',
+      },
+      evictedChildSessionIds: ['child-evicted'],
+    }),
+    {
+      cachedTokensByChildSessionId: { 'child-active': 'active-token' },
+      shouldBackfill: true,
+    },
+  )
+})
+
+void test('shouldShowEmbeddedManagerBootstrapOverlay keeps active managers recoverable after their token is evicted', () => {
+  assert.equal(shouldShowEmbeddedManagerBootstrapOverlay({
+    isActive: true,
+    managerEntryToken: null,
+    isLoaded: true,
+  }), true)
+  assert.equal(shouldShowEmbeddedManagerBootstrapOverlay({
+    isActive: true,
+    managerEntryToken: 'token-1',
+    isLoaded: true,
+  }), false)
+  assert.equal(shouldShowEmbeddedManagerBootstrapOverlay({
+    isActive: false,
+    managerEntryToken: null,
+    isLoaded: true,
+  }), false)
 })
 
 void test('resolveEmbeddedManagerIframeAccessibilityProps hides inactive embedded managers from focus and assistive tech', () => {

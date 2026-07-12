@@ -147,6 +147,7 @@ interface SyncDeckEmbeddedActivityStartResponse {
   childSessionId?: unknown
   instanceKey?: unknown
   managerBootstrap?: unknown
+  managerEntryToken?: unknown
 }
 
 interface SyncDeckEmbeddedBootstrapBackfillRequest {
@@ -863,6 +864,7 @@ export function resolveEmbeddedBootstrapBackfillRequests(params: {
   embeddedActivities: SyncDeckEmbeddedActivitiesMap
   completedChildSessionIds: ReadonlySet<string>
   pendingChildSessionIds: ReadonlySet<string>
+  failedChildSessionIds?: ReadonlySet<string>
 }): SyncDeckEmbeddedBootstrapBackfillRequest[] {
   const requests: SyncDeckEmbeddedBootstrapBackfillRequest[] = []
 
@@ -870,6 +872,7 @@ export function resolveEmbeddedBootstrapBackfillRequests(params: {
     if (
       params.completedChildSessionIds.has(record.childSessionId)
       || params.pendingChildSessionIds.has(record.childSessionId)
+      || params.failedChildSessionIds?.has(record.childSessionId)
     ) {
       continue
     }
@@ -897,6 +900,20 @@ export function resolveCompletedEmbeddedBootstrapChildSessionIds(params: {
     completedIds.add(params.resolvedChildSessionId)
   }
   return [...completedIds]
+}
+
+export function resolveEmbeddedBootstrapManagerCredentials(payload: {
+  managerBootstrap?: unknown
+  managerEntryToken?: unknown
+}): { managerBootstrap: Record<string, unknown>; managerEntryToken: string } | null {
+  if (!isPlainObject(payload.managerBootstrap)) {
+    return null
+  }
+  const managerEntryToken = typeof payload.managerEntryToken === 'string' ? payload.managerEntryToken.trim() : ''
+  if (managerEntryToken.length === 0) {
+    return null
+  }
+  return { managerBootstrap: payload.managerBootstrap, managerEntryToken }
 }
 
 export function advanceEmbeddedManagerRenderNonce(
@@ -933,8 +950,18 @@ export function resolveEmbeddedBootstrapBackfillRetryDelayMs(attemptCount: numbe
   )
 }
 
+export function shouldShowEmbeddedBootstrapFailure(retryAttemptCount: number): boolean {
+  return retryAttemptCount >= MAX_EMBEDDED_BOOTSTRAP_RETRY_ATTEMPTS
+}
+
 export function shouldRetryEmbeddedBootstrapBackfill(status: number): boolean {
   return status >= 500
+}
+
+export function resolveEmbeddedBootstrapBackfillHttpOutcome(
+  status: number,
+): 'retry' | 'failed' {
+  return shouldRetryEmbeddedBootstrapBackfill(status) ? 'retry' : 'failed'
 }
 
 export function resolveManagerActiveEmbeddedInstanceKey(
@@ -1961,11 +1988,13 @@ export function buildInstructorRoleCommandMessage(): Record<string, unknown> {
   })
 }
 
-function buildEmbeddedManagerIframeSrc(record: SyncDeckEmbeddedActivityRecord): string {
-  return `/manage/${encodeURIComponent(record.activityId)}/${encodeURIComponent(record.childSessionId)}`
+function buildEmbeddedManagerIframeSrc(record: SyncDeckEmbeddedActivityRecord, managerEntryToken: string): string {
+  const params = new URLSearchParams({ embeddedManagerToken: managerEntryToken })
+  return `/manage/${encodeURIComponent(record.activityId)}/${encodeURIComponent(record.childSessionId)}?${params.toString()}`
 }
 
 const MAX_MOUNTED_EMBEDDED_MANAGER_IFRAMES = 2
+const MAX_EMBEDDED_BOOTSTRAP_RETRY_ATTEMPTS = 3
 
 function areStringArraysEqual(left: readonly string[], right: readonly string[]): boolean {
   return left.length === right.length && left.every((value, index) => value === right[index])
@@ -2000,6 +2029,50 @@ export function resolveMountedEmbeddedManagerInstanceKeys(params: {
   }
 
   return next.slice(0, limit)
+}
+
+export function resolveEvictedEmbeddedManagerChildSessionIds(params: {
+  previousInstanceKeys: Iterable<string>
+  mountedInstanceKeys: Iterable<string>
+  embeddedActivities: SyncDeckEmbeddedActivitiesMap
+}): string[] {
+  const mounted = new Set(params.mountedInstanceKeys)
+  const childSessionIds = new Set<string>()
+  for (const instanceKey of params.previousInstanceKeys) {
+    if (mounted.has(instanceKey)) {
+      continue
+    }
+    const childSessionId = params.embeddedActivities[instanceKey]?.childSessionId
+    if (typeof childSessionId === 'string' && childSessionId.length > 0) {
+      childSessionIds.add(childSessionId)
+    }
+  }
+  return [...childSessionIds]
+}
+
+export function resolveEvictedEmbeddedManagerTokenCache(params: {
+  cachedTokensByChildSessionId: Record<string, string>
+  evictedChildSessionIds: Iterable<string>
+}): {
+  cachedTokensByChildSessionId: Record<string, string>
+  shouldBackfill: boolean
+} {
+  const evictedChildSessionIdSet = new Set(params.evictedChildSessionIds)
+  return {
+    cachedTokensByChildSessionId: Object.fromEntries(
+      Object.entries(params.cachedTokensByChildSessionId)
+        .filter(([childSessionId]) => !evictedChildSessionIdSet.has(childSessionId)),
+    ),
+    shouldBackfill: evictedChildSessionIdSet.size > 0,
+  }
+}
+
+export function shouldShowEmbeddedManagerBootstrapOverlay(params: {
+  isActive: boolean
+  managerEntryToken: string | null
+  isLoaded: boolean
+}): boolean {
+  return params.isActive && (!params.managerEntryToken || !params.isLoaded)
 }
 
 export function resolveEmbeddedManagerIframeAccessibilityProps(
@@ -2073,7 +2146,9 @@ const SyncDeckManager: FC = () => {
   const [mountedEmbeddedManagerInstanceKeys, setMountedEmbeddedManagerInstanceKeys] = useState<string[]>([])
   const [loadedEmbeddedManagerInstanceKeys, setLoadedEmbeddedManagerInstanceKeys] = useState<Record<string, boolean>>({})
   const [embeddedManagerRenderNonceByChildSessionId, setEmbeddedManagerRenderNonceByChildSessionId] = useState<Record<string, number>>({})
+  const [embeddedManagerEntryTokensByChildSessionId, setEmbeddedManagerEntryTokensByChildSessionId] = useState<Record<string, string>>({})
   const [embeddedBootstrapBackfillRetryNonce, setEmbeddedBootstrapBackfillRetryNonce] = useState(0)
+  const [failedEmbeddedBootstrapChildSessionIds, setFailedEmbeddedBootstrapChildSessionIds] = useState<string[]>([])
   const presentationIframeRef = useRef<HTMLIFrameElement | null>(null)
   const reportPreviewTriggerRef = useRef<HTMLButtonElement | null>(null)
   const reportPreviewDialogRef = useRef<HTMLDivElement | null>(null)
@@ -2114,9 +2189,12 @@ const SyncDeckManager: FC = () => {
   } | null>(null)
   const pendingDeckActivityRequestsRef = useRef<Promise<SyncDeckDeckActivityRequestsByHorizontalIndex> | null>(null)
   const completedEmbeddedBootstrapChildSessionIdsRef = useRef<Set<string>>(new Set())
+  const embeddedManagerEntryTokensByChildSessionIdRef = useRef<Record<string, string>>({})
+  const previouslyMountedEmbeddedManagerInstanceKeysRef = useRef<Set<string>>(new Set())
   const pendingEmbeddedBootstrapChildSessionIdsRef = useRef<Set<string>>(new Set())
   const embeddedBootstrapBackfillRetryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const embeddedBootstrapBackfillRetryAttemptRef = useRef(0)
+  const embeddedBootstrapBackfillRetryAttemptByChildSessionIdRef = useRef<Map<string, number>>(new Map())
+  const failedEmbeddedBootstrapChildSessionIdsRef = useRef<Set<string>>(new Set())
   const consumedRouterStatePasscodeRef = useRef<{ sessionId: string; instructorPasscode: string } | null>(null)
   const syncDebugEnabledRef = useRef(isSyncDeckDebugEnabled())
 
@@ -2157,6 +2235,21 @@ const SyncDeckManager: FC = () => {
       clearTimeout(embeddedBootstrapBackfillRetryTimeoutRef.current)
       embeddedBootstrapBackfillRetryTimeoutRef.current = null
     }
+  }, [])
+
+  const cacheEmbeddedManagerEntryToken = useCallback((childSessionId: string, managerEntryToken: string): boolean => {
+    if (embeddedManagerEntryTokensByChildSessionIdRef.current[childSessionId] === managerEntryToken) {
+      return false
+    }
+
+    const next = {
+      ...embeddedManagerEntryTokensByChildSessionIdRef.current,
+      [childSessionId]: managerEntryToken,
+    }
+    embeddedManagerEntryTokensByChildSessionIdRef.current = next
+    setEmbeddedManagerEntryTokensByChildSessionId(next)
+    setEmbeddedManagerRenderNonceByChildSessionId((current) => advanceEmbeddedManagerRenderNonce(current, childSessionId))
+    return true
   }, [])
 
   const releaseRestoreSuppression = useCallback((): void => {
@@ -2235,6 +2328,43 @@ const SyncDeckManager: FC = () => {
       return Object.fromEntries(nextEntries)
     })
   }, [embeddedActivities, instructorIndicesState])
+
+  useEffect(() => {
+    const currentlyMounted = new Set(mountedEmbeddedManagerInstanceKeys)
+    const evictedChildSessionIds = resolveEvictedEmbeddedManagerChildSessionIds({
+      previousInstanceKeys: previouslyMountedEmbeddedManagerInstanceKeysRef.current,
+      mountedInstanceKeys: currentlyMounted,
+      embeddedActivities,
+    })
+    previouslyMountedEmbeddedManagerInstanceKeysRef.current = currentlyMounted
+    if (evictedChildSessionIds.length === 0) {
+      return
+    }
+
+    const tokenCacheUpdate = resolveEvictedEmbeddedManagerTokenCache({
+      cachedTokensByChildSessionId: embeddedManagerEntryTokensByChildSessionIdRef.current,
+      evictedChildSessionIds,
+    })
+    const nextTokens = tokenCacheUpdate.cachedTokensByChildSessionId
+    if (Object.keys(nextTokens).length !== Object.keys(embeddedManagerEntryTokensByChildSessionIdRef.current).length) {
+      embeddedManagerEntryTokensByChildSessionIdRef.current = nextTokens
+      setEmbeddedManagerEntryTokensByChildSessionId(nextTokens)
+    }
+
+    for (const childSessionId of evictedChildSessionIds) {
+      completedEmbeddedBootstrapChildSessionIdsRef.current.delete(childSessionId)
+      embeddedBootstrapBackfillRetryAttemptByChildSessionIdRef.current.delete(childSessionId)
+      failedEmbeddedBootstrapChildSessionIdsRef.current.delete(childSessionId)
+    }
+    setFailedEmbeddedBootstrapChildSessionIds((current) => (
+      current.some((childSessionId) => evictedChildSessionIds.includes(childSessionId))
+        ? current.filter((childSessionId) => !evictedChildSessionIds.includes(childSessionId))
+        : current
+    ))
+    if (tokenCacheUpdate.shouldBackfill) {
+      setEmbeddedBootstrapBackfillRetryNonce((current) => current + 1)
+    }
+  }, [embeddedActivities, mountedEmbeddedManagerInstanceKeys])
 
   useEffect(
     () => () => {
@@ -2596,9 +2726,14 @@ const SyncDeckManager: FC = () => {
   useEffect(() => {
     completedEmbeddedBootstrapChildSessionIdsRef.current.clear()
     pendingEmbeddedBootstrapChildSessionIdsRef.current.clear()
-    embeddedBootstrapBackfillRetryAttemptRef.current = 0
+    embeddedBootstrapBackfillRetryAttemptByChildSessionIdRef.current.clear()
+    failedEmbeddedBootstrapChildSessionIdsRef.current.clear()
     clearEmbeddedBootstrapBackfillRetryTimeout()
     setEmbeddedManagerRenderNonceByChildSessionId({})
+    setFailedEmbeddedBootstrapChildSessionIds([])
+    embeddedManagerEntryTokensByChildSessionIdRef.current = {}
+    previouslyMountedEmbeddedManagerInstanceKeysRef.current.clear()
+    setEmbeddedManagerEntryTokensByChildSessionId({})
   }, [clearEmbeddedBootstrapBackfillRetryTimeout, sessionId])
 
   useEffect(() => {
@@ -2745,9 +2880,9 @@ const SyncDeckManager: FC = () => {
       embeddedActivities,
       completedChildSessionIds: completedEmbeddedBootstrapChildSessionIdsRef.current,
       pendingChildSessionIds: pendingEmbeddedBootstrapChildSessionIdsRef.current,
+      failedChildSessionIds: failedEmbeddedBootstrapChildSessionIdsRef.current,
     })
     if (requests.length === 0) {
-      embeddedBootstrapBackfillRetryAttemptRef.current = 0
       clearEmbeddedBootstrapBackfillRetryTimeout()
       return
     }
@@ -2758,7 +2893,7 @@ const SyncDeckManager: FC = () => {
       pendingEmbeddedBootstrapChildSessionIdsRef.current.add(request.childSessionId)
     }
 
-    void Promise.all(requests.map(async (request): Promise<boolean> => {
+    void Promise.all(requests.map(async (request): Promise<'success' | 'retry' | 'failed'> => {
       try {
         const response = await fetch(`/api/syncdeck/${encodeURIComponent(sessionId)}/embedded-activity/start`, {
           method: 'POST',
@@ -2772,44 +2907,41 @@ const SyncDeckManager: FC = () => {
         })
 
         if (!response.ok) {
-          return shouldRetryEmbeddedBootstrapBackfill(response.status)
+          return resolveEmbeddedBootstrapBackfillHttpOutcome(response.status)
         }
 
         const payload = (await response.json()) as SyncDeckEmbeddedActivityStartResponse
         if (isCancelled) {
-          return false
+          return 'success'
         }
 
         const resolvedChildSessionId =
           typeof payload.childSessionId === 'string' && payload.childSessionId.trim().length > 0
             ? payload.childSessionId.trim()
             : request.childSessionId
+        const managerCredentials = resolveEmbeddedBootstrapManagerCredentials(payload)
+        if (!managerCredentials) {
+          return 'retry'
+        }
+
+        storeCreateSessionBootstrapPayload(request.activityId, resolvedChildSessionId, managerCredentials.managerBootstrap)
+        if (cacheEmbeddedManagerEntryToken(resolvedChildSessionId, managerCredentials.managerEntryToken)) {
+          setLoadedEmbeddedManagerInstanceKeys((current) => clearLoadedEmbeddedManagerInstanceKey(
+            current,
+            request.instanceKey,
+          ))
+        }
         const completedChildSessionIds = resolveCompletedEmbeddedBootstrapChildSessionIds({
           requestChildSessionId: request.childSessionId,
           resolvedChildSessionId,
         })
-
         for (const completedChildSessionId of completedChildSessionIds) {
           completedEmbeddedBootstrapChildSessionIdsRef.current.add(completedChildSessionId)
         }
-
-        if (!isPlainObject(payload.managerBootstrap)) {
-          return false
-        }
-
-        storeCreateSessionBootstrapPayload(request.activityId, resolvedChildSessionId, payload.managerBootstrap)
-        setEmbeddedManagerRenderNonceByChildSessionId((current) => advanceEmbeddedManagerRenderNonce(
-          current,
-          resolvedChildSessionId,
-        ))
-        setLoadedEmbeddedManagerInstanceKeys((current) => clearLoadedEmbeddedManagerInstanceKey(
-          current,
-          request.instanceKey,
-        ))
-        return false
+        return 'success'
       } catch {
         // Best-effort only. Embedded managers with their own recovery endpoints can still self-heal.
-        return true
+        return 'retry'
       } finally {
         pendingEmbeddedBootstrapChildSessionIdsRef.current.delete(request.childSessionId)
       }
@@ -2818,19 +2950,62 @@ const SyncDeckManager: FC = () => {
         return
       }
 
-      if (results.some(Boolean)) {
+      const retryAttemptCounts = embeddedBootstrapBackfillRetryAttemptByChildSessionIdRef.current
+      const retryableRequests: SyncDeckEmbeddedBootstrapBackfillRequest[] = []
+      const newlyFailedChildSessionIds: string[] = []
+      const successfulChildSessionIds: string[] = []
+      for (const [index, request] of requests.entries()) {
+        if (results[index] === 'success') {
+          retryAttemptCounts.delete(request.childSessionId)
+          successfulChildSessionIds.push(request.childSessionId)
+          continue
+        }
+
+        if (results[index] === 'failed') {
+          retryAttemptCounts.delete(request.childSessionId)
+          newlyFailedChildSessionIds.push(request.childSessionId)
+          continue
+        }
+
+        const retryAttemptCount = (retryAttemptCounts.get(request.childSessionId) ?? 0) + 1
+        retryAttemptCounts.set(request.childSessionId, retryAttemptCount)
+        if (shouldShowEmbeddedBootstrapFailure(retryAttemptCount)) {
+          newlyFailedChildSessionIds.push(request.childSessionId)
+        } else {
+          retryableRequests.push(request)
+        }
+      }
+      if (newlyFailedChildSessionIds.length > 0 || successfulChildSessionIds.length > 0) {
+        for (const childSessionId of successfulChildSessionIds) {
+          failedEmbeddedBootstrapChildSessionIdsRef.current.delete(childSessionId)
+        }
+        for (const childSessionId of newlyFailedChildSessionIds) {
+          failedEmbeddedBootstrapChildSessionIdsRef.current.add(childSessionId)
+        }
+        setFailedEmbeddedBootstrapChildSessionIds((current) => {
+          const next = new Set(current)
+          for (const childSessionId of successfulChildSessionIds) {
+            next.delete(childSessionId)
+          }
+          for (const childSessionId of newlyFailedChildSessionIds) {
+            next.add(childSessionId)
+          }
+          return [...next]
+        })
+      }
+
+      if (retryableRequests.length > 0) {
+        const retryAttemptCount = Math.max(...retryableRequests.map((request) => (
+          retryAttemptCounts.get(request.childSessionId) ?? 0
+        )))
         const retryDelayMs = resolveEmbeddedBootstrapBackfillRetryDelayMs(
-          embeddedBootstrapBackfillRetryAttemptRef.current,
+          retryAttemptCount - 1,
         )
-        embeddedBootstrapBackfillRetryAttemptRef.current += 1
         embeddedBootstrapBackfillRetryTimeoutRef.current = setTimeout(() => {
           embeddedBootstrapBackfillRetryTimeoutRef.current = null
           setEmbeddedBootstrapBackfillRetryNonce((current) => current + 1)
         }, retryDelayMs)
-        return
       }
-
-      embeddedBootstrapBackfillRetryAttemptRef.current = 0
     })
 
     return () => {
@@ -2840,7 +3015,7 @@ const SyncDeckManager: FC = () => {
         pendingEmbeddedBootstrapChildSessionIdsRef.current.delete(request.childSessionId)
       }
     }
-  }, [clearEmbeddedBootstrapBackfillRetryTimeout, embeddedActivities, embeddedBootstrapBackfillRetryNonce, instructorPasscode, sessionId])
+  }, [cacheEmbeddedManagerEntryToken, clearEmbeddedBootstrapBackfillRetryTimeout, embeddedActivities, embeddedBootstrapBackfillRetryNonce, instructorPasscode, sessionId])
 
   const copyValue = async (value: string): Promise<void> => {
     if (!value || typeof navigator === 'undefined' || navigator.clipboard === undefined) {
@@ -3121,16 +3296,19 @@ const SyncDeckManager: FC = () => {
 
             const payload = (await response.json()) as SyncDeckEmbeddedActivityStartResponse
             const childSessionId = typeof payload.childSessionId === 'string' ? payload.childSessionId.trim() : ''
-            if (childSessionId && isPlainObject(payload.managerBootstrap)) {
-              storeCreateSessionBootstrapPayload(request.activityId, childSessionId, payload.managerBootstrap)
-              setEmbeddedManagerRenderNonceByChildSessionId((current) => advanceEmbeddedManagerRenderNonce(
-                current,
+            const managerCredentials = resolveEmbeddedBootstrapManagerCredentials(payload)
+            if (childSessionId && managerCredentials) {
+              storeCreateSessionBootstrapPayload(
+                request.activityId,
                 childSessionId,
-              ))
-              setLoadedEmbeddedManagerInstanceKeys((current) => clearLoadedEmbeddedManagerInstanceKey(
-                current,
-                request.instanceKey,
-              ))
+                managerCredentials.managerBootstrap,
+              )
+              if (cacheEmbeddedManagerEntryToken(childSessionId, managerCredentials.managerEntryToken)) {
+                setLoadedEmbeddedManagerInstanceKeys((current) => clearLoadedEmbeddedManagerInstanceKey(
+                  current,
+                  request.instanceKey,
+                ))
+              }
             }
 
             if (!background) {
@@ -3189,7 +3367,7 @@ const SyncDeckManager: FC = () => {
         },
       })
     },
-    [sessionId, instructorPasscode, embeddedActivities, instructorIndicesState],
+    [cacheEmbeddedManagerEntryToken, sessionId, instructorPasscode, embeddedActivities, instructorIndicesState],
   )
 
   const loadDeckActivityRequests = useCallback(async (): Promise<SyncDeckDeckActivityRequestsByHorizontalIndex> => {
@@ -4763,6 +4941,8 @@ const SyncDeckManager: FC = () => {
                   if (!record) {
                     return null
                   }
+                  const managerEntryToken = embeddedManagerEntryTokensByChildSessionId[record.childSessionId] ?? null
+                  const hasBootstrapFailure = failedEmbeddedBootstrapChildSessionIds.includes(record.childSessionId)
                   const isActive = instanceKey === activeEmbeddedInstanceKey
                   const inactiveIframeAccessibilityProps = resolveEmbeddedManagerIframeAccessibilityProps(isActive)
 
@@ -4786,21 +4966,46 @@ const SyncDeckManager: FC = () => {
                       ) : null}
                       <div className={isActive ? 'absolute inset-0 p-14' : 'absolute inset-0'}>
                         <div className="relative w-full h-full rounded-lg border border-gray-200 bg-white shadow-sm overflow-hidden">
-                          <iframe
-                            title={`Embedded ${record.activityId} manager`}
-                            src={buildEmbeddedManagerIframeSrc(record)}
-                            className="w-full h-full"
-                            {...inactiveIframeAccessibilityProps}
-                            onLoad={() => {
-                              setLoadedEmbeddedManagerInstanceKeys((current) => (
-                                current[instanceKey] ? current : { ...current, [instanceKey]: true }
-                              ))
-                            }}
-                          />
-                          {isActive && !isActiveEmbeddedManagerLoaded ? (
+                          {managerEntryToken ? (
+                            <iframe
+                              title={`Embedded ${record.activityId} manager`}
+                              src={buildEmbeddedManagerIframeSrc(record, managerEntryToken)}
+                              className="w-full h-full"
+                              referrerPolicy="no-referrer"
+                              {...inactiveIframeAccessibilityProps}
+                              onLoad={() => {
+                                setLoadedEmbeddedManagerInstanceKeys((current) => (
+                                  current[instanceKey] ? current : { ...current, [instanceKey]: true }
+                                ))
+                              }}
+                            />
+                          ) : null}
+                          {shouldShowEmbeddedManagerBootstrapOverlay({
+                            isActive,
+                            managerEntryToken,
+                            isLoaded: isActiveEmbeddedManagerLoaded,
+                          }) ? (
                             <div className="absolute inset-0 flex items-center justify-center bg-white/92">
                               <div className="rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm text-gray-700 shadow-sm">
-                                Loading embedded manager…
+                                {hasBootstrapFailure ? (
+                                  <div className="space-y-2" role="alert">
+                                    <p>Could not start the embedded manager.</p>
+                                    <button
+                                      type="button"
+                                      className="rounded bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700"
+                                      onClick={() => {
+                                        embeddedBootstrapBackfillRetryAttemptByChildSessionIdRef.current.delete(record.childSessionId)
+                                        failedEmbeddedBootstrapChildSessionIdsRef.current.delete(record.childSessionId)
+                                        setFailedEmbeddedBootstrapChildSessionIds((current) => current.filter(
+                                          (childSessionId) => childSessionId !== record.childSessionId,
+                                        ))
+                                        setEmbeddedBootstrapBackfillRetryNonce((current) => current + 1)
+                                      }}
+                                    >
+                                      Retry embedded manager
+                                    </button>
+                                  </div>
+                                ) : 'Loading embedded manager…'}
                               </div>
                             </div>
                           ) : null}

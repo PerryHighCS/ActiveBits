@@ -1,5 +1,6 @@
 import { acceptEntryParticipant } from 'activebits-server/core/acceptedEntryParticipants.js'
 import type { SessionRecord, SessionStore } from 'activebits-server/core/sessions.js'
+import { consumeSessionDataToken } from 'activebits-server/core/sessionTokenUtils.js'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import type { ActiveBitsWebSocket, WsConnectionHandler, WsRouter } from '../../../types/websocket.js'
@@ -78,6 +79,9 @@ function createSessionStore(initial: Record<string, SessionRecord>) {
     },
     async set(id: string, session: SessionRecord) {
       store[id] = session
+    },
+    async consumeSessionDataToken(id: string, field: string, token: string) {
+      return consumeSessionDataToken(store[id], field, token)
     },
     async delete(id: string) {
       const existed = Boolean(store[id])

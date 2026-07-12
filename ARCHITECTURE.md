@@ -243,6 +243,17 @@ through activity-specific props.
   authoritative “live run” fields. For example, Resonance now normalizes multi-question runs
   with `activeQuestionIds` plus a shared `activeQuestionDeadlineAt`, while still backfilling
   `activeQuestionId` for compatibility with older snapshots.
+- Embedded instructor iframes receive a short-lived, server-issued manager-entry token only after
+  the authenticated parent start response arrives, then exchange it atomically for the child
+  passcode and replace the iframe URL to remove the consumed token. This avoids putting instructor
+  credentials in browser storage while preventing an iframe bootstrap race or concurrent reuse.
+- SyncDeck's warm iframe eviction resets all per-child bootstrap completion, retry, and failure
+  markers before a later remount requests a fresh token. Transient embedded-start failures use
+  bounded retry, while non-retryable responses surface the manager recovery action immediately.
+- Internal embedded-activity iframes delegate `autoplay` and `fullscreen` to support synchronized,
+  muted nested media players such as Video Sync without relaxing their sandbox policy.
+- Instructor websocket updates are serialized per SyncDeck connection before session persistence, so
+  closely spaced reveal/chalkboard commands cannot overwrite one another across storage boundaries.
 
 `client/index.ts` (components/footer only, lazy-loaded chunk):
 ```typescript

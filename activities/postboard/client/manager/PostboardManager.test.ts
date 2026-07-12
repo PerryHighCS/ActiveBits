@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { getInstructorBoardCardClassName, readInstructorPasscode, reorderPostIds } from './PostboardManager.js'
+import {
+  getInstructorBoardCardClassName,
+  readInstructorPasscode,
+  reorderPostIds,
+  resolvePostboardInstructorAccessState,
+} from './PostboardManager.js'
 
 function withMockWindow(
   sessionStorage: Pick<Storage, 'getItem' | 'setItem'>,
@@ -22,6 +27,13 @@ function withMockWindow(
     }
   }
 }
+
+void test('resolvePostboardInstructorAccessState keeps token recovery loading separate from missing credentials', () => {
+  assert.equal(resolvePostboardInstructorAccessState({ isResolvingCredentials: true, instructorPasscode: '' }), 'loading')
+  assert.equal(resolvePostboardInstructorAccessState({ isResolvingCredentials: false, instructorPasscode: '' }), 'missing')
+  assert.equal(resolvePostboardInstructorAccessState({ isResolvingCredentials: false, instructorPasscode: 'teacher-pass' }), 'ready')
+  assert.equal(resolvePostboardInstructorAccessState({ isResolvingCredentials: true, instructorPasscode: 'teacher-pass' }), 'ready')
+})
 
 void test('reorderPostIds moves the dragged post to the target position', () => {
   assert.deepEqual(

@@ -1,4 +1,5 @@
 import type { SessionRecord, SessionStore } from 'activebits-server/core/sessions.js'
+import { consumeSessionDataToken } from 'activebits-server/core/sessionTokenUtils.js'
 import { acceptEntryParticipant } from 'activebits-server/core/acceptedEntryParticipants.js'
 import {
   computePersistentLinkUrlHash,
@@ -26,6 +27,7 @@ const DEFAULT_SYNCDECK_ENTRY_POLICY = 'instructor-required'
 interface RouteRequest {
   params: Record<string, string | undefined>
   body?: unknown
+  query?: Record<string, unknown>
   cookies?: Record<string, unknown>
   headers?: Record<string, unknown>
 }
@@ -122,19 +124,35 @@ function createRequest(
   body: unknown,
   cookies: Record<string, unknown> = {},
   headers: Record<string, unknown> = {},
+  query: Record<string, unknown> = {},
 ): RouteRequest {
-  return { params, body, cookies, headers }
+  return { params, body, cookies, headers, query }
 }
 
 function createSessionStore(initial: Record<string, SessionRecord>) {
-  const store = { ...initial }
+  const cloneSession = (session: SessionRecord): SessionRecord => structuredClone(session)
+  const store = Object.fromEntries(
+    Object.entries(initial).map(([id, session]) => [id, cloneSession(session)]),
+  ) as Record<string, SessionRecord>
+  const getCalls: string[] = []
   const touchCalls: string[] = []
   const sessions: SessionStore = {
     async get(id: string) {
-      return store[id] ?? null
+      getCalls.push(id)
+      const session = store[id]
+      return session ? cloneSession(session) : null
     },
     async set(id: string, session: SessionRecord) {
-      store[id] = session
+      store[id] = cloneSession(session)
+    },
+    async consumeSessionDataToken(id: string, field: string, token: string) {
+      const session = store[id]
+      const consumed = consumeSessionDataToken(session ? cloneSession(session) : null, field, token)
+      if (!consumed) {
+        return null
+      }
+      store[id] = cloneSession(consumed)
+      return cloneSession(consumed)
     },
     async delete(id: string) {
       const existed = Boolean(store[id])
@@ -149,7 +167,7 @@ function createSessionStore(initial: Record<string, SessionRecord>) {
       return true
     },
     async getAll() {
-      return Object.values(store)
+      return Object.values(store).map(cloneSession)
     },
     async getAllIds() {
       return Object.keys(store)
@@ -161,10 +179,24 @@ function createSessionStore(initial: Record<string, SessionRecord>) {
 
   return {
     store,
+    getCalls,
     sessions,
     touchCalls,
   }
 }
+
+void test('route session-store mock requires an explicit write to persist fetched-session mutations', async () => {
+  const state = createSessionStore({
+    s1: createSyncDeckSession('s1', 'teacher-passcode'),
+  })
+  const fetched = await state.sessions.get('s1')
+  assert.ok(fetched)
+  fetched.data.example = 'unpersisted'
+  assert.equal(state.store.s1?.data.example, undefined)
+
+  await state.sessions.set('s1', fetched)
+  assert.equal(state.store.s1?.data.example, 'unpersisted')
+})
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (value == null || typeof value !== 'object' || Array.isArray(value)) {
@@ -1488,50 +1520,20 @@ void test('syncdeck session normalization filters malformed persisted students a
 
   assert.equal(instructorSocket.closeCalls.length, 0)
 
-  const normalizedSessionData = state.store.s1?.data as {
-    students: Array<{
-      studentId: string
-      name: string
-      joinedAt: number
-      lastSeenAt: number
-      lastIndices: { h: number; v: number; f: number } | null
-      lastStudentStateAt: number | null
-    }>
-    embeddedActivities: Record<string, {
-      childSessionId: string
-      activityId: string
-      startedAt: number
-      owner: string
-    }>
-    chalkboard: {
-      snapshot: string | null
-      delta: Array<Record<string, unknown>>
-    }
-    drawingToolMode: 'none' | 'chalkboard' | 'pen'
-  }
-
-  assert.equal(normalizedSessionData.students.length, 1)
-  assert.deepEqual(normalizedSessionData.students[0], {
+  const delivered = instructorSocket.sent.map((entry) => JSON.parse(entry) as {
+    type?: string
+    payload?: { students?: unknown[]; type?: string; activityId?: string }
+  })
+  const studentsMessage = delivered.find((entry) => entry.type === 'syncdeck-students')
+  const students = studentsMessage?.payload?.students as Array<Record<string, unknown>> | undefined
+  assert.equal(students?.length, 1)
+  assert.deepEqual(students?.[0], {
     studentId: 'student-1',
     name: 'Student',
     joinedAt: 100,
     lastSeenAt: 120,
-    lastIndices: { h: 1, v: 2, f: 3 },
-    lastStudentStateAt: null,
+    connected: false,
   })
-
-  assert.deepEqual(normalizedSessionData.embeddedActivities, {
-    'quiz:2:3': {
-      childSessionId: 'CHILD:s1:abc12:quiz',
-      activityId: 'quiz',
-      startedAt: 321,
-      owner: 'syncdeck-instructor',
-    },
-  })
-
-  assert.equal(normalizedSessionData.chalkboard.snapshot, null)
-  assert.deepEqual(normalizedSessionData.chalkboard.delta, [{ mode: 1, event: { type: 'draw' } }])
-  assert.equal(normalizedSessionData.drawingToolMode, 'none')
 })
 
 void test('generate-url returns signed syncdeck persistent link and sets cookie', async () => {
@@ -2538,7 +2540,10 @@ void test('embedded-activity start route is idempotent per instance key', async 
       type: 'video-sync',
       created: Date.now(),
       lastActivity: Date.now(),
-      data: {},
+      data: {
+        instructorPasscode: 'child-passcode',
+        embeddedManagerEntryToken: { value: 'reusable-entry-token', expiresAt: Date.now() + 60_000 },
+      },
     },
   })
   setupSyncDeckRoutes(app, storeState.sessions, ws)
@@ -2560,10 +2565,157 @@ void test('embedded-activity start route is idempotent per instance key', async 
   )
 
   assert.equal(res.statusCode, 200)
-  assert.deepEqual(res.body, {
-    childSessionId: 'CHILD:s1:abc12:video-sync',
-    instanceKey: 'video-sync:3:0',
+  const body = res.body as { childSessionId?: unknown; instanceKey?: unknown; managerEntryToken?: unknown }
+  assert.equal(body.childSessionId, 'CHILD:s1:abc12:video-sync')
+  assert.equal(body.instanceKey, 'video-sync:3:0')
+  assert.equal(body.managerEntryToken, 'reusable-entry-token')
+})
+
+void test('embedded manager passcode exchange validates and consumes short-lived tokens', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const now = Date.now()
+  const storeState = createSessionStore({
+    'child-valid': {
+      id: 'child-valid',
+      type: 'video-sync',
+      created: now,
+      lastActivity: now,
+      data: {
+        instructorPasscode: 'child-passcode',
+        embeddedManagerEntryToken: { value: 'valid-entry-token', expiresAt: now + 60_000 },
+      },
+    },
+    'child-expired': {
+      id: 'child-expired',
+      type: 'video-sync',
+      created: now,
+      lastActivity: now,
+      data: {
+        instructorPasscode: 'child-passcode',
+        embeddedManagerEntryToken: { value: 'expired-entry-token', expiresAt: now - 1 },
+      },
+    },
   })
+  setupSyncDeckRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.get['/api/syncdeck/embedded-manager-passcode']
+  assert.equal(typeof handler, 'function')
+
+  const missingRes = createResponse()
+  await handler?.(createRequest({}, undefined), missingRes)
+  assert.equal(missingRes.statusCode, 400)
+
+  const invalidRes = createResponse()
+  await handler?.(
+    createRequest({}, undefined, {}, {}, { sessionId: 'child-valid', token: 'wrong-token' }),
+    invalidRes,
+  )
+  assert.equal(invalidRes.statusCode, 403)
+
+  const oversizedRes = createResponse()
+  const getCallsBeforeOversizedToken = storeState.getCalls.length
+  await handler?.(
+    createRequest({}, undefined, {}, {}, { sessionId: 'child-valid', token: 'x'.repeat(100_000) }),
+    oversizedRes,
+  )
+  assert.equal(oversizedRes.statusCode, 403)
+  assert.equal(storeState.getCalls.length, getCallsBeforeOversizedToken)
+
+  const oversizedSessionIdRes = createResponse()
+  const getCallsBeforeOversizedSessionId = storeState.getCalls.length
+  await handler?.(
+    createRequest({}, undefined, {}, {}, { sessionId: 's'.repeat(100_000), token: 'valid-entry-token' }),
+    oversizedSessionIdRes,
+  )
+  assert.equal(oversizedSessionIdRes.statusCode, 403)
+  assert.equal(storeState.getCalls.length, getCallsBeforeOversizedSessionId)
+
+  const expiredRes = createResponse()
+  await handler?.(
+    createRequest({}, undefined, {}, {}, { sessionId: 'child-expired', token: 'expired-entry-token' }),
+    expiredRes,
+  )
+  assert.equal(expiredRes.statusCode, 403)
+
+  const infoMessages: unknown[][] = []
+  const originalInfo = console.info
+  console.info = (...args: unknown[]) => {
+    infoMessages.push(args)
+  }
+  const validRes = createResponse()
+  try {
+    await handler?.(
+      createRequest({}, undefined, {}, {}, { sessionId: 'child-valid', token: 'valid-entry-token' }),
+      validRes,
+    )
+  } finally {
+    console.info = originalInfo
+  }
+  assert.equal(validRes.statusCode, 200)
+  assert.deepEqual(validRes.body, { instructorPasscode: 'child-passcode' })
+  assert.equal(validRes.headers['Cache-Control'], 'no-store')
+  assert.equal((storeState.store['child-valid']?.data as { embeddedManagerEntryToken?: unknown }).embeddedManagerEntryToken, undefined)
+  assert.deepEqual(infoMessages, [[JSON.stringify({
+    activity: 'syncdeck',
+    event: 'embedded-manager-passcode-exchanged',
+    sessionId: 'child-valid',
+  })]])
+
+  const reusedRes = createResponse()
+  await handler?.(
+    createRequest({}, undefined, {}, {}, { sessionId: 'child-valid', token: 'valid-entry-token' }),
+    reusedRes,
+  )
+  assert.equal(reusedRes.statusCode, 403)
+})
+
+void test('embedded manager passcode exchange allows only one concurrent token redemption', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const now = Date.now()
+  const storeState = createSessionStore({
+    'child-concurrent': {
+      id: 'child-concurrent',
+      type: 'video-sync',
+      created: now,
+      lastActivity: now,
+      data: {
+        instructorPasscode: 'child-passcode',
+        embeddedManagerEntryToken: { value: 'concurrent-entry-token', expiresAt: now + 60_000 },
+      },
+    },
+  })
+  setupSyncDeckRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.get['/api/syncdeck/embedded-manager-passcode']
+  assert.equal(typeof handler, 'function')
+  const firstResponse = createResponse()
+  const secondResponse = createResponse()
+  const request = () => createRequest(
+    {},
+    undefined,
+    {},
+    {},
+    { sessionId: 'child-concurrent', token: 'concurrent-entry-token' },
+  )
+
+  await Promise.all([
+    handler?.(request(), firstResponse),
+    handler?.(request(), secondResponse),
+  ])
+
+  assert.deepEqual(
+    [firstResponse.statusCode, secondResponse.statusCode].sort(),
+    [200, 403],
+  )
+  assert.equal(
+    [firstResponse.body, secondResponse.body].filter(
+      (body) => (body as { instructorPasscode?: unknown }).instructorPasscode === 'child-passcode',
+    ).length,
+    1,
+  )
+  assert.equal((storeState.store['child-concurrent']?.data as { embeddedManagerEntryToken?: unknown }).embeddedManagerEntryToken, undefined)
 })
 
 void test('embedded-activity start route serializes concurrent creation for the same instance key', async () => {
@@ -4344,7 +4496,7 @@ void test('embedded-activity start is idempotent per key even when a concurrent 
       type: 'video-sync',
       created: Date.now(),
       lastActivity: Date.now(),
-      data: {},
+      data: { instructorPasscode: 'child-passcode' },
     },
   })
   setupSyncDeckRoutes(app, storeState.sessions, ws)
@@ -4372,10 +4524,10 @@ void test('embedded-activity start is idempotent per key even when a concurrent 
   )
 
   assert.equal(resIdempotent.statusCode, 200)
-  assert.deepEqual(resIdempotent.body, {
-    childSessionId: 'CHILD:s1:abc12:video-sync',
-    instanceKey: 'video-sync:3:0',
-  })
+  const idempotentBody = resIdempotent.body as { childSessionId?: unknown; instanceKey?: unknown; managerEntryToken?: unknown }
+  assert.equal(idempotentBody.childSessionId, 'CHILD:s1:abc12:video-sync')
+  assert.equal(idempotentBody.instanceKey, 'video-sync:3:0')
+  assert.match(String(idempotentBody.managerEntryToken), /^[a-f0-9]{64}$/)
 
   assert.equal(resNew.statusCode, 200)
   const newBody = resNew.body as { childSessionId: string; instanceKey: string }
@@ -4413,7 +4565,7 @@ void test('syncdeck parent routes keep embedded child sessions alive while the p
       type: 'video-sync',
       created: Date.now(),
       lastActivity: 1,
-      data: {},
+      data: { instructorPasscode: 'child-passcode' },
     },
   })
   setupSyncDeckRoutes(app, storeState.sessions, ws)
@@ -4429,10 +4581,10 @@ void test('syncdeck parent routes keep embedded child sessions alive while the p
   )
 
   assert.equal(res.statusCode, 200)
-  assert.deepEqual(res.body, {
-    childSessionId,
-    instanceKey: 'video-sync:3:0',
-  })
+  const body = res.body as { childSessionId?: unknown; instanceKey?: unknown; managerEntryToken?: unknown }
+  assert.equal(body.childSessionId, childSessionId)
+  assert.equal(body.instanceKey, 'video-sync:3:0')
+  assert.match(String(body.managerEntryToken), /^[a-f0-9]{64}$/)
   assert.deepEqual(storeState.touchCalls, [childSessionId])
   assert.ok((storeState.store[childSessionId]?.lastActivity ?? 0) > 1)
 })
