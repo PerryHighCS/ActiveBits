@@ -313,13 +313,13 @@ export default function ResonanceManager() {
     setIsResolvingPasscode(true)
 
     const recoverPasscode = async () => {
-      try {
-        if (embeddedManagerToken) {
-          // Let React StrictMode's setup/cleanup pass cancel before consuming the single-use token.
-          await Promise.resolve()
-          if (isCancelled) {
-            return
-          }
+      if (embeddedManagerToken) {
+        // Let React StrictMode's setup/cleanup pass cancel before consuming the single-use token.
+        await Promise.resolve()
+        if (isCancelled) {
+          return
+        }
+        try {
           const response = await fetch(
             `/api/syncdeck/embedded-manager-passcode?sessionId=${encodeURIComponent(sessionId)}&token=${encodeURIComponent(embeddedManagerToken)}`,
             { credentials: 'same-origin', cache: 'no-store' },
@@ -334,8 +334,12 @@ export default function ResonanceManager() {
               return
             }
           }
+        } catch {
+          // Fall through to normal cookie-backed instructor recovery.
         }
+      }
 
+      try {
         const response = await fetch(`/api/resonance/${encodeURIComponent(sessionId)}/instructor-passcode`, {
           credentials: 'include',
         })

@@ -2004,6 +2004,25 @@ export function resolveMountedEmbeddedManagerInstanceKeys(params: {
   return next.slice(0, limit)
 }
 
+export function resolveEvictedEmbeddedManagerChildSessionIds(params: {
+  previousInstanceKeys: Iterable<string>
+  mountedInstanceKeys: Iterable<string>
+  embeddedActivities: SyncDeckEmbeddedActivitiesMap
+}): string[] {
+  const mounted = new Set(params.mountedInstanceKeys)
+  const childSessionIds = new Set<string>()
+  for (const instanceKey of params.previousInstanceKeys) {
+    if (mounted.has(instanceKey)) {
+      continue
+    }
+    const childSessionId = params.embeddedActivities[instanceKey]?.childSessionId
+    if (typeof childSessionId === 'string' && childSessionId.length > 0) {
+      childSessionIds.add(childSessionId)
+    }
+  }
+  return [...childSessionIds]
+}
+
 export function resolveEmbeddedManagerIframeAccessibilityProps(
   isActive: boolean,
 ): { 'aria-hidden'?: 'true'; tabIndex?: -1; inert?: true } {
@@ -2118,6 +2137,7 @@ const SyncDeckManager: FC = () => {
   const pendingDeckActivityRequestsRef = useRef<Promise<SyncDeckDeckActivityRequestsByHorizontalIndex> | null>(null)
   const completedEmbeddedBootstrapChildSessionIdsRef = useRef<Set<string>>(new Set())
   const embeddedManagerEntryTokensByChildSessionIdRef = useRef<Record<string, string>>({})
+  const previouslyMountedEmbeddedManagerInstanceKeysRef = useRef<Set<string>>(new Set())
   const pendingEmbeddedBootstrapChildSessionIdsRef = useRef<Set<string>>(new Set())
   const embeddedBootstrapBackfillRetryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const embeddedBootstrapBackfillRetryAttemptRef = useRef(0)
@@ -2254,6 +2274,35 @@ const SyncDeckManager: FC = () => {
       return Object.fromEntries(nextEntries)
     })
   }, [embeddedActivities, instructorIndicesState])
+
+  useEffect(() => {
+    const currentlyMounted = new Set(mountedEmbeddedManagerInstanceKeys)
+    const evictedChildSessionIds = resolveEvictedEmbeddedManagerChildSessionIds({
+      previousInstanceKeys: previouslyMountedEmbeddedManagerInstanceKeysRef.current,
+      mountedInstanceKeys: currentlyMounted,
+      embeddedActivities,
+    })
+    previouslyMountedEmbeddedManagerInstanceKeysRef.current = currentlyMounted
+    if (evictedChildSessionIds.length === 0) {
+      return
+    }
+
+    const evictedChildSessionIdSet = new Set(evictedChildSessionIds)
+    const nextTokens = Object.fromEntries(
+      Object.entries(embeddedManagerEntryTokensByChildSessionIdRef.current)
+        .filter(([childSessionId]) => !evictedChildSessionIdSet.has(childSessionId)),
+    )
+    if (Object.keys(nextTokens).length === Object.keys(embeddedManagerEntryTokensByChildSessionIdRef.current).length) {
+      return
+    }
+
+    embeddedManagerEntryTokensByChildSessionIdRef.current = nextTokens
+    setEmbeddedManagerEntryTokensByChildSessionId(nextTokens)
+    for (const childSessionId of evictedChildSessionIds) {
+      completedEmbeddedBootstrapChildSessionIdsRef.current.delete(childSessionId)
+    }
+    setEmbeddedBootstrapBackfillRetryNonce((current) => current + 1)
+  }, [embeddedActivities, mountedEmbeddedManagerInstanceKeys])
 
   useEffect(
     () => () => {
@@ -2619,6 +2668,7 @@ const SyncDeckManager: FC = () => {
     clearEmbeddedBootstrapBackfillRetryTimeout()
     setEmbeddedManagerRenderNonceByChildSessionId({})
     embeddedManagerEntryTokensByChildSessionIdRef.current = {}
+    previouslyMountedEmbeddedManagerInstanceKeysRef.current.clear()
     setEmbeddedManagerEntryTokensByChildSessionId({})
   }, [clearEmbeddedBootstrapBackfillRetryTimeout, sessionId])
 

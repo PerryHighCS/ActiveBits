@@ -54,6 +54,7 @@ import { resolveEmbeddedBootstrapBackfillRequests } from './SyncDeckManager.js'
 import { shouldRetryEmbeddedBootstrapBackfill } from './SyncDeckManager.js'
 import { extractRevealSyncActionWithoutParsing } from './SyncDeckManager.js'
 import { resolveMountedEmbeddedManagerInstanceKeys } from './SyncDeckManager.js'
+import { resolveEvictedEmbeddedManagerChildSessionIds } from './SyncDeckManager.js'
 import { resolveEmbeddedManagerIframeAccessibilityProps } from './SyncDeckManager.js'
 import { extractManagerNavigationCapabilitiesFromRevealMessage } from './SyncDeckManager.js'
 import { resolveSyncDeckActivityPickerEntries } from './SyncDeckManager.js'
@@ -1180,6 +1181,30 @@ void test('resolveMountedEmbeddedManagerInstanceKeys drops stale warm entries', 
       limit: 2,
     }),
     ['gallery-walk:0:0'],
+  )
+})
+
+void test('resolveEvictedEmbeddedManagerChildSessionIds identifies only child sessions whose iframe was unmounted', () => {
+  assert.deepEqual(
+    resolveEvictedEmbeddedManagerChildSessionIds({
+      previousInstanceKeys: ['resonance:0:1', 'gallery-walk:0:0'],
+      mountedInstanceKeys: ['gallery-walk:0:0'],
+      embeddedActivities: {
+        'resonance:0:1': {
+          activityId: 'resonance',
+          childSessionId: 'child-resonance',
+          startedAt: 1,
+          owner: 'syncdeck-instructor',
+        },
+        'gallery-walk:0:0': {
+          activityId: 'gallery-walk',
+          childSessionId: 'child-gallery',
+          startedAt: 1,
+          owner: 'syncdeck-instructor',
+        },
+      },
+    }),
+    ['child-resonance'],
   )
 })
 
