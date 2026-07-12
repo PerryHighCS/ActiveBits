@@ -952,12 +952,17 @@ function readEmbeddedManagerEntryToken(session: SessionRecord): SyncDeckEmbedded
 }
 
 function verifyEmbeddedManagerEntryToken(expected: string, candidate: string): boolean {
-  if (candidate.length !== expected.length) {
+  const expectedBuffer = Buffer.from(expected, 'utf8')
+  const candidateBuffer = Buffer.from(candidate, 'utf8')
+  if (candidateBuffer.length !== expectedBuffer.length) {
     return false
   }
-  const expectedBuffer = Buffer.from(expected)
-  const candidateBuffer = Buffer.from(candidate)
-  return expectedBuffer.length === candidateBuffer.length && timingSafeEqual(expectedBuffer, candidateBuffer)
+
+  try {
+    return timingSafeEqual(expectedBuffer, candidateBuffer)
+  } catch {
+    return false
+  }
 }
 
 function buildEmbeddedActivityStartLockKey(sessionId: string, instanceKey: string): string {

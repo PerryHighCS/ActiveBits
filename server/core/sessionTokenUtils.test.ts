@@ -29,3 +29,17 @@ void test('consumeSessionDataToken consumes a matching unexpired entry', () => {
   )
   assert.equal(session.data.embeddedManagerEntryToken, undefined)
 })
+
+void test('consumeSessionDataToken rejects non-finite numeric expiry values without deleting them', () => {
+  const session = {
+    data: {
+      embeddedManagerEntryToken: { value: 'token-value', expiresAt: Number.POSITIVE_INFINITY },
+    },
+  }
+
+  assert.equal(
+    consumeSessionDataToken(session, 'embeddedManagerEntryToken', 'token-value', 100),
+    null,
+  )
+  assert.deepEqual(session.data.embeddedManagerEntryToken, { value: 'token-value', expiresAt: Number.POSITIVE_INFINITY })
+})
