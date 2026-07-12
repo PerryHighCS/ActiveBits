@@ -936,7 +936,7 @@ function mergeReportStudents(sections: Array<{ students?: ActivityReportStudentR
   return [...byStudentId.values()]
 }
 
-const EMBEDDED_REPORT_SCOPES: ActivityReportScope[] = ['activity-session', 'student-cross-activity', 'session-summary']
+const EMBEDDED_REPORT_SCOPES: ActivityReportScope[] = ['activity-session', 'session-summary']
 
 function resolveActivityDisplayName(activityId: string): string {
   const activityConfig = getActivityConfig(activityId)
