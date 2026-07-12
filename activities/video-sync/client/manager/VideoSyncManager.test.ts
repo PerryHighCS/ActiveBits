@@ -14,7 +14,6 @@ import {
     parseManagerStopTimeInput,
     readBootstrapInstructorPasscode,
     readBootstrapSourceUrl,
-    readEmbeddedManagerToken,
     readEmbeddedBootstrapSourceUrl,
     readRecoveredPersistentSourceUrl,
     resolveBootstrapInstructorPasscode,
@@ -27,12 +26,6 @@ import {
     shouldRenderManagerHeaderForSession,
     shouldSendManagerPlaybackPositionUpdate,
 } from './VideoSyncManager.js'
-
-void test('readEmbeddedManagerToken reads only a non-empty SyncDeck manager token', () => {
-  assert.equal(readEmbeddedManagerToken('?embeddedManagerToken=token-123'), 'token-123')
-  assert.equal(readEmbeddedManagerToken('?embeddedManagerToken=%20%20'), null)
-  assert.equal(readEmbeddedManagerToken(''), null)
-})
 
 const BASE_STATE: VideoSyncState = {
   provider: 'youtube',

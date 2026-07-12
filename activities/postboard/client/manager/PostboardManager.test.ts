@@ -2,7 +2,6 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   getInstructorBoardCardClassName,
-  readEmbeddedManagerToken,
   readInstructorPasscode,
   reorderPostIds,
   resolvePostboardInstructorAccessState,
@@ -28,12 +27,6 @@ function withMockWindow(
     }
   }
 }
-
-void test('readEmbeddedManagerToken accepts only non-empty SyncDeck iframe tokens', () => {
-  assert.equal(readEmbeddedManagerToken('?embeddedManagerToken=token-123'), 'token-123')
-  assert.equal(readEmbeddedManagerToken('?embeddedManagerToken=%20%20'), null)
-  assert.equal(readEmbeddedManagerToken(''), null)
-})
 
 void test('resolvePostboardInstructorAccessState keeps token recovery loading separate from missing credentials', () => {
   assert.equal(resolvePostboardInstructorAccessState({ isResolvingCredentials: true, instructorPasscode: '' }), 'loading')

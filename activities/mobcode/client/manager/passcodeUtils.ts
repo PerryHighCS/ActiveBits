@@ -44,8 +44,3 @@ export function resolveMobCodeInstructorPasscode(params: {
   const fromBootstrap = typeof bootstrap?.instructorPasscode === 'string' ? bootstrap.instructorPasscode : ''
   return fromBootstrap || ''
 }
-
-export function readEmbeddedManagerToken(search: string): string | null {
-  const token = new URLSearchParams(search).get('embeddedManagerToken')
-  return typeof token === 'string' && token.trim().length > 0 ? token.trim() : null
-}

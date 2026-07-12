@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { useLocation, useParams } from 'react-router-dom'
 import SessionHeader from '@src/components/common/SessionHeader'
+import { readEmbeddedManagerToken } from '@src/components/common/embeddedManagerBootstrap'
 import Button from '@src/components/ui/Button'
 import InstructorFeedbackControls from '../../../shared/client/components/InstructorFeedbackControls.js'
 import NoteStyleSelect from '../../../shared/client/components/NoteStyleSelect.js'
@@ -41,11 +42,6 @@ export function readInstructorPasscode(sessionId: string | undefined, state: unk
   } catch {
     return ''
   }
-}
-
-export function readEmbeddedManagerToken(search: string): string | null {
-  const token = new URLSearchParams(search).get('embeddedManagerToken')
-  return typeof token === 'string' && token.trim().length > 0 ? token.trim() : null
 }
 
 export function resolvePostboardInstructorAccessState(params: {

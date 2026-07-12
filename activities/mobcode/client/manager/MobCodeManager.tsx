@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useLocation, useParams } from 'react-router-dom'
 import SessionHeader from '@src/components/common/SessionHeader'
+import { readEmbeddedManagerToken } from '@src/components/common/embeddedManagerBootstrap'
 import VirtualFileExplorer from '@src/components/common/VirtualFileExplorer'
 import type { VirtualFileEntry } from '@src/components/common/virtualFileExplorerTypes'
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
@@ -48,7 +49,7 @@ import {
   sendMobCodeWsMessage,
   shouldApplyRemoteStateMessage,
 } from './managerUtils'
-import { readEmbeddedManagerToken, resolveMobCodeInstructorPasscode } from './passcodeUtils'
+import { resolveMobCodeInstructorPasscode } from './passcodeUtils'
 import '../styles.css'
 
 interface SessionResponse {

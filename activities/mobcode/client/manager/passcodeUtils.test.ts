@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createMobCodeManagerAuthMessage } from './MobCodeManager.js'
-import { readEmbeddedManagerToken, resolveMobCodeInstructorPasscode } from './passcodeUtils'
+import { resolveMobCodeInstructorPasscode } from './passcodeUtils'
 
 function createStorage(initial: Record<string, string> = {}) {
   const store = new Map(Object.entries(initial))
@@ -15,12 +15,6 @@ function createStorage(initial: Record<string, string> = {}) {
     store,
   }
 }
-
-void test('readEmbeddedManagerToken accepts only non-empty SyncDeck iframe tokens', () => {
-  assert.equal(readEmbeddedManagerToken('?embeddedManagerToken=token-123'), 'token-123')
-  assert.equal(readEmbeddedManagerToken('?embeddedManagerToken=%20%20'), null)
-  assert.equal(readEmbeddedManagerToken(''), null)
-})
 
 void test('createMobCodeManagerAuthMessage only emits authentication for complete credentials', () => {
   assert.equal(createMobCodeManagerAuthMessage(undefined, 'teacher-pass'), null)

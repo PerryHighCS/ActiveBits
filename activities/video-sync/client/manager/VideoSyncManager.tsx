@@ -1,4 +1,5 @@
 import SessionHeader from '@src/components/common/SessionHeader'
+import { readEmbeddedManagerToken } from '@src/components/common/embeddedManagerBootstrap'
 import { fetchEmbeddedLaunchSelectedOptions } from '@src/components/common/embeddedLaunchBootstrap'
 import {
   consumeCreateSessionBootstrapPayload,
@@ -125,11 +126,6 @@ export function readBootstrapSourceUrl(search: string): string | null {
 
   const trimmed = value.trim()
   return trimmed.length > 0 ? trimmed : null
-}
-
-export function readEmbeddedManagerToken(search: string): string | null {
-  const value = new URLSearchParams(search).get('embeddedManagerToken')
-  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null
 }
 
 export function readRecoveredPersistentSourceUrl(payload: InstructorPasscodeResponse | null | undefined): string | null {

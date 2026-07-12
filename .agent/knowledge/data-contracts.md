@@ -24,6 +24,15 @@ Document API and data-shape assumptions that must stay compatible over time.
 - Follow-up action: If Postboard later supports student-owned solo proof-of-work exports, add a separate student-scoped report path that filters moderation state and peer identities.
 - Owner: Codex
 
+- Date: 2026-07-12
+- Surface: SyncDeck embedded instructor managers
+- Contract: Credentialed embedded manager URLs carry `embeddedManagerToken`; client activities must parse it through `readEmbeddedManagerToken(search)` in `client/src/components/common/embeddedManagerBootstrap.ts`. The shared parser returns only a trimmed, non-empty token or `null`.
+- Compatibility constraints: The token remains an opaque short-lived server-issued recovery credential. Activity-specific code owns token exchange and passcode recovery, but must not duplicate URL parsing or broaden the accepted input.
+- Validation rules: The shared parser test covers valid, whitespace-padded, blank, and absent query values. VideoSync, Resonance, Postboard, and MobCode import the same parser.
+- Evidence (schema/tests/path): `client/src/components/common/embeddedManagerBootstrap.ts`; `client/src/components/common/embeddedManagerBootstrap.test.ts`; `activities/video-sync/client/manager/VideoSyncManager.tsx`; `activities/resonance/client/manager/ResonanceManager.tsx`; `activities/postboard/client/manager/PostboardManager.tsx`; `activities/mobcode/client/manager/MobCodeManager.tsx`
+- Follow-up action: New credentialed SyncDeck embedded activities should reuse this parser and add activity-owned token-exchange tests.
+- Owner: Codex
+
 - Date: 2026-07-11
 - Surface: activity interface | SyncDeck report aggregation
 - Contract: `ActivityStructuredReportSection.reportStatus` may be `available`, `unsupported`, or `unavailable`. Activity-owned structured builders should return `available` sections with generic `summaryCards`, `scopeBlocks`, `studentScopeBlocks`, and a JSON-serializable `payload` that contains any data required for offline rendering. SyncDeck session reports now include every current embedded activity with a valid parent record: child sessions without a registered builder are represented as `unsupported`, and missing or unbuildable child sessions are represented as `unavailable`.

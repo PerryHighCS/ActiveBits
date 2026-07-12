@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { consumeCreateSessionBootstrapPayload } from '@src/components/common/manageDashboardUtils'
+import { readEmbeddedManagerToken } from '@src/components/common/embeddedManagerBootstrap'
 import { isEmbeddedChildSessionId } from '@src/components/common/sessionHeaderUtils'
 import type { InstructorAnnotation, Question, ResonancePresentationMode, StagedRunState } from '../../shared/types.js'
 import { useInstructorState } from '../hooks/useInstructorState.js'
@@ -51,11 +52,6 @@ export function resolvePasscode(sessionId: string): string | null {
   }
 
   return null
-}
-
-export function readEmbeddedManagerToken(search: string): string | null {
-  const token = new URLSearchParams(search).get('embeddedManagerToken')
-  return typeof token === 'string' && token.trim().length > 0 ? token.trim() : null
 }
 
 function formatRemainingTime(deadlineAt: number | null, now: number): string | null {
