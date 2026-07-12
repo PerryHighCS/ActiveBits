@@ -247,6 +247,8 @@ through activity-specific props.
   the authenticated parent start response arrives, then exchange it atomically for the child
   passcode and replace the iframe URL to remove the consumed token. This avoids putting instructor
   credentials in browser storage while preventing an iframe bootstrap race or concurrent reuse.
+- Internal embedded-activity iframes delegate `autoplay` and `fullscreen` to support synchronized,
+  muted nested media players such as Video Sync without relaxing their sandbox policy.
 
 `client/index.ts` (components/footer only, lazy-loaded chunk):
 ```typescript

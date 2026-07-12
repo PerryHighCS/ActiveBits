@@ -153,6 +153,10 @@ SyncDeck sample decks that exist only for local development live under `activiti
 - Vite serves them during local development from the same `/presentations/...` URLs used by the app.
 - Production builds must not emit these dev-only presentation files.
 
+## SyncDeck Embedded Media
+
+- SyncDeck's internal embedded-activity iframes delegate `autoplay` and `fullscreen` so synchronized, muted media players (including Video Sync's nested YouTube player) can start from an instructor playback command. Keep this iframe permission policy intact when configuring a reverse proxy or content-security policy.
+
 ## Scaling Considerations
 
 ### Single Instance (Default)
