@@ -3022,6 +3022,69 @@ void test('report-manifest route includes missing child sessions as unavailable 
   assert.equal(body.activities[0]?.report.payload?.status, 'unavailable')
 })
 
+void test('report-manifest route emits resolved activity metadata and finite start times', async () => {
+  await initializeActivityRegistry()
+  const app = createMockApp()
+  const ws = createMockWs()
+  const storeState = createSessionStore({
+    s1: {
+      ...createSyncDeckSession('s1', 'teacher-passcode-1'),
+      data: {
+        ...createSyncDeckSession('s1', 'teacher-passcode-1').data,
+        embeddedActivities: {
+          'video-sync:2:0': {
+            childSessionId: 'CHILD:s1:legacy:video-sync',
+            activityId: 'legacy-video-sync-id',
+            startedAt: Number.POSITIVE_INFINITY,
+            owner: 'syncdeck-instructor',
+          },
+        },
+      },
+    },
+    'CHILD:s1:legacy:video-sync': {
+      id: 'CHILD:s1:legacy:video-sync',
+      type: 'video-sync',
+      created: Date.now(),
+      lastActivity: Date.now(),
+      data: {},
+    },
+  })
+  setupSyncDeckRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.get['/api/syncdeck/:sessionId/report-manifest']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.(
+    createRequest(
+      { sessionId: 's1' },
+      {},
+      {},
+      { 'x-syncdeck-instructor-passcode': 'teacher-passcode-1' },
+    ),
+    res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  const body = res.body as {
+    activities: Array<{
+      activityId: string
+      activityName: string
+      childSessionId: string
+      startedAt: number
+      report: { activityId: string; childSessionId: string; reportStatus?: string }
+    }>
+  }
+  assert.equal(body.activities.length, 1)
+  assert.equal(body.activities[0]?.activityId, 'video-sync')
+  assert.equal(body.activities[0]?.activityName, 'Video Sync')
+  assert.equal(body.activities[0]?.childSessionId, 'CHILD:s1:legacy:video-sync')
+  assert.equal(Number.isFinite(body.activities[0]?.startedAt), true)
+  assert.equal(body.activities[0]?.report.activityId, 'video-sync')
+  assert.equal(body.activities[0]?.report.childSessionId, 'CHILD:s1:legacy:video-sync')
+  assert.equal(body.activities[0]?.report.reportStatus, 'unsupported')
+})
+
 void test('report-manifest route isolates child report builder exceptions', async () => {
   await initializeActivityRegistry()
   registerActivityReportBuilder('throwing-report-activity', () => {

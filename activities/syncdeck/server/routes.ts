@@ -1021,18 +1021,17 @@ async function buildSyncDeckSessionReportManifest(
 
   for (const [instanceKey, embeddedActivity] of entries) {
     const childSession = await sessions.get(embeddedActivity.childSessionId)
+    const startedAt = Number.isFinite(embeddedActivity.startedAt) ? embeddedActivity.startedAt : 0
     let report: ActivityStructuredReportSection
-    let activityId = embeddedActivity.activityId
     if (!childSession || typeof childSession.type !== 'string') {
       report = buildEmbeddedReportAvailabilitySection({
-        activityId,
+        activityId: embeddedActivity.activityId,
         childSessionId: embeddedActivity.childSessionId,
         instanceKey,
         status: 'unavailable',
         reason: 'This embedded activity session was no longer available when the SyncDeck report was generated.',
       })
     } else {
-      activityId = childSession.type
       const builder = getActivityReportBuilder(childSession.type)
       if (builder) {
         try {
@@ -1074,11 +1073,11 @@ async function buildSyncDeckSessionReportManifest(
     }
 
     activities.push({
-      activityId: embeddedActivity.activityId,
-      activityName: resolveActivityDisplayName(activityId),
-      childSessionId: embeddedActivity.childSessionId,
+      activityId: report.activityId,
+      activityName: resolveActivityDisplayName(report.activityId),
+      childSessionId: report.childSessionId,
       instanceKey,
-      startedAt: embeddedActivity.startedAt,
+      startedAt,
       report,
     })
   }
