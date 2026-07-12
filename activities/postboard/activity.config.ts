@@ -49,7 +49,6 @@ const postboardConfig: ActivityConfig = {
   studentLayout: {
     expandShell: true,
   },
-  reportEndpoint: '/api/postboard/:sessionId/report',
   clientEntry: './client/index.ts',
   serverEntry: './server/routes.ts',
 }

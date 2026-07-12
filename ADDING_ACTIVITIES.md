@@ -301,10 +301,14 @@ export default {
       timeoutMs: 4000,
     },
   },
-  // Optional: expose an activity-owned standalone report download route.
+  // Optional: expose an activity-owned report download route for embedded end/report flows.
   // Embedded reports should download as a single self-contained HTML file with inline data,
   // styles, and scripts so instructors can open them offline and switch between class and
   // per-student views without additional requests.
+  // For SyncDeck aggregate reports, pair this with structured report data that can expose
+  // generic `scopeBlocks` / `studentScopeBlocks` (for example rich text or tables) so the
+  // parent report shell can render richer activity-owned content without importing activity
+  // implementation code.
   reportEndpoint: '/api/quiz/:sessionId/report',
   clientEntry: './client/index.ts',  // or .tsx if using JSX in footerContent
   serverEntry: './server/routes.ts',
@@ -312,35 +316,6 @@ export default {
 ```
 
 Activities are auto-discovered from `activities/*/activity.config.ts`; no central registry needs updating.
-
-### Activity Reports
-
-Standalone report endpoints declared with `reportEndpoint` should return one self-contained HTML file. Inline the data, CSS, and any JavaScript needed for view switching; do not rely on CDN assets, external fonts, companion files, or follow-up API calls after download.
-
-For SyncDeck aggregation, register a structured report builder from the activity server entry:
-
-```typescript
-import { registerActivityReportBuilder } from '../../../server/activities/activityReportRegistry.js'
-
-registerActivityReportBuilder('quiz', (session, params) => {
-  return {
-    activityId: 'quiz',
-    childSessionId: session.id,
-    instanceKey: params.instanceKey,
-    title: 'Quiz Report',
-    generatedAt: Date.now(),
-    reportStatus: 'available',
-    supportsScopes: ['activity-session', 'student-cross-activity', 'session-summary'],
-    students: [{ studentId: 'student-1', displayName: 'Avery' }],
-    summaryCards: [],
-    scopeBlocks: {},
-    studentScopeBlocks: {},
-    payload: {},
-  }
-})
-```
-
-Builders should normalize legacy session state before reading it, exclude secrets and entry tokens, and return JSON-serializable data. Use generic `scopeBlocks` and `studentScopeBlocks` for rich text and table content that the SyncDeck parent report can render offline. If an embedded activity has no builder, SyncDeck includes it in the parent report with an `unsupported` status; if the child session is missing or cannot produce a report, SyncDeck includes an `unavailable` status.
 
 ### Step 7: Update the Activity Tests
 

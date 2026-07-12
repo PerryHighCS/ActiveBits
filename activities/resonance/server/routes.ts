@@ -1,7 +1,6 @@
 import { timingSafeEqual } from 'crypto'
 import { createSession, type SessionRecord, type SessionStore } from 'activebits-server/core/sessions.js'
 import { registerSessionNormalizer } from 'activebits-server/core/sessionNormalization.js'
-import { registerActivityReportBuilder } from '../../../server/activities/activityReportRegistry.js'
 import {
   findHashBySessionId,
   generatePersistentHash,
@@ -26,7 +25,6 @@ import {
   buildResonanceReport,
   buildResonanceReportFilename,
   buildResonanceReportHtml,
-  buildResonanceStructuredReportSection,
 } from './reportRenderer.js'
 
 // ---------------------------------------------------------------------------
@@ -1265,21 +1263,6 @@ function resolveStudentAvailableQuestionIds(session: ResonanceSession, selfPaced
 
 registerSessionNormalizer('resonance', (session) => {
   session.data = normalizeSessionData(session.data)
-})
-
-registerActivityReportBuilder('resonance', (session, params) => {
-  const normalizedSession = asResonanceSession(session)
-  if (!normalizedSession) {
-    return null
-  }
-
-  return buildResonanceStructuredReportSection(
-    buildResonanceReport({
-      id: normalizedSession.id,
-      ...normalizedSession.data,
-    }),
-    { instanceKey: params.instanceKey },
-  )
 })
 
 // ---------------------------------------------------------------------------
