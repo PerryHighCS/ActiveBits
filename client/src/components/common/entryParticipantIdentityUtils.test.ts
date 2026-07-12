@@ -69,14 +69,14 @@ void test('persistSessionParticipantIdentity degrades gracefully when storage wr
   assert.match(warnings[2]?.message ?? '', /student id/i)
 })
 
-void test('resolveInitialEntryParticipantIdentity prefers stored live-session identity', async () => {
+void test('resolveInitialEntryParticipantIdentity prefers fresh live-session handoff over stale stored identity', async () => {
   const localStorage = createStorage()
   const sessionStorage = createStorage()
   persistSessionParticipantIdentity(localStorage, 'session-1', 'Grace', 'participant-1')
   persistEntryParticipantValues(
     sessionStorage,
     buildSessionEntryParticipantStorageKey('java-string-practice', 'session-1'),
-    { displayName: 'Ignored', participantId: 'participant-2' },
+    { displayName: 'Ada', participantId: 'participant-2' },
   )
 
   const identity = await resolveInitialEntryParticipantIdentity({
@@ -85,6 +85,29 @@ void test('resolveInitialEntryParticipantIdentity prefers stored live-session id
     isSoloSession: false,
     localStorage,
     sessionStorage,
+  })
+
+  assert.deepEqual(identity, {
+    studentName: 'Ada',
+    studentId: 'participant-2',
+    nameSubmitted: true,
+  })
+  assert.deepEqual(readSessionParticipantContext(localStorage, 'session-1'), {
+    studentName: 'Ada',
+    studentId: 'participant-2',
+  })
+})
+
+void test('resolveInitialEntryParticipantIdentity falls back to stored live-session identity without handoff', async () => {
+  const localStorage = createStorage()
+  persistSessionParticipantIdentity(localStorage, 'session-1', 'Grace', 'participant-1')
+
+  const identity = await resolveInitialEntryParticipantIdentity({
+    activityName: 'java-string-practice',
+    sessionId: 'session-1',
+    isSoloSession: false,
+    localStorage,
+    sessionStorage: createStorage(),
   })
 
   assert.deepEqual(identity, {

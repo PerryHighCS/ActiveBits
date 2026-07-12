@@ -3,6 +3,13 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { isMcqAnswerCorrect } from '../shared/mcq.js'
 import type { InstructorAnnotation, Question, QuestionReveal, Response, Student } from '../shared/types.js'
 import type { ResonanceReport, ResonanceReportQuestion } from '../shared/reportTypes.js'
+import type {
+  ActivityReportBlock,
+  ActivityReportStudentRef,
+  ActivityReportSummaryCard,
+  ActivityReportTableRow,
+  ActivityStructuredReportSection,
+} from '../../../types/activity.js'
 import FormattedMarkdown from '../client/components/FormattedMarkdown.js'
 
 /**
@@ -81,6 +88,254 @@ function esc(str: string): string {
 
 function pct(count: number, total: number): number {
   return total > 0 ? Math.round((count / total) * 100) : 0
+}
+
+function answerToText(question: Question, response: Response): string {
+  if (response.answer.type === 'free-response') {
+    return response.answer.text
+  }
+
+  if (question.type !== 'multiple-choice') {
+    return response.answer.selectedOptionIds.join(', ')
+  }
+
+  return response.answer.selectedOptionIds
+    .map((optionId) => question.options.find((option) => option.id === optionId)?.text ?? optionId)
+    .join(', ')
+}
+
+function reportStudents(report: ResonanceReport): ActivityReportStudentRef[] {
+  return report.students.map((student) => ({
+    studentId: student.studentId,
+    displayName: student.name,
+  }))
+}
+
+function reportSummaryCards(report: ResonanceReport): ActivityReportSummaryCard[] {
+  const responseCount = report.questions.reduce((total, question) => total + question.responses.length, 0)
+  const sharedQuestionCount = report.questions.filter((question) => question.reveal !== null).length
+  const correctMcqCount = report.questions.reduce((total, question) => {
+    const correctOptionIds = question.reveal?.correctOptionIds ?? []
+    if (question.question.type !== 'multiple-choice' || correctOptionIds.length === 0) {
+      return total
+    }
+
+    return total + question.responses.filter((response) =>
+      response.answer.type === 'multiple-choice' &&
+      isMcqAnswerCorrect(response.answer.selectedOptionIds, correctOptionIds),
+    ).length
+  }, 0)
+
+  return [
+    {
+      id: 'resonance-overview',
+      title: 'Resonance Overview',
+      metrics: [
+        { id: 'question-count', label: 'Questions', value: report.questions.length },
+        { id: 'student-count', label: 'Students', value: report.students.length },
+        { id: 'response-count', label: 'Responses', value: responseCount },
+        { id: 'shared-question-count', label: 'Shared Results', value: sharedQuestionCount },
+        { id: 'correct-mcq-count', label: 'Correct MCQ Responses', value: correctMcqCount },
+      ],
+    },
+  ]
+}
+
+function buildQuestionSummaryRows(report: ResonanceReport): ActivityReportTableRow[] {
+  return report.questions.map((section) => {
+    const question = section.question
+    const correctOptionIds = section.reveal?.correctOptionIds ?? []
+    const correctResponseCount = question.type === 'multiple-choice' && correctOptionIds.length > 0
+      ? section.responses.filter((response) =>
+          response.answer.type === 'multiple-choice' &&
+          isMcqAnswerCorrect(response.answer.selectedOptionIds, correctOptionIds),
+        ).length
+      : null
+    const sharedResponseCount = section.reveal?.sharedResponses.length ?? 0
+
+    return {
+      id: question.id,
+      cells: [
+        String(question.order),
+        question.type === 'multiple-choice' ? 'Multiple choice' : 'Free response',
+        question.text,
+        String(section.responses.length),
+        correctResponseCount === null ? 'N/A' : `${correctResponseCount} correct`,
+        sharedResponseCount > 0 ? `${sharedResponseCount} shared` : 'Not shared',
+      ],
+    }
+  })
+}
+
+function buildResponseRows(report: ResonanceReport): ActivityReportTableRow[] {
+  const rows: ActivityReportTableRow[] = []
+  for (const section of report.questions) {
+    for (const response of section.responses) {
+      const annotation = section.annotations[response.id]
+      const annotationParts: string[] = []
+      if (annotation?.starred === true) annotationParts.push('starred')
+      if (annotation?.flagged === true) annotationParts.push('flagged')
+      if (annotation?.emoji) annotationParts.push(annotation.emoji)
+      rows.push({
+        id: response.id,
+        cells: [
+          response.studentName,
+          section.question.text,
+          answerToText(section.question, response),
+          annotationParts.length > 0 ? annotationParts.join(', ') : 'None',
+        ],
+      })
+    }
+  }
+  return rows
+}
+
+function buildOptionSummaryBlocks(report: ResonanceReport): ActivityReportBlock[] {
+  return report.questions
+    .filter((section) => section.question.type === 'multiple-choice')
+    .map((section): ActivityReportBlock => {
+      const question = section.question
+      if (question.type !== 'multiple-choice') {
+        throw new Error('unreachable')
+      }
+
+      const optionCounts = new Map<string, number>()
+      for (const response of section.responses) {
+        if (response.answer.type !== 'multiple-choice') continue
+        for (const optionId of response.answer.selectedOptionIds) {
+          optionCounts.set(optionId, (optionCounts.get(optionId) ?? 0) + 1)
+        }
+      }
+      const correctOptionIds = new Set(section.reveal?.correctOptionIds ?? question.options.filter((option) => option.isCorrect).map((option) => option.id))
+
+      return {
+        id: `resonance-options-${question.id}`,
+        type: 'table',
+        title: `Options: ${question.text}`,
+        columns: ['Option', 'Selections', 'Percent', 'Correct'],
+        rows: question.options.map((option) => {
+          const count = optionCounts.get(option.id) ?? 0
+          return {
+            id: option.id,
+            cells: [
+              option.text,
+              String(count),
+              `${pct(count, section.responses.length)}%`,
+              correctOptionIds.has(option.id) ? 'Yes' : 'No',
+            ],
+          }
+        }),
+        emptyMessage: 'No options were available for this question.',
+      }
+    })
+}
+
+function buildScopeBlocks(report: ResonanceReport): Partial<Record<'activity-session' | 'session-summary', ActivityReportBlock[]>> {
+  return {
+    'session-summary': [
+      {
+        id: 'resonance-session-summary',
+        type: 'rich-text',
+        title: 'Snapshot',
+        paragraphs: [
+          `${report.questions.length} question${report.questions.length === 1 ? '' : 's'} included in this Resonance activity.`,
+          `${report.students.length} student${report.students.length === 1 ? '' : 's'} submitted ${report.questions.reduce((total, question) => total + question.responses.length, 0)} response${report.questions.reduce((total, question) => total + question.responses.length, 0) === 1 ? '' : 's'}.`,
+        ],
+      },
+    ],
+    'activity-session': [
+      {
+        id: 'resonance-question-summary',
+        type: 'table',
+        title: 'Question Summary',
+        columns: ['Order', 'Type', 'Question', 'Responses', 'Correctness', 'Shared'],
+        rows: buildQuestionSummaryRows(report),
+        emptyMessage: 'No Resonance questions were captured for this session.',
+      },
+      {
+        id: 'resonance-response-log',
+        type: 'table',
+        title: 'Response Log',
+        columns: ['Student', 'Question', 'Answer', 'Instructor Notes'],
+        rows: buildResponseRows(report),
+        emptyMessage: 'No student responses were captured for this session.',
+      },
+      ...buildOptionSummaryBlocks(report),
+    ],
+  }
+}
+
+function buildStudentScopeBlocks(report: ResonanceReport): Record<string, ActivityReportBlock[]> {
+  const blocksByStudent: Record<string, ActivityReportBlock[]> = {}
+  for (const student of report.students) {
+    const rows: ActivityReportTableRow[] = []
+    for (const section of report.questions) {
+      const responses = section.responses.filter((response) => response.studentId === student.studentId)
+      for (const response of responses) {
+        const annotation = section.annotations[response.id]
+        const instructorNoteParts: string[] = []
+        if (annotation?.starred === true) instructorNoteParts.push('starred')
+        if (annotation?.flagged === true) instructorNoteParts.push('flagged')
+        if (annotation?.emoji) instructorNoteParts.push(annotation.emoji)
+        const correctOptionIds = section.reveal?.correctOptionIds ?? []
+        const correctness = response.answer.type === 'multiple-choice' && correctOptionIds.length > 0
+          ? isMcqAnswerCorrect(response.answer.selectedOptionIds, correctOptionIds) ? 'Correct' : 'Incorrect'
+          : 'N/A'
+        rows.push({
+          id: response.id,
+          cells: [
+            section.question.text,
+            answerToText(section.question, response),
+            correctness,
+            instructorNoteParts.length > 0 ? instructorNoteParts.join(', ') : 'None',
+          ],
+        })
+      }
+    }
+
+    blocksByStudent[student.studentId] = [
+      {
+        id: `resonance-student-summary-${student.studentId}`,
+        type: 'rich-text',
+        title: 'Student Snapshot',
+        paragraphs: [
+          `${student.name} submitted ${rows.length} Resonance response${rows.length === 1 ? '' : 's'}.`,
+        ],
+      },
+      {
+        id: `resonance-student-responses-${student.studentId}`,
+        type: 'table',
+        title: 'Responses',
+        columns: ['Question', 'Answer', 'Correctness', 'Instructor Notes'],
+        rows,
+        emptyMessage: 'No responses were captured for this student.',
+      },
+    ]
+  }
+
+  return blocksByStudent
+}
+
+export function buildResonanceStructuredReportSection(
+  report: ResonanceReport,
+  params: { instanceKey: string },
+): ActivityStructuredReportSection {
+  return {
+    activityId: 'resonance',
+    childSessionId: report.sessionId,
+    instanceKey: params.instanceKey,
+    title: 'Resonance Report',
+    generatedAt: report.exportedAt,
+    reportStatus: 'available',
+    supportsScopes: ['activity-session', 'student-cross-activity', 'session-summary'],
+    students: reportStudents(report),
+    summaryCards: reportSummaryCards(report),
+    scopeBlocks: buildScopeBlocks(report),
+    studentScopeBlocks: buildStudentScopeBlocks(report),
+    payload: {
+      report,
+    },
+  }
 }
 
 function renderMarkdown(markdown: string): string {
