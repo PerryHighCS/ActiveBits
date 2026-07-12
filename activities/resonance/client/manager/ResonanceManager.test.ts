@@ -10,6 +10,7 @@ import {
   isQuestionStemVisuallyTruncated,
   normalizeActivationSelection,
   reconcileActivationSelection,
+  readEmbeddedManagerToken,
   resolveActivationSelectionAfterToggle,
   resolveActivationSelectionForRender,
   resolveLiveCountdown,
@@ -24,6 +25,12 @@ import {
   toggleExpandedQuestionStem,
   toggleQuestionActivationSelection,
 } from './ResonanceManager.js'
+
+void test('readEmbeddedManagerToken reads only a non-empty SyncDeck manager token', () => {
+  assert.equal(readEmbeddedManagerToken('?embeddedManagerToken=token-123'), 'token-123')
+  assert.equal(readEmbeddedManagerToken('?embeddedManagerToken=%20%20'), null)
+  assert.equal(readEmbeddedManagerToken(''), null)
+})
 
 function installDomEnvironment() {
   const dom = new JSDOM('<!doctype html><html><body></body></html>', {

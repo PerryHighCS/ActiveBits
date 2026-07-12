@@ -147,6 +147,7 @@ interface SyncDeckEmbeddedActivityStartResponse {
   childSessionId?: unknown
   instanceKey?: unknown
   managerBootstrap?: unknown
+  managerEntryToken?: unknown
 }
 
 interface SyncDeckEmbeddedBootstrapBackfillRequest {
@@ -1961,8 +1962,9 @@ export function buildInstructorRoleCommandMessage(): Record<string, unknown> {
   })
 }
 
-function buildEmbeddedManagerIframeSrc(record: SyncDeckEmbeddedActivityRecord): string {
-  return `/manage/${encodeURIComponent(record.activityId)}/${encodeURIComponent(record.childSessionId)}`
+function buildEmbeddedManagerIframeSrc(record: SyncDeckEmbeddedActivityRecord, managerEntryToken: string): string {
+  const params = new URLSearchParams({ embeddedManagerToken: managerEntryToken })
+  return `/manage/${encodeURIComponent(record.activityId)}/${encodeURIComponent(record.childSessionId)}?${params.toString()}`
 }
 
 const MAX_MOUNTED_EMBEDDED_MANAGER_IFRAMES = 2
@@ -2073,6 +2075,7 @@ const SyncDeckManager: FC = () => {
   const [mountedEmbeddedManagerInstanceKeys, setMountedEmbeddedManagerInstanceKeys] = useState<string[]>([])
   const [loadedEmbeddedManagerInstanceKeys, setLoadedEmbeddedManagerInstanceKeys] = useState<Record<string, boolean>>({})
   const [embeddedManagerRenderNonceByChildSessionId, setEmbeddedManagerRenderNonceByChildSessionId] = useState<Record<string, number>>({})
+  const [embeddedManagerEntryTokensByChildSessionId, setEmbeddedManagerEntryTokensByChildSessionId] = useState<Record<string, string>>({})
   const [embeddedBootstrapBackfillRetryNonce, setEmbeddedBootstrapBackfillRetryNonce] = useState(0)
   const presentationIframeRef = useRef<HTMLIFrameElement | null>(null)
   const reportPreviewTriggerRef = useRef<HTMLButtonElement | null>(null)
@@ -2599,6 +2602,7 @@ const SyncDeckManager: FC = () => {
     embeddedBootstrapBackfillRetryAttemptRef.current = 0
     clearEmbeddedBootstrapBackfillRetryTimeout()
     setEmbeddedManagerRenderNonceByChildSessionId({})
+    setEmbeddedManagerEntryTokensByChildSessionId({})
   }, [clearEmbeddedBootstrapBackfillRetryTimeout, sessionId])
 
   useEffect(() => {
@@ -2797,7 +2801,16 @@ const SyncDeckManager: FC = () => {
           return false
         }
 
+        const managerEntryToken = typeof payload.managerEntryToken === 'string' ? payload.managerEntryToken.trim() : ''
+        if (managerEntryToken.length === 0) {
+          return true
+        }
+
         storeCreateSessionBootstrapPayload(request.activityId, resolvedChildSessionId, payload.managerBootstrap)
+        setEmbeddedManagerEntryTokensByChildSessionId((current) => ({
+          ...current,
+          [resolvedChildSessionId]: managerEntryToken,
+        }))
         setEmbeddedManagerRenderNonceByChildSessionId((current) => advanceEmbeddedManagerRenderNonce(
           current,
           resolvedChildSessionId,
@@ -3122,7 +3135,14 @@ const SyncDeckManager: FC = () => {
             const payload = (await response.json()) as SyncDeckEmbeddedActivityStartResponse
             const childSessionId = typeof payload.childSessionId === 'string' ? payload.childSessionId.trim() : ''
             if (childSessionId && isPlainObject(payload.managerBootstrap)) {
+              const managerEntryToken = typeof payload.managerEntryToken === 'string' ? payload.managerEntryToken.trim() : ''
               storeCreateSessionBootstrapPayload(request.activityId, childSessionId, payload.managerBootstrap)
+              if (managerEntryToken.length > 0) {
+                setEmbeddedManagerEntryTokensByChildSessionId((current) => ({
+                  ...current,
+                  [childSessionId]: managerEntryToken,
+                }))
+              }
               setEmbeddedManagerRenderNonceByChildSessionId((current) => advanceEmbeddedManagerRenderNonce(
                 current,
                 childSessionId,
@@ -4760,7 +4780,10 @@ const SyncDeckManager: FC = () => {
 
                 {renderedEmbeddedManagerInstanceKeys.map((instanceKey) => {
                   const record = embeddedActivities[instanceKey]
-                  if (!record) {
+                  const managerEntryToken = record
+                    ? embeddedManagerEntryTokensByChildSessionId[record.childSessionId]
+                    : null
+                  if (!record || !managerEntryToken) {
                     return null
                   }
                   const isActive = instanceKey === activeEmbeddedInstanceKey
@@ -4788,7 +4811,7 @@ const SyncDeckManager: FC = () => {
                         <div className="relative w-full h-full rounded-lg border border-gray-200 bg-white shadow-sm overflow-hidden">
                           <iframe
                             title={`Embedded ${record.activityId} manager`}
-                            src={buildEmbeddedManagerIframeSrc(record)}
+                            src={buildEmbeddedManagerIframeSrc(record, managerEntryToken)}
                             className="w-full h-full"
                             {...inactiveIframeAccessibilityProps}
                             onLoad={() => {

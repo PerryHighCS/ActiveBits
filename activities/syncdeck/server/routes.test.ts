@@ -2560,10 +2560,10 @@ void test('embedded-activity start route is idempotent per instance key', async 
   )
 
   assert.equal(res.statusCode, 200)
-  assert.deepEqual(res.body, {
-    childSessionId: 'CHILD:s1:abc12:video-sync',
-    instanceKey: 'video-sync:3:0',
-  })
+  const body = res.body as { childSessionId?: unknown; instanceKey?: unknown; managerEntryToken?: unknown }
+  assert.equal(body.childSessionId, 'CHILD:s1:abc12:video-sync')
+  assert.equal(body.instanceKey, 'video-sync:3:0')
+  assert.match(String(body.managerEntryToken), /^[a-f0-9]{64}$/)
 })
 
 void test('embedded-activity start route serializes concurrent creation for the same instance key', async () => {
@@ -4372,10 +4372,10 @@ void test('embedded-activity start is idempotent per key even when a concurrent 
   )
 
   assert.equal(resIdempotent.statusCode, 200)
-  assert.deepEqual(resIdempotent.body, {
-    childSessionId: 'CHILD:s1:abc12:video-sync',
-    instanceKey: 'video-sync:3:0',
-  })
+  const idempotentBody = resIdempotent.body as { childSessionId?: unknown; instanceKey?: unknown; managerEntryToken?: unknown }
+  assert.equal(idempotentBody.childSessionId, 'CHILD:s1:abc12:video-sync')
+  assert.equal(idempotentBody.instanceKey, 'video-sync:3:0')
+  assert.match(String(idempotentBody.managerEntryToken), /^[a-f0-9]{64}$/)
 
   assert.equal(resNew.statusCode, 200)
   const newBody = resNew.body as { childSessionId: string; instanceKey: string }
@@ -4429,10 +4429,10 @@ void test('syncdeck parent routes keep embedded child sessions alive while the p
   )
 
   assert.equal(res.statusCode, 200)
-  assert.deepEqual(res.body, {
-    childSessionId,
-    instanceKey: 'video-sync:3:0',
-  })
+  const body = res.body as { childSessionId?: unknown; instanceKey?: unknown; managerEntryToken?: unknown }
+  assert.equal(body.childSessionId, childSessionId)
+  assert.equal(body.instanceKey, 'video-sync:3:0')
+  assert.match(String(body.managerEntryToken), /^[a-f0-9]{64}$/)
   assert.deepEqual(storeState.touchCalls, [childSessionId])
   assert.ok((storeState.store[childSessionId]?.lastActivity ?? 0) > 1)
 })

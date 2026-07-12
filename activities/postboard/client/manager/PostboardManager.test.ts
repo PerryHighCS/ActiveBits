@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { getInstructorBoardCardClassName, readInstructorPasscode, reorderPostIds } from './PostboardManager.js'
+import { getInstructorBoardCardClassName, readEmbeddedManagerToken, readInstructorPasscode, reorderPostIds } from './PostboardManager.js'
 
 function withMockWindow(
   sessionStorage: Pick<Storage, 'getItem' | 'setItem'>,
@@ -22,6 +22,12 @@ function withMockWindow(
     }
   }
 }
+
+void test('readEmbeddedManagerToken accepts only non-empty SyncDeck iframe tokens', () => {
+  assert.equal(readEmbeddedManagerToken('?embeddedManagerToken=token-123'), 'token-123')
+  assert.equal(readEmbeddedManagerToken('?embeddedManagerToken=%20%20'), null)
+  assert.equal(readEmbeddedManagerToken(''), null)
+})
 
 void test('reorderPostIds moves the dragged post to the target position', () => {
   assert.deepEqual(

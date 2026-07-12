@@ -15,6 +15,10 @@ There are two closely related but different shapes to keep straight:
 
 In some activities those shapes are nearly identical. In others, the host normalizes or transforms the launch payload before the child reads it.
 
+## Embedded Instructor Manager Bootstrap
+
+SyncDeck starts embedded instructor iframes only after `POST /api/syncdeck/:sessionId/embedded-activity/start` returns a short-lived `managerEntryToken`. The iframe exchanges that token with `GET /api/syncdeck/embedded-manager-passcode` to receive its child activity passcode. This is host-managed runtime state, not deck-authored `data-activity-options`; do not add credentials or bootstrap tokens to deck payloads.
+
 ## Resonance
 
 ### Deck launch payload

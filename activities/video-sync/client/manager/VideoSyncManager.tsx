@@ -127,6 +127,11 @@ export function readBootstrapSourceUrl(search: string): string | null {
   return trimmed.length > 0 ? trimmed : null
 }
 
+export function readEmbeddedManagerToken(search: string): string | null {
+  const value = new URLSearchParams(search).get('embeddedManagerToken')
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null
+}
+
 export function readRecoveredPersistentSourceUrl(payload: InstructorPasscodeResponse | null | undefined): string | null {
   const value = payload?.persistentSourceUrl
   if (typeof value !== 'string') {
@@ -404,6 +409,7 @@ export default function VideoSyncManager() {
   const suppressPlayerEventsTimeoutRef = useRef<number | null>(null)
   const autoStartAttemptKeyRef = useRef<string | null>(null)
   const queryBootstrapSourceUrl = useMemo(() => readBootstrapSourceUrl(location.search), [location.search])
+  const embeddedManagerToken = useMemo(() => readEmbeddedManagerToken(location.search), [location.search])
   const bootstrapSourceUrl = persistentRecoverySourceUrl ?? queryBootstrapSourceUrl ?? embeddedBootstrapSourceUrl
 
   useEffect(() => {
@@ -672,6 +678,26 @@ export default function VideoSyncManager() {
     let isCancelled = false
 
     const loadInstructorPasscode = async (): Promise<void> => {
+      if (embeddedManagerToken) {
+        try {
+          const response = await fetch(
+            `/api/syncdeck/embedded-manager-passcode?sessionId=${encodeURIComponent(sessionId)}&token=${encodeURIComponent(embeddedManagerToken)}`,
+            { credentials: 'same-origin' },
+          )
+          if (response.ok) {
+            const payload = (await response.json()) as InstructorPasscodeResponse
+            if (typeof payload.instructorPasscode === 'string' && payload.instructorPasscode.length > 0 && !isCancelled) {
+              setInstructorPasscode(payload.instructorPasscode)
+              setPersistentRecoverySourceUrl(null)
+              setIsPasscodeReady(true)
+              return
+            }
+          }
+        } catch {
+          // Fall through to normal authenticated recovery.
+        }
+      }
+
       const bootstrap = resolveBootstrapInstructorPasscode({
         locationState: location.state,
         sessionId,
@@ -740,7 +766,7 @@ export default function VideoSyncManager() {
     return () => {
       isCancelled = true
     }
-  }, [location.pathname, location.search, navigate, sessionId])
+  }, [embeddedManagerToken, location.pathname, location.search, navigate, sessionId])
 
   const handleEnvelope = useCallback((envelope: VideoSyncWsEnvelope) => {
     if (envelope.type === 'state-update' || envelope.type === 'state-snapshot' || envelope.type === 'heartbeat') {

@@ -24,6 +24,15 @@ Capture reusable test setup patterns, common failure modes, and reliability guid
 - Follow-up action: If MobCode later adds explicit revision numbers, update these tests to assert monotonic revision handling instead of relying on authenticated-manager-gated live-state merge preference.
 - Owner: Codex
 
+- Date: 2026-07-12
+- Scope: e2e | SyncDeck embedded managers
+- Pattern: Use `activities/syncdeck/playwright/embedded-manager-bootstrap.spec.ts` for activity-by-activity browser coverage of embedded instructor manager bootstrap. Each case should create a SyncDeck parent through its API, start the child through the authenticated embedded-start endpoint, mount the returned child manager URL with `embeddedManagerToken` in a real same-origin iframe, and assert an activity-specific instructor-ready UI state.
+- Why it helps: The parent manager and an iframe do not share JavaScript memory, and sensitive bootstrap values are intentionally excluded from browser storage. Unit tests cannot validate that the child exchanged its token or that its post-auth UI bypassed configuration/error states.
+- Example (file/path): `activities/syncdeck/playwright/embedded-manager-bootstrap.spec.ts`
+- Failure signal: A child manager shows missing-credentials/configuration UI, or its expected instructor-ready control/content never appears after iframe navigation.
+- Follow-up action: VideoSync, Resonance, MobCode, and Postboard now have cases. Add a case for each future passcode-protected SyncDeck embedded activity in the same spec, keeping the shared launch/iframe helpers unchanged.
+- Owner: Codex
+
 - Date: 2026-03-04
 - Scope: integration
 - Pattern: Session-store mocks for route tests should return deep clones from `get()` and store clones on `set()` when production storage serializes records between calls.

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { consumeCreateSessionBootstrapPayload } from '@src/components/common/manageDashboardUtils'
 import { isEmbeddedChildSessionId } from '@src/components/common/sessionHeaderUtils'
 import type { InstructorAnnotation, Question, ResonancePresentationMode, StagedRunState } from '../../shared/types.js'
@@ -51,6 +51,11 @@ export function resolvePasscode(sessionId: string): string | null {
   }
 
   return null
+}
+
+export function readEmbeddedManagerToken(search: string): string | null {
+  const token = new URLSearchParams(search).get('embeddedManagerToken')
+  return typeof token === 'string' && token.trim().length > 0 ? token.trim() : null
 }
 
 function formatRemainingTime(deadlineAt: number | null, now: number): string | null {
@@ -271,7 +276,9 @@ export function handleQuestionListItemKeyDown(
  */
 export default function ResonanceManager() {
   const { sessionId } = useParams<{ sessionId?: string }>()
+  const location = useLocation()
   const navigate = useNavigate()
+  const embeddedManagerToken = readEmbeddedManagerToken(location.search)
   const [passcode, setPasscode] = useState<string | null>(null)
   const [isResolvingPasscode, setIsResolvingPasscode] = useState(true)
   const [isEndingSession, setIsEndingSession] = useState(false)
@@ -307,6 +314,23 @@ export default function ResonanceManager() {
 
     const recoverPasscode = async () => {
       try {
+        if (embeddedManagerToken) {
+          const response = await fetch(
+            `/api/syncdeck/embedded-manager-passcode?sessionId=${encodeURIComponent(sessionId)}&token=${encodeURIComponent(embeddedManagerToken)}`,
+            { credentials: 'same-origin' },
+          )
+          if (response.ok) {
+            const payload = await response.json() as { instructorPasscode?: unknown }
+            const recoveredPasscode = typeof payload.instructorPasscode === 'string' && payload.instructorPasscode.trim().length > 0
+              ? payload.instructorPasscode.trim()
+              : null
+            if (recoveredPasscode !== null && !isCancelled) {
+              setPasscode(recoveredPasscode)
+              return
+            }
+          }
+        }
+
         const response = await fetch(`/api/resonance/${encodeURIComponent(sessionId)}/instructor-passcode`, {
           credentials: 'include',
         })
@@ -344,7 +368,7 @@ export default function ResonanceManager() {
     return () => {
       isCancelled = true
     }
-  }, [sessionId])
+  }, [embeddedManagerToken, sessionId])
 
   const { snapshot, loading, error, refresh } = useInstructorState(
     sessionId ?? null,

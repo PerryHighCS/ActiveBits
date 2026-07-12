@@ -48,7 +48,7 @@ import {
   sendMobCodeWsMessage,
   shouldApplyRemoteStateMessage,
 } from './managerUtils'
-import { resolveMobCodeInstructorPasscode } from './passcodeUtils'
+import { readEmbeddedManagerToken, resolveMobCodeInstructorPasscode } from './passcodeUtils'
 import '../styles.css'
 
 interface SessionResponse {
@@ -76,10 +76,11 @@ export default function MobCodeManager() {
   const { sessionId } = useParams()
   const encodedSessionId = sessionId ? encodeURIComponent(sessionId) : ''
   const location = useLocation()
-  const instructorPasscode = resolveMobCodeInstructorPasscode({
+  const embeddedManagerToken = readEmbeddedManagerToken(location.search)
+  const [instructorPasscode, setInstructorPasscode] = useState(() => resolveMobCodeInstructorPasscode({
     sessionId,
     locationState: location.state,
-  })
+  }))
   const canEdit = instructorPasscode.length > 0
   const [files, setFiles] = useState<Record<string, string>>({})
   const [activeFile, setActiveFile] = useState('')
@@ -101,6 +102,37 @@ export default function MobCodeManager() {
   const presenceDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pendingPresenceRef = useRef<{ path: string; selections: MobCodeSelectionRange[] } | null>(null)
   const lastPresenceSyncAtRef = useRef(0)
+
+  useEffect(() => {
+    const fallbackPasscode = resolveMobCodeInstructorPasscode({ sessionId, locationState: location.state })
+    if (!sessionId || !embeddedManagerToken) {
+      setInstructorPasscode(fallbackPasscode)
+      return
+    }
+
+    let cancelled = false
+    void (async () => {
+      try {
+        const response = await fetch(
+          `/api/syncdeck/embedded-manager-passcode?sessionId=${encodeURIComponent(sessionId)}&token=${encodeURIComponent(embeddedManagerToken)}`,
+          { credentials: 'same-origin' },
+        )
+        const payload = response.ok ? await response.json() as { instructorPasscode?: unknown } : null
+        const passcode = typeof payload?.instructorPasscode === 'string' ? payload.instructorPasscode.trim() : ''
+        if (!cancelled) {
+          setInstructorPasscode(passcode || fallbackPasscode)
+        }
+      } catch {
+        if (!cancelled) {
+          setInstructorPasscode(fallbackPasscode)
+        }
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [embeddedManagerToken, location.state, sessionId])
 
   useEffect(() => {
     latestStateRef.current = createStateSnapshot(files, activeFile)

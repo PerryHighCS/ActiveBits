@@ -70,6 +70,7 @@ interface JsonResponse {
 interface RouteRequest {
   params: Record<string, string | undefined>
   body?: unknown
+  query?: Record<string, unknown>
   cookies?: Record<string, unknown>
   headers?: Record<string, unknown>
 }
@@ -121,12 +122,20 @@ interface SyncDeckEmbeddedManagerBootstrapPayload {
   instructorPasscode?: string
 }
 
+interface SyncDeckEmbeddedManagerEntryToken {
+  value: string
+  expiresAt: number
+}
+
 interface EmbeddedActivityStartResponsePayload {
   childSessionId: string
   instanceKey: string
   location?: SyncDeckEmbeddedActivityLocation
   managerBootstrap?: SyncDeckEmbeddedManagerBootstrapPayload
+  managerEntryToken?: string
 }
+
+const EMBEDDED_MANAGER_ENTRY_TOKEN_TTL_MS = 5 * 60 * 1000
 
 type SyncDeckEmbeddedActivitiesMap = Record<string, SyncDeckEmbeddedActivityRecord>
 
@@ -918,6 +927,32 @@ function buildEmbeddedManagerBootstrapPayload(session: SessionRecord): SyncDeckE
   return {
     instructorPasscode,
   }
+}
+
+function mintEmbeddedManagerEntryToken(session: SessionRecord): string {
+  const token = randomBytes(32).toString('hex')
+  session.data.embeddedManagerEntryToken = {
+      value: token,
+      expiresAt: Date.now() + EMBEDDED_MANAGER_ENTRY_TOKEN_TTL_MS,
+  } satisfies SyncDeckEmbeddedManagerEntryToken
+  return token
+}
+
+function readEmbeddedManagerEntryToken(session: SessionRecord): SyncDeckEmbeddedManagerEntryToken | null {
+  const candidate = isPlainObject(session.data) ? session.data.embeddedManagerEntryToken : null
+  if (!isPlainObject(candidate) || typeof candidate.value !== 'string' || typeof candidate.expiresAt !== 'number') {
+    return null
+  }
+  if (candidate.value.length === 0 || !Number.isFinite(candidate.expiresAt) || candidate.expiresAt <= Date.now()) {
+    return null
+  }
+  return { value: candidate.value, expiresAt: candidate.expiresAt }
+}
+
+function verifyEmbeddedManagerEntryToken(expected: string, candidate: string): boolean {
+  const expectedBuffer = Buffer.from(expected)
+  const candidateBuffer = Buffer.from(candidate)
+  return expectedBuffer.length === candidateBuffer.length && timingSafeEqual(expectedBuffer, candidateBuffer)
 }
 
 function buildEmbeddedActivityStartLockKey(sessionId: string, instanceKey: string): string {
@@ -1800,6 +1835,8 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
           const existingChildSession = await sessions.get(existing.childSessionId)
           if (existingChildSession) {
             const managerBootstrap = buildEmbeddedManagerBootstrapPayload(existingChildSession)
+            const managerEntryToken = mintEmbeddedManagerEntryToken(existingChildSession)
+            await sessions.set(existingChildSession.id, existingChildSession)
             return {
               statusCode: 200,
               body: {
@@ -1807,6 +1844,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
                 instanceKey,
                 ...(existing.location ? { location: existing.location } : {}),
                 ...(managerBootstrap ? { managerBootstrap } : {}),
+                managerEntryToken,
               },
             }
           }
@@ -1829,6 +1867,12 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
         const managerBootstrap = normalizedChildSession
           ? buildEmbeddedManagerBootstrapPayload(normalizedChildSession)
           : null
+        const managerEntryToken = normalizedChildSession
+          ? mintEmbeddedManagerEntryToken(normalizedChildSession)
+          : null
+        if (normalizedChildSession) {
+          await sessions.set(normalizedChildSession.id, normalizedChildSession)
+        }
         return {
           statusCode: 200,
           body: {
@@ -1836,12 +1880,33 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
             instanceKey,
             ...(location ? { location } : {}),
             ...(managerBootstrap ? { managerBootstrap } : {}),
+            ...(managerEntryToken ? { managerEntryToken } : {}),
           },
         }
       },
     )
 
     res.status(responsePayload.statusCode).json(responsePayload.body)
+  })
+
+  app.get('/api/syncdeck/embedded-manager-passcode', async (req, res) => {
+    const sessionId = typeof req.query?.sessionId === 'string' ? req.query.sessionId.trim() : ''
+    const token = typeof req.query?.token === 'string' ? req.query.token.trim() : ''
+    if (!sessionId || !token) {
+      res.status(400).json({ error: 'missing embedded manager credentials' })
+      return
+    }
+
+    const session = await sessions.get(sessionId)
+    const entryToken = session ? readEmbeddedManagerEntryToken(session) : null
+    const instructorPasscode = session ? buildEmbeddedManagerBootstrapPayload(session)?.instructorPasscode : null
+    if (!entryToken || !instructorPasscode || !verifyEmbeddedManagerEntryToken(entryToken.value, token)) {
+      res.status(403).json({ error: 'invalid embedded manager credentials' })
+      return
+    }
+
+    console.info('[syncdeck] Embedded manager passcode exchanged', { sessionId })
+    res.json({ instructorPasscode })
   })
 
   app.post('/api/syncdeck/:sessionId/embedded-activity/end', async (req, res) => {

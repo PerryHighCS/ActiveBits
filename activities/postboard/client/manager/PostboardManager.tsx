@@ -43,6 +43,11 @@ export function readInstructorPasscode(sessionId: string | undefined, state: unk
   }
 }
 
+export function readEmbeddedManagerToken(search: string): string | null {
+  const token = new URLSearchParams(search).get('embeddedManagerToken')
+  return typeof token === 'string' && token.trim().length > 0 ? token.trim() : null
+}
+
 function getLaunchDefaults(search: string): { prompt: string; autoApprove: boolean | null } {
   const params = new URLSearchParams(search)
   const prompt = params.get('prompt')?.trim() ?? ''
@@ -82,6 +87,7 @@ export function getInstructorBoardCardClassName(
 export default function PostboardManager(): React.JSX.Element {
   const { sessionId } = useParams<{ sessionId?: string }>()
   const location = useLocation()
+  const embeddedManagerToken = readEmbeddedManagerToken(location.search)
   const [instructorPasscode, setInstructorPasscode] = useState(() => readInstructorPasscode(sessionId, location.state))
   const [snapshot, setSnapshot] = useState<PostboardInstructorSnapshot | null>(null)
   const [promptDraft, setPromptDraft] = useState('')
@@ -112,6 +118,37 @@ export default function PostboardManager(): React.JSX.Element {
     setupInitializedRef.current = false
     fetchRequestIdRef.current += 1
   }, [location.state, sessionId])
+
+  useEffect(() => {
+    const fallbackPasscode = readInstructorPasscode(sessionId, location.state)
+    if (!sessionId || !embeddedManagerToken) {
+      setInstructorPasscode(fallbackPasscode)
+      return
+    }
+
+    let cancelled = false
+    void (async () => {
+      try {
+        const response = await fetch(
+          `/api/syncdeck/embedded-manager-passcode?sessionId=${encodeURIComponent(sessionId)}&token=${encodeURIComponent(embeddedManagerToken)}`,
+          { credentials: 'same-origin' },
+        )
+        const payload = response.ok ? await response.json() as { instructorPasscode?: unknown } : null
+        const passcode = typeof payload?.instructorPasscode === 'string' ? payload.instructorPasscode.trim() : ''
+        if (!cancelled) {
+          setInstructorPasscode(passcode || fallbackPasscode)
+        }
+      } catch {
+        if (!cancelled) {
+          setInstructorPasscode(fallbackPasscode)
+        }
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [embeddedManagerToken, location.state, sessionId])
 
   const fetchState = useCallback(async () => {
     if (!sessionId || !instructorPasscode) return false
