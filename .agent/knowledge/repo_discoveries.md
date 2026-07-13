@@ -14,6 +14,14 @@ Use this log for durable findings that future contributors and agents should reu
 
 ## Discoveries
 
+- Date: 2026-07-13
+- Area: client | activities | syncdeck | reporting
+- Discovery: `SyncDeckManager.tsx`'s sticky top header (`className="sticky top-0 z-20 ..."`) creates its own stacking context because it combines `position: sticky` with an explicit `z-index`. Any `fixed`/absolutely-positioned overlay declared as a JSX descendant of that header (e.g. the report preview dialog, previously `fixed inset-0 z-40` nested inside the header block) has its z-index compared only within that trapped stacking context, not the document root. The active embedded-activity container (`absolute inset-0 z-20`, a later sibling of the header in DOM order) then wins root-level stacking ties and paints over the entire header, including any modal nested inside it — making the modal appear behind the embedded activity and its close button unreachable.
+- Why it matters: any future modal/overlay added inside that header div (or any other `sticky`/`z-index` ancestor) will silently reproduce this bug even with a high `z-*` utility class, since Tailwind z-index classes only resolve within their local stacking context. The fix was to render the report preview dialog via `createPortal(..., document.body)` so its DOM node — and therefore its stacking context comparison — sits at the document root, alongside (and above) the embedded-activity container.
+- Evidence: `activities/syncdeck/client/manager/SyncDeckManager.tsx` (header ~line 4454, report preview dialog ~line 4632, embedded-activity container ~line 4950); regression test `activities/syncdeck/playwright/report-preview-overlay.spec.ts` (asserts the dialog's DOM parent is `document.body`, verified to fail on pre-fix code and pass after the portal fix).
+- Follow-up action: Any new top-level modal/dialog added to SyncDeckManager should be rendered via `createPortal(..., document.body)` (or otherwise verified to live outside the sticky header's stacking context) rather than assuming a high Tailwind `z-*` class is sufficient.
+- Owner: Claude
+
 - Date: 2026-07-11
 - Area: client | activities | syncdeck | reporting
 - Discovery: SyncDeck's running activities panel derives report contribution indicators from `GET /api/syncdeck/:sessionId/report-manifest` rather than from client-side activity metadata. Each embedded activity can display included, unsupported, unavailable, pending, or temporary error states based on the parent report manifest.
