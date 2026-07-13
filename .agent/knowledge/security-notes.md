@@ -15,6 +15,15 @@ Track security-relevant boundaries, risks, and mitigation decisions.
 
 ## Notes
 
+- Date: 2026-07-13
+- Area: SyncDeck temporary instructor recovery
+- Threat or risk: The generated SyncDeck instructor passcode was held only in router state for temporary sessions, so a browser reload lost authority; persisting that passcode in browser storage is prohibited.
+- Control or mitigation: `POST /api/syncdeck/create` now mints a random session-scoped recovery token, stores it only on the server session record, and appends it to one capped httpOnly, same-site, secure-in-production browser-session cookie scoped to the SyncDeck API prefix. The cookie retains at most 20 recent entries; each token is honored only by its matching session's instructor-passcode recovery route. The route uses a timing-safe comparison and returns the passcode only when that cookie token matches; server-side session validity and its sliding TTL remain authoritative.
+- Residual risk: The cookie authorizes instructor recovery for active sessions in the issuing browser profile until the browser session ends or the server session expires; do not widen its path or make it readable by JavaScript.
+- Validation (test/review/path): `activities/syncdeck/server/routes.ts`; `activities/syncdeck/server/routes.test.ts`.
+- Follow-up action: If multi-device temporary-session recovery is required, add an explicit instructor-authentication flow instead of sharing this browser-bound recovery credential.
+- Owner: Codex
+
 - Date: 2026-06-24
 - Area: dependency update audit
 - Threat or risk: Dependabot PR `#279` identified current npm security updates for `undici`, `http-proxy-middleware`, `vite`, and `esbuild`; additional direct dependency patch/minor releases were also available.

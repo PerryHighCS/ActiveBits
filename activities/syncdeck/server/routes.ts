@@ -48,10 +48,12 @@ import { buildSyncDeckReportFilename, buildSyncDeckSessionReportHtml } from './r
 
 const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000
 const MAX_SESSIONS_PER_COOKIE = 20
+const MAX_INSTRUCTOR_RECOVERY_COOKIE_ENTRIES = 20
 const MAX_EMBEDDED_MANAGER_SESSION_ID_LENGTH = 256
 const MAX_EMBEDDED_MANAGER_TOKEN_LENGTH = 512
 const MAX_TEACHER_CODE_LENGTH = 100
 const DEFAULT_SYNCDECK_ENTRY_POLICY = 'instructor-required'
+const INSTRUCTOR_RECOVERY_COOKIE_NAME = 'syncdeck_instructor_recoveries'
 
 interface CookieSessionEntry {
   key: string
@@ -59,6 +61,11 @@ interface CookieSessionEntry {
   selectedOptions?: Record<string, unknown>
   entryPolicy?: unknown
   urlHash?: unknown
+}
+
+interface InstructorRecoveryCookieEntry {
+  sessionId: string
+  token: string
 }
 
 interface JsonResponse {
@@ -152,6 +159,7 @@ interface SyncDeckSessionData extends Record<string, unknown> {
   presentationUrl: string | null
   standaloneMode: boolean
   instructorPasscode: string
+  instructorRecoveryToken?: string
   instructorState: SyncDeckInstructorState | null
   lastInstructorPayload: unknown
   lastInstructorStatePayload: unknown
@@ -587,6 +595,9 @@ function normalizeSessionData(data: unknown): SyncDeckSessionData {
       typeof source.instructorPasscode === 'string' && source.instructorPasscode.length > 0
         ? source.instructorPasscode
         : createInstructorPasscode(),
+    ...(typeof source.instructorRecoveryToken === 'string' && /^[a-f0-9]{64}$/i.test(source.instructorRecoveryToken)
+      ? { instructorRecoveryToken: source.instructorRecoveryToken }
+      : {}),
     instructorState: null,
     lastInstructorPayload: normalizedLastInstructorPayload,
     lastInstructorStatePayload: normalizedLastInstructorStatePayload,
@@ -595,6 +606,60 @@ function normalizeSessionData(data: unknown): SyncDeckSessionData {
     students: normalizeStudents(source.students),
     embeddedActivities: normalizeEmbeddedActivities(source.embeddedActivities),
   }
+}
+
+function parseInstructorRecoveryCookie(value: unknown): InstructorRecoveryCookieEntry[] {
+  if (typeof value !== 'string') {
+    return []
+  }
+
+  try {
+    const parsed = JSON.parse(value) as unknown
+    if (!Array.isArray(parsed)) {
+      return []
+    }
+
+    return parsed
+      .filter((entry): entry is InstructorRecoveryCookieEntry => (
+        isPlainObject(entry)
+        && typeof entry.sessionId === 'string'
+        && entry.sessionId.length > 0
+        && typeof entry.token === 'string'
+        && /^[a-f0-9]{64}$/i.test(entry.token)
+      ))
+      .slice(-MAX_INSTRUCTOR_RECOVERY_COOKIE_ENTRIES)
+  } catch {
+    return []
+  }
+}
+
+function readInstructorRecoveryToken(req: RouteRequest, sessionId: string): string | null {
+  const entries = parseInstructorRecoveryCookie(req.cookies?.[INSTRUCTOR_RECOVERY_COOKIE_NAME])
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const entry = entries[index]
+    if (entry?.sessionId === sessionId) {
+      return entry.token
+    }
+  }
+
+  return null
+}
+
+function writeInstructorRecoveryCookie(req: RouteRequest, res: JsonResponse, sessionId: string, token: string): void {
+  const existingEntries = parseInstructorRecoveryCookie(req.cookies?.[INSTRUCTOR_RECOVERY_COOKIE_NAME])
+  const nextEntries = [
+    ...existingEntries.filter((entry) => entry.sessionId !== sessionId),
+    { sessionId, token },
+  ].slice(-MAX_INSTRUCTOR_RECOVERY_COOKIE_ENTRIES)
+
+  res.cookie?.(INSTRUCTOR_RECOVERY_COOKIE_NAME, JSON.stringify(nextEntries), {
+    // This is a browser-session cookie: the server session's sliding TTL remains authoritative.
+    // WebKit requires the cookie path to include the endpoint that sets it.
+    path: '/api/syncdeck',
+    sameSite: 'lax',
+    secure: process.env.NODE_ENV === 'production',
+    httpOnly: true,
+  })
 }
 
 function parseDrawingToolModeUpdate(payload: unknown): SyncDeckDrawingToolMode | null {
@@ -1594,6 +1659,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
   }
 
   app.get('/api/syncdeck/:sessionId/instructor-passcode', async (req, res) => {
+    res.setHeader?.('Cache-Control', 'no-store')
     const sessionId = req.params.sessionId
     if (!sessionId) {
       res.status(400).json({ error: 'missing sessionId' })
@@ -1603,6 +1669,21 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
     const session = await getSyncDeckSessionWithEmbeddedKeepalive(sessions, sessionId)
     if (!session) {
       res.status(404).json({ error: 'invalid session' })
+      return
+    }
+
+    const recoveryToken = readInstructorRecoveryToken(req, sessionId)
+    if (
+      recoveryToken
+      && session.data.instructorRecoveryToken
+      && verifyInstructorPasscode(session.data.instructorRecoveryToken, recoveryToken)
+    ) {
+      console.info(JSON.stringify({
+        activity: 'syncdeck',
+        event: 'instructor-recovery-cookie-exchanged',
+        sessionId,
+      }))
+      res.json({ instructorPasscode: session.data.instructorPasscode })
       return
     }
 
@@ -1723,11 +1804,15 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
     })
   })
 
-  app.post('/api/syncdeck/create', async (_req, res) => {
+  app.post('/api/syncdeck/create', async (req, res) => {
     const session = await createSession(sessions, { data: {} })
     session.type = 'syncdeck'
     session.data = normalizeSessionData(session.data)
+    const instructorRecoveryToken = randomBytes(32).toString('hex')
+    session.data.instructorRecoveryToken = instructorRecoveryToken
     await sessions.set(session.id, session)
+
+    writeInstructorRecoveryCookie(req, res, session.id, instructorRecoveryToken)
 
     const response = res as unknown as JsonResponse
     response.json({ id: session.id, instructorPasscode: session.data.instructorPasscode })
