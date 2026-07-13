@@ -45,7 +45,7 @@ function buildTopSummaryCards(
       id: 'session-overview',
       title: 'Session Overview',
       metrics: [
-        { id: 'activity-count', label: 'Embedded Activities', value: reportableActivityCount },
+        { id: 'activity-count', label: 'Reportable Activities', value: reportableActivityCount },
         { id: 'student-count', label: 'Students Represented', value: manifest.students.length },
       ],
     },
@@ -276,7 +276,7 @@ export function buildSyncDeckSessionReportHtml(manifest: SyncDeckSessionReportMa
       <h1>${escapeHtml(`Session ${manifest.parentSessionId}`)}</h1>
       <div class="meta">
         <span>Generated: ${escapeHtml(formatDate(manifest.generatedAt))}</span>
-        <span>Embedded activities: ${reportableActivityCount}</span>
+        <span>Reportable activities: ${reportableActivityCount}</span>
         <span>Students represented: ${manifest.students.length}</span>
       </div>
     </section>
@@ -400,9 +400,13 @@ export function buildSyncDeckSessionReportHtml(manifest: SyncDeckSessionReportMa
 
         const groups = new Map();
         activitiesWithoutReports.forEach((activity) => {
-          const reason = (activity.report && activity.report.payload && activity.report.payload.reason)
-            || (activity.report && Array.isArray(activity.report.summaryCards) && activity.report.summaryCards[0] && activity.report.summaryCards[0].description)
-            || 'This activity does not provide structured reporting for this session.';
+          const payloadReason = activity.report && activity.report.payload && activity.report.payload.reason;
+          const summaryDescription = activity.report && Array.isArray(activity.report.summaryCards) && activity.report.summaryCards[0] && activity.report.summaryCards[0].description;
+          const reason = typeof payloadReason === 'string' && payloadReason.length > 0
+            ? payloadReason
+            : typeof summaryDescription === 'string' && summaryDescription.length > 0
+              ? summaryDescription
+              : 'This activity does not provide structured reporting for this session.';
           const key = (activity.activityId || activity.activityName || 'activity') + '::' + reason;
           const existing = groups.get(key);
           if (existing) {

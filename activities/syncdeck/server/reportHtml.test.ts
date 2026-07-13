@@ -173,8 +173,29 @@ void test('buildSyncDeckSessionReportHtml stacks activity/student cards full-wid
 
 void test('buildSyncDeckSessionReportHtml counts only reportable activities in the hero and session overview metrics', () => {
   const html = buildSyncDeckSessionReportHtml(createManifest())
-  assert.match(html, /Embedded activities: 1</)
-  assert.match(html, /"id":"activity-count","label":"Embedded Activities","value":1/)
+  assert.match(html, /Reportable activities: 1</)
+  assert.match(html, /"id":"activity-count","label":"Reportable Activities","value":1/)
+})
+
+void test('buildSyncDeckSessionReportHtml falls back to the summary description when an unsupported activity payload.reason is not a string', () => {
+  const manifest = createManifest()
+  const videoSyncActivity = manifest.activities[1]
+  assert.ok(videoSyncActivity)
+  videoSyncActivity.report.payload = {
+    status: 'unsupported',
+    reason: { message: 'not a string' },
+  }
+
+  const html = buildSyncDeckSessionReportHtml(manifest)
+  const dom = new JSDOM(html, { runScripts: 'dangerously', url: 'https://activebits.local/' })
+  const { document } = dom.window
+  try {
+    const summaryBlockGrid = document.getElementById('summary-block-grid')
+    assert.doesNotMatch(summaryBlockGrid?.innerHTML ?? '', /\[object Object\]/)
+    assert.match(summaryBlockGrid?.innerHTML ?? '', /Structured reporting is not available for this activity yet\./)
+  } finally {
+    dom.window.close()
+  }
 })
 
 void test('buildSyncDeckSessionReportHtml hides unsupported activities from the By Activity view and consolidates them in the summary', () => {
