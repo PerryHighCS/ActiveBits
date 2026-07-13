@@ -634,9 +634,15 @@ function parseInstructorRecoveryCookie(value: unknown): InstructorRecoveryCookie
 }
 
 function readInstructorRecoveryToken(req: RouteRequest, sessionId: string): string | null {
-  return parseInstructorRecoveryCookie(req.cookies?.[INSTRUCTOR_RECOVERY_COOKIE_NAME])
-    .find((entry) => entry.sessionId === sessionId)
-    ?.token ?? null
+  const entries = parseInstructorRecoveryCookie(req.cookies?.[INSTRUCTOR_RECOVERY_COOKIE_NAME])
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const entry = entries[index]
+    if (entry?.sessionId === sessionId) {
+      return entry.token
+    }
+  }
+
+  return null
 }
 
 function writeInstructorRecoveryCookie(req: RouteRequest, res: JsonResponse, sessionId: string, token: string): void {

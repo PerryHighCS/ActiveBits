@@ -4889,13 +4889,18 @@ void test('instructor-passcode route restores a temporary SyncDeck instructor fr
 
   const sessionId = String((createRes.body as { id?: string }).id)
   const recoveryCookie = createRes.cookies[0]
+  const recoveryEntries = JSON.parse(recoveryCookie?.value ?? '[]') as Array<{ sessionId: string; token: string }>
+  const recoveryCookieWithOlderTamperedEntry = JSON.stringify([
+    { sessionId, token: 'f'.repeat(64) },
+    ...recoveryEntries,
+  ])
   const handler = app.handlers.get['/api/syncdeck/:sessionId/instructor-passcode']
   const res = createResponse()
   await handler?.(
     createRequest(
       { sessionId },
       {},
-      { [recoveryCookie?.name ?? 'missing']: recoveryCookie?.value ?? '' },
+      { [recoveryCookie?.name ?? 'missing']: recoveryCookieWithOlderTamperedEntry },
     ),
     res,
   )
