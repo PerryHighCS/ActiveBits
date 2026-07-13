@@ -7,11 +7,13 @@ interface SyncDeckCreateResponse {
 
 interface EmbeddedStartResponse {
   childSessionId?: unknown
+  managerBootstrap?: unknown
   managerEntryToken?: unknown
 }
 
 async function startEmbeddedManager(page: Page, activityId: string, activityOptions: Record<string, unknown>): Promise<{
   childSessionId: string
+  managerBootstrap: unknown
   managerEntryToken: string
 }> {
   const createResponse = await page.request.post('/api/syncdeck/create')
@@ -41,6 +43,7 @@ async function startEmbeddedManager(page: Page, activityId: string, activityOpti
 
   return {
     childSessionId: started.childSessionId as string,
+    managerBootstrap: started.managerBootstrap,
     managerEntryToken: started.managerEntryToken as string,
   }
 }
@@ -113,6 +116,7 @@ test.describe('SyncDeck embedded instructor manager bootstrap', () => {
 
   test('Raffle mounts in an iframe without a child manager passcode', async ({ page }) => {
     const bootstrap = await startEmbeddedManager(page, 'raffle', {})
+    expect(bootstrap.managerBootstrap).toEqual({})
     const manager = await openEmbeddedManagerIframe(page, 'raffle', bootstrap)
 
     await expect(manager.getByText('Raffle', { exact: true })).toBeVisible()
