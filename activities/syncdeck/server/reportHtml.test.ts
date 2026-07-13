@@ -189,19 +189,43 @@ void test('buildSyncDeckSessionReportHtml hides unsupported activities from the 
   const html = buildSyncDeckSessionReportHtml(manifest)
   const dom = new JSDOM(html, { runScripts: 'dangerously', url: 'https://activebits.local/' })
   const { document } = dom.window
+  try {
+    const summaryBlockGrid = document.getElementById('summary-block-grid')
+    assert.match(summaryBlockGrid?.innerHTML ?? '', /Activities without full reporting/)
+    assert.match(summaryBlockGrid?.innerHTML ?? '', /Video Sync/)
+    assert.match(summaryBlockGrid?.innerHTML ?? '', /2 instances/)
 
-  const summaryBlockGrid = document.getElementById('summary-block-grid')
-  assert.match(summaryBlockGrid?.innerHTML ?? '', /Activities without full reporting/)
-  assert.match(summaryBlockGrid?.innerHTML ?? '', /Video Sync/)
-  assert.match(summaryBlockGrid?.innerHTML ?? '', /2 instances/)
+    const activitiesTab = document.querySelector('[data-view="activities"]')
+    assert.ok(activitiesTab instanceof dom.window.HTMLElement)
+    ;(activitiesTab as HTMLElement).click()
 
-  const activitiesTab = document.querySelector('[data-view="activities"]')
-  assert.ok(activitiesTab instanceof dom.window.HTMLElement)
-  ;(activitiesTab as HTMLElement).click()
+    const activityGrid = document.getElementById('activity-grid')
+    assert.match(activityGrid?.innerHTML ?? '', /Bridge Critique Round/)
+    assert.doesNotMatch(activityGrid?.innerHTML ?? '', /Video Sync Report Unsupported/)
+  } finally {
+    dom.window.close()
+  }
+})
 
-  const activityGrid = document.getElementById('activity-grid')
-  assert.match(activityGrid?.innerHTML ?? '', /Bridge Critique Round/)
-  assert.doesNotMatch(activityGrid?.innerHTML ?? '', /Video Sync Report Unsupported/)
+void test('buildSyncDeckSessionReportHtml shows a friendly empty state in By Activity when every activity is unsupported', () => {
+  const manifest = createManifest()
+  manifest.activities = manifest.activities.filter((activity) => activity.activityId === 'video-sync')
 
-  dom.window.close()
+  const html = buildSyncDeckSessionReportHtml(manifest)
+  const dom = new JSDOM(html, { runScripts: 'dangerously', url: 'https://activebits.local/' })
+  const { document } = dom.window
+  try {
+    const activitiesTab = document.querySelector('[data-view="activities"]')
+    assert.ok(activitiesTab instanceof dom.window.HTMLElement)
+    ;(activitiesTab as HTMLElement).click()
+
+    const activityGrid = document.getElementById('activity-grid')
+    assert.match(
+      activityGrid?.innerHTML ?? '',
+      /None of the embedded activities in this session have added structured reporting support yet\./,
+    )
+    assert.doesNotMatch(activityGrid?.innerHTML ?? '', /Video Sync Report Unsupported/)
+  } finally {
+    dom.window.close()
+  }
 })
