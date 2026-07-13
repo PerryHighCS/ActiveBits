@@ -47,11 +47,13 @@ import type {
 import { buildSyncDeckReportFilename, buildSyncDeckSessionReportHtml } from './reportHtml.js'
 
 const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000
+const DEFAULT_SESSION_TTL_MS = 60 * 60 * 1000
 const MAX_SESSIONS_PER_COOKIE = 20
 const MAX_EMBEDDED_MANAGER_SESSION_ID_LENGTH = 256
 const MAX_EMBEDDED_MANAGER_TOKEN_LENGTH = 512
 const MAX_TEACHER_CODE_LENGTH = 100
 const DEFAULT_SYNCDECK_ENTRY_POLICY = 'instructor-required'
+const INSTRUCTOR_RECOVERY_COOKIE_PREFIX = 'syncdeck_instructor_recovery_'
 
 interface CookieSessionEntry {
   key: string
@@ -152,6 +154,7 @@ interface SyncDeckSessionData extends Record<string, unknown> {
   presentationUrl: string | null
   standaloneMode: boolean
   instructorPasscode: string
+  instructorRecoveryToken?: string
   instructorState: SyncDeckInstructorState | null
   lastInstructorPayload: unknown
   lastInstructorStatePayload: unknown
@@ -587,6 +590,9 @@ function normalizeSessionData(data: unknown): SyncDeckSessionData {
       typeof source.instructorPasscode === 'string' && source.instructorPasscode.length > 0
         ? source.instructorPasscode
         : createInstructorPasscode(),
+    ...(typeof source.instructorRecoveryToken === 'string' && /^[a-f0-9]{64}$/i.test(source.instructorRecoveryToken)
+      ? { instructorRecoveryToken: source.instructorRecoveryToken }
+      : {}),
     instructorState: null,
     lastInstructorPayload: normalizedLastInstructorPayload,
     lastInstructorStatePayload: normalizedLastInstructorStatePayload,
@@ -595,6 +601,27 @@ function normalizeSessionData(data: unknown): SyncDeckSessionData {
     students: normalizeStudents(source.students),
     embeddedActivities: normalizeEmbeddedActivities(source.embeddedActivities),
   }
+}
+
+function buildInstructorRecoveryCookieName(sessionId: string): string {
+  return `${INSTRUCTOR_RECOVERY_COOKIE_PREFIX}${sessionId}`
+}
+
+function readInstructorRecoveryToken(req: RouteRequest, sessionId: string): string | null {
+  const token = req.cookies?.[buildInstructorRecoveryCookieName(sessionId)]
+  return typeof token === 'string' && /^[a-f0-9]{64}$/i.test(token) ? token : null
+}
+
+function writeInstructorRecoveryCookie(res: JsonResponse, sessionId: string, token: string, maxAge: number): void {
+  res.cookie?.(buildInstructorRecoveryCookieName(sessionId), token, {
+    maxAge,
+    // WebKit rejects a cookie path that is narrower than the create endpoint.
+    // The token name remains session-specific and is only read by that session's recovery route.
+    path: '/api/syncdeck',
+    sameSite: 'lax',
+    secure: process.env.NODE_ENV === 'production',
+    httpOnly: true,
+  })
 }
 
 function parseDrawingToolModeUpdate(payload: unknown): SyncDeckDrawingToolMode | null {
@@ -1606,6 +1633,16 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       return
     }
 
+    const recoveryToken = readInstructorRecoveryToken(req, sessionId)
+    if (
+      recoveryToken
+      && session.data.instructorRecoveryToken
+      && verifyInstructorPasscode(session.data.instructorRecoveryToken, recoveryToken)
+    ) {
+      res.json({ instructorPasscode: session.data.instructorPasscode })
+      return
+    }
+
     const persistentHash = await findHashBySessionId(sessionId)
     if (!persistentHash) {
       res.status(403).json({ error: 'forbidden' })
@@ -1727,7 +1764,16 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
     const session = await createSession(sessions, { data: {} })
     session.type = 'syncdeck'
     session.data = normalizeSessionData(session.data)
+    const instructorRecoveryToken = randomBytes(32).toString('hex')
+    session.data.instructorRecoveryToken = instructorRecoveryToken
     await sessions.set(session.id, session)
+
+    writeInstructorRecoveryCookie(
+      res,
+      session.id,
+      instructorRecoveryToken,
+      typeof sessions.ttlMs === 'number' && sessions.ttlMs > 0 ? sessions.ttlMs : DEFAULT_SESSION_TTL_MS,
+    )
 
     const response = res as unknown as JsonResponse
     response.json({ id: session.id, instructorPasscode: session.data.instructorPasscode })

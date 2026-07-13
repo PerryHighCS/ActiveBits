@@ -1660,6 +1660,42 @@ void test('instructor-passcode route returns passcode when teacher cookie matche
   })
 })
 
+void test('instructor-passcode route keeps restoring a SyncDeck instructor on repeated persistent permalink entry', async () => {
+  initializePersistentStorage(null)
+
+  const app = createMockApp()
+  const ws = createMockWs()
+  const storeState = createSessionStore({
+    s1: createSyncDeckSession('s1', 'teacher-passcode-1'),
+  })
+  setupSyncDeckRoutes(app, storeState.sessions, ws)
+
+  const teacherCode = 'repeated-persistent-teacher-code'
+  const { hash, hashedTeacherCode } = generatePersistentHash('syncdeck', teacherCode)
+  await getOrCreateActivePersistentSession('syncdeck', hash, hashedTeacherCode)
+  await startPersistentSession(hash, 's1', {
+    id: 'teacher-ws',
+    readyState: 1,
+    send() {},
+  })
+
+  const handler = app.handlers.get['/api/syncdeck/:sessionId/instructor-passcode']
+  const persistentSessions = JSON.stringify([
+    { key: `syncdeck:${hash}`, teacherCode },
+  ])
+
+  for (const entryAttempt of [1, 2]) {
+    const res = createResponse()
+    await handler?.(
+      createRequest({ sessionId: 's1' }, {}, { persistent_sessions: persistentSessions }),
+      res,
+    )
+
+    assert.equal(res.statusCode, 200, `persistent instructor entry attempt ${entryAttempt}`)
+    assert.equal((res.body as { instructorPasscode?: unknown }).instructorPasscode, 'teacher-passcode-1')
+  }
+})
+
 void test('instructor-passcode route returns recovered persistent entryPolicy for syncdeck links', async () => {
   initializePersistentStorage(null)
 
@@ -4823,6 +4859,45 @@ void test('create route initializes syncdeck session state', async () => {
   assert.equal(typeof body.id, 'string')
   assert.equal(typeof body.instructorPasscode, 'string')
   assert.equal(body.instructorPasscode?.length, 32)
+  assert.equal(res.cookies.length, 1)
+  assert.equal(res.cookies[0]?.name, `syncdeck_instructor_recovery_${body.id}`)
+  assert.match(res.cookies[0]?.value ?? '', /^[a-f0-9]{64}$/)
+  assert.deepEqual(res.cookies[0]?.options, {
+    maxAge: 60 * 60 * 1000,
+    path: '/api/syncdeck',
+    sameSite: 'lax',
+    secure: false,
+    httpOnly: true,
+  })
+})
+
+void test('instructor-passcode route restores a temporary SyncDeck instructor from its httpOnly recovery cookie', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const storeState = createSessionStore({})
+  setupSyncDeckRoutes(app, storeState.sessions, ws)
+
+  const createHandler = app.handlers.post['/api/syncdeck/create']
+  const createRes = createResponse()
+  await createHandler?.(createRequest({}, {}), createRes)
+
+  const sessionId = String((createRes.body as { id?: string }).id)
+  const recoveryCookie = createRes.cookies[0]
+  const handler = app.handlers.get['/api/syncdeck/:sessionId/instructor-passcode']
+  const res = createResponse()
+  await handler?.(
+    createRequest(
+      { sessionId },
+      {},
+      { [recoveryCookie?.name ?? 'missing']: recoveryCookie?.value ?? '' },
+    ),
+    res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  assert.deepEqual(res.body, {
+    instructorPasscode: (createRes.body as { instructorPasscode: string }).instructorPasscode,
+  })
 })
 
 void test('configure route sets presentation url for valid passcode', async () => {
