@@ -159,6 +159,27 @@ void test('useEmbeddedManagerPasscodeExchange reports resolving and successful p
   }
 })
 
+void test('useEmbeddedManagerPasscodeExchange removes the token after an invalid exchange response', async () => {
+  const restoreDom = installDomEnvironment()
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = (async () => ({ ok: false, json: async () => ({}) })) as unknown as typeof fetch
+  const root = createRoot(document.getElementById('root') as Element)
+
+  try {
+    await act(async () => {
+      root.render(createElement(ExchangeProbe, { onState: () => {} }))
+    })
+    await flushAsyncWork()
+    assert.equal(window.location.search, '')
+  } finally {
+    await act(async () => {
+      root.unmount()
+    })
+    globalThis.fetch = originalFetch
+    restoreDom()
+  }
+})
+
 void test('useEmbeddedManagerPasscodeExchange reports failures and ignores updates after unmount', async () => {
   const restoreDom = installDomEnvironment()
   const originalFetch = globalThis.fetch
@@ -176,6 +197,7 @@ void test('useEmbeddedManagerPasscodeExchange reports failures and ignores updat
     await flushAsyncWork()
     assert.equal(states.at(-1)?.isResolving, false)
     assert.equal((states.at(-1)?.error as Error).message, 'exchange unavailable')
+    assert.equal(window.location.search, '')
 
     await act(async () => {
       root.unmount()

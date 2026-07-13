@@ -89,9 +89,11 @@ export function useEmbeddedManagerPasscodeExchange(params: {
       try {
         const passcode = await fetchEmbeddedManagerPasscode({ sessionId, token })
         if (cancelled) return
+        // The one-time token has now been presented, even if the server could
+        // not exchange it. Parent-mediated recovery supplies any replacement.
+        clearEmbeddedManagerTokenFromUrl()
         if (passcode) {
           refreshAttemptsBySessionIdRef.current.delete(sessionId)
-          clearEmbeddedManagerTokenFromUrl()
         } else {
           requestRefresh(sessionId)
         }
@@ -99,6 +101,7 @@ export function useEmbeddedManagerPasscodeExchange(params: {
       } catch (error) {
         if (!cancelled) {
           console.error('Failed to exchange embedded manager token:', error)
+          clearEmbeddedManagerTokenFromUrl()
           requestRefresh(sessionId)
           setState({ key: exchangeKey, passcode: null, error, isResolving: false })
         }
