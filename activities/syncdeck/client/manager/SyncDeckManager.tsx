@@ -42,6 +42,7 @@ import {
   type SyncDeckGroupedActivityRequest,
 } from '../shared/groupedActivityRequests.js'
 import { useCallback, useEffect, useMemo, useRef, useState, type FC, type FormEvent, type KeyboardEvent, type MouseEvent, type PointerEvent } from 'react'
+import { createPortal } from 'react-dom'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import type { SyncDeckSessionReportManifest } from '../../../../types/activity.js'
 import ConnectionStatusDot from '../components/ConnectionStatusDot.js'
@@ -4628,7 +4629,7 @@ const SyncDeckManager: FC = () => {
           </div>
         )}
 
-        {isReportPreviewOpen && (
+        {isReportPreviewOpen && createPortal(
           <div
             className="fixed inset-0 z-40 flex items-start justify-center bg-black/40 px-4 py-16"
           >
@@ -4735,7 +4736,8 @@ const SyncDeckManager: FC = () => {
                 </button>
               </div>
             </div>
-          </div>
+          </div>,
+          document.body,
         )}
 
         {isEmbeddedPanelOpen && (
