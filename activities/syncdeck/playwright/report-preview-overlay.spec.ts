@@ -20,7 +20,7 @@ test.describe('SyncDeck report preview overlay', () => {
     // Regression guard for the bug where this dialog was rendered inside the
     // sticky header's stacking context, trapping it behind embedded activity
     // content that sits in a later, higher DOM-order stacking context. The
-    // dialog must be portalled directly under document.body.
+    // dialog's overlay wrapper must be portalled directly under document.body.
     const overlayParentIsBody = await page.evaluate(() => {
       const dialogElement = document.getElementById('syncdeck-report-preview-dialog')
       const overlay = dialogElement?.parentElement ?? null
@@ -32,5 +32,6 @@ test.describe('SyncDeck report preview overlay', () => {
     await expect(closeButton).toBeVisible()
     await closeButton.click()
     await expect(dialog).toHaveCount(0)
+    await expect(previewButton).toBeFocused()
   })
 })
