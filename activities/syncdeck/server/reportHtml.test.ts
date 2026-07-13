@@ -171,6 +171,12 @@ void test('buildSyncDeckSessionReportHtml stacks activity/student cards full-wid
   assert.match(html, /\.activity-grid, \.student-grid \{ grid-template-columns: 1fr; \}/)
 })
 
+void test('buildSyncDeckSessionReportHtml counts only reportable activities in the hero and session overview metrics', () => {
+  const html = buildSyncDeckSessionReportHtml(createManifest())
+  assert.match(html, /Embedded activities: 1</)
+  assert.match(html, /"id":"activity-count","label":"Embedded Activities","value":1/)
+})
+
 void test('buildSyncDeckSessionReportHtml hides unsupported activities from the By Activity view and consolidates them in the summary', () => {
   const manifest = createManifest()
   const videoSyncActivity = manifest.activities[1]

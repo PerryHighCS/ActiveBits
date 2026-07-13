@@ -1,6 +1,7 @@
 import type {
   ActivityReportSummaryCard,
   SyncDeckSessionReportManifest,
+  SyncDeckSessionReportManifestActivity,
 } from '../../../types/activity.js'
 
 function escapeHtml(value: unknown): string {
@@ -30,13 +31,21 @@ function sanitizeFileLabel(value: string): string {
   return trimmed.length > 0 ? trimmed : 'syncdeck-report'
 }
 
-function buildTopSummaryCards(manifest: SyncDeckSessionReportManifest): ActivityReportSummaryCard[] {
+function isUnsupportedActivityReport(activity: SyncDeckSessionReportManifestActivity): boolean {
+  const status = activity.report.reportStatus
+  return status === 'unsupported' || status === 'unavailable'
+}
+
+function buildTopSummaryCards(
+  manifest: SyncDeckSessionReportManifest,
+  reportableActivityCount: number,
+): ActivityReportSummaryCard[] {
   return [
     {
       id: 'session-overview',
       title: 'Session Overview',
       metrics: [
-        { id: 'activity-count', label: 'Embedded Activities', value: manifest.activities.length },
+        { id: 'activity-count', label: 'Embedded Activities', value: reportableActivityCount },
         { id: 'student-count', label: 'Students Represented', value: manifest.students.length },
       ],
     },
@@ -49,7 +58,10 @@ export function buildSyncDeckReportFilename(manifest: SyncDeckSessionReportManif
 
 export function buildSyncDeckSessionReportHtml(manifest: SyncDeckSessionReportManifest): string {
   const reportJson = toSafeJson(manifest)
-  const topSummaryCards = buildTopSummaryCards(manifest)
+  const reportableActivityCount = manifest.activities.filter(
+    (activity) => !isUnsupportedActivityReport(activity),
+  ).length
+  const topSummaryCards = buildTopSummaryCards(manifest, reportableActivityCount)
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -264,7 +276,7 @@ export function buildSyncDeckSessionReportHtml(manifest: SyncDeckSessionReportMa
       <h1>${escapeHtml(`Session ${manifest.parentSessionId}`)}</h1>
       <div class="meta">
         <span>Generated: ${escapeHtml(formatDate(manifest.generatedAt))}</span>
-        <span>Embedded activities: ${manifest.activities.length}</span>
+        <span>Embedded activities: ${reportableActivityCount}</span>
         <span>Students represented: ${manifest.students.length}</span>
       </div>
     </section>
