@@ -1653,6 +1653,7 @@ void test('instructor-passcode route returns passcode when teacher cookie matche
   )
 
   assert.equal(res.statusCode, 200)
+  assert.equal(res.headers['Cache-Control'], 'no-store')
   assert.deepEqual(res.body, {
     instructorPasscode: 'teacher-passcode-1',
     persistentEntryPolicy: 'instructor-required',

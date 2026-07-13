@@ -1653,6 +1653,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
   }
 
   app.get('/api/syncdeck/:sessionId/instructor-passcode', async (req, res) => {
+    res.setHeader?.('Cache-Control', 'no-store')
     const sessionId = req.params.sessionId
     if (!sessionId) {
       res.status(400).json({ error: 'missing sessionId' })
