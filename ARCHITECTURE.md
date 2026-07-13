@@ -255,7 +255,9 @@ through activity-specific props.
   the returned child-manager token would have no iframe to redeem it until a later reload.
 - If a credentialed child cannot redeem its one-time token, it sends its child session id (never
   credentials) to the same-origin parent. The parent invalidates its cached token and uses the
-  existing authenticated start path to mint a replacement before remounting that iframe.
+  existing authenticated start path to mint a replacement before remounting that iframe. Child
+  refresh requests are capped per child session, and parent backfill failures retain their retry
+  history so a persistent outage still reaches the recovery UI.
 - SyncDeck's warm iframe eviction resets all per-child bootstrap completion, retry, and failure
   markers before a later remount requests a fresh token. Transient embedded-start failures use
   bounded retry, while non-retryable responses surface the manager recovery action immediately.

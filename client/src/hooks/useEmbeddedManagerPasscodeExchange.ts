@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   clearEmbeddedManagerTokenFromUrl,
   readEmbeddedManagerToken,
@@ -6,6 +6,18 @@ import {
 } from '@src/components/common/embeddedManagerBootstrap'
 
 type EmbeddedManagerPasscodeResponse = { instructorPasscode?: unknown }
+
+export const MAX_EMBEDDED_MANAGER_BOOTSTRAP_REFRESH_ATTEMPTS = 3
+
+export function nextEmbeddedManagerBootstrapRefreshAttempt(
+  currentAttempt: number,
+  maxAttempts = MAX_EMBEDDED_MANAGER_BOOTSTRAP_REFRESH_ATTEMPTS,
+): number | null {
+  if (!Number.isInteger(currentAttempt) || currentAttempt < 0 || currentAttempt >= maxAttempts) {
+    return null
+  }
+  return currentAttempt + 1
+}
 
 type EmbeddedManagerPasscodeFetch = (
   input: string,
@@ -48,6 +60,18 @@ export function useEmbeddedManagerPasscodeExchange(params: {
     error: null,
     isResolving: false,
   })
+  const refreshAttemptsBySessionIdRef = useRef<Map<string, number>>(new Map())
+
+  const requestRefresh = (sessionId: string): void => {
+    const nextAttempt = nextEmbeddedManagerBootstrapRefreshAttempt(
+      refreshAttemptsBySessionIdRef.current.get(sessionId) ?? 0,
+    )
+    if (nextAttempt == null) {
+      return
+    }
+    refreshAttemptsBySessionIdRef.current.set(sessionId, nextAttempt)
+    requestEmbeddedManagerBootstrapRefresh(sessionId)
+  }
 
   useEffect(() => {
     const sessionId = params.sessionId
@@ -66,15 +90,16 @@ export function useEmbeddedManagerPasscodeExchange(params: {
         const passcode = await fetchEmbeddedManagerPasscode({ sessionId, token })
         if (cancelled) return
         if (passcode) {
+          refreshAttemptsBySessionIdRef.current.delete(sessionId)
           clearEmbeddedManagerTokenFromUrl()
         } else {
-          requestEmbeddedManagerBootstrapRefresh(sessionId)
+          requestRefresh(sessionId)
         }
         setState({ key: exchangeKey, passcode, error: null, isResolving: false })
       } catch (error) {
         if (!cancelled) {
           console.error('Failed to exchange embedded manager token:', error)
-          requestEmbeddedManagerBootstrapRefresh(sessionId)
+          requestRefresh(sessionId)
           setState({ key: exchangeKey, passcode: null, error, isResolving: false })
         }
       }

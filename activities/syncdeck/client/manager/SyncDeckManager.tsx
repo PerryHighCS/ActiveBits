@@ -2319,7 +2319,6 @@ const SyncDeckManager: FC = () => {
       setEmbeddedManagerEntryTokensByChildSessionId(nextTokens)
       setLoadedEmbeddedManagerInstanceKeys((current) => clearLoadedEmbeddedManagerInstanceKey(current, instanceKey))
       completedEmbeddedBootstrapChildSessionIdsRef.current.delete(childSessionId)
-      embeddedBootstrapBackfillRetryAttemptByChildSessionIdRef.current.delete(childSessionId)
       failedEmbeddedBootstrapChildSessionIdsRef.current.delete(childSessionId)
       setFailedEmbeddedBootstrapChildSessionIds((current) => current.filter((id) => id !== childSessionId))
       clearEmbeddedBootstrapBackfillRetryTimeout()

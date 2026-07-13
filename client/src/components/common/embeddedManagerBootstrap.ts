@@ -1,6 +1,4 @@
-/**
- * Reads the one-time SyncDeck manager token from an embedded child manager URL.
- */
+/** Reads a one-time manager token from an embedded child manager URL. */
 export function readEmbeddedManagerToken(search: string): string | null {
   const token = new URLSearchParams(search).get('embeddedManagerToken')
   return typeof token === 'string' && token.trim().length > 0 ? token.trim() : null
@@ -14,7 +12,7 @@ export function removeEmbeddedManagerToken(search: string): string {
   return nextSearch ? `?${nextSearch}` : ''
 }
 
-export const EMBEDDED_MANAGER_BOOTSTRAP_REFRESH_REQUEST = 'syncdeck-embedded-manager-bootstrap-refresh'
+export const EMBEDDED_MANAGER_BOOTSTRAP_REFRESH_REQUEST = 'embedded-manager-bootstrap-refresh'
 
 /**
  * Parses a credentialed child iframe's request for a replacement one-time
@@ -34,7 +32,7 @@ export function readEmbeddedManagerBootstrapRefreshRequest(payload: unknown): st
   return childSessionId.length > 0 ? childSessionId : null
 }
 
-/** Requests a replacement manager-entry token from the same-origin SyncDeck parent. */
+/** Requests a replacement manager-entry token from the same-origin embedding parent. */
 export function requestEmbeddedManagerBootstrapRefresh(childSessionId: string): void {
   if (typeof window === 'undefined' || window.parent === window) {
     return

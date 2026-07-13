@@ -16,8 +16,8 @@ Use this log for durable findings that future contributors and agents should reu
 
 - Date: 2026-07-13
 - Area: client | activities | syncdeck | embedded bootstrap
-- Discovery: An embedded manager can receive a one-time entry token that has already been consumed or has otherwise failed exchange. The child cannot safely retry that token itself, so it reports only its child-session id to its same-origin SyncDeck parent. The parent drops its cached token, clears completion/failure markers, and reruns the authenticated embedded-start bootstrap before remounting the iframe.
-- Why it matters: Child-specific credentials must not be sent through `postMessage`, and allowing a child to re-use an old entry token would break atomic token-consumption guarantees. This recovery path makes stale-token failures self-healing without browser storage or a manual parent reload.
+- Discovery: An embedded manager can receive a one-time entry token that has already been consumed or has otherwise failed exchange. The child cannot safely retry that token itself, so it reports only its child-session id to its same-origin SyncDeck parent. The parent drops its cached token, clears completion/failure markers, and reruns the authenticated embedded-start bootstrap before remounting the iframe. Refresh requests are capped per child session, while the parent retains its backfill-attempt count across a child refresh.
+- Why it matters: Child-specific credentials must not be sent through `postMessage`, and allowing a child to re-use an old entry token would break atomic token-consumption guarantees. The bounded recovery path makes stale-token failures self-healing without browser storage or a manual parent reload while preserving the manager recovery UI for persistent failures.
 - Evidence: `client/src/components/common/embeddedManagerBootstrap.ts`; `client/src/hooks/useEmbeddedManagerPasscodeExchange.ts`; `activities/syncdeck/client/manager/SyncDeckManager.tsx`.
 - Follow-up action: Preserve same-origin validation and child-session lookup when extending embedded-manager postMessage handling.
 - Owner: Codex

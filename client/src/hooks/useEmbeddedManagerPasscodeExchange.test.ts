@@ -5,6 +5,7 @@ import { createRoot } from 'react-dom/client'
 import { JSDOM } from 'jsdom'
 import {
   fetchEmbeddedManagerPasscode,
+  nextEmbeddedManagerBootstrapRefreshAttempt,
   useEmbeddedManagerPasscodeExchange,
 } from './useEmbeddedManagerPasscodeExchange'
 
@@ -114,6 +115,14 @@ void test('fetchEmbeddedManagerPasscode rejects invalid exchange responses witho
     }),
     null,
   )
+})
+
+void test('nextEmbeddedManagerBootstrapRefreshAttempt caps refresh attempts per child session', () => {
+  assert.equal(nextEmbeddedManagerBootstrapRefreshAttempt(0), 1)
+  assert.equal(nextEmbeddedManagerBootstrapRefreshAttempt(2), 3)
+  assert.equal(nextEmbeddedManagerBootstrapRefreshAttempt(3), null)
+  assert.equal(nextEmbeddedManagerBootstrapRefreshAttempt(-1), null)
+  assert.equal(nextEmbeddedManagerBootstrapRefreshAttempt(0.5), null)
 })
 
 void test('useEmbeddedManagerPasscodeExchange reports resolving and successful passcode states', async () => {
