@@ -256,11 +256,12 @@ through activity-specific props.
   muted nested media players such as Video Sync without relaxing their sandbox policy.
 - Instructor websocket updates are serialized per SyncDeck connection before session persistence, so
   closely spaced reveal/chalkboard commands cannot overwrite one another across storage boundaries.
-- Temporary SyncDeck managers receive a server-issued, session-scoped httpOnly recovery cookie when
-  their session is created. After a reload, the manager exchanges that opaque cookie for the
-  in-memory instructor passcode through the same-origin recovery route; the passcode itself never
-  enters browser storage. Persistent SyncDeck links continue to recover through the remembered
-  persistent teacher cookie.
+- Temporary SyncDeck managers receive a server-issued token stored in a bounded, browser-session
+  httpOnly recovery cookie when their session is created. After a reload, the manager exchanges
+  that opaque token for the in-memory instructor passcode through the same-origin recovery route;
+  the server session's sliding TTL remains authoritative and the passcode itself never enters
+  browser storage. Persistent SyncDeck links continue to recover through the remembered persistent
+  teacher cookie.
 
 `client/index.ts` (components/footer only, lazy-loaded chunk):
 ```typescript

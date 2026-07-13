@@ -47,13 +47,12 @@ import type {
 import { buildSyncDeckReportFilename, buildSyncDeckSessionReportHtml } from './reportHtml.js'
 
 const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000
-const DEFAULT_SESSION_TTL_MS = 60 * 60 * 1000
 const MAX_SESSIONS_PER_COOKIE = 20
 const MAX_EMBEDDED_MANAGER_SESSION_ID_LENGTH = 256
 const MAX_EMBEDDED_MANAGER_TOKEN_LENGTH = 512
 const MAX_TEACHER_CODE_LENGTH = 100
 const DEFAULT_SYNCDECK_ENTRY_POLICY = 'instructor-required'
-const INSTRUCTOR_RECOVERY_COOKIE_PREFIX = 'syncdeck_instructor_recovery_'
+const INSTRUCTOR_RECOVERY_COOKIE_NAME = 'syncdeck_instructor_recoveries'
 
 interface CookieSessionEntry {
   key: string
@@ -61,6 +60,11 @@ interface CookieSessionEntry {
   selectedOptions?: Record<string, unknown>
   entryPolicy?: unknown
   urlHash?: unknown
+}
+
+interface InstructorRecoveryCookieEntry {
+  sessionId: string
+  token: string
 }
 
 interface JsonResponse {
@@ -603,20 +607,47 @@ function normalizeSessionData(data: unknown): SyncDeckSessionData {
   }
 }
 
-function buildInstructorRecoveryCookieName(sessionId: string): string {
-  return `${INSTRUCTOR_RECOVERY_COOKIE_PREFIX}${sessionId}`
+function parseInstructorRecoveryCookie(value: unknown): InstructorRecoveryCookieEntry[] {
+  if (typeof value !== 'string') {
+    return []
+  }
+
+  try {
+    const parsed = JSON.parse(value) as unknown
+    if (!Array.isArray(parsed)) {
+      return []
+    }
+
+    return parsed
+      .filter((entry): entry is InstructorRecoveryCookieEntry => (
+        isPlainObject(entry)
+        && typeof entry.sessionId === 'string'
+        && entry.sessionId.length > 0
+        && typeof entry.token === 'string'
+        && /^[a-f0-9]{64}$/i.test(entry.token)
+      ))
+      .slice(-MAX_SESSIONS_PER_COOKIE)
+  } catch {
+    return []
+  }
 }
 
 function readInstructorRecoveryToken(req: RouteRequest, sessionId: string): string | null {
-  const token = req.cookies?.[buildInstructorRecoveryCookieName(sessionId)]
-  return typeof token === 'string' && /^[a-f0-9]{64}$/i.test(token) ? token : null
+  return parseInstructorRecoveryCookie(req.cookies?.[INSTRUCTOR_RECOVERY_COOKIE_NAME])
+    .find((entry) => entry.sessionId === sessionId)
+    ?.token ?? null
 }
 
-function writeInstructorRecoveryCookie(res: JsonResponse, sessionId: string, token: string, maxAge: number): void {
-  res.cookie?.(buildInstructorRecoveryCookieName(sessionId), token, {
-    maxAge,
-    // WebKit rejects a cookie path that is narrower than the create endpoint.
-    // The token name remains session-specific and is only read by that session's recovery route.
+function writeInstructorRecoveryCookie(req: RouteRequest, res: JsonResponse, sessionId: string, token: string): void {
+  const existingEntries = parseInstructorRecoveryCookie(req.cookies?.[INSTRUCTOR_RECOVERY_COOKIE_NAME])
+  const nextEntries = [
+    ...existingEntries.filter((entry) => entry.sessionId !== sessionId),
+    { sessionId, token },
+  ].slice(-MAX_SESSIONS_PER_COOKIE)
+
+  res.cookie?.(INSTRUCTOR_RECOVERY_COOKIE_NAME, JSON.stringify(nextEntries), {
+    // This is a browser-session cookie: the server session's sliding TTL remains authoritative.
+    // WebKit requires the cookie path to include the endpoint that sets it.
     path: '/api/syncdeck',
     sameSite: 'lax',
     secure: process.env.NODE_ENV === 'production',
@@ -1760,7 +1791,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
     })
   })
 
-  app.post('/api/syncdeck/create', async (_req, res) => {
+  app.post('/api/syncdeck/create', async (req, res) => {
     const session = await createSession(sessions, { data: {} })
     session.type = 'syncdeck'
     session.data = normalizeSessionData(session.data)
@@ -1768,12 +1799,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
     session.data.instructorRecoveryToken = instructorRecoveryToken
     await sessions.set(session.id, session)
 
-    writeInstructorRecoveryCookie(
-      res,
-      session.id,
-      instructorRecoveryToken,
-      typeof sessions.ttlMs === 'number' && sessions.ttlMs > 0 ? sessions.ttlMs : DEFAULT_SESSION_TTL_MS,
-    )
+    writeInstructorRecoveryCookie(req, res, session.id, instructorRecoveryToken)
 
     const response = res as unknown as JsonResponse
     response.json({ id: session.id, instructorPasscode: session.data.instructorPasscode })

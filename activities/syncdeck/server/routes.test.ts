@@ -23,6 +23,7 @@ import '../../resonance/server/routes.js'
 import '../../video-sync/server/routes.js'
 
 const DEFAULT_SYNCDECK_ENTRY_POLICY = 'instructor-required'
+const MAX_SYNCDECK_INSTRUCTOR_RECOVERY_COOKIE_ENTRIES = 20
 
 interface RouteRequest {
   params: Record<string, string | undefined>
@@ -4860,10 +4861,14 @@ void test('create route initializes syncdeck session state', async () => {
   assert.equal(typeof body.instructorPasscode, 'string')
   assert.equal(body.instructorPasscode?.length, 32)
   assert.equal(res.cookies.length, 1)
-  assert.equal(res.cookies[0]?.name, `syncdeck_instructor_recovery_${body.id}`)
-  assert.match(res.cookies[0]?.value ?? '', /^[a-f0-9]{64}$/)
+  assert.equal(res.cookies[0]?.name, 'syncdeck_instructor_recoveries')
+  const recoveryEntries = JSON.parse(res.cookies[0]?.value ?? '[]') as Array<{ sessionId?: string; token?: string }>
+  assert.deepEqual(recoveryEntries, [{
+    sessionId: body.id,
+    token: recoveryEntries[0]?.token,
+  }])
+  assert.match(recoveryEntries[0]?.token ?? '', /^[a-f0-9]{64}$/)
   assert.deepEqual(res.cookies[0]?.options, {
-    maxAge: 60 * 60 * 1000,
     path: '/api/syncdeck',
     sameSite: 'lax',
     secure: false,
@@ -4898,6 +4903,36 @@ void test('instructor-passcode route restores a temporary SyncDeck instructor fr
   assert.deepEqual(res.body, {
     instructorPasscode: (createRes.body as { instructorPasscode: string }).instructorPasscode,
   })
+})
+
+void test('create route keeps temporary instructor recovery tokens in one bounded session cookie', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const storeState = createSessionStore({})
+  setupSyncDeckRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.post['/api/syncdeck/create']
+  let recoveryCookieValue: string | undefined
+  const createdSessionIds: string[] = []
+  for (let index = 0; index <= MAX_SYNCDECK_INSTRUCTOR_RECOVERY_COOKIE_ENTRIES; index += 1) {
+    const res = createResponse()
+    await handler?.(
+      createRequest(
+        {},
+        {},
+        recoveryCookieValue ? { syncdeck_instructor_recoveries: recoveryCookieValue } : {},
+      ),
+      res,
+    )
+    createdSessionIds.push((res.body as { id: string }).id)
+    recoveryCookieValue = res.cookies[0]?.value
+  }
+
+  const entries = JSON.parse(recoveryCookieValue ?? '[]') as Array<{ sessionId?: string; token?: string }>
+  assert.equal(entries.length, MAX_SYNCDECK_INSTRUCTOR_RECOVERY_COOKIE_ENTRIES)
+  assert.equal(entries.some((entry) => entry.sessionId === createdSessionIds[0]), false)
+  assert.equal(entries.at(-1)?.sessionId, createdSessionIds.at(-1))
+  assert.ok(entries.every((entry) => typeof entry.token === 'string' && /^[a-f0-9]{64}$/.test(entry.token)))
 })
 
 void test('configure route sets presentation url for valid passcode', async () => {

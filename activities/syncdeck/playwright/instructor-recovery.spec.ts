@@ -24,7 +24,7 @@ test('a temporary SyncDeck instructor keeps control after reloading the manager 
   await page.reload()
 
   const recoveryCookies = (await context.cookies()).filter(
-    (cookie) => cookie.name === `syncdeck_instructor_recovery_${sessionId}`,
+    (cookie) => cookie.name === 'syncdeck_instructor_recoveries',
   )
   expect(recoveryCookies).toHaveLength(1)
   expect(recoveryCookies[0]).toMatchObject({
