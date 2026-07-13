@@ -48,6 +48,7 @@ import { buildSyncDeckReportFilename, buildSyncDeckSessionReportHtml } from './r
 
 const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000
 const MAX_SESSIONS_PER_COOKIE = 20
+const MAX_INSTRUCTOR_RECOVERY_COOKIE_ENTRIES = 20
 const MAX_EMBEDDED_MANAGER_SESSION_ID_LENGTH = 256
 const MAX_EMBEDDED_MANAGER_TOKEN_LENGTH = 512
 const MAX_TEACHER_CODE_LENGTH = 100
@@ -626,7 +627,7 @@ function parseInstructorRecoveryCookie(value: unknown): InstructorRecoveryCookie
         && typeof entry.token === 'string'
         && /^[a-f0-9]{64}$/i.test(entry.token)
       ))
-      .slice(-MAX_SESSIONS_PER_COOKIE)
+      .slice(-MAX_INSTRUCTOR_RECOVERY_COOKIE_ENTRIES)
   } catch {
     return []
   }
@@ -643,7 +644,7 @@ function writeInstructorRecoveryCookie(req: RouteRequest, res: JsonResponse, ses
   const nextEntries = [
     ...existingEntries.filter((entry) => entry.sessionId !== sessionId),
     { sessionId, token },
-  ].slice(-MAX_SESSIONS_PER_COOKIE)
+  ].slice(-MAX_INSTRUCTOR_RECOVERY_COOKIE_ENTRIES)
 
   res.cookie?.(INSTRUCTOR_RECOVERY_COOKIE_NAME, JSON.stringify(nextEntries), {
     // This is a browser-session cookie: the server session's sliding TTL remains authoritative.
@@ -1670,6 +1671,11 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       && session.data.instructorRecoveryToken
       && verifyInstructorPasscode(session.data.instructorRecoveryToken, recoveryToken)
     ) {
+      console.info(JSON.stringify({
+        activity: 'syncdeck',
+        event: 'instructor-recovery-cookie-exchanged',
+        sessionId,
+      }))
       res.json({ instructorPasscode: session.data.instructorPasscode })
       return
     }

@@ -4905,6 +4905,38 @@ void test('instructor-passcode route restores a temporary SyncDeck instructor fr
   })
 })
 
+void test('instructor-passcode route rejects a tampered temporary SyncDeck recovery token', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const storeState = createSessionStore({})
+  setupSyncDeckRoutes(app, storeState.sessions, ws)
+
+  const createHandler = app.handlers.post['/api/syncdeck/create']
+  const createRes = createResponse()
+  await createHandler?.(createRequest({}, {}), createRes)
+
+  const sessionId = String((createRes.body as { id?: string }).id)
+  const recoveryCookie = createRes.cookies[0]
+  const recoveryEntries = JSON.parse(recoveryCookie?.value ?? '[]') as Array<{ sessionId: string; token: string }>
+  const tamperedCookie = JSON.stringify(recoveryEntries.map((entry) => ({
+    ...entry,
+    token: entry.sessionId === sessionId ? 'f'.repeat(64) : entry.token,
+  })))
+  const handler = app.handlers.get['/api/syncdeck/:sessionId/instructor-passcode']
+  const res = createResponse()
+  await handler?.(
+    createRequest(
+      { sessionId },
+      {},
+      { [recoveryCookie?.name ?? 'missing']: tamperedCookie },
+    ),
+    res,
+  )
+
+  assert.equal(res.statusCode, 403)
+  assert.deepEqual(res.body, { error: 'forbidden' })
+})
+
 void test('create route keeps temporary instructor recovery tokens in one bounded session cookie', async () => {
   const app = createMockApp()
   const ws = createMockWs()
