@@ -147,6 +147,7 @@ interface RevealSyncEnvelope {
 interface SyncDeckEmbeddedActivityStartResponse {
   childSessionId?: unknown
   instanceKey?: unknown
+  location?: unknown
   managerBootstrap?: unknown
   managerEntryToken?: unknown
 }
@@ -858,6 +859,44 @@ export function applySyncDeckEmbeddedLifecyclePayload(
       owner: 'syncdeck-instructor',
       ...(payload.location ? { location: payload.location } : {}),
     },
+  }
+}
+
+/**
+ * Reconcile a successful local start immediately instead of waiting for the
+ * instructor websocket echo. The start request can complete before that
+ * socket has finished authenticating, in which case the echo is legitimately
+ * missed and the one-time child-manager bootstrap would otherwise be stranded.
+ */
+export function resolveLocalEmbeddedActivityStartLifecyclePayload(params: {
+  activityId: string
+  instanceKey: string
+  location?: SyncDeckEmbeddedActivityLocation
+  response: SyncDeckEmbeddedActivityStartResponse
+}): SyncDeckEmbeddedLifecyclePayload | null {
+  const childSessionId = typeof params.response.childSessionId === 'string'
+    ? params.response.childSessionId.trim()
+    : ''
+  const responseInstanceKey = typeof params.response.instanceKey === 'string'
+    ? params.response.instanceKey.trim()
+    : ''
+
+  if (!childSessionId || responseInstanceKey !== params.instanceKey) {
+    return null
+  }
+
+  const responseLocation = resolveEmbeddedActivityLocation({
+    location: params.response.location,
+    instanceKey: params.instanceKey,
+  })
+  const location = responseLocation ?? params.location
+
+  return {
+    type: 'embedded-activity-start',
+    instanceKey: params.instanceKey,
+    activityId: params.activityId,
+    childSessionId,
+    ...(location ? { location } : {}),
   }
 }
 
@@ -3297,6 +3336,17 @@ const SyncDeckManager: FC = () => {
 
             const payload = (await response.json()) as SyncDeckEmbeddedActivityStartResponse
             const childSessionId = typeof payload.childSessionId === 'string' ? payload.childSessionId.trim() : ''
+            const localLifecyclePayload = resolveLocalEmbeddedActivityStartLifecyclePayload({
+              activityId: request.activityId,
+              instanceKey: request.instanceKey,
+              location: request.location,
+              response: payload,
+            })
+            if (localLifecyclePayload) {
+              setEmbeddedActivities((current) => (
+                applySyncDeckEmbeddedLifecyclePayload(current, localLifecyclePayload)
+              ))
+            }
             const managerCredentials = resolveEmbeddedBootstrapManagerCredentials(payload)
             if (childSessionId && managerCredentials) {
               storeCreateSessionBootstrapPayload(

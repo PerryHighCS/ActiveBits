@@ -23,12 +23,6 @@ const postboardConfig: ActivityConfig = {
     },
   },
   createSessionBootstrap: {
-    sessionStorage: [
-      {
-        keyPrefix: 'postboard_instructor_',
-        responseField: 'instructorPasscode',
-      },
-    ],
     historyState: ['instructorPasscode'],
     selectedOptionsToSessionData: ['prompt', 'autoApprove'],
   },

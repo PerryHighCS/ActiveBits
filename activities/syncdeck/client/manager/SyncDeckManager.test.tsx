@@ -31,6 +31,7 @@ import { resolvePersistentEntryPolicyForConfigure } from './SyncDeckManager.js'
 import { resolvePersistentUrlHashForConfigure } from './SyncDeckManager.js'
 import { normalizeSyncDeckEmbeddedActivities } from './SyncDeckManager.js'
 import { applySyncDeckEmbeddedLifecyclePayload } from './SyncDeckManager.js'
+import { resolveLocalEmbeddedActivityStartLifecyclePayload } from './SyncDeckManager.js'
 import { resolveManagerActiveEmbeddedInstanceKey } from './SyncDeckManager.js'
 import { resolveManagerEmbeddedInstanceStatus } from './SyncDeckManager.js'
 import { buildManagerOverlayNavigationCommand } from './SyncDeckManager.js'
@@ -711,6 +712,40 @@ void test('applySyncDeckEmbeddedLifecyclePayload applies start and end lifecycle
   )
 
   assert.deepEqual(ended, {})
+})
+
+void test('resolveLocalEmbeddedActivityStartLifecyclePayload updates the local manager when its websocket echo is unavailable', () => {
+  assert.deepEqual(
+    resolveLocalEmbeddedActivityStartLifecyclePayload({
+      activityId: 'video-sync',
+      instanceKey: 'video-sync:3:0',
+      location: { h: 3, v: 0 },
+      response: {
+        childSessionId: 'CHILD:s1:abc12:video-sync',
+        instanceKey: 'video-sync:3:0',
+        location: { h: 3, v: 0 },
+      },
+    }),
+    {
+      type: 'embedded-activity-start',
+      activityId: 'video-sync',
+      instanceKey: 'video-sync:3:0',
+      childSessionId: 'CHILD:s1:abc12:video-sync',
+      location: { h: 3, v: 0 },
+    },
+  )
+
+  assert.equal(
+    resolveLocalEmbeddedActivityStartLifecyclePayload({
+      activityId: 'video-sync',
+      instanceKey: 'video-sync:3:0',
+      response: {
+        childSessionId: 'CHILD:s1:abc12:video-sync',
+        instanceKey: 'video-sync:4:0',
+      },
+    }),
+    null,
+  )
 })
 
 void test('resolveManagerActiveEmbeddedInstanceKey picks instance anchored to current slide position', () => {

@@ -249,6 +249,10 @@ through activity-specific props.
   children still receive the launch token so the parent can mount them through the same recovery
   path, but do not redeem it. This avoids putting instructor credentials in browser storage while
   preventing an iframe bootstrap race or concurrent reuse.
+- The initiating SyncDeck manager reconciles a successful embedded-start response into its local
+  embedded-activity map immediately. It must not depend solely on the instructor websocket echo:
+  the deck can request an activity before that websocket finishes authenticating, and otherwise
+  the returned child-manager token would have no iframe to redeem it until a later reload.
 - SyncDeck's warm iframe eviction resets all per-child bootstrap completion, retry, and failure
   markers before a later remount requests a fresh token. Transient embedded-start failures use
   bounded retry, while non-retryable responses surface the manager recovery action immediately.

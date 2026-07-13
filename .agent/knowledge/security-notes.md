@@ -16,6 +16,15 @@ Track security-relevant boundaries, risks, and mitigation decisions.
 ## Notes
 
 - Date: 2026-07-13
+- Area: Postboard instructor bootstrap
+- Threat or risk: Postboard's activity configuration previously declared `instructorPasscode` sessionStorage bootstrap, leaving a reusable manager credential accessible to same-origin JavaScript.
+- Control or mitigation: Postboard now accepts the immediate router-state bootstrap or SyncDeck's short-lived server-issued manager-token exchange only; its manager no longer reads instructor credentials from Web Storage.
+- Residual risk: A temporary standalone manager still needs an authenticated server-backed recovery flow to survive a full reload; do not restore browser-storage fallback to address that gap.
+- Validation (test/review/path): `activities/postboard/activity.config.ts`; `activities/postboard/client/manager/PostboardManager.tsx`; `activities/postboard/client/manager/PostboardManager.test.ts`.
+- Follow-up action: Add cookie- or token-backed recovery if temporary standalone Postboard reload recovery becomes a product requirement.
+- Owner: Codex
+
+- Date: 2026-07-13
 - Area: SyncDeck temporary instructor recovery
 - Threat or risk: The generated SyncDeck instructor passcode was held only in router state for temporary sessions, so a browser reload lost authority; persisting that passcode in browser storage is prohibited.
 - Control or mitigation: `POST /api/syncdeck/create` now mints a random session-scoped recovery token, stores it only on the server session record, and appends it to one capped httpOnly, same-site, secure-in-production browser-session cookie scoped to the SyncDeck API prefix. The cookie retains at most 20 recent entries; each token is honored only by its matching session's instructor-passcode recovery route. The route uses a timing-safe comparison and returns the passcode only when that cookie token matches; server-side session validity and its sliding TTL remain authoritative.
