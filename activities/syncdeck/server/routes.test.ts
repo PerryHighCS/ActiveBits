@@ -2303,6 +2303,22 @@ void test('embedded-activity start route provides an entry token for credentiall
   assert.match(String(body.childSessionId), /^CHILD:s1:[a-f0-9]{5}:raffle$/)
   assert.deepEqual(body.managerBootstrap, {})
   assert.match(String(body.managerEntryToken), /^[a-f0-9]{64}$/)
+
+  const passcodeHandler = app.handlers.get['/api/syncdeck/embedded-manager-passcode']
+  assert.equal(typeof passcodeHandler, 'function')
+  const passcodeRes = createResponse()
+  await passcodeHandler?.(
+    createRequest(
+      {},
+      undefined,
+      {},
+      {},
+      { sessionId: String(body.childSessionId), token: String(body.managerEntryToken) },
+    ),
+    passcodeRes,
+  )
+  assert.equal(passcodeRes.statusCode, 403)
+  assert.deepEqual(passcodeRes.body, { error: 'invalid embedded manager credentials' })
 })
 
 void test('embedded-activity start route bootstraps Postboard prompt and approval settings', async () => {
