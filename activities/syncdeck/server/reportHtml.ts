@@ -1,6 +1,7 @@
 import type {
   ActivityReportSummaryCard,
   SyncDeckSessionReportManifest,
+  SyncDeckSessionReportManifestActivity,
 } from '../../../types/activity.js'
 
 function escapeHtml(value: unknown): string {
@@ -30,13 +31,21 @@ function sanitizeFileLabel(value: string): string {
   return trimmed.length > 0 ? trimmed : 'syncdeck-report'
 }
 
-function buildTopSummaryCards(manifest: SyncDeckSessionReportManifest): ActivityReportSummaryCard[] {
+function isUnsupportedActivityReport(activity: SyncDeckSessionReportManifestActivity): boolean {
+  const status = activity.report.reportStatus
+  return status === 'unsupported' || status === 'unavailable'
+}
+
+function buildTopSummaryCards(
+  manifest: SyncDeckSessionReportManifest,
+  reportableActivityCount: number,
+): ActivityReportSummaryCard[] {
   return [
     {
       id: 'session-overview',
       title: 'Session Overview',
       metrics: [
-        { id: 'activity-count', label: 'Embedded Activities', value: manifest.activities.length },
+        { id: 'activity-count', label: 'Reportable Activities', value: reportableActivityCount },
         { id: 'student-count', label: 'Students Represented', value: manifest.students.length },
       ],
     },
@@ -49,7 +58,10 @@ export function buildSyncDeckReportFilename(manifest: SyncDeckSessionReportManif
 
 export function buildSyncDeckSessionReportHtml(manifest: SyncDeckSessionReportManifest): string {
   const reportJson = toSafeJson(manifest)
-  const topSummaryCards = buildTopSummaryCards(manifest)
+  const reportableActivityCount = manifest.activities.filter(
+    (activity) => !isUnsupportedActivityReport(activity),
+  ).length
+  const topSummaryCards = buildTopSummaryCards(manifest, reportableActivityCount)
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -157,7 +169,7 @@ export function buildSyncDeckSessionReportHtml(manifest: SyncDeckSessionReportMa
       gap: 14px;
     }
     .summary-grid { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); margin-bottom: 18px; }
-    .activity-grid, .student-grid { grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+    .activity-grid, .student-grid { grid-template-columns: 1fr; }
     .card, .activity-card, .student-card { padding: 16px; }
     .card h2, .activity-card h2, .student-card h2 { margin: 0 0 10px; font-size: 1.1rem; }
     .block-stack {
@@ -264,7 +276,7 @@ export function buildSyncDeckSessionReportHtml(manifest: SyncDeckSessionReportMa
       <h1>${escapeHtml(`Session ${manifest.parentSessionId}`)}</h1>
       <div class="meta">
         <span>Generated: ${escapeHtml(formatDate(manifest.generatedAt))}</span>
-        <span>Embedded activities: ${manifest.activities.length}</span>
+        <span>Reportable activities: ${reportableActivityCount}</span>
         <span>Students represented: ${manifest.students.length}</span>
       </div>
     </section>
@@ -325,6 +337,12 @@ export function buildSyncDeckSessionReportHtml(manifest: SyncDeckSessionReportMa
       }[char]));
       const activities = Array.isArray(manifest.activities) ? manifest.activities : [];
       const students = Array.isArray(manifest.students) ? manifest.students : [];
+      const isUnsupportedReport = (activity) => {
+        const status = activity.report && activity.report.reportStatus;
+        return status === 'unsupported' || status === 'unavailable';
+      };
+      const reportableActivities = activities.filter((activity) => !isUnsupportedReport(activity));
+      const unsupportedActivities = activities.filter((activity) => isUnsupportedReport(activity));
 
       const topCards = ${toSafeJson(topSummaryCards)};
       const renderBlocks = (blocks) => {
@@ -375,6 +393,39 @@ export function buildSyncDeckSessionReportHtml(manifest: SyncDeckSessionReportMa
         }).join('');
       };
 
+      const renderUnsupportedSummaryCard = (activitiesWithoutReports) => {
+        if (activitiesWithoutReports.length === 0) {
+          return '';
+        }
+
+        const groups = new Map();
+        activitiesWithoutReports.forEach((activity) => {
+          const payloadReason = activity.report && activity.report.payload && activity.report.payload.reason;
+          const summaryDescription = activity.report && Array.isArray(activity.report.summaryCards) && activity.report.summaryCards[0] && activity.report.summaryCards[0].description;
+          const reason = typeof payloadReason === 'string' && payloadReason.length > 0
+            ? payloadReason
+            : typeof summaryDescription === 'string' && summaryDescription.length > 0
+              ? summaryDescription
+              : 'This activity does not provide structured reporting for this session.';
+          const key = (activity.activityId || activity.activityName || 'activity') + '::' + reason;
+          const existing = groups.get(key);
+          if (existing) {
+            existing.count += 1;
+          } else {
+            groups.set(key, { activityName: activity.activityName || activity.activityId, reason, count: 1 });
+          }
+        });
+
+        return '<article class="card">' +
+          '<h2>Activities without full reporting</h2>' +
+          '<ul class="section-list">' +
+            Array.from(groups.values()).map((group) =>
+              '<li><strong>' + escapeText(group.activityName) + '</strong> (' + group.count + (group.count === 1 ? ' instance' : ' instances') + '): ' + escapeText(group.reason) + '</li>'
+            ).join('') +
+          '</ul>' +
+        '</article>';
+      };
+
       summaryGrid.innerHTML = topCards.map((card) =>
         '<section class="card"><h2>' + escapeText(card.title) + '</h2><div class="metrics">' +
         (Array.isArray(card.metrics) ? card.metrics.map((metric) =>
@@ -382,7 +433,7 @@ export function buildSyncDeckSessionReportHtml(manifest: SyncDeckSessionReportMa
         ).join('') : '') +
         '</div></section>'
       ).join('');
-      summaryBlockGrid.innerHTML = activities.map((activity) => {
+      summaryBlockGrid.innerHTML = reportableActivities.map((activity) => {
         const scopeBlocks = activity.report && activity.report.scopeBlocks && activity.report.scopeBlocks['session-summary'];
         if (!Array.isArray(scopeBlocks) || scopeBlocks.length === 0) {
           return '';
@@ -393,11 +444,13 @@ export function buildSyncDeckSessionReportHtml(manifest: SyncDeckSessionReportMa
           '<h2>' + escapeText(activity.report && activity.report.title ? activity.report.title : activity.instanceKey) + '</h2>' +
           renderBlocks(scopeBlocks) +
         '</article>';
-      }).join('');
+      }).join('') + renderUnsupportedSummaryCard(unsupportedActivities);
 
       activityGrid.innerHTML = activities.length === 0
         ? '<div class="empty">No embedded activity reports were available for this session.</div>'
-        : activities.map((activity) => {
+        : reportableActivities.length === 0
+          ? '<div class="empty">None of the embedded activities in this session have added structured reporting support yet.</div>'
+          : reportableActivities.map((activity) => {
             const summaryCards = Array.isArray(activity.report && activity.report.summaryCards) ? activity.report.summaryCards : [];
             const studentsForActivity = Array.isArray(activity.report && activity.report.students) ? activity.report.students : [];
             const scopeBlocks = activity.report && activity.report.scopeBlocks && activity.report.scopeBlocks['activity-session'];
@@ -435,7 +488,7 @@ export function buildSyncDeckSessionReportHtml(manifest: SyncDeckSessionReportMa
 
       const renderStudent = (studentId) => {
         const student = students.find((entry) => entry.studentId === studentId) || null;
-        const relevantActivities = activities.filter((activity) =>
+        const relevantActivities = reportableActivities.filter((activity) =>
           Array.isArray(activity.report && activity.report.students)
           && activity.report.students.some((entry) => entry.studentId === studentId)
         );
