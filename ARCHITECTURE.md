@@ -244,9 +244,11 @@ through activity-specific props.
   with `activeQuestionIds` plus a shared `activeQuestionDeadlineAt`, while still backfilling
   `activeQuestionId` for compatibility with older snapshots.
 - Embedded instructor iframes receive a short-lived, server-issued manager-entry token only after
-  the authenticated parent start response arrives, then exchange it atomically for the child
-  passcode and replace the iframe URL to remove the consumed token. This avoids putting instructor
-  credentials in browser storage while preventing an iframe bootstrap race or concurrent reuse.
+  the authenticated parent start response arrives. Credentialed children exchange it atomically for
+  the child passcode and replace the iframe URL to remove the consumed token; credentialless
+  children still receive the launch token so the parent can mount them through the same recovery
+  path, but do not redeem it. This avoids putting instructor credentials in browser storage while
+  preventing an iframe bootstrap race or concurrent reuse.
 - SyncDeck's warm iframe eviction resets all per-child bootstrap completion, retry, and failure
   markers before a later remount requests a fresh token. Transient embedded-start failures use
   bounded retry, while non-retryable responses surface the manager recovery action immediately.

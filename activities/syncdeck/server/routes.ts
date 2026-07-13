@@ -922,12 +922,11 @@ function buildEmbeddedManagerBootstrapPayload(session: SessionRecord): SyncDeckE
   }
 
   const instructorPasscode = normalizeInstructorPasscode(session.data.instructorPasscode)
-  if (!instructorPasscode) {
-    return null
-  }
-
+  // A bootstrap envelope also marks credentialless managers (such as Raffle)
+  // as ready to mount. Credentialed children exchange the accompanying entry
+  // token; credentialless children simply ignore it.
   return {
-    instructorPasscode,
+    ...(instructorPasscode ? { instructorPasscode } : {}),
   }
 }
 
