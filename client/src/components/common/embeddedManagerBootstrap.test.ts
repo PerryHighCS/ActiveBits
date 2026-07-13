@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { readEmbeddedManagerToken, removeEmbeddedManagerToken } from './embeddedManagerBootstrap'
+import {
+  EMBEDDED_MANAGER_BOOTSTRAP_REFRESH_REQUEST,
+  readEmbeddedManagerBootstrapRefreshRequest,
+  readEmbeddedManagerToken,
+  removeEmbeddedManagerToken,
+} from './embeddedManagerBootstrap'
 
 void test('readEmbeddedManagerToken returns only a non-empty trimmed manager token', () => {
   assert.equal(readEmbeddedManagerToken('?embeddedManagerToken=token-123'), 'token-123')
@@ -15,4 +20,16 @@ void test('removeEmbeddedManagerToken preserves unrelated query parameters', () 
     '?sourceUrl=https%3A%2F%2Fexample.com&mode=manage',
   )
   assert.equal(removeEmbeddedManagerToken('?embeddedManagerToken=token-123'), '')
+})
+
+void test('readEmbeddedManagerBootstrapRefreshRequest accepts only a non-empty child session id', () => {
+  assert.equal(
+    readEmbeddedManagerBootstrapRefreshRequest({
+      type: EMBEDDED_MANAGER_BOOTSTRAP_REFRESH_REQUEST,
+      childSessionId: ' CHILD:parent:child:postboard ',
+    }),
+    'CHILD:parent:child:postboard',
+  )
+  assert.equal(readEmbeddedManagerBootstrapRefreshRequest({ type: 'other', childSessionId: 'child' }), null)
+  assert.equal(readEmbeddedManagerBootstrapRefreshRequest({ type: EMBEDDED_MANAGER_BOOTSTRAP_REFRESH_REQUEST }), null)
 })

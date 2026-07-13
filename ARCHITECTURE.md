@@ -253,6 +253,9 @@ through activity-specific props.
   embedded-activity map immediately. It must not depend solely on the instructor websocket echo:
   the deck can request an activity before that websocket finishes authenticating, and otherwise
   the returned child-manager token would have no iframe to redeem it until a later reload.
+- If a credentialed child cannot redeem its one-time token, it sends its child session id (never
+  credentials) to the same-origin parent. The parent invalidates its cached token and uses the
+  existing authenticated start path to mint a replacement before remounting that iframe.
 - SyncDeck's warm iframe eviction resets all per-child bootstrap completion, retry, and failure
   markers before a later remount requests a fresh token. Transient embedded-start failures use
   bounded retry, while non-retryable responses surface the manager recovery action immediately.

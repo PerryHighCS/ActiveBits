@@ -16,6 +16,14 @@ Use this log for durable findings that future contributors and agents should reu
 
 - Date: 2026-07-13
 - Area: client | activities | syncdeck | embedded bootstrap
+- Discovery: An embedded manager can receive a one-time entry token that has already been consumed or has otherwise failed exchange. The child cannot safely retry that token itself, so it reports only its child-session id to its same-origin SyncDeck parent. The parent drops its cached token, clears completion/failure markers, and reruns the authenticated embedded-start bootstrap before remounting the iframe.
+- Why it matters: Child-specific credentials must not be sent through `postMessage`, and allowing a child to re-use an old entry token would break atomic token-consumption guarantees. This recovery path makes stale-token failures self-healing without browser storage or a manual parent reload.
+- Evidence: `client/src/components/common/embeddedManagerBootstrap.ts`; `client/src/hooks/useEmbeddedManagerPasscodeExchange.ts`; `activities/syncdeck/client/manager/SyncDeckManager.tsx`.
+- Follow-up action: Preserve same-origin validation and child-session lookup when extending embedded-manager postMessage handling.
+- Owner: Codex
+
+- Date: 2026-07-13
+- Area: client | activities | syncdeck | embedded bootstrap
 - Discovery: A SyncDeck activity start can complete before the instructor websocket has authenticated, so the initiating manager can miss its own `embedded-activity-start` lifecycle echo. The start response is independently authoritative for that initiating tab and must immediately populate its local embedded-activity map; otherwise the child iframe never mounts to redeem the returned one-time manager token until a reload replays lifecycle state. This manifested as missing Postboard credentials and a Video Sync manager unable to issue initial student playback commands.
 - Why it matters: websocket lifecycle events remain required for other tabs and students, but local manager startup cannot depend on receiving its own broadcast. The response reconciliation must retain the response/request instance-key match check to avoid mounting an unrelated child session.
 - Evidence: `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/client/manager/SyncDeckManager.test.tsx`; `activities/syncdeck/playwright/embedded-manager-bootstrap.spec.ts`.

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import {
   clearEmbeddedManagerTokenFromUrl,
   readEmbeddedManagerToken,
+  requestEmbeddedManagerBootstrapRefresh,
 } from '@src/components/common/embeddedManagerBootstrap'
 
 type EmbeddedManagerPasscodeResponse = { instructorPasscode?: unknown }
@@ -66,11 +67,14 @@ export function useEmbeddedManagerPasscodeExchange(params: {
         if (cancelled) return
         if (passcode) {
           clearEmbeddedManagerTokenFromUrl()
+        } else {
+          requestEmbeddedManagerBootstrapRefresh(sessionId)
         }
         setState({ key: exchangeKey, passcode, error: null, isResolving: false })
       } catch (error) {
         if (!cancelled) {
           console.error('Failed to exchange embedded manager token:', error)
+          requestEmbeddedManagerBootstrapRefresh(sessionId)
           setState({ key: exchangeKey, passcode: null, error, isResolving: false })
         }
       }

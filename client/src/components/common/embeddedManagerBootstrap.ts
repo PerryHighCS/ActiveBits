@@ -14,6 +14,38 @@ export function removeEmbeddedManagerToken(search: string): string {
   return nextSearch ? `?${nextSearch}` : ''
 }
 
+export const EMBEDDED_MANAGER_BOOTSTRAP_REFRESH_REQUEST = 'syncdeck-embedded-manager-bootstrap-refresh'
+
+/**
+ * Parses a credentialed child iframe's request for a replacement one-time
+ * token. The request carries only the child session id, never a passcode.
+ */
+export function readEmbeddedManagerBootstrapRefreshRequest(payload: unknown): string | null {
+  if (payload == null || typeof payload !== 'object' || Array.isArray(payload)) {
+    return null
+  }
+
+  const request = payload as { type?: unknown; childSessionId?: unknown }
+  if (request.type !== EMBEDDED_MANAGER_BOOTSTRAP_REFRESH_REQUEST || typeof request.childSessionId !== 'string') {
+    return null
+  }
+
+  const childSessionId = request.childSessionId.trim()
+  return childSessionId.length > 0 ? childSessionId : null
+}
+
+/** Requests a replacement manager-entry token from the same-origin SyncDeck parent. */
+export function requestEmbeddedManagerBootstrapRefresh(childSessionId: string): void {
+  if (typeof window === 'undefined' || window.parent === window) {
+    return
+  }
+
+  window.parent.postMessage({
+    type: EMBEDDED_MANAGER_BOOTSTRAP_REFRESH_REQUEST,
+    childSessionId,
+  }, window.location.origin)
+}
+
 /** Replaces the current same-origin URL without leaving a reusable token in history. */
 export function clearEmbeddedManagerTokenFromUrl(): void {
   if (typeof window === 'undefined') return

@@ -1,5 +1,6 @@
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
 import { storeCreateSessionBootstrapPayload } from '@src/components/common/manageDashboardUtils'
+import { readEmbeddedManagerBootstrapRefreshRequest } from '@src/components/common/embeddedManagerBootstrap'
 import { resolvePersistentSessionEntryPolicy, type PersistentSessionEntryPolicy } from '../../../../types/waitingRoom.js'
 import { runSyncDeckPresentationPreflight } from '../shared/presentationPreflight.js'
 import {
@@ -2291,6 +2292,43 @@ const SyncDeckManager: FC = () => {
     setEmbeddedManagerRenderNonceByChildSessionId((current) => advanceEmbeddedManagerRenderNonce(current, childSessionId))
     return true
   }, [])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    const handleEmbeddedManagerBootstrapRefreshRequest = (event: MessageEvent<unknown>): void => {
+      if (event.origin !== window.location.origin) {
+        return
+      }
+      const childSessionId = readEmbeddedManagerBootstrapRefreshRequest(event.data)
+      if (!childSessionId) {
+        return
+      }
+      const instanceKey = Object.entries(embeddedActivities).find(([, record]) => (
+        record.childSessionId === childSessionId
+      ))?.[0]
+      if (!instanceKey) {
+        return
+      }
+
+      const nextTokens = { ...embeddedManagerEntryTokensByChildSessionIdRef.current }
+      delete nextTokens[childSessionId]
+      embeddedManagerEntryTokensByChildSessionIdRef.current = nextTokens
+      setEmbeddedManagerEntryTokensByChildSessionId(nextTokens)
+      setLoadedEmbeddedManagerInstanceKeys((current) => clearLoadedEmbeddedManagerInstanceKey(current, instanceKey))
+      completedEmbeddedBootstrapChildSessionIdsRef.current.delete(childSessionId)
+      embeddedBootstrapBackfillRetryAttemptByChildSessionIdRef.current.delete(childSessionId)
+      failedEmbeddedBootstrapChildSessionIdsRef.current.delete(childSessionId)
+      setFailedEmbeddedBootstrapChildSessionIds((current) => current.filter((id) => id !== childSessionId))
+      clearEmbeddedBootstrapBackfillRetryTimeout()
+      setEmbeddedBootstrapBackfillRetryNonce((current) => current + 1)
+    }
+
+    window.addEventListener('message', handleEmbeddedManagerBootstrapRefreshRequest)
+    return () => window.removeEventListener('message', handleEmbeddedManagerBootstrapRefreshRequest)
+  }, [clearEmbeddedBootstrapBackfillRetryTimeout, embeddedActivities])
 
   const releaseRestoreSuppression = useCallback((): void => {
     suppressOutboundStateUntilRestoreRef.current = false

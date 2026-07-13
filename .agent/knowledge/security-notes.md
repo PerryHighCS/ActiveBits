@@ -16,6 +16,15 @@ Track security-relevant boundaries, risks, and mitigation decisions.
 ## Notes
 
 - Date: 2026-07-13
+- Area: SyncDeck embedded manager bootstrap recovery
+- Threat or risk: A consumed or stale one-time child-manager token can leave an iframe without instructor credentials; passing a replacement token or passcode through an unverified child message would expand the credential exposure surface.
+- Control or mitigation: The child posts only `{ type, childSessionId }` to its same-origin parent after failed exchange. The parent validates the origin and verifies the session id belongs to an embedded record before invalidating its local token cache and requesting a new token via the already authenticated SyncDeck start route.
+- Residual risk: Same-origin XSS could forge this availability-only refresh request, causing bounded bootstrap churn but not credential disclosure; the request carries no secret and cannot target a non-embedded child session.
+- Validation (test/review/path): `client/src/components/common/embeddedManagerBootstrap.ts`; `client/src/components/common/embeddedManagerBootstrap.test.ts`; `client/src/hooks/useEmbeddedManagerPasscodeExchange.ts`; `activities/syncdeck/client/manager/SyncDeckManager.tsx`.
+- Follow-up action: If repeated refresh requests become an operational concern, add a parent-side rate limit keyed by child session without weakening token rotation.
+- Owner: Codex
+
+- Date: 2026-07-13
 - Area: Postboard instructor bootstrap
 - Threat or risk: Postboard's activity configuration previously declared `instructorPasscode` sessionStorage bootstrap, leaving a reusable manager credential accessible to same-origin JavaScript.
 - Control or mitigation: Postboard now accepts the immediate router-state bootstrap or SyncDeck's short-lived server-issued manager-token exchange only; its manager no longer reads instructor credentials from Web Storage.
