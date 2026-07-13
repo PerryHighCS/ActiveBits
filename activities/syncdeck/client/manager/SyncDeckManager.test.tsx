@@ -794,6 +794,16 @@ void test('resolveEmbeddedBootstrapManagerCredentials requires both bootstrap da
   assert.equal(resolveEmbeddedBootstrapManagerCredentials({ managerEntryToken: 'token-1' }), null)
   assert.deepEqual(
     resolveEmbeddedBootstrapManagerCredentials({
+      managerBootstrap: {},
+      managerEntryToken: 'token-1',
+    }),
+    {
+      managerBootstrap: {},
+      managerEntryToken: 'token-1',
+    },
+  )
+  assert.deepEqual(
+    resolveEmbeddedBootstrapManagerCredentials({
       managerBootstrap: { instructorPasscode: 'teacher-pass' },
       managerEntryToken: ' token-1 ',
     }),

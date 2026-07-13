@@ -15,6 +15,15 @@ Document API and data-shape assumptions that must stay compatible over time.
 
 ## Contracts
 
+- Date: 2026-07-13
+- Surface: REST | activity interface | SyncDeck embedded manager bootstrap
+- Contract: Every valid SyncDeck embedded child with object session data returns both `managerBootstrap` and a short-lived `managerEntryToken` from `POST /api/syncdeck/:sessionId/embedded-activity/start`. The bootstrap object may be empty for a credentialless manager such as Raffle.
+- Compatibility constraints: Credentialed activities continue to exchange the single-use token for `instructorPasscode`. Credentialless managers ignore the token, but the parent still uses it to mount the iframe through the same retry and recovery lifecycle. Do not add activity-specific launch conditionals to SyncDeck shared code.
+- Validation rules: The parent accepts an empty bootstrap object when it is paired with a non-empty entry token. The token exchange endpoint remains credentialed-only and must reject children with no instructor passcode.
+- Evidence (schema/tests/path): `activities/syncdeck/server/routes.ts`; `activities/syncdeck/server/routes.test.ts`; `activities/syncdeck/client/manager/SyncDeckManager.test.tsx`.
+- Follow-up action: New credentialless activities should preserve object session data so they can use the shared embedded manager launch path.
+- Owner: Codex
+
 - Date: 2026-07-11
 - Surface: REST | activity interface | SyncDeck report aggregation
 - Contract: Postboard exposes `GET /api/postboard/:sessionId/report` as an instructor-authenticated self-contained HTML export and registers a structured report builder for SyncDeck aggregate reports. The report payload includes prompt/settings, normalized posts, reaction counts, flags, moderation status totals, hidden/deleted state, and per-student post drill-downs.

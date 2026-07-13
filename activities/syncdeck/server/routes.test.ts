@@ -2269,6 +2269,42 @@ void test('embedded-activity start route creates a child session, stores keyed m
   assert.equal(typeof studentStart?.entryParticipantToken, 'string')
 })
 
+void test('embedded-activity start route provides an entry token for credentialless Raffle managers', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const storeState = createSessionStore({
+    s1: createSyncDeckSession('s1', 'teacher-passcode-1'),
+  })
+  setupSyncDeckRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.post['/api/syncdeck/:sessionId/embedded-activity/start']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.(
+    createRequest(
+      { sessionId: 's1' },
+      {
+        instructorPasscode: 'teacher-passcode-1',
+        activityId: 'raffle',
+        instanceKey: 'raffle:3:0',
+        location: { h: 3, v: 0 },
+      },
+    ),
+    res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  const body = res.body as {
+    childSessionId?: unknown
+    managerBootstrap?: unknown
+    managerEntryToken?: unknown
+  }
+  assert.match(String(body.childSessionId), /^CHILD:s1:[a-f0-9]{5}:raffle$/)
+  assert.deepEqual(body.managerBootstrap, {})
+  assert.match(String(body.managerEntryToken), /^[a-f0-9]{64}$/)
+})
+
 void test('embedded-activity start route bootstraps Postboard prompt and approval settings', async () => {
   const app = createMockApp()
   const ws = createMockWs()
