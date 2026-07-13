@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { JSDOM } from 'jsdom'
 import {
   buildSyncDeckReportFilename,
   buildSyncDeckSessionReportHtml,
@@ -163,4 +164,44 @@ void test('buildSyncDeckSessionReportHtml renders aggregate summary, activity bl
   assert.match(html, /Avery - Bridge Design/)
   assert.doesNotMatch(html, /<script[^>]+src=/)
   assert.doesNotMatch(html, /<link[^>]+href=/)
+})
+
+void test('buildSyncDeckSessionReportHtml stacks activity/student cards full-width instead of a multi-column grid', () => {
+  const html = buildSyncDeckSessionReportHtml(createManifest())
+  assert.match(html, /\.activity-grid, \.student-grid \{ grid-template-columns: 1fr; \}/)
+})
+
+void test('buildSyncDeckSessionReportHtml hides unsupported activities from the By Activity view and consolidates them in the summary', () => {
+  const manifest = createManifest()
+  const videoSyncActivity = manifest.activities[1]
+  assert.ok(videoSyncActivity)
+  manifest.activities.push({
+    ...videoSyncActivity,
+    instanceKey: 'video-sync:9:0',
+    childSessionId: 'CHILD:syncdeck-42:ghi:video-sync',
+    report: {
+      ...videoSyncActivity.report,
+      instanceKey: 'video-sync:9:0',
+      childSessionId: 'CHILD:syncdeck-42:ghi:video-sync',
+    },
+  })
+
+  const html = buildSyncDeckSessionReportHtml(manifest)
+  const dom = new JSDOM(html, { runScripts: 'dangerously', url: 'https://activebits.local/' })
+  const { document } = dom.window
+
+  const summaryBlockGrid = document.getElementById('summary-block-grid')
+  assert.match(summaryBlockGrid?.innerHTML ?? '', /Activities without full reporting/)
+  assert.match(summaryBlockGrid?.innerHTML ?? '', /Video Sync/)
+  assert.match(summaryBlockGrid?.innerHTML ?? '', /2 instances/)
+
+  const activitiesTab = document.querySelector('[data-view="activities"]')
+  assert.ok(activitiesTab instanceof dom.window.HTMLElement)
+  ;(activitiesTab as HTMLElement).click()
+
+  const activityGrid = document.getElementById('activity-grid')
+  assert.match(activityGrid?.innerHTML ?? '', /Bridge Critique Round/)
+  assert.doesNotMatch(activityGrid?.innerHTML ?? '', /Video Sync Report Unsupported/)
+
+  dom.window.close()
 })
