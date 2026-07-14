@@ -1,8 +1,14 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useState, type ChangeEvent, type FormEvent } from 'react'
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { runSyncDeckPresentationPreflight, type SyncDeckPreflightResult } from '../shared/presentationPreflight.js'
 import { getStudentPresentationCompatibilityError } from '../shared/presentationUrlCompatibility.js'
 import { createConfiguredSyncDeckSession } from '../shared/sessionLaunch.js'
+import { PERSISTENT_SESSION_ENTRY_POLICY_OPTIONS } from '@src/components/common/persistentSessionEntryPolicyUtils.js'
+import {
+  DEFAULT_PERSISTENT_SESSION_ENTRY_POLICY,
+  resolvePersistentSessionEntryPolicy,
+  type PersistentSessionEntryPolicy,
+} from '../../../../types/waitingRoom.js'
 
 type LaunchState =
   | { phase: 'idle'; detail: string | null }
@@ -86,6 +92,7 @@ export interface SyncDeckLaunchRedirectState {
 export interface GenerateSyncDeckPermalinkParams {
   presentationUrl: string
   teacherCode: string
+  entryPolicy?: PersistentSessionEntryPolicy
   fetchFn?: typeof fetch
   origin?: string
 }
@@ -139,6 +146,8 @@ export async function generateSyncDeckPermalink(
     throw new Error('Teacher code is required.')
   }
 
+  const entryPolicy = params.entryPolicy ?? DEFAULT_PERSISTENT_SESSION_ENTRY_POLICY
+
   const fetchFn = params.fetchFn ?? fetch
   const response = await fetchFn('/api/syncdeck/generate-url', {
     method: 'POST',
@@ -146,6 +155,7 @@ export async function generateSyncDeckPermalink(
     body: JSON.stringify({
       activityName: 'syncdeck',
       teacherCode,
+      entryPolicy,
       selectedOptions: {
         presentationUrl,
       },
@@ -224,6 +234,7 @@ export default function SyncDeckLaunchPresentation() {
       : { phase: 'idle', detail: null }
   })
   const [teacherCode, setTeacherCode] = useState('')
+  const [entryPolicy, setEntryPolicy] = useState<PersistentSessionEntryPolicy>(DEFAULT_PERSISTENT_SESSION_ENTRY_POLICY)
   const [permalinkState, setPermalinkState] = useState<PermalinkState>({
     phase: 'idle',
     detail: null,
@@ -465,6 +476,7 @@ export default function SyncDeckLaunchPresentation() {
         const result = await generateSyncDeckPermalink({
           presentationUrl,
           teacherCode: normalizedTeacherCode,
+          entryPolicy,
         })
         setCopyState({
           phase: 'idle',
@@ -567,6 +579,30 @@ export default function SyncDeckLaunchPresentation() {
                     {permalinkState.phase === 'verifying' ? 'Verifying...' : 'Verify URL'}
                   </button>
                 </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-200" htmlFor="syncdeck-permalink-entry-policy">
+                  Entry Mode
+                </label>
+                <select
+                  id="syncdeck-permalink-entry-policy"
+                  aria-describedby="syncdeck-permalink-entry-policy-description"
+                  value={entryPolicy}
+                  onChange={(event: ChangeEvent<HTMLSelectElement>) => {
+                    setEntryPolicy(resolvePersistentSessionEntryPolicy(event.target.value))
+                  }}
+                  className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-slate-50 outline-none transition focus:border-cyan-400"
+                >
+                  {PERSISTENT_SESSION_ENTRY_POLICY_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+                <p id="syncdeck-permalink-entry-policy-description" className="mt-2 text-xs text-slate-400">
+                  {PERSISTENT_SESSION_ENTRY_POLICY_OPTIONS.find((option) => option.value === entryPolicy)?.description}
+                </p>
               </div>
 
               <div>

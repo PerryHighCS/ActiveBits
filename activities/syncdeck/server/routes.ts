@@ -52,7 +52,6 @@ const MAX_INSTRUCTOR_RECOVERY_COOKIE_ENTRIES = 20
 const MAX_EMBEDDED_MANAGER_SESSION_ID_LENGTH = 256
 const MAX_EMBEDDED_MANAGER_TOKEN_LENGTH = 512
 const MAX_TEACHER_CODE_LENGTH = 100
-const DEFAULT_SYNCDECK_ENTRY_POLICY = 'instructor-required'
 const INSTRUCTOR_RECOVERY_COOKIE_NAME = 'syncdeck_instructor_recoveries'
 
 interface CookieSessionEntry {
@@ -1760,7 +1759,8 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
     }
 
     const { hash } = generatePersistentHash('syncdeck', teacherCode)
-    const urlState = buildSyncDeckPersistentLinkUrlState(DEFAULT_SYNCDECK_ENTRY_POLICY, presentationUrl)
+    const urlState = buildSyncDeckPersistentLinkUrlState(readStringField(body, 'entryPolicy'), presentationUrl)
+    const { entryPolicy } = urlState
     const urlHash = computePersistentLinkUrlHash(hash, urlState)
 
     const cookieName = 'persistent_sessions'
@@ -1777,7 +1777,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       selectedOptions: {
         presentationUrl,
       },
-      entryPolicy: DEFAULT_SYNCDECK_ENTRY_POLICY,
+      entryPolicy,
       urlHash,
     })
 
@@ -1794,7 +1794,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
 
     const params = new URLSearchParams({
       presentationUrl,
-      entryPolicy: DEFAULT_SYNCDECK_ENTRY_POLICY,
+      entryPolicy,
       urlHash,
     })
 
