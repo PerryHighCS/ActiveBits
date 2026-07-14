@@ -15,10 +15,16 @@ interface ExchangeState {
   error: unknown | null
 }
 
-function ExchangeProbe({ onState }: { onState: (state: ExchangeState) => void }): null {
+function ExchangeProbe({
+  onState,
+  search = '?embeddedManagerToken=token-123',
+}: {
+  onState: (state: ExchangeState) => void
+  search?: string
+}): null {
   const state = useEmbeddedManagerPasscodeExchange({
     sessionId: 'child-session',
-    search: '?embeddedManagerToken=token-123',
+    search,
   })
   useEffect(() => {
     onState(state)
@@ -179,6 +185,64 @@ void test('useEmbeddedManagerPasscodeExchange removes the token after an invalid
     await act(async () => {
       root.unmount()
     })
+    globalThis.fetch = originalFetch
+    restoreDom()
+  }
+})
+
+void test('useEmbeddedManagerPasscodeExchange requests bounded parent refreshes after failed exchanges', async () => {
+  const restoreDom = installDomEnvironment()
+  const originalFetch = globalThis.fetch
+  const parentDescriptor = Object.getOwnPropertyDescriptor(window, 'parent')
+  const refreshRequests: Array<{ payload: unknown; targetOrigin: string }> = []
+  let exchangeCount = 0
+  globalThis.fetch = (async () => {
+    exchangeCount += 1
+    if (exchangeCount % 2 === 0) {
+      throw new Error('exchange unavailable')
+    }
+    return { ok: false, json: async () => ({}) }
+  }) as unknown as typeof fetch
+  Object.defineProperty(window, 'parent', {
+    configurable: true,
+    value: {
+      postMessage(payload: unknown, targetOrigin: string) {
+        refreshRequests.push({ payload, targetOrigin })
+      },
+    },
+  })
+  const root = createRoot(document.getElementById('root') as Element)
+
+  try {
+    console.info('[TEST] Expected null and failed embedded-manager token exchanges.')
+    for (const token of ['token-1', 'token-2', 'token-3', 'token-4']) {
+      await act(async () => {
+        root.render(createElement(ExchangeProbe, { onState: () => {}, search: `?embeddedManagerToken=${token}` }))
+      })
+      await flushAsyncWork()
+    }
+
+    assert.deepEqual(refreshRequests, [
+      {
+        payload: { type: 'embedded-manager-bootstrap-refresh', childSessionId: 'child-session' },
+        targetOrigin: 'https://activebits.local',
+      },
+      {
+        payload: { type: 'embedded-manager-bootstrap-refresh', childSessionId: 'child-session' },
+        targetOrigin: 'https://activebits.local',
+      },
+      {
+        payload: { type: 'embedded-manager-bootstrap-refresh', childSessionId: 'child-session' },
+        targetOrigin: 'https://activebits.local',
+      },
+    ])
+  } finally {
+    await act(async () => {
+      root.unmount()
+    })
+    if (parentDescriptor) {
+      Object.defineProperty(window, 'parent', parentDescriptor)
+    }
     globalThis.fetch = originalFetch
     restoreDom()
   }
