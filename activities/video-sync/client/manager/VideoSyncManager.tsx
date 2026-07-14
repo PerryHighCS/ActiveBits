@@ -75,7 +75,7 @@ type AutoStartStatus = 'idle' | 'starting' | 'failed'
 
 const YOUTUBE_MANAGER_LOAD_ERROR = 'YouTube player failed to load. Try a different video URL.'
 const MISSING_INSTRUCTOR_CREDENTIALS_ERROR = 'Instructor credentials missing. Open this session from the dashboard or authenticated permalink.'
-const YOUTUBE_EDUCATION_FALLBACK_TIMEOUT_MS = 1_500
+const YOUTUBE_HOST_FALLBACK_TIMEOUT_MS = 1_500
 const MANAGER_PLAYING_DRIFT_TOLERANCE_SEC = 2
 const MANAGER_PLAYBACK_COMMAND_FLUSH_DELAY_MS = 120
 const MAX_MANAGER_API_ERROR_MESSAGE_LENGTH = 160
@@ -863,7 +863,7 @@ export default function VideoSyncManager() {
         clearPlayerReadyTimeout()
         playerReadyTimeoutId = window.setTimeout(() => {
           fallbackToNextHost(player)
-        }, YOUTUBE_EDUCATION_FALLBACK_TIMEOUT_MS)
+        }, YOUTUBE_HOST_FALLBACK_TIMEOUT_MS)
       }
 
       try {
