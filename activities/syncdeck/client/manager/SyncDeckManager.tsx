@@ -984,8 +984,10 @@ export function clearLoadedEmbeddedManagerInstanceKey(
 export function resolveEmbeddedManagerBootstrapRefreshRecovery(params: {
   currentOrigin: string
   eventOrigin: string
+  eventSource: MessageEventSource | null
   payload: unknown
   embeddedActivities: SyncDeckEmbeddedActivitiesMap
+  embeddedManagerWindowByInstanceKey: Readonly<Record<string, WindowProxy | null>>
   managerEntryTokensByChildSessionId: Record<string, string>
   loadedEmbeddedManagerInstanceKeys: Record<string, boolean>
   completedChildSessionIds: Set<string>
@@ -1009,6 +1011,8 @@ export function resolveEmbeddedManagerBootstrapRefreshRecovery(params: {
     record.childSessionId === childSessionId
   ))?.[0]
   if (!instanceKey) return null
+  const expectedSource = params.embeddedManagerWindowByInstanceKey[instanceKey] ?? null
+  if (!params.eventSource || !expectedSource || params.eventSource !== expectedSource) return null
 
   const managerEntryTokensByChildSessionId = { ...params.managerEntryTokensByChildSessionId }
   delete managerEntryTokensByChildSessionId[childSessionId]
@@ -2244,6 +2248,7 @@ const SyncDeckManager: FC = () => {
   const [embeddedBootstrapBackfillRetryNonce, setEmbeddedBootstrapBackfillRetryNonce] = useState(0)
   const [failedEmbeddedBootstrapChildSessionIds, setFailedEmbeddedBootstrapChildSessionIds] = useState<string[]>([])
   const presentationIframeRef = useRef<HTMLIFrameElement | null>(null)
+  const embeddedManagerIframeRefs = useRef<Record<string, HTMLIFrameElement | null>>({})
   const reportPreviewTriggerRef = useRef<HTMLButtonElement | null>(null)
   const reportPreviewDialogRef = useRef<HTMLDivElement | null>(null)
   const restoreDocumentTitleRef = useRef<string | null>(null)
@@ -2355,8 +2360,15 @@ const SyncDeckManager: FC = () => {
       const recovery = resolveEmbeddedManagerBootstrapRefreshRecovery({
         currentOrigin: window.location.origin,
         eventOrigin: event.origin,
+        eventSource: event.source,
         payload: event.data,
         embeddedActivities,
+        embeddedManagerWindowByInstanceKey: Object.fromEntries(
+          Object.entries(embeddedManagerIframeRefs.current).map(([instanceKey, iframe]) => [
+            instanceKey,
+            iframe?.contentWindow ?? null,
+          ]),
+        ),
         managerEntryTokensByChildSessionId: embeddedManagerEntryTokensByChildSessionIdRef.current,
         loadedEmbeddedManagerInstanceKeys,
         completedChildSessionIds: completedEmbeddedBootstrapChildSessionIdsRef.current,
@@ -2369,7 +2381,9 @@ const SyncDeckManager: FC = () => {
 
       embeddedManagerEntryTokensByChildSessionIdRef.current = recovery.managerEntryTokensByChildSessionId
       setEmbeddedManagerEntryTokensByChildSessionId(recovery.managerEntryTokensByChildSessionId)
-      setLoadedEmbeddedManagerInstanceKeys(recovery.loadedEmbeddedManagerInstanceKeys)
+      setLoadedEmbeddedManagerInstanceKeys((current) => (
+        clearLoadedEmbeddedManagerInstanceKey(current, recovery.instanceKey)
+      ))
       completedEmbeddedBootstrapChildSessionIdsRef.current = recovery.completedChildSessionIds
       pendingEmbeddedBootstrapChildSessionIdsRef.current = recovery.pendingChildSessionIds
       failedEmbeddedBootstrapChildSessionIdsRef.current = recovery.failedChildSessionIds
@@ -5113,6 +5127,13 @@ const SyncDeckManager: FC = () => {
                               title={`Embedded ${record.activityId} manager`}
                               src={buildEmbeddedManagerIframeSrc(record, managerEntryToken)}
                               className="w-full h-full"
+                              ref={(iframe) => {
+                                if (iframe) {
+                                  embeddedManagerIframeRefs.current[instanceKey] = iframe
+                                } else {
+                                  delete embeddedManagerIframeRefs.current[instanceKey]
+                                }
+                              }}
                               referrerPolicy="no-referrer"
                               {...inactiveIframeAccessibilityProps}
                               onLoad={() => {

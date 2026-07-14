@@ -878,6 +878,7 @@ void test('clearLoadedEmbeddedManagerInstanceKey forces bootstrap-refresh remoun
 })
 
 void test('resolveEmbeddedManagerBootstrapRefreshRecovery clears same-origin child state and requeues its backfill', () => {
+  const childManagerWindow = {} as WindowProxy
   const embeddedActivities = {
     'video-sync:3:0': {
       activityId: 'video-sync',
@@ -895,8 +896,10 @@ void test('resolveEmbeddedManagerBootstrapRefreshRecovery clears same-origin chi
   const recovery = resolveEmbeddedManagerBootstrapRefreshRecovery({
     currentOrigin: 'https://activebits.local',
     eventOrigin: 'https://activebits.local',
+    eventSource: childManagerWindow,
     payload: { type: 'embedded-manager-bootstrap-refresh', childSessionId: 'child-video' },
     embeddedActivities,
+    embeddedManagerWindowByInstanceKey: { 'video-sync:3:0': childManagerWindow },
     managerEntryTokensByChildSessionId: {
       'child-video': 'stale-token',
       'child-postboard': 'keep-token',
@@ -932,13 +935,42 @@ void test('resolveEmbeddedManagerBootstrapRefreshRecovery ignores cross-origin r
     resolveEmbeddedManagerBootstrapRefreshRecovery({
       currentOrigin: 'https://activebits.local',
       eventOrigin: 'https://untrusted.example',
+      eventSource: null,
       payload: { type: 'embedded-manager-bootstrap-refresh', childSessionId: 'child-video' },
       embeddedActivities: {},
+      embeddedManagerWindowByInstanceKey: {},
       managerEntryTokensByChildSessionId: {},
       loadedEmbeddedManagerInstanceKeys: {},
       completedChildSessionIds: new Set(),
       pendingChildSessionIds: new Set(),
       failedChildSessionIds: new Set(),
+    }),
+    null,
+  )
+})
+
+void test('resolveEmbeddedManagerBootstrapRefreshRecovery ignores same-origin messages from another iframe', () => {
+  const childManagerWindow = {} as WindowProxy
+  assert.equal(
+    resolveEmbeddedManagerBootstrapRefreshRecovery({
+      currentOrigin: 'https://activebits.local',
+      eventOrigin: 'https://activebits.local',
+      eventSource: {} as WindowProxy,
+      payload: { type: 'embedded-manager-bootstrap-refresh', childSessionId: 'child-video' },
+      embeddedActivities: {
+        'video-sync:3:0': {
+          activityId: 'video-sync',
+          childSessionId: 'child-video',
+          startedAt: 3,
+          owner: 'syncdeck-instructor',
+        },
+      },
+      embeddedManagerWindowByInstanceKey: { 'video-sync:3:0': childManagerWindow },
+      managerEntryTokensByChildSessionId: { 'child-video': 'stale-token' },
+      loadedEmbeddedManagerInstanceKeys: { 'video-sync:3:0': true },
+      completedChildSessionIds: new Set(['child-video']),
+      pendingChildSessionIds: new Set(['child-video']),
+      failedChildSessionIds: new Set(['child-video']),
     }),
     null,
   )
