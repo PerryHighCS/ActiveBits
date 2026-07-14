@@ -93,11 +93,11 @@ export function useEmbeddedManagerPasscodeExchange(params: {
       setState({ key: exchangeKey, passcode: null, error: null, isResolving: true })
 
       try {
+        // This token is now being presented. Remove it before awaiting so an
+        // unmount cannot leave an attempted credential in the iframe URL.
+        clearEmbeddedManagerTokenFromUrl()
         const passcode = await fetchEmbeddedManagerPasscode({ sessionId, token })
         if (cancelled) return
-        // The one-time token has now been presented, even if the server could
-        // not exchange it. Parent-mediated recovery supplies any replacement.
-        clearEmbeddedManagerTokenFromUrl()
         if (passcode) {
           refreshAttemptsBySessionIdRef.current.delete(sessionId)
         } else {
@@ -107,7 +107,6 @@ export function useEmbeddedManagerPasscodeExchange(params: {
       } catch (error) {
         if (!cancelled) {
           console.error('Failed to exchange embedded manager token:', error)
-          clearEmbeddedManagerTokenFromUrl()
           requestRefresh(sessionId)
           setState({ key: exchangeKey, passcode: null, error, isResolving: false })
         }

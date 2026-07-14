@@ -197,6 +197,7 @@ void test('useEmbeddedManagerPasscodeExchange reports failures and ignores updat
       root.render(createElement(ExchangeProbe, { onState: (state) => states.push(state) }))
     })
     await flushAsyncWork()
+    assert.equal(window.location.search, '')
     console.info('[TEST] Expected embedded-manager token exchange failure.')
     deferredFetch.reject(new Error('exchange unavailable'))
     await flushAsyncWork()
