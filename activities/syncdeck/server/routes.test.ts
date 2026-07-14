@@ -1583,6 +1583,65 @@ void test('generate-url returns signed syncdeck persistent link and sets cookie'
   assert.equal(cookiePayload[0]?.urlHash, urlHash)
 })
 
+void test('generate-url honors a solo-allowed entry policy from the request body', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const storeState = createSessionStore({})
+  setupSyncDeckRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.post['/api/syncdeck/generate-url']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.(
+    createRequest({}, {
+      activityName: 'syncdeck',
+      teacherCode: 'teacher-123',
+      entryPolicy: 'solo-allowed',
+      selectedOptions: {
+        presentationUrl: 'https://slides.example.com/deck',
+      },
+    }),
+    res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  const payload = res.body as { hash?: string; url?: string }
+  assert.match(
+    payload.url ?? '',
+    /^\/activity\/syncdeck\/[a-f0-9]{20}\?presentationUrl=.*&entryPolicy=solo-allowed&urlHash=[a-f0-9]{16}$/,
+  )
+
+  const cookiePayload = JSON.parse(res.cookies[0]?.value || '[]') as Array<Record<string, unknown>>
+  assert.equal(cookiePayload[0]?.entryPolicy, 'solo-allowed')
+})
+
+void test('generate-url falls back to instructor-required for an invalid entry policy', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const storeState = createSessionStore({})
+  setupSyncDeckRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.post['/api/syncdeck/generate-url']
+  const res = createResponse()
+
+  await handler?.(
+    createRequest({}, {
+      activityName: 'syncdeck',
+      teacherCode: 'teacher-123',
+      entryPolicy: 'not-a-real-policy',
+      selectedOptions: {
+        presentationUrl: 'https://slides.example.com/deck',
+      },
+    }),
+    res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  const payload = res.body as { url?: string }
+  assert.match(payload.url ?? '', /entryPolicy=instructor-required/)
+})
+
 void test('generate-url rejects invalid presentationUrl', async () => {
   const app = createMockApp()
   const ws = createMockWs()

@@ -15,6 +15,15 @@ Document API and data-shape assumptions that must stay compatible over time.
 
 ## Contracts
 
+- Date: 2026-07-14
+- Surface: REST | SyncDeck utility permalink builder
+- Contract: `POST /api/syncdeck/generate-url` (the endpoint behind the standalone `/util/syncdeck/permalink` utility page, distinct from the generic `/api/persistent-session/create` used by the Manage Dashboard permalink flow) now accepts an optional `entryPolicy` field (`instructor-required` | `solo-allowed` | `solo-only`, from `types/waitingRoom.ts`). The client dropdown reuses `PERSISTENT_SESSION_ENTRY_POLICY_OPTIONS` from `client/src/components/common/persistentSessionEntryPolicyUtils.ts` via the `@src/...` alias.
+- Compatibility constraints: The server resolves the field through `resolvePersistentSessionEntryPolicy`, which falls back to `instructor-required` for missing/invalid values, so old clients that omit `entryPolicy` keep prior behavior. SyncDeck's `activity.config.ts` already declares `standaloneEntry.supportsPermalink: true`, so no additional per-activity solo-support gate was needed in this endpoint (unlike the generic `/api/persistent-session/create` route, which calls `validateEntryPolicyForActivity`).
+- Validation rules: `entryPolicy` is written into both the returned URL query string and the `persistent_sessions` cookie entry, matching the shape already used by `/api/syncdeck/:sessionId/configure` and the generic persistent-session routes.
+- Evidence (schema/tests/path): `activities/syncdeck/server/routes.ts` (`/api/syncdeck/generate-url`); `activities/syncdeck/server/routes.test.ts`; `activities/syncdeck/client/util/SyncDeckLaunchPresentation.tsx`; `activities/syncdeck/client/util/SyncDeckLaunchPresentation.test.tsx`.
+- Follow-up action: None currently; if another activity utility page grows a bespoke permalink endpoint, prefer wiring it through the generic `/api/persistent-session/create` contract instead of duplicating entry-policy handling.
+- Owner: Claude
+
 - Date: 2026-07-13
 - Surface: REST | activity interface | SyncDeck embedded manager bootstrap
 - Contract: Every valid SyncDeck embedded child with object session data returns both `managerBootstrap` and a short-lived `managerEntryToken` from `POST /api/syncdeck/:sessionId/embedded-activity/start`. The bootstrap object may be empty for a credentialless manager such as Raffle.

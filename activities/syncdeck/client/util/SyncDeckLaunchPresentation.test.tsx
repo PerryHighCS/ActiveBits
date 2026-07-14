@@ -190,6 +190,38 @@ void test('generateSyncDeckPermalink posts selected presentation options and ret
   assert.deepEqual(JSON.parse(String(requests[0]?.init?.body ?? '{}')), {
     activityName: 'syncdeck',
     teacherCode: 'teacher-123',
+    entryPolicy: 'instructor-required',
+    selectedOptions: {
+      presentationUrl: 'https://slides.example/deck',
+    },
+  })
+})
+
+void test('generateSyncDeckPermalink posts the selected entry policy', async () => {
+  const { generateSyncDeckPermalink } = await import('./SyncDeckLaunchPresentation.js')
+  const requests: Array<{ input: string; init?: RequestInit }> = []
+
+  await generateSyncDeckPermalink({
+    presentationUrl: 'https://slides.example/deck',
+    teacherCode: 'teacher-123',
+    entryPolicy: 'solo-allowed',
+    origin: 'https://bits.example',
+    fetchFn: (async (input, init) => {
+      requests.push({ input: String(input), init })
+      return {
+        ok: true,
+        json: async () => ({
+          hash: 'abc123',
+          url: '/activity/syncdeck/abc123?presentationUrl=https%3A%2F%2Fslides.example%2Fdeck&entryPolicy=solo-allowed&urlHash=deadbeef',
+        }),
+      } as Response
+    }) as typeof fetch,
+  })
+
+  assert.deepEqual(JSON.parse(String(requests[0]?.init?.body ?? '{}')), {
+    activityName: 'syncdeck',
+    teacherCode: 'teacher-123',
+    entryPolicy: 'solo-allowed',
     selectedOptions: {
       presentationUrl: 'https://slides.example/deck',
     },
@@ -280,8 +312,85 @@ void test('SyncDeckLaunchPresentation shows a permalink builder with a prefilled
       )
       assert.notEqual(rendered.queryByLabelText(/teacher code/i), null)
       assert.notEqual(rendered.queryByRole('button', { name: /create permanent link/i }), null)
+      const entryModeSelect = rendered.getByLabelText(/entry mode/i) as HTMLSelectElement
+      assert.equal(entryModeSelect.value, 'instructor-required')
+      assert.deepEqual(
+        Array.from(entryModeSelect.options).map((option) => option.value),
+        ['instructor-required', 'solo-allowed', 'solo-only'],
+      )
     })
   } finally {
+    restoreDomEnvironment()
+  }
+})
+
+void test('SyncDeckLaunchPresentation sends the selected entry mode when creating a permalink', async () => {
+  const restoreDomEnvironment = installDomEnvironment(
+    'https://bits.mycode.run/util/syncdeck/permalink?presentationUrl=https%3A%2F%2Fslides.example%2Fdeck',
+  )
+  const previousFetch = globalThis.fetch
+  const { fireEvent, render, waitFor } = await import('@testing-library/react')
+  const { MemoryRouter } = await import('react-router-dom')
+  const { default: SyncDeckLaunchPresentation } = await import('./SyncDeckLaunchPresentation.js')
+  let capturedEntryPolicy: unknown = null
+  let unmount: (() => void) | null = null
+
+  ;(globalThis as { fetch: typeof fetch }).fetch = (async (input, init) => {
+    assert.equal(String(input), '/api/syncdeck/generate-url')
+    capturedEntryPolicy = JSON.parse(String(init?.body ?? '{}')).entryPolicy
+    return {
+      ok: true,
+      json: async () => ({
+        hash: 'abc123',
+        url: '/activity/syncdeck/abc123?presentationUrl=https%3A%2F%2Fslides.example%2Fdeck&entryPolicy=solo-only&urlHash=deadbeef',
+      }),
+    } as Response
+  }) as typeof fetch
+
+  try {
+    const rendered = render(
+      React.createElement(
+        MemoryRouter,
+        {
+          initialEntries: [
+            '/util/syncdeck/permalink?presentationUrl=https%3A%2F%2Fslides.example%2Fdeck',
+          ],
+        },
+        React.createElement(SyncDeckLaunchPresentation),
+      ),
+    )
+    unmount = rendered.unmount
+
+    fireEvent.click(rendered.getByRole('button', { name: /verify url/i }))
+
+    await waitFor(() => {
+      assert.notEqual(document.querySelector('iframe'), null)
+    })
+    const iframe = document.querySelector('iframe')
+    window.dispatchEvent(new window.MessageEvent('message', {
+      origin: 'https://slides.example',
+      source: iframe?.contentWindow ?? null,
+      data: { type: 'reveal-sync', action: 'ready' },
+    }))
+
+    await waitFor(() => {
+      assert.match(rendered.getByText(/url verified/i).textContent ?? '', /url verified/i)
+    })
+
+    fireEvent.change(rendered.getByLabelText(/entry mode/i), {
+      target: { value: 'solo-only' },
+    })
+    fireEvent.change(rendered.getByLabelText(/teacher code/i), {
+      target: { value: 'teacher-123' },
+    })
+    fireEvent.click(rendered.getByRole('button', { name: /create permanent link/i }))
+
+    await waitFor(() => {
+      assert.equal(capturedEntryPolicy, 'solo-only')
+    })
+  } finally {
+    unmount?.()
+    ;(globalThis as { fetch?: typeof fetch }).fetch = previousFetch
     restoreDomEnvironment()
   }
 })
