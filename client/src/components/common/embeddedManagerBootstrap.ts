@@ -4,7 +4,7 @@ export function readEmbeddedManagerToken(search: string): string | null {
   return typeof token === 'string' && token.trim().length > 0 ? token.trim() : null
 }
 
-/** Removes the one-time manager token after a successful child-manager exchange. */
+/** Removes the one-time manager token after a child-manager exchange attempt. */
 export function removeEmbeddedManagerToken(search: string): string {
   const params = new URLSearchParams(search)
   params.delete('embeddedManagerToken')

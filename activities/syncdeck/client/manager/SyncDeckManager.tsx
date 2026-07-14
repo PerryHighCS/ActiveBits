@@ -2207,6 +2207,7 @@ const SyncDeckManager: FC = () => {
   const [students, setStudents] = useState<SyncDeckStudentPresence[]>([])
   const [isStudentsPanelOpen, setIsStudentsPanelOpen] = useState(false)
   const [embeddedActivities, setEmbeddedActivities] = useState<SyncDeckEmbeddedActivitiesMap>({})
+  const embeddedActivitiesRef = useRef<SyncDeckEmbeddedActivitiesMap>({})
   const [isEmbeddedPanelOpen, setIsEmbeddedPanelOpen] = useState(false)
   const [isActivityPickerOpen, setIsActivityPickerOpen] = useState(false)
   const [endingEmbeddedInstanceKey, setEndingEmbeddedInstanceKey] = useState<string | null>(null)
@@ -2345,6 +2346,16 @@ const SyncDeckManager: FC = () => {
     return true
   }, [])
 
+  const updateEmbeddedActivities = useCallback((
+    updater: (current: SyncDeckEmbeddedActivitiesMap) => SyncDeckEmbeddedActivitiesMap,
+  ): void => {
+    setEmbeddedActivities((current) => {
+      const next = updater(current)
+      embeddedActivitiesRef.current = next
+      return next
+    })
+  }, [])
+
   useEffect(() => {
     if (typeof window === 'undefined') {
       return
@@ -2356,7 +2367,7 @@ const SyncDeckManager: FC = () => {
         eventOrigin: event.origin,
         eventSource: event.source,
         payload: event.data,
-        embeddedActivities,
+        embeddedActivities: embeddedActivitiesRef.current,
         embeddedManagerWindowByInstanceKey: Object.fromEntries(
           Object.entries(embeddedManagerIframeRefs.current).map(([instanceKey, iframe]) => [
             instanceKey,
@@ -2387,7 +2398,7 @@ const SyncDeckManager: FC = () => {
 
     window.addEventListener('message', handleEmbeddedManagerBootstrapRefreshRequest)
     return () => window.removeEventListener('message', handleEmbeddedManagerBootstrapRefreshRequest)
-  }, [clearEmbeddedBootstrapBackfillRetryTimeout, embeddedActivities])
+  }, [clearEmbeddedBootstrapBackfillRetryTimeout])
 
   const releaseRestoreSuppression = useCallback((): void => {
     suppressOutboundStateUntilRestoreRef.current = false
@@ -2658,7 +2669,7 @@ const SyncDeckManager: FC = () => {
                   current === embeddedLifecyclePayload.instanceKey ? null : current,
                 )
               }
-              setEmbeddedActivities((current) =>
+              updateEmbeddedActivities((current) =>
                 applySyncDeckEmbeddedLifecyclePayload(current, embeddedLifecyclePayload),
               )
               return
@@ -2829,7 +2840,7 @@ const SyncDeckManager: FC = () => {
         const existingPresentationUrl = payload.session?.data?.presentationUrl
 
         if (!isCancelled) {
-          setEmbeddedActivities(existingEmbeddedActivities)
+          updateEmbeddedActivities(() => existingEmbeddedActivities)
         }
 
         if (typeof existingPresentationUrl !== 'string') {
@@ -2858,7 +2869,7 @@ const SyncDeckManager: FC = () => {
     return () => {
       isCancelled = true
     }
-  }, [hostProtocol, sessionId, userAgent])
+  }, [hostProtocol, sessionId, updateEmbeddedActivities, userAgent])
 
   useEffect(() => {
     completedEmbeddedBootstrapChildSessionIdsRef.current.clear()
@@ -3440,7 +3451,7 @@ const SyncDeckManager: FC = () => {
               response: payload,
             })
             if (localLifecyclePayload) {
-              setEmbeddedActivities((current) => (
+              updateEmbeddedActivities((current) => (
                 applySyncDeckEmbeddedLifecyclePayload(current, localLifecyclePayload)
               ))
             }
@@ -3515,7 +3526,7 @@ const SyncDeckManager: FC = () => {
         },
       })
     },
-    [cacheEmbeddedManagerEntryToken, sessionId, instructorPasscode, embeddedActivities, instructorIndicesState],
+    [cacheEmbeddedManagerEntryToken, sessionId, instructorPasscode, embeddedActivities, instructorIndicesState, updateEmbeddedActivities],
   )
 
   const loadDeckActivityRequests = useCallback(async (): Promise<SyncDeckDeckActivityRequestsByHorizontalIndex> => {
@@ -4471,7 +4482,7 @@ const SyncDeckManager: FC = () => {
         throw new Error('Failed to end embedded activity')
       }
 
-      setEmbeddedActivities((current) => {
+      updateEmbeddedActivities((current) => {
         const next = { ...current }
         delete next[instanceKey]
         return next

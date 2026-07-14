@@ -7,6 +7,13 @@ import {
 
 type EmbeddedManagerPasscodeResponse = { instructorPasscode?: unknown }
 
+export class EmbeddedManagerPasscodeExchangeUnavailableError extends Error {
+  constructor(status: number) {
+    super(`Embedded manager credential exchange is temporarily unavailable (HTTP ${status}).`)
+    this.name = 'EmbeddedManagerPasscodeExchangeUnavailableError'
+  }
+}
+
 export const MAX_EMBEDDED_MANAGER_BOOTSTRAP_REFRESH_ATTEMPTS = 3
 
 export function nextEmbeddedManagerBootstrapRefreshAttempt(
@@ -28,7 +35,7 @@ export function nextEmbeddedManagerBootstrapRefreshAttempt(
 type EmbeddedManagerPasscodeFetch = (
   input: string,
   init: RequestInit,
-) => Promise<{ ok: boolean; json(): Promise<unknown> }>
+) => Promise<{ ok: boolean; status?: number; json(): Promise<unknown> }>
 
 export async function fetchEmbeddedManagerPasscode(params: {
   sessionId: string
@@ -40,7 +47,13 @@ export async function fetchEmbeddedManagerPasscode(params: {
     `/api/syncdeck/embedded-manager-passcode?sessionId=${encodeURIComponent(params.sessionId)}&token=${encodeURIComponent(params.token)}`,
     { credentials: 'same-origin', cache: 'no-store' },
   )
-  if (!response.ok) return null
+  if (!response.ok) {
+    const status = response.status
+    if (typeof status === 'number' && Number.isInteger(status) && status >= 500) {
+      throw new EmbeddedManagerPasscodeExchangeUnavailableError(status)
+    }
+    return null
+  }
 
   const payload = await response.json() as EmbeddedManagerPasscodeResponse
   const passcode = typeof payload.instructorPasscode === 'string' ? payload.instructorPasscode.trim() : ''

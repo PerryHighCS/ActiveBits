@@ -4,6 +4,7 @@ import { act, createElement, useEffect } from 'react'
 import { createRoot } from 'react-dom/client'
 import { JSDOM } from 'jsdom'
 import {
+  EmbeddedManagerPasscodeExchangeUnavailableError,
   fetchEmbeddedManagerPasscode,
   nextEmbeddedManagerBootstrapRefreshAttempt,
   useEmbeddedManagerPasscodeExchange,
@@ -120,6 +121,21 @@ void test('fetchEmbeddedManagerPasscode rejects invalid exchange responses witho
       fetchImpl: async () => ({ ok: true, json: async () => ({ instructorPasscode: '   ' }) }),
     }),
     null,
+  )
+})
+
+void test('fetchEmbeddedManagerPasscode surfaces temporary server failures', async () => {
+  console.info('[TEST] Expected embedded-manager credential exchange server failure.')
+  await assert.rejects(
+    fetchEmbeddedManagerPasscode({
+      sessionId: 'child',
+      token: 'token',
+      fetchImpl: async () => ({ ok: false, status: 503, json: async () => ({}) }),
+    }),
+    (error: unknown) => (
+      error instanceof EmbeddedManagerPasscodeExchangeUnavailableError
+      && error.message.includes('HTTP 503')
+    ),
   )
 })
 
