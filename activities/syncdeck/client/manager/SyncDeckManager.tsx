@@ -989,7 +989,6 @@ export function resolveEmbeddedManagerBootstrapRefreshRecovery(params: {
   embeddedActivities: SyncDeckEmbeddedActivitiesMap
   embeddedManagerWindowByInstanceKey: Readonly<Record<string, WindowProxy | null>>
   managerEntryTokensByChildSessionId: Record<string, string>
-  loadedEmbeddedManagerInstanceKeys: Record<string, boolean>
   completedChildSessionIds: Set<string>
   pendingChildSessionIds: Set<string>
   failedChildSessionIds: Set<string>
@@ -997,7 +996,6 @@ export function resolveEmbeddedManagerBootstrapRefreshRecovery(params: {
   childSessionId: string
   instanceKey: string
   managerEntryTokensByChildSessionId: Record<string, string>
-  loadedEmbeddedManagerInstanceKeys: Record<string, boolean>
   completedChildSessionIds: Set<string>
   pendingChildSessionIds: Set<string>
   failedChildSessionIds: Set<string>
@@ -1027,10 +1025,6 @@ export function resolveEmbeddedManagerBootstrapRefreshRecovery(params: {
     childSessionId,
     instanceKey,
     managerEntryTokensByChildSessionId,
-    loadedEmbeddedManagerInstanceKeys: clearLoadedEmbeddedManagerInstanceKey(
-      params.loadedEmbeddedManagerInstanceKeys,
-      instanceKey,
-    ),
     completedChildSessionIds,
     pendingChildSessionIds,
     failedChildSessionIds,
@@ -2370,7 +2364,6 @@ const SyncDeckManager: FC = () => {
           ]),
         ),
         managerEntryTokensByChildSessionId: embeddedManagerEntryTokensByChildSessionIdRef.current,
-        loadedEmbeddedManagerInstanceKeys,
         completedChildSessionIds: completedEmbeddedBootstrapChildSessionIdsRef.current,
         pendingChildSessionIds: pendingEmbeddedBootstrapChildSessionIdsRef.current,
         failedChildSessionIds: failedEmbeddedBootstrapChildSessionIdsRef.current,
@@ -2394,7 +2387,7 @@ const SyncDeckManager: FC = () => {
 
     window.addEventListener('message', handleEmbeddedManagerBootstrapRefreshRequest)
     return () => window.removeEventListener('message', handleEmbeddedManagerBootstrapRefreshRequest)
-  }, [clearEmbeddedBootstrapBackfillRetryTimeout, embeddedActivities, loadedEmbeddedManagerInstanceKeys])
+  }, [clearEmbeddedBootstrapBackfillRetryTimeout, embeddedActivities])
 
   const releaseRestoreSuppression = useCallback((): void => {
     suppressOutboundStateUntilRestoreRef.current = false

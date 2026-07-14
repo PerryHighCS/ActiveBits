@@ -904,10 +904,6 @@ void test('resolveEmbeddedManagerBootstrapRefreshRecovery clears same-origin chi
       'child-video': 'stale-token',
       'child-postboard': 'keep-token',
     },
-    loadedEmbeddedManagerInstanceKeys: {
-      'video-sync:3:0': true,
-      'postboard:3:1': true,
-    },
     completedChildSessionIds: new Set(['child-video', 'child-postboard']),
     pendingChildSessionIds: new Set(['child-video']),
     failedChildSessionIds: new Set(['child-video']),
@@ -915,7 +911,6 @@ void test('resolveEmbeddedManagerBootstrapRefreshRecovery clears same-origin chi
 
   assert.ok(recovery)
   assert.deepEqual(recovery.managerEntryTokensByChildSessionId, { 'child-postboard': 'keep-token' })
-  assert.deepEqual(recovery.loadedEmbeddedManagerInstanceKeys, { 'postboard:3:1': true })
   assert.deepEqual([...recovery.completedChildSessionIds], ['child-postboard'])
   assert.deepEqual([...recovery.pendingChildSessionIds], [])
   assert.deepEqual([...recovery.failedChildSessionIds], [])
@@ -940,7 +935,6 @@ void test('resolveEmbeddedManagerBootstrapRefreshRecovery ignores cross-origin r
       embeddedActivities: {},
       embeddedManagerWindowByInstanceKey: {},
       managerEntryTokensByChildSessionId: {},
-      loadedEmbeddedManagerInstanceKeys: {},
       completedChildSessionIds: new Set(),
       pendingChildSessionIds: new Set(),
       failedChildSessionIds: new Set(),
@@ -967,7 +961,6 @@ void test('resolveEmbeddedManagerBootstrapRefreshRecovery ignores same-origin me
       },
       embeddedManagerWindowByInstanceKey: { 'video-sync:3:0': childManagerWindow },
       managerEntryTokensByChildSessionId: { 'child-video': 'stale-token' },
-      loadedEmbeddedManagerInstanceKeys: { 'video-sync:3:0': true },
       completedChildSessionIds: new Set(['child-video']),
       pendingChildSessionIds: new Set(['child-video']),
       failedChildSessionIds: new Set(['child-video']),
