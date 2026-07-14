@@ -253,7 +253,9 @@ through activity-specific props.
 - The initiating SyncDeck manager reconciles a successful embedded-start response into its local
   embedded-activity map immediately. It must not depend solely on the instructor websocket echo:
   the deck can request an activity before that websocket finishes authenticating, and otherwise
-  the returned child-manager token would have no iframe to redeem it until a later reload.
+  the returned child-manager token would have no iframe to redeem it until a later reload. The
+  response `instanceKey` must match the requested embedded instance before any local lifecycle,
+  credential-cache, retry, or success state is updated.
 - If a credentialed child cannot redeem its one-time token, it sends its child session id (never
   credentials) to the same-origin parent. The parent invalidates its cached token and uses the
   existing authenticated start path to mint a replacement before remounting that iframe. Child

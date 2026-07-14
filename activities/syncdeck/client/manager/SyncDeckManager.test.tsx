@@ -31,6 +31,7 @@ import { resolvePersistentEntryPolicyForConfigure } from './SyncDeckManager.js'
 import { resolvePersistentUrlHashForConfigure } from './SyncDeckManager.js'
 import { normalizeSyncDeckEmbeddedActivities } from './SyncDeckManager.js'
 import { applySyncDeckEmbeddedLifecyclePayload } from './SyncDeckManager.js'
+import { isExpectedEmbeddedActivityStartResponseInstance } from './SyncDeckManager.js'
 import { resolveLocalEmbeddedActivityStartLifecyclePayload } from './SyncDeckManager.js'
 import { resolveManagerActiveEmbeddedInstanceKey } from './SyncDeckManager.js'
 import { resolveManagerEmbeddedInstanceStatus } from './SyncDeckManager.js'
@@ -159,6 +160,7 @@ void test('report preview dialog focus helpers ignore disabled controls and wrap
     getReportPreviewFocusableElements(dialog).map((element) => element.id),
     ['close', 'download'],
   )
+  console.info('[TEST] Expected local embedded-start lifecycle rejection for a mismatched instance key.')
   assert.equal(
     resolveReportPreviewDialogTabTarget({
       dialog,
@@ -183,6 +185,16 @@ void test('report preview dialog focus helpers ignore disabled controls and wrap
     }),
     downloadLink,
   )
+})
+
+void test('isExpectedEmbeddedActivityStartResponseInstance rejects mismatched primary and backfill responses', () => {
+  const mismatchedResponse = {
+    childSessionId: 'CHILD:s1:abc12:video-sync',
+    instanceKey: 'video-sync:4:0',
+  }
+  console.info('[TEST] Expected primary and backfill embedded-start response instance-key rejection.')
+  assert.equal(isExpectedEmbeddedActivityStartResponseInstance(mismatchedResponse, 'video-sync:3:0'), false)
+  assert.equal(isExpectedEmbeddedActivityStartResponseInstance(mismatchedResponse, 'video-sync:3:1'), false)
 })
 
 void test('parseDownloadFilenameFromContentDisposition handles standard and utf-8 filenames', () => {
@@ -926,6 +938,7 @@ void test('resolveEmbeddedManagerBootstrapRefreshRecovery clears same-origin chi
 })
 
 void test('resolveEmbeddedManagerBootstrapRefreshRecovery ignores cross-origin refresh messages', () => {
+  console.info('[TEST] Expected cross-origin embedded bootstrap refresh rejection.')
   assert.equal(
     resolveEmbeddedManagerBootstrapRefreshRecovery({
       currentOrigin: 'https://activebits.local',
@@ -945,6 +958,7 @@ void test('resolveEmbeddedManagerBootstrapRefreshRecovery ignores cross-origin r
 
 void test('resolveEmbeddedManagerBootstrapRefreshRecovery ignores same-origin messages from another iframe', () => {
   const childManagerWindow = {} as WindowProxy
+  console.info('[TEST] Expected embedded bootstrap refresh rejection from a different iframe.')
   assert.equal(
     resolveEmbeddedManagerBootstrapRefreshRecovery({
       currentOrigin: 'https://activebits.local',

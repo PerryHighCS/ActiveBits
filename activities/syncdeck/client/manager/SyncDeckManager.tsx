@@ -863,6 +863,15 @@ export function applySyncDeckEmbeddedLifecyclePayload(
   }
 }
 
+/** Verifies that an embedded-start response belongs to the requested slide instance. */
+export function isExpectedEmbeddedActivityStartResponseInstance(
+  response: SyncDeckEmbeddedActivityStartResponse,
+  instanceKey: string,
+): boolean {
+  const responseInstanceKey = typeof response.instanceKey === 'string' ? response.instanceKey.trim() : ''
+  return responseInstanceKey === instanceKey
+}
+
 /**
  * Reconcile a successful local start immediately instead of waiting for the
  * instructor websocket echo. The start request can complete before that
@@ -878,11 +887,7 @@ export function resolveLocalEmbeddedActivityStartLifecyclePayload(params: {
   const childSessionId = typeof params.response.childSessionId === 'string'
     ? params.response.childSessionId.trim()
     : ''
-  const responseInstanceKey = typeof params.response.instanceKey === 'string'
-    ? params.response.instanceKey.trim()
-    : ''
-
-  if (!childSessionId || responseInstanceKey !== params.instanceKey) {
+  if (!childSessionId || !isExpectedEmbeddedActivityStartResponseInstance(params.response, params.instanceKey)) {
     return null
   }
 
@@ -3059,6 +3064,9 @@ const SyncDeckManager: FC = () => {
         }
 
         const payload = (await response.json()) as SyncDeckEmbeddedActivityStartResponse
+        if (!isExpectedEmbeddedActivityStartResponseInstance(payload, request.instanceKey)) {
+          return 'failed'
+        }
         if (isCancelled) {
           return 'success'
         }
@@ -3443,6 +3451,16 @@ const SyncDeckManager: FC = () => {
             }
 
             const payload = (await response.json()) as SyncDeckEmbeddedActivityStartResponse
+            if (!isExpectedEmbeddedActivityStartResponseInstance(payload, request.instanceKey)) {
+              const message = 'Embedded activity start response did not match the requested instance.'
+              if (!background) {
+                setStartError(message)
+                setStartSuccess(null)
+              } else {
+                console.warn('[SyncDeck][ManagerActivityPrestartFailed]', { request, message })
+              }
+              return false
+            }
             const childSessionId = typeof payload.childSessionId === 'string' ? payload.childSessionId.trim() : ''
             const localLifecyclePayload = resolveLocalEmbeddedActivityStartLifecyclePayload({
               activityId: request.activityId,
