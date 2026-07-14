@@ -340,6 +340,7 @@ void test('SyncDeckLaunchPresentation copies a generated permalink to the clipbo
   const { fireEvent, render, waitFor } = await import('@testing-library/react')
   const { MemoryRouter } = await import('react-router-dom')
   const { default: SyncDeckLaunchPresentation } = await import('./SyncDeckLaunchPresentation.js')
+  let unmount: (() => void) | null = null
 
   Object.defineProperty(globalThis.navigator, 'clipboard', {
     configurable: true,
@@ -373,6 +374,7 @@ void test('SyncDeckLaunchPresentation copies a generated permalink to the clipbo
         React.createElement(SyncDeckLaunchPresentation),
       ),
     )
+    unmount = rendered.unmount
 
     fireEvent.click(rendered.getByRole('button', { name: /verify url/i }))
 
@@ -408,6 +410,7 @@ void test('SyncDeckLaunchPresentation copies a generated permalink to the clipbo
       assert.notEqual(rendered.queryByText(/copied link to clipboard/i), null)
     })
   } finally {
+    unmount?.()
     ;(globalThis as { fetch?: typeof fetch }).fetch = previousFetch
     restoreDomEnvironment()
   }
