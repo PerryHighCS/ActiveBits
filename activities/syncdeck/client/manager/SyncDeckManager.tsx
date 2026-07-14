@@ -980,6 +980,59 @@ export function clearLoadedEmbeddedManagerInstanceKey(
   return next
 }
 
+/** Applies a same-origin child refresh request to the local embedded-bootstrap recovery state. */
+export function resolveEmbeddedManagerBootstrapRefreshRecovery(params: {
+  currentOrigin: string
+  eventOrigin: string
+  payload: unknown
+  embeddedActivities: SyncDeckEmbeddedActivitiesMap
+  managerEntryTokensByChildSessionId: Record<string, string>
+  loadedEmbeddedManagerInstanceKeys: Record<string, boolean>
+  completedChildSessionIds: Set<string>
+  pendingChildSessionIds: Set<string>
+  failedChildSessionIds: Set<string>
+}): {
+  childSessionId: string
+  instanceKey: string
+  managerEntryTokensByChildSessionId: Record<string, string>
+  loadedEmbeddedManagerInstanceKeys: Record<string, boolean>
+  completedChildSessionIds: Set<string>
+  pendingChildSessionIds: Set<string>
+  failedChildSessionIds: Set<string>
+} | null {
+  if (params.eventOrigin !== params.currentOrigin) return null
+
+  const childSessionId = readEmbeddedManagerBootstrapRefreshRequest(params.payload)
+  if (!childSessionId) return null
+
+  const instanceKey = Object.entries(params.embeddedActivities).find(([, record]) => (
+    record.childSessionId === childSessionId
+  ))?.[0]
+  if (!instanceKey) return null
+
+  const managerEntryTokensByChildSessionId = { ...params.managerEntryTokensByChildSessionId }
+  delete managerEntryTokensByChildSessionId[childSessionId]
+  const completedChildSessionIds = new Set(params.completedChildSessionIds)
+  completedChildSessionIds.delete(childSessionId)
+  const pendingChildSessionIds = new Set(params.pendingChildSessionIds)
+  pendingChildSessionIds.delete(childSessionId)
+  const failedChildSessionIds = new Set(params.failedChildSessionIds)
+  failedChildSessionIds.delete(childSessionId)
+
+  return {
+    childSessionId,
+    instanceKey,
+    managerEntryTokensByChildSessionId,
+    loadedEmbeddedManagerInstanceKeys: clearLoadedEmbeddedManagerInstanceKey(
+      params.loadedEmbeddedManagerInstanceKeys,
+      instanceKey,
+    ),
+    completedChildSessionIds,
+    pendingChildSessionIds,
+    failedChildSessionIds,
+  }
+}
+
 export function resolveEmbeddedBootstrapBackfillRetryDelayMs(attemptCount: number): number {
   const normalizedAttemptCount = Number.isFinite(attemptCount) && attemptCount > 0
     ? Math.floor(attemptCount)
@@ -2299,36 +2352,35 @@ const SyncDeckManager: FC = () => {
     }
 
     const handleEmbeddedManagerBootstrapRefreshRequest = (event: MessageEvent<unknown>): void => {
-      if (event.origin !== window.location.origin) {
-        return
-      }
-      const childSessionId = readEmbeddedManagerBootstrapRefreshRequest(event.data)
-      if (!childSessionId) {
-        return
-      }
-      const instanceKey = Object.entries(embeddedActivities).find(([, record]) => (
-        record.childSessionId === childSessionId
-      ))?.[0]
-      if (!instanceKey) {
+      const recovery = resolveEmbeddedManagerBootstrapRefreshRecovery({
+        currentOrigin: window.location.origin,
+        eventOrigin: event.origin,
+        payload: event.data,
+        embeddedActivities,
+        managerEntryTokensByChildSessionId: embeddedManagerEntryTokensByChildSessionIdRef.current,
+        loadedEmbeddedManagerInstanceKeys,
+        completedChildSessionIds: completedEmbeddedBootstrapChildSessionIdsRef.current,
+        pendingChildSessionIds: pendingEmbeddedBootstrapChildSessionIdsRef.current,
+        failedChildSessionIds: failedEmbeddedBootstrapChildSessionIdsRef.current,
+      })
+      if (!recovery) {
         return
       }
 
-      const nextTokens = { ...embeddedManagerEntryTokensByChildSessionIdRef.current }
-      delete nextTokens[childSessionId]
-      embeddedManagerEntryTokensByChildSessionIdRef.current = nextTokens
-      setEmbeddedManagerEntryTokensByChildSessionId(nextTokens)
-      setLoadedEmbeddedManagerInstanceKeys((current) => clearLoadedEmbeddedManagerInstanceKey(current, instanceKey))
-      completedEmbeddedBootstrapChildSessionIdsRef.current.delete(childSessionId)
-      pendingEmbeddedBootstrapChildSessionIdsRef.current.delete(childSessionId)
-      failedEmbeddedBootstrapChildSessionIdsRef.current.delete(childSessionId)
-      setFailedEmbeddedBootstrapChildSessionIds((current) => current.filter((id) => id !== childSessionId))
+      embeddedManagerEntryTokensByChildSessionIdRef.current = recovery.managerEntryTokensByChildSessionId
+      setEmbeddedManagerEntryTokensByChildSessionId(recovery.managerEntryTokensByChildSessionId)
+      setLoadedEmbeddedManagerInstanceKeys(recovery.loadedEmbeddedManagerInstanceKeys)
+      completedEmbeddedBootstrapChildSessionIdsRef.current = recovery.completedChildSessionIds
+      pendingEmbeddedBootstrapChildSessionIdsRef.current = recovery.pendingChildSessionIds
+      failedEmbeddedBootstrapChildSessionIdsRef.current = recovery.failedChildSessionIds
+      setFailedEmbeddedBootstrapChildSessionIds((current) => current.filter((id) => id !== recovery.childSessionId))
       clearEmbeddedBootstrapBackfillRetryTimeout()
       setEmbeddedBootstrapBackfillRetryNonce((current) => current + 1)
     }
 
     window.addEventListener('message', handleEmbeddedManagerBootstrapRefreshRequest)
     return () => window.removeEventListener('message', handleEmbeddedManagerBootstrapRefreshRequest)
-  }, [clearEmbeddedBootstrapBackfillRetryTimeout, embeddedActivities])
+  }, [clearEmbeddedBootstrapBackfillRetryTimeout, embeddedActivities, loadedEmbeddedManagerInstanceKeys])
 
   const releaseRestoreSuppression = useCallback((): void => {
     suppressOutboundStateUntilRestoreRef.current = false

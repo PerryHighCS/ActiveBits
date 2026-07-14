@@ -51,6 +51,7 @@ import { resolveCompletedEmbeddedBootstrapChildSessionIds } from './SyncDeckMana
 import { resolveEmbeddedBootstrapManagerCredentials } from './SyncDeckManager.js'
 import { advanceEmbeddedManagerRenderNonce } from './SyncDeckManager.js'
 import { clearLoadedEmbeddedManagerInstanceKey } from './SyncDeckManager.js'
+import { resolveEmbeddedManagerBootstrapRefreshRecovery } from './SyncDeckManager.js'
 import { resolveEmbeddedBootstrapBackfillRetryDelayMs } from './SyncDeckManager.js'
 import { shouldShowEmbeddedBootstrapFailure } from './SyncDeckManager.js'
 import { resolveEmbeddedBootstrapBackfillRequests } from './SyncDeckManager.js'
@@ -873,6 +874,73 @@ void test('clearLoadedEmbeddedManagerInstanceKey forces bootstrap-refresh remoun
   assert.equal(
     clearLoadedEmbeddedManagerInstanceKey(current, 'missing:1:0'),
     current,
+  )
+})
+
+void test('resolveEmbeddedManagerBootstrapRefreshRecovery clears same-origin child state and requeues its backfill', () => {
+  const embeddedActivities = {
+    'video-sync:3:0': {
+      activityId: 'video-sync',
+      childSessionId: 'child-video',
+      startedAt: 3,
+      owner: 'syncdeck-instructor',
+    },
+    'postboard:3:1': {
+      activityId: 'postboard',
+      childSessionId: 'child-postboard',
+      startedAt: 3,
+      owner: 'syncdeck-instructor',
+    },
+  }
+  const recovery = resolveEmbeddedManagerBootstrapRefreshRecovery({
+    currentOrigin: 'https://activebits.local',
+    eventOrigin: 'https://activebits.local',
+    payload: { type: 'embedded-manager-bootstrap-refresh', childSessionId: 'child-video' },
+    embeddedActivities,
+    managerEntryTokensByChildSessionId: {
+      'child-video': 'stale-token',
+      'child-postboard': 'keep-token',
+    },
+    loadedEmbeddedManagerInstanceKeys: {
+      'video-sync:3:0': true,
+      'postboard:3:1': true,
+    },
+    completedChildSessionIds: new Set(['child-video', 'child-postboard']),
+    pendingChildSessionIds: new Set(['child-video']),
+    failedChildSessionIds: new Set(['child-video']),
+  })
+
+  assert.ok(recovery)
+  assert.deepEqual(recovery.managerEntryTokensByChildSessionId, { 'child-postboard': 'keep-token' })
+  assert.deepEqual(recovery.loadedEmbeddedManagerInstanceKeys, { 'postboard:3:1': true })
+  assert.deepEqual([...recovery.completedChildSessionIds], ['child-postboard'])
+  assert.deepEqual([...recovery.pendingChildSessionIds], [])
+  assert.deepEqual([...recovery.failedChildSessionIds], [])
+  assert.deepEqual(
+    resolveEmbeddedBootstrapBackfillRequests({
+      embeddedActivities,
+      completedChildSessionIds: recovery.completedChildSessionIds,
+      pendingChildSessionIds: recovery.pendingChildSessionIds,
+      failedChildSessionIds: recovery.failedChildSessionIds,
+    }),
+    [{ activityId: 'video-sync', childSessionId: 'child-video', instanceKey: 'video-sync:3:0' }],
+  )
+})
+
+void test('resolveEmbeddedManagerBootstrapRefreshRecovery ignores cross-origin refresh messages', () => {
+  assert.equal(
+    resolveEmbeddedManagerBootstrapRefreshRecovery({
+      currentOrigin: 'https://activebits.local',
+      eventOrigin: 'https://untrusted.example',
+      payload: { type: 'embedded-manager-bootstrap-refresh', childSessionId: 'child-video' },
+      embeddedActivities: {},
+      managerEntryTokensByChildSessionId: {},
+      loadedEmbeddedManagerInstanceKeys: {},
+      completedChildSessionIds: new Set(),
+      pendingChildSessionIds: new Set(),
+      failedChildSessionIds: new Set(),
+    }),
+    null,
   )
 })
 
