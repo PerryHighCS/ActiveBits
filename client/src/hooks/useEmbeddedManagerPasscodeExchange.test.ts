@@ -162,6 +162,7 @@ void test('useEmbeddedManagerPasscodeExchange reports resolving and successful p
 void test('useEmbeddedManagerPasscodeExchange removes the token after an invalid exchange response', async () => {
   const restoreDom = installDomEnvironment()
   const originalFetch = globalThis.fetch
+  console.info('[TEST] Expected invalid embedded-manager token exchange response.')
   globalThis.fetch = (async () => ({ ok: false, json: async () => ({}) })) as unknown as typeof fetch
   const root = createRoot(document.getElementById('root') as Element)
 
@@ -193,6 +194,7 @@ void test('useEmbeddedManagerPasscodeExchange reports failures and ignores updat
       root.render(createElement(ExchangeProbe, { onState: (state) => states.push(state) }))
     })
     await flushAsyncWork()
+    console.info('[TEST] Expected embedded-manager token exchange failure.')
     deferredFetch.reject(new Error('exchange unavailable'))
     await flushAsyncWork()
     assert.equal(states.at(-1)?.isResolving, false)
