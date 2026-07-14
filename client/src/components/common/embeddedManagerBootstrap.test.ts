@@ -57,6 +57,7 @@ void test('requestEmbeddedManagerBootstrapRefresh posts only the child session i
 
   try {
     requestEmbeddedManagerBootstrapRefresh('CHILD:parent:child:postboard')
+    requestEmbeddedManagerBootstrapRefresh('   ')
   } finally {
     if (windowDescriptor) {
       Object.defineProperty(globalThis, 'window', windowDescriptor)

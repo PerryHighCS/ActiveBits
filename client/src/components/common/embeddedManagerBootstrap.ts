@@ -34,13 +34,14 @@ export function readEmbeddedManagerBootstrapRefreshRequest(payload: unknown): st
 
 /** Requests a replacement manager-entry token from the same-origin embedding parent. */
 export function requestEmbeddedManagerBootstrapRefresh(childSessionId: string): void {
-  if (typeof window === 'undefined' || window.parent === window) {
+  const normalizedChildSessionId = childSessionId.trim()
+  if (normalizedChildSessionId.length === 0 || typeof window === 'undefined' || window.parent === window) {
     return
   }
 
   window.parent.postMessage({
     type: EMBEDDED_MANAGER_BOOTSTRAP_REFRESH_REQUEST,
-    childSessionId,
+    childSessionId: normalizedChildSessionId,
   }, window.location.origin)
 }
 

@@ -123,6 +123,9 @@ void test('nextEmbeddedManagerBootstrapRefreshAttempt caps refresh attempts per 
   assert.equal(nextEmbeddedManagerBootstrapRefreshAttempt(3), null)
   assert.equal(nextEmbeddedManagerBootstrapRefreshAttempt(-1), null)
   assert.equal(nextEmbeddedManagerBootstrapRefreshAttempt(0.5), null)
+  assert.equal(nextEmbeddedManagerBootstrapRefreshAttempt(0, Number.NaN), null)
+  assert.equal(nextEmbeddedManagerBootstrapRefreshAttempt(0, 0), null)
+  assert.equal(nextEmbeddedManagerBootstrapRefreshAttempt(0, 1.5), null)
 })
 
 void test('useEmbeddedManagerPasscodeExchange reports resolving and successful passcode states', async () => {

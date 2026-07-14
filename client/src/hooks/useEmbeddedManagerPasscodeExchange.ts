@@ -13,7 +13,13 @@ export function nextEmbeddedManagerBootstrapRefreshAttempt(
   currentAttempt: number,
   maxAttempts = MAX_EMBEDDED_MANAGER_BOOTSTRAP_REFRESH_ATTEMPTS,
 ): number | null {
-  if (!Number.isInteger(currentAttempt) || currentAttempt < 0 || currentAttempt >= maxAttempts) {
+  if (
+    !Number.isInteger(currentAttempt)
+    || currentAttempt < 0
+    || !Number.isInteger(maxAttempts)
+    || maxAttempts <= 0
+    || currentAttempt >= maxAttempts
+  ) {
     return null
   }
   return currentAttempt + 1
