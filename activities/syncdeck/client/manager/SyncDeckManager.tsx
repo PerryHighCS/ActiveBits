@@ -1,5 +1,6 @@
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
 import { storeCreateSessionBootstrapPayload } from '@src/components/common/manageDashboardUtils'
+import { readEmbeddedManagerBootstrapRefreshRequest } from '@src/components/common/embeddedManagerBootstrap'
 import { resolvePersistentSessionEntryPolicy, type PersistentSessionEntryPolicy } from '../../../../types/waitingRoom.js'
 import { runSyncDeckPresentationPreflight } from '../shared/presentationPreflight.js'
 import {
@@ -147,6 +148,7 @@ interface RevealSyncEnvelope {
 interface SyncDeckEmbeddedActivityStartResponse {
   childSessionId?: unknown
   instanceKey?: unknown
+  location?: unknown
   managerBootstrap?: unknown
   managerEntryToken?: unknown
 }
@@ -861,6 +863,49 @@ export function applySyncDeckEmbeddedLifecyclePayload(
   }
 }
 
+/** Verifies that an embedded-start response belongs to the requested slide instance. */
+export function isExpectedEmbeddedActivityStartResponseInstance(
+  response: SyncDeckEmbeddedActivityStartResponse,
+  instanceKey: string,
+): boolean {
+  const responseInstanceKey = typeof response.instanceKey === 'string' ? response.instanceKey.trim() : ''
+  return responseInstanceKey === instanceKey
+}
+
+/**
+ * Reconcile a successful local start immediately instead of waiting for the
+ * instructor websocket echo. The start request can complete before that
+ * socket has finished authenticating, in which case the echo is legitimately
+ * missed and the one-time child-manager bootstrap would otherwise be stranded.
+ */
+export function resolveLocalEmbeddedActivityStartLifecyclePayload(params: {
+  activityId: string
+  instanceKey: string
+  location?: SyncDeckEmbeddedActivityLocation
+  response: SyncDeckEmbeddedActivityStartResponse
+}): SyncDeckEmbeddedLifecyclePayload | null {
+  const childSessionId = typeof params.response.childSessionId === 'string'
+    ? params.response.childSessionId.trim()
+    : ''
+  if (!childSessionId || !isExpectedEmbeddedActivityStartResponseInstance(params.response, params.instanceKey)) {
+    return null
+  }
+
+  const responseLocation = resolveEmbeddedActivityLocation({
+    location: params.response.location,
+    instanceKey: params.instanceKey,
+  })
+  const location = responseLocation ?? params.location
+
+  return {
+    type: 'embedded-activity-start',
+    instanceKey: params.instanceKey,
+    activityId: params.activityId,
+    childSessionId,
+    ...(location ? { location } : {}),
+  }
+}
+
 export function resolveEmbeddedBootstrapBackfillRequests(params: {
   embeddedActivities: SyncDeckEmbeddedActivitiesMap
   completedChildSessionIds: ReadonlySet<string>
@@ -938,6 +983,57 @@ export function clearLoadedEmbeddedManagerInstanceKey(
   const next = { ...current }
   delete next[instanceKey]
   return next
+}
+
+/** Applies a same-origin child refresh request to the local embedded-bootstrap recovery state. */
+export function resolveEmbeddedManagerBootstrapRefreshRecovery(params: {
+  currentOrigin: string
+  eventOrigin: string
+  eventSource: MessageEventSource | null
+  payload: unknown
+  embeddedActivities: SyncDeckEmbeddedActivitiesMap
+  embeddedManagerWindowByInstanceKey: Readonly<Record<string, WindowProxy | null>>
+  managerEntryTokensByChildSessionId: Record<string, string>
+  completedChildSessionIds: Set<string>
+  pendingChildSessionIds: Set<string>
+  failedChildSessionIds: Set<string>
+}): {
+  childSessionId: string
+  instanceKey: string
+  managerEntryTokensByChildSessionId: Record<string, string>
+  completedChildSessionIds: Set<string>
+  pendingChildSessionIds: Set<string>
+  failedChildSessionIds: Set<string>
+} | null {
+  if (params.eventOrigin !== params.currentOrigin) return null
+
+  const childSessionId = readEmbeddedManagerBootstrapRefreshRequest(params.payload)
+  if (!childSessionId) return null
+
+  const instanceKey = Object.entries(params.embeddedActivities).find(([, record]) => (
+    record.childSessionId === childSessionId
+  ))?.[0]
+  if (!instanceKey) return null
+  const expectedSource = params.embeddedManagerWindowByInstanceKey[instanceKey] ?? null
+  if (!params.eventSource || !expectedSource || params.eventSource !== expectedSource) return null
+
+  const managerEntryTokensByChildSessionId = { ...params.managerEntryTokensByChildSessionId }
+  delete managerEntryTokensByChildSessionId[childSessionId]
+  const completedChildSessionIds = new Set(params.completedChildSessionIds)
+  completedChildSessionIds.delete(childSessionId)
+  const pendingChildSessionIds = new Set(params.pendingChildSessionIds)
+  pendingChildSessionIds.delete(childSessionId)
+  const failedChildSessionIds = new Set(params.failedChildSessionIds)
+  failedChildSessionIds.delete(childSessionId)
+
+  return {
+    childSessionId,
+    instanceKey,
+    managerEntryTokensByChildSessionId,
+    completedChildSessionIds,
+    pendingChildSessionIds,
+    failedChildSessionIds,
+  }
 }
 
 export function resolveEmbeddedBootstrapBackfillRetryDelayMs(attemptCount: number): number {
@@ -2116,6 +2212,7 @@ const SyncDeckManager: FC = () => {
   const [students, setStudents] = useState<SyncDeckStudentPresence[]>([])
   const [isStudentsPanelOpen, setIsStudentsPanelOpen] = useState(false)
   const [embeddedActivities, setEmbeddedActivities] = useState<SyncDeckEmbeddedActivitiesMap>({})
+  const embeddedActivitiesRef = useRef<SyncDeckEmbeddedActivitiesMap>({})
   const [isEmbeddedPanelOpen, setIsEmbeddedPanelOpen] = useState(false)
   const [isActivityPickerOpen, setIsActivityPickerOpen] = useState(false)
   const [endingEmbeddedInstanceKey, setEndingEmbeddedInstanceKey] = useState<string | null>(null)
@@ -2151,6 +2248,7 @@ const SyncDeckManager: FC = () => {
   const [embeddedBootstrapBackfillRetryNonce, setEmbeddedBootstrapBackfillRetryNonce] = useState(0)
   const [failedEmbeddedBootstrapChildSessionIds, setFailedEmbeddedBootstrapChildSessionIds] = useState<string[]>([])
   const presentationIframeRef = useRef<HTMLIFrameElement | null>(null)
+  const embeddedManagerIframeRefs = useRef<Record<string, HTMLIFrameElement | null>>({})
   const reportPreviewTriggerRef = useRef<HTMLButtonElement | null>(null)
   const reportPreviewDialogRef = useRef<HTMLDivElement | null>(null)
   const restoreDocumentTitleRef = useRef<string | null>(null)
@@ -2252,6 +2350,60 @@ const SyncDeckManager: FC = () => {
     setEmbeddedManagerRenderNonceByChildSessionId((current) => advanceEmbeddedManagerRenderNonce(current, childSessionId))
     return true
   }, [])
+
+  const updateEmbeddedActivities = useCallback((
+    updater: (current: SyncDeckEmbeddedActivitiesMap) => SyncDeckEmbeddedActivitiesMap,
+  ): void => {
+    setEmbeddedActivities((current) => {
+      const next = updater(current)
+      embeddedActivitiesRef.current = next
+      return next
+    })
+  }, [])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    const handleEmbeddedManagerBootstrapRefreshRequest = (event: MessageEvent<unknown>): void => {
+      const recovery = resolveEmbeddedManagerBootstrapRefreshRecovery({
+        currentOrigin: window.location.origin,
+        eventOrigin: event.origin,
+        eventSource: event.source,
+        payload: event.data,
+        embeddedActivities: embeddedActivitiesRef.current,
+        embeddedManagerWindowByInstanceKey: Object.fromEntries(
+          Object.entries(embeddedManagerIframeRefs.current).map(([instanceKey, iframe]) => [
+            instanceKey,
+            iframe?.contentWindow ?? null,
+          ]),
+        ),
+        managerEntryTokensByChildSessionId: embeddedManagerEntryTokensByChildSessionIdRef.current,
+        completedChildSessionIds: completedEmbeddedBootstrapChildSessionIdsRef.current,
+        pendingChildSessionIds: pendingEmbeddedBootstrapChildSessionIdsRef.current,
+        failedChildSessionIds: failedEmbeddedBootstrapChildSessionIdsRef.current,
+      })
+      if (!recovery) {
+        return
+      }
+
+      embeddedManagerEntryTokensByChildSessionIdRef.current = recovery.managerEntryTokensByChildSessionId
+      setEmbeddedManagerEntryTokensByChildSessionId(recovery.managerEntryTokensByChildSessionId)
+      setLoadedEmbeddedManagerInstanceKeys((current) => (
+        clearLoadedEmbeddedManagerInstanceKey(current, recovery.instanceKey)
+      ))
+      completedEmbeddedBootstrapChildSessionIdsRef.current = recovery.completedChildSessionIds
+      pendingEmbeddedBootstrapChildSessionIdsRef.current = recovery.pendingChildSessionIds
+      failedEmbeddedBootstrapChildSessionIdsRef.current = recovery.failedChildSessionIds
+      setFailedEmbeddedBootstrapChildSessionIds((current) => current.filter((id) => id !== recovery.childSessionId))
+      clearEmbeddedBootstrapBackfillRetryTimeout()
+      setEmbeddedBootstrapBackfillRetryNonce((current) => current + 1)
+    }
+
+    window.addEventListener('message', handleEmbeddedManagerBootstrapRefreshRequest)
+    return () => window.removeEventListener('message', handleEmbeddedManagerBootstrapRefreshRequest)
+  }, [clearEmbeddedBootstrapBackfillRetryTimeout])
 
   const releaseRestoreSuppression = useCallback((): void => {
     suppressOutboundStateUntilRestoreRef.current = false
@@ -2522,7 +2674,7 @@ const SyncDeckManager: FC = () => {
                   current === embeddedLifecyclePayload.instanceKey ? null : current,
                 )
               }
-              setEmbeddedActivities((current) =>
+              updateEmbeddedActivities((current) =>
                 applySyncDeckEmbeddedLifecyclePayload(current, embeddedLifecyclePayload),
               )
               return
@@ -2693,7 +2845,7 @@ const SyncDeckManager: FC = () => {
         const existingPresentationUrl = payload.session?.data?.presentationUrl
 
         if (!isCancelled) {
-          setEmbeddedActivities(existingEmbeddedActivities)
+          updateEmbeddedActivities(() => existingEmbeddedActivities)
         }
 
         if (typeof existingPresentationUrl !== 'string') {
@@ -2722,7 +2874,7 @@ const SyncDeckManager: FC = () => {
     return () => {
       isCancelled = true
     }
-  }, [hostProtocol, sessionId, userAgent])
+  }, [hostProtocol, sessionId, updateEmbeddedActivities, userAgent])
 
   useEffect(() => {
     completedEmbeddedBootstrapChildSessionIdsRef.current.clear()
@@ -2912,6 +3064,9 @@ const SyncDeckManager: FC = () => {
         }
 
         const payload = (await response.json()) as SyncDeckEmbeddedActivityStartResponse
+        if (!isExpectedEmbeddedActivityStartResponseInstance(payload, request.instanceKey)) {
+          return 'failed'
+        }
         if (isCancelled) {
           return 'success'
         }
@@ -3296,7 +3451,28 @@ const SyncDeckManager: FC = () => {
             }
 
             const payload = (await response.json()) as SyncDeckEmbeddedActivityStartResponse
+            if (!isExpectedEmbeddedActivityStartResponseInstance(payload, request.instanceKey)) {
+              const message = 'Embedded activity start response did not match the requested instance.'
+              if (!background) {
+                setStartError(message)
+                setStartSuccess(null)
+              } else {
+                console.warn('[SyncDeck][ManagerActivityPrestartFailed]', { request, message })
+              }
+              return false
+            }
             const childSessionId = typeof payload.childSessionId === 'string' ? payload.childSessionId.trim() : ''
+            const localLifecyclePayload = resolveLocalEmbeddedActivityStartLifecyclePayload({
+              activityId: request.activityId,
+              instanceKey: request.instanceKey,
+              location: request.location,
+              response: payload,
+            })
+            if (localLifecyclePayload) {
+              updateEmbeddedActivities((current) => (
+                applySyncDeckEmbeddedLifecyclePayload(current, localLifecyclePayload)
+              ))
+            }
             const managerCredentials = resolveEmbeddedBootstrapManagerCredentials(payload)
             if (childSessionId && managerCredentials) {
               storeCreateSessionBootstrapPayload(
@@ -3368,7 +3544,7 @@ const SyncDeckManager: FC = () => {
         },
       })
     },
-    [cacheEmbeddedManagerEntryToken, sessionId, instructorPasscode, embeddedActivities, instructorIndicesState],
+    [cacheEmbeddedManagerEntryToken, sessionId, instructorPasscode, embeddedActivities, instructorIndicesState, updateEmbeddedActivities],
   )
 
   const loadDeckActivityRequests = useCallback(async (): Promise<SyncDeckDeckActivityRequestsByHorizontalIndex> => {
@@ -4324,7 +4500,7 @@ const SyncDeckManager: FC = () => {
         throw new Error('Failed to end embedded activity')
       }
 
-      setEmbeddedActivities((current) => {
+      updateEmbeddedActivities((current) => {
         const next = { ...current }
         delete next[instanceKey]
         return next
@@ -4973,6 +5149,13 @@ const SyncDeckManager: FC = () => {
                               title={`Embedded ${record.activityId} manager`}
                               src={buildEmbeddedManagerIframeSrc(record, managerEntryToken)}
                               className="w-full h-full"
+                              ref={(iframe) => {
+                                if (iframe) {
+                                  embeddedManagerIframeRefs.current[instanceKey] = iframe
+                                } else {
+                                  delete embeddedManagerIframeRefs.current[instanceKey]
+                                }
+                              }}
                               referrerPolicy="no-referrer"
                               {...inactiveIframeAccessibilityProps}
                               onLoad={() => {

@@ -1,15 +1,41 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   clearEmbeddedManagerTokenFromUrl,
   readEmbeddedManagerToken,
+  requestEmbeddedManagerBootstrapRefresh,
 } from '@src/components/common/embeddedManagerBootstrap'
 
 type EmbeddedManagerPasscodeResponse = { instructorPasscode?: unknown }
 
+export class EmbeddedManagerPasscodeExchangeUnavailableError extends Error {
+  constructor(status: number) {
+    super(`Embedded manager credential exchange is temporarily unavailable (HTTP ${status}).`)
+    this.name = 'EmbeddedManagerPasscodeExchangeUnavailableError'
+  }
+}
+
+export const MAX_EMBEDDED_MANAGER_BOOTSTRAP_REFRESH_ATTEMPTS = 3
+
+export function nextEmbeddedManagerBootstrapRefreshAttempt(
+  currentAttempt: number,
+  maxAttempts = MAX_EMBEDDED_MANAGER_BOOTSTRAP_REFRESH_ATTEMPTS,
+): number | null {
+  if (
+    !Number.isInteger(currentAttempt)
+    || currentAttempt < 0
+    || !Number.isInteger(maxAttempts)
+    || maxAttempts <= 0
+    || currentAttempt >= maxAttempts
+  ) {
+    return null
+  }
+  return currentAttempt + 1
+}
+
 type EmbeddedManagerPasscodeFetch = (
   input: string,
   init: RequestInit,
-) => Promise<{ ok: boolean; json(): Promise<unknown> }>
+) => Promise<{ ok: boolean; status?: number; json(): Promise<unknown> }>
 
 export async function fetchEmbeddedManagerPasscode(params: {
   sessionId: string
@@ -21,7 +47,13 @@ export async function fetchEmbeddedManagerPasscode(params: {
     `/api/syncdeck/embedded-manager-passcode?sessionId=${encodeURIComponent(params.sessionId)}&token=${encodeURIComponent(params.token)}`,
     { credentials: 'same-origin', cache: 'no-store' },
   )
-  if (!response.ok) return null
+  if (!response.ok) {
+    const status = response.status
+    if (typeof status === 'number' && Number.isInteger(status) && status >= 500) {
+      throw new EmbeddedManagerPasscodeExchangeUnavailableError(status)
+    }
+    return null
+  }
 
   const payload = await response.json() as EmbeddedManagerPasscodeResponse
   const passcode = typeof payload.instructorPasscode === 'string' ? payload.instructorPasscode.trim() : ''
@@ -47,6 +79,18 @@ export function useEmbeddedManagerPasscodeExchange(params: {
     error: null,
     isResolving: false,
   })
+  const refreshAttemptsBySessionIdRef = useRef<Map<string, number>>(new Map())
+
+  const requestRefresh = (sessionId: string): void => {
+    const nextAttempt = nextEmbeddedManagerBootstrapRefreshAttempt(
+      refreshAttemptsBySessionIdRef.current.get(sessionId) ?? 0,
+    )
+    if (nextAttempt == null) {
+      return
+    }
+    refreshAttemptsBySessionIdRef.current.set(sessionId, nextAttempt)
+    requestEmbeddedManagerBootstrapRefresh(sessionId)
+  }
 
   useEffect(() => {
     const sessionId = params.sessionId
@@ -62,15 +106,21 @@ export function useEmbeddedManagerPasscodeExchange(params: {
       setState({ key: exchangeKey, passcode: null, error: null, isResolving: true })
 
       try {
+        // This token is now being presented. Remove it before awaiting so an
+        // unmount cannot leave an attempted credential in the iframe URL.
+        clearEmbeddedManagerTokenFromUrl()
         const passcode = await fetchEmbeddedManagerPasscode({ sessionId, token })
         if (cancelled) return
         if (passcode) {
-          clearEmbeddedManagerTokenFromUrl()
+          refreshAttemptsBySessionIdRef.current.delete(sessionId)
+        } else {
+          requestRefresh(sessionId)
         }
         setState({ key: exchangeKey, passcode, error: null, isResolving: false })
       } catch (error) {
         if (!cancelled) {
           console.error('Failed to exchange embedded manager token:', error)
+          requestRefresh(sessionId)
           setState({ key: exchangeKey, passcode: null, error, isResolving: false })
         }
       }

@@ -245,10 +245,22 @@ through activity-specific props.
   `activeQuestionId` for compatibility with older snapshots.
 - Embedded instructor iframes receive a short-lived, server-issued manager-entry token only after
   the authenticated parent start response arrives. Credentialed children exchange it atomically for
-  the child passcode and replace the iframe URL to remove the consumed token; credentialless
+  the child passcode and replace the iframe URL to remove the attempted token whether the exchange
+  succeeds or fails; credentialless
   children still receive the launch token so the parent can mount them through the same recovery
   path, but do not redeem it. This avoids putting instructor credentials in browser storage while
   preventing an iframe bootstrap race or concurrent reuse.
+- The initiating SyncDeck manager reconciles a successful embedded-start response into its local
+  embedded-activity map immediately. It must not depend solely on the instructor websocket echo:
+  the deck can request an activity before that websocket finishes authenticating, and otherwise
+  the returned child-manager token would have no iframe to redeem it until a later reload. The
+  response `instanceKey` must match the requested embedded instance before any local lifecycle,
+  credential-cache, retry, or success state is updated.
+- If a credentialed child cannot redeem its one-time token, it sends its child session id (never
+  credentials) to the same-origin parent. The parent invalidates its cached token and uses the
+  existing authenticated start path to mint a replacement before remounting that iframe. Child
+  refresh requests are capped per child session, and parent backfill failures retain their retry
+  history so a persistent outage still reaches the recovery UI.
 - SyncDeck's warm iframe eviction resets all per-child bootstrap completion, retry, and failure
   markers before a later remount requests a fresh token. Transient embedded-start failures use
   bounded retry, while non-retryable responses surface the manager recovery action immediately.

@@ -36,12 +36,10 @@ export function readInstructorPasscode(sessionId: string | undefined, state: unk
       : ''
 
   if (statePasscode) return statePasscode
-  if (!sessionId || typeof window === 'undefined') return ''
-  try {
-    return window.sessionStorage.getItem(`postboard_instructor_${sessionId}`) ?? ''
-  } catch {
-    return ''
-  }
+  // Instructor credentials are intentionally limited to router state or the
+  // short-lived SyncDeck exchange; never recover them from Web Storage.
+  void sessionId
+  return ''
 }
 
 export function resolvePostboardInstructorAccessState(params: {

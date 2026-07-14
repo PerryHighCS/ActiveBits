@@ -31,6 +31,8 @@ import { resolvePersistentEntryPolicyForConfigure } from './SyncDeckManager.js'
 import { resolvePersistentUrlHashForConfigure } from './SyncDeckManager.js'
 import { normalizeSyncDeckEmbeddedActivities } from './SyncDeckManager.js'
 import { applySyncDeckEmbeddedLifecyclePayload } from './SyncDeckManager.js'
+import { isExpectedEmbeddedActivityStartResponseInstance } from './SyncDeckManager.js'
+import { resolveLocalEmbeddedActivityStartLifecyclePayload } from './SyncDeckManager.js'
 import { resolveManagerActiveEmbeddedInstanceKey } from './SyncDeckManager.js'
 import { resolveManagerEmbeddedInstanceStatus } from './SyncDeckManager.js'
 import { buildManagerOverlayNavigationCommand } from './SyncDeckManager.js'
@@ -50,6 +52,7 @@ import { resolveCompletedEmbeddedBootstrapChildSessionIds } from './SyncDeckMana
 import { resolveEmbeddedBootstrapManagerCredentials } from './SyncDeckManager.js'
 import { advanceEmbeddedManagerRenderNonce } from './SyncDeckManager.js'
 import { clearLoadedEmbeddedManagerInstanceKey } from './SyncDeckManager.js'
+import { resolveEmbeddedManagerBootstrapRefreshRecovery } from './SyncDeckManager.js'
 import { resolveEmbeddedBootstrapBackfillRetryDelayMs } from './SyncDeckManager.js'
 import { shouldShowEmbeddedBootstrapFailure } from './SyncDeckManager.js'
 import { resolveEmbeddedBootstrapBackfillRequests } from './SyncDeckManager.js'
@@ -157,6 +160,7 @@ void test('report preview dialog focus helpers ignore disabled controls and wrap
     getReportPreviewFocusableElements(dialog).map((element) => element.id),
     ['close', 'download'],
   )
+  console.info('[TEST] Expected local embedded-start lifecycle rejection for a mismatched instance key.')
   assert.equal(
     resolveReportPreviewDialogTabTarget({
       dialog,
@@ -181,6 +185,16 @@ void test('report preview dialog focus helpers ignore disabled controls and wrap
     }),
     downloadLink,
   )
+})
+
+void test('isExpectedEmbeddedActivityStartResponseInstance rejects mismatched primary and backfill responses', () => {
+  const mismatchedResponse = {
+    childSessionId: 'CHILD:s1:abc12:video-sync',
+    instanceKey: 'video-sync:4:0',
+  }
+  console.info('[TEST] Expected primary and backfill embedded-start response instance-key rejection.')
+  assert.equal(isExpectedEmbeddedActivityStartResponseInstance(mismatchedResponse, 'video-sync:3:0'), false)
+  assert.equal(isExpectedEmbeddedActivityStartResponseInstance(mismatchedResponse, 'video-sync:3:1'), false)
 })
 
 void test('parseDownloadFilenameFromContentDisposition handles standard and utf-8 filenames', () => {
@@ -713,6 +727,40 @@ void test('applySyncDeckEmbeddedLifecyclePayload applies start and end lifecycle
   assert.deepEqual(ended, {})
 })
 
+void test('resolveLocalEmbeddedActivityStartLifecyclePayload updates the local manager when its websocket echo is unavailable', () => {
+  assert.deepEqual(
+    resolveLocalEmbeddedActivityStartLifecyclePayload({
+      activityId: 'video-sync',
+      instanceKey: 'video-sync:3:0',
+      location: { h: 3, v: 0 },
+      response: {
+        childSessionId: 'CHILD:s1:abc12:video-sync',
+        instanceKey: 'video-sync:3:0',
+        location: { h: 3, v: 0 },
+      },
+    }),
+    {
+      type: 'embedded-activity-start',
+      activityId: 'video-sync',
+      instanceKey: 'video-sync:3:0',
+      childSessionId: 'CHILD:s1:abc12:video-sync',
+      location: { h: 3, v: 0 },
+    },
+  )
+
+  assert.equal(
+    resolveLocalEmbeddedActivityStartLifecyclePayload({
+      activityId: 'video-sync',
+      instanceKey: 'video-sync:3:0',
+      response: {
+        childSessionId: 'CHILD:s1:abc12:video-sync',
+        instanceKey: 'video-sync:4:0',
+      },
+    }),
+    null,
+  )
+})
+
 void test('resolveManagerActiveEmbeddedInstanceKey picks instance anchored to current slide position', () => {
   const selected = resolveManagerActiveEmbeddedInstanceKey(
     {
@@ -838,6 +886,100 @@ void test('clearLoadedEmbeddedManagerInstanceKey forces bootstrap-refresh remoun
   assert.equal(
     clearLoadedEmbeddedManagerInstanceKey(current, 'missing:1:0'),
     current,
+  )
+})
+
+void test('resolveEmbeddedManagerBootstrapRefreshRecovery clears same-origin child state and requeues its backfill', () => {
+  const childManagerWindow = {} as WindowProxy
+  const embeddedActivities = {
+    'video-sync:3:0': {
+      activityId: 'video-sync',
+      childSessionId: 'child-video',
+      startedAt: 3,
+      owner: 'syncdeck-instructor',
+    },
+    'postboard:3:1': {
+      activityId: 'postboard',
+      childSessionId: 'child-postboard',
+      startedAt: 3,
+      owner: 'syncdeck-instructor',
+    },
+  }
+  const recovery = resolveEmbeddedManagerBootstrapRefreshRecovery({
+    currentOrigin: 'https://activebits.local',
+    eventOrigin: 'https://activebits.local',
+    eventSource: childManagerWindow,
+    payload: { type: 'embedded-manager-bootstrap-refresh', childSessionId: 'child-video' },
+    embeddedActivities,
+    embeddedManagerWindowByInstanceKey: { 'video-sync:3:0': childManagerWindow },
+    managerEntryTokensByChildSessionId: {
+      'child-video': 'stale-token',
+      'child-postboard': 'keep-token',
+    },
+    completedChildSessionIds: new Set(['child-video', 'child-postboard']),
+    pendingChildSessionIds: new Set(['child-video']),
+    failedChildSessionIds: new Set(['child-video']),
+  })
+
+  assert.ok(recovery)
+  assert.deepEqual(recovery.managerEntryTokensByChildSessionId, { 'child-postboard': 'keep-token' })
+  assert.deepEqual([...recovery.completedChildSessionIds], ['child-postboard'])
+  assert.deepEqual([...recovery.pendingChildSessionIds], [])
+  assert.deepEqual([...recovery.failedChildSessionIds], [])
+  assert.deepEqual(
+    resolveEmbeddedBootstrapBackfillRequests({
+      embeddedActivities,
+      completedChildSessionIds: recovery.completedChildSessionIds,
+      pendingChildSessionIds: recovery.pendingChildSessionIds,
+      failedChildSessionIds: recovery.failedChildSessionIds,
+    }),
+    [{ activityId: 'video-sync', childSessionId: 'child-video', instanceKey: 'video-sync:3:0' }],
+  )
+})
+
+void test('resolveEmbeddedManagerBootstrapRefreshRecovery ignores cross-origin refresh messages', () => {
+  console.info('[TEST] Expected cross-origin embedded bootstrap refresh rejection.')
+  assert.equal(
+    resolveEmbeddedManagerBootstrapRefreshRecovery({
+      currentOrigin: 'https://activebits.local',
+      eventOrigin: 'https://untrusted.example',
+      eventSource: null,
+      payload: { type: 'embedded-manager-bootstrap-refresh', childSessionId: 'child-video' },
+      embeddedActivities: {},
+      embeddedManagerWindowByInstanceKey: {},
+      managerEntryTokensByChildSessionId: {},
+      completedChildSessionIds: new Set(),
+      pendingChildSessionIds: new Set(),
+      failedChildSessionIds: new Set(),
+    }),
+    null,
+  )
+})
+
+void test('resolveEmbeddedManagerBootstrapRefreshRecovery ignores same-origin messages from another iframe', () => {
+  const childManagerWindow = {} as WindowProxy
+  console.info('[TEST] Expected embedded bootstrap refresh rejection from a different iframe.')
+  assert.equal(
+    resolveEmbeddedManagerBootstrapRefreshRecovery({
+      currentOrigin: 'https://activebits.local',
+      eventOrigin: 'https://activebits.local',
+      eventSource: {} as WindowProxy,
+      payload: { type: 'embedded-manager-bootstrap-refresh', childSessionId: 'child-video' },
+      embeddedActivities: {
+        'video-sync:3:0': {
+          activityId: 'video-sync',
+          childSessionId: 'child-video',
+          startedAt: 3,
+          owner: 'syncdeck-instructor',
+        },
+      },
+      embeddedManagerWindowByInstanceKey: { 'video-sync:3:0': childManagerWindow },
+      managerEntryTokensByChildSessionId: { 'child-video': 'stale-token' },
+      completedChildSessionIds: new Set(['child-video']),
+      pendingChildSessionIds: new Set(['child-video']),
+      failedChildSessionIds: new Set(['child-video']),
+    }),
+    null,
   )
 })
 

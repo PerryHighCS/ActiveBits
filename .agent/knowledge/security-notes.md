@@ -16,6 +16,24 @@ Track security-relevant boundaries, risks, and mitigation decisions.
 ## Notes
 
 - Date: 2026-07-13
+- Area: SyncDeck embedded manager bootstrap recovery
+- Threat or risk: A consumed or stale one-time child-manager token can leave an iframe without instructor credentials; passing a replacement token or passcode through an unverified child message would expand the credential exposure surface.
+- Control or mitigation: The child posts only `{ type, childSessionId }` to its same-origin parent after failed exchange. The parent validates the origin, verifies the sending iframe window and embedded record, and rejects authenticated-start responses whose `instanceKey` differs from the requested instance before invalidating local bootstrap state or caching credentials. The child caps refresh requests per session, and the parent preserves failed backfill history across refreshes.
+- Residual risk: Same-origin XSS could forge this availability-only refresh request, causing bounded bootstrap churn but not credential disclosure; the request carries no secret and cannot target a non-embedded child session.
+- Validation (test/review/path): `client/src/components/common/embeddedManagerBootstrap.ts`; `client/src/components/common/embeddedManagerBootstrap.test.ts`; `client/src/hooks/useEmbeddedManagerPasscodeExchange.ts`; `activities/syncdeck/client/manager/SyncDeckManager.tsx`.
+- Follow-up action: If repeated refresh requests become an operational concern, add a parent-side rate limit keyed by child session without weakening token rotation.
+- Owner: Codex
+
+- Date: 2026-07-13
+- Area: Postboard instructor bootstrap
+- Threat or risk: Postboard's activity configuration previously declared `instructorPasscode` sessionStorage bootstrap, leaving a reusable manager credential accessible to same-origin JavaScript.
+- Control or mitigation: Postboard now accepts the immediate router-state bootstrap or SyncDeck's short-lived server-issued manager-token exchange only; its manager no longer reads instructor credentials from Web Storage.
+- Residual risk: A temporary standalone manager still needs an authenticated server-backed recovery flow to survive a full reload; do not restore browser-storage fallback to address that gap.
+- Validation (test/review/path): `activities/postboard/activity.config.ts`; `activities/postboard/client/manager/PostboardManager.tsx`; `activities/postboard/client/manager/PostboardManager.test.ts`.
+- Follow-up action: Add cookie- or token-backed recovery if temporary standalone Postboard reload recovery becomes a product requirement.
+- Owner: Codex
+
+- Date: 2026-07-13
 - Area: SyncDeck temporary instructor recovery
 - Threat or risk: The generated SyncDeck instructor passcode was held only in router state for temporary sessions, so a browser reload lost authority; persisting that passcode in browser storage is prohibited.
 - Control or mitigation: `POST /api/syncdeck/create` now mints a random session-scoped recovery token, stores it only on the server session record, and appends it to one capped httpOnly, same-site, secure-in-production browser-session cookie scoped to the SyncDeck API prefix. The cookie retains at most 20 recent entries; each token is honored only by its matching session's instructor-passcode recovery route. The route uses a timing-safe comparison and returns the passcode only when that cookie token matches; server-side session validity and its sliding TTL remain authoritative.
@@ -36,7 +54,7 @@ Track security-relevant boundaries, risks, and mitigation decisions.
 - Date: 2026-07-12
 - Area: SyncDeck embedded instructor manager bootstrap
 - Threat or risk: Embedded manager iframes run in a separate JavaScript context, so an in-memory parent handoff cannot deliver an instructor passcode. Persisting that passcode to browser storage is prohibited.
-- Control or mitigation: SyncDeck mints a random, five-minute child-manager entry token server-side, passes it only to the same-origin iframe, and the child exchanges it once through the SyncDeck endpoint for its passcode. Token consumption is atomic in both in-memory and Valkey-backed session stores, checks expiry at consumption time, rejects any present missing/non-numeric/non-finite/expired expiry value, and refreshes the consumed session's normal TTL, so concurrent, malformed, or expired redemptions cannot succeed. The exchange response and browser request both opt out of caching, and the iframe uses `no-referrer`; after a successful exchange, the child replaces its URL to remove the consumed query token. The iframe is not mounted until the token arrives from the authenticated embedded-start response.
+- Control or mitigation: SyncDeck mints a random, five-minute child-manager entry token server-side, passes it only to the same-origin iframe, and the child exchanges it once through the SyncDeck endpoint for its passcode. Token consumption is atomic in both in-memory and Valkey-backed session stores, checks expiry at consumption time, rejects any present missing/non-numeric/non-finite/expired expiry value, and refreshes the consumed session's normal TTL, so concurrent, malformed, or expired redemptions cannot succeed. The exchange response and browser request both opt out of caching, and the iframe uses `no-referrer`; after an exchange attempt, the child replaces its URL to remove the attempted query token even when recovery is needed. The iframe is not mounted until the token arrives from the authenticated embedded-start response.
 - Residual risk: The short-lived token is present in the iframe URL while it loads. Keep it same-origin, do not log query strings, and do not reuse it as an activity API credential. Child managers yield once before exchanging it so React StrictMode's development-only setup/cleanup pass cannot consume it before the durable mount commits.
 - Operational constraint: Because the token is consumed after exchange, SyncDeck clears a child token when its manager iframe is evicted from the warm-mount limit and reuses the authenticated embedded-start backfill path to obtain a fresh token before a later remount.
 - Validation (test/review/path): `server/core/sessions.ts`; `server/core/sessionTokenUtils.ts`; `server/core/sessionTokenUtils.test.ts`; `server/core/valkeyStore.ts`; `server/core/valkeyStore.test.ts`; `server/sessionTokenConsumption.test.ts`; `activities/syncdeck/server/routes.ts`; `activities/syncdeck/server/routes.test.ts`; `client/src/components/common/embeddedManagerBootstrap.ts`; `client/src/components/common/embeddedManagerBootstrap.test.ts`; `client/src/hooks/useEmbeddedManagerPasscodeExchange.ts`; `client/src/hooks/useEmbeddedManagerPasscodeExchange.test.ts`; `activities/syncdeck/playwright/embedded-manager-bootstrap.spec.ts`.

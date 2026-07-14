@@ -12,7 +12,7 @@ Current activity areas include:
 - Java and Python practice activities
 - Standalone practice and utility flows for independent student work
 
-SyncDeck can embed supported activities inside a presentation; embedded instructor views are launched through the active SyncDeck session and do not require teachers to repeat child-activity setup. Activities with manager credentials receive them through a short-lived handoff; credentialless activities such as Raffle launch directly.
+SyncDeck can embed supported activities inside a presentation; embedded instructor views are launched through the active SyncDeck session and do not require teachers to repeat child-activity setup. Activities with manager credentials receive them through a short-lived handoff; credentialless activities such as Raffle launch directly. The initiating manager applies the authenticated launch response locally, so first-load embedded activities do not wait for a websocket replay before mounting, and it performs a bounded refresh for an expired or consumed child bootstrap.
 SyncDeck also preserves a temporary-session instructor's control after a reload with a bounded, browser-session httpOnly recovery cookie; instructor passcodes are never stored in browser storage.
 
 ## Documentation

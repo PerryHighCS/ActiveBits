@@ -15,6 +15,22 @@ Use this log for durable findings that future contributors and agents should reu
 ## Discoveries
 
 - Date: 2026-07-13
+- Area: client | activities | syncdeck | embedded bootstrap
+- Discovery: An embedded manager can receive a one-time entry token that has already been consumed or has otherwise failed exchange. The child cannot safely retry that token itself, so it reports only its child-session id to its same-origin SyncDeck parent. The parent drops its cached token, clears completion/failure markers, and reruns the authenticated embedded-start bootstrap before remounting the iframe. Refresh requests are capped per child session, while the parent retains its backfill-attempt count across a child refresh.
+- Why it matters: Child-specific credentials must not be sent through `postMessage`, and allowing a child to re-use an old entry token would break atomic token-consumption guarantees. The bounded recovery path makes stale-token failures self-healing without browser storage or a manual parent reload while preserving the manager recovery UI for persistent failures.
+- Evidence: `client/src/components/common/embeddedManagerBootstrap.ts`; `client/src/hooks/useEmbeddedManagerPasscodeExchange.ts`; `activities/syncdeck/client/manager/SyncDeckManager.tsx`.
+- Follow-up action: Preserve same-origin validation and child-session lookup when extending embedded-manager postMessage handling.
+- Owner: Codex
+
+- Date: 2026-07-13
+- Area: client | activities | syncdeck | embedded bootstrap
+- Discovery: A SyncDeck activity start can complete before the instructor websocket has authenticated, so the initiating manager can miss its own `embedded-activity-start` lifecycle echo. The start response is independently authoritative for that initiating tab and must immediately populate its local embedded-activity map; otherwise the child iframe never mounts to redeem the returned one-time manager token until a reload replays lifecycle state. This manifested as missing Postboard credentials and a Video Sync manager unable to issue initial student playback commands.
+- Why it matters: websocket lifecycle events remain required for other tabs and students, but local manager startup cannot depend on receiving its own broadcast. The response reconciliation must retain the response/request instance-key match check to avoid mounting an unrelated child session.
+- Evidence: `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/client/manager/SyncDeckManager.test.tsx`; `activities/syncdeck/playwright/embedded-manager-bootstrap.spec.ts`.
+- Follow-up action: Keep embedded-start response reconciliation when changing SyncDeck websocket authentication or child-manager token flow, and include it in any first-load embedded-activity regression coverage.
+- Owner: Codex
+
+- Date: 2026-07-13
 - Area: client | activities | syncdeck | reporting
 - Discovery: `SyncDeckManager.tsx`'s sticky top header (`className="sticky top-0 z-20 ..."`) creates its own stacking context because it combines `position: sticky` with an explicit `z-index`. Any `fixed`/absolutely-positioned overlay declared as a JSX descendant of that header (e.g. the report preview dialog, previously `fixed inset-0 z-40` nested inside the header block) has its z-index compared only within that trapped stacking context, not the document root. The active embedded-activity container (`absolute inset-0 z-20`, a later sibling of the header in DOM order) then wins root-level stacking ties and paints over the entire header, including any modal nested inside it — making the modal appear behind the embedded activity and its close button unreachable.
 - Why it matters: any future modal/overlay added inside that header div (or any other `sticky`/`z-index` ancestor) will silently reproduce this bug even with a high `z-*` utility class, since Tailwind z-index classes only resolve within their local stacking context. The fix was to render the report preview dialog via `createPortal(..., document.body)` so its DOM node — and therefore its stacking context comparison — sits at the document root, alongside (and above) the embedded-activity container.

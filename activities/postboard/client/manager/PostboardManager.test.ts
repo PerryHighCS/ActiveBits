@@ -108,10 +108,12 @@ void test('readInstructorPasscode reads passcode from route state without persis
   assert.equal(writeCount, 0)
 })
 
-void test('readInstructorPasscode falls back safely when sessionStorage throws', () => {
+void test('readInstructorPasscode never reads instructor credentials from sessionStorage', () => {
+  let readCount = 0
   withMockWindow({
     getItem: () => {
-      throw new Error('blocked')
+      readCount += 1
+      return 'stored-pass'
     },
     setItem: () => {
       throw new Error('blocked')
@@ -123,4 +125,5 @@ void test('readInstructorPasscode falls back safely when sessionStorage throws',
     )
     assert.equal(readInstructorPasscode('session-2', null), '')
   })
+  assert.equal(readCount, 0)
 })
