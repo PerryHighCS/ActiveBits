@@ -1802,3 +1802,11 @@ Use this log for durable findings that future contributors and agents should reu
 - Why it matters: Queueing updates per instructor socket preserves arrival order across asynchronous session reads and writes, preventing reveal or chalkboard state loss in both in-memory and Valkey deployments.
 - Evidence: `activities/syncdeck/server/routes.ts`; `activities/syncdeck/server/routes.test.ts`
 - Owner: Codex
+
+- Date: 2026-07-14
+- Area: activities (video-sync)
+- Discovery: `youtube-nocookie.com` embeds have no further fallback host when YouTube itself rejects a video (surfaced to the end user as YouTube's own in-iframe "configuration error", commonly numbered 153 — not an ActiveBits-generated code). This happens for videos that need a signed-in/cookied session to verify eligibility (e.g. age- or region-restricted), which the privacy-enhanced no-cookie domain cannot provide, and was reported by an instructor on iPad Safari where cookie/storage restrictions make it more likely. `resolveYoutubePlayerHostCandidates` now appends a final `youtube` (standard `https://www.youtube.com`) candidate after `youtube-nocookie` (and after the existing `youtube-education` → `youtube-nocookie` step), reusing the same onError/watchdog-timeout fallback mechanism already in place for the education host.
+- Why it matters: Previously an instructor whose video hit this YouTube-side rejection had no recovery path in the UI beyond picking a different video. The added third fallback candidate lets VideoSync recover automatically using the same mechanism that already existed for `youtube-education` failures.
+- Evidence: `activities/video-sync/shared/playerHosts.ts` (`PLAYER_HOST_FALLBACK_CHAIN`, `resolveYoutubePlayerHostCandidates`); `activities/video-sync/shared/playerHosts.test.ts`; `activities/video-sync/client/manager/VideoSyncManager.tsx` (`YOUTUBE_HOST_FALLBACK_TIMEOUT_MS`); `activities/video-sync/client/student/VideoSyncStudent.tsx` (`YOUTUBE_HOST_FALLBACK_TIMEOUT_MS`).
+- Follow-up action: The player's `onError` handlers still discard the numeric YouTube `event.data` error code (see the 2026-05-06 host-fallback entry above); if a future report needs to distinguish *which* YouTube error triggered a fallback, add telemetry that logs `event.data` before falling back.
+- Owner: Claude

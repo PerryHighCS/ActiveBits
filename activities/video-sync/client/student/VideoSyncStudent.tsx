@@ -48,7 +48,7 @@ const STUDENT_PLAYING_DRIFT_TOLERANCE_SEC = 0.5
 const STUDENT_HARD_SEEK_DRIFT_SEC = 1.5
 const STUDENT_CATCH_UP_PLAYBACK_RATE = 1.25
 const STUDENT_SLOW_DOWN_PLAYBACK_RATE = 0.75
-const YOUTUBE_EDUCATION_FALLBACK_TIMEOUT_MS = 1_500
+const YOUTUBE_HOST_FALLBACK_TIMEOUT_MS = 1_500
 
 interface StudentPlaybackSyncAction {
   type: 'none' | 'rate' | 'seek'
@@ -584,7 +584,7 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
         clearPlayerReadyTimeout()
         playerReadyTimeoutId = window.setTimeout(() => {
           fallbackToNextHost(player)
-        }, YOUTUBE_EDUCATION_FALLBACK_TIMEOUT_MS)
+        }, YOUTUBE_HOST_FALLBACK_TIMEOUT_MS)
       }
 
       try {
