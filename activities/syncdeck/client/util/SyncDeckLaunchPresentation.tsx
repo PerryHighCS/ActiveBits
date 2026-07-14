@@ -6,6 +6,7 @@ import { createConfiguredSyncDeckSession } from '../shared/sessionLaunch.js'
 import { PERSISTENT_SESSION_ENTRY_POLICY_OPTIONS } from '@src/components/common/persistentSessionEntryPolicyUtils.js'
 import {
   DEFAULT_PERSISTENT_SESSION_ENTRY_POLICY,
+  resolvePersistentSessionEntryPolicy,
   type PersistentSessionEntryPolicy,
 } from '../../../../types/waitingRoom.js'
 
@@ -589,7 +590,7 @@ export default function SyncDeckLaunchPresentation() {
                   aria-describedby="syncdeck-permalink-entry-policy-description"
                   value={entryPolicy}
                   onChange={(event: ChangeEvent<HTMLSelectElement>) => {
-                    setEntryPolicy(event.target.value as PersistentSessionEntryPolicy)
+                    setEntryPolicy(resolvePersistentSessionEntryPolicy(event.target.value))
                   }}
                   className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-slate-50 outline-none transition focus:border-cyan-400"
                 >

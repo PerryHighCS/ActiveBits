@@ -395,6 +395,40 @@ void test('SyncDeckLaunchPresentation sends the selected entry mode when creatin
   }
 })
 
+void test('SyncDeckLaunchPresentation falls back to instructor-required for a tampered entry mode value', async () => {
+  const restoreDomEnvironment = installDomEnvironment(
+    'https://bits.mycode.run/util/syncdeck/permalink?presentationUrl=https%3A%2F%2Fslides.example%2Fdeck',
+  )
+  const { fireEvent, render, waitFor } = await import('@testing-library/react')
+  const { MemoryRouter } = await import('react-router-dom')
+  const { default: SyncDeckLaunchPresentation } = await import('./SyncDeckLaunchPresentation.js')
+
+  try {
+    const rendered = render(
+      React.createElement(
+        MemoryRouter,
+        {
+          initialEntries: [
+            '/util/syncdeck/permalink?presentationUrl=https%3A%2F%2Fslides.example%2Fdeck',
+          ],
+        },
+        React.createElement(SyncDeckLaunchPresentation),
+      ),
+    )
+
+    const entryModeSelect = rendered.getByLabelText(/entry mode/i) as HTMLSelectElement
+    fireEvent.change(entryModeSelect, {
+      target: { value: 'not-a-real-policy' },
+    })
+
+    await waitFor(() => {
+      assert.equal(entryModeSelect.value, 'instructor-required')
+    })
+  } finally {
+    restoreDomEnvironment()
+  }
+})
+
 void test('SyncDeckLaunchPresentation refuses to generate a permalink before URL verification', async () => {
   const restoreDomEnvironment = installDomEnvironment(
     'https://bits.mycode.run/util/syncdeck/permalink?presentationUrl=https%3A%2F%2Fslides.example%2Fdeck',

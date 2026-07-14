@@ -1758,10 +1758,9 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       return
     }
 
-    const entryPolicy = resolvePersistentSessionEntryPolicy(readStringField(body, 'entryPolicy'))
-
     const { hash } = generatePersistentHash('syncdeck', teacherCode)
-    const urlState = buildSyncDeckPersistentLinkUrlState(entryPolicy, presentationUrl)
+    const urlState = buildSyncDeckPersistentLinkUrlState(readStringField(body, 'entryPolicy'), presentationUrl)
+    const { entryPolicy } = urlState
     const urlHash = computePersistentLinkUrlHash(hash, urlState)
 
     const cookieName = 'persistent_sessions'
