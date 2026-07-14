@@ -586,6 +586,7 @@ export default function SyncDeckLaunchPresentation() {
                 </label>
                 <select
                   id="syncdeck-permalink-entry-policy"
+                  aria-describedby="syncdeck-permalink-entry-policy-description"
                   value={entryPolicy}
                   onChange={(event: ChangeEvent<HTMLSelectElement>) => {
                     setEntryPolicy(event.target.value as PersistentSessionEntryPolicy)
@@ -598,7 +599,7 @@ export default function SyncDeckLaunchPresentation() {
                     </option>
                   ))}
                 </select>
-                <p className="mt-2 text-xs text-slate-400">
+                <p id="syncdeck-permalink-entry-policy-description" className="mt-2 text-xs text-slate-400">
                   {PERSISTENT_SESSION_ENTRY_POLICY_OPTIONS.find((option) => option.value === entryPolicy)?.description}
                 </p>
               </div>
