@@ -10,8 +10,14 @@ test.describe('SyncDeck report preview overlay', () => {
     await syncDeckCard.getByRole('button', { name: 'Start Session Now' }).click()
     await page.waitForURL(/\/manage\/syncdeck\//)
 
-    const previewButton = page.getByRole('button', { name: 'Preview Report' })
+    const previewButton = page.getByRole('button', { name: 'Session Report' })
     await expect(previewButton).toBeEnabled()
+    const copyJoinUrlButton = page.getByRole('button', { name: 'Copy join URL' })
+    await expect(copyJoinUrlButton).toHaveText('🔗')
+    await expect(copyJoinUrlButton).toHaveAttribute('title', 'Copy join URL')
+    const joinCode = page.getByText('Join Code:', { exact: true })
+    const [reportBounds, joinCodeBounds] = await Promise.all([previewButton.boundingBox(), joinCode.boundingBox()])
+    expect(reportBounds?.x).toBeLessThan(joinCodeBounds?.x ?? Number.POSITIVE_INFINITY)
     await previewButton.click()
 
     const dialog = page.locator('#syncdeck-report-preview-dialog')
@@ -28,7 +34,9 @@ test.describe('SyncDeck report preview overlay', () => {
     })
     expect(overlayParentIsBody).toBe(true)
 
-    const closeButton = dialog.getByRole('button', { name: 'Close' }).first()
+    await expect(dialog.getByRole('heading', { name: 'Session Summary' })).toBeVisible()
+    await expect(dialog.getByRole('button', { name: 'Download Session Report' })).toBeVisible()
+    const closeButton = dialog.getByRole('button', { name: 'Close Session Summary' })
     await expect(closeButton).toBeVisible()
     await closeButton.click()
     await expect(dialog).toHaveCount(0)

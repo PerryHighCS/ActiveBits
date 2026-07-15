@@ -4715,6 +4715,20 @@ const SyncDeckManager: FC = () => {
           </div>
 
           <div className="flex items-center gap-2">
+            <button
+              ref={reportPreviewTriggerRef}
+              type="button"
+              onClick={() => {
+                void openSessionReportPreview()
+              }}
+              disabled={isReportPreviewLoading || !instructorPasscode}
+              className="px-3 py-2 rounded border border-gray-300 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+              aria-haspopup="dialog"
+              aria-expanded={isReportPreviewOpen}
+              aria-controls="syncdeck-report-preview-dialog"
+            >
+              {isReportPreviewLoading ? 'Loading session report…' : 'Session Report'}
+            </button>
             <div className="flex items-center gap-2">
               <button
                 type="button"
@@ -4743,49 +4757,30 @@ const SyncDeckManager: FC = () => {
                 Students: {connectedStudentCount}
               </button>
               <ConnectionStatusDot state={instructorConnectionState} tooltip={instructorConnectionTooltip} />
-              <span className="text-sm text-gray-600">Join Code:</span>
-              <code
-                onClick={() => {
-                  void copyValue(sessionId)
-                }}
-                className="px-3 py-1.5 rounded bg-gray-100 font-mono text-lg font-semibold text-gray-800 cursor-pointer hover:bg-gray-200 transition-colors"
-                title="Click to copy"
-              >
-                {copiedValue === sessionId ? '✓ Copied!' : sessionId}
-              </code>
+              <div className="flex items-center gap-1" role="group" aria-label="Session join details">
+                <span className="text-sm text-gray-600">Join Code:</span>
+                <code
+                  onClick={() => {
+                    void copyValue(sessionId)
+                  }}
+                  className="px-3 py-1.5 rounded bg-gray-100 font-mono text-lg font-semibold text-gray-800 cursor-pointer hover:bg-gray-200 transition-colors"
+                  title="Click to copy"
+                >
+                  {copiedValue === sessionId ? '✓ Copied!' : sessionId}
+                </code>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void copyValue(studentJoinUrl)
+                  }}
+                  className="rounded border border-gray-300 px-2 py-1.5 text-lg leading-none text-gray-700 hover:bg-gray-50"
+                  aria-label="Copy join URL"
+                  title="Copy join URL"
+                >
+                  🔗
+                </button>
+              </div>
             </div>
-            <button
-              onClick={() => {
-                void copyValue(studentJoinUrl)
-              }}
-              className="px-3 py-2 rounded border border-gray-300 text-sm font-semibold text-gray-700 hover:bg-gray-50"
-            >
-              {copiedValue === studentJoinUrl ? '✓ Copied!' : 'Copy Join URL'}
-            </button>
-            <button
-              ref={reportPreviewTriggerRef}
-              type="button"
-              onClick={() => {
-                void openSessionReportPreview()
-              }}
-              disabled={isReportPreviewLoading || !instructorPasscode}
-              className="px-3 py-2 rounded border border-gray-300 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-              aria-haspopup="dialog"
-              aria-expanded={isReportPreviewOpen}
-              aria-controls="syncdeck-report-preview-dialog"
-            >
-              {isReportPreviewLoading ? 'Loading preview…' : 'Preview Report'}
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                void downloadSessionReport()
-              }}
-              disabled={isDownloadingSessionReport || !instructorPasscode}
-              className="px-3 py-2 rounded border border-gray-300 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {isDownloadingSessionReport ? 'Downloading report…' : 'Download Session Report'}
-            </button>
 
             <button
               onClick={() => {
@@ -4821,14 +4816,16 @@ const SyncDeckManager: FC = () => {
             >
               <div className="flex items-center justify-between gap-3 border-b border-gray-200 px-4 py-3">
                 <h2 id="syncdeck-report-preview-title" className="text-base font-semibold text-gray-800">
-                  Session Report Preview
+                  Session Summary
                 </h2>
                 <button
                   type="button"
                   onClick={() => setIsReportPreviewOpen(false)}
-                  className="rounded px-2 py-1 text-sm text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                  className="rounded px-2 py-1 text-xl leading-none text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                  aria-label="Close Session Summary"
+                  title="Close Session Summary"
                 >
-                  Close
+                  ×
                 </button>
               </div>
               <div className="max-h-[70vh] overflow-y-auto px-4 py-4">
@@ -4893,13 +4890,6 @@ const SyncDeckManager: FC = () => {
                 )}
               </div>
               <div className="flex justify-end gap-2 border-t border-gray-200 px-4 py-3">
-                <button
-                  type="button"
-                  onClick={() => setIsReportPreviewOpen(false)}
-                  className="px-3 py-2 rounded border border-gray-300 text-sm font-semibold text-gray-700 hover:bg-gray-50"
-                >
-                  Close
-                </button>
                 <button
                   type="button"
                   onClick={() => {
