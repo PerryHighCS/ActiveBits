@@ -3,7 +3,11 @@ import assert from 'node:assert/strict'
 import {
   buildWaitingRoomStorageKey,
   getWaitingRoomInitialValues,
+  persistRememberedStudentDisplayName,
   persistWaitingRoomValues,
+  readRememberedStudentDisplayName,
+  REMEMBERED_STUDENT_DISPLAY_NAME_COOKIE,
+  REMEMBERED_STUDENT_DISPLAY_NAME_MAX_LENGTH,
   readWaitingRoomValues,
   validateWaitingRoomValues,
   type WaitingRoomStorageLike,
@@ -46,6 +50,42 @@ const sampleFields: WaitingRoomFieldConfig[] = [
 
 void test('buildWaitingRoomStorageKey namespaces by activity and hash', () => {
   assert.equal(buildWaitingRoomStorageKey('gallery-walk', 'abc123'), 'waiting-room:gallery-walk:abc123')
+})
+
+void test('remembered student display name round-trips through a one-year, same-site cookie', () => {
+  const cookieDocument = { cookie: '' }
+
+  persistRememberedStudentDisplayName(cookieDocument, '  Ada Lovelace  ', { isSecure: true })
+
+  assert.match(cookieDocument.cookie, new RegExp(`^${REMEMBERED_STUDENT_DISPLAY_NAME_COOKIE}=Ada%20Lovelace;`))
+  assert.match(cookieDocument.cookie, /Path=\//)
+  assert.match(cookieDocument.cookie, /SameSite=Lax/)
+  assert.match(cookieDocument.cookie, /Max-Age=31536000/)
+  assert.match(cookieDocument.cookie, /Secure/)
+  assert.equal(
+    readRememberedStudentDisplayName({ cookie: `${cookieDocument.cookie}; unrelated=value` }),
+    'Ada Lovelace',
+  )
+})
+
+void test('remembered student display name ignores malformed cookies and clears blank values', () => {
+  assert.equal(
+    readRememberedStudentDisplayName({ cookie: `${REMEMBERED_STUDENT_DISPLAY_NAME_COOKIE}=%E0%A4%A` }),
+    null,
+  )
+
+  const cookieDocument = { cookie: '' }
+  persistRememberedStudentDisplayName(cookieDocument, '   ')
+  assert.match(cookieDocument.cookie, /Max-Age=0/)
+})
+
+void test('remembered student display name is capped before it is stored or read', () => {
+  const tooLongName = 'A'.repeat(REMEMBERED_STUDENT_DISPLAY_NAME_MAX_LENGTH + 1)
+  const cookieDocument = { cookie: '' }
+
+  persistRememberedStudentDisplayName(cookieDocument, tooLongName)
+
+  assert.equal(readRememberedStudentDisplayName(cookieDocument), 'A'.repeat(REMEMBERED_STUDENT_DISPLAY_NAME_MAX_LENGTH))
 })
 
 void test('getWaitingRoomInitialValues applies defaults and sanitizes stored values', () => {

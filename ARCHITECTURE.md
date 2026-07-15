@@ -74,8 +74,9 @@ session.
 1. Receive session ID or permanent link from teacher
 2. Navigate to `/{session-id}` or enter ID at `/` or use permanent link ( `/activity/{activityName}/{hash}` )
 3. System fetches session data and determines activity type
-4. Student is shown the appropriate activity component
-5. Student interacts with the activity
+4. In waiting rooms, the entered `displayName` is remembered in a same-site, one-year browser cookie and used as the default on later visits; no participant IDs, credentials, or other waiting-room fields are stored there
+5. Student is shown the appropriate activity component
+6. Student interacts with the activity
 
 ### Session Lifecycle
 - **Temporary sessions**: Created on-demand, expire after inactivity

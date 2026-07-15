@@ -18,7 +18,9 @@ import { persistCreateSessionBootstrapToSessionStorage } from './manageDashboard
 import {
   buildWaitingRoomStorageKey,
   getWaitingRoomInitialValues,
+  persistRememberedStudentDisplayName,
   persistWaitingRoomValues,
+  readRememberedStudentDisplayName,
   readWaitingRoomValues,
   validateWaitingRoomValues,
   type WaitingRoomFieldValueMap,
@@ -185,11 +187,17 @@ export default function WaitingRoom({
     const storedValues = typeof window !== 'undefined' && window.sessionStorage != null
       ? readWaitingRoomValues(window.sessionStorage, storageKey, waitingRoomFields)
       : null
+    const rememberedDisplayName = typeof document !== 'undefined'
+      ? readRememberedStudentDisplayName(document)
+      : null
+    const initialValues = storedValues ?? (
+      rememberedDisplayName == null ? null : { displayName: rememberedDisplayName }
+    )
 
     let isCurrent = true
     queueMicrotask(() => {
       if (isCurrent) {
-        setWaitingRoomValues(getWaitingRoomInitialValues(waitingRoomFields, storedValues))
+        setWaitingRoomValues(getWaitingRoomInitialValues(waitingRoomFields, initialValues))
         setTouchedFields({})
       }
     })
@@ -397,6 +405,12 @@ export default function WaitingRoom({
   }
 
   const handleFieldChange = (fieldId: string, value: WaitingRoomFieldValueMap[string]) => {
+    if (fieldId === 'displayName' && typeof value === 'string' && typeof document !== 'undefined') {
+      persistRememberedStudentDisplayName(document, value, {
+        isSecure: typeof window !== 'undefined' && window.location.protocol === 'https:',
+      })
+    }
+
     setWaitingRoomValues((current) => ({
       ...current,
       [fieldId]: value,
