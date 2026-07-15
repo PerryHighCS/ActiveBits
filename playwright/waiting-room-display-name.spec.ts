@@ -5,7 +5,12 @@ interface PersistentSessionCreateResponse {
 }
 
 test('waiting room remembers a student display name in the browser cookie', async ({ browser }) => {
-  const seedContext = await browser.newContext()
+  const baseURL = test.info().project.use.baseURL
+  if (typeof baseURL !== 'string') {
+    throw new Error('Playwright baseURL must be configured for waiting-room cookie coverage.')
+  }
+
+  const seedContext = await browser.newContext({ baseURL })
   const seedPage = await seedContext.newPage()
   const createResponse = await seedPage.request.post('/api/persistent-session/create', {
     data: {
@@ -16,7 +21,7 @@ test('waiting room remembers a student display name in the browser cookie', asyn
   expect(createResponse.ok()).toBe(true)
   const persistentSession = await createResponse.json() as PersistentSessionCreateResponse
 
-  const studentContext = await browser.newContext()
+  const studentContext = await browser.newContext({ baseURL })
   const studentPage = await studentContext.newPage()
   await studentPage.goto(persistentSession.url)
 
