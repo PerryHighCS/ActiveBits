@@ -7,6 +7,7 @@ import {
   persistWaitingRoomValues,
   readRememberedStudentDisplayName,
   REMEMBERED_STUDENT_DISPLAY_NAME_COOKIE,
+  REMEMBERED_STUDENT_DISPLAY_NAME_MAX_LENGTH,
   readWaitingRoomValues,
   validateWaitingRoomValues,
   type WaitingRoomStorageLike,
@@ -76,6 +77,15 @@ void test('remembered student display name ignores malformed cookies and clears 
   const cookieDocument = { cookie: '' }
   persistRememberedStudentDisplayName(cookieDocument, '   ')
   assert.match(cookieDocument.cookie, /Max-Age=0/)
+})
+
+void test('remembered student display name is capped before it is stored or read', () => {
+  const tooLongName = 'A'.repeat(REMEMBERED_STUDENT_DISPLAY_NAME_MAX_LENGTH + 1)
+  const cookieDocument = { cookie: '' }
+
+  persistRememberedStudentDisplayName(cookieDocument, tooLongName)
+
+  assert.equal(readRememberedStudentDisplayName(cookieDocument), 'A'.repeat(REMEMBERED_STUDENT_DISPLAY_NAME_MAX_LENGTH))
 })
 
 void test('getWaitingRoomInitialValues applies defaults and sanitizes stored values', () => {

@@ -407,7 +407,7 @@ export default function WaitingRoom({
   const handleFieldChange = (fieldId: string, value: WaitingRoomFieldValueMap[string]) => {
     if (fieldId === 'displayName' && typeof value === 'string' && typeof document !== 'undefined') {
       persistRememberedStudentDisplayName(document, value, {
-        isSecure: window.location.protocol === 'https:',
+        isSecure: typeof window !== 'undefined' && window.location.protocol === 'https:',
       })
     }
 

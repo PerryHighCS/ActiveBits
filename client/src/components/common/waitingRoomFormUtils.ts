@@ -17,6 +17,7 @@ export type WaitingRoomFieldValueMap = Record<string, WaitingRoomSerializableVal
 export type WaitingRoomFieldErrorMap = Record<string, string>
 
 export const REMEMBERED_STUDENT_DISPLAY_NAME_COOKIE = 'activebits_student_display_name'
+export const REMEMBERED_STUDENT_DISPLAY_NAME_MAX_LENGTH = 80
 const REMEMBERED_STUDENT_DISPLAY_NAME_COOKIE_MAX_AGE_SEC = 60 * 60 * 24 * 365
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -95,7 +96,7 @@ export function readRememberedStudentDisplayName(
   }
 
   try {
-    const displayName = decodeURIComponent(encodedValue).trim()
+    const displayName = decodeURIComponent(encodedValue).trim().slice(0, REMEMBERED_STUDENT_DISPLAY_NAME_MAX_LENGTH)
     return displayName.length > 0 ? displayName : null
   } catch {
     return null
@@ -107,7 +108,7 @@ export function persistRememberedStudentDisplayName(
   displayName: string,
   options: { isSecure?: boolean } = {},
 ): void {
-  const normalizedDisplayName = displayName.trim()
+  const normalizedDisplayName = displayName.trim().slice(0, REMEMBERED_STUDENT_DISPLAY_NAME_MAX_LENGTH)
   const attributes = [
     'Path=/',
     'SameSite=Lax',
