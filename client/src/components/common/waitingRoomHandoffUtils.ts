@@ -89,9 +89,12 @@ export async function persistWaitingRoomServerBackedHandoff({
       ...(typeof persistentHash === 'string' ? { persistentHash } : {}),
     }, onWarn)
   } catch (error) {
-    onWarn('[WaitingRoom] Failed to store entry participant on server, falling back to client handoff:', error)
-    if (storage) {
-      persistEntryParticipantValues(storage, storageKey, values, onWarn)
+    if (!storage) {
+      onWarn('[WaitingRoom] Failed to store entry participant on server; client handoff is unavailable because browser storage is unavailable:', error)
+      return
     }
+
+    onWarn('[WaitingRoom] Failed to store entry participant on server, falling back to client handoff:', error)
+    persistEntryParticipantValues(storage, storageKey, values, onWarn)
   }
 }

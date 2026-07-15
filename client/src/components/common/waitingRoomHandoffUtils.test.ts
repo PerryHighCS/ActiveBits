@@ -144,6 +144,31 @@ void test('persistWaitingRoomServerBackedHandoff falls back to local values when
   assert.equal(warnings[0], '[WaitingRoom] Failed to store entry participant on server, falling back to client handoff:')
 })
 
+void test('persistWaitingRoomServerBackedHandoff reports unavailable client handoff when storage is missing', async () => {
+  console.log('[TEST] exercising server handoff failure without browser storage')
+  const warnings: string[] = []
+
+  await persistWaitingRoomServerBackedHandoff({
+    storage: null,
+    storageKey: buildEntryParticipantStorageKey('syncdeck', 'session', 'session-4'),
+    values: { displayName: 'Grace' },
+    submitApiUrl: '/api/session/session-4/entry-participant',
+    fetchImpl: async () => ({
+      ok: false,
+      status: 500,
+      async json() {
+        return {}
+      },
+    }),
+    onWarn: (message) => warnings.push(message),
+  })
+
+  assert.equal(
+    warnings[0],
+    '[WaitingRoom] Failed to store entry participant on server; client handoff is unavailable because browser storage is unavailable:',
+  )
+})
+
 void test('persistWaitingRoomServerBackedHandoff falls back to local values when token is missing', async () => {
   const storage = createStorage()
   const storageKey = buildEntryParticipantStorageKey('java-string-practice', 'session', 'session-3')
