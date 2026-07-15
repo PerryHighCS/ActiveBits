@@ -2,6 +2,13 @@ import { expect, test } from '@playwright/test'
 
 test.describe('SyncDeck report preview overlay', () => {
   test('report preview dialog escapes the sticky header stacking context and stays closable', async ({ page }) => {
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, 'clipboard', {
+        configurable: true,
+        value: { writeText: async () => undefined },
+      })
+    })
+
     // Reach the manager the way an instructor actually does: create a session
     // from the dashboard so the instructor passcode arrives via same-tab
     // router state instead of browser storage.
@@ -12,12 +19,21 @@ test.describe('SyncDeck report preview overlay', () => {
 
     const previewButton = page.getByRole('button', { name: 'Session Report' })
     await expect(previewButton).toBeEnabled()
+    await expect(previewButton).toBeVisible()
     const copyJoinUrlButton = page.getByRole('button', { name: 'Copy join URL' })
     await expect(copyJoinUrlButton).toHaveText('🔗')
     await expect(copyJoinUrlButton).toHaveAttribute('title', 'Copy join URL')
     const joinCode = page.getByText('Join Code:', { exact: true })
+    await expect(joinCode).toBeVisible()
     const [reportBounds, joinCodeBounds] = await Promise.all([previewButton.boundingBox(), joinCode.boundingBox()])
-    expect(reportBounds?.x).toBeLessThan(joinCodeBounds?.x ?? Number.POSITIVE_INFINITY)
+    expect(reportBounds).not.toBeNull()
+    expect(joinCodeBounds).not.toBeNull()
+    if (!reportBounds || !joinCodeBounds) {
+      throw new Error('Expected visible Session Report and Join Code controls to have layout bounds.')
+    }
+    expect(reportBounds.x).toBeLessThan(joinCodeBounds.x)
+    await copyJoinUrlButton.click()
+    await expect(page.getByRole('button', { name: 'Join URL copied' })).toHaveText('✓')
     await previewButton.click()
 
     const dialog = page.locator('#syncdeck-report-preview-dialog')

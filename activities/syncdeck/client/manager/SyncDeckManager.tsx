@@ -4774,11 +4774,14 @@ const SyncDeckManager: FC = () => {
                     void copyValue(studentJoinUrl)
                   }}
                   className="rounded border border-gray-300 px-2 py-1.5 text-lg leading-none text-gray-700 hover:bg-gray-50"
-                  aria-label="Copy join URL"
-                  title="Copy join URL"
+                  aria-label={copiedValue === studentJoinUrl ? 'Join URL copied' : 'Copy join URL'}
+                  title={copiedValue === studentJoinUrl ? 'Join URL copied' : 'Copy join URL'}
                 >
-                  🔗
+                  {copiedValue === studentJoinUrl ? '✓' : '🔗'}
                 </button>
+                {copiedValue === studentJoinUrl && (
+                  <span className="sr-only" role="status">Join URL copied</span>
+                )}
               </div>
             </div>
 
