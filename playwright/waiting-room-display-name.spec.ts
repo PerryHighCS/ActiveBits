@@ -37,8 +37,9 @@ test('waiting room remembers a student display name in the browser cookie', asyn
     }),
   ]))
 
-  await studentPage.reload()
-  await expect(displayName).toHaveValue('Ada Lovelace')
+  const revisitPage = await studentContext.newPage()
+  await revisitPage.goto(persistentSession.url)
+  await expect(revisitPage.locator('#waiting-room-field-displayName')).toHaveValue('Ada Lovelace')
 
   await studentContext.close()
   await seedContext.close()
