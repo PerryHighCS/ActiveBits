@@ -83,6 +83,33 @@ void test('persistWaitingRoomServerBackedHandoff stores persistent hash with sol
   })
 })
 
+void test('persistWaitingRoomServerBackedHandoff persists the server-issued participant id without session storage', async () => {
+  const participantContextStorage = createStorage()
+
+  await persistWaitingRoomServerBackedHandoff({
+    storage: null,
+    participantContextStorage,
+    storageKey: buildEntryParticipantStorageKey('syncdeck', 'session', 'session-1'),
+    values: { displayName: 'Ada' },
+    submitApiUrl: '/api/session/session-1/entry-participant',
+    sessionParticipantContextSessionId: 'session-1',
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      async json() {
+        return {
+          values: { displayName: 'Ada', participantId: 'participant-1' },
+        }
+      },
+    }),
+  })
+
+  assert.deepEqual(readSessionParticipantContext(participantContextStorage, 'session-1'), {
+    studentName: 'Ada',
+    studentId: 'participant-1',
+  })
+})
+
 void test('persistWaitingRoomServerBackedHandoff falls back to local values when server write fails', async () => {
   const storage = createStorage()
   const participantContextStorage = createStorage()

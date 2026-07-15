@@ -3,6 +3,7 @@ import test from 'node:test'
 import type { EntryParticipantStorageLike } from './entryParticipantStorage'
 import {
   buildSessionParticipantContextStorageKey,
+  hasCompleteSessionParticipantContext,
   persistSessionParticipantContext,
   readSessionParticipantContext,
 } from './sessionParticipantContext'
@@ -53,6 +54,13 @@ void test('persistSessionParticipantContext merges later id-only updates with ex
     studentName: 'Ada',
     studentId: 'participant-1',
   })
+})
+
+void test('hasCompleteSessionParticipantContext requires both a name and participant id', () => {
+  assert.equal(hasCompleteSessionParticipantContext({ studentName: 'Ada', studentId: 'participant-1' }), true)
+  assert.equal(hasCompleteSessionParticipantContext({ studentName: 'Ada', studentId: null }), false)
+  assert.equal(hasCompleteSessionParticipantContext({ studentName: null, studentId: 'participant-1' }), false)
+  assert.equal(hasCompleteSessionParticipantContext(null), false)
 })
 
 void test('readSessionParticipantContext removes invalid stored payloads', () => {

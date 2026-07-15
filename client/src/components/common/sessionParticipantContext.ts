@@ -5,6 +5,10 @@ export interface SessionParticipantContext {
   studentId: string | null
 }
 
+export function hasCompleteSessionParticipantContext(context: SessionParticipantContext | null): boolean {
+  return context?.studentName != null && context.studentId != null
+}
+
 interface RawSessionParticipantContext {
   studentName?: unknown
   studentId?: unknown
