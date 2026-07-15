@@ -3178,9 +3178,13 @@ const SyncDeckManager: FC = () => {
       return
     }
 
-    await navigator.clipboard.writeText(value)
-    setCopiedValue(value)
-    setTimeout(() => setCopiedValue((current) => (current === value ? null : current)), 1500)
+    try {
+      await navigator.clipboard.writeText(value)
+      setCopiedValue(value)
+      setTimeout(() => setCopiedValue((current) => (current === value ? null : current)), 1500)
+    } catch {
+      // Clipboard permission can be denied or unavailable in an insecure browser context.
+    }
   }
 
   const handleEndSession = async (): Promise<void> => {
@@ -4766,6 +4770,7 @@ const SyncDeckManager: FC = () => {
                   }}
                   className="px-3 py-1.5 rounded bg-gray-100 font-mono text-lg font-semibold text-gray-800 cursor-pointer hover:bg-gray-200 transition-colors"
                   aria-label={copiedValue === sessionId ? 'Join code copied' : 'Copy join code'}
+                  aria-describedby="syncdeck-join-code-value"
                   title={copiedValue === sessionId ? 'Join code copied' : 'Copy join code'}
                 >
                   {copiedValue === sessionId ? '✓ Copied!' : sessionId}
@@ -4773,6 +4778,7 @@ const SyncDeckManager: FC = () => {
                 {copiedValue === sessionId && (
                   <span className="sr-only" role="status">Join code copied</span>
                 )}
+                <span id="syncdeck-join-code-value" className="sr-only">Join code: {sessionId}</span>
                 <button
                   type="button"
                   onClick={() => {
