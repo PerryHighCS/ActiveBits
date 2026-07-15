@@ -15,6 +15,15 @@ Track security-relevant boundaries, risks, and mitigation decisions.
 
 ## Notes
 
+- Date: 2026-07-15
+- Area: waiting-room student display-name persistence
+- Threat or risk: Remembering a student's lobby name across days in browser persistence could inadvertently expand into storing participant IDs, credentials, or activity-specific form data.
+- Control or mitigation: The shared waiting room writes only the trimmed `displayName` to the JavaScript-readable `activebits_student_display_name` cookie, scoped to `/`, `SameSite=Lax`, one-year expiry, and `Secure` on HTTPS. All other waiting-room values retain their existing session-only persistence.
+- Residual risk: The display name remains readable by same-origin JavaScript and by anyone with access to the browser profile; it is deliberately not an authentication or identity signal.
+- Validation (test/review/path): `client/src/components/common/waitingRoomFormUtils.ts`; `client/src/components/common/waitingRoomFormUtils.test.ts`.
+- Follow-up action: If product requirements add remembered student identity beyond a display name, design a server-issued, privacy-reviewed identity mechanism rather than adding fields to this cookie.
+- Owner: Codex
+
 - Date: 2026-07-13
 - Area: SyncDeck embedded manager bootstrap recovery
 - Threat or risk: A consumed or stale one-time child-manager token can leave an iframe without instructor credentials; passing a replacement token or passcode through an unverified child message would expand the credential exposure surface.

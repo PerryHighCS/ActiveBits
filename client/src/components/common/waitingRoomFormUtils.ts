@@ -9,8 +9,15 @@ export interface WaitingRoomStorageLike {
   removeItem(key: string): void
 }
 
+export interface WaitingRoomCookieDocumentLike {
+  cookie: string
+}
+
 export type WaitingRoomFieldValueMap = Record<string, WaitingRoomSerializableValue>
 export type WaitingRoomFieldErrorMap = Record<string, string>
+
+export const REMEMBERED_STUDENT_DISPLAY_NAME_COOKIE = 'activebits_student_display_name'
+const REMEMBERED_STUDENT_DISPLAY_NAME_COOKIE_MAX_AGE_SEC = 60 * 60 * 24 * 365
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value != null && typeof value === 'object' && !Array.isArray(value)
@@ -71,6 +78,43 @@ function isEmptyValue(value: WaitingRoomSerializableValue): boolean {
 
 export function buildWaitingRoomStorageKey(activityName: string, hash: string): string {
   return `waiting-room:${activityName}:${hash}`
+}
+
+export function readRememberedStudentDisplayName(
+  cookieDocument: Pick<WaitingRoomCookieDocumentLike, 'cookie'>,
+): string | null {
+  const cookiePrefix = `${REMEMBERED_STUDENT_DISPLAY_NAME_COOKIE}=`
+  const encodedValue = cookieDocument.cookie
+    .split(';')
+    .map((entry) => entry.trim())
+    .find((entry) => entry.startsWith(cookiePrefix))
+    ?.slice(cookiePrefix.length)
+
+  if (!encodedValue) {
+    return null
+  }
+
+  try {
+    const displayName = decodeURIComponent(encodedValue).trim()
+    return displayName.length > 0 ? displayName : null
+  } catch {
+    return null
+  }
+}
+
+export function persistRememberedStudentDisplayName(
+  cookieDocument: WaitingRoomCookieDocumentLike,
+  displayName: string,
+  options: { isSecure?: boolean } = {},
+): void {
+  const normalizedDisplayName = displayName.trim()
+  const attributes = [
+    'Path=/',
+    'SameSite=Lax',
+    `Max-Age=${normalizedDisplayName.length > 0 ? REMEMBERED_STUDENT_DISPLAY_NAME_COOKIE_MAX_AGE_SEC : 0}`,
+    ...(options.isSecure ? ['Secure'] : []),
+  ]
+  cookieDocument.cookie = `${REMEMBERED_STUDENT_DISPLAY_NAME_COOKIE}=${encodeURIComponent(normalizedDisplayName)}; ${attributes.join('; ')}`
 }
 
 export function getWaitingRoomInitialValues(
