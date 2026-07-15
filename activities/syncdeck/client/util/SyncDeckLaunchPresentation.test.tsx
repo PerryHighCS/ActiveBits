@@ -554,6 +554,7 @@ void test('SyncDeckLaunchPresentation copies a generated permalink to the clipbo
     })
   } finally {
     unmount?.()
+    await Promise.resolve()
     ;(globalThis as { fetch?: typeof fetch }).fetch = previousFetch
     restoreDomEnvironment()
   }
