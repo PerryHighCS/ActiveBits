@@ -6,7 +6,7 @@ export interface SessionParticipantContext {
 }
 
 export function hasCompleteSessionParticipantContext(context: SessionParticipantContext | null): boolean {
-  return context?.studentName != null && context.studentId != null
+  return context?.studentName != null && context?.studentId != null
 }
 
 interface RawSessionParticipantContext {
