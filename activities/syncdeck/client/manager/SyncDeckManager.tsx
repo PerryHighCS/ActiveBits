@@ -1,4 +1,5 @@
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
+import { copyTextWithReset } from '@src/hooks/useClipboard'
 import { storeCreateSessionBootstrapPayload } from '@src/components/common/manageDashboardUtils'
 import { readEmbeddedManagerBootstrapRefreshRequest } from '@src/components/common/embeddedManagerBootstrap'
 import { resolvePersistentSessionEntryPolicy, type PersistentSessionEntryPolicy } from '../../../../types/waitingRoom.js'
@@ -2252,6 +2253,7 @@ const SyncDeckManager: FC = () => {
   const reportPreviewTriggerRef = useRef<HTMLButtonElement | null>(null)
   const reportPreviewDialogRef = useRef<HTMLDivElement | null>(null)
   const restoreDocumentTitleRef = useRef<string | null>(null)
+  const copiedValueResetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const disconnectStatusTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastInstructorPayloadRef = useRef<unknown>(null)
   const lastInstructorStatePayloadRef = useRef<unknown>(null)
@@ -3178,13 +3180,12 @@ const SyncDeckManager: FC = () => {
       return
     }
 
-    try {
-      await navigator.clipboard.writeText(value)
-      setCopiedValue(value)
-      setTimeout(() => setCopiedValue((current) => (current === value ? null : current)), 1500)
-    } catch {
-      // Clipboard permission can be denied or unavailable in an insecure browser context.
-    }
+    await copyTextWithReset(value, {
+      writeText: (text) => navigator.clipboard.writeText(text),
+      setCopiedText: setCopiedValue,
+      timeoutRef: copiedValueResetTimeoutRef,
+      resetDelay: 1500,
+    })
   }
 
   const handleEndSession = async (): Promise<void> => {
@@ -3947,6 +3948,11 @@ const SyncDeckManager: FC = () => {
     () => () => {
       if (disconnectStatusTimeoutRef.current != null) {
         clearTimeout(disconnectStatusTimeoutRef.current)
+        disconnectStatusTimeoutRef.current = null
+      }
+      if (copiedValueResetTimeoutRef.current != null) {
+        clearTimeout(copiedValueResetTimeoutRef.current)
+        copiedValueResetTimeoutRef.current = null
       }
     },
     [],

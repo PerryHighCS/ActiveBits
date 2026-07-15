@@ -27,13 +27,19 @@ test.describe('SyncDeck report preview overlay', () => {
     await expect(copyJoinUrlButton).toHaveAttribute('title', 'Copy join URL')
     const joinCode = page.getByText('Join Code:', { exact: true })
     await expect(joinCode).toBeVisible()
-    const [reportBounds, joinCodeBounds] = await Promise.all([previewButton.boundingBox(), joinCode.boundingBox()])
-    expect(reportBounds).not.toBeNull()
-    expect(joinCodeBounds).not.toBeNull()
-    if (!reportBounds || !joinCodeBounds) {
-      throw new Error('Expected visible Session Report and Join Code controls to have layout bounds.')
+    const joinCodeHandle = await joinCode.elementHandle()
+    expect(joinCodeHandle).not.toBeNull()
+    if (!joinCodeHandle) {
+      throw new Error('Expected the visible Join Code control to have a DOM element.')
     }
-    expect(reportBounds.x).toBeLessThan(joinCodeBounds.x)
+    const reportPrecedesJoinCode = await previewButton.evaluate(
+      (reportButton, joinCodeLabel) => Boolean(
+        reportButton.compareDocumentPosition(joinCodeLabel) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ),
+      joinCodeHandle,
+    )
+    await joinCodeHandle.dispose()
+    expect(reportPrecedesJoinCode).toBe(true)
     await copyJoinCodeButton.click()
     await expect(page.getByRole('button', { name: 'Join code copied' })).toHaveText('✓ Copied!')
     await copyJoinUrlButton.click()
