@@ -4759,15 +4759,20 @@ const SyncDeckManager: FC = () => {
               <ConnectionStatusDot state={instructorConnectionState} tooltip={instructorConnectionTooltip} />
               <div className="flex items-center gap-1" role="group" aria-label="Session join details">
                 <span className="text-sm text-gray-600">Join Code:</span>
-                <code
+                <button
+                  type="button"
                   onClick={() => {
                     void copyValue(sessionId)
                   }}
                   className="px-3 py-1.5 rounded bg-gray-100 font-mono text-lg font-semibold text-gray-800 cursor-pointer hover:bg-gray-200 transition-colors"
-                  title="Click to copy"
+                  aria-label={copiedValue === sessionId ? 'Join code copied' : 'Copy join code'}
+                  title={copiedValue === sessionId ? 'Join code copied' : 'Copy join code'}
                 >
                   {copiedValue === sessionId ? '✓ Copied!' : sessionId}
-                </code>
+                </button>
+                {copiedValue === sessionId && (
+                  <span className="sr-only" role="status">Join code copied</span>
+                )}
                 <button
                   type="button"
                   onClick={() => {

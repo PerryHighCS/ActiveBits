@@ -99,6 +99,7 @@ void test('SyncDeckManager shows the active session id when provided', () => {
   assert.match(html, /Running activities:/i)
   assert.match(html, /session-123/i)
   assert.match(html, /aria-label="Session join details"/i)
+  assert.match(html, /aria-label="Copy join code"/i)
   assert.match(html, /aria-label="Copy join URL"/i)
   assert.doesNotMatch(html, />Copy Join URL</i)
   assert.match(html, /Session Report/i)
