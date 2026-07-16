@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useLocation } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import VirtualFileExplorer from '@src/components/common/VirtualFileExplorer'
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
 import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler'
@@ -158,24 +158,22 @@ export function getStudentRunnerOptions(
 
 export default function MobCodeStudent({ sessionData }: MobCodeStudentProps) {
   const location = useLocation()
-  const [route] = useState(() => resolveMobCodeStudentRoute(location.search, location.state, location.hash))
+  const navigate = useNavigate()
+  const route = resolveMobCodeStudentRoute(location.search, location.state, location.hash)
 
   useEffect(() => {
-    if (route.mode !== 'solo' || typeof window === 'undefined') return
+    if (route.mode !== 'solo') return
     const nextSearch = removeMobCodeSoloTokenFromSearch(location.search)
     const nextHash = removeMobCodeSoloTokenFromHash(location.hash)
-    const currentState = window.history.state != null && typeof window.history.state === 'object'
-      ? window.history.state as Record<string, unknown>
+    if (nextSearch === location.search && nextHash === location.hash) return
+    const currentRouterState = location.state != null && typeof location.state === 'object'
+      ? location.state as Record<string, unknown>
       : {}
-    const currentRouterState = currentState.usr != null && typeof currentState.usr === 'object'
-      ? currentState.usr as Record<string, unknown>
-      : {}
-    window.history.replaceState(
-      { ...currentState, usr: { ...currentRouterState, mobcodeSoloToken: route.soloEditToken } },
-      '',
-      `${window.location.pathname}${nextSearch}${nextHash}`,
-    )
-  }, [location.hash, location.search, route])
+    void navigate(`${location.pathname}${nextSearch}${nextHash}`, {
+      replace: true,
+      state: { ...currentRouterState, mobcodeSoloToken: route.soloEditToken },
+    })
+  }, [location.hash, location.pathname, location.search, location.state, navigate, route])
 
   return route.mode === 'solo'
     ? <MobCodeManager sessionIdOverride={sessionData.sessionId} soloEditToken={route.soloEditToken} soloMode />
