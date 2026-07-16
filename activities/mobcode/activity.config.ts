@@ -6,9 +6,9 @@ const mobCodeConfig: ActivityConfig = {
   description: 'Share a live multi-file code editor with students in real time',
   color: 'blue',
   standaloneEntry: {
-    enabled: false,
+    enabled: true,
     supportsDirectPath: false,
-    supportsPermalink: false,
+    supportsPermalink: true,
     showOnHome: false,
   },
   createSessionBootstrap: {

@@ -51,6 +51,7 @@ const MAX_FILE_CONTENT_LENGTH = 1_000_000
 const MAX_TOTAL_CONTENT_LENGTH = 4 * 1024 * 1024
 const INSTRUCTOR_PASSCODE_BYTES = 16
 const MAX_INSTRUCTOR_PASSCODE_LENGTH = 512
+const SOLO_EDIT_TOKEN_BYTES = 24
 const MAX_PRESENCE_SELECTIONS = 16
 const WS_OPEN = 1
 const LIVE_GROUP_CLEANUP_DELAY_MS = 30_000
@@ -207,6 +208,10 @@ function asMobCodeSession(session: SessionRecord | null): (SessionRecord & { dat
 
 function createInstructorPasscode(): string {
   return randomBytes(INSTRUCTOR_PASSCODE_BYTES).toString('hex')
+}
+
+function createSoloEditToken(): string {
+  return randomBytes(SOLO_EDIT_TOKEN_BYTES).toString('hex')
 }
 
 function verifyPasscode(expected: string | undefined, candidate: unknown): boolean {
@@ -580,6 +585,31 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
     }
   })
 
+  app.post('/api/mobcode/create-solo', async (req, res) => {
+    try {
+      const body = isPlainObject(req.body) ? req.body : {}
+      const files = normalizeFiles(body.files)
+      const activeFile = resolveActiveFile(files, body.activeFile)
+      const runnerId = isMobCodeRunnerId(body.runnerId) ? body.runnerId : undefined
+      const soloEditToken = createSoloEditToken()
+      const session = await createSession(sessions, {
+        data: normalizeMobCodeSessionData({
+          groups: { [DEFAULT_GROUP_ID]: { files, activeFile } },
+          soloMode: true,
+          soloEditToken,
+          ...(runnerId ? { embeddedLaunch: { selectedOptions: { runnerId } } } : {}),
+        }),
+      })
+      session.type = 'mobcode'
+      await sessions.set(session.id, session)
+      console.info(JSON.stringify({ event: 'mobcode.solo-session-created', sessionId: session.id, fileCount: Object.keys(files).length }))
+      res.json({ id: session.id, soloEditToken })
+    } catch (error) {
+      console.error(JSON.stringify({ event: 'mobcode.solo-create-failed', error: String(error) }))
+      res.status(500).json({ error: 'Failed to create solo session' })
+    }
+  })
+
   app.get('/api/mobcode/:sessionId/session', async (req, res) => {
     try {
       const session = asMobCodeSession(await sessions.get(readParam(req.params.sessionId)))
@@ -593,6 +623,7 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
         data: {
           groups: session.data.groups,
           runnerId: readEmbeddedRunnerId(session.data),
+          soloMode: session.data.soloMode === true,
         },
       })
     } catch (error) {
@@ -609,7 +640,10 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
         return
       }
       const body = isPlainObject(req.body) ? req.body : {}
-      if (!verifyPasscode(session.data.instructorPasscode, body.instructorPasscode)) {
+      const hasInstructorAccess = verifyPasscode(session.data.instructorPasscode, body.instructorPasscode)
+      const hasSoloEditAccess = session.data.soloMode === true
+        && verifyPasscode(session.data.soloEditToken, body.soloEditToken)
+      if (!hasInstructorAccess && !hasSoloEditAccess) {
         console.warn(JSON.stringify({ event: 'mobcode.state-denied', sessionId: session.id }))
         res.status(403).json({ error: 'Forbidden' })
         return

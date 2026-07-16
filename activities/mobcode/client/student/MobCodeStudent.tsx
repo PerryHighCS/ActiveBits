@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useLocation } from 'react-router-dom'
 import VirtualFileExplorer from '@src/components/common/VirtualFileExplorer'
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
 import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler'
@@ -17,6 +18,7 @@ import { MOB_CODE_MESSAGE_TYPES } from '../utils/constants'
 import { resolveActiveFile, sanitizeFilesMap } from '../utils/fileUtils'
 import { getThemeFromCookie, setThemeCookie } from '../utils/themeUtils'
 import { isStatePayload, parseMobCodeMessage } from '../manager/managerUtils'
+import MobCodeManager from '../manager/MobCodeManager'
 import '../styles.css'
 
 interface MobCodeStudentProps {
@@ -118,6 +120,15 @@ export function getStudentRunnerOptions(
 }
 
 export default function MobCodeStudent({ sessionData }: MobCodeStudentProps) {
+  const location = useLocation()
+  const soloEditToken = new URLSearchParams(location.search).get('mobcodeSoloToken')
+
+  return soloEditToken
+    ? <MobCodeManager sessionIdOverride={sessionData.sessionId} soloEditToken={soloEditToken} />
+    : <MobCodeLiveStudent sessionData={sessionData} />
+}
+
+function MobCodeLiveStudent({ sessionData }: MobCodeStudentProps) {
   const { sessionId } = sessionData
   const encodedSessionId = encodeURIComponent(sessionId)
   const attachSessionEndedHandler = useSessionEndedHandler()

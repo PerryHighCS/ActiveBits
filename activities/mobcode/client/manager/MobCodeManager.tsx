@@ -14,6 +14,7 @@ import type {
 } from '../../shared/types'
 import { isMobCodeRunnerId } from '../../shared/types'
 import CodeEditor from '../components/CodeEditor'
+import EditorToolbar from '../components/EditorToolbar'
 import FileNameModal from '../components/FileNameModal'
 import FileControlsMenuContent from '../components/FileControlsMenuContent'
 import RunnerControls from '../components/RunnerControls'
@@ -108,8 +109,23 @@ export function resolveOpenMobCodeManagerAuthMessage(params: {
     : null
 }
 
-export default function MobCodeManager() {
-  const { sessionId } = useParams()
+interface MobCodeManagerProps {
+  /** Session and opaque edit credential used by a server-backed solo workspace. */
+  sessionIdOverride?: string
+  soloEditToken?: string
+}
+
+export function resolveMobCodeWorkspaceAccess(params: {
+  isSolo: boolean
+  instructorPasscode: string
+}): boolean {
+  return params.isSolo || params.instructorPasscode.length > 0
+}
+
+export default function MobCodeManager({ sessionIdOverride, soloEditToken }: MobCodeManagerProps = {}) {
+  const { sessionId: routeSessionId } = useParams()
+  const sessionId = sessionIdOverride ?? routeSessionId
+  const isSolo = typeof soloEditToken === 'string' && soloEditToken.length > 0
   const encodedSessionId = sessionId ? encodeURIComponent(sessionId) : ''
   const location = useLocation()
   const fallbackInstructorPasscode = useMemo(() => resolveMobCodeInstructorPasscode({
@@ -121,9 +137,9 @@ export default function MobCodeManager() {
     search: location.search,
   })
   const [instructorPasscode, setInstructorPasscode] = useState(fallbackInstructorPasscode)
-  const canEdit = instructorPasscode.length > 0
+  const canEdit = resolveMobCodeWorkspaceAccess({ isSolo, instructorPasscode })
   const instructorAccessBanner = resolveMobCodeManagerAccessBanner({
-    instructorPasscode,
+    instructorPasscode: isSolo ? 'solo' : instructorPasscode,
     isResolving: embeddedManagerPasscodeExchange.isResolving,
   })
   const [files, setFiles] = useState<Record<string, string>>({})
@@ -186,15 +202,15 @@ export default function MobCodeManager() {
   }, [encodedSessionId, replaceFilesState, sessionId])
 
   const buildWsUrl = useCallback(() => {
-    if (!sessionId) return null
+    if (isSolo || !sessionId) return null
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const params = new URLSearchParams({ sessionId, role: 'manager' })
     return `${protocol}//${window.location.host}/ws/mobcode?${params.toString()}`
-  }, [sessionId])
+  }, [isSolo, sessionId])
 
   const { connect, disconnect, socketRef } = useResilientWebSocket({
     buildUrl: buildWsUrl,
-    shouldReconnect: true,
+    shouldReconnect: !isSolo,
     onOpen: (_event, ws) => {
       const authMessage = createMobCodeManagerAuthMessage(sessionId, instructorPasscode)
       if (authMessage) {
@@ -213,6 +229,7 @@ export default function MobCodeManager() {
   })
 
   useEffect(() => {
+    if (isSolo) return
     const socket = socketRef.current
     const authMessage = resolveOpenMobCodeManagerAuthMessage({
       sessionId,
@@ -223,16 +240,21 @@ export default function MobCodeManager() {
       return
     }
     socket.send(authMessage)
-  }, [instructorPasscode, sessionId, socketRef])
+  }, [instructorPasscode, isSolo, sessionId, socketRef])
 
   const persistState = useCallback(
     async (payload: MobCodeStatePayload, messageType: DurableMobCodeMessageType = MOB_CODE_MESSAGE_TYPES.STATE_SYNC) => {
-      if (!sessionId || !instructorPasscode) return
+      const credential = isSolo ? soloEditToken : instructorPasscode
+      if (!sessionId || !credential) return
       try {
         const response = await fetch(`/api/mobcode/${encodedSessionId}/state`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ...payload, instructorPasscode, messageType }),
+          body: JSON.stringify({
+            ...payload,
+            ...(isSolo ? { soloEditToken } : { instructorPasscode }),
+            messageType,
+          }),
         })
         if (!response.ok) {
           throw new Error(`MobCode state persist failed with status ${response.status}`)
@@ -241,15 +263,15 @@ export default function MobCodeManager() {
         console.error('Failed to persist MobCode state:', error)
       }
     },
-    [encodedSessionId, sessionId, instructorPasscode],
+    [encodedSessionId, instructorPasscode, isSolo, sessionId, soloEditToken],
   )
 
   const sendWsMessage = useCallback(
     (type: MobCodeMessageType, payload: unknown): boolean => {
-      if (!sessionId || !instructorPasscode) return false
+      if (isSolo || !sessionId || !instructorPasscode) return false
       return sendMobCodeWsMessage(socketRef.current, { type, sessionId, payload })
     },
-    [instructorPasscode, sessionId, socketRef],
+    [instructorPasscode, isSolo, sessionId, socketRef],
   )
 
   const flushPendingPresenceSync = useCallback(() => {
@@ -305,6 +327,7 @@ export default function MobCodeManager() {
 
   const scheduleContentSync = useCallback(
     (path: string, content: string, selections: MobCodeSelectionRange[]) => {
+      if (isSolo) return
       pendingContentUpdateRef.current = { path, content, selections }
 
       const syncPlan = createLiveContentSyncPlan(Date.now(), lastLiveSyncAtRef.current, LIVE_CONTENT_SYNC_INTERVAL_MS)
@@ -323,11 +346,12 @@ export default function MobCodeManager() {
 
       schedulePersistSync()
     },
-    [flushPendingContentSync, schedulePersistSync],
+    [flushPendingContentSync, isSolo, schedulePersistSync],
   )
 
   const schedulePresenceSync = useCallback(
     (path: string, selections: MobCodeSelectionRange[]) => {
+      if (isSolo) return
       pendingPresenceRef.current = { path, selections }
 
       const syncPlan = createLiveContentSyncPlan(Date.now(), lastPresenceSyncAtRef.current, LIVE_PRESENCE_SYNC_INTERVAL_MS)
@@ -344,7 +368,7 @@ export default function MobCodeManager() {
         }, syncPlan.delayMs)
       }
     },
-    [flushPendingPresenceSync],
+    [flushPendingPresenceSync, isSolo],
   )
 
   const clearPendingSync = useCallback(() => {
@@ -365,7 +389,7 @@ export default function MobCodeManager() {
   }, [])
 
   useEffect(() => {
-    if (!sessionId) return undefined
+    if (isSolo || !sessionId) return undefined
     connect()
     return () => {
       const hasPendingContent = pendingContentUpdateRef.current != null
@@ -395,6 +419,7 @@ export default function MobCodeManager() {
     }
   }, [
     sessionId,
+    isSolo,
     connect,
     disconnect,
     flushPendingContentSync,
@@ -503,40 +528,62 @@ export default function MobCodeManager() {
 
   return (
     <div className="mobcode-shell">
-      <SessionHeader
-        activityName="Mob Code"
-        sessionId={sessionId}
-        includeBottomMargin={false}
-        actionMenuLabel={canEdit ? 'Files' : undefined}
-        actionMenuRole={canEdit ? 'menu' : undefined}
-        actionMenuContent={canEdit ? (
-          <FileControlsMenuContent
-            files={files}
-            onUploadFiles={(uploadedFiles) => {
-              importFilesIntoWorkspace(uploadedFiles)
-            }}
-            onCreateFile={() => setModalMode('create-file')}
-            onCreateFolder={() => setModalMode('create-folder')}
-            onMessageChange={setFileImportMessage}
-          />
-        ) : undefined}
-        headerActions={(
-          <div className="mobcode-header-actions">
-            <SettingsMenu theme={theme} onThemeChange={handleThemeChange} label="Theme" />
-          </div>
-        )}
-        centerHeaderActions={(
-          <div className="mobcode-runner-actions">
-            <RunnerControls
+      {isSolo ? (
+        <EditorToolbar
+          files={files}
+          theme={theme}
+          centerControls={(
+            <div className="mobcode-runner-actions">
+              <RunnerControls
+                files={files}
+                runnerId={runnerId}
+                runners={MOB_CODE_RUNNERS}
+                onRunCode={handleRunCode}
+                onRunnerChange={setRunnerId}
+              />
+            </div>
+          )}
+          onThemeChange={handleThemeChange}
+          onUploadFiles={importFilesIntoWorkspace}
+          onCreateFile={() => setModalMode('create-file')}
+          onCreateFolder={() => setModalMode('create-folder')}
+        />
+      ) : (
+        <SessionHeader
+          activityName="Mob Code"
+          sessionId={sessionId}
+          includeBottomMargin={false}
+          actionMenuLabel={canEdit ? 'Files' : undefined}
+          actionMenuRole={canEdit ? 'menu' : undefined}
+          actionMenuContent={canEdit ? (
+            <FileControlsMenuContent
               files={files}
-              runnerId={runnerId}
-              runners={MOB_CODE_RUNNERS}
-              onRunCode={handleRunCode}
-              onRunnerChange={setRunnerId}
+              onUploadFiles={(uploadedFiles) => {
+                importFilesIntoWorkspace(uploadedFiles)
+              }}
+              onCreateFile={() => setModalMode('create-file')}
+              onCreateFolder={() => setModalMode('create-folder')}
+              onMessageChange={setFileImportMessage}
             />
-          </div>
-        )}
-      />
+          ) : undefined}
+          headerActions={(
+            <div className="mobcode-header-actions">
+              <SettingsMenu theme={theme} onThemeChange={handleThemeChange} label="Theme" />
+            </div>
+          )}
+          centerHeaderActions={(
+            <div className="mobcode-runner-actions">
+              <RunnerControls
+                files={files}
+                runnerId={runnerId}
+                runners={MOB_CODE_RUNNERS}
+                onRunCode={handleRunCode}
+                onRunnerChange={setRunnerId}
+              />
+            </div>
+          )}
+        />
+      )}
       {instructorAccessBanner === 'loading' && (
         <div
           className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800"

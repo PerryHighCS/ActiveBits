@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   createMobCodeManagerAuthMessage,
+  resolveMobCodeWorkspaceAccess,
   resolveMobCodeManagerAccessBanner,
   resolveOpenMobCodeManagerAuthMessage,
 } from './MobCodeManager.js'
@@ -31,6 +32,12 @@ void test('createMobCodeManagerAuthMessage only emits authentication for complet
       payload: { instructorPasscode: 'teacher-pass' },
     },
   )
+})
+
+void test('resolveMobCodeWorkspaceAccess grants local solo workspaces edit access without credentials', () => {
+  assert.equal(resolveMobCodeWorkspaceAccess({ isSolo: true, instructorPasscode: '' }), true)
+  assert.equal(resolveMobCodeWorkspaceAccess({ isSolo: false, instructorPasscode: '' }), false)
+  assert.equal(resolveMobCodeWorkspaceAccess({ isSolo: false, instructorPasscode: 'teacher-pass' }), true)
 })
 
 void test('resolveMobCodeManagerAccessBanner distinguishes token resolution from missing credentials', () => {

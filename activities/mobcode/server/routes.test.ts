@@ -133,6 +133,41 @@ void test('normalizeMobCodeSessionData creates default group when missing', () =
   assert.equal(data.instructorPasscode?.length, 32)
 })
 
+void test('POST /api/mobcode/create-solo creates a server-backed editable workspace from starter files', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  let savedSession: SessionRecord | null = null
+  setupMobCodeRoutes(app as never, {
+    async get() {
+      return null
+    },
+    async set(_id: string, session: SessionRecord) {
+      savedSession = session
+    },
+  }, ws as never)
+
+  const handler = app.handlers.post['/api/mobcode/create-solo']
+  assert.ok(handler)
+  const response = createResponse()
+  await handler({
+    params: {},
+    body: {
+      files: { 'starter.py': 'print("ready")', '../ignored.py': 'nope' },
+      activeFile: 'starter.py',
+      runnerId: 'brython-terminal',
+    },
+  } as unknown as Parameters<typeof handler>[0], response as unknown as Parameters<typeof handler>[1])
+
+  assert.equal(response.statusCode, 200)
+  assert.equal(typeof (response.body as { id?: unknown }).id, 'string')
+  assert.equal(typeof (response.body as { soloEditToken?: unknown }).soloEditToken, 'string')
+  if (savedSession === null) throw new Error('Expected solo session to be saved')
+  const data = (savedSession as SessionRecord & { data: ReturnType<typeof normalizeMobCodeSessionData> }).data
+  assert.equal(data.soloMode, true)
+  assert.deepEqual(data.groups.default, { files: { 'starter.py': 'print("ready")' }, activeFile: 'starter.py' })
+  assert.equal(data.soloEditToken, (response.body as { soloEditToken: string }).soloEditToken)
+})
+
 void test('GET /api/mobcode/:sessionId/session does not leak instructor passcode', async () => {
   const app = createMockApp()
   const ws = createMockWs()
@@ -159,6 +194,7 @@ void test('GET /api/mobcode/:sessionId/session does not leak instructor passcode
     data: {
       groups: session.data.groups,
       runnerId: null,
+      soloMode: false,
     },
   })
   assert.equal(
@@ -208,6 +244,7 @@ void test('GET /api/mobcode/:sessionId/session exposes sanitized embedded runner
     data: {
       groups: session.data.groups,
       runnerId: 'brython-terminal',
+      soloMode: false,
     },
   })
 })
@@ -253,6 +290,7 @@ void test('GET /api/mobcode/:sessionId/session drops invalid embedded runner id'
     data: {
       groups: session.data.groups,
       runnerId: null,
+      soloMode: false,
     },
   })
 })
@@ -287,6 +325,41 @@ void test('POST /api/mobcode/:sessionId/state returns 403 for a bad instructor p
   assert.equal(response.statusCode, 403)
   assert.deepEqual(response.body, { error: 'Forbidden' })
   assert.equal(setCalls, 0)
+})
+
+void test('POST /api/mobcode/:sessionId/state accepts the scoped solo edit token', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const session = createMobCodeSessionRecord({
+    data: normalizeMobCodeSessionData({
+      soloMode: true,
+      soloEditToken: 'solo-edit-token',
+      groups: { default: { files: { 'main.py': 'print(1)' }, activeFile: 'main.py' } },
+    }),
+  })
+  let saved: SessionRecord | null = null
+  setupMobCodeRoutes(app as never, {
+    async get(id: string) { return id === session.id ? session : null },
+    async set(_id: string, nextSession: SessionRecord) { saved = nextSession },
+  }, ws as never)
+
+  const handler = app.handlers.post['/api/mobcode/:sessionId/state']
+  assert.ok(handler)
+  const response = createResponse()
+  await handler({
+    params: { sessionId: session.id },
+    body: {
+      soloEditToken: 'solo-edit-token',
+      files: { 'main.py': 'print(2)' },
+      activeFile: 'main.py',
+    },
+  } as unknown as Parameters<typeof handler>[0], response as unknown as Parameters<typeof handler>[1])
+
+  assert.equal(response.statusCode, 200)
+  if (saved === null) throw new Error('Expected solo state to be saved')
+  const savedGroup = (saved as SessionRecord & { data: ReturnType<typeof normalizeMobCodeSessionData> }).data.groups.default
+  if (!savedGroup) throw new Error('Expected saved default group')
+  assert.equal(savedGroup.files['main.py'] ?? '', 'print(2)')
 })
 
 void test('POST /api/mobcode/:sessionId/state returns 400 for an invalid payload', async () => {
