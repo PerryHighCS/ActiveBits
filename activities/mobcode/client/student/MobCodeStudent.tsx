@@ -37,14 +37,13 @@ function readMobCodeSoloTokenFromHistoryState(locationState: unknown): string {
   return typeof token === 'string' ? token.trim() : ''
 }
 
-function readMobCodeSoloTokenFromUrl(search: string, hash: string): string {
-  return new URLSearchParams(search).get('mobcodeSoloToken')?.trim()
-    || new URLSearchParams(hash.startsWith('#') ? hash.slice(1) : hash).get('mobcodeSoloToken')?.trim()
+function readMobCodeSoloTokenFromUrl(hash: string): string {
+  return new URLSearchParams(hash.startsWith('#') ? hash.slice(1) : hash).get('mobcodeSoloToken')?.trim()
     || ''
 }
 
-export function resolveMobCodeStudentRoute(search: string, locationState?: unknown, hash = ''): MobCodeStudentRoute {
-  const soloEditToken = readMobCodeSoloTokenFromUrl(search, hash)
+export function resolveMobCodeStudentRoute(_search: string, locationState?: unknown, hash = ''): MobCodeStudentRoute {
+  const soloEditToken = readMobCodeSoloTokenFromUrl(hash)
     || readMobCodeSoloTokenFromHistoryState(locationState)
   return soloEditToken ? { mode: 'solo', soloEditToken } : { mode: 'live' }
 }

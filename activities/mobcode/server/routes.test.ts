@@ -16,7 +16,7 @@ import {
 import setupMobCodeRoutes from './routes'
 
 type RouteHandler = (
-  req: { params: Record<string, string>; body?: unknown },
+  req: { params: Record<string, string>; body?: unknown; headers?: { cookie?: string } },
   res: MockResponse,
 ) => Promise<void> | void
 
@@ -246,6 +246,33 @@ void test('GET /api/mobcode/:sessionId/session does not leak a solo edit token',
   assert.equal(Object.hasOwn((response.body as { data: Record<string, unknown> }).data, 'soloEditToken'), false)
 })
 
+void test('GET /api/mobcode/:sessionId/session enables solo editing for the matching cookie', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const session = createMobCodeSessionRecord({
+    data: normalizeMobCodeSessionData({
+      soloMode: true,
+      soloEditToken: 'solo-edit-token',
+      groups: { default: { files: { 'main.py': 'print(1)' }, activeFile: 'main.py' } },
+    }),
+  })
+  setupMobCodeRoutes(app as never, {
+    async get(id: string) { return id === session.id ? session : null },
+    async set() {},
+  }, ws as never)
+
+  const handler = app.handlers.get['/api/mobcode/:sessionId/session']
+  assert.ok(handler)
+  const response = createResponse()
+  await handler({
+    params: { sessionId: session.id },
+    headers: { cookie: `mobcode_solo_edit_${session.id}=solo-edit-token` },
+  } as never, response as never)
+
+  assert.equal(response.statusCode, 200)
+  assert.equal((response.body as { data: { canEditSolo: boolean } }).data.canEditSolo, true)
+})
+
 void test('GET /api/mobcode/:sessionId/session exposes sanitized embedded runner id', async () => {
   const app = createMockApp()
   const ws = createMockWs()
@@ -399,6 +426,41 @@ void test('POST /api/mobcode/:sessionId/state accepts the scoped solo edit token
       activeFile: 'main.py',
     },
   } as unknown as Parameters<typeof handler>[0], response as unknown as Parameters<typeof handler>[1])
+
+  assert.equal(response.statusCode, 200)
+  if (saved === null) throw new Error('Expected solo state to be saved')
+  const savedGroup = (saved as SessionRecord & { data: ReturnType<typeof normalizeMobCodeSessionData> }).data.groups.default
+  if (!savedGroup) throw new Error('Expected saved default group')
+  assert.equal(savedGroup.files['main.py'] ?? '', 'print(2)')
+})
+
+void test('POST /api/mobcode/:sessionId/state accepts the matching solo edit cookie', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const session = createMobCodeSessionRecord({
+    data: normalizeMobCodeSessionData({
+      soloMode: true,
+      soloEditToken: 'solo-edit-token',
+      groups: { default: { files: { 'main.py': 'print(1)' }, activeFile: 'main.py' } },
+    }),
+  })
+  let saved: SessionRecord | null = null
+  setupMobCodeRoutes(app as never, {
+    async get(id: string) { return id === session.id ? session : null },
+    async set(_id: string, nextSession: SessionRecord) { saved = nextSession },
+  }, ws as never)
+
+  const handler = app.handlers.post['/api/mobcode/:sessionId/state']
+  assert.ok(handler)
+  const response = createResponse()
+  await handler({
+    params: { sessionId: session.id },
+    headers: { cookie: `mobcode_solo_edit_${session.id}=solo-edit-token` },
+    body: {
+      files: { 'main.py': 'print(2)' },
+      activeFile: 'main.py',
+    },
+  } as never, response as never)
 
   assert.equal(response.statusCode, 200)
   if (saved === null) throw new Error('Expected solo state to be saved')

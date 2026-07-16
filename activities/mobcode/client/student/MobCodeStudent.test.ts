@@ -29,6 +29,7 @@ void test('resolveMobCodeStudentRoute selects the token-authenticated solo manag
     soloEditToken: 'opaque-token',
   })
   assert.deepEqual(resolveMobCodeStudentRoute('?other=value'), { mode: 'live' })
+  assert.deepEqual(resolveMobCodeStudentRoute('?mobcodeSoloToken=opaque-token'), { mode: 'live' })
   assert.deepEqual(resolveMobCodeStudentRoute('?mobcodeSoloToken=%20%20'), { mode: 'live' })
   assert.deepEqual(resolveMobCodeStudentRoute('', { mobcodeSoloToken: ' history-token ' }), {
     mode: 'solo',

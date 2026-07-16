@@ -702,6 +702,9 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
       }
       await sessions.set(session.id, session)
       await broadcast(messageType, nextPayload, session.id)
+      if (session.data.soloMode === true) {
+        scheduleLiveGroupCleanup(session.id)
+      }
       res.json({ ok: true })
     } catch (error) {
       console.error(JSON.stringify({ event: 'mobcode.state-failed', sessionId: req.params.sessionId, error: String(error) }))
