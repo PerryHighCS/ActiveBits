@@ -78,6 +78,7 @@ async function openPostboardStudent(
   page: Page,
   sessionId: string,
   student?: AcceptedStudent,
+  expectWaitingRoom = false,
 ): Promise<void> {
   await page.addInitScript(({ sessionId: targetSessionId, student: targetStudent }) => {
     if (targetStudent) {
@@ -91,6 +92,10 @@ async function openPostboardStudent(
     }
   }, { sessionId, student })
   await page.goto(`/${encodeURIComponent(sessionId)}`)
+  if (expectWaitingRoom) {
+    await expect(page.getByRole('button', { name: 'Join Session' })).toBeVisible()
+    return
+  }
   await expect(page.getByRole('heading', { name: 'Add a note' })).toBeVisible()
 }
 
@@ -155,7 +160,12 @@ test('student reactions require accepted identity and expose current reaction ac
   })
   await createInstructorPost(seedPage, session, 'A note from the instructor')
 
-  await openPostboardStudent(anonymousPage, session.id, { studentId: null, studentName: 'Waiting Student' })
+  await openPostboardStudent(
+    anonymousPage,
+    session.id,
+    { studentId: null, studentName: 'Waiting Student' },
+    true,
+  )
   await expect(anonymousPage.getByRole('button', { name: 'Choose reaction' })).toHaveCount(0)
 
   const grace = await acceptStudent(seedPage, session.id, 'Grace Hopper')

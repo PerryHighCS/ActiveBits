@@ -32,12 +32,14 @@ export async function persistWaitingRoomServerBackedHandoff({
   fetchImpl = typeof fetch === 'function' ? fetch.bind(globalThis) as EntryParticipantFetchLike : null,
   onWarn = console.warn,
 }: WaitingRoomHandoffPersistenceParams): Promise<void> {
-  if (!storage || !fetchImpl) {
+  if (!fetchImpl) {
     return
   }
 
-  if (sessionParticipantContextSessionId) {
-    persistSessionParticipantContext(participantContextStorage ?? storage, sessionParticipantContextSessionId, {
+  const resolvedParticipantContextStorage = participantContextStorage
+
+  if (sessionParticipantContextSessionId && resolvedParticipantContextStorage) {
+    persistSessionParticipantContext(resolvedParticipantContextStorage, sessionParticipantContextSessionId, {
       studentName: getEntryParticipantDisplayName(values),
       studentId: getEntryParticipantParticipantId(values),
     }, onWarn)
@@ -60,28 +62,38 @@ export async function persistWaitingRoomServerBackedHandoff({
     }
 
     const payload = await response.json() as { entryParticipantToken?: unknown; values?: unknown }
-    const token = typeof payload.entryParticipantToken === 'string' ? payload.entryParticipantToken.trim() : ''
-    if (!token) {
-      throw new Error('Missing entry participant token')
-    }
-
     if (
       typeof sessionParticipantContextSessionId === 'string'
+      && resolvedParticipantContextStorage
       && typeof payload.values === 'object'
       && payload.values !== null
       && !Array.isArray(payload.values)
     ) {
       const responseValues = payload.values as EntryParticipantValueMap
-      persistSessionParticipantContext(participantContextStorage ?? storage, sessionParticipantContextSessionId, {
+      persistSessionParticipantContext(resolvedParticipantContextStorage, sessionParticipantContextSessionId, {
         studentName: getEntryParticipantDisplayName(responseValues),
         studentId: getEntryParticipantParticipantId(responseValues),
       }, onWarn)
+    }
+
+    if (!storage) {
+      return
+    }
+
+    const token = typeof payload.entryParticipantToken === 'string' ? payload.entryParticipantToken.trim() : ''
+    if (!token) {
+      throw new Error('Missing entry participant token')
     }
 
     persistEntryParticipantToken(storage, storageKey, token, {
       ...(typeof persistentHash === 'string' ? { persistentHash } : {}),
     }, onWarn)
   } catch (error) {
+    if (!storage) {
+      onWarn('[WaitingRoom] Failed to store entry participant on server; client handoff is unavailable because browser storage is unavailable:', error)
+      return
+    }
+
     onWarn('[WaitingRoom] Failed to store entry participant on server, falling back to client handoff:', error)
     persistEntryParticipantValues(storage, storageKey, values, onWarn)
   }

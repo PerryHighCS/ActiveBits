@@ -39,7 +39,7 @@ import {
   hasValidEntryParticipantHandoffStorageValue,
 } from './entryParticipantStorage'
 import { shouldAutoRedirectPersistentTeacherToManage, shouldRenderSessionJoinPreflight } from './sessionEntryRenderUtils'
-import { readSessionParticipantContext } from './sessionParticipantContext'
+import { hasCompleteSessionParticipantContext, readSessionParticipantContext } from './sessionParticipantContext'
 
 interface RouteParams {
   [key: string]: string | undefined
@@ -126,11 +126,13 @@ const SessionRouter = ({ onShellExpandChange }: SessionRouterProps = {}) => {
   const hasStoredSessionParticipantContext = (
     typeof window !== 'undefined'
     && sessionId != null
-  ) ? Boolean(readSessionParticipantContext(window.localStorage, sessionId)) : false
+  ) ? hasCompleteSessionParticipantContext(readSessionParticipantContext(window.localStorage, sessionId)) : false
   const hasStoredPersistentSessionParticipantContext = (
     typeof window !== 'undefined'
     && persistentSessionEntryStatus?.sessionId != null
-  ) ? Boolean(readSessionParticipantContext(window.localStorage, persistentSessionEntryStatus.sessionId)) : false
+  ) ? hasCompleteSessionParticipantContext(
+    readSessionParticipantContext(window.localStorage, persistentSessionEntryStatus.sessionId),
+  ) : false
   const hasStoredSessionEntryParticipantHandoff = (
     typeof window !== 'undefined'
     && sessionEntryStatus?.sessionId != null

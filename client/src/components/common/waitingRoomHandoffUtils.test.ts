@@ -83,6 +83,63 @@ void test('persistWaitingRoomServerBackedHandoff stores persistent hash with sol
   })
 })
 
+void test('persistWaitingRoomServerBackedHandoff persists the server-issued participant id without session storage', async () => {
+  const participantContextStorage = createStorage()
+
+  await persistWaitingRoomServerBackedHandoff({
+    storage: null,
+    participantContextStorage,
+    storageKey: buildEntryParticipantStorageKey('syncdeck', 'session', 'session-1'),
+    values: { displayName: 'Ada' },
+    submitApiUrl: '/api/session/session-1/entry-participant',
+    sessionParticipantContextSessionId: 'session-1',
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      async json() {
+        return {
+          values: { displayName: 'Ada', participantId: 'participant-1' },
+        }
+      },
+    }),
+  })
+
+  assert.deepEqual(readSessionParticipantContext(participantContextStorage, 'session-1'), {
+    studentName: 'Ada',
+    studentId: 'participant-1',
+  })
+})
+
+void test('persistWaitingRoomServerBackedHandoff respects disabled participant context storage', async () => {
+  const storage = createStorage()
+  const storageKey = buildEntryParticipantStorageKey('syncdeck', 'session', 'session-1')
+
+  await persistWaitingRoomServerBackedHandoff({
+    storage,
+    participantContextStorage: null,
+    storageKey,
+    values: { displayName: 'Ada' },
+    submitApiUrl: '/api/session/session-1/entry-participant',
+    sessionParticipantContextSessionId: 'session-1',
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      async json() {
+        return {
+          entryParticipantToken: 'token-123',
+          values: { displayName: 'Ada', participantId: 'participant-1' },
+        }
+      },
+    }),
+  })
+
+  assert.equal(readSessionParticipantContext(storage, 'session-1'), null)
+  assert.deepEqual(JSON.parse(String(storage.getItem(storageKey))), {
+    kind: 'token',
+    token: 'token-123',
+  })
+})
+
 void test('persistWaitingRoomServerBackedHandoff falls back to local values when server write fails', async () => {
   const storage = createStorage()
   const participantContextStorage = createStorage()
@@ -115,6 +172,31 @@ void test('persistWaitingRoomServerBackedHandoff falls back to local values when
     studentId: null,
   })
   assert.equal(warnings[0], '[WaitingRoom] Failed to store entry participant on server, falling back to client handoff:')
+})
+
+void test('persistWaitingRoomServerBackedHandoff reports unavailable client handoff when storage is missing', async () => {
+  console.log('[TEST] exercising server handoff failure without browser storage')
+  const warnings: string[] = []
+
+  await persistWaitingRoomServerBackedHandoff({
+    storage: null,
+    storageKey: buildEntryParticipantStorageKey('syncdeck', 'session', 'session-4'),
+    values: { displayName: 'Grace' },
+    submitApiUrl: '/api/session/session-4/entry-participant',
+    fetchImpl: async () => ({
+      ok: false,
+      status: 500,
+      async json() {
+        return {}
+      },
+    }),
+    onWarn: (message) => warnings.push(message),
+  })
+
+  assert.equal(
+    warnings[0],
+    '[WaitingRoom] Failed to store entry participant on server; client handoff is unavailable because browser storage is unavailable:',
+  )
 })
 
 void test('persistWaitingRoomServerBackedHandoff falls back to local values when token is missing', async () => {
