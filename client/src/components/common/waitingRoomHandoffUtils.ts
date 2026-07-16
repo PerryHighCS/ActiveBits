@@ -36,7 +36,7 @@ export async function persistWaitingRoomServerBackedHandoff({
     return
   }
 
-  const resolvedParticipantContextStorage = participantContextStorage ?? storage
+  const resolvedParticipantContextStorage = participantContextStorage
 
   if (sessionParticipantContextSessionId && resolvedParticipantContextStorage) {
     persistSessionParticipantContext(resolvedParticipantContextStorage, sessionParticipantContextSessionId, {
