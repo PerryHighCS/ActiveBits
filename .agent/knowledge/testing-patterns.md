@@ -15,6 +15,15 @@ Capture reusable test setup patterns, common failure modes, and reliability guid
 
 ## Entries
 
+- Date: 2026-07-16
+- Scope: unit | SyncDeck utility UI
+- Pattern: When a JSDOM component test triggers a detached async UI handler, wrap the interaction in `await act(async () => { ... })`, allow its promise continuations to settle inside that boundary, and unmount in a final `act` boundary before restoring global DOM objects.
+- Why it helps: The `node:test` runner can otherwise observe a pending React state update after the test has restored `window`/`document`, producing an intermittent uncaught `TypeError` despite all assertions passing.
+- Example (file/path): `activities/syncdeck/client/util/SyncDeckLaunchPresentation.test.tsx`
+- Failure signal: CI reports asynchronous activity after the test ends, often with an error reading an event property, while the named assertion has already passed.
+- Follow-up action: Apply this only to tests that own a temporary JSDOM environment and invoke detached async handlers; do not add arbitrary delays when the interaction can be awaited through React's `act`.
+- Owner: Codex
+
 - Date: 2026-06-06
 - Scope: unit | integration
 - Pattern: For MobCode editor sync, test both sides of stale durable snapshot handling: editable manager clients should ignore remote durable `state-sync`/`file-tree-changed` echoes, and the server should merge durable `state-sync`/`file-tree-changed` payloads with the latest live websocket group only while an authenticated manager socket is connected. The merge keeps the requested file tree so creates/deletes/renames survive, while preserving live content for files that still exist in that requested tree.

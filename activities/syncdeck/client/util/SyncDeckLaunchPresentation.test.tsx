@@ -480,7 +480,7 @@ void test('SyncDeckLaunchPresentation copies a generated permalink to the clipbo
   )
   const previousFetch = globalThis.fetch
   const writes: string[] = []
-  const { fireEvent, render, waitFor } = await import('@testing-library/react')
+  const { act, fireEvent, render, waitFor } = await import('@testing-library/react')
   const { MemoryRouter } = await import('react-router-dom')
   const { default: SyncDeckLaunchPresentation } = await import('./SyncDeckLaunchPresentation.js')
   let unmount: (() => void) | null = null
@@ -546,15 +546,20 @@ void test('SyncDeckLaunchPresentation copies a generated permalink to the clipbo
       assert.notEqual(rendered.queryByRole('button', { name: /^copy$/i }), null)
     })
 
-    fireEvent.click(rendered.getByRole('button', { name: /^copy$/i }))
+    await act(async () => {
+      fireEvent.click(rendered.getByRole('button', { name: /^copy$/i }))
+      await Promise.resolve()
+      await Promise.resolve()
+    })
 
     await waitFor(() => {
       assert.deepEqual(writes, [generatedUrl])
       assert.notEqual(rendered.queryByText(/copied link to clipboard/i), null)
     })
   } finally {
-    unmount?.()
-    await Promise.resolve()
+    await act(async () => {
+      unmount?.()
+    })
     ;(globalThis as { fetch?: typeof fetch }).fetch = previousFetch
     restoreDomEnvironment()
   }
