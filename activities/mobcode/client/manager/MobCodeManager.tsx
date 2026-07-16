@@ -327,21 +327,22 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken }: Mob
 
   const scheduleContentSync = useCallback(
     (path: string, content: string, selections: MobCodeSelectionRange[]) => {
-      if (isSolo) return
-      pendingContentUpdateRef.current = { path, content, selections }
+      if (!isSolo) {
+        pendingContentUpdateRef.current = { path, content, selections }
 
-      const syncPlan = createLiveContentSyncPlan(Date.now(), lastLiveSyncAtRef.current, LIVE_CONTENT_SYNC_INTERVAL_MS)
-      if (syncPlan.sendImmediately) {
-        if (wsDebounceRef.current) {
-          clearTimeout(wsDebounceRef.current)
-          wsDebounceRef.current = null
-        }
-        flushPendingContentSync()
-      } else if (wsDebounceRef.current == null) {
-        wsDebounceRef.current = setTimeout(() => {
-          wsDebounceRef.current = null
+        const syncPlan = createLiveContentSyncPlan(Date.now(), lastLiveSyncAtRef.current, LIVE_CONTENT_SYNC_INTERVAL_MS)
+        if (syncPlan.sendImmediately) {
+          if (wsDebounceRef.current) {
+            clearTimeout(wsDebounceRef.current)
+            wsDebounceRef.current = null
+          }
           flushPendingContentSync()
-        }, syncPlan.delayMs)
+        } else if (wsDebounceRef.current == null) {
+          wsDebounceRef.current = setTimeout(() => {
+            wsDebounceRef.current = null
+            flushPendingContentSync()
+          }, syncPlan.delayMs)
+        }
       }
 
       schedulePersistSync()
@@ -389,7 +390,19 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken }: Mob
   }, [])
 
   useEffect(() => {
-    if (isSolo || !sessionId) return undefined
+    if (!sessionId) return undefined
+    if (isSolo) {
+      return () => {
+        const hasPendingPersist = persistDebounceRef.current != null
+        if (persistDebounceRef.current) {
+          clearTimeout(persistDebounceRef.current)
+          persistDebounceRef.current = null
+        }
+        if (hasPendingPersist) {
+          flushPendingPersistSync()
+        }
+      }
+    }
     connect()
     return () => {
       const hasPendingContent = pendingContentUpdateRef.current != null

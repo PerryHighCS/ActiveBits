@@ -27,6 +27,15 @@ interface MobCodeStudentProps {
   }
 }
 
+export type MobCodeStudentRoute =
+  | { mode: 'solo'; soloEditToken: string }
+  | { mode: 'live' }
+
+export function resolveMobCodeStudentRoute(search: string): MobCodeStudentRoute {
+  const soloEditToken = new URLSearchParams(search).get('mobcodeSoloToken')
+  return soloEditToken ? { mode: 'solo', soloEditToken } : { mode: 'live' }
+}
+
 interface SessionResponse {
   data?: {
     runnerId?: unknown
@@ -121,10 +130,10 @@ export function getStudentRunnerOptions(
 
 export default function MobCodeStudent({ sessionData }: MobCodeStudentProps) {
   const location = useLocation()
-  const soloEditToken = new URLSearchParams(location.search).get('mobcodeSoloToken')
+  const route = resolveMobCodeStudentRoute(location.search)
 
-  return soloEditToken
-    ? <MobCodeManager sessionIdOverride={sessionData.sessionId} soloEditToken={soloEditToken} />
+  return route.mode === 'solo'
+    ? <MobCodeManager sessionIdOverride={sessionData.sessionId} soloEditToken={route.soloEditToken} />
     : <MobCodeLiveStudent sessionData={sessionData} />
 }
 
