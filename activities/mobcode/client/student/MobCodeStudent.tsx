@@ -37,8 +37,14 @@ function readMobCodeSoloTokenFromHistoryState(locationState: unknown): string {
   return typeof token === 'string' ? token.trim() : ''
 }
 
-export function resolveMobCodeStudentRoute(search: string, locationState?: unknown): MobCodeStudentRoute {
-  const soloEditToken = new URLSearchParams(search).get('mobcodeSoloToken')?.trim()
+function readMobCodeSoloTokenFromUrl(search: string, hash: string): string {
+  return new URLSearchParams(search).get('mobcodeSoloToken')?.trim()
+    || new URLSearchParams(hash.startsWith('#') ? hash.slice(1) : hash).get('mobcodeSoloToken')?.trim()
+    || ''
+}
+
+export function resolveMobCodeStudentRoute(search: string, locationState?: unknown, hash = ''): MobCodeStudentRoute {
+  const soloEditToken = readMobCodeSoloTokenFromUrl(search, hash)
     || readMobCodeSoloTokenFromHistoryState(locationState)
   return soloEditToken ? { mode: 'solo', soloEditToken } : { mode: 'live' }
 }
@@ -48,6 +54,13 @@ export function removeMobCodeSoloTokenFromSearch(search: string): string {
   params.delete('mobcodeSoloToken')
   const remainingSearch = params.toString()
   return remainingSearch ? `?${remainingSearch}` : ''
+}
+
+export function removeMobCodeSoloTokenFromHash(hash: string): string {
+  const params = new URLSearchParams(hash.startsWith('#') ? hash.slice(1) : hash)
+  params.delete('mobcodeSoloToken')
+  const remainingHash = params.toString()
+  return remainingHash ? `#${remainingHash}` : ''
 }
 
 interface SessionResponse {
@@ -145,20 +158,24 @@ export function getStudentRunnerOptions(
 
 export default function MobCodeStudent({ sessionData }: MobCodeStudentProps) {
   const location = useLocation()
-  const [route] = useState(() => resolveMobCodeStudentRoute(location.search, location.state))
+  const [route] = useState(() => resolveMobCodeStudentRoute(location.search, location.state, location.hash))
 
   useEffect(() => {
     if (route.mode !== 'solo' || typeof window === 'undefined') return
     const nextSearch = removeMobCodeSoloTokenFromSearch(location.search)
+    const nextHash = removeMobCodeSoloTokenFromHash(location.hash)
     const currentState = window.history.state != null && typeof window.history.state === 'object'
       ? window.history.state as Record<string, unknown>
       : {}
+    const currentRouterState = currentState.usr != null && typeof currentState.usr === 'object'
+      ? currentState.usr as Record<string, unknown>
+      : {}
     window.history.replaceState(
-      { ...currentState, mobcodeSoloToken: route.soloEditToken },
+      { ...currentState, usr: { ...currentRouterState, mobcodeSoloToken: route.soloEditToken } },
       '',
-      `${window.location.pathname}${nextSearch}${window.location.hash}`,
+      `${window.location.pathname}${nextSearch}${nextHash}`,
     )
-  }, [location.search, route])
+  }, [location.hash, location.search, route])
 
   return route.mode === 'solo'
     ? <MobCodeManager sessionIdOverride={sessionData.sessionId} soloEditToken={route.soloEditToken} soloMode />

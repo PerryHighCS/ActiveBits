@@ -205,6 +205,7 @@ void test('GET /api/mobcode/:sessionId/session does not leak instructor passcode
   } as unknown as Parameters<typeof sessionHandler>[0], response as unknown as Parameters<typeof sessionHandler>[1])
 
   assert.equal(response.statusCode, 200)
+  assert.equal(response.headers['Cache-Control'], 'no-store')
   assert.deepEqual(response.body, {
     id: session.id,
     type: session.type,

@@ -21,7 +21,7 @@ export async function launchMobCodePersistentSoloEntry(
   if (typeof created.id !== 'string' || typeof created.soloEditToken !== 'string') {
     throw new Error('MobCode solo session response was invalid.')
   }
-  return { navigateTo: `/${encodeURIComponent(created.id)}?mobcodeSoloToken=${encodeURIComponent(created.soloEditToken)}` }
+  return { navigateTo: `/${encodeURIComponent(created.id)}#mobcodeSoloToken=${encodeURIComponent(created.soloEditToken)}` }
 }
 
 export default {

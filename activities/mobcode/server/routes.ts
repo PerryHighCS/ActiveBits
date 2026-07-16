@@ -640,6 +640,7 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
         res.status(404).json({ error: 'Session not found' })
         return
       }
+      res.set('Cache-Control', 'no-store')
       res.json({
         id: session.id,
         type: session.type,

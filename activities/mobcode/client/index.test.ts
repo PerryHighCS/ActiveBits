@@ -24,5 +24,5 @@ void test('launchMobCodePersistentSoloEntry creates a server-backed workspace wi
     runnerId: 'brython-terminal',
   })
   assert.equal(request.current?.init?.cache, 'no-store')
-  assert.deepEqual(result, { navigateTo: '/solo-session?mobcodeSoloToken=opaque-token' })
+  assert.deepEqual(result, { navigateTo: '/solo-session#mobcodeSoloToken=opaque-token' })
 })
