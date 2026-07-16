@@ -882,6 +882,7 @@ entry_source = ${serializedEntryContent}
 entry_user_line_count = ${entryLineCount}
 entry_import_diagnostic = ${serializedEntryImportDiagnostic}
 workspace_files = ${serializedWorkspaceFiles}
+entry_user_source = workspace_files.get(entry_filename, '')
 workspace_python_modules = ${serializedWorkspacePythonModules}
 workspace_brython_files_json = ${serializedWorkspaceBrythonFilesJson}
 input_sequence = 0
@@ -1090,17 +1091,23 @@ def find_user_error_line(error):
             return int(entry_import_diagnostic.get('line', 1))
         except Exception:
             return None
+    user_line_number = None
     traceback_node = getattr(error, '__traceback__', None)
     while traceback_node is not None:
         frame = getattr(traceback_node, 'tb_frame', None)
         code = getattr(frame, 'f_code', None)
-        filename = getattr(code, 'co_filename', None)
+        # Some Brython frames expose __file__ directly rather than CPython's
+        # f_code.co_filename. Accept both representations for runtime errors.
+        filename = getattr(code, 'co_filename', None) or getattr(frame, '__file__', None)
         if filename == entry_filename:
             line_number = getattr(traceback_node, 'tb_lineno', None)
             if line_number is not None and line_number <= entry_user_line_count + 1:
-                return max(1, line_number - 1)
-            return None
+                # Keep walking: wrapper frames share the entry filename, while
+                # the deepest matching frame identifies the actual user line.
+                user_line_number = max(1, line_number - 1)
         traceback_node = getattr(traceback_node, 'tb_next', None)
+    if user_line_number is not None:
+        return user_line_number
     fallback_line_number = getattr(error, 'lineno', None)
     if fallback_line_number is not None:
         try:
@@ -1120,7 +1127,31 @@ def format_user_error_header(error):
 def mobcode_report_done():
     worker_self.send({'type': 'done'})
 
+def mobcode_format_exception(error):
+    error_message = str(error)
+    error_suffix = ': ' + error_message if error_message else ''
+    return error.__class__.__name__ + error_suffix + '\\n'
+
 def mobcode_format_error(error):
+    traceback_lines = []
+    traceback_node = getattr(error, '__traceback__', None)
+    entry_user_lines = entry_user_source.splitlines()
+    while traceback_node is not None:
+        frame = getattr(traceback_node, 'tb_frame', None)
+        code = getattr(frame, 'f_code', None)
+        filename = getattr(code, 'co_filename', None) or getattr(frame, '__file__', None)
+        line_number = getattr(traceback_node, 'tb_lineno', None)
+        if filename == entry_filename and line_number is not None and line_number <= entry_user_line_count + 1:
+            user_line_number = max(1, line_number - 1)
+            function_name = getattr(code, 'co_name', '<module>')
+            if function_name == '__mobcode_user_main__':
+                function_name = '<module>'
+            traceback_lines.append('  File "' + entry_filename + '", line ' + str(user_line_number) + ', in ' + function_name)
+            if user_line_number <= len(entry_user_lines):
+                traceback_lines.append('    ' + entry_user_lines[user_line_number - 1].strip())
+        traceback_node = getattr(traceback_node, 'tb_next', None)
+    if traceback_lines:
+        return 'Traceback (most recent call last):\\n' + '\\n'.join(traceback_lines) + '\\n' + mobcode_format_exception(error)
     try:
         formatted_error = traceback.format_exc()
         if formatted_error.strip() != 'NoneType: None':
@@ -1128,7 +1159,7 @@ def mobcode_format_error(error):
     except Exception:
         pass
     try:
-        return error.__class__.__name__ + ': ' + str(error) + '\\n'
+        return mobcode_format_exception(error)
     except Exception:
         return 'Python error could not be formatted.\\n'
 

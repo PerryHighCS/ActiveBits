@@ -205,3 +205,56 @@ test('MobCode Python runner popup reports unsupported imports without Brython DO
   await expect(terminal).not.toContainText('JSObject')
   await expect(terminal).not.toContainText('DOMException')
 })
+
+test('MobCode Python runner identifies the source line for assertion failures', async ({ page }) => {
+  const session = await createMobCodeSession(page)
+  await seedMobCodeFile(page, session, [
+    'def onesDigit(n):',
+    '    return n % 10',
+    '',
+    'def testOnesDigit():',
+    '    assert(onesDigit(5) == 5)',
+    '    assert(onesDigit(123) == 3)',
+    '    assert(onesDigit(100) == 0)',
+    '    assert(onesDigit(999) == 9)',
+    '    assert(onesDigit(-123) == 3)',
+    "    print('Passed!')",
+    '',
+    'testOnesDigit()',
+  ].join('\n'))
+  await openMobCodeManager(page, session)
+
+  const popup = await runMobCodePopup(page)
+  const terminal = popup.locator('#terminal')
+
+  await expect(terminal).toContainText('Error in test.py, line 9', { timeout: 15_000 })
+  await expect(terminal).toContainText('Traceback (most recent call last):')
+  await expect(terminal).toContainText('File "test.py", line 12, in <module>')
+  await expect(terminal).toContainText('testOnesDigit()')
+  await expect(terminal).toContainText('File "test.py", line 9, in testOnesDigit')
+  await expect(terminal).toContainText('assert(onesDigit(-123) == 3)')
+  await expect(terminal).toContainText('AssertionError')
+  await expect(terminal).not.toContainText('AssertionError: ')
+})
+
+test('MobCode Python runner identifies the deepest user line for runtime failures', async ({ page }) => {
+  const session = await createMobCodeSession(page)
+  await seedMobCodeFile(page, session, [
+    'def divide(n):',
+    '    return 10 / n',
+    '',
+    'print(divide(0))',
+  ].join('\n'))
+  await openMobCodeManager(page, session)
+
+  const popup = await runMobCodePopup(page)
+  const terminal = popup.locator('#terminal')
+
+  await expect(terminal).toContainText('Error in test.py, line 2', { timeout: 15_000 })
+  await expect(terminal).toContainText('Traceback (most recent call last):')
+  await expect(terminal).toContainText('File "test.py", line 4, in <module>')
+  await expect(terminal).toContainText('print(divide(0))')
+  await expect(terminal).toContainText('File "test.py", line 2, in divide')
+  await expect(terminal).toContainText('return 10 / n')
+  await expect(terminal).toContainText('ZeroDivisionError')
+})
