@@ -178,6 +178,7 @@ void test('POST /api/mobcode/create-solo creates a server-backed editable worksp
   assert.equal(response.headers['Cache-Control'], 'no-store')
   assert.equal(response.cookies.length, 1)
   assert.equal(response.cookies[0]?.options.httpOnly, true)
+  assert.equal(response.cookies[0]?.options.maxAge, 365 * 24 * 60 * 60 * 1000)
   if (savedSession === null) throw new Error('Expected solo session to be saved')
   const data = (savedSession as SessionRecord & { data: ReturnType<typeof normalizeMobCodeSessionData> }).data
   assert.equal(data.soloMode, true)

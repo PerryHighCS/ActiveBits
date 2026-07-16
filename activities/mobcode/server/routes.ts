@@ -55,6 +55,7 @@ const SOLO_EDIT_TOKEN_BYTES = 24
 const MAX_PRESENCE_SELECTIONS = 16
 const WS_OPEN = 1
 const LIVE_GROUP_CLEANUP_DELAY_MS = 30_000
+const SOLO_EDIT_COOKIE_MAX_AGE_MS = 365 * 24 * 60 * 60 * 1000
 const DURABLE_MESSAGE_TYPES = new Set<MobCodeMessage['type']>(['state-sync', 'file-tree-changed'])
 const RESERVED_PATH_SEGMENTS = new Set(['__proto__', 'constructor', 'prototype'])
 
@@ -621,6 +622,7 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
       console.info(JSON.stringify({ event: 'mobcode.solo-session-created', sessionId: session.id, fileCount: Object.keys(files).length }))
       res.cookie(getSoloEditCookieName(session.id), soloEditToken, {
         httpOnly: true,
+        maxAge: SOLO_EDIT_COOKIE_MAX_AGE_MS,
         sameSite: 'lax',
         secure: process.env.NODE_ENV === 'production',
         path: `/api/mobcode/${encodeURIComponent(session.id)}`,
