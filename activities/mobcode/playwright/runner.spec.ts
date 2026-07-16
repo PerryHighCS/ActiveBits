@@ -228,6 +228,11 @@ test('MobCode Python runner identifies the source line for assertion failures', 
   const terminal = popup.locator('#terminal')
 
   await expect(terminal).toContainText('Error in test.py, line 9', { timeout: 15_000 })
+  await expect(terminal).toContainText('Traceback (most recent call last):')
+  await expect(terminal).toContainText('File "test.py", line 12, in <module>')
+  await expect(terminal).toContainText('testOnesDigit()')
+  await expect(terminal).toContainText('File "test.py", line 9, in testOnesDigit')
+  await expect(terminal).toContainText('assert(onesDigit(-123) == 3)')
   await expect(terminal).toContainText('AssertionError')
 })
 
@@ -245,5 +250,10 @@ test('MobCode Python runner identifies the deepest user line for runtime failure
   const terminal = popup.locator('#terminal')
 
   await expect(terminal).toContainText('Error in test.py, line 2', { timeout: 15_000 })
+  await expect(terminal).toContainText('Traceback (most recent call last):')
+  await expect(terminal).toContainText('File "test.py", line 4, in <module>')
+  await expect(terminal).toContainText('print(divide(0))')
+  await expect(terminal).toContainText('File "test.py", line 2, in divide')
+  await expect(terminal).toContainText('return 10 / n')
   await expect(terminal).toContainText('ZeroDivisionError')
 })

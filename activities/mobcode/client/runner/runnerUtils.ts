@@ -566,6 +566,7 @@ export function buildBrythonRunnerHtml(payload: BrythonRunnerPayload): string {
   const serializedPayload = escapeScriptJson(payload)
   const entryContent = payload.files[payload.entryFile] ?? ''
   const serializedEntryContent = escapeScriptJson(buildBrythonAsyncEntrySource(entryContent))
+  const serializedEntryUserSource = escapeScriptJson(entryContent)
   const serializedEntryFile = escapeScriptJson(payload.entryFile)
   const entryImportDiagnostic = findUnsupportedEntryImport(entryContent, payload.files)
   const serializedEntryImportDiagnostic = entryImportDiagnostic === null
@@ -879,6 +880,7 @@ import traceback
 
 entry_filename = ${serializedEntryFile}
 entry_source = ${serializedEntryContent}
+entry_user_source = ${serializedEntryUserSource}
 entry_user_line_count = ${entryLineCount}
 entry_import_diagnostic = ${serializedEntryImportDiagnostic}
 workspace_files = ${serializedWorkspaceFiles}
@@ -1127,6 +1129,25 @@ def mobcode_report_done():
     worker_self.send({'type': 'done'})
 
 def mobcode_format_error(error):
+    traceback_lines = []
+    traceback_node = getattr(error, '__traceback__', None)
+    entry_user_lines = entry_user_source.splitlines()
+    while traceback_node is not None:
+        frame = getattr(traceback_node, 'tb_frame', None)
+        code = getattr(frame, 'f_code', None)
+        filename = getattr(code, 'co_filename', None) or getattr(frame, '__file__', None)
+        line_number = getattr(traceback_node, 'tb_lineno', None)
+        if filename == entry_filename and line_number is not None and line_number <= entry_user_line_count + 1:
+            user_line_number = max(1, line_number - 1)
+            function_name = getattr(code, 'co_name', '<module>')
+            if function_name == '__mobcode_user_main__':
+                function_name = '<module>'
+            traceback_lines.append('  File "' + entry_filename + '", line ' + str(user_line_number) + ', in ' + function_name)
+            if user_line_number <= len(entry_user_lines):
+                traceback_lines.append('    ' + entry_user_lines[user_line_number - 1].strip())
+        traceback_node = getattr(traceback_node, 'tb_next', None)
+    if traceback_lines:
+        return 'Traceback (most recent call last):\\n' + '\\n'.join(traceback_lines) + '\\n' + error.__class__.__name__ + ': ' + str(error) + '\\n'
     try:
         formatted_error = traceback.format_exc()
         if formatted_error.strip() != 'NoneType: None':
