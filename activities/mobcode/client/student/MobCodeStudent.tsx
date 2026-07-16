@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import VirtualFileExplorer from '@src/components/common/VirtualFileExplorer'
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
 import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler'
@@ -17,6 +18,7 @@ import { MOB_CODE_MESSAGE_TYPES } from '../utils/constants'
 import { resolveActiveFile, sanitizeFilesMap } from '../utils/fileUtils'
 import { getThemeFromCookie, setThemeCookie } from '../utils/themeUtils'
 import { isStatePayload, parseMobCodeMessage } from '../manager/managerUtils'
+import MobCodeManager from '../manager/MobCodeManager'
 import '../styles.css'
 
 interface MobCodeStudentProps {
@@ -25,9 +27,45 @@ interface MobCodeStudentProps {
   }
 }
 
+export type MobCodeStudentRoute =
+  | { mode: 'solo'; soloEditToken: string }
+  | { mode: 'live' }
+
+function readMobCodeSoloTokenFromHistoryState(locationState: unknown): string {
+  if (locationState == null || typeof locationState !== 'object') return ''
+  const token = (locationState as { mobcodeSoloToken?: unknown }).mobcodeSoloToken
+  return typeof token === 'string' ? token.trim() : ''
+}
+
+function readMobCodeSoloTokenFromUrl(hash: string): string {
+  return new URLSearchParams(hash.startsWith('#') ? hash.slice(1) : hash).get('mobcodeSoloToken')?.trim()
+    || ''
+}
+
+export function resolveMobCodeStudentRoute(_search: string, locationState?: unknown, hash = ''): MobCodeStudentRoute {
+  const soloEditToken = readMobCodeSoloTokenFromUrl(hash)
+    || readMobCodeSoloTokenFromHistoryState(locationState)
+  return soloEditToken ? { mode: 'solo', soloEditToken } : { mode: 'live' }
+}
+
+export function removeMobCodeSoloTokenFromSearch(search: string): string {
+  const params = new URLSearchParams(search)
+  params.delete('mobcodeSoloToken')
+  const remainingSearch = params.toString()
+  return remainingSearch ? `?${remainingSearch}` : ''
+}
+
+export function removeMobCodeSoloTokenFromHash(hash: string): string {
+  const params = new URLSearchParams(hash.startsWith('#') ? hash.slice(1) : hash)
+  params.delete('mobcodeSoloToken')
+  const remainingHash = params.toString()
+  return remainingHash ? `#${remainingHash}` : ''
+}
+
 interface SessionResponse {
   data?: {
     runnerId?: unknown
+    canEditSolo?: unknown
     groups?: {
       default?: {
         files?: unknown
@@ -118,6 +156,30 @@ export function getStudentRunnerOptions(
 }
 
 export default function MobCodeStudent({ sessionData }: MobCodeStudentProps) {
+  const location = useLocation()
+  const navigate = useNavigate()
+  const route = resolveMobCodeStudentRoute(location.search, location.state, location.hash)
+
+  useEffect(() => {
+    if (route.mode !== 'solo') return
+    const nextSearch = removeMobCodeSoloTokenFromSearch(location.search)
+    const nextHash = removeMobCodeSoloTokenFromHash(location.hash)
+    if (nextSearch === location.search && nextHash === location.hash) return
+    const currentRouterState = location.state != null && typeof location.state === 'object'
+      ? location.state as Record<string, unknown>
+      : {}
+    void navigate(`${location.pathname}${nextSearch}${nextHash}`, {
+      replace: true,
+      state: { ...currentRouterState, mobcodeSoloToken: route.soloEditToken },
+    })
+  }, [location.hash, location.pathname, location.search, location.state, navigate, route])
+
+  return route.mode === 'solo'
+    ? <MobCodeManager sessionIdOverride={sessionData.sessionId} soloEditToken={route.soloEditToken} soloMode />
+    : <MobCodeLiveStudent sessionData={sessionData} />
+}
+
+function MobCodeLiveStudent({ sessionData }: MobCodeStudentProps) {
   const { sessionId } = sessionData
   const encodedSessionId = encodeURIComponent(sessionId)
   const attachSessionEndedHandler = useSessionEndedHandler()
@@ -127,6 +189,7 @@ export default function MobCodeStudent({ sessionData }: MobCodeStudentProps) {
   const [runnerMessage, setRunnerMessage] = useState('')
   const [theme, setTheme] = useState<MobCodeThemeId>(() => getThemeFromCookie())
   const [instructorPresence, setInstructorPresence] = useState<MobCodeEditorPresencePayload | null>(null)
+  const [canResumeSolo, setCanResumeSolo] = useState(false)
   const latestFilesRef = useRef<Record<string, string>>({})
 
   useEffect(() => {
@@ -141,6 +204,7 @@ export default function MobCodeStudent({ sessionData }: MobCodeStudentProps) {
         setRunnerId(isMobCodeRunnerId(session.data?.runnerId) ? session.data.runnerId : DEFAULT_MOB_CODE_RUNNER_ID)
         setRunnerMessage('')
         setInstructorPresence(null)
+        setCanResumeSolo(session.data?.canEditSolo === true)
       })
       .catch((error) => console.error('Failed to fetch MobCode session:', error))
   }, [encodedSessionId, sessionId])
@@ -221,6 +285,10 @@ export default function MobCodeStudent({ sessionData }: MobCodeStudentProps) {
 
   const editorThemeClassName = `mobcode-editor-theme-${theme}`
   const studentRunners = getStudentRunnerOptions(runnerId)
+
+  if (canResumeSolo) {
+    return <MobCodeManager sessionIdOverride={sessionId} soloMode />
+  }
 
   return (
     <div className="mobcode-shell">

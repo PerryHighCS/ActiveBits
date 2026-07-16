@@ -6,6 +6,9 @@ export interface MobCodeGroupState {
 export interface MobCodeSessionData extends Record<string, unknown> {
   groups: Record<string, MobCodeGroupState>
   instructorPasscode?: string
+  /** Opaque, per-session credential for a self-paced student workspace. */
+  soloEditToken?: string
+  soloMode?: boolean
 }
 
 export type MobCodeStatePayload = MobCodeGroupState

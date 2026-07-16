@@ -291,7 +291,7 @@ Postboard reads `embeddedLaunch.selectedOptions.prompt` and `embeddedLaunch.sele
 
 ### Deck launch payload
 
-MobCode can seed starter files for an embedded live coding session.
+MobCode can seed starter files for an embedded live coding session or a student-owned solo workspace.
 
 Example:
 
@@ -315,6 +315,8 @@ Field guidance:
 ### Child embedded launch state
 
 MobCode reads `embeddedLaunch.selectedOptions.files` and `embeddedLaunch.selectedOptions.activeFile` only when the child session is first created without an existing MobCode file tree. After that, the live session state under `groups.default` is authoritative, so later reloads or reconnects do not overwrite instructor edits with the original starter payload.
+
+When SyncDeck is in solo mode, MobCode creates a distinct server-backed self-paced workspace from this same payload for the student who launches it. The student receives an opaque scoped edit token for that workspace; it is not an instructor passcode. The workspace state can therefore be retained for later activity reporting, unlike a browser-only editor.
 
 MobCode also reads `embeddedLaunch.selectedOptions.runnerId` through the child session API so the instructor and students use the instructor-selected runner. The current supported value is `brython-terminal`; unsupported values are ignored and the activity falls back to the default runner. In the student view, available runner options collapse to the instructor-selected runner so students cannot switch to a different implementation.
 

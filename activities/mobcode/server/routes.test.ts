@@ -16,14 +16,18 @@ import {
 import setupMobCodeRoutes from './routes'
 
 type RouteHandler = (
-  req: { params: Record<string, string>; body?: unknown },
+  req: { params: Record<string, string>; body?: unknown; headers?: { cookie?: string } },
   res: MockResponse,
 ) => Promise<void> | void
 
 interface MockResponse {
   statusCode: number
   body: unknown
+  headers: Record<string, string>
+  cookies: Array<{ name: string; value: string; options: Record<string, unknown> }>
   status(code: number): MockResponse
+  set(name: string, value: string): MockResponse
+  cookie(name: string, value: string, options: Record<string, unknown>): MockResponse
   json(payload: unknown): MockResponse
 }
 
@@ -31,8 +35,18 @@ function createResponse(): MockResponse {
   return {
     statusCode: 200,
     body: null,
+    headers: {},
+    cookies: [],
     status(code: number) {
       this.statusCode = code
+      return this
+    },
+    set(name: string, value: string) {
+      this.headers[name] = value
+      return this
+    },
+    cookie(name: string, value: string, options: Record<string, unknown>) {
+      this.cookies.push({ name, value, options })
       return this
     },
     json(payload: unknown) {
@@ -133,6 +147,45 @@ void test('normalizeMobCodeSessionData creates default group when missing', () =
   assert.equal(data.instructorPasscode?.length, 32)
 })
 
+void test('POST /api/mobcode/create-solo creates a server-backed editable workspace from starter files', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  let savedSession: SessionRecord | null = null
+  setupMobCodeRoutes(app as never, {
+    async get() {
+      return null
+    },
+    async set(_id: string, session: SessionRecord) {
+      savedSession = session
+    },
+  }, ws as never)
+
+  const handler = app.handlers.post['/api/mobcode/create-solo']
+  assert.ok(handler)
+  const response = createResponse()
+  await handler({
+    params: {},
+    body: {
+      files: { 'starter.py': 'print("ready")', '../ignored.py': 'nope' },
+      activeFile: 'starter.py',
+      runnerId: 'brython-terminal',
+    },
+  } as unknown as Parameters<typeof handler>[0], response as unknown as Parameters<typeof handler>[1])
+
+  assert.equal(response.statusCode, 200)
+  assert.equal(typeof (response.body as { id?: unknown }).id, 'string')
+  assert.equal(typeof (response.body as { soloEditToken?: unknown }).soloEditToken, 'string')
+  assert.equal(response.headers['Cache-Control'], 'no-store')
+  assert.equal(response.cookies.length, 1)
+  assert.equal(response.cookies[0]?.options.httpOnly, true)
+  assert.equal(response.cookies[0]?.options.maxAge, 365 * 24 * 60 * 60 * 1000)
+  if (savedSession === null) throw new Error('Expected solo session to be saved')
+  const data = (savedSession as SessionRecord & { data: ReturnType<typeof normalizeMobCodeSessionData> }).data
+  assert.equal(data.soloMode, true)
+  assert.deepEqual(data.groups.default, { files: { 'starter.py': 'print("ready")' }, activeFile: 'starter.py' })
+  assert.equal(data.soloEditToken, (response.body as { soloEditToken: string }).soloEditToken)
+})
+
 void test('GET /api/mobcode/:sessionId/session does not leak instructor passcode', async () => {
   const app = createMockApp()
   const ws = createMockWs()
@@ -153,18 +206,72 @@ void test('GET /api/mobcode/:sessionId/session does not leak instructor passcode
   } as unknown as Parameters<typeof sessionHandler>[0], response as unknown as Parameters<typeof sessionHandler>[1])
 
   assert.equal(response.statusCode, 200)
+  assert.equal(response.headers['Cache-Control'], 'no-store')
   assert.deepEqual(response.body, {
     id: session.id,
     type: session.type,
     data: {
       groups: session.data.groups,
       runnerId: null,
+      soloMode: false,
+      canEditSolo: false,
     },
   })
   assert.equal(
     Object.hasOwn((response.body as { data: { groups: unknown; instructorPasscode?: unknown } }).data, 'instructorPasscode'),
     false,
   )
+})
+
+void test('GET /api/mobcode/:sessionId/session does not leak a solo edit token', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const session = createMobCodeSessionRecord({
+    data: normalizeMobCodeSessionData({
+      soloMode: true,
+      soloEditToken: 'solo-edit-token',
+      groups: { default: { files: { 'main.py': 'print(1)' }, activeFile: 'main.py' } },
+    }),
+  })
+  setupMobCodeRoutes(app as never, {
+    async get(id: string) { return id === session.id ? session : null },
+    async set() {},
+  }, ws as never)
+
+  const handler = app.handlers.get['/api/mobcode/:sessionId/session']
+  assert.ok(handler)
+  const response = createResponse()
+  await handler({ params: { sessionId: session.id } } as never, response as never)
+
+  assert.equal(response.statusCode, 200)
+  assert.equal(Object.hasOwn((response.body as { data: Record<string, unknown> }).data, 'soloEditToken'), false)
+})
+
+void test('GET /api/mobcode/:sessionId/session enables solo editing for the matching cookie', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const session = createMobCodeSessionRecord({
+    data: normalizeMobCodeSessionData({
+      soloMode: true,
+      soloEditToken: 'solo-edit-token',
+      groups: { default: { files: { 'main.py': 'print(1)' }, activeFile: 'main.py' } },
+    }),
+  })
+  setupMobCodeRoutes(app as never, {
+    async get(id: string) { return id === session.id ? session : null },
+    async set() {},
+  }, ws as never)
+
+  const handler = app.handlers.get['/api/mobcode/:sessionId/session']
+  assert.ok(handler)
+  const response = createResponse()
+  await handler({
+    params: { sessionId: session.id },
+    headers: { cookie: `mobcode_solo_edit_${session.id}=solo-edit-token` },
+  } as never, response as never)
+
+  assert.equal(response.statusCode, 200)
+  assert.equal((response.body as { data: { canEditSolo: boolean } }).data.canEditSolo, true)
 })
 
 void test('GET /api/mobcode/:sessionId/session exposes sanitized embedded runner id', async () => {
@@ -208,6 +315,8 @@ void test('GET /api/mobcode/:sessionId/session exposes sanitized embedded runner
     data: {
       groups: session.data.groups,
       runnerId: 'brython-terminal',
+      soloMode: false,
+      canEditSolo: false,
     },
   })
 })
@@ -253,6 +362,8 @@ void test('GET /api/mobcode/:sessionId/session drops invalid embedded runner id'
     data: {
       groups: session.data.groups,
       runnerId: null,
+      soloMode: false,
+      canEditSolo: false,
     },
   })
 })
@@ -287,6 +398,76 @@ void test('POST /api/mobcode/:sessionId/state returns 403 for a bad instructor p
   assert.equal(response.statusCode, 403)
   assert.deepEqual(response.body, { error: 'Forbidden' })
   assert.equal(setCalls, 0)
+})
+
+void test('POST /api/mobcode/:sessionId/state accepts the scoped solo edit token', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const session = createMobCodeSessionRecord({
+    data: normalizeMobCodeSessionData({
+      soloMode: true,
+      soloEditToken: 'solo-edit-token',
+      groups: { default: { files: { 'main.py': 'print(1)' }, activeFile: 'main.py' } },
+    }),
+  })
+  let saved: SessionRecord | null = null
+  setupMobCodeRoutes(app as never, {
+    async get(id: string) { return id === session.id ? session : null },
+    async set(_id: string, nextSession: SessionRecord) { saved = nextSession },
+  }, ws as never)
+
+  const handler = app.handlers.post['/api/mobcode/:sessionId/state']
+  assert.ok(handler)
+  const response = createResponse()
+  await handler({
+    params: { sessionId: session.id },
+    body: {
+      soloEditToken: 'solo-edit-token',
+      files: { 'main.py': 'print(2)' },
+      activeFile: 'main.py',
+    },
+  } as unknown as Parameters<typeof handler>[0], response as unknown as Parameters<typeof handler>[1])
+
+  assert.equal(response.statusCode, 200)
+  if (saved === null) throw new Error('Expected solo state to be saved')
+  const savedGroup = (saved as SessionRecord & { data: ReturnType<typeof normalizeMobCodeSessionData> }).data.groups.default
+  if (!savedGroup) throw new Error('Expected saved default group')
+  assert.equal(savedGroup.files['main.py'] ?? '', 'print(2)')
+})
+
+void test('POST /api/mobcode/:sessionId/state accepts the matching solo edit cookie', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const session = createMobCodeSessionRecord({
+    data: normalizeMobCodeSessionData({
+      soloMode: true,
+      soloEditToken: 'solo-edit-token',
+      groups: { default: { files: { 'main.py': 'print(1)' }, activeFile: 'main.py' } },
+    }),
+  })
+  let saved: SessionRecord | null = null
+  setupMobCodeRoutes(app as never, {
+    async get(id: string) { return id === session.id ? session : null },
+    async set(_id: string, nextSession: SessionRecord) { saved = nextSession },
+  }, ws as never)
+
+  const handler = app.handlers.post['/api/mobcode/:sessionId/state']
+  assert.ok(handler)
+  const response = createResponse()
+  await handler({
+    params: { sessionId: session.id },
+    headers: { cookie: `mobcode_solo_edit_${session.id}=solo-edit-token` },
+    body: {
+      files: { 'main.py': 'print(2)' },
+      activeFile: 'main.py',
+    },
+  } as never, response as never)
+
+  assert.equal(response.statusCode, 200)
+  if (saved === null) throw new Error('Expected solo state to be saved')
+  const savedGroup = (saved as SessionRecord & { data: ReturnType<typeof normalizeMobCodeSessionData> }).data.groups.default
+  if (!savedGroup) throw new Error('Expected saved default group')
+  assert.equal(savedGroup.files['main.py'] ?? '', 'print(2)')
 })
 
 void test('POST /api/mobcode/:sessionId/state returns 400 for an invalid payload', async () => {

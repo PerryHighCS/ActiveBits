@@ -15,6 +15,15 @@ Document API and data-shape assumptions that must stay compatible over time.
 
 ## Contracts
 
+- Date: 2026-07-16
+- Surface: client routing | MobCode standalone solo entry
+- Contract: MobCode declares a permalink-capable standalone entry that uses `launchPersistentSoloEntry` to create a distinct server-backed workspace. It accepts optional `{ files, activeFile, runnerId }` selected options and returns a normal session route plus a scoped `mobcodeSoloToken` edit credential; the credential is not an instructor passcode.
+- Compatibility constraints: Managed `/manage/mobcode/:sessionId` keeps its passcode-gated server persistence and live websocket behavior. Non-solo student sessions remain read-only. Each solo launch creates its own session, preserving its workspace state for later activity-level reporting.
+- Validation rules: `POST /api/mobcode/create-solo` normalizes files using the existing path and byte limits. State writes accept either the instructor passcode or the matching solo edit token, and the session-read response never exposes either credential.
+- Evidence (schema/tests/path): `activities/mobcode/activity.config.ts`; `activities/mobcode/client/index.ts`; `activities/mobcode/client/student/MobCodeStudent.tsx`; `activities/mobcode/client/manager/MobCodeManager.tsx`; `activities/mobcode/server/routes.ts`; `activities/mobcode/server/routes.test.ts`.
+- Follow-up action: When SyncDeck’s parent report gains solo-child aggregation, persist an explicit parent-session and slide-instance association alongside this child session rather than inferring it from a browser overlay.
+- Owner: Codex
+
 - Date: 2026-07-14
 - Surface: REST | SyncDeck utility permalink builder
 - Contract: `POST /api/syncdeck/generate-url` now accepts an optional `entryPolicy` field (`instructor-required` | `solo-allowed` | `solo-only`, from `types/waitingRoom.ts`). This endpoint is called directly by the standalone `/util/syncdeck/permalink` utility page. SyncDeck's `activity.config.ts` also declares this same URL as `deepLinkGenerator.endpoint`, but that config is unused in practice: `manageDashboard.customPersistentLinkBuilder: true` makes `ManageDashboard` null out `deepLinkGenerator` for SyncDeck (`client/src/components/common/ManageDashboard.tsx` `submitPersistentLink`), so the Manage Dashboard permalink flow always posts to the generic `/api/persistent-session/create` instead. The client dropdown reuses `PERSISTENT_SESSION_ENTRY_POLICY_OPTIONS` from `client/src/components/common/persistentSessionEntryPolicyUtils.ts` via the `@src/...` alias.

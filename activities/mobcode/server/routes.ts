@@ -51,9 +51,11 @@ const MAX_FILE_CONTENT_LENGTH = 1_000_000
 const MAX_TOTAL_CONTENT_LENGTH = 4 * 1024 * 1024
 const INSTRUCTOR_PASSCODE_BYTES = 16
 const MAX_INSTRUCTOR_PASSCODE_LENGTH = 512
+const SOLO_EDIT_TOKEN_BYTES = 24
 const MAX_PRESENCE_SELECTIONS = 16
 const WS_OPEN = 1
 const LIVE_GROUP_CLEANUP_DELAY_MS = 30_000
+const SOLO_EDIT_COOKIE_MAX_AGE_MS = 365 * 24 * 60 * 60 * 1000
 const DURABLE_MESSAGE_TYPES = new Set<MobCodeMessage['type']>(['state-sync', 'file-tree-changed'])
 const RESERVED_PATH_SEGMENTS = new Set(['__proto__', 'constructor', 'prototype'])
 
@@ -207,6 +209,26 @@ function asMobCodeSession(session: SessionRecord | null): (SessionRecord & { dat
 
 function createInstructorPasscode(): string {
   return randomBytes(INSTRUCTOR_PASSCODE_BYTES).toString('hex')
+}
+
+function createSoloEditToken(): string {
+  return randomBytes(SOLO_EDIT_TOKEN_BYTES).toString('hex')
+}
+
+function getSoloEditCookieName(sessionId: string): string {
+  return `mobcode_solo_edit_${sessionId}`
+}
+
+function readRequestCookie(req: Request, name: string): string | null {
+  const cookieHeader = req.headers?.cookie
+  if (typeof cookieHeader !== 'string') return null
+  const cookie = cookieHeader.split(';').map((entry) => entry.trim()).find((entry) => entry.startsWith(`${name}=`))
+  if (!cookie) return null
+  try {
+    return decodeURIComponent(cookie.slice(name.length + 1))
+  } catch {
+    return null
+  }
 }
 
 function verifyPasscode(expected: string | undefined, candidate: unknown): boolean {
@@ -580,6 +602,39 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
     }
   })
 
+  app.post('/api/mobcode/create-solo', async (req, res) => {
+    try {
+      const body = isPlainObject(req.body) ? req.body : {}
+      const files = normalizeFiles(body.files)
+      const activeFile = resolveActiveFile(files, body.activeFile)
+      const runnerId = isMobCodeRunnerId(body.runnerId) ? body.runnerId : undefined
+      const soloEditToken = createSoloEditToken()
+      const session = await createSession(sessions, {
+        data: normalizeMobCodeSessionData({
+          groups: { [DEFAULT_GROUP_ID]: { files, activeFile } },
+          soloMode: true,
+          soloEditToken,
+          ...(runnerId ? { embeddedLaunch: { selectedOptions: { runnerId } } } : {}),
+        }),
+      })
+      session.type = 'mobcode'
+      await sessions.set(session.id, session)
+      console.info(JSON.stringify({ event: 'mobcode.solo-session-created', sessionId: session.id, fileCount: Object.keys(files).length }))
+      res.cookie(getSoloEditCookieName(session.id), soloEditToken, {
+        httpOnly: true,
+        maxAge: SOLO_EDIT_COOKIE_MAX_AGE_MS,
+        sameSite: 'lax',
+        secure: process.env.NODE_ENV === 'production',
+        path: `/api/mobcode/${encodeURIComponent(session.id)}`,
+      })
+      res.set('Cache-Control', 'no-store')
+      res.json({ id: session.id, soloEditToken })
+    } catch (error) {
+      console.error(JSON.stringify({ event: 'mobcode.solo-create-failed', error: String(error) }))
+      res.status(500).json({ error: 'Failed to create solo session' })
+    }
+  })
+
   app.get('/api/mobcode/:sessionId/session', async (req, res) => {
     try {
       const session = asMobCodeSession(await sessions.get(readParam(req.params.sessionId)))
@@ -587,12 +642,16 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
         res.status(404).json({ error: 'Session not found' })
         return
       }
+      res.set('Cache-Control', 'no-store')
       res.json({
         id: session.id,
         type: session.type,
         data: {
           groups: session.data.groups,
           runnerId: readEmbeddedRunnerId(session.data),
+          soloMode: session.data.soloMode === true,
+          canEditSolo: session.data.soloMode === true
+            && verifyPasscode(session.data.soloEditToken, readRequestCookie(req, getSoloEditCookieName(session.id))),
         },
       })
     } catch (error) {
@@ -609,7 +668,13 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
         return
       }
       const body = isPlainObject(req.body) ? req.body : {}
-      if (!verifyPasscode(session.data.instructorPasscode, body.instructorPasscode)) {
+      const hasInstructorAccess = verifyPasscode(session.data.instructorPasscode, body.instructorPasscode)
+      const hasSoloEditAccess = session.data.soloMode === true
+        && (
+          verifyPasscode(session.data.soloEditToken, body.soloEditToken)
+          || verifyPasscode(session.data.soloEditToken, readRequestCookie(req, getSoloEditCookieName(session.id)))
+        )
+      if (!hasInstructorAccess && !hasSoloEditAccess) {
         console.warn(JSON.stringify({ event: 'mobcode.state-denied', sessionId: session.id }))
         res.status(403).json({ error: 'Forbidden' })
         return
@@ -639,6 +704,9 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
       }
       await sessions.set(session.id, session)
       await broadcast(messageType, nextPayload, session.id)
+      if (session.data.soloMode === true) {
+        scheduleLiveGroupCleanup(session.id)
+      }
       res.json({ ok: true })
     } catch (error) {
       console.error(JSON.stringify({ event: 'mobcode.state-failed', sessionId: req.params.sessionId, error: String(error) }))
