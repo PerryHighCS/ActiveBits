@@ -31,8 +31,15 @@ export type MobCodeStudentRoute =
   | { mode: 'solo'; soloEditToken: string }
   | { mode: 'live' }
 
-export function resolveMobCodeStudentRoute(search: string): MobCodeStudentRoute {
+function readMobCodeSoloTokenFromHistoryState(locationState: unknown): string {
+  if (locationState == null || typeof locationState !== 'object') return ''
+  const token = (locationState as { mobcodeSoloToken?: unknown }).mobcodeSoloToken
+  return typeof token === 'string' ? token.trim() : ''
+}
+
+export function resolveMobCodeStudentRoute(search: string, locationState?: unknown): MobCodeStudentRoute {
   const soloEditToken = new URLSearchParams(search).get('mobcodeSoloToken')?.trim()
+    || readMobCodeSoloTokenFromHistoryState(locationState)
   return soloEditToken ? { mode: 'solo', soloEditToken } : { mode: 'live' }
 }
 
@@ -138,13 +145,20 @@ export function getStudentRunnerOptions(
 
 export default function MobCodeStudent({ sessionData }: MobCodeStudentProps) {
   const location = useLocation()
-  const [route] = useState(() => resolveMobCodeStudentRoute(location.search))
+  const [route] = useState(() => resolveMobCodeStudentRoute(location.search, location.state))
 
   useEffect(() => {
     if (route.mode !== 'solo' || typeof window === 'undefined') return
     const nextSearch = removeMobCodeSoloTokenFromSearch(location.search)
-    window.history.replaceState(window.history.state, '', `${window.location.pathname}${nextSearch}${window.location.hash}`)
-  }, [location.search, route.mode])
+    const currentState = window.history.state != null && typeof window.history.state === 'object'
+      ? window.history.state as Record<string, unknown>
+      : {}
+    window.history.replaceState(
+      { ...currentState, mobcodeSoloToken: route.soloEditToken },
+      '',
+      `${window.location.pathname}${nextSearch}${window.location.hash}`,
+    )
+  }, [location.search, route])
 
   return route.mode === 'solo'
     ? <MobCodeManager sessionIdOverride={sessionData.sessionId} soloEditToken={route.soloEditToken} soloMode />
