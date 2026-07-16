@@ -8,6 +8,7 @@ export async function launchMobCodePersistentSoloEntry(
 ): Promise<ActivityPersistentSoloLaunchResult> {
   const response = await fetchImpl('/api/mobcode/create-solo', {
     method: 'POST',
+    cache: 'no-store',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       files: params.selectedOptions.files,

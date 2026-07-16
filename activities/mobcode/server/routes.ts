@@ -603,6 +603,7 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
       session.type = 'mobcode'
       await sessions.set(session.id, session)
       console.info(JSON.stringify({ event: 'mobcode.solo-session-created', sessionId: session.id, fileCount: Object.keys(files).length }))
+      res.set('Cache-Control', 'no-store')
       res.json({ id: session.id, soloEditToken })
     } catch (error) {
       console.error(JSON.stringify({ event: 'mobcode.solo-create-failed', error: String(error) }))

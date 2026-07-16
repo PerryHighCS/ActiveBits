@@ -32,8 +32,15 @@ export type MobCodeStudentRoute =
   | { mode: 'live' }
 
 export function resolveMobCodeStudentRoute(search: string): MobCodeStudentRoute {
-  const soloEditToken = new URLSearchParams(search).get('mobcodeSoloToken')
+  const soloEditToken = new URLSearchParams(search).get('mobcodeSoloToken')?.trim()
   return soloEditToken ? { mode: 'solo', soloEditToken } : { mode: 'live' }
+}
+
+export function removeMobCodeSoloTokenFromSearch(search: string): string {
+  const params = new URLSearchParams(search)
+  params.delete('mobcodeSoloToken')
+  const remainingSearch = params.toString()
+  return remainingSearch ? `?${remainingSearch}` : ''
 }
 
 interface SessionResponse {
@@ -130,7 +137,13 @@ export function getStudentRunnerOptions(
 
 export default function MobCodeStudent({ sessionData }: MobCodeStudentProps) {
   const location = useLocation()
-  const route = resolveMobCodeStudentRoute(location.search)
+  const [route] = useState(() => resolveMobCodeStudentRoute(location.search))
+
+  useEffect(() => {
+    if (route.mode !== 'solo' || typeof window === 'undefined') return
+    const nextSearch = removeMobCodeSoloTokenFromSearch(location.search)
+    window.history.replaceState(window.history.state, '', `${window.location.pathname}${nextSearch}${window.location.hash}`)
+  }, [location.search, route.mode])
 
   return route.mode === 'solo'
     ? <MobCodeManager sessionIdOverride={sessionData.sessionId} soloEditToken={route.soloEditToken} />

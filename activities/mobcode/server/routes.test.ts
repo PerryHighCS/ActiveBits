@@ -23,7 +23,9 @@ type RouteHandler = (
 interface MockResponse {
   statusCode: number
   body: unknown
+  headers: Record<string, string>
   status(code: number): MockResponse
+  set(name: string, value: string): MockResponse
   json(payload: unknown): MockResponse
 }
 
@@ -31,8 +33,13 @@ function createResponse(): MockResponse {
   return {
     statusCode: 200,
     body: null,
+    headers: {},
     status(code: number) {
       this.statusCode = code
+      return this
+    },
+    set(name: string, value: string) {
+      this.headers[name] = value
       return this
     },
     json(payload: unknown) {
@@ -161,6 +168,7 @@ void test('POST /api/mobcode/create-solo creates a server-backed editable worksp
   assert.equal(response.statusCode, 200)
   assert.equal(typeof (response.body as { id?: unknown }).id, 'string')
   assert.equal(typeof (response.body as { soloEditToken?: unknown }).soloEditToken, 'string')
+  assert.equal(response.headers['Cache-Control'], 'no-store')
   if (savedSession === null) throw new Error('Expected solo session to be saved')
   const data = (savedSession as SessionRecord & { data: ReturnType<typeof normalizeMobCodeSessionData> }).data
   assert.equal(data.soloMode, true)
@@ -201,6 +209,30 @@ void test('GET /api/mobcode/:sessionId/session does not leak instructor passcode
     Object.hasOwn((response.body as { data: { groups: unknown; instructorPasscode?: unknown } }).data, 'instructorPasscode'),
     false,
   )
+})
+
+void test('GET /api/mobcode/:sessionId/session does not leak a solo edit token', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const session = createMobCodeSessionRecord({
+    data: normalizeMobCodeSessionData({
+      soloMode: true,
+      soloEditToken: 'solo-edit-token',
+      groups: { default: { files: { 'main.py': 'print(1)' }, activeFile: 'main.py' } },
+    }),
+  })
+  setupMobCodeRoutes(app as never, {
+    async get(id: string) { return id === session.id ? session : null },
+    async set() {},
+  }, ws as never)
+
+  const handler = app.handlers.get['/api/mobcode/:sessionId/session']
+  assert.ok(handler)
+  const response = createResponse()
+  await handler({ params: { sessionId: session.id } } as never, response as never)
+
+  assert.equal(response.statusCode, 200)
+  assert.equal(Object.hasOwn((response.body as { data: Record<string, unknown> }).data, 'soloEditToken'), false)
 })
 
 void test('GET /api/mobcode/:sessionId/session exposes sanitized embedded runner id', async () => {

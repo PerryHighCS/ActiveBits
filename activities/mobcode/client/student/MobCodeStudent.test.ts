@@ -3,6 +3,7 @@ import test from 'node:test'
 import {
   applyStudentFileContentUpdate,
   getStudentRunnerOptions,
+  removeMobCodeSoloTokenFromSearch,
   resolveMobCodeStudentRoute,
   resolveStudentActiveFileChange,
   sanitizeStudentPresenceUpdate,
@@ -27,6 +28,8 @@ void test('resolveMobCodeStudentRoute selects the token-authenticated solo manag
     soloEditToken: 'opaque-token',
   })
   assert.deepEqual(resolveMobCodeStudentRoute('?other=value'), { mode: 'live' })
+  assert.deepEqual(resolveMobCodeStudentRoute('?mobcodeSoloToken=%20%20'), { mode: 'live' })
+  assert.equal(removeMobCodeSoloTokenFromSearch('?mobcodeSoloToken=opaque-token&view=solo'), '?view=solo')
 })
 
 void test('resolveStudentActiveFileChange ignores missing active-file updates', () => {
