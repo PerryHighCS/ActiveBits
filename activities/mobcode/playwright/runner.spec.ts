@@ -234,6 +234,7 @@ test('MobCode Python runner identifies the source line for assertion failures', 
   await expect(terminal).toContainText('File "test.py", line 9, in testOnesDigit')
   await expect(terminal).toContainText('assert(onesDigit(-123) == 3)')
   await expect(terminal).toContainText('AssertionError')
+  await expect(terminal).not.toContainText('AssertionError: ')
 })
 
 test('MobCode Python runner identifies the deepest user line for runtime failures', async ({ page }) => {

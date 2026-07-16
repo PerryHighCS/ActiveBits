@@ -1128,6 +1128,11 @@ def format_user_error_header(error):
 def mobcode_report_done():
     worker_self.send({'type': 'done'})
 
+def mobcode_format_exception(error):
+    error_message = str(error)
+    error_suffix = ': ' + error_message if error_message else ''
+    return error.__class__.__name__ + error_suffix + '\\n'
+
 def mobcode_format_error(error):
     traceback_lines = []
     traceback_node = getattr(error, '__traceback__', None)
@@ -1147,7 +1152,7 @@ def mobcode_format_error(error):
                 traceback_lines.append('    ' + entry_user_lines[user_line_number - 1].strip())
         traceback_node = getattr(traceback_node, 'tb_next', None)
     if traceback_lines:
-        return 'Traceback (most recent call last):\\n' + '\\n'.join(traceback_lines) + '\\n' + error.__class__.__name__ + ': ' + str(error) + '\\n'
+        return 'Traceback (most recent call last):\\n' + '\\n'.join(traceback_lines) + '\\n' + mobcode_format_exception(error)
     try:
         formatted_error = traceback.format_exc()
         if formatted_error.strip() != 'NoneType: None':
@@ -1155,7 +1160,7 @@ def mobcode_format_error(error):
     except Exception:
         pass
     try:
-        return error.__class__.__name__ + ': ' + str(error) + '\\n'
+        return mobcode_format_exception(error)
     except Exception:
         return 'Python error could not be formatted.\\n'
 
