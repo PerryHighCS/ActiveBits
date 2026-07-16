@@ -443,6 +443,9 @@ void test('buildBrythonRunnerHtml prints a user-file error header before the raw
 
   assert.match(html, /def find_user_error_line\(error\):/)
   assert.match(html, /if filename == entry_filename:/)
+  assert.match(html, /getattr\(code, 'co_filename', None\) or getattr\(frame, '__file__', None\)/)
+  assert.match(html, /user_line_number = max\(1, line_number - 1\)/)
+  assert.match(html, /if user_line_number is not None:/)
   assert.match(html, /line_number <= entry_user_line_count \+ 1/)
   assert.match(html, /fallback_line_number = getattr\(error, 'lineno', None\)/)
   assert.match(html, /fallback_line_number = int\(fallback_line_number\)/)

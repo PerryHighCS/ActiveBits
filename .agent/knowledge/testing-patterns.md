@@ -16,6 +16,15 @@ Capture reusable test setup patterns, common failure modes, and reliability guid
 ## Entries
 
 - Date: 2026-07-16
+- Scope: e2e | MobCode Python runner
+- Pattern: Exercise error diagnostics through the Brython popup with both an assertion failure and a nested ordinary runtime failure; assert the terminal names the selected file and the deepest failing user line.
+- Why it helps: Brython traceback chains include async-wrapper frames that share the entry filename, so unit checks of generated runner text cannot detect an early-return regression that hides the actual source location.
+- Example (file/path): `activities/mobcode/playwright/runner.spec.ts`
+- Failure signal: The terminal shows only `Error in <file>` or reports a wrapper line instead of the line containing the failing assertion or expression.
+- Follow-up action: Preserve the browser coverage whenever the runner wrapper or traceback formatter changes; include another nested-call case if support for a new execution wrapper is added.
+- Owner: Codex
+
+- Date: 2026-07-16
 - Scope: unit | SyncDeck utility UI
 - Pattern: When a JSDOM component test triggers a detached async UI handler, wrap the interaction in `await act(async () => { ... })`, allow its promise continuations to settle inside that boundary, and unmount in a final `act` boundary before restoring global DOM objects.
 - Why it helps: The `node:test` runner can otherwise observe a pending React state update after the test has restored `window`/`document`, producing an intermittent uncaught `TypeError` despite all assertions passing.

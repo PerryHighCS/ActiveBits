@@ -1090,17 +1090,23 @@ def find_user_error_line(error):
             return int(entry_import_diagnostic.get('line', 1))
         except Exception:
             return None
+    user_line_number = None
     traceback_node = getattr(error, '__traceback__', None)
     while traceback_node is not None:
         frame = getattr(traceback_node, 'tb_frame', None)
         code = getattr(frame, 'f_code', None)
-        filename = getattr(code, 'co_filename', None)
+        # Some Brython frames expose __file__ directly rather than CPython's
+        # f_code.co_filename. Accept both representations for runtime errors.
+        filename = getattr(code, 'co_filename', None) or getattr(frame, '__file__', None)
         if filename == entry_filename:
             line_number = getattr(traceback_node, 'tb_lineno', None)
             if line_number is not None and line_number <= entry_user_line_count + 1:
-                return max(1, line_number - 1)
-            return None
+                # Keep walking: wrapper frames share the entry filename, while
+                # the deepest matching frame identifies the actual user line.
+                user_line_number = max(1, line_number - 1)
         traceback_node = getattr(traceback_node, 'tb_next', None)
+    if user_line_number is not None:
+        return user_line_number
     fallback_line_number = getattr(error, 'lineno', None)
     if fallback_line_number is not None:
         try:
