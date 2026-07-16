@@ -566,7 +566,6 @@ export function buildBrythonRunnerHtml(payload: BrythonRunnerPayload): string {
   const serializedPayload = escapeScriptJson(payload)
   const entryContent = payload.files[payload.entryFile] ?? ''
   const serializedEntryContent = escapeScriptJson(buildBrythonAsyncEntrySource(entryContent))
-  const serializedEntryUserSource = escapeScriptJson(entryContent)
   const serializedEntryFile = escapeScriptJson(payload.entryFile)
   const entryImportDiagnostic = findUnsupportedEntryImport(entryContent, payload.files)
   const serializedEntryImportDiagnostic = entryImportDiagnostic === null
@@ -880,10 +879,10 @@ import traceback
 
 entry_filename = ${serializedEntryFile}
 entry_source = ${serializedEntryContent}
-entry_user_source = ${serializedEntryUserSource}
 entry_user_line_count = ${entryLineCount}
 entry_import_diagnostic = ${serializedEntryImportDiagnostic}
 workspace_files = ${serializedWorkspaceFiles}
+entry_user_source = workspace_files.get(entry_filename, '')
 workspace_python_modules = ${serializedWorkspacePythonModules}
 workspace_brython_files_json = ${serializedWorkspaceBrythonFilesJson}
 input_sequence = 0

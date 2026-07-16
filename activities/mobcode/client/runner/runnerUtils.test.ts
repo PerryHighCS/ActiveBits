@@ -455,7 +455,7 @@ void test('buildBrythonRunnerHtml prints a user-file error header before the raw
   assert.match(html, /def mobcode_format_error\(error\):/)
   assert.match(html, /def mobcode_format_exception\(error\):/)
   assert.match(html, /error_suffix = ': ' \+ error_message if error_message else ''/)
-  assert.match(html, /entry_user_source = /)
+  assert.match(html, /entry_user_source = workspace_files\.get\(entry_filename, ''\)/)
   assert.match(html, /Traceback \(most recent call last\):/)
   assert.match(html, /function_name == '__mobcode_user_main__'/)
   assert.match(html, /entry_user_lines\[user_line_number - 1\]/)
