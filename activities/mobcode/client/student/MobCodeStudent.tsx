@@ -46,6 +46,7 @@ export function removeMobCodeSoloTokenFromSearch(search: string): string {
 interface SessionResponse {
   data?: {
     runnerId?: unknown
+    canEditSolo?: unknown
     groups?: {
       default?: {
         files?: unknown
@@ -146,7 +147,7 @@ export default function MobCodeStudent({ sessionData }: MobCodeStudentProps) {
   }, [location.search, route.mode])
 
   return route.mode === 'solo'
-    ? <MobCodeManager sessionIdOverride={sessionData.sessionId} soloEditToken={route.soloEditToken} />
+    ? <MobCodeManager sessionIdOverride={sessionData.sessionId} soloEditToken={route.soloEditToken} soloMode />
     : <MobCodeLiveStudent sessionData={sessionData} />
 }
 
@@ -160,6 +161,7 @@ function MobCodeLiveStudent({ sessionData }: MobCodeStudentProps) {
   const [runnerMessage, setRunnerMessage] = useState('')
   const [theme, setTheme] = useState<MobCodeThemeId>(() => getThemeFromCookie())
   const [instructorPresence, setInstructorPresence] = useState<MobCodeEditorPresencePayload | null>(null)
+  const [canResumeSolo, setCanResumeSolo] = useState(false)
   const latestFilesRef = useRef<Record<string, string>>({})
 
   useEffect(() => {
@@ -174,6 +176,7 @@ function MobCodeLiveStudent({ sessionData }: MobCodeStudentProps) {
         setRunnerId(isMobCodeRunnerId(session.data?.runnerId) ? session.data.runnerId : DEFAULT_MOB_CODE_RUNNER_ID)
         setRunnerMessage('')
         setInstructorPresence(null)
+        setCanResumeSolo(session.data?.canEditSolo === true)
       })
       .catch((error) => console.error('Failed to fetch MobCode session:', error))
   }, [encodedSessionId, sessionId])
@@ -254,6 +257,10 @@ function MobCodeLiveStudent({ sessionData }: MobCodeStudentProps) {
 
   const editorThemeClassName = `mobcode-editor-theme-${theme}`
   const studentRunners = getStudentRunnerOptions(runnerId)
+
+  if (canResumeSolo) {
+    return <MobCodeManager sessionIdOverride={sessionId} soloMode />
+  }
 
   return (
     <div className="mobcode-shell">

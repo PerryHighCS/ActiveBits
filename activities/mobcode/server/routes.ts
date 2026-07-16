@@ -214,6 +214,22 @@ function createSoloEditToken(): string {
   return randomBytes(SOLO_EDIT_TOKEN_BYTES).toString('hex')
 }
 
+function getSoloEditCookieName(sessionId: string): string {
+  return `mobcode_solo_edit_${sessionId}`
+}
+
+function readRequestCookie(req: Request, name: string): string | null {
+  const cookieHeader = req.headers?.cookie
+  if (typeof cookieHeader !== 'string') return null
+  const cookie = cookieHeader.split(';').map((entry) => entry.trim()).find((entry) => entry.startsWith(`${name}=`))
+  if (!cookie) return null
+  try {
+    return decodeURIComponent(cookie.slice(name.length + 1))
+  } catch {
+    return null
+  }
+}
+
 function verifyPasscode(expected: string | undefined, candidate: unknown): boolean {
   if (typeof expected !== 'string' || typeof candidate !== 'string') return false
   if (
@@ -603,6 +619,12 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
       session.type = 'mobcode'
       await sessions.set(session.id, session)
       console.info(JSON.stringify({ event: 'mobcode.solo-session-created', sessionId: session.id, fileCount: Object.keys(files).length }))
+      res.cookie(getSoloEditCookieName(session.id), soloEditToken, {
+        httpOnly: true,
+        sameSite: 'lax',
+        secure: process.env.NODE_ENV === 'production',
+        path: `/api/mobcode/${encodeURIComponent(session.id)}`,
+      })
       res.set('Cache-Control', 'no-store')
       res.json({ id: session.id, soloEditToken })
     } catch (error) {
@@ -625,6 +647,8 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
           groups: session.data.groups,
           runnerId: readEmbeddedRunnerId(session.data),
           soloMode: session.data.soloMode === true,
+          canEditSolo: session.data.soloMode === true
+            && verifyPasscode(session.data.soloEditToken, readRequestCookie(req, getSoloEditCookieName(session.id))),
         },
       })
     } catch (error) {
@@ -643,7 +667,10 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
       const body = isPlainObject(req.body) ? req.body : {}
       const hasInstructorAccess = verifyPasscode(session.data.instructorPasscode, body.instructorPasscode)
       const hasSoloEditAccess = session.data.soloMode === true
-        && verifyPasscode(session.data.soloEditToken, body.soloEditToken)
+        && (
+          verifyPasscode(session.data.soloEditToken, body.soloEditToken)
+          || verifyPasscode(session.data.soloEditToken, readRequestCookie(req, getSoloEditCookieName(session.id)))
+        )
       if (!hasInstructorAccess && !hasSoloEditAccess) {
         console.warn(JSON.stringify({ event: 'mobcode.state-denied', sessionId: session.id }))
         res.status(403).json({ error: 'Forbidden' })

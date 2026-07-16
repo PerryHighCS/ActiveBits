@@ -24,8 +24,10 @@ interface MockResponse {
   statusCode: number
   body: unknown
   headers: Record<string, string>
+  cookies: Array<{ name: string; value: string; options: Record<string, unknown> }>
   status(code: number): MockResponse
   set(name: string, value: string): MockResponse
+  cookie(name: string, value: string, options: Record<string, unknown>): MockResponse
   json(payload: unknown): MockResponse
 }
 
@@ -34,12 +36,17 @@ function createResponse(): MockResponse {
     statusCode: 200,
     body: null,
     headers: {},
+    cookies: [],
     status(code: number) {
       this.statusCode = code
       return this
     },
     set(name: string, value: string) {
       this.headers[name] = value
+      return this
+    },
+    cookie(name: string, value: string, options: Record<string, unknown>) {
+      this.cookies.push({ name, value, options })
       return this
     },
     json(payload: unknown) {
@@ -169,6 +176,8 @@ void test('POST /api/mobcode/create-solo creates a server-backed editable worksp
   assert.equal(typeof (response.body as { id?: unknown }).id, 'string')
   assert.equal(typeof (response.body as { soloEditToken?: unknown }).soloEditToken, 'string')
   assert.equal(response.headers['Cache-Control'], 'no-store')
+  assert.equal(response.cookies.length, 1)
+  assert.equal(response.cookies[0]?.options.httpOnly, true)
   if (savedSession === null) throw new Error('Expected solo session to be saved')
   const data = (savedSession as SessionRecord & { data: ReturnType<typeof normalizeMobCodeSessionData> }).data
   assert.equal(data.soloMode, true)
@@ -203,6 +212,7 @@ void test('GET /api/mobcode/:sessionId/session does not leak instructor passcode
       groups: session.data.groups,
       runnerId: null,
       soloMode: false,
+      canEditSolo: false,
     },
   })
   assert.equal(
@@ -277,6 +287,7 @@ void test('GET /api/mobcode/:sessionId/session exposes sanitized embedded runner
       groups: session.data.groups,
       runnerId: 'brython-terminal',
       soloMode: false,
+      canEditSolo: false,
     },
   })
 })
@@ -323,6 +334,7 @@ void test('GET /api/mobcode/:sessionId/session drops invalid embedded runner id'
       groups: session.data.groups,
       runnerId: null,
       soloMode: false,
+      canEditSolo: false,
     },
   })
 })

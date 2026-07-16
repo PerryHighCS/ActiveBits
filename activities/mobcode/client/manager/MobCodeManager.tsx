@@ -113,6 +113,7 @@ interface MobCodeManagerProps {
   /** Session and opaque edit credential used by a server-backed solo workspace. */
   sessionIdOverride?: string
   soloEditToken?: string
+  soloMode?: boolean
 }
 
 export function resolveMobCodeWorkspaceAccess(params: {
@@ -122,10 +123,10 @@ export function resolveMobCodeWorkspaceAccess(params: {
   return params.isSolo || params.instructorPasscode.length > 0
 }
 
-export default function MobCodeManager({ sessionIdOverride, soloEditToken }: MobCodeManagerProps = {}) {
+export default function MobCodeManager({ sessionIdOverride, soloEditToken, soloMode = false }: MobCodeManagerProps = {}) {
   const { sessionId: routeSessionId } = useParams()
   const sessionId = sessionIdOverride ?? routeSessionId
-  const isSolo = typeof soloEditToken === 'string' && soloEditToken.length > 0
+  const isSolo = soloMode || (typeof soloEditToken === 'string' && soloEditToken.length > 0)
   const encodedSessionId = sessionId ? encodeURIComponent(sessionId) : ''
   const location = useLocation()
   const fallbackInstructorPasscode = useMemo(() => resolveMobCodeInstructorPasscode({
@@ -245,14 +246,14 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken }: Mob
   const persistState = useCallback(
     async (payload: MobCodeStatePayload, messageType: DurableMobCodeMessageType = MOB_CODE_MESSAGE_TYPES.STATE_SYNC) => {
       const credential = isSolo ? soloEditToken : instructorPasscode
-      if (!sessionId || !credential) return
+      if (!sessionId || (!isSolo && !credential)) return
       try {
         const response = await fetch(`/api/mobcode/${encodedSessionId}/state`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             ...payload,
-            ...(isSolo ? { soloEditToken } : { instructorPasscode }),
+            ...(isSolo && soloEditToken ? { soloEditToken } : !isSolo ? { instructorPasscode } : {}),
             messageType,
           }),
         })
