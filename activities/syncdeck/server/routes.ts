@@ -2412,7 +2412,13 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
         return
       }
       if (typeof session.data.learnIntegrationStoppedAt === 'number') {
-        socket.send(JSON.stringify({ type: 'session-ended' }))
+        if (socket.readyState === WS_OPEN_READY_STATE) {
+          try {
+            socket.send(JSON.stringify({ type: 'session-ended' }))
+          } catch {
+            // Socket may have closed concurrently; swallow send failures.
+          }
+        }
         socket.close(1000, 'session ended')
         return
       }

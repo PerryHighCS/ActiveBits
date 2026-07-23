@@ -11,7 +11,12 @@ export async function readLearnSyncDeckWaitingStatus(
     cache: 'no-store',
     credentials: 'same-origin',
   })
-  const payload = await response.json() as WaitingStatusResponse
+  let payload: WaitingStatusResponse = {}
+  try {
+    payload = await response.json() as WaitingStatusResponse
+  } catch {
+    // Proxies and upstream errors may return a non-JSON response.
+  }
   if (!response.ok) {
     throw new Error(typeof payload.error === 'string' ? payload.error : 'Your waiting-room entry is no longer available.')
   }

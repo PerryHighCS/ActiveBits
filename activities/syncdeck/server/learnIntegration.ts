@@ -265,6 +265,7 @@ async function createBrowserToken(sessions: SessionStore, data: BrowserTokenData
 async function consumeBrowserToken(sessions: SessionStore, tokenId: string, value: string): Promise<BrowserTokenData | null> {
   if (!sessions.consumeSessionDataToken || tokenId.length > 256 || value.length > 256) return null
   const consumed = await sessions.consumeSessionDataToken(tokenId, 'browserToken', value)
+  if (!consumed) return null
   await sessions.delete(tokenId)
   return getBrowserTokenData(consumed)
 }

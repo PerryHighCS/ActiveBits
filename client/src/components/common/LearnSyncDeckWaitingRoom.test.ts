@@ -23,3 +23,10 @@ void test('readLearnSyncDeckWaitingStatus surfaces a safe server error', async (
     /waiting-room entry is unavailable/i,
   )
 })
+
+void test('readLearnSyncDeckWaitingStatus falls back to a safe error for a non-JSON response', async () => {
+  await assert.rejects(
+    () => readLearnSyncDeckWaitingStatus(async () => new Response('<html>gateway error</html>', { status: 502 })),
+    /waiting-room entry is no longer available/i,
+  )
+})

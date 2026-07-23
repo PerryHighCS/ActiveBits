@@ -155,6 +155,13 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
     const waitingLaunchUrl = String((entryResponse.body as { waitingLaunchUrl: string }).waitingLaunchUrl)
     const launchUrl = new URL(waitingLaunchUrl, 'https://bits.example')
 
+    const invalidWaitLaunchResponse = response()
+    await getHandlers.get('/integrations/learn/:activityId/wait/:tokenId')!(
+      { params: { activityId: 'syncdeck', tokenId: launchUrl.pathname.split('/').at(-1) }, query: { token: 'invalid-token' } },
+      invalidWaitLaunchResponse,
+    )
+    assert.equal(invalidWaitLaunchResponse.statusCode, 403)
+
     const waitLaunchResponse = response()
     await getHandlers.get('/integrations/learn/:activityId/wait/:tokenId')!(
       { params: { activityId: 'syncdeck', tokenId: launchUrl.pathname.split('/').at(-1) }, query: { token: launchUrl.searchParams.get('token') } },
