@@ -7,7 +7,7 @@ interface WaitingStatusResponse {
 export async function readLearnSyncDeckWaitingStatus(
   fetchImpl: typeof fetch = fetch,
 ): Promise<{ state: 'waiting' | 'active'; studentLaunchUrl: string | null }> {
-  const response = await fetchImpl('/api/integrations/learn/v1/wait/status', {
+  const response = await fetchImpl('/api/integrations/learn/v1/activities/syncdeck/wait/status', {
     cache: 'no-store',
     credentials: 'same-origin',
   })

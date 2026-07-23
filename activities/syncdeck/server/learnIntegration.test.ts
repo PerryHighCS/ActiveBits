@@ -117,10 +117,10 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
     })
 
     const resourceId = 'learn-resource-1'
-    const entryPath = `/api/integrations/learn/v1/resources/${resourceId}/student-entry`
+    const entryPath = `/api/integrations/learn/v1/activities/syncdeck/resources/${resourceId}/student-entry`
     const entryResponse = response()
-    await postHandlers.get('/api/integrations/learn/v1/resources/:resourceLinkId/student-entry')!(
-      { params: { resourceLinkId: resourceId }, ...signedRequest('POST', entryPath, {}, 'student-entry-nonce') },
+    await postHandlers.get('/api/integrations/learn/v1/activities/:activityId/resources/:resourceLinkId/student-entry')!(
+      { params: { activityId: 'syncdeck', resourceLinkId: resourceId }, ...signedRequest('POST', entryPath, {}, 'student-entry-nonce') },
       entryResponse,
     )
     assert.equal(entryResponse.statusCode, 200)
@@ -128,33 +128,33 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
     const launchUrl = new URL(waitingLaunchUrl, 'https://bits.example')
 
     const waitLaunchResponse = response()
-    await getHandlers.get('/integrations/learn/wait/:tokenId')!(
-      { params: { tokenId: launchUrl.pathname.split('/').at(-1) }, query: { token: launchUrl.searchParams.get('token') } },
+    await getHandlers.get('/integrations/learn/:activityId/wait/:tokenId')!(
+      { params: { activityId: 'syncdeck', tokenId: launchUrl.pathname.split('/').at(-1) }, query: { token: launchUrl.searchParams.get('token') } },
       waitLaunchResponse,
     )
-    assert.equal(waitLaunchResponse.redirectTo, '/integrations/learn/wait')
+    assert.equal(waitLaunchResponse.redirectTo, '/integrations/learn/syncdeck/wait')
     const waitingCookie = waitLaunchResponse.cookies.find((item) => item.name === 'learn_syncdeck_wait')?.value
     assert.ok(waitingCookie)
 
-    const startPath = `/api/integrations/learn/v1/resources/${resourceId}/start`
+    const startPath = `/api/integrations/learn/v1/activities/syncdeck/resources/${resourceId}/start`
     const startResponse = response()
-    await postHandlers.get('/api/integrations/learn/v1/resources/:resourceLinkId/start')!(
-      { params: { resourceLinkId: resourceId }, ...signedRequest('POST', startPath, { presentationUrl: 'https://slides.example/deck', requestId: 'start-1' }, 'start-nonce') },
+    await postHandlers.get('/api/integrations/learn/v1/activities/:activityId/resources/:resourceLinkId/start')!(
+      { params: { activityId: 'syncdeck', resourceLinkId: resourceId }, ...signedRequest('POST', startPath, { presentationUrl: 'https://slides.example/deck', requestId: 'start-1' }, 'start-nonce') },
       startResponse,
     )
     assert.equal(startResponse.statusCode, 200)
     assert.equal((startResponse.body as { activeSessionId?: unknown }).activeSessionId, createdSessionId)
 
     const waitStatusResponse = response()
-    await getHandlers.get('/api/integrations/learn/v1/wait/status')!(
-      { params: {}, cookies: { learn_syncdeck_wait: waitingCookie } },
+    await getHandlers.get('/api/integrations/learn/v1/activities/:activityId/wait/status')!(
+      { params: { activityId: 'syncdeck' }, cookies: { learn_syncdeck_wait: waitingCookie } },
       waitStatusResponse,
     )
     assert.deepEqual(waitStatusResponse.body, { state: 'active', studentLaunchUrl: '/syncdeck-live' })
 
     const replayResponse = response()
-    await postHandlers.get('/api/integrations/learn/v1/resources/:resourceLinkId/start')!(
-      { params: { resourceLinkId: resourceId }, ...signedRequest('POST', startPath, { presentationUrl: 'https://slides.example/deck', requestId: 'start-1' }, 'start-nonce') },
+    await postHandlers.get('/api/integrations/learn/v1/activities/:activityId/resources/:resourceLinkId/start')!(
+      { params: { activityId: 'syncdeck', resourceLinkId: resourceId }, ...signedRequest('POST', startPath, { presentationUrl: 'https://slides.example/deck', requestId: 'start-1' }, 'start-nonce') },
       replayResponse,
     )
     assert.equal(replayResponse.statusCode, 401)

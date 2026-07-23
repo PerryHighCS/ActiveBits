@@ -12,7 +12,7 @@ void test('readLearnSyncDeckWaitingStatus returns an active launch URL without c
   })
 
   assert.deepEqual(result, { state: 'active', studentLaunchUrl: '/session-1' })
-  assert.equal(requestedUrl, '/api/integrations/learn/v1/wait/status')
+  assert.equal(requestedUrl, '/api/integrations/learn/v1/activities/syncdeck/wait/status')
   assert.equal(init?.cache, 'no-store')
   assert.equal(init?.credentials, 'same-origin')
 })

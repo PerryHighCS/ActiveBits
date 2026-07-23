@@ -347,7 +347,8 @@ SyncDeck also supports ActiveBits-owned utility flows for statically hosted deck
 ### Learn-managed SyncDeck sessions
 
 The Learn integration is a separate server-to-server path. Learn signs requests with a
-dedicated HMAC secret, and ActiveBits uses its opaque provider/resource ID only as a
+dedicated HMAC secret, and ActiveBits uses an activity-scoped opaque
+`activityId`/provider/resource ID only as a
 temporary waiting-or-active-session index. A student waiting-room launch is a one-time
 browser handoff issued to Learn's server; ActiveBits consumes it, keeps the student in
 an ActiveBits waiting room, and moves the browser into the shared SyncDeck session after

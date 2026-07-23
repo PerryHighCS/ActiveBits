@@ -5,6 +5,7 @@ import type { ActiveBitsWebSocket, WsRouter } from '../../../types/websocket.js'
 
 const INTEGRATION_PREFIX = '/api/integrations/learn/v1'
 const BROWSER_PREFIX = '/integrations/learn'
+const ACTIVITY_ID = 'syncdeck'
 const HMAC_SIGNATURE_HEADER = 'x-learn-signature'
 const HMAC_KEY_ID_HEADER = 'x-learn-key-id'
 const HMAC_TIMESTAMP_HEADER = 'x-learn-timestamp'
@@ -39,6 +40,7 @@ interface RouteApp {
 
 interface LearnEntryData extends Record<string, unknown> {
   learnIntegrationKind: 'entry'
+  activityId: string
   provider: string
   resourceLinkId: string
   state: 'waiting' | 'active'
@@ -49,6 +51,7 @@ interface LearnEntryData extends Record<string, unknown> {
 
 interface BrowserTokenData extends Record<string, unknown> {
   learnIntegrationKind: 'browser-token'
+  activityId: string
   purpose: 'student-wait' | 'instructor-launch'
   mappingId: string
   sessionId?: string
@@ -195,8 +198,8 @@ async function verifyHmac(req: RouteRequest, method: string, path: string, sessi
   return { ok: true, key, provider }
 }
 
-function mappingId(secret: string, provider: string, resourceLinkId: string): string {
-  const digest = createHmac('sha256', secret).update(`${provider}\n${resourceLinkId}`, 'utf8').digest('hex')
+function mappingId(secret: string, activityId: string, provider: string, resourceLinkId: string): string {
+  const digest = createHmac('sha256', secret).update(`${activityId}\n${provider}\n${resourceLinkId}`, 'utf8').digest('hex')
   return `learn-syncdeck-entry-${digest.slice(0, 40)}`
 }
 
@@ -216,13 +219,15 @@ function readCookieMapping(value: unknown, secret: string): string | null {
 function getEntryData(session: SessionRecord | null): LearnEntryData | null {
   if (!session || !isPlainObject(session.data) || session.data.learnIntegrationKind !== 'entry') return null
   const data = session.data
+  const activityId = readString(data.activityId, 120)
   const provider = readString(data.provider, MAX_PROVIDER_LENGTH)
   const resourceLinkId = readString(data.resourceLinkId, MAX_RESOURCE_ID_LENGTH)
   const state = data.state === 'waiting' || data.state === 'active' ? data.state : null
   const expiresAt = typeof data.expiresAt === 'number' && Number.isFinite(data.expiresAt) ? data.expiresAt : 0
-  if (!provider || !resourceLinkId || !state || expiresAt <= Date.now()) return null
+  if (!activityId || !provider || !resourceLinkId || !state || expiresAt <= Date.now()) return null
   return {
     learnIntegrationKind: 'entry',
+    activityId,
     provider,
     resourceLinkId,
     state,
@@ -239,6 +244,7 @@ function getBrowserTokenData(session: SessionRecord | null): BrowserTokenData | 
   if (typeof data.expiresAt !== 'number' || data.expiresAt <= Date.now()) return null
   return {
     learnIntegrationKind: 'browser-token',
+    activityId: typeof data.activityId === 'string' ? data.activityId : '',
     purpose: data.purpose,
     mappingId: data.mappingId,
     ...(typeof data.sessionId === 'string' ? { sessionId: data.sessionId } : {}),
@@ -277,8 +283,14 @@ function setNoStore(res: RouteResponse): void {
   res.setHeader?.('Cache-Control', 'no-store')
 }
 
-function integrationPath(resourceLinkId: string, suffix: string): string {
-  return `${INTEGRATION_PREFIX}/resources/${encodeURIComponent(resourceLinkId)}${suffix}`
+function integrationPath(activityId: string, resourceLinkId: string, suffix: string): string {
+  return `${INTEGRATION_PREFIX}/activities/${encodeURIComponent(activityId)}/resources/${encodeURIComponent(resourceLinkId)}${suffix}`
+}
+
+function requireSyncDeckActivity(activityId: string | undefined, res: RouteResponse): boolean {
+  if (activityId === ACTIVITY_ID) return true
+  res.status(404).json({ error: 'Unsupported Learn integration activity' })
+  return false
 }
 
 export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions): void {
@@ -306,14 +318,15 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
     return { session, data }
   }
 
-  app.get(`${INTEGRATION_PREFIX}/resources/:resourceLinkId/status`, async (req, res) => {
+  app.get(`${INTEGRATION_PREFIX}/activities/:activityId/resources/:resourceLinkId/status`, async (req, res) => {
     setNoStore(res)
+    if (!requireSyncDeckActivity(req.params.activityId, res)) return
     const resourceLinkId = readString(req.params.resourceLinkId, MAX_RESOURCE_ID_LENGTH)
-    const auth = await verifyHmac(req, 'GET', integrationPath(req.params.resourceLinkId ?? '', '/status'), sessions)
+    const auth = await verifyHmac(req, 'GET', integrationPath(ACTIVITY_ID, req.params.resourceLinkId ?? '', '/status'), sessions)
     if (!auth.ok) return void res.status(auth.status).json({ error: auth.error })
     if (!resourceLinkId) return void res.status(400).json({ error: 'Invalid resourceLinkId' })
     const provider = auth.provider
-    const entry = await loadEntry(mappingId(auth.key.secret, provider, resourceLinkId))
+    const entry = await loadEntry(mappingId(auth.key.secret, ACTIVITY_ID, provider, resourceLinkId))
     if (!entry) return void res.json({ resourceLinkId, state: 'inactive', activeSessionId: null, studentLaunchUrl: null, connectedParticipantCount: 0, connectedInstructorCount: 0 })
     if (entry.data.state === 'waiting' || !entry.data.activeSessionId) {
       return void res.json({ resourceLinkId, state: 'waiting', activeSessionId: null, studentLaunchUrl: null, connectedParticipantCount: 0, connectedInstructorCount: 0 })
@@ -322,18 +335,19 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
     res.json({ resourceLinkId, state: 'active', activeSessionId: entry.data.activeSessionId, studentLaunchUrl: `/${encodeURIComponent(entry.data.activeSessionId)}`, connectedParticipantCount: counts.participants, connectedInstructorCount: counts.instructors })
   })
 
-  app.post(`${INTEGRATION_PREFIX}/resources/:resourceLinkId/student-entry`, async (req, res) => {
+  app.post(`${INTEGRATION_PREFIX}/activities/:activityId/resources/:resourceLinkId/student-entry`, async (req, res) => {
     setNoStore(res)
+    if (!requireSyncDeckActivity(req.params.activityId, res)) return
     const resourceLinkId = readString(req.params.resourceLinkId, MAX_RESOURCE_ID_LENGTH)
-    const auth = await verifyHmac(req, 'POST', integrationPath(req.params.resourceLinkId ?? '', '/student-entry'), sessions)
+    const auth = await verifyHmac(req, 'POST', integrationPath(ACTIVITY_ID, req.params.resourceLinkId ?? '', '/student-entry'), sessions)
     if (!auth.ok) return void res.status(auth.status).json({ error: auth.error })
     if (!resourceLinkId) return void res.status(400).json({ error: 'Invalid resourceLinkId' })
     const provider = auth.provider
     if (!provider) return void res.status(400).json({ error: 'Missing Learn provider' })
-    const id = mappingId(auth.key.secret, provider, resourceLinkId)
+    const id = mappingId(auth.key.secret, ACTIVITY_ID, provider, resourceLinkId)
     let entry = await loadEntry(id)
     if (!entry) {
-      const created = await createSession(sessions, { data: { learnIntegrationKind: 'entry', provider, resourceLinkId, state: 'waiting', activeSessionId: null, presentationUrl: null, expiresAt: Date.now() + WAITING_TTL_MS } })
+      const created = await createSession(sessions, { data: { learnIntegrationKind: 'entry', activityId: ACTIVITY_ID, provider, resourceLinkId, state: 'waiting', activeSessionId: null, presentationUrl: null, expiresAt: Date.now() + WAITING_TTL_MS } })
       const generatedId = created.id
       created.id = id
       created.type = 'syncdeck-learn-entry'
@@ -341,14 +355,15 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
       await sessions.set(id, created, WAITING_TTL_MS)
       entry = { session: created, data: getEntryData(created)! }
     }
-    const token = await createBrowserToken(sessions, { learnIntegrationKind: 'browser-token', purpose: 'student-wait', mappingId: id, expiresAt: Date.now() + BROWSER_TOKEN_TTL_MS })
-    res.json({ waitingLaunchUrl: `${BROWSER_PREFIX}/wait/${encodeURIComponent(token.id)}?token=${encodeURIComponent(token.value)}`, state: entry.data.state })
+    const token = await createBrowserToken(sessions, { learnIntegrationKind: 'browser-token', activityId: ACTIVITY_ID, purpose: 'student-wait', mappingId: id, expiresAt: Date.now() + BROWSER_TOKEN_TTL_MS })
+    res.json({ waitingLaunchUrl: `${BROWSER_PREFIX}/${ACTIVITY_ID}/wait/${encodeURIComponent(token.id)}?token=${encodeURIComponent(token.value)}`, state: entry.data.state })
   })
 
-  app.post(`${INTEGRATION_PREFIX}/resources/:resourceLinkId/start`, async (req, res) => {
+  app.post(`${INTEGRATION_PREFIX}/activities/:activityId/resources/:resourceLinkId/start`, async (req, res) => {
     setNoStore(res)
+    if (!requireSyncDeckActivity(req.params.activityId, res)) return
     const resourceLinkId = readString(req.params.resourceLinkId, MAX_RESOURCE_ID_LENGTH)
-    const auth = await verifyHmac(req, 'POST', integrationPath(req.params.resourceLinkId ?? '', '/start'), sessions)
+    const auth = await verifyHmac(req, 'POST', integrationPath(ACTIVITY_ID, req.params.resourceLinkId ?? '', '/start'), sessions)
     if (!auth.ok) return void res.status(auth.status).json({ error: auth.error })
     if (!resourceLinkId) return void res.status(400).json({ error: 'Invalid resourceLinkId' })
     const provider = auth.provider
@@ -359,7 +374,7 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
       return void res.status(400).json({ error: 'Missing or invalid Learn start payload' })
     }
 
-    const id = mappingId(auth.key.secret, provider, resourceLinkId)
+    const id = mappingId(auth.key.secret, ACTIVITY_ID, provider, resourceLinkId)
     let entry = await loadEntry(id)
     const releaseStartLock = entry?.data.state === 'active'
       ? null
@@ -394,6 +409,7 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
       sessionId = created.sessionId
       const nextData: LearnEntryData = {
         learnIntegrationKind: 'entry',
+        activityId: ACTIVITY_ID,
         provider,
         resourceLinkId,
         state: 'active',
@@ -417,6 +433,7 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
 
     const browserToken = await createBrowserToken(sessions, {
       learnIntegrationKind: 'browser-token',
+      activityId: ACTIVITY_ID,
       purpose: 'instructor-launch',
       mappingId: id,
       sessionId: sessionId!,
@@ -426,7 +443,7 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
       state: 'active',
       activeSessionId: sessionId!,
       reused,
-      instructorLaunchUrl: `${BROWSER_PREFIX}/instructor/${encodeURIComponent(browserToken.id)}?token=${encodeURIComponent(browserToken.value)}`,
+      instructorLaunchUrl: `${BROWSER_PREFIX}/${ACTIVITY_ID}/instructor/${encodeURIComponent(browserToken.id)}?token=${encodeURIComponent(browserToken.value)}`,
       studentLaunchUrl: `/${encodeURIComponent(sessionId!)}`,
     })
     } finally {
@@ -434,14 +451,15 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
     }
   })
 
-  app.post(`${INTEGRATION_PREFIX}/resources/:resourceLinkId/stop`, async (req, res) => {
+  app.post(`${INTEGRATION_PREFIX}/activities/:activityId/resources/:resourceLinkId/stop`, async (req, res) => {
     setNoStore(res)
+    if (!requireSyncDeckActivity(req.params.activityId, res)) return
     const resourceLinkId = readString(req.params.resourceLinkId, MAX_RESOURCE_ID_LENGTH)
-    const auth = await verifyHmac(req, 'POST', integrationPath(req.params.resourceLinkId ?? '', '/stop'), sessions)
+    const auth = await verifyHmac(req, 'POST', integrationPath(ACTIVITY_ID, req.params.resourceLinkId ?? '', '/stop'), sessions)
     if (!auth.ok) return void res.status(auth.status).json({ error: auth.error })
     if (!resourceLinkId) return void res.status(400).json({ error: 'Invalid resourceLinkId' })
     const provider = auth.provider
-    const id = mappingId(auth.key.secret, provider, resourceLinkId)
+    const id = mappingId(auth.key.secret, ACTIVITY_ID, provider, resourceLinkId)
     const entry = await loadEntry(id)
     if (!entry?.data.activeSessionId) return void res.json({ state: 'inactive', alreadyInactive: true })
     const sessionId = entry.data.activeSessionId
@@ -456,20 +474,22 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
     res.json({ state: 'inactive', alreadyInactive: false })
   })
 
-  app.get(`${BROWSER_PREFIX}/wait/:tokenId`, async (req, res) => {
+  app.get(`${BROWSER_PREFIX}/:activityId/wait/:tokenId`, async (req, res) => {
     setNoStore(res)
+    if (!requireSyncDeckActivity(req.params.activityId, res)) return
     const tokenId = readString(req.params.tokenId, 256)
     const tokenValue = readString((req as RouteRequest & { query?: Record<string, unknown> }).query?.token, 256)
     const key = configuredKey()
     const token = tokenId && tokenValue ? await consumeBrowserToken(sessions, tokenId, tokenValue) : null
-    if (!key || !token || token.purpose !== 'student-wait') return void res.status(403).json({ error: 'Invalid or expired waiting-room launch' })
-    res.cookie?.('learn_syncdeck_wait', cookieValue(key.secret, token.mappingId), { path: `${INTEGRATION_PREFIX}/wait`, httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production' })
-    if (typeof res.redirect === 'function') return void res.redirect(302, `${BROWSER_PREFIX}/wait`)
-    res.status(302).json({ redirectTo: `${BROWSER_PREFIX}/wait` })
+    if (!key || !token || token.activityId !== ACTIVITY_ID || token.purpose !== 'student-wait') return void res.status(403).json({ error: 'Invalid or expired waiting-room launch' })
+    res.cookie?.('learn_syncdeck_wait', cookieValue(key.secret, token.mappingId), { path: `${INTEGRATION_PREFIX}/activities/${ACTIVITY_ID}/wait`, httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production' })
+    if (typeof res.redirect === 'function') return void res.redirect(302, `${BROWSER_PREFIX}/${ACTIVITY_ID}/wait`)
+    res.status(302).json({ redirectTo: `${BROWSER_PREFIX}/${ACTIVITY_ID}/wait` })
   })
 
-  app.get(`${INTEGRATION_PREFIX}/wait/status`, async (req, res) => {
+  app.get(`${INTEGRATION_PREFIX}/activities/:activityId/wait/status`, async (req, res) => {
     setNoStore(res)
+    if (!requireSyncDeckActivity(req.params.activityId, res)) return
     const key = configuredKey()
     const id = key ? readCookieMapping(req.cookies?.learn_syncdeck_wait, key.secret) : null
     const entry = id ? await loadEntry(id) : null
@@ -478,12 +498,13 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
     res.json({ state: 'active', studentLaunchUrl: `/${encodeURIComponent(entry.data.activeSessionId)}` })
   })
 
-  app.get(`${BROWSER_PREFIX}/instructor/:tokenId`, async (req, res) => {
+  app.get(`${BROWSER_PREFIX}/:activityId/instructor/:tokenId`, async (req, res) => {
     setNoStore(res)
+    if (!requireSyncDeckActivity(req.params.activityId, res)) return
     const tokenId = readString(req.params.tokenId, 256)
     const tokenValue = readString((req as RouteRequest & { query?: Record<string, unknown> }).query?.token, 256)
     const token = tokenId && tokenValue ? await consumeBrowserToken(sessions, tokenId, tokenValue) : null
-    if (!token || token.purpose !== 'instructor-launch' || !token.sessionId) return void res.status(403).json({ error: 'Invalid or expired instructor launch' })
+    if (!token || token.activityId !== ACTIVITY_ID || token.purpose !== 'instructor-launch' || !token.sessionId) return void res.status(403).json({ error: 'Invalid or expired instructor launch' })
     const session = await sessions.get(token.sessionId)
     const recovery = session && typeof session.data.instructorRecoveryToken === 'string' ? session.data.instructorRecoveryToken : null
     if (!recovery) return void res.status(404).json({ error: 'Instructor session is unavailable' })

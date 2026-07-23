@@ -114,6 +114,7 @@ does not retain Learn's deck configuration after the entry flow ends.
 
 ```ts
 interface LearnSyncDeckEntryState {
+  activityId: string               // currently "syncdeck"
   provider: string                 // e.g. "learn-production"
   resourceLinkId: string           // opaque Learn/LTI identifier
   state: 'waiting' | 'active'
@@ -132,7 +133,7 @@ under the normal session TTL.
 
 Suggested constraints:
 
-- Treat `(provider, resourceLinkId)` as unique.
+- Treat `(activityId, provider, resourceLinkId)` as unique.
 - Validate and bound all strings before storage; do not log raw signed assertions.
 - Receive and validate `presentationUrl` only with a Start request. Learn is the
   durable owner of the URL, and ActiveBits applies it to the newly created session.
@@ -173,6 +174,7 @@ rotation.
 
 ```ts
 interface LearnResourceRequest {
+  activityId: string               // path segment; currently "syncdeck"
   provider: string
   resourceLinkId: string
   presentationUrl?: string          // required when registering/starting initially
@@ -184,7 +186,7 @@ The authenticated assertion/request metadata must also establish whether the cal
 is authorized as an instructor. Do not trust a role field solely because it appears
 in JSON request data.
 
-### `GET /resources/:resourceLinkId/status`
+### `GET /activities/:activityId/resources/:resourceLinkId/status`
 
 Returns the authoritative state for Learn to render its controls.
 
@@ -242,9 +244,9 @@ rate-limit the endpoint by authenticated Learn client/resource without making no
 polling fail. ActiveBits does not retain or report historical attendance; Learn owns
 that concern, including any LMS grade notification it sends when a student connects.
 
-### `POST /resources/:resourceLinkId/start`
+### `POST /activities/:activityId/resources/:resourceLinkId/start`
 
-Instructor-authorized and idempotent on `(provider, resourceLinkId, requestId)`.
+Instructor-authorized and idempotent on `(activityId, provider, resourceLinkId, requestId)`.
 
 1. If the mapping is waiting (or absent), validate `presentationUrl`, create/configure
    the temporary session, and atomically write/transition the mapping to active with a
@@ -273,7 +275,7 @@ configured URL, reject it with `409 Conflict`. Never silently switch the present
 of a live class. A changed URL is accepted only after a successful `stop` has cleared
 the active mapping.
 
-### `POST /resources/:resourceLinkId/stop`
+### `POST /activities/:activityId/resources/:resourceLinkId/stop`
 
 Instructor-authorized and idempotent. End the active SyncDeck session using the normal
 server lifecycle/broadcast path, delete the active mapping, and return `inactive`.
@@ -306,7 +308,7 @@ An inactive resource has no implied ActiveBits behavior until Learn selects `sol
 `wait-for-instructor`. Waiting-room state is short-lived and is not a durable Learn
 resource record.
 
-### `POST /resources/:resourceLinkId/student-entry`
+### `POST /activities/:activityId/resources/:resourceLinkId/student-entry`
 
 This is an authenticated Learn-server request used only for the
 `wait-for-instructor` path. It returns a short-lived, single-use browser URL such as:

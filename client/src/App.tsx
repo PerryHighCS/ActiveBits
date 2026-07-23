@@ -59,7 +59,7 @@ function AppShell() {
           <Route path="/status" element={<StatusDashboard />} />
           <Route path="/manage" element={<ManageDashboard />} />
           <Route path="/launch/:activityId" element={<ActivityLauncher />} />
-          <Route path="/integrations/learn/wait" element={<LearnSyncDeckWaitingRoom />} />
+          <Route path="/integrations/learn/syncdeck/wait" element={<LearnSyncDeckWaitingRoom />} />
           <Route path="/session-ended" element={<SessionEnded />} />
 
           {activities.map((activity) => {
