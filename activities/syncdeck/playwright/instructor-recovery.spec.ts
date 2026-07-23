@@ -30,7 +30,7 @@ test('a temporary SyncDeck instructor keeps control after reloading the manager 
   expect(recoveryCookies[0]).toMatchObject({
     httpOnly: true,
     sameSite: 'Lax',
-    path: '/api/syncdeck',
+      path: '/',
   })
 
   const recovery = await page.evaluate(async (id) => {
