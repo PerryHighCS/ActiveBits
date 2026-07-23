@@ -166,9 +166,10 @@ SHA256(request_body)
 ```
 
 Headers carry a key ID, timestamp, nonce, and signature. ActiveBits verifies the
-signature in constant time, enforces a short clock-skew window, and stores nonces long
-enough to reject replayed requests. Both systems support two active key IDs during key
-rotation.
+signature in constant time, enforces a short clock-skew window, and stores nonces for
+the full acceptance window to reject replayed requests. The initial implementation
+accepts one configured key ID/secret pair; rotate it through a coordinated Learn and
+ActiveBits deployment. Add dual-key verification before requiring no-downtime rotation.
 
 ### Common Request Fields
 
@@ -409,9 +410,9 @@ ID. Expired or consumed tokens must fail closed with a friendly re-launch instru
   status polling and rejects abusive API traffic.
 - [x] Reuse SyncDeck session creation/configuration behavior; do not duplicate or
   weaken its presentation validation and instructor authorization rules.
-- [x] Implement cross-instance atomic waiting-to-active transition/start-reuse behavior
-  and let waiting browsers observe the active student session URL through no-store
-  status polling.
+- [ ] Verify and complete cross-instance atomic waiting-to-active transition/start-reuse
+  behavior with the shared mapping/idempotency store. Waiting browsers already observe
+  the active student session URL through no-store status polling.
 - [x] Reject presentation URL updates and mismatched Start requests with `409 Conflict`
   while an instructor-led session is active, even if Learn's UI has already disabled
   the edit control.
@@ -431,12 +432,12 @@ ID. Expired or consumed tokens must fail closed with a friendly re-launch instru
 - [x] Implement one-time student waiting-room browser handoff tokens that establish
   same-origin httpOnly state, remove tokens from final URLs, and create/refresh only a
   bounded temporary waiting mapping.
-- [ ] Add unit tests for authentication failures, replay, validation, idempotency,
-  start races, stop idempotency, waiting-to-active broadcasts, stale mappings, and
-  student/instructor token single consumption. Mark expected noisy failure-path logs
-  with `[TEST]`.
-- [ ] Add Playwright coverage for Learn-style instructor new-window handoff and student
-  redirect, using the shared root harness.
+- [ ] Add unit tests for idempotency, start races, stop idempotency, stale mappings, and
+  student/instructor token single consumption. Authentication failures, replay,
+  validation, stop broadcast, and instructor handoff are covered. Mark expected noisy
+  failure-path logs with `[TEST]`.
+- [ ] Add Playwright coverage for the Learn-style instructor new-window handoff. Student
+  waiting-room polling and redirect are covered using the shared root harness.
 - [x] Update `README.md`, `ARCHITECTURE.md`, `DEPLOYMENT.md`, data-contract notes, and
   any SyncDeck payload documentation affected by the final launch contract.
 

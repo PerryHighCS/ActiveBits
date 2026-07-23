@@ -41,7 +41,7 @@ function response(): MockResponse {
   }
 }
 
-function store(): SessionStore {
+function store(broadcasts: Array<{ event: string; payload: unknown }>): SessionStore {
   const records = new Map<string, SessionRecord>()
   return {
     async get(id) { return records.get(id) ? structuredClone(records.get(id)!) : null },
@@ -61,7 +61,7 @@ function store(): SessionStore {
     },
     cleanup() {},
     async close() {},
-    async publishBroadcast() {},
+    async publishBroadcast(event, payload) { broadcasts.push({ event, payload }) },
     ttlMs: 60_000,
   }
 }
@@ -92,7 +92,8 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
   try {
     const getHandlers = new Map<string, RouteHandler>()
     const postHandlers = new Map<string, RouteHandler>()
-    const sessions = store()
+    const broadcasts: Array<{ event: string; payload: unknown }> = []
+    const sessions = store(broadcasts)
     const ws: WsRouter = { wss: { clients: new Set<ActiveBitsWebSocket>(), close() {} }, register() {} }
     let createdSessionId = ''
     registerLearnSyncDeckRoutes({
@@ -113,10 +114,37 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
         })
         return { sessionId: createdSessionId, instructorRecoveryToken: 'a'.repeat(64) }
       },
-      writeInstructorRecoveryCookie() {},
+      writeInstructorRecoveryCookie(_req, res) {
+        res.cookie?.('syncdeck_instructor_recoveries', 'recovered', {})
+      },
     })
 
     const resourceId = 'learn-resource-1'
+    const missingAuthenticationResponse = response()
+    await getHandlers.get('/api/integrations/learn/v1/activities/:activityId/resources/:resourceLinkId/status')!(
+      { params: { activityId: 'syncdeck', resourceLinkId: resourceId } },
+      missingAuthenticationResponse,
+    )
+    assert.equal(missingAuthenticationResponse.statusCode, 401)
+
+    const statusPath = `/api/integrations/learn/v1/activities/syncdeck/resources/${resourceId}/status`
+    const tamperedRequest = signedRequest('GET', statusPath, {}, 'tampered-signature-nonce')
+    tamperedRequest.headers['x-learn-signature'] = '0'.repeat(64)
+    const tamperedSignatureResponse = response()
+    await getHandlers.get('/api/integrations/learn/v1/activities/:activityId/resources/:resourceLinkId/status')!(
+      { params: { activityId: 'syncdeck', resourceLinkId: resourceId }, ...tamperedRequest },
+      tamperedSignatureResponse,
+    )
+    assert.equal(tamperedSignatureResponse.statusCode, 401)
+
+    const invalidResourceResponse = response()
+    const invalidResourcePath = '/api/integrations/learn/v1/activities/syncdeck/resources/%20/status'
+    await getHandlers.get('/api/integrations/learn/v1/activities/:activityId/resources/:resourceLinkId/status')!(
+      { params: { activityId: 'syncdeck', resourceLinkId: ' ' }, ...signedRequest('GET', invalidResourcePath, {}, 'invalid-resource-nonce') },
+      invalidResourceResponse,
+    )
+    assert.equal(invalidResourceResponse.statusCode, 400)
+
     const entryPath = `/api/integrations/learn/v1/activities/syncdeck/resources/${resourceId}/student-entry`
     const entryResponse = response()
     await postHandlers.get('/api/integrations/learn/v1/activities/:activityId/resources/:resourceLinkId/student-entry')!(
@@ -145,6 +173,15 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
     assert.equal(startResponse.statusCode, 200)
     assert.equal((startResponse.body as { activeSessionId?: unknown }).activeSessionId, createdSessionId)
 
+    const instructorLaunchUrl = new URL(String((startResponse.body as { instructorLaunchUrl: string }).instructorLaunchUrl), 'https://bits.example')
+    const instructorLaunchResponse = response()
+    await getHandlers.get('/integrations/learn/:activityId/instructor/:tokenId')!(
+      { params: { activityId: 'syncdeck', tokenId: instructorLaunchUrl.pathname.split('/').at(-1) }, query: { token: instructorLaunchUrl.searchParams.get('token') } },
+      instructorLaunchResponse,
+    )
+    assert.equal(instructorLaunchResponse.redirectTo, `/manage/syncdeck/${createdSessionId}`)
+    assert.deepEqual(instructorLaunchResponse.cookies, [{ name: 'syncdeck_instructor_recoveries', value: 'recovered' }])
+
     const waitStatusResponse = response()
     await getHandlers.get('/api/integrations/learn/v1/activities/:activityId/wait/status')!(
       { params: { activityId: 'syncdeck' }, cookies: { learn_syncdeck_wait: waitingCookie } },
@@ -159,6 +196,16 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
     )
     assert.equal(replayResponse.statusCode, 401)
     assert.match(String((replayResponse.body as { error?: unknown }).error), /replayed/i)
+
+    const stopPath = `/api/integrations/learn/v1/activities/syncdeck/resources/${resourceId}/stop`
+    const stopResponse = response()
+    await postHandlers.get('/api/integrations/learn/v1/activities/:activityId/resources/:resourceLinkId/stop')!(
+      { params: { activityId: 'syncdeck', resourceLinkId: resourceId }, ...signedRequest('POST', stopPath, {}, 'stop-nonce') },
+      stopResponse,
+    )
+    assert.deepEqual(stopResponse.body, { state: 'inactive', alreadyInactive: false })
+    assert.equal(typeof (await sessions.get(createdSessionId))?.data.learnIntegrationStoppedAt, 'number')
+    assert.deepEqual(broadcasts, [{ event: 'session-ended', payload: { sessionId: createdSessionId } }])
   } finally {
     if (previousSecret === undefined) delete process.env.LEARN_SYNCDECK_HMAC_SECRET
     else process.env.LEARN_SYNCDECK_HMAC_SECRET = previousSecret

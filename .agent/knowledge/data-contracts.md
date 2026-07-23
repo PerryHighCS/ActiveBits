@@ -21,7 +21,7 @@ Document API and data-shape assumptions that must stay compatible over time.
 - Compatibility constraints: The Learn HMAC secret is independent of LTI 1.1 consumer credentials. Learn owns the durable deck URL and attendance/grade history; ActiveBits stores the presentation URL only for an active mapped session and reports current websocket connection counts only. Solo uses the existing independent per-student SyncDeck launch flow.
 - Validation rules: HMAC requests include method/path/timestamp/nonce/canonical-body digest and reject invalid, expired, or replayed nonces. Browser handoff tokens are single-use and removed from the final URL. A Start URL mismatch while active returns `409`.
 - Evidence (schema/tests/path): `activities/syncdeck/server/learnIntegration.ts`; `activities/syncdeck/server/learnIntegration.test.ts`; `client/src/components/common/LearnSyncDeckWaitingRoom.tsx`; `.agent/plans/learn-syncdeck-session-integration.md`.
-- Follow-up action: Add multi-instance start locking/idempotency storage and browser-level coverage before production enablement.
+- Follow-up action: Verify the shared mapping/idempotency store provides an atomic multi-instance start transition, then add start-race and instructor-new-window browser coverage before production enablement.
 - Owner: Codex
 
 - Date: 2026-07-16

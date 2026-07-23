@@ -38,7 +38,7 @@ export default function LearnSyncDeckWaitingRoom() {
   }, [refresh])
 
   return (
-    <main className="mx-auto mt-12 max-w-lg rounded-lg bg-white p-8 text-center shadow" aria-live="polite">
+    <main className="mx-auto mt-12 max-w-lg rounded-lg bg-white p-8 text-center shadow" aria-live="polite" aria-busy={state.phase === 'waiting'}>
       <h1 className="text-2xl font-semibold text-gray-900">SyncDeck waiting room</h1>
       <p className="mt-3 text-gray-700">{state.detail}</p>
       {state.phase === 'error' && (

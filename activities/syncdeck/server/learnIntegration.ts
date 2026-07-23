@@ -11,6 +11,7 @@ const HMAC_KEY_ID_HEADER = 'x-learn-key-id'
 const HMAC_TIMESTAMP_HEADER = 'x-learn-timestamp'
 const HMAC_NONCE_HEADER = 'x-learn-nonce'
 const MAX_CLOCK_SKEW_MS = 5 * 60 * 1000
+const NONCE_RETENTION_MS = 2 * MAX_CLOCK_SKEW_MS
 const BROWSER_TOKEN_TTL_MS = 5 * 60 * 1000
 const WAITING_TTL_MS = 10 * 60 * 1000
 const MAX_PROVIDER_LENGTH = 120
@@ -123,7 +124,7 @@ async function claimNonce(sessions: SessionStore, keyId: string, nonce: string):
     try {
       const result = await (valkeyClient as unknown as {
         set(...args: unknown[]): Promise<unknown>
-      }).set(`learn-syncdeck-nonce:${digest}`, '1', 'PX', MAX_CLOCK_SKEW_MS, 'NX')
+      }).set(`learn-syncdeck-nonce:${digest}`, '1', 'PX', NONCE_RETENTION_MS, 'NX')
       return result === 'OK'
     } catch (error) {
       console.error(JSON.stringify({ activity: 'syncdeck', event: 'learn-nonce-claim-failed', error: error instanceof Error ? error.message : String(error) }))
@@ -136,7 +137,7 @@ async function claimNonce(sessions: SessionStore, keyId: string, nonce: string):
     if (expiresAt <= now) claimedNonces.delete(knownNonce)
   }
   if (claimedNonces.has(digest)) return false
-  claimedNonces.set(digest, now + MAX_CLOCK_SKEW_MS)
+  claimedNonces.set(digest, now + NONCE_RETENTION_MS)
   return true
 }
 
