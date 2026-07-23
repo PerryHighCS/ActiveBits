@@ -14,6 +14,14 @@ Use this log for durable findings that future contributors and agents should reu
 
 ## Discoveries
 
+- Date: 2026-07-23
+- Area: server | persistent sessions | instructor recovery
+- Discovery: The shared `persistent_sessions` httpOnly cookie contains remembered teacher codes and permalink state. A fixed entry-count cap alone can exceed browser cookie limits when several SyncDeck entries carry presentation URLs; browsers may silently reject the oversized replacement cookie. Bounds must measure the percent-encoded JSON cookie value and skip individually oversized entries without evicting older valid remembered sessions.
+- Why it matters: A missing or stale remembered-code cookie forces teachers to re-enter their code and prevents SyncDeck's authenticated permalink manager recovery. Bound entries by serialized bytes as well as count, retaining the most recently used entries.
+- Evidence: `server/core/persistentSessionCookie.ts`; `server/routes/persistentSessionRoutes.ts`; `activities/syncdeck/server/routes.ts`.
+- Follow-up action: Any new fields added to persistent cookie entries must remain within the shared encoded-byte-bounded compaction path.
+- Owner: Codex
+
 - Date: 2026-07-13
 - Area: client | activities | syncdeck | embedded bootstrap
 - Discovery: An embedded manager can receive a one-time entry token that has already been consumed or has otherwise failed exchange. The child cannot safely retry that token itself, so it reports only its child-session id to its same-origin SyncDeck parent. The parent drops its cached token, clears completion/failure markers, and reruns the authenticated embedded-start bootstrap before remounting the iframe. Refresh requests are capped per child session, while the parent retains its backfill-attempt count across a child refresh.

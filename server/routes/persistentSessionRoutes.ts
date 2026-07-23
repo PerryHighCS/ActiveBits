@@ -34,9 +34,9 @@ import {
   loadPersistentSessionEntryStatus,
 } from '../core/persistentSessionEntryGateway.js'
 import { buildCreateSessionBootstrapPayload } from '../core/createSessionBootstrapPayload.js'
+import { boundPersistentSessionCookieEntries } from '../core/persistentSessionCookie.js'
 
 const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000
-const MAX_SESSIONS_PER_COOKIE = 20
 const MAX_TEACHER_CODE_LENGTH = 100
 const DEFAULT_PERSISTENT_SESSION_ENTRY_POLICY = 'instructor-required'
 
@@ -231,7 +231,8 @@ function getValidatedPersistentSessionCookieEntry(
 }
 
 function writePersistentSessionsCookie(res: ResponseLike, sessionEntries: CookieSessionEntry[]): void {
-  res.cookie('persistent_sessions', JSON.stringify(sessionEntries), {
+  const boundedEntries = boundPersistentSessionCookieEntries(sessionEntries)
+  res.cookie('persistent_sessions', JSON.stringify(boundedEntries), {
     maxAge: ONE_YEAR_MS,
     sameSite: 'lax',
     secure: process.env.NODE_ENV === 'production',
@@ -405,7 +406,7 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
     const selectedOptions = getCanonicalPersistentLinkSelectedOptions(activityName, body.selectedOptions)
 
     const cookieName = 'persistent_sessions'
-    let { sessions: sessionEntries } = parsePersistentSessionsCookie(
+    const { sessions: sessionEntries } = parsePersistentSessionsCookie(
       req.cookies?.[cookieName],
       'persistent_sessions (/api/persistent-session/create)',
     )
@@ -429,10 +430,6 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
       entryPolicy,
       urlHash: query.get('urlHash') ?? undefined,
     })
-    if (sessionEntries.length > MAX_SESSIONS_PER_COOKIE) {
-      sessionEntries = sessionEntries.slice(-MAX_SESSIONS_PER_COOKIE)
-    }
-
     await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode, entryPolicy)
     await updatePersistentSessionUrlState(hash, {
       entryPolicy,
@@ -604,7 +601,7 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
     const persistentSession = await getPersistentSession(hash)
 
     const cookieName = 'persistent_sessions'
-    let { sessions: sessionEntries } = parsePersistentSessionsCookie(
+    const { sessions: sessionEntries } = parsePersistentSessionsCookie(
       req.cookies?.[cookieName],
       'persistent_sessions (/api/persistent-session/authenticate)',
     )
@@ -636,10 +633,6 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
       entryPolicy: finalEntryPolicy,
       urlHash: finalUrlHash,
     })
-    if (sessionEntries.length > MAX_SESSIONS_PER_COOKIE) {
-      sessionEntries = sessionEntries.slice(-MAX_SESSIONS_PER_COOKIE)
-    }
-
     writePersistentSessionsCookie(res, sessionEntries)
     await updatePersistentSessionUrlState(hash, {
       entryPolicy: finalEntryPolicy,
@@ -745,10 +738,6 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
       entryPolicy: finalEntryPolicy,
       urlHash: finalUrlHash,
     })
-    if (sessionEntries.length > MAX_SESSIONS_PER_COOKIE) {
-      sessionEntries = sessionEntries.slice(-MAX_SESSIONS_PER_COOKIE)
-    }
-
     writePersistentSessionsCookie(res, sessionEntries)
     await updatePersistentSessionUrlState(hash, finalUrlState)
 
