@@ -4929,7 +4929,7 @@ void test('create route initializes syncdeck session state', async () => {
   }])
   assert.match(recoveryEntries[0]?.token ?? '', /^[a-f0-9]{64}$/)
   assert.deepEqual(res.cookies[0]?.options, {
-    path: '/api/syncdeck',
+    path: '/',
     sameSite: 'lax',
     secure: false,
     httpOnly: true,

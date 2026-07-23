@@ -4,6 +4,10 @@ interface WaitingStatusResponse {
   error?: unknown
 }
 
+function isSameOriginRelativePath(value: unknown): value is string {
+  return typeof value === 'string' && value.startsWith('/') && !value.startsWith('//') && !value.includes('\\')
+}
+
 export async function readLearnSyncDeckWaitingStatus(
   fetchImpl: typeof fetch = fetch,
 ): Promise<{ state: 'waiting' | 'active'; studentLaunchUrl: string | null }> {
@@ -22,7 +26,7 @@ export async function readLearnSyncDeckWaitingStatus(
   }
   return {
     state: payload.state === 'active' ? 'active' : 'waiting',
-    studentLaunchUrl: typeof payload.studentLaunchUrl === 'string' && payload.studentLaunchUrl.length > 0
+    studentLaunchUrl: isSameOriginRelativePath(payload.studentLaunchUrl) && payload.studentLaunchUrl.length > 0
       ? payload.studentLaunchUrl
       : null,
   }

@@ -655,8 +655,9 @@ function writeInstructorRecoveryCookie(req: RouteRequest, res: JsonResponse, ses
 
   res.cookie?.(INSTRUCTOR_RECOVERY_COOKIE_NAME, JSON.stringify(nextEntries), {
     // This is a browser-session cookie: the server session's sliding TTL remains authoritative.
-    // WebKit requires the cookie path to include the endpoint that sets it.
-    path: '/api/syncdeck',
+    // Learn handoffs set this cookie outside /api/syncdeck; root scope lets WebKit
+    // accept it there and return it to the authenticated recovery endpoint.
+    path: '/',
     sameSite: 'lax',
     secure: process.env.NODE_ENV === 'production',
     httpOnly: true,

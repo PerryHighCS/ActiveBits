@@ -388,66 +388,66 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
       entry = await loadEntry(id)
     }
     try {
-    let sessionId: string
-    let reused = false
-    if (entry?.data.state === 'active' && entry.data.activeSessionId) {
-      if (entry.data.presentationUrl !== presentationUrl) {
-        return void res.status(409).json({ error: 'Presentation URL cannot change while the instructor session is active' })
+      let sessionId: string
+      let reused = false
+      if (entry?.data.state === 'active' && entry.data.activeSessionId) {
+        if (entry.data.presentationUrl !== presentationUrl) {
+          return void res.status(409).json({ error: 'Presentation URL cannot change while the instructor session is active' })
+        }
+        const activeSession = await sessions.get(entry.data.activeSessionId)
+        if (!activeSession) {
+          await sessions.delete(id)
+          entry = null
+        } else {
+          sessionId = entry.data.activeSessionId
+          const token = typeof activeSession.data.instructorRecoveryToken === 'string' ? activeSession.data.instructorRecoveryToken : null
+          if (!token) return void res.status(500).json({ error: 'Active instructor recovery is unavailable' })
+          reused = true
+        }
       }
-      const activeSession = await sessions.get(entry.data.activeSessionId)
-      if (!activeSession) {
-        await sessions.delete(id)
-        entry = null
-      } else {
-        sessionId = entry.data.activeSessionId
-        const token = typeof activeSession.data.instructorRecoveryToken === 'string' ? activeSession.data.instructorRecoveryToken : null
-        if (!token) return void res.status(500).json({ error: 'Active instructor recovery is unavailable' })
-        reused = true
-      }
-    }
 
-    if (!reused) {
-      const created = await options.createInstructorSession(presentationUrl)
-      sessionId = created.sessionId
-      const nextData: LearnEntryData = {
-        learnIntegrationKind: 'entry',
+      if (!reused) {
+        const created = await options.createInstructorSession(presentationUrl)
+        sessionId = created.sessionId
+        const nextData: LearnEntryData = {
+          learnIntegrationKind: 'entry',
+          activityId: ACTIVITY_ID,
+          provider,
+          resourceLinkId,
+          state: 'active',
+          activeSessionId: sessionId,
+          presentationUrl,
+          expiresAt: Date.now() + (sessions.ttlMs ?? WAITING_TTL_MS),
+        }
+        if (entry) {
+          entry.session.data = nextData
+          await sessions.set(id, entry.session)
+        } else {
+          const createdEntry = await createSession(sessions, { data: nextData })
+          const generatedId = createdEntry.id
+          createdEntry.id = id
+          createdEntry.type = 'syncdeck-learn-entry'
+          await sessions.delete(generatedId)
+          await sessions.set(id, createdEntry, sessions.ttlMs ?? WAITING_TTL_MS)
+        }
+        console.info(JSON.stringify({ activity: 'syncdeck', event: 'learn-instructor-session-started', resourceLinkId, requestId, sessionId, reused: false }))
+      }
+
+      const browserToken = await createBrowserToken(sessions, {
+        learnIntegrationKind: 'browser-token',
         activityId: ACTIVITY_ID,
-        provider,
-        resourceLinkId,
+        purpose: 'instructor-launch',
+        mappingId: id,
+        sessionId: sessionId!,
+        expiresAt: Date.now() + BROWSER_TOKEN_TTL_MS,
+      })
+      res.json({
         state: 'active',
-        activeSessionId: sessionId,
-        presentationUrl,
-        expiresAt: Date.now() + (sessions.ttlMs ?? WAITING_TTL_MS),
-      }
-      if (entry) {
-        entry.session.data = nextData
-        await sessions.set(id, entry.session)
-      } else {
-        const createdEntry = await createSession(sessions, { data: nextData })
-        const generatedId = createdEntry.id
-        createdEntry.id = id
-        createdEntry.type = 'syncdeck-learn-entry'
-        await sessions.delete(generatedId)
-        await sessions.set(id, createdEntry, sessions.ttlMs ?? WAITING_TTL_MS)
-      }
-      console.info(JSON.stringify({ activity: 'syncdeck', event: 'learn-instructor-session-started', resourceLinkId, requestId, sessionId, reused: false }))
-    }
-
-    const browserToken = await createBrowserToken(sessions, {
-      learnIntegrationKind: 'browser-token',
-      activityId: ACTIVITY_ID,
-      purpose: 'instructor-launch',
-      mappingId: id,
-      sessionId: sessionId!,
-      expiresAt: Date.now() + BROWSER_TOKEN_TTL_MS,
-    })
-    res.json({
-      state: 'active',
-      activeSessionId: sessionId!,
-      reused,
-      instructorLaunchUrl: `${BROWSER_PREFIX}/${ACTIVITY_ID}/instructor/${encodeURIComponent(browserToken.id)}?token=${encodeURIComponent(browserToken.value)}`,
-      studentLaunchUrl: `/${encodeURIComponent(sessionId!)}`,
-    })
+        activeSessionId: sessionId!,
+        reused,
+        instructorLaunchUrl: `${BROWSER_PREFIX}/${ACTIVITY_ID}/instructor/${encodeURIComponent(browserToken.id)}?token=${encodeURIComponent(browserToken.value)}`,
+        studentLaunchUrl: `/${encodeURIComponent(sessionId!)}`,
+      })
     } finally {
       await releaseStartLock?.()
     }
@@ -484,7 +484,7 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
     const key = configuredKey()
     const token = tokenId && tokenValue ? await consumeBrowserToken(sessions, tokenId, tokenValue) : null
     if (!key || !token || token.activityId !== ACTIVITY_ID || token.purpose !== 'student-wait') return void res.status(403).json({ error: 'Invalid or expired waiting-room launch' })
-    res.cookie?.('learn_syncdeck_wait', cookieValue(key.secret, token.mappingId), { path: `${INTEGRATION_PREFIX}/activities/${ACTIVITY_ID}/wait`, httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production' })
+    res.cookie?.('learn_syncdeck_wait', cookieValue(key.secret, token.mappingId), { path: '/', httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production' })
     if (typeof res.redirect === 'function') return void res.redirect(302, `${BROWSER_PREFIX}/${ACTIVITY_ID}/wait`)
     res.status(302).json({ redirectTo: `${BROWSER_PREFIX}/${ACTIVITY_ID}/wait` })
   })

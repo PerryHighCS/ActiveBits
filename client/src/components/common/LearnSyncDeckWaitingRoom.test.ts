@@ -30,3 +30,12 @@ void test('readLearnSyncDeckWaitingStatus falls back to a safe error for a non-J
     /waiting-room entry is no longer available/i,
   )
 })
+
+void test('readLearnSyncDeckWaitingStatus rejects an absolute student launch URL', async () => {
+  const result = await readLearnSyncDeckWaitingStatus(async () => new Response(JSON.stringify({
+    state: 'active',
+    studentLaunchUrl: 'https://untrusted.example/session',
+  })))
+
+  assert.deepEqual(result, { state: 'active', studentLaunchUrl: null })
+})

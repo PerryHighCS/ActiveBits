@@ -8,11 +8,11 @@ import { buildLearnHmacCanonicalRequest, registerLearnSyncDeckRoutes } from './l
 interface MockResponse {
   statusCode: number
   body: unknown
-  cookies: Array<{ name: string; value: string }>
+  cookies: Array<{ name: string; value: string; options: Record<string, unknown> }>
   redirectTo: string | null
   status(code: number): MockResponse
   json(payload: unknown): void
-  cookie(name: string, value: string): void
+  cookie(name: string, value: string, options: Record<string, unknown>): void
   redirect(status: number, url: string): void
   setHeader(): void
 }
@@ -35,7 +35,7 @@ function response(): MockResponse {
     redirectTo: null,
     status(code) { this.statusCode = code; return this },
     json(payload) { this.body = payload },
-    cookie(name, value) { this.cookies.push({ name, value }) },
+    cookie(name, value, options) { this.cookies.push({ name, value, options }) },
     redirect(status, url) { this.statusCode = status; this.redirectTo = url },
     setHeader() {},
   }
@@ -168,7 +168,9 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
       waitLaunchResponse,
     )
     assert.equal(waitLaunchResponse.redirectTo, '/integrations/learn/syncdeck/wait')
-    const waitingCookie = waitLaunchResponse.cookies.find((item) => item.name === 'learn_syncdeck_wait')?.value
+    const waitCookie = waitLaunchResponse.cookies.find((item) => item.name === 'learn_syncdeck_wait')
+    assert.equal(waitCookie?.options.path, '/')
+    const waitingCookie = waitCookie?.value
     assert.ok(waitingCookie)
 
     const startPath = `/api/integrations/learn/v1/activities/syncdeck/resources/${resourceId}/start`
@@ -187,7 +189,7 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
       instructorLaunchResponse,
     )
     assert.equal(instructorLaunchResponse.redirectTo, `/manage/syncdeck/${createdSessionId}`)
-    assert.deepEqual(instructorLaunchResponse.cookies, [{ name: 'syncdeck_instructor_recoveries', value: 'recovered' }])
+    assert.deepEqual(instructorLaunchResponse.cookies, [{ name: 'syncdeck_instructor_recoveries', value: 'recovered', options: {} }])
 
     const waitStatusResponse = response()
     await getHandlers.get('/api/integrations/learn/v1/activities/:activityId/wait/status')!(
