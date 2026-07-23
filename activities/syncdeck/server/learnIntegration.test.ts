@@ -86,8 +86,12 @@ function signedRequest(method: string, path: string, body: unknown, nonce: strin
 void test('Learn routes transition a one-time waiting-room entry into an active SyncDeck session', async () => {
   const previousSecret = process.env.LEARN_SYNCDECK_HMAC_SECRET
   const previousKeyId = process.env.LEARN_SYNCDECK_HMAC_KEY_ID
+  const previousInfo = console.info
+  const infoLogs: string[] = []
   process.env.LEARN_SYNCDECK_HMAC_SECRET = 'a test-only Learn integration secret that is long enough'
   process.env.LEARN_SYNCDECK_HMAC_KEY_ID = 'test-key'
+  console.info = (...args: unknown[]) => { infoLogs.push(args.map(String).join(' ')) }
+  previousInfo('[TEST] Expected Learn integration failure logs are captured by this test.')
 
   try {
     const getHandlers = new Map<string, RouteHandler>()
@@ -126,6 +130,7 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
       missingAuthenticationResponse,
     )
     assert.equal(missingAuthenticationResponse.statusCode, 401)
+    assert.ok(infoLogs.some((message) => message.includes('learn-integration-request-failed') && message.includes('"route":"status"') && message.includes('"status":401')))
 
     const statusPath = `/api/integrations/learn/v1/activities/syncdeck/resources/${resourceId}/status`
     const tamperedRequest = signedRequest('GET', statusPath, {}, 'tampered-signature-nonce')
@@ -216,6 +221,7 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
     assert.equal(typeof (await sessions.get(createdSessionId))?.data.learnIntegrationStoppedAt, 'number')
     assert.deepEqual(broadcasts, [{ event: 'session-ended', payload: { sessionId: createdSessionId } }])
   } finally {
+    console.info = previousInfo
     if (previousSecret === undefined) delete process.env.LEARN_SYNCDECK_HMAC_SECRET
     else process.env.LEARN_SYNCDECK_HMAC_SECRET = previousSecret
     if (previousKeyId === undefined) delete process.env.LEARN_SYNCDECK_HMAC_KEY_ID
