@@ -349,13 +349,22 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
     const id = mappingId(auth.key.secret, ACTIVITY_ID, provider, resourceLinkId)
     let entry = await loadEntry(id)
     if (!entry) {
-      const created = await createSession(sessions, { data: { learnIntegrationKind: 'entry', activityId: ACTIVITY_ID, provider, resourceLinkId, state: 'waiting', activeSessionId: null, presentationUrl: null, expiresAt: Date.now() + WAITING_TTL_MS } })
-      const generatedId = created.id
-      created.id = id
-      created.type = 'syncdeck-learn-entry'
-      await sessions.delete(generatedId)
-      await sessions.set(id, created, WAITING_TTL_MS)
-      entry = { session: created, data: getEntryData(created)! }
+      const releaseStartLock = await claimStartLock(sessions, id)
+      if (!releaseStartLock) return void res.status(409).json({ error: 'A Learn session transition is already in progress; retry shortly' })
+      try {
+        entry = await loadEntry(id)
+        if (!entry) {
+          const created = await createSession(sessions, { data: { learnIntegrationKind: 'entry', activityId: ACTIVITY_ID, provider, resourceLinkId, state: 'waiting', activeSessionId: null, presentationUrl: null, expiresAt: Date.now() + WAITING_TTL_MS } })
+          const generatedId = created.id
+          created.id = id
+          created.type = 'syncdeck-learn-entry'
+          await sessions.delete(generatedId)
+          await sessions.set(id, created, WAITING_TTL_MS)
+          entry = { session: created, data: getEntryData(created)! }
+        }
+      } finally {
+        await releaseStartLock()
+      }
     }
     const token = await createBrowserToken(sessions, { learnIntegrationKind: 'browser-token', activityId: ACTIVITY_ID, purpose: 'student-wait', mappingId: id, expiresAt: Date.now() + BROWSER_TOKEN_TTL_MS })
     res.json({ waitingLaunchUrl: `${BROWSER_PREFIX}/${ACTIVITY_ID}/wait/${encodeURIComponent(token.id)}?token=${encodeURIComponent(token.value)}`, state: entry.data.state })
@@ -377,16 +386,12 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
     }
 
     const id = mappingId(auth.key.secret, ACTIVITY_ID, provider, resourceLinkId)
-    let entry = await loadEntry(id)
-    const releaseStartLock = entry?.data.state === 'active'
-      ? null
-      : await claimStartLock(sessions, id)
-    if (entry?.data.state !== 'active' && !releaseStartLock) {
+    let entry: { session: SessionRecord; data: LearnEntryData } | null
+    const releaseStartLock = await claimStartLock(sessions, id)
+    if (!releaseStartLock) {
       return void res.status(409).json({ error: 'A Learn instructor start is already in progress; retry shortly' })
     }
-    if (releaseStartLock) {
-      entry = await loadEntry(id)
-    }
+    entry = await loadEntry(id)
     try {
       let sessionId: string
       let reused = false

@@ -7,7 +7,7 @@ import StatusDashboard from './components/common/StatusDashboard'
 import LoadingFallback from './components/common/LoadingFallback'
 import ManagedSessionRoute from './components/common/ManagedSessionRoute'
 import ActivityLauncher from './components/common/ActivityLauncher'
-import LearnSyncDeckWaitingRoom from './components/common/LearnSyncDeckWaitingRoom'
+import LearnSyncDeckWaitingRoom from '@activities/syncdeck/client/learn/LearnSyncDeckWaitingRoom'
 import { activities } from './activities'
 import { findFooterActivity } from './appUtils'
 

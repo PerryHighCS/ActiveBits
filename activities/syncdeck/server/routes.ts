@@ -1481,6 +1481,23 @@ registerSessionNormalizer('syncdeck', (session) => {
   session.data = normalizeSessionData(session.data)
 })
 
+async function createSyncDeckInstructorSession(
+  sessions: SessionStore,
+  presentationUrl?: string,
+): Promise<{ sessionId: string; instructorRecoveryToken: string; instructorPasscode: string }> {
+  const session = await createSession(sessions, { data: {} })
+  session.type = 'syncdeck'
+  session.data = normalizeSessionData({
+    ...session.data,
+    ...(presentationUrl ? { presentationUrl, standaloneMode: false } : {}),
+  })
+  const instructorRecoveryToken = randomBytes(32).toString('hex')
+  session.data.instructorRecoveryToken = instructorRecoveryToken
+  await sessions.set(session.id, session)
+  const instructorPasscode = typeof session.data.instructorPasscode === 'string' ? session.data.instructorPasscode : ''
+  return { sessionId: session.id, instructorRecoveryToken, instructorPasscode }
+}
+
 export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: SessionStore, ws: WsRouter): void {
   const embeddedActivityStartLocks = new Map<string, Promise<void>>()
 
@@ -1489,17 +1506,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
     sessions,
     ws,
     async createInstructorSession(presentationUrl) {
-      const session = await createSession(sessions, { data: {} })
-      session.type = 'syncdeck'
-      session.data = normalizeSessionData({
-        ...session.data,
-        presentationUrl,
-        standaloneMode: false,
-      })
-      const instructorRecoveryToken = randomBytes(32).toString('hex')
-      session.data.instructorRecoveryToken = instructorRecoveryToken
-      await sessions.set(session.id, session)
-      return { sessionId: session.id, instructorRecoveryToken }
+      return createSyncDeckInstructorSession(sessions, presentationUrl)
     },
     writeInstructorRecoveryCookie(req, res, sessionId, token) {
       writeInstructorRecoveryCookie(req, res, sessionId, token)
@@ -1828,17 +1835,12 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
   })
 
   app.post('/api/syncdeck/create', async (req, res) => {
-    const session = await createSession(sessions, { data: {} })
-    session.type = 'syncdeck'
-    session.data = normalizeSessionData(session.data)
-    const instructorRecoveryToken = randomBytes(32).toString('hex')
-    session.data.instructorRecoveryToken = instructorRecoveryToken
-    await sessions.set(session.id, session)
+    const session = await createSyncDeckInstructorSession(sessions)
 
-    writeInstructorRecoveryCookie(req, res, session.id, instructorRecoveryToken)
+    writeInstructorRecoveryCookie(req, res, session.sessionId, session.instructorRecoveryToken)
 
     const response = res as unknown as JsonResponse
-    response.json({ id: session.id, instructorPasscode: session.data.instructorPasscode })
+    response.json({ id: session.sessionId, instructorPasscode: session.instructorPasscode })
   })
 
   app.post('/api/syncdeck/:sessionId/embedded-context', async (req, res) => {
@@ -2413,6 +2415,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
         return
       }
       if (typeof session.data.learnIntegrationStoppedAt === 'number') {
+        console.info(JSON.stringify({ activity: 'syncdeck', event: 'learn-stopped-session-websocket-rejected', sessionId }))
         if (socket.readyState === WS_OPEN_READY_STATE) {
           try {
             socket.send(JSON.stringify({ type: 'session-ended' }))
