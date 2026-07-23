@@ -1,4 +1,5 @@
 import { normalizeSessionData as normalizeSessionRecord, registerSessionNormalizer } from 'activebits-server/core/sessionNormalization.js'
+import { boundPersistentSessionCookieEntries } from 'activebits-server/core/persistentSessionCookie.js'
 import {
   findHashBySessionId,
   generatePersistentHash,
@@ -47,7 +48,6 @@ import type {
 import { buildSyncDeckReportFilename, buildSyncDeckSessionReportHtml } from './reportHtml.js'
 
 const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000
-const MAX_SESSIONS_PER_COOKIE = 20
 const MAX_INSTRUCTOR_RECOVERY_COOKIE_ENTRIES = 20
 const MAX_EMBEDDED_MANAGER_SESSION_ID_LENGTH = 256
 const MAX_EMBEDDED_MANAGER_TOKEN_LENGTH = 512
@@ -1781,9 +1781,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       urlHash,
     })
 
-    if (sessionEntries.length > MAX_SESSIONS_PER_COOKIE) {
-      sessionEntries = sessionEntries.slice(-MAX_SESSIONS_PER_COOKIE)
-    }
+    sessionEntries = boundPersistentSessionCookieEntries(sessionEntries)
 
     res.cookie?.(cookieName, JSON.stringify(sessionEntries), {
       maxAge: ONE_YEAR_MS,

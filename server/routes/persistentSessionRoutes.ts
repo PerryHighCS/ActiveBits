@@ -34,9 +34,9 @@ import {
   loadPersistentSessionEntryStatus,
 } from '../core/persistentSessionEntryGateway.js'
 import { buildCreateSessionBootstrapPayload } from '../core/createSessionBootstrapPayload.js'
+import { boundPersistentSessionCookieEntries } from '../core/persistentSessionCookie.js'
 
 const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000
-const MAX_SESSIONS_PER_COOKIE = 20
 const MAX_TEACHER_CODE_LENGTH = 100
 const DEFAULT_PERSISTENT_SESSION_ENTRY_POLICY = 'instructor-required'
 
@@ -429,9 +429,7 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
       entryPolicy,
       urlHash: query.get('urlHash') ?? undefined,
     })
-    if (sessionEntries.length > MAX_SESSIONS_PER_COOKIE) {
-      sessionEntries = sessionEntries.slice(-MAX_SESSIONS_PER_COOKIE)
-    }
+    sessionEntries = boundPersistentSessionCookieEntries(sessionEntries)
 
     await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode, entryPolicy)
     await updatePersistentSessionUrlState(hash, {
@@ -636,9 +634,7 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
       entryPolicy: finalEntryPolicy,
       urlHash: finalUrlHash,
     })
-    if (sessionEntries.length > MAX_SESSIONS_PER_COOKIE) {
-      sessionEntries = sessionEntries.slice(-MAX_SESSIONS_PER_COOKIE)
-    }
+    sessionEntries = boundPersistentSessionCookieEntries(sessionEntries)
 
     writePersistentSessionsCookie(res, sessionEntries)
     await updatePersistentSessionUrlState(hash, {
@@ -745,9 +741,7 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
       entryPolicy: finalEntryPolicy,
       urlHash: finalUrlHash,
     })
-    if (sessionEntries.length > MAX_SESSIONS_PER_COOKIE) {
-      sessionEntries = sessionEntries.slice(-MAX_SESSIONS_PER_COOKIE)
-    }
+    sessionEntries = boundPersistentSessionCookieEntries(sessionEntries)
 
     writePersistentSessionsCookie(res, sessionEntries)
     await updatePersistentSessionUrlState(hash, finalUrlState)
