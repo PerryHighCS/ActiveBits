@@ -46,3 +46,12 @@ Additional operational docs:
 - Student site: <https://bits.mycode.run>
 - Instructor dashboard: <https://bits.mycode.run/manage>
 - Standalone activity launcher: `https://bits.mycode.run/launch/<activity-id>` with optional `?start=1` for instructor-authored links that should immediately start a new session and redirect to the activity manager.
+
+## Learn SyncDeck Integration
+
+ActiveBits can accept authenticated Learn server-to-server SyncDeck launches when both
+servers configure the same dedicated HMAC secret. This is separate from any LTI 1.1
+consumer secret. Set `LEARN_SYNCDECK_HMAC_SECRET` and, optionally,
+`LEARN_SYNCDECK_HMAC_KEY_ID` (default: `learn-default`) only in server-side environment
+configuration. See `.agent/plans/learn-syncdeck-session-integration.md` for the request
+contract and launch lifecycle.

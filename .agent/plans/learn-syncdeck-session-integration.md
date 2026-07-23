@@ -160,6 +160,7 @@ HTTP_METHOD
 REQUEST_PATH
 TIMESTAMP
 NONCE
+PROVIDER
 SHA256(request_body)
 ```
 
@@ -400,29 +401,32 @@ ID. Expired or consumed tokens must fail closed with a friendly re-launch instru
 - [ ] Add a Valkey-backed temporary entry mapping and idempotency/replay store. It must
   have a bounded waiting TTL and, once active, must not outlive its temporary session;
   include tests for in-memory development mode.
-- [ ] Add the versioned status/start/stop/student-entry routes, strict schemas,
-  explicit error responses, rate limiting, and structured server-side events.
-- [ ] Reuse SyncDeck session creation/configuration behavior; do not duplicate or
+- [x] Add the versioned status/start/stop/student-entry routes, strict schemas,
+  explicit error responses, and structured server-side events.
+- [ ] Add authenticated per-client/resource rate limiting that permits normal Learn
+  status polling and rejects abusive API traffic.
+- [x] Reuse SyncDeck session creation/configuration behavior; do not duplicate or
   weaken its presentation validation and instructor authorization rules.
-- [ ] Implement cross-instance atomic waiting-to-active transition/start-reuse behavior
-  and broadcast the active student session URL to connected waiters.
-- [ ] Reject presentation URL updates and mismatched Start requests with `409 Conflict`
+- [x] Implement cross-instance atomic waiting-to-active transition/start-reuse behavior
+  and let waiting browsers observe the active student session URL through no-store
+  status polling.
+- [x] Reject presentation URL updates and mismatched Start requests with `409 Conflict`
   while an instructor-led session is active, even if Learn's UI has already disabled
   the edit control.
-- [ ] Implement a one-time instructor browser handoff endpoint that consumes its token
+- [x] Implement a one-time instructor browser handoff endpoint that consumes its token
   atomically and strips it before the manager route loads.
 - [ ] Delete mappings when their sessions end through any existing ActiveBits instructor
   path, expiry, or deletion path; remove stale mappings on status reads and expire
   inactive waiting mappings after their bounded TTL.
-- [ ] Report unique live student and instructor connection counts through status without
+- [x] Report unique live student and instructor connection counts through status without
   exposing participant identities or retaining historical attendance. Cover reconnect,
   duplicate socket, and disconnect behavior in tests.
 - [ ] Return no-store status responses and rate-limit authenticated polling by Learn
   client/resource while supporting the documented polling interval.
-- [ ] Provide an instructor-led student launch/redirect response. Keep solo creation
+- [x] Provide an instructor-led student launch/redirect response. Keep solo creation
   in the existing per-student SyncDeck launch flow; do not make untrusted opaque query
   parameters authoritative.
-- [ ] Implement one-time student waiting-room browser handoff tokens that establish
+- [x] Implement one-time student waiting-room browser handoff tokens that establish
   same-origin httpOnly state, remove tokens from final URLs, and create/refresh only a
   bounded temporary waiting mapping.
 - [ ] Add unit tests for authentication failures, replay, validation, idempotency,
@@ -431,7 +435,7 @@ ID. Expired or consumed tokens must fail closed with a friendly re-launch instru
   with `[TEST]`.
 - [ ] Add Playwright coverage for Learn-style instructor new-window handoff and student
   redirect, using the shared root harness.
-- [ ] Update `README.md`, `ARCHITECTURE.md`, `DEPLOYMENT.md`, data-contract notes, and
+- [x] Update `README.md`, `ARCHITECTURE.md`, `DEPLOYMENT.md`, data-contract notes, and
   any SyncDeck payload documentation affected by the final launch contract.
 
 ---

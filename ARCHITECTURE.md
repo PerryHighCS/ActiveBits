@@ -344,6 +344,17 @@ Activities can also support standalone via permalink without supporting `/solo/:
 
 SyncDeck also supports ActiveBits-owned utility flows for statically hosted decks. For immediate temporary sessions, the external presentation redirects the browser to `/util/syncdeck/launch-presentation?presentationUrl=...`; ActiveBits runs the normal SyncDeck Reveal preflight on its own origin, then creates/configures a temporary SyncDeck session. By default the utility redirects into `/:sessionId` so the deck opens in solo student mode. Adding `mode=instructor` creates a hosted instructor session, hands the generated instructor credential to the manager through same-tab router state, and redirects into `/manage/syncdeck/:sessionId?presentationUrl=...`. For permanent links, `/util/syncdeck/permalink?presentationUrl=...` renders a builder page with the URL prefilled; after the teacher verifies the deck and enters a teacher code, the page calls the existing `POST /api/syncdeck/generate-url` endpoint. Both utility flows accept `presentation-url` as an alias for `presentationUrl`. This avoids cross-origin browser fetch/CORS requirements while keeping all session creation and permalink generation on the ActiveBits origin.
 
+### Learn-managed SyncDeck sessions
+
+The Learn integration is a separate server-to-server path. Learn signs requests with a
+dedicated HMAC secret, and ActiveBits uses its opaque provider/resource ID only as a
+temporary waiting-or-active-session index. A student waiting-room launch is a one-time
+browser handoff issued to Learn's server; ActiveBits consumes it, keeps the student in
+an ActiveBits waiting room, and moves the browser into the shared SyncDeck session after
+Learn starts it. The mapping is removed on Stop or session expiry and does not store a
+durable Learn deck configuration. Instructor launch URLs are also one-time handoffs and
+establish an httpOnly SyncDeck recovery cookie before redirecting to the manager.
+
 ### Solo Mode vs. Teacher Mode
 
 | Aspect | Solo Mode | Teacher Mode |

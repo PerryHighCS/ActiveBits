@@ -1,0 +1,168 @@
+import assert from 'node:assert/strict'
+import { createHmac } from 'node:crypto'
+import test from 'node:test'
+import type { SessionRecord, SessionStore } from 'activebits-server/core/sessions.js'
+import type { ActiveBitsWebSocket, WsRouter } from '../../../types/websocket.js'
+import { buildLearnHmacCanonicalRequest, registerLearnSyncDeckRoutes } from './learnIntegration.js'
+
+interface MockResponse {
+  statusCode: number
+  body: unknown
+  cookies: Array<{ name: string; value: string }>
+  redirectTo: string | null
+  status(code: number): MockResponse
+  json(payload: unknown): void
+  cookie(name: string, value: string): void
+  redirect(status: number, url: string): void
+  setHeader(): void
+}
+
+interface MockRequest {
+  params: Record<string, string | undefined>
+  body?: unknown
+  headers?: Record<string, unknown>
+  cookies?: Record<string, unknown>
+  query?: Record<string, unknown>
+}
+
+type RouteHandler = (req: MockRequest, res: MockResponse) => Promise<void> | void
+
+function response(): MockResponse {
+  return {
+    statusCode: 200,
+    body: null,
+    cookies: [],
+    redirectTo: null,
+    status(code) { this.statusCode = code; return this },
+    json(payload) { this.body = payload },
+    cookie(name, value) { this.cookies.push({ name, value }) },
+    redirect(status, url) { this.statusCode = status; this.redirectTo = url },
+    setHeader() {},
+  }
+}
+
+function store(): SessionStore {
+  const records = new Map<string, SessionRecord>()
+  return {
+    async get(id) { return records.get(id) ? structuredClone(records.get(id)!) : null },
+    async set(id, session) { records.set(id, structuredClone(session)) },
+    async delete(id) { return records.delete(id) },
+    async touch() { return true },
+    async getAll() { return Array.from(records.values()).map((item) => structuredClone(item)) },
+    async getAllIds() { return Array.from(records.keys()) },
+    async consumeSessionDataToken(id, field, value) {
+      const session = records.get(id)
+      const entry = session?.data[field] as { value?: unknown; expiresAt?: unknown } | undefined
+      if (!session || entry?.value !== value || typeof entry.expiresAt !== 'number' || entry.expiresAt <= Date.now()) return null
+      const next = structuredClone(session)
+      delete next.data[field]
+      records.set(id, next)
+      return structuredClone(next)
+    },
+    cleanup() {},
+    async close() {},
+    async publishBroadcast() {},
+    ttlMs: 60_000,
+  }
+}
+
+function signedRequest(method: string, path: string, body: unknown, nonce: string) {
+  const timestamp = String(Date.now())
+  const secret = process.env.LEARN_SYNCDECK_HMAC_SECRET!
+  return {
+    body,
+    headers: {
+      'x-learn-key-id': 'test-key',
+      'x-learn-provider': 'learn-test',
+      'x-learn-timestamp': timestamp,
+      'x-learn-nonce': nonce,
+      'x-learn-signature': createHmac('sha256', secret)
+        .update(buildLearnHmacCanonicalRequest(method, path, timestamp, nonce, 'learn-test', body), 'utf8')
+        .digest('hex'),
+    },
+  }
+}
+
+void test('Learn routes transition a one-time waiting-room entry into an active SyncDeck session', async () => {
+  const previousSecret = process.env.LEARN_SYNCDECK_HMAC_SECRET
+  const previousKeyId = process.env.LEARN_SYNCDECK_HMAC_KEY_ID
+  process.env.LEARN_SYNCDECK_HMAC_SECRET = 'a test-only Learn integration secret that is long enough'
+  process.env.LEARN_SYNCDECK_HMAC_KEY_ID = 'test-key'
+
+  try {
+    const getHandlers = new Map<string, RouteHandler>()
+    const postHandlers = new Map<string, RouteHandler>()
+    const sessions = store()
+    const ws: WsRouter = { wss: { clients: new Set<ActiveBitsWebSocket>(), close() {} }, register() {} }
+    let createdSessionId = ''
+    registerLearnSyncDeckRoutes({
+      app: {
+        get(path, handler) { getHandlers.set(path, handler) },
+        post(path, handler) { postHandlers.set(path, handler) },
+      },
+      sessions,
+      ws,
+      async createInstructorSession() {
+        createdSessionId = 'syncdeck-live'
+        await sessions.set(createdSessionId, {
+          id: createdSessionId,
+          type: 'syncdeck',
+          created: Date.now(),
+          lastActivity: Date.now(),
+          data: { instructorRecoveryToken: 'a'.repeat(64) },
+        })
+        return { sessionId: createdSessionId, instructorRecoveryToken: 'a'.repeat(64) }
+      },
+      writeInstructorRecoveryCookie() {},
+    })
+
+    const resourceId = 'learn-resource-1'
+    const entryPath = `/api/integrations/learn/v1/resources/${resourceId}/student-entry`
+    const entryResponse = response()
+    await postHandlers.get('/api/integrations/learn/v1/resources/:resourceLinkId/student-entry')!(
+      { params: { resourceLinkId: resourceId }, ...signedRequest('POST', entryPath, {}, 'student-entry-nonce') },
+      entryResponse,
+    )
+    assert.equal(entryResponse.statusCode, 200)
+    const waitingLaunchUrl = String((entryResponse.body as { waitingLaunchUrl: string }).waitingLaunchUrl)
+    const launchUrl = new URL(waitingLaunchUrl, 'https://bits.example')
+
+    const waitLaunchResponse = response()
+    await getHandlers.get('/integrations/learn/wait/:tokenId')!(
+      { params: { tokenId: launchUrl.pathname.split('/').at(-1) }, query: { token: launchUrl.searchParams.get('token') } },
+      waitLaunchResponse,
+    )
+    assert.equal(waitLaunchResponse.redirectTo, '/integrations/learn/wait')
+    const waitingCookie = waitLaunchResponse.cookies.find((item) => item.name === 'learn_syncdeck_wait')?.value
+    assert.ok(waitingCookie)
+
+    const startPath = `/api/integrations/learn/v1/resources/${resourceId}/start`
+    const startResponse = response()
+    await postHandlers.get('/api/integrations/learn/v1/resources/:resourceLinkId/start')!(
+      { params: { resourceLinkId: resourceId }, ...signedRequest('POST', startPath, { presentationUrl: 'https://slides.example/deck', requestId: 'start-1' }, 'start-nonce') },
+      startResponse,
+    )
+    assert.equal(startResponse.statusCode, 200)
+    assert.equal((startResponse.body as { activeSessionId?: unknown }).activeSessionId, createdSessionId)
+
+    const waitStatusResponse = response()
+    await getHandlers.get('/api/integrations/learn/v1/wait/status')!(
+      { params: {}, cookies: { learn_syncdeck_wait: waitingCookie } },
+      waitStatusResponse,
+    )
+    assert.deepEqual(waitStatusResponse.body, { state: 'active', studentLaunchUrl: '/syncdeck-live' })
+
+    const replayResponse = response()
+    await postHandlers.get('/api/integrations/learn/v1/resources/:resourceLinkId/start')!(
+      { params: { resourceLinkId: resourceId }, ...signedRequest('POST', startPath, { presentationUrl: 'https://slides.example/deck', requestId: 'start-1' }, 'start-nonce') },
+      replayResponse,
+    )
+    assert.equal(replayResponse.statusCode, 401)
+    assert.match(String((replayResponse.body as { error?: unknown }).error), /replayed/i)
+  } finally {
+    if (previousSecret === undefined) delete process.env.LEARN_SYNCDECK_HMAC_SECRET
+    else process.env.LEARN_SYNCDECK_HMAC_SECRET = previousSecret
+    if (previousKeyId === undefined) delete process.env.LEARN_SYNCDECK_HMAC_KEY_ID
+    else process.env.LEARN_SYNCDECK_HMAC_KEY_ID = previousKeyId
+  }
+})

@@ -125,6 +125,9 @@ ActiveBits supports two session storage modes:
 | `SESSION_TTL_MS` | No | `3600000` | Session TTL in milliseconds (default: 1 hour). |
 | `PORT` | No | `3000` | Server port (Render sets this automatically). |
 
+| `LEARN_SYNCDECK_HMAC_SECRET` | Conditional | (none) | Dedicated shared secret for the Learn SyncDeck server-to-server integration. Leave unset to disable the integration. Never reuse an LTI consumer secret. |
+| `LEARN_SYNCDECK_HMAC_KEY_ID` | No | `learn-default` | Identifies the active Learn SyncDeck HMAC key. Use a new key ID during rotation. |
+
 ## Source Map Policy (Open-Source Repo)
 
 ActiveBits intentionally ships source maps in production for debugging and teaching transparency.

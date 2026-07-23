@@ -46,6 +46,7 @@ import type {
   SyncDeckSessionReportManifest,
 } from '../../../types/activity.js'
 import { buildSyncDeckReportFilename, buildSyncDeckSessionReportHtml } from './reportHtml.js'
+import { registerLearnSyncDeckRoutes } from './learnIntegration.js'
 
 const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000
 const MAX_INSTRUCTOR_RECOVERY_COOKIE_ENTRIES = 20
@@ -73,6 +74,7 @@ interface JsonResponse {
   send?(payload: unknown): void
   cookie?(name: string, value: string, options: Record<string, unknown>): void
   setHeader?(name: string, value: string): void
+  redirect?(status: number, url: string): void
 }
 
 interface RouteRequest {
@@ -1481,6 +1483,28 @@ registerSessionNormalizer('syncdeck', (session) => {
 export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: SessionStore, ws: WsRouter): void {
   const embeddedActivityStartLocks = new Map<string, Promise<void>>()
 
+  registerLearnSyncDeckRoutes({
+    app,
+    sessions,
+    ws,
+    async createInstructorSession(presentationUrl) {
+      const session = await createSession(sessions, { data: {} })
+      session.type = 'syncdeck'
+      session.data = normalizeSessionData({
+        ...session.data,
+        presentationUrl,
+        standaloneMode: false,
+      })
+      const instructorRecoveryToken = randomBytes(32).toString('hex')
+      session.data.instructorRecoveryToken = instructorRecoveryToken
+      await sessions.set(session.id, session)
+      return { sessionId: session.id, instructorRecoveryToken }
+    },
+    writeInstructorRecoveryCookie(req, res, sessionId, token) {
+      writeInstructorRecoveryCookie(req, res, sessionId, token)
+    },
+  })
+
   const withEmbeddedActivityStartLock = async <T,>(lockKey: string, work: () => Promise<T>): Promise<T> => {
     const previous = embeddedActivityStartLocks.get(lockKey) ?? Promise.resolve()
     let releaseCurrent!: () => void
@@ -2385,6 +2409,11 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       const session = await getSyncDeckSessionWithEmbeddedKeepalive(sessions, sessionId)
       if (!session) {
         socket.close(1008, 'invalid session')
+        return
+      }
+      if (typeof session.data.learnIntegrationStoppedAt === 'number') {
+        socket.send(JSON.stringify({ type: 'session-ended' }))
+        socket.close(1000, 'session ended')
         return
       }
 
