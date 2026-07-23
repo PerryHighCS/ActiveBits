@@ -42,3 +42,16 @@ void test('persistent instructor cookie omits a singleton that exceeds the encod
   assert.deepEqual(bounded, [])
   assert.ok(getPersistentSessionCookieValueByteLength(bounded) <= MAX_PERSISTENT_SESSIONS_COOKIE_BYTES)
 })
+
+void test('persistent instructor cookie skips an oversized newest entry without dropping older valid entries', () => {
+  const bounded = boundPersistentSessionCookieEntries([
+    { key: 'syncdeck:older-one', teacherCode: 'teacher-one' },
+    { key: 'syncdeck:older-two', teacherCode: 'teacher-two' },
+    { key: 'syncdeck:oversized', teacherCode: 'é'.repeat(MAX_PERSISTENT_SESSIONS_COOKIE_BYTES) },
+  ])
+
+  assert.deepEqual(bounded, [
+    { key: 'syncdeck:older-one', teacherCode: 'teacher-one' },
+    { key: 'syncdeck:older-two', teacherCode: 'teacher-two' },
+  ])
+})

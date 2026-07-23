@@ -16,7 +16,7 @@ Use this log for durable findings that future contributors and agents should reu
 
 - Date: 2026-07-23
 - Area: server | persistent sessions | instructor recovery
-- Discovery: The shared `persistent_sessions` httpOnly cookie contains remembered teacher codes and permalink state. A fixed entry-count cap alone can exceed browser cookie limits when several SyncDeck entries carry presentation URLs; browsers may silently reject the oversized replacement cookie. Bounds must measure the percent-encoded JSON cookie value, and an oversized singleton must be omitted rather than emitted.
+- Discovery: The shared `persistent_sessions` httpOnly cookie contains remembered teacher codes and permalink state. A fixed entry-count cap alone can exceed browser cookie limits when several SyncDeck entries carry presentation URLs; browsers may silently reject the oversized replacement cookie. Bounds must measure the percent-encoded JSON cookie value and skip individually oversized entries without evicting older valid remembered sessions.
 - Why it matters: A missing or stale remembered-code cookie forces teachers to re-enter their code and prevents SyncDeck's authenticated permalink manager recovery. Bound entries by serialized bytes as well as count, retaining the most recently used entries.
 - Evidence: `server/core/persistentSessionCookie.ts`; `server/routes/persistentSessionRoutes.ts`; `activities/syncdeck/server/routes.ts`.
 - Follow-up action: Any new fields added to persistent cookie entries must remain within the shared encoded-byte-bounded compaction path.

@@ -19,13 +19,19 @@ export function getPersistentSessionCookieValueByteLength(entries: readonly Pers
 export function boundPersistentSessionCookieEntries<T extends PersistentSessionCookieEntry>(
   entries: readonly T[],
 ): T[] {
-  let bounded = entries.slice(-MAX_PERSISTENT_SESSIONS_PER_COOKIE)
+  const candidates = entries.slice(-MAX_PERSISTENT_SESSIONS_PER_COOKIE)
+  let bounded: T[] = []
 
-  while (
-    bounded.length > 0
-    && getPersistentSessionCookieValueByteLength(bounded) > MAX_PERSISTENT_SESSIONS_COOKIE_BYTES
-  ) {
-    bounded = bounded.slice(1)
+  for (let index = candidates.length - 1; index >= 0; index -= 1) {
+    const candidate = candidates[index]
+    if (!candidate) {
+      continue
+    }
+
+    const next = [candidate, ...bounded]
+    if (getPersistentSessionCookieValueByteLength(next) <= MAX_PERSISTENT_SESSIONS_COOKIE_BYTES) {
+      bounded = next
+    }
   }
 
   return bounded
