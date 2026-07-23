@@ -231,7 +231,8 @@ function getValidatedPersistentSessionCookieEntry(
 }
 
 function writePersistentSessionsCookie(res: ResponseLike, sessionEntries: CookieSessionEntry[]): void {
-  res.cookie('persistent_sessions', JSON.stringify(sessionEntries), {
+  const boundedEntries = boundPersistentSessionCookieEntries(sessionEntries)
+  res.cookie('persistent_sessions', JSON.stringify(boundedEntries), {
     maxAge: ONE_YEAR_MS,
     sameSite: 'lax',
     secure: process.env.NODE_ENV === 'production',
@@ -405,7 +406,7 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
     const selectedOptions = getCanonicalPersistentLinkSelectedOptions(activityName, body.selectedOptions)
 
     const cookieName = 'persistent_sessions'
-    let { sessions: sessionEntries } = parsePersistentSessionsCookie(
+    const { sessions: sessionEntries } = parsePersistentSessionsCookie(
       req.cookies?.[cookieName],
       'persistent_sessions (/api/persistent-session/create)',
     )
@@ -429,8 +430,6 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
       entryPolicy,
       urlHash: query.get('urlHash') ?? undefined,
     })
-    sessionEntries = boundPersistentSessionCookieEntries(sessionEntries)
-
     await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode, entryPolicy)
     await updatePersistentSessionUrlState(hash, {
       entryPolicy,
@@ -602,7 +601,7 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
     const persistentSession = await getPersistentSession(hash)
 
     const cookieName = 'persistent_sessions'
-    let { sessions: sessionEntries } = parsePersistentSessionsCookie(
+    const { sessions: sessionEntries } = parsePersistentSessionsCookie(
       req.cookies?.[cookieName],
       'persistent_sessions (/api/persistent-session/authenticate)',
     )
@@ -634,8 +633,6 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
       entryPolicy: finalEntryPolicy,
       urlHash: finalUrlHash,
     })
-    sessionEntries = boundPersistentSessionCookieEntries(sessionEntries)
-
     writePersistentSessionsCookie(res, sessionEntries)
     await updatePersistentSessionUrlState(hash, {
       entryPolicy: finalEntryPolicy,
@@ -741,8 +738,6 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
       entryPolicy: finalEntryPolicy,
       urlHash: finalUrlHash,
     })
-    sessionEntries = boundPersistentSessionCookieEntries(sessionEntries)
-
     writePersistentSessionsCookie(res, sessionEntries)
     await updatePersistentSessionUrlState(hash, finalUrlState)
 
