@@ -8,13 +8,14 @@ import { buildLearnHmacCanonicalRequest, registerLearnSyncDeckRoutes } from './l
 interface MockResponse {
   statusCode: number
   body: unknown
+  headers: Record<string, string>
   cookies: Array<{ name: string; value: string; options: Record<string, unknown> }>
   redirectTo: string | null
   status(code: number): MockResponse
   json(payload: unknown): void
   cookie(name: string, value: string, options: Record<string, unknown>): void
   redirect(status: number, url: string): void
-  setHeader(): void
+  setHeader(name: string, value: string): void
 }
 
 interface MockRequest {
@@ -31,13 +32,14 @@ function response(): MockResponse {
   return {
     statusCode: 200,
     body: null,
+    headers: {},
     cookies: [],
     redirectTo: null,
     status(code) { this.statusCode = code; return this },
     json(payload) { this.body = payload },
     cookie(name, value, options) { this.cookies.push({ name, value, options }) },
     redirect(status, url) { this.statusCode = status; this.redirectTo = url },
-    setHeader() {},
+    setHeader(name, value) { this.headers[name] = value },
   }
 }
 
@@ -173,6 +175,7 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
       waitLaunchResponse,
     )
     assert.equal(waitLaunchResponse.redirectTo, '/integrations/learn/syncdeck/wait')
+    assert.equal(waitLaunchResponse.headers['Referrer-Policy'], 'no-referrer')
     const waitCookie = waitLaunchResponse.cookies.find((item) => item.name === 'learn_syncdeck_wait')
     assert.equal(waitCookie?.options.path, '/')
     const waitingCookie = waitCookie?.value
@@ -194,6 +197,7 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
       instructorLaunchResponse,
     )
     assert.equal(instructorLaunchResponse.redirectTo, `/manage/syncdeck/${createdSessionId}`)
+    assert.equal(instructorLaunchResponse.headers['Referrer-Policy'], 'no-referrer')
     assert.deepEqual(instructorLaunchResponse.cookies, [{ name: 'syncdeck_instructor_recoveries', value: 'recovered', options: {} }])
 
     const waitStatusResponse = response()

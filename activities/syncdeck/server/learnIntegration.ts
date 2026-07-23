@@ -527,6 +527,7 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
 
   app.get(`${BROWSER_PREFIX}/:activityId/wait/:tokenId`, async (req, res) => {
     setNoStore(res)
+    res.setHeader?.('Referrer-Policy', 'no-referrer')
     if (!requireSyncDeckActivity(req.params.activityId, res)) return
     const tokenId = readString(req.params.tokenId, 256)
     const tokenValue = readString((req as RouteRequest & { query?: Record<string, unknown> }).query?.token, 256)
@@ -557,6 +558,7 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
 
   app.get(`${BROWSER_PREFIX}/:activityId/instructor/:tokenId`, async (req, res) => {
     setNoStore(res)
+    res.setHeader?.('Referrer-Policy', 'no-referrer')
     if (!requireSyncDeckActivity(req.params.activityId, res)) return
     const tokenId = readString(req.params.tokenId, 256)
     const tokenValue = readString((req as RouteRequest & { query?: Record<string, unknown> }).query?.token, 256)

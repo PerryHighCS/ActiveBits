@@ -161,6 +161,7 @@ interface SyncDeckSessionData extends Record<string, unknown> {
   standaloneMode: boolean
   instructorPasscode: string
   instructorRecoveryToken?: string
+  learnIntegrationStoppedAt?: number
   instructorState: SyncDeckInstructorState | null
   lastInstructorPayload: unknown
   lastInstructorStatePayload: unknown
@@ -599,6 +600,9 @@ function normalizeSessionData(data: unknown): SyncDeckSessionData {
     ...(typeof source.instructorRecoveryToken === 'string' && /^[a-f0-9]{64}$/i.test(source.instructorRecoveryToken)
       ? { instructorRecoveryToken: source.instructorRecoveryToken }
       : {}),
+    ...(typeof source.learnIntegrationStoppedAt === 'number' && Number.isFinite(source.learnIntegrationStoppedAt)
+      ? { learnIntegrationStoppedAt: source.learnIntegrationStoppedAt }
+      : {}),
     instructorState: null,
     lastInstructorPayload: normalizedLastInstructorPayload,
     lastInstructorStatePayload: normalizedLastInstructorStatePayload,
@@ -646,7 +650,7 @@ function readInstructorRecoveryToken(req: RouteRequest, sessionId: string): stri
   return null
 }
 
-function writeInstructorRecoveryCookie(req: RouteRequest, res: JsonResponse, sessionId: string, token: string): void {
+function writeSyncDeckInstructorRecoveryCookie(req: RouteRequest, res: JsonResponse, sessionId: string, token: string): void {
   const existingEntries = parseInstructorRecoveryCookie(req.cookies?.[INSTRUCTOR_RECOVERY_COOKIE_NAME])
   const nextEntries = [
     ...existingEntries.filter((entry) => entry.sessionId !== sessionId),
@@ -1509,7 +1513,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       return createSyncDeckInstructorSession(sessions, presentationUrl)
     },
     writeInstructorRecoveryCookie(req, res, sessionId, token) {
-      writeInstructorRecoveryCookie(req, res, sessionId, token)
+    writeSyncDeckInstructorRecoveryCookie(req, res, sessionId, token)
     },
   })
 
@@ -1837,7 +1841,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
   app.post('/api/syncdeck/create', async (req, res) => {
     const session = await createSyncDeckInstructorSession(sessions)
 
-    writeInstructorRecoveryCookie(req, res, session.sessionId, session.instructorRecoveryToken)
+    writeSyncDeckInstructorRecoveryCookie(req, res, session.sessionId, session.instructorRecoveryToken)
 
     const response = res as unknown as JsonResponse
     response.json({ id: session.sessionId, instructorPasscode: session.instructorPasscode })
