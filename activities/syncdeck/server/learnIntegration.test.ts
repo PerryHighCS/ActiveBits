@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { createHmac } from 'node:crypto'
+import { createHash, createHmac } from 'node:crypto'
 import test from 'node:test'
 import type { SessionRecord, SessionStore } from 'activebits-server/core/sessions.js'
 import type { ActiveBitsWebSocket, WsRouter } from '../../../types/websocket.js'
@@ -85,6 +85,12 @@ function signedRequest(method: string, path: string, body: unknown, nonce: strin
   }
 }
 
+void test('buildLearnHmacCanonicalRequest orders object keys by codepoint', () => {
+  const request = buildLearnHmacCanonicalRequest('POST', '/path', '123', 'nonce', 'provider', { ä: 'umlaut', z: 'zee' })
+  const expectedHash = createHash('sha256').update('{"z":"zee","ä":"umlaut"}', 'utf8').digest('hex')
+  assert.equal(request, `POST\n/path\n123\nnonce\nprovider\n${expectedHash}`)
+})
+
 void test('Learn routes transition a one-time waiting-room entry into an active SyncDeck session', async () => {
   const previousSecret = process.env.LEARN_SYNCDECK_HMAC_SECRET
   const previousKeyId = process.env.LEARN_SYNCDECK_HMAC_KEY_ID
@@ -144,6 +150,17 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
     assert.ok(infoLogs.some((message) => message.includes('learn-integration-request-failed') && message.includes('"route":"status"') && message.includes('"status":401')))
 
     const statusPath = `/api/integrations/learn/v1/activities/syncdeck/resources/${resourceId}/status`
+    console.info('[TEST] Expected unconfigured Learn integration to be logged as a configuration state.')
+    delete process.env.LEARN_SYNCDECK_HMAC_SECRET
+    const unconfiguredStatusResponse = response()
+    await getHandlers.get('/api/integrations/learn/v1/activities/:activityId/resources/:resourceLinkId/status')!(
+      { params: { activityId: 'syncdeck', resourceLinkId: resourceId } },
+      unconfiguredStatusResponse,
+    )
+    assert.equal(unconfiguredStatusResponse.statusCode, 503)
+    assert.ok(infoLogs.some((message) => message.includes('learn-integration-request-failed') && message.includes('"reason":"integration-not-configured"') && message.includes('"status":503')))
+    process.env.LEARN_SYNCDECK_HMAC_SECRET = 'a test-only Learn integration secret that is long enough'
+
     const tamperedRequest = signedRequest('GET', statusPath, {}, 'tampered-signature-nonce')
     tamperedRequest.headers['x-learn-signature'] = '0'.repeat(64)
     const tamperedSignatureResponse = response()

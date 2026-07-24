@@ -95,7 +95,7 @@ function stableJson(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value)
   if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`
   const entries = Object.entries(value as Record<string, unknown>)
-    .sort(([left], [right]) => left.localeCompare(right))
+    .sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)
     .map(([key, item]) => `${JSON.stringify(key)}:${stableJson(item)}`)
   return `{${entries.join(',')}}`
 }
@@ -193,8 +193,9 @@ async function claimStartLock(sessions: SessionStore, mapping: string): Promise<
   return { state: 'acquired', release: async () => { localStartLocks.delete(mapping) } }
 }
 
-function authenticationFailureReason(status: number): 'authentication-failed' | 'nonce-storage-unavailable' {
-  return status === 503 ? 'nonce-storage-unavailable' : 'authentication-failed'
+function authenticationFailureReason(status: number, error: string): 'authentication-failed' | 'integration-not-configured' | 'nonce-storage-unavailable' {
+  if (status !== 503) return 'authentication-failed'
+  return error === 'Learn integration is not configured' ? 'integration-not-configured' : 'nonce-storage-unavailable'
 }
 
 async function verifyHmac(req: RouteRequest, method: string, path: string, sessions: SessionStore): Promise<{ ok: true; key: { keyId: string; secret: string }; provider: string } | { ok: false; status: number; error: string }> {
@@ -365,7 +366,7 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
     const resourceLinkId = readString(req.params.resourceLinkId, MAX_RESOURCE_ID_LENGTH)
     const auth = await verifyHmac(req, 'GET', integrationPath(ACTIVITY_ID, req.params.resourceLinkId ?? '', '/status'), sessions)
     if (!auth.ok) {
-      logLearnRequestFailure('status', authenticationFailureReason(auth.status), { status: auth.status })
+      logLearnRequestFailure('status', authenticationFailureReason(auth.status, auth.error), { status: auth.status })
       return void res.status(auth.status).json({ error: auth.error })
     }
     if (!resourceLinkId) {
@@ -388,7 +389,7 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
     const resourceLinkId = readString(req.params.resourceLinkId, MAX_RESOURCE_ID_LENGTH)
     const auth = await verifyHmac(req, 'POST', integrationPath(ACTIVITY_ID, req.params.resourceLinkId ?? '', '/student-entry'), sessions)
     if (!auth.ok) {
-      logLearnRequestFailure('student-entry', authenticationFailureReason(auth.status), { status: auth.status })
+      logLearnRequestFailure('student-entry', authenticationFailureReason(auth.status, auth.error), { status: auth.status })
       return void res.status(auth.status).json({ error: auth.error })
     }
     if (!resourceLinkId) {
@@ -438,7 +439,7 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
     const resourceLinkId = readString(req.params.resourceLinkId, MAX_RESOURCE_ID_LENGTH)
     const auth = await verifyHmac(req, 'POST', integrationPath(ACTIVITY_ID, req.params.resourceLinkId ?? '', '/start'), sessions)
     if (!auth.ok) {
-      logLearnRequestFailure('start', authenticationFailureReason(auth.status), { status: auth.status })
+      logLearnRequestFailure('start', authenticationFailureReason(auth.status, auth.error), { status: auth.status })
       return void res.status(auth.status).json({ error: auth.error })
     }
     if (!resourceLinkId) {
@@ -568,7 +569,7 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
     const resourceLinkId = readString(req.params.resourceLinkId, MAX_RESOURCE_ID_LENGTH)
     const auth = await verifyHmac(req, 'POST', integrationPath(ACTIVITY_ID, req.params.resourceLinkId ?? '', '/stop'), sessions)
     if (!auth.ok) {
-      logLearnRequestFailure('stop', authenticationFailureReason(auth.status), { status: auth.status })
+      logLearnRequestFailure('stop', authenticationFailureReason(auth.status, auth.error), { status: auth.status })
       return void res.status(auth.status).json({ error: auth.error })
     }
     if (!resourceLinkId) {
