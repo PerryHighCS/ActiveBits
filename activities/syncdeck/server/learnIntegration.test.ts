@@ -244,6 +244,33 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
     assert.equal(repeatedStopResponse.statusCode, 200)
     assert.deepEqual(repeatedStopResponse.body, { state: 'inactive', alreadyInactive: true })
     assert.ok(infoLogs.some((message) => message.includes('learn-integration-stop-noop') && message.includes('"reason":"already-inactive"')))
+
+    console.info('[TEST] Expected Learn start to release its lock after a mapping-load failure.')
+    const originalGet = sessions.get.bind(sessions)
+    let failNextEntryLoad = true
+    sessions.get = async (id) => {
+      if (failNextEntryLoad && id.startsWith('learn-syncdeck-entry-')) {
+        failNextEntryLoad = false
+        throw new Error('test mapping-load failure')
+      }
+      return await originalGet(id)
+    }
+    const failedStartRequest = signedRequest('POST', startPath, { presentationUrl: 'https://slides.example/deck', requestId: 'start-after-load-failure' }, 'start-load-failure-nonce')
+    await assert.rejects(
+      async () => {
+        await postHandlers.get('/api/integrations/learn/v1/activities/:activityId/resources/:resourceLinkId/start')!(
+          { params: { activityId: 'syncdeck', resourceLinkId: resourceId }, ...failedStartRequest },
+          response(),
+        )
+      },
+      /test mapping-load failure/,
+    )
+    const retryStartResponse = response()
+    await postHandlers.get('/api/integrations/learn/v1/activities/:activityId/resources/:resourceLinkId/start')!(
+      { params: { activityId: 'syncdeck', resourceLinkId: resourceId }, ...signedRequest('POST', startPath, { presentationUrl: 'https://slides.example/deck', requestId: 'start-after-load-failure-retry' }, 'start-load-failure-retry-nonce') },
+      retryStartResponse,
+    )
+    assert.equal(retryStartResponse.statusCode, 200)
   } finally {
     console.info = previousInfo
     if (previousSecret === undefined) delete process.env.LEARN_SYNCDECK_HMAC_SECRET

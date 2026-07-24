@@ -422,8 +422,8 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
       logLearnRequestFailure('start', 'instructor-start-in-progress', { resourceLinkId, requestId, status: 409 })
       return void res.status(409).json({ error: 'A Learn instructor start is already in progress; retry shortly' })
     }
-    entry = await loadEntry(id)
     try {
+      entry = await loadEntry(id)
       let sessionId: string
       let reused = false
       if (entry?.data.state === 'active' && entry.data.activeSessionId) {
