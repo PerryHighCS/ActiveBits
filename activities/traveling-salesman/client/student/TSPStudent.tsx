@@ -95,6 +95,10 @@ export function buildSoloDisplayedRoutes(
   ]
 }
 
+export function getTspStudentSessionEndedNavigation(message: Pick<TspSessionMessage, 'type'>): string | null {
+  return message.type === 'session-ended' ? '/session-ended' : null
+}
+
 /**
  * TSPStudent - Student view for building TSP routes
  * Students click cities in order to build their route
@@ -221,8 +225,9 @@ export default function TSPStudent({ sessionData }: TSPStudentProps) {
       if (payload?.type == null) return;
       if (typeof payload.type !== 'string') return;
 
-      if (payload.type === 'session-ended') {
-        void navigate('/session-ended');
+      const sessionEndedPath = getTspStudentSessionEndedNavigation(payload)
+      if (sessionEndedPath) {
+        void navigate(sessionEndedPath);
         return;
       }
       if (payload.type === 'clearBroadcast') {
