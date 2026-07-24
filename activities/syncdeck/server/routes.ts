@@ -46,6 +46,7 @@ import type {
   SyncDeckSessionReportManifest,
 } from '../../../types/activity.js'
 import { buildSyncDeckReportFilename, buildSyncDeckSessionReportHtml } from './reportHtml.js'
+import { registerLearnSyncDeckRoutes } from './learnIntegration.js'
 
 const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000
 const MAX_INSTRUCTOR_RECOVERY_COOKIE_ENTRIES = 20
@@ -73,6 +74,7 @@ interface JsonResponse {
   send?(payload: unknown): void
   cookie?(name: string, value: string, options: Record<string, unknown>): void
   setHeader?(name: string, value: string): void
+  redirect?(status: number, url: string): void
 }
 
 interface RouteRequest {
@@ -159,6 +161,7 @@ interface SyncDeckSessionData extends Record<string, unknown> {
   standaloneMode: boolean
   instructorPasscode: string
   instructorRecoveryToken?: string
+  learnIntegrationStoppedAt?: number
   instructorState: SyncDeckInstructorState | null
   lastInstructorPayload: unknown
   lastInstructorStatePayload: unknown
@@ -597,6 +600,9 @@ function normalizeSessionData(data: unknown): SyncDeckSessionData {
     ...(typeof source.instructorRecoveryToken === 'string' && /^[a-f0-9]{64}$/i.test(source.instructorRecoveryToken)
       ? { instructorRecoveryToken: source.instructorRecoveryToken }
       : {}),
+    ...(typeof source.learnIntegrationStoppedAt === 'number' && Number.isFinite(source.learnIntegrationStoppedAt)
+      ? { learnIntegrationStoppedAt: source.learnIntegrationStoppedAt }
+      : {}),
     instructorState: null,
     lastInstructorPayload: normalizedLastInstructorPayload,
     lastInstructorStatePayload: normalizedLastInstructorStatePayload,
@@ -644,7 +650,7 @@ function readInstructorRecoveryToken(req: RouteRequest, sessionId: string): stri
   return null
 }
 
-function writeInstructorRecoveryCookie(req: RouteRequest, res: JsonResponse, sessionId: string, token: string): void {
+function writeSyncDeckInstructorRecoveryCookie(req: RouteRequest, res: JsonResponse, sessionId: string, token: string): void {
   const existingEntries = parseInstructorRecoveryCookie(req.cookies?.[INSTRUCTOR_RECOVERY_COOKIE_NAME])
   const nextEntries = [
     ...existingEntries.filter((entry) => entry.sessionId !== sessionId),
@@ -653,7 +659,8 @@ function writeInstructorRecoveryCookie(req: RouteRequest, res: JsonResponse, ses
 
   res.cookie?.(INSTRUCTOR_RECOVERY_COOKIE_NAME, JSON.stringify(nextEntries), {
     // This is a browser-session cookie: the server session's sliding TTL remains authoritative.
-    // WebKit requires the cookie path to include the endpoint that sets it.
+    // The Learn handoff redirects to /manage, but recovery is consumed only by the scoped API
+    // endpoint below; /ws/syncdeck authenticates with the recovered passcode message instead.
     path: '/api/syncdeck',
     sameSite: 'lax',
     secure: process.env.NODE_ENV === 'production',
@@ -1478,8 +1485,37 @@ registerSessionNormalizer('syncdeck', (session) => {
   session.data = normalizeSessionData(session.data)
 })
 
+async function createSyncDeckInstructorSession(
+  sessions: SessionStore,
+  presentationUrl?: string,
+): Promise<{ sessionId: string; instructorRecoveryToken: string; instructorPasscode: string }> {
+  const session = await createSession(sessions, { data: {} })
+  session.type = 'syncdeck'
+  session.data = normalizeSessionData({
+    ...session.data,
+    ...(presentationUrl ? { presentationUrl, standaloneMode: false } : {}),
+  })
+  const instructorRecoveryToken = randomBytes(32).toString('hex')
+  session.data.instructorRecoveryToken = instructorRecoveryToken
+  await sessions.set(session.id, session)
+  const instructorPasscode = typeof session.data.instructorPasscode === 'string' ? session.data.instructorPasscode : ''
+  return { sessionId: session.id, instructorRecoveryToken, instructorPasscode }
+}
+
 export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: SessionStore, ws: WsRouter): void {
   const embeddedActivityStartLocks = new Map<string, Promise<void>>()
+
+  registerLearnSyncDeckRoutes({
+    app,
+    sessions,
+    ws,
+    async createInstructorSession(presentationUrl) {
+      return createSyncDeckInstructorSession(sessions, presentationUrl)
+    },
+    writeInstructorRecoveryCookie(req, res, sessionId, token) {
+      writeSyncDeckInstructorRecoveryCookie(req, res, sessionId, token)
+    },
+  })
 
   const withEmbeddedActivityStartLock = async <T,>(lockKey: string, work: () => Promise<T>): Promise<T> => {
     const previous = embeddedActivityStartLocks.get(lockKey) ?? Promise.resolve()
@@ -1803,17 +1839,15 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
   })
 
   app.post('/api/syncdeck/create', async (req, res) => {
-    const session = await createSession(sessions, { data: {} })
-    session.type = 'syncdeck'
-    session.data = normalizeSessionData(session.data)
-    const instructorRecoveryToken = randomBytes(32).toString('hex')
-    session.data.instructorRecoveryToken = instructorRecoveryToken
-    await sessions.set(session.id, session)
-
-    writeInstructorRecoveryCookie(req, res, session.id, instructorRecoveryToken)
-
     const response = res as unknown as JsonResponse
-    response.json({ id: session.id, instructorPasscode: session.data.instructorPasscode })
+    try {
+      const session = await createSyncDeckInstructorSession(sessions)
+      writeSyncDeckInstructorRecoveryCookie(req, res, session.sessionId, session.instructorRecoveryToken)
+      response.json({ id: session.sessionId, instructorPasscode: session.instructorPasscode })
+    } catch (error) {
+      console.error(JSON.stringify({ activity: 'syncdeck', event: 'create-session-failed', error: error instanceof Error ? error.message : String(error) }))
+      response.status(500).json({ error: 'Unable to create SyncDeck session' })
+    }
   })
 
   app.post('/api/syncdeck/:sessionId/embedded-context', async (req, res) => {
@@ -2385,6 +2419,18 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       const session = await getSyncDeckSessionWithEmbeddedKeepalive(sessions, sessionId)
       if (!session) {
         socket.close(1008, 'invalid session')
+        return
+      }
+      if (typeof session.data.learnIntegrationStoppedAt === 'number') {
+        console.info(JSON.stringify({ activity: 'syncdeck', event: 'learn-stopped-session-websocket-rejected', sessionId }))
+        if (socket.readyState === WS_OPEN_READY_STATE) {
+          try {
+            socket.send(JSON.stringify({ type: 'session-ended' }))
+          } catch {
+            // Socket may have closed concurrently; swallow send failures.
+          }
+        }
+        socket.close(1000, 'session ended')
         return
       }
 

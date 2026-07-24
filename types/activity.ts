@@ -85,6 +85,12 @@ export interface ActivityUtility {
   standaloneSessionId?: string
 }
 
+/** A path owned by an activity and rendered through its lazily loaded client module. */
+export interface ActivityClientRoute {
+  id: string
+  path: string
+}
+
 export interface ActivityStandaloneEntryConfig {
   enabled: boolean
   supportsDirectPath?: boolean
@@ -189,6 +195,7 @@ export interface ActivityConfig {
   description: string
   color: string
   standaloneEntry: ActivityStandaloneEntryConfig
+  clientRoutes?: ActivityClientRoute[]
   utilities?: ActivityUtility[]
   deepLinkOptions?: Record<string, ActivityDeepLinkOption>
   deepLinkGenerator?: {
@@ -226,6 +233,8 @@ export interface ActivityClientModule {
   StudentComponent?: ComponentType<unknown>
   /** Rendered at /util/:activityId for activities with utilMode: true. */
   UtilComponent?: ComponentType<unknown>
+  /** Components for routes declared by the activity's `clientRoutes` configuration. */
+  ClientRouteComponents?: Record<string, ComponentType<unknown>>
   footerContent?: ReactNode | (() => ReactNode)
   PersistentLinkBuilderComponent?: ComponentType<ActivityPersistentLinkBuilderProps>
   ReportSectionComponent?: ComponentType<ActivityReportSectionProps>
@@ -244,6 +253,7 @@ export interface ActivityRegistryEntry extends ActivityConfig {
   StudentComponent?: ActivityRenderableComponent | null
   /** Rendered at /util/:activityId for activities with utilMode: true. */
   UtilComponent?: ActivityRenderableComponent | null
+  ClientRouteComponents?: Record<string, ActivityRenderableComponent>
   FooterComponent?: ActivityRenderableComponent | null
   PersistentLinkBuilderComponent?: ActivityRenderableComponent | null
 }

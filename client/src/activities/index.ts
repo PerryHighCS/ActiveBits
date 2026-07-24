@@ -1,6 +1,7 @@
 import React, { type ComponentType } from 'react'
 import type {
   ActivityClientModule,
+  ActivityRenderableComponent,
   ActivityConfig,
   ActivityDeepLinkPreflightConfig,
   ActivityDeepLinkPreflightResult,
@@ -123,6 +124,17 @@ async function resolveClientModule(loader: ActivityClientLoader): Promise<Activi
   return (resolved != null && typeof resolved === 'object') ? (resolved as ActivityClientResolved) : {}
 }
 
+export function getClientRouteComponent(
+  components: Record<string, ComponentType<unknown>> | undefined,
+  routeId: string,
+): ComponentType<unknown> | undefined {
+  return components && Object.hasOwn(components, routeId) ? components[routeId] : undefined
+}
+
+export function formatComponentExportExpectation(componentType: string, expectedExport?: string): string {
+  return expectedExport ?? `${componentType}: Component`
+}
+
 export function shouldUseClientModuleResolutionCache(options: {
   isDevelopment: boolean
   hasHotModuleReload: boolean
@@ -191,6 +203,7 @@ function createLazyComponent(
   fallbackComponent: ComponentType<unknown> | undefined = undefined,
   activityId = 'unknown',
   componentType = 'component',
+  expectedExport?: string,
 ): React.LazyExoticComponent<ComponentType<unknown>> | null {
   if (!loader) return null
 
@@ -203,7 +216,7 @@ function createLazyComponent(
         return { default: fallbackComponent }
       }
       throw new Error(
-        `${componentType} not found in activity "${activityId}" client module. Expected on the client module's default export object: { ${componentType}: Component }`,
+        `${componentType} not found in activity "${activityId}" client module. Expected on the client module's default export object: { ${formatComponentExportExpectation(componentType, expectedExport)} }`,
       )
     }
 
@@ -273,12 +286,25 @@ export const activities: ActivityRegistryEntry[] = preferredConfigEntries
           'UtilComponent',
         )
       : null
+    const ClientRouteComponents = (cfg.clientRoutes ?? []).reduce<Record<string, ActivityRenderableComponent>>((components, route) => {
+      const Component = createLazyComponent(
+        clientLoader,
+        (resolved) => getClientRouteComponent(resolved.ClientRouteComponents, route.id),
+        undefined,
+        activityId,
+        'ClientRouteComponent',
+        `ClientRouteComponents: { ${route.id}: Component }`,
+      )
+      if (Component) components[route.id] = Component
+      return components
+    }, Object.create(null) as Record<string, ActivityRenderableComponent>)
 
     return {
       ...cfg,
       ManagerComponent,
       StudentComponent,
       UtilComponent,
+      ...(Object.keys(ClientRouteComponents).length > 0 ? { ClientRouteComponents } : {}),
       FooterComponent,
       PersistentLinkBuilderComponent,
     }
