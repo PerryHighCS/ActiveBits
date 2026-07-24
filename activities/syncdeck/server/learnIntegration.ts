@@ -28,6 +28,7 @@ interface RouteRequest {
   body?: unknown
   headers?: Record<string, unknown>
   cookies?: Record<string, unknown>
+  query?: Record<string, unknown>
 }
 
 interface RouteResponse {
@@ -49,6 +50,7 @@ interface LearnEntryData extends Record<string, unknown> {
   provider: string
   resourceLinkId: string
   state: 'waiting' | 'active'
+  startRequestId?: string
   activeSessionId: string | null
   presentationUrl: string | null
   expiresAt: number
@@ -263,6 +265,7 @@ function getEntryData(session: SessionRecord | null): LearnEntryData | null {
     provider,
     resourceLinkId,
     state,
+    ...(typeof data.startRequestId === 'string' ? { startRequestId: data.startRequestId } : {}),
     activeSessionId: typeof data.activeSessionId === 'string' ? data.activeSessionId : null,
     presentationUrl: typeof data.presentationUrl === 'string' ? data.presentationUrl : null,
     expiresAt,
@@ -459,6 +462,11 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
         logLearnRequestFailure('start', 'start-lock-unavailable', { resourceLinkId, requestId, status: 503 })
         return void res.status(503).json({ error: 'Learn session coordination is unavailable' })
       }
+      const pendingEntry = await loadEntry(id)
+      if (pendingEntry?.data.startRequestId === requestId) {
+        console.info(JSON.stringify({ activity: ACTIVITY_ID, event: 'learn-instructor-session-start-pending', resourceLinkId, requestId }))
+        return void res.status(202).json({ state: 'starting', activeSessionId: null, reused: false })
+      }
       logLearnRequestFailure('start', 'instructor-start-in-progress', { resourceLinkId, requestId, status: 409 })
       return void res.status(409).json({ error: 'A Learn instructor start is already in progress; retry shortly' })
     }
@@ -488,30 +496,46 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
       }
 
       if (!reused) {
-        const created = await options.createInstructorSession(presentationUrl)
-        sessionId = created.sessionId
-        const nextData: LearnEntryData = {
-          learnIntegrationKind: 'entry',
-          activityId: ACTIVITY_ID,
-          provider,
-          resourceLinkId,
-          state: 'active',
-          activeSessionId: sessionId,
-          presentationUrl,
-          expiresAt: Date.now() + (sessions.ttlMs ?? WAITING_TTL_MS),
-        }
+        const previousData = entry?.data
         if (entry) {
-          entry.session.data = nextData
+          entry.session.data = { ...entry.data, startRequestId: requestId }
           await sessions.set(id, entry.session)
         } else {
-          const createdEntry = await createSession(sessions, { data: nextData })
+          const createdEntry = await createSession(sessions, { data: { learnIntegrationKind: 'entry', activityId: ACTIVITY_ID, provider, resourceLinkId, state: 'waiting', startRequestId: requestId, activeSessionId: null, presentationUrl: null, expiresAt: Date.now() + WAITING_TTL_MS } })
           const generatedId = createdEntry.id
           createdEntry.id = id
           createdEntry.type = 'syncdeck-learn-entry'
           await sessions.delete(generatedId)
-          await sessions.set(id, createdEntry, sessions.ttlMs ?? WAITING_TTL_MS)
+          await sessions.set(id, createdEntry, WAITING_TTL_MS)
+          entry = { session: createdEntry, data: getEntryData(createdEntry)! }
         }
-        console.info(JSON.stringify({ activity: 'syncdeck', event: 'learn-instructor-session-started', resourceLinkId, requestId, sessionId, reused: false }))
+
+        try {
+          const created = await options.createInstructorSession(presentationUrl)
+          sessionId = created.sessionId
+          const nextData: LearnEntryData = {
+            learnIntegrationKind: 'entry',
+            activityId: ACTIVITY_ID,
+            provider,
+            resourceLinkId,
+            state: 'active',
+            startRequestId: requestId,
+            activeSessionId: sessionId,
+            presentationUrl,
+            expiresAt: Date.now() + (sessions.ttlMs ?? WAITING_TTL_MS),
+          }
+          entry.session.data = nextData
+          await sessions.set(id, entry.session)
+          console.info(JSON.stringify({ activity: 'syncdeck', event: 'learn-instructor-session-started', resourceLinkId, requestId, sessionId, reused: false }))
+        } catch (error) {
+          if (previousData) {
+            entry.session.data = previousData
+            await sessions.set(id, entry.session)
+          } else {
+            await sessions.delete(id)
+          }
+          throw error
+        }
       }
 
       const browserToken = await createBrowserToken(sessions, {
@@ -571,7 +595,7 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
     res.setHeader?.('Referrer-Policy', 'no-referrer')
     if (!requireSyncDeckActivity(req.params.activityId, res)) return
     const tokenId = readString(req.params.tokenId, 256)
-    const tokenValue = readString((req as RouteRequest & { query?: Record<string, unknown> }).query?.token, 256)
+    const tokenValue = readString(req.query?.token, 256)
     const key = configuredKey()
     if (!key) {
       logLearnRequestFailure('waiting-room-launch', 'integration-not-configured', { status: 403 })
@@ -606,7 +630,7 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
     res.setHeader?.('Referrer-Policy', 'no-referrer')
     if (!requireSyncDeckActivity(req.params.activityId, res)) return
     const tokenId = readString(req.params.tokenId, 256)
-    const tokenValue = readString((req as RouteRequest & { query?: Record<string, unknown> }).query?.token, 256)
+    const tokenValue = readString(req.query?.token, 256)
     const token = tokenId && tokenValue ? await consumeBrowserToken(sessions, tokenId, tokenValue) : null
     if (!token || token.activityId !== ACTIVITY_ID || token.purpose !== 'instructor-launch' || !token.sessionId) {
       logLearnRequestFailure('instructor-launch', 'invalid-or-expired-browser-launch', { status: 403 })

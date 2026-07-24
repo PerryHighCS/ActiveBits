@@ -105,6 +105,8 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
     const sessions = store(broadcasts)
     const ws: WsRouter = { wss: { clients: new Set<ActiveBitsWebSocket>(), close() {} }, register() {} }
     let createdSessionId = ''
+    let delayedInstructorSession: Promise<void> | null = null
+    let notifyInstructorSessionStart: (() => void) | null = null
     registerLearnSyncDeckRoutes({
       app: {
         get(path, handler) { getHandlers.set(path, handler) },
@@ -113,6 +115,8 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
       sessions,
       ws,
       async createInstructorSession() {
+        notifyInstructorSessionStart?.()
+        if (delayedInstructorSession) await delayedInstructorSession
         createdSessionId = 'syncdeck-live'
         await sessions.set(createdSessionId, {
           id: createdSessionId,
@@ -195,11 +199,28 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
     assert.ok(waitingCookie)
 
     const startPath = `/api/integrations/learn/v1/activities/syncdeck/resources/${resourceId}/start`
+    let releaseDelayedStart!: () => void
+    delayedInstructorSession = new Promise<void>((resolve) => { releaseDelayedStart = resolve })
+    let resolveInstructorSessionStart!: () => void
+    const instructorSessionStarted = new Promise<void>((resolve) => { resolveInstructorSessionStart = resolve })
+    notifyInstructorSessionStart = resolveInstructorSessionStart
     const startResponse = response()
-    await postHandlers.get('/api/integrations/learn/v1/activities/:activityId/resources/:resourceLinkId/start')!(
+    const firstStart = postHandlers.get('/api/integrations/learn/v1/activities/:activityId/resources/:resourceLinkId/start')!(
       { params: { activityId: 'syncdeck', resourceLinkId: resourceId }, ...signedRequest('POST', startPath, { presentationUrl: 'https://slides.example/deck', requestId: 'start-1' }, 'start-nonce') },
       startResponse,
     )
+    await instructorSessionStarted
+    const repeatedInFlightStartResponse = response()
+    await postHandlers.get('/api/integrations/learn/v1/activities/:activityId/resources/:resourceLinkId/start')!(
+      { params: { activityId: 'syncdeck', resourceLinkId: resourceId }, ...signedRequest('POST', startPath, { presentationUrl: 'https://slides.example/deck', requestId: 'start-1' }, 'start-retry-nonce') },
+      repeatedInFlightStartResponse,
+    )
+    assert.equal(repeatedInFlightStartResponse.statusCode, 202)
+    assert.deepEqual(repeatedInFlightStartResponse.body, { state: 'starting', activeSessionId: null, reused: false })
+    releaseDelayedStart()
+    await firstStart
+    delayedInstructorSession = null
+    notifyInstructorSessionStart = null
     assert.equal(startResponse.statusCode, 200)
     assert.equal((startResponse.body as { activeSessionId?: unknown }).activeSessionId, createdSessionId)
 

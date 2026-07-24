@@ -249,6 +249,11 @@ that concern, including any LMS grade notification it sends when a student conne
 
 Instructor-authorized and idempotent on `(activityId, provider, resourceLinkId, requestId)`.
 
+If the same `requestId` is retried while its first request is still creating the
+instructor session, ActiveBits returns `202 Accepted` with `state: "starting"`.
+Learn should retry that same request ID until it receives the active-session
+response; a different request ID during that transition receives `409 Conflict`.
+
 1. If the mapping is waiting (or absent), validate `presentationUrl`, create/configure
    the temporary session, and atomically write/transition the mapping to active with a
    matching bounded TTL.
