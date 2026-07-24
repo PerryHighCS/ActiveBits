@@ -10,10 +10,12 @@ function isSameOriginRelativePath(value: unknown): value is string {
 
 export async function readLearnSyncDeckWaitingStatus(
   fetchImpl: typeof fetch = fetch,
+  signal?: AbortSignal,
 ): Promise<{ state: 'waiting' | 'active'; studentLaunchUrl: string | null }> {
   const response = await fetchImpl('/api/integrations/learn/v1/activities/syncdeck/wait/status', {
     cache: 'no-store',
     credentials: 'same-origin',
+    signal,
   })
   let payload: WaitingStatusResponse = {}
   try {

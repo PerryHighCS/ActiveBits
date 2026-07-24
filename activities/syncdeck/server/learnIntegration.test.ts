@@ -234,6 +234,16 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
     assert.deepEqual(stopResponse.body, { state: 'inactive', alreadyInactive: false })
     assert.equal(typeof (await sessions.get(createdSessionId))?.data.learnIntegrationStoppedAt, 'number')
     assert.deepEqual(broadcasts, [{ event: 'session-ended', payload: { sessionId: createdSessionId } }])
+
+    console.info('[TEST] Expected idempotent Learn stop no-op log.')
+    const repeatedStopResponse = response()
+    await postHandlers.get('/api/integrations/learn/v1/activities/:activityId/resources/:resourceLinkId/stop')!(
+      { params: { activityId: 'syncdeck', resourceLinkId: resourceId }, ...signedRequest('POST', stopPath, {}, 'stop-noop-nonce') },
+      repeatedStopResponse,
+    )
+    assert.equal(repeatedStopResponse.statusCode, 200)
+    assert.deepEqual(repeatedStopResponse.body, { state: 'inactive', alreadyInactive: true })
+    assert.ok(infoLogs.some((message) => message.includes('learn-integration-stop-noop') && message.includes('"reason":"already-inactive"')))
   } finally {
     console.info = previousInfo
     if (previousSecret === undefined) delete process.env.LEARN_SYNCDECK_HMAC_SECRET

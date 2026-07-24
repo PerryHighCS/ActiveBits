@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { readLearnSyncDeckWaitingStatus } from './learnSyncDeckWaitingUtils.js'
 
+const WAITING_STATUS_TIMEOUT_MS = 15_000
+
 type WaitingState =
   | { phase: 'waiting'; detail: string }
   | { phase: 'error'; detail: string }
@@ -9,12 +11,16 @@ export default function LearnSyncDeckWaitingRoom() {
   const [state, setState] = useState<WaitingState>({ phase: 'waiting', detail: 'Waiting for your instructor to start the session.' })
   const requestInFlight = useRef(false)
   const mounted = useRef(false)
+  const activeRequest = useRef<AbortController | null>(null)
 
   const refresh = useCallback(async (): Promise<void> => {
     if (requestInFlight.current) return
     requestInFlight.current = true
+    const controller = new AbortController()
+    activeRequest.current = controller
+    const timeout = window.setTimeout(() => controller.abort(), WAITING_STATUS_TIMEOUT_MS)
     try {
-      const status = await readLearnSyncDeckWaitingStatus()
+      const status = await readLearnSyncDeckWaitingStatus(fetch, controller.signal)
       if (!mounted.current) return
       if (status.state === 'active' && status.studentLaunchUrl) {
         window.location.replace(status.studentLaunchUrl)
@@ -25,9 +31,13 @@ export default function LearnSyncDeckWaitingRoom() {
       if (!mounted.current) return
       setState({
         phase: 'error',
-        detail: error instanceof Error ? error.message : 'Unable to check the waiting room.',
+        detail: controller.signal.aborted
+          ? 'Unable to check the waiting room. Please try again.'
+          : error instanceof Error ? error.message : 'Unable to check the waiting room.',
       })
     } finally {
+      window.clearTimeout(timeout)
+      if (activeRequest.current === controller) activeRequest.current = null
       requestInFlight.current = false
     }
   }, [])
@@ -42,6 +52,7 @@ export default function LearnSyncDeckWaitingRoom() {
     }, 5_000)
     return () => {
       mounted.current = false
+      activeRequest.current?.abort()
       window.clearTimeout(initialTimer)
       window.clearInterval(timer)
     }
