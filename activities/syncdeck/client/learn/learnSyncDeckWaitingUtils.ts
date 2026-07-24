@@ -25,7 +25,11 @@ export function createTimedAbortRequest(
 }
 
 function isSameOriginRelativePath(value: unknown): value is string {
-  return typeof value === 'string' && value.startsWith('/') && !value.startsWith('//') && !value.includes('\\')
+  return typeof value === 'string'
+    && value.startsWith('/')
+    && !value.startsWith('//')
+    && !value.includes('\\')
+    && !Array.from(value).some((character) => character <= ' ' || character === '\u007f')
 }
 
 export async function readLearnSyncDeckWaitingStatus(

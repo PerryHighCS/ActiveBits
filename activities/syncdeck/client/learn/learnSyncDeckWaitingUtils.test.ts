@@ -36,7 +36,7 @@ void test('readLearnSyncDeckWaitingStatus falls back to a safe error for a non-J
 })
 
 void test('readLearnSyncDeckWaitingStatus rejects unsafe student launch URLs', async () => {
-  for (const studentLaunchUrl of ['https://untrusted.example/session', '//untrusted.example/session', '/\\untrusted.example/session']) {
+  for (const studentLaunchUrl of ['https://untrusted.example/session', '//untrusted.example/session', '/\\untrusted.example/session', '/\n//untrusted.example/session']) {
     const result = await readLearnSyncDeckWaitingStatus(async () => new Response(JSON.stringify({
       state: 'active',
       studentLaunchUrl,

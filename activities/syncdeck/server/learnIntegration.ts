@@ -259,7 +259,7 @@ function getEntryData(session: SessionRecord | null): LearnEntryData | null {
   const resourceLinkId = readString(data.resourceLinkId, MAX_RESOURCE_ID_LENGTH)
   const state = data.state === 'waiting' || data.state === 'active' ? data.state : null
   const expiresAt = typeof data.expiresAt === 'number' && Number.isFinite(data.expiresAt) ? data.expiresAt : 0
-  if (!activityId || !provider || !resourceLinkId || !state || expiresAt <= Date.now()) return null
+  if (!activityId || !provider || !resourceLinkId || !state || expiresAt <= 0) return null
   return {
     learnIntegrationKind: 'entry',
     activityId,
@@ -349,15 +349,14 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
       await sessions.delete(id)
       return null
     }
-    const ttl = data.state === 'waiting' ? WAITING_TTL_MS : (sessions.ttlMs ?? WAITING_TTL_MS)
-    const refreshed = {
-      ...data,
-      expiresAt: Date.now() + ttl,
+    if (!await sessions.touch(id)) return null
+    return {
+      session,
+      data: {
+        ...data,
+        expiresAt: Date.now() + (data.state === 'waiting' ? WAITING_TTL_MS : (sessions.ttlMs ?? WAITING_TTL_MS)),
+      },
     }
-    session.data = refreshed
-    await sessions.set(id, session, ttl)
-    data.expiresAt = refreshed.expiresAt
-    return { session, data }
   }
 
   app.get(`${INTEGRATION_PREFIX}/activities/:activityId/resources/:resourceLinkId/status`, async (req, res) => {
