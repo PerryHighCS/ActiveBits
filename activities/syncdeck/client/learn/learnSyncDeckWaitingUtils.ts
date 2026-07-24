@@ -43,7 +43,10 @@ export async function readLearnSyncDeckWaitingStatus(
   })
   let payload: WaitingStatusResponse = {}
   try {
-    payload = await response.json() as WaitingStatusResponse
+    const parsed = await response.json() as unknown
+    payload = parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as WaitingStatusResponse
+      : {}
   } catch {
     // Proxies and upstream errors may return a non-JSON response.
   }
