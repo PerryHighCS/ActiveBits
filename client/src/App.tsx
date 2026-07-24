@@ -8,12 +8,15 @@ import LoadingFallback from './components/common/LoadingFallback'
 import ManagedSessionRoute from './components/common/ManagedSessionRoute'
 import ActivityLauncher from './components/common/ActivityLauncher'
 import { activities } from './activities'
+import { registerActivityClientRoutes } from './activityClientRoutes'
 import { findFooterActivity } from './appUtils'
 
 const footerClass =
   'text-center text-sm text-gray-500 mt-4 w-full bg-white border-t border-gray-300 p-4 mx-auto empty:hidden empty:mt-0 empty:border-0 empty:p-0'
 
 type AnyComponent = ComponentType<Record<string, unknown>>
+
+const clientRoutes = registerActivityClientRoutes(activities)
 
 function Footer() {
   const location = useLocation()
@@ -50,7 +53,6 @@ function AppShell() {
   const appClassName = shouldExpandShell
     ? 'w-full flex flex-col items-center min-h-screen print:pt-0 print:px-0 md:bg-gray-100 print:bg-white'
     : 'w-full flex flex-col items-center min-h-screen pt-4 md:pt-10 px-4 sm:px-6 md:px-10 print:pt-0 print:px-0 md:bg-gray-100 print:bg-white'
-
   return (
     <div className={appClassName}>
       <div className="w-full grow">
@@ -63,7 +65,8 @@ function AppShell() {
           {activities.map((activity) => {
             const ManagerComponent = activity.ManagerComponent
             const UtilComponent = activity.UtilComponent
-            if (!ManagerComponent && !UtilComponent) return null
+            const ClientRouteComponents = activity.ClientRouteComponents
+            if (!ManagerComponent && !UtilComponent && !ClientRouteComponents) return null
 
             const routes: ReactElement[] = []
 
@@ -109,6 +112,21 @@ function AppShell() {
             }
 
             return <Fragment key={activity.id}>{routes}</Fragment>
+          })}
+
+          {clientRoutes.map((clientRoute) => {
+            const TypedClientRouteComponent = clientRoute.Component as AnyComponent
+            return (
+              <Route
+                key={`client-route-${clientRoute.activityId}-${clientRoute.id}`}
+                path={clientRoute.path}
+                element={
+                  <Suspense fallback={<LoadingFallback />}>
+                    <TypedClientRouteComponent />
+                  </Suspense>
+                }
+              />
+            )
           })}
 
           <Route

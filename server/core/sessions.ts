@@ -53,6 +53,7 @@ export interface SessionStore extends SharedSessionStore<Record<string, unknown>
   consumeSessionDataToken?(id: string, field: string, token: string): Promise<SessionRecord | null>
   delete(id: string): Promise<boolean>
   touch(id: string): Promise<boolean>
+  refreshSessionExpiry?(id: string, expectedExpiresAt: number, nextExpiresAt: number, ttlMs: number): Promise<SessionRecord | null>
   getAll(): Promise<SessionRecord[]>
   getAllIds(): Promise<string[]>
   cleanup(): void
@@ -138,6 +139,19 @@ class InMemorySessionStore implements SessionStore {
 
     session.lastActivity = Date.now()
     return true
+  }
+
+  async refreshSessionExpiry(id: string, expectedExpiresAt: number, nextExpiresAt: number, _ttlMs: number): Promise<SessionRecord | null> {
+    const session = this.store[id]
+    if (!session || session.data.expiresAt !== expectedExpiresAt) return null
+    session.data = { ...session.data, expiresAt: nextExpiresAt }
+    session.lastActivity = Date.now()
+    const refreshed = normalizeSessionData(session)
+    const embeddedParentSessionId = getEmbeddedParentSessionId(refreshed)
+    if (embeddedParentSessionId && embeddedParentSessionId !== id) {
+      await this.touch(embeddedParentSessionId)
+    }
+    return refreshed
   }
 
   async getAll(): Promise<SessionRecord[]> {
@@ -246,6 +260,19 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
     return true
   }
 
+  const refreshSessionExpiry = async (id: string, expectedExpiresAt: number, nextExpiresAt: number, ttl: number): Promise<SessionRecord | null> => {
+    cache.invalidate(id)
+    const refreshed = await valkeyStore.refreshSessionExpiry(id, expectedExpiresAt, nextExpiresAt, ttl)
+    if (!refreshed) return null
+    const session = normalizeSessionData(toSessionRecord(refreshed))
+    cache.set(id, session, false)
+    const embeddedParentSessionId = getEmbeddedParentSessionId(session)
+    if (embeddedParentSessionId && embeddedParentSessionId !== id) {
+      await touch(embeddedParentSessionId)
+    }
+    return session
+  }
+
   const getAll = async (): Promise<SessionRecord[]> => {
     const all = await valkeyStore.getAll()
     return all.map((session) => normalizeSessionData(toSessionRecord(session)))
@@ -294,6 +321,7 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
     consumeSessionDataToken,
     delete: del,
     touch,
+    refreshSessionExpiry,
     getAll,
     getAllIds,
     cleanup,

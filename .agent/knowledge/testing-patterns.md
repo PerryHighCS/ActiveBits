@@ -15,6 +15,15 @@ Capture reusable test setup patterns, common failure modes, and reliability guid
 
 ## Entries
 
+- Date: 2026-07-24
+- Scope: unit | CI
+- Pattern: Keep activity tests free of mutations to `globalThis.window`, `document`, `navigator`, or global browser timers when the activities workspace runs files concurrently; extract browser-timer behavior behind an injected helper and test it with a local timer double instead.
+- Why it helps: A temporary JSDOM environment can collide with another test file's runtime while Node runs the suite concurrently, producing a file-level failure without a useful assertion trace.
+- Example (file/path): `activities/syncdeck/client/learn/learnSyncDeckWaitingUtils.ts`; `activities/syncdeck/client/learn/learnSyncDeckWaitingUtils.test.ts`
+- Failure signal: An isolated test passes but the same file fails only in a concurrent activity-test group, often as an opaque file-level failure.
+- Follow-up action: Prefer helper-level tests for timer, abort, and retry policy; only use a JSDOM component test when its DOM lifecycle is isolated from concurrent files.
+- Owner: Codex
+
 - Date: 2026-07-16
 - Scope: e2e | MobCode Python runner
 - Pattern: Exercise error diagnostics through the Brython popup with both an assertion failure and a nested ordinary runtime failure; assert the terminal names the selected file and the deepest failing user line.

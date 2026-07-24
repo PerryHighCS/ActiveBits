@@ -12,6 +12,7 @@ import SyncDeckStudent from './student/SyncDeckStudent.js'
 import { runSyncDeckPresentationPreflight } from './shared/presentationPreflight.js'
 import { createConfiguredSyncDeckSession } from './shared/sessionLaunch.js'
 import SyncDeckLaunchPresentation from './util/SyncDeckLaunchPresentation.js'
+import LearnSyncDeckWaitingRoom from './learn/LearnSyncDeckWaitingRoom.js'
 
 async function runSyncDeckDeepLinkPreflight(
   preflight: ActivityDeepLinkPreflightConfig,
@@ -49,6 +50,9 @@ const syncdeckActivity: ActivityClientModule = {
   ManagerComponent: SyncDeckManager as ComponentType<unknown>,
   StudentComponent: SyncDeckStudent as ComponentType<unknown>,
   UtilComponent: SyncDeckLaunchPresentation as ComponentType<unknown>,
+  ClientRouteComponents: {
+    'learn-waiting-room': LearnSyncDeckWaitingRoom as ComponentType<unknown>,
+  },
   PersistentLinkBuilderComponent: SyncDeckPersistentLinkBuilder as ComponentType<ActivityPersistentLinkBuilderProps>,
   footerContent: null,
   runDeepLinkPreflight: runSyncDeckDeepLinkPreflight,

@@ -327,6 +327,37 @@ void test('setupSyncDeckRoutes registers syncdeck websocket namespace', () => {
   assert.equal(typeof ws.registered['/ws/syncdeck'], 'function')
 })
 
+void test('syncdeck websocket rejects sessions stopped by Learn after session normalization', async () => {
+  console.info('[TEST] Expected stopped Learn session rejection log.')
+  const app = createMockApp()
+  const ws = createMockWs()
+  const state = createSessionStore({
+    s1: {
+      ...createSyncDeckSession('s1', 'teacher-pass'),
+      data: {
+        ...createSyncDeckSession('s1', 'teacher-pass').data,
+        learnIntegrationStoppedAt: Date.now(),
+      },
+    },
+  })
+
+  setupSyncDeckRoutes(app, state.sessions, ws)
+  const handler = ws.registered['/ws/syncdeck']
+  assert.equal(typeof handler, 'function')
+
+  const studentSocket = new MockSocket()
+  ws.wss.clients.add(studentSocket)
+  handler?.(
+    studentSocket,
+    new URLSearchParams({ sessionId: 's1', studentId: 'student-1', studentName: 'Ada Lovelace' }),
+    ws.wss,
+  )
+  await new Promise((resolve) => setTimeout(resolve, 0))
+
+  assert.deepEqual(studentSocket.sent, [JSON.stringify({ type: 'session-ended' })])
+  assert.deepEqual(studentSocket.closeCalls, [{ code: 1000, reason: 'session ended' }])
+})
+
 void test('syncdeck websocket sends latest state snapshot to student on connect', async () => {
   const app = createMockApp()
   const ws = createMockWs()
@@ -4934,6 +4965,35 @@ void test('create route initializes syncdeck session state', async () => {
     secure: false,
     httpOnly: true,
   })
+})
+
+void test('create route logs and returns a safe error when session creation fails', async () => {
+  console.info('[TEST] Expected SyncDeck create-session failure log.')
+  const app = createMockApp()
+  const ws = createMockWs()
+  const storeState = createSessionStore({})
+  const originalError = console.error
+  const errorLogs: string[] = []
+  console.error = (...args: unknown[]) => { errorLogs.push(args.map(String).join(' ')) }
+  const failingSessions: SessionStore = {
+    ...storeState.sessions,
+    async set() { throw new Error('test session-store failure') },
+  }
+
+  try {
+    setupSyncDeckRoutes(app, failingSessions, ws)
+    const handler = app.handlers.post['/api/syncdeck/create']
+    assert.equal(typeof handler, 'function')
+
+    const res = createResponse()
+    await handler?.(createRequest({}, {}), res)
+
+    assert.equal(res.statusCode, 500)
+    assert.deepEqual(res.body, { error: 'Unable to create SyncDeck session' })
+    assert.ok(errorLogs.some((entry) => entry.includes('create-session-failed')))
+  } finally {
+    console.error = originalError
+  }
 })
 
 void test('instructor-passcode route restores a temporary SyncDeck instructor from its httpOnly recovery cookie', async () => {

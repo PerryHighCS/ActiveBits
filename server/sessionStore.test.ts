@@ -116,3 +116,33 @@ void test('embedded child session reads refresh the parent session activity time
   assert.ok(loadedChild)
   assert.ok((parentSession.lastActivity ?? 0) > originalLastActivity)
 })
+
+void test('refreshing an embedded child session refreshes its parent activity and only accepts matching expiry', async (t) => {
+  const sessions = createSessionStore(null, 1_000)
+  t.after(async () => {
+    await sessions.close()
+  })
+  const refreshSessionExpiry = sessions.refreshSessionExpiry
+  assert.ok(refreshSessionExpiry)
+
+  const parentSession = await createSession(sessions)
+  parentSession.lastActivity = 1
+  await sessions.set(parentSession.id, parentSession)
+  const childSession: SessionRecord = {
+    id: `${EMBEDDED_CHILD_SESSION_PREFIX}${parentSession.id}:abc12:embedded-test`,
+    type: 'embedded-test',
+    created: 1,
+    lastActivity: 1,
+    data: { embeddedParentSessionId: parentSession.id, expiresAt: 100 },
+  }
+  await sessions.set(childSession.id, childSession)
+
+  assert.equal(await refreshSessionExpiry.call(sessions, 'missing-session', 100, 200, 1_000), null)
+  assert.equal(await refreshSessionExpiry.call(sessions, childSession.id, 99, 200, 1_000), null)
+
+  const refreshed = await refreshSessionExpiry.call(sessions, childSession.id, 100, 200, 1_000)
+  assert.equal(refreshed?.data.expiresAt, 200)
+  assert.ok((refreshed?.lastActivity ?? 0) > 1)
+  const refreshedParent = await sessions.get(parentSession.id)
+  assert.ok((refreshedParent?.lastActivity ?? 0) > 1)
+})

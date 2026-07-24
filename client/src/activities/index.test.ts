@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path'
 import test from 'node:test'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import activityConfigSchema from '../../../types/activityConfigSchema.js'
+import { formatComponentExportExpectation, getClientRouteComponent } from './index.js'
 
 interface ActivityConfigModule {
   default?: {
@@ -214,4 +215,86 @@ void test('client registry-style config parsing skips invalid config modules wit
   } finally {
     console.warn = originalWarn
   }
+})
+
+void test('activity client routes cannot claim shared application paths', () => {
+  console.info('[TEST] Expected shared application paths to be rejected for activity client routes.')
+  for (const path of ['/', '/status', '/manage/syncdeck', '/launch/activity', '/session-ended', '/activity/syncdeck/hash', '/solo/syncdeck', '/util/syncdeck']) {
+    assert.throws(
+      () => parseActivityConfig({
+        id: 'route-test',
+        name: 'Route Test',
+        description: 'route validation test',
+        color: 'blue',
+        standaloneEntry: { enabled: false },
+        clientRoutes: [{ id: 'conflict', path }],
+      }),
+      /reserved shared-app route prefix/i,
+    )
+  }
+})
+
+void test('activity client routes cannot shadow top-level session IDs', () => {
+  console.info('[TEST] Expected session-ID-shaped client-route paths to be rejected.')
+  for (const path of ['/abc12', '/abcdef', '/a1b2c3d4']) {
+    assert.throws(
+      () => parseActivityConfig({
+        id: 'route-test',
+        name: 'Route Test',
+        description: 'route validation test',
+        color: 'blue',
+        standaloneEntry: { enabled: false },
+        clientRoutes: [{ id: 'route', path }],
+      }),
+      /conflicts with the session ID route/i,
+    )
+  }
+})
+
+void test('activity client routes require canonical slash paths', () => {
+  console.info('[TEST] Expected non-canonical client-route paths to be rejected.')
+  for (const path of ['//manage', '/foo/', '//abc12', '/abc12/', '///abc12///']) {
+    assert.throws(
+      () => parseActivityConfig({
+        id: 'route-test',
+        name: 'Route Test',
+        description: 'route validation test',
+        color: 'blue',
+        standaloneEntry: { enabled: false },
+        clientRoutes: [{ id: 'route', path }],
+      }),
+      /must not contain repeated or trailing slashes/i,
+    )
+  }
+})
+
+void test('activity client routes cannot use Object prototype property names as route IDs', () => {
+  console.info('[TEST] Expected Object prototype client-route IDs to be rejected.')
+  for (const id of [...Object.getOwnPropertyNames(Object.prototype), 'prototype']) {
+    assert.throws(
+      () => parseActivityConfig({
+        id: 'route-test',
+        name: 'Route Test',
+        description: 'route validation test',
+        color: 'blue',
+        standaloneEntry: { enabled: false },
+        clientRoutes: [{ id, path: '/activity-route' }],
+      }),
+      /"id" is reserved/i,
+    )
+  }
+})
+
+void test('client route component lookup only accepts explicit exports', () => {
+  const ExplicitComponent = () => null
+  const inheritedComponents = Object.create({ toString: ExplicitComponent }) as Record<string, typeof ExplicitComponent>
+  inheritedComponents.explicit = ExplicitComponent
+
+  assert.equal(getClientRouteComponent(inheritedComponents, 'explicit'), ExplicitComponent)
+  assert.equal(getClientRouteComponent(inheritedComponents, 'toString'), undefined)
+})
+
+void test('component export expectations retain the default component hint', () => {
+  assert.equal(formatComponentExportExpectation('ManagerComponent'), 'ManagerComponent: Component')
+  assert.equal(formatComponentExportExpectation('ClientRouteComponent', 'ClientRouteComponents: { waiting-room: Component }'), 'ClientRouteComponents: { waiting-room: Component }')
 })
