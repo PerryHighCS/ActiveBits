@@ -143,5 +143,6 @@ void test('refreshing an embedded child session refreshes its parent activity an
   const refreshed = await refreshSessionExpiry.call(sessions, childSession.id, 100, 200, 1_000)
   assert.equal(refreshed?.data.expiresAt, 200)
   assert.ok((refreshed?.lastActivity ?? 0) > 1)
-  assert.ok((parentSession.lastActivity ?? 0) > 1)
+  const refreshedParent = await sessions.get(parentSession.id)
+  assert.ok((refreshedParent?.lastActivity ?? 0) > 1)
 })

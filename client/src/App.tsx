@@ -16,6 +16,8 @@ const footerClass =
 
 type AnyComponent = ComponentType<Record<string, unknown>>
 
+const clientRoutes = registerActivityClientRoutes(activities)
+
 function Footer() {
   const location = useLocation()
   const footerActivity = findFooterActivity(location.pathname, activities)
@@ -51,8 +53,6 @@ function AppShell() {
   const appClassName = shouldExpandShell
     ? 'w-full flex flex-col items-center min-h-screen print:pt-0 print:px-0 md:bg-gray-100 print:bg-white'
     : 'w-full flex flex-col items-center min-h-screen pt-4 md:pt-10 px-4 sm:px-6 md:px-10 print:pt-0 print:px-0 md:bg-gray-100 print:bg-white'
-  const clientRoutes = registerActivityClientRoutes(activities)
-
   return (
     <div className={appClassName}>
       <div className="w-full grow">

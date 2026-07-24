@@ -577,6 +577,7 @@ function parseWaitingRoom(raw: unknown, context: string): ActivityWaitingRoomCon
 }
 
 const RESERVED_CLIENT_ROUTE_IDS = new Set([...Object.getOwnPropertyNames(Object.prototype), 'prototype'])
+const SESSION_ID_CLIENT_ROUTE_PATH = /^\/[a-f0-9]{5,}$/
 
 function parseClientRoutes(raw: unknown, context: string): ActivityClientRoute[] | undefined {
   if (raw == null) return undefined
@@ -596,6 +597,9 @@ function parseClientRoutes(raw: unknown, context: string): ActivityClientRoute[]
     if (/[?#\\:*]/.test(path)) throw new Error(`${context}.clientRoutes[${index}]: "path" must be a static pathname without "?", "#", "\\", ":", or "*"`)
     if (reservedPaths.some((reserved) => path === reserved || (reserved !== '/' && path.startsWith(`${reserved}/`)))) {
       throw new Error(`${context}.clientRoutes[${index}]: "path" uses a reserved shared-app route prefix`)
+    }
+    if (SESSION_ID_CLIENT_ROUTE_PATH.test(path)) {
+      throw new Error(`${context}.clientRoutes[${index}]: "path" conflicts with the session ID route`)
     }
     if (ids.has(id)) throw new Error(`${context}.clientRoutes: route ids must be unique`)
     if (paths.has(path)) throw new Error(`${context}.clientRoutes: route paths must be unique`)

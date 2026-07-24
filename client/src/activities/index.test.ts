@@ -234,6 +234,23 @@ void test('activity client routes cannot claim shared application paths', () => 
   }
 })
 
+void test('activity client routes cannot shadow top-level session IDs', () => {
+  console.info('[TEST] Expected session-ID-shaped client-route paths to be rejected.')
+  for (const path of ['/abc12', '/abcdef', '/a1b2c3d4']) {
+    assert.throws(
+      () => parseActivityConfig({
+        id: 'route-test',
+        name: 'Route Test',
+        description: 'route validation test',
+        color: 'blue',
+        standaloneEntry: { enabled: false },
+        clientRoutes: [{ id: 'route', path }],
+      }),
+      /conflicts with the session ID route/i,
+    )
+  }
+})
+
 void test('activity client routes cannot use Object prototype property names as route IDs', () => {
   console.info('[TEST] Expected Object prototype client-route IDs to be rejected.')
   for (const id of [...Object.getOwnPropertyNames(Object.prototype), 'prototype']) {
