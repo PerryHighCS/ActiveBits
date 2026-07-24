@@ -35,15 +35,20 @@ void test('readLearnSyncDeckWaitingStatus falls back to a safe error for a non-J
   )
 })
 
-void test('readLearnSyncDeckWaitingStatus rejects unsafe student launch URLs', async () => {
+void test('readLearnSyncDeckWaitingStatus rejects an active response with an unsafe student launch URL', async () => {
   for (const studentLaunchUrl of ['https://untrusted.example/session', '//untrusted.example/session', '/\\untrusted.example/session', '/\n//untrusted.example/session']) {
-    const result = await readLearnSyncDeckWaitingStatus(async () => new Response(JSON.stringify({
-      state: 'active',
-      studentLaunchUrl,
-    })))
-
-    assert.deepEqual(result, { state: 'active', studentLaunchUrl: null })
+    await assert.rejects(
+      () => readLearnSyncDeckWaitingStatus(async () => new Response(JSON.stringify({ state: 'active', studentLaunchUrl }))),
+      /did not include a valid launch URL/i,
+    )
   }
+})
+
+void test('readLearnSyncDeckWaitingStatus rejects unknown waiting-room states', async () => {
+  await assert.rejects(
+    () => readLearnSyncDeckWaitingStatus(async () => new Response(JSON.stringify({ state: 'starting' }))),
+    /invalid waiting-room status response/i,
+  )
 })
 
 void test('createTimedAbortRequest aborts a stalled waiting-room status request', () => {

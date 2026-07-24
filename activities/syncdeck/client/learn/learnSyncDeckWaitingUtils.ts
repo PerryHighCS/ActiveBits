@@ -53,10 +53,17 @@ export async function readLearnSyncDeckWaitingStatus(
   if (!response.ok) {
     throw new Error(typeof payload.error === 'string' ? payload.error : 'Your waiting-room entry is no longer available.')
   }
+  if (payload.state !== 'waiting' && payload.state !== 'active') {
+    throw new Error('Invalid waiting-room status response.')
+  }
+  const studentLaunchUrl = isSameOriginRelativePath(payload.studentLaunchUrl) && payload.studentLaunchUrl.length > 0
+    ? payload.studentLaunchUrl
+    : null
+  if (payload.state === 'active' && !studentLaunchUrl) {
+    throw new Error('Waiting-room response did not include a valid launch URL.')
+  }
   return {
-    state: payload.state === 'active' ? 'active' : 'waiting',
-    studentLaunchUrl: isSameOriginRelativePath(payload.studentLaunchUrl) && payload.studentLaunchUrl.length > 0
-      ? payload.studentLaunchUrl
-      : null,
+    state: payload.state,
+    studentLaunchUrl,
   }
 }

@@ -367,9 +367,18 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
     }
     const ttl = data.state === 'waiting' ? WAITING_TTL_MS : (sessions.ttlMs ?? WAITING_TTL_MS)
     const nextExpiresAt = Date.now() + ttl
-    const refreshed = sessions.refreshSessionExpiry
-      ? await sessions.refreshSessionExpiry(id, data.expiresAt, nextExpiresAt, ttl)
-      : null
+    let refreshed: SessionRecord | null = null
+    try {
+      refreshed = sessions.refreshSessionExpiry
+        ? await sessions.refreshSessionExpiry(id, data.expiresAt, nextExpiresAt, ttl)
+        : null
+    } catch (error) {
+      console.error(JSON.stringify({
+        activity: ACTIVITY_ID,
+        event: 'learn-entry-expiry-refresh-failed',
+        error: error instanceof Error ? { name: error.name, message: error.message } : String(error),
+      }))
+    }
     const refreshedData = getEntryData(refreshed)
     if (!refreshed || !refreshedData) {
       const current = await sessions.get(id)

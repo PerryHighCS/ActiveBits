@@ -336,6 +336,19 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
     )
     assert.equal(retryStartResponse.statusCode, 200)
 
+    console.info('[TEST] Expected Learn status to fall back after a session-expiry refresh failure.')
+    const originalRefreshSessionExpiry = sessions.refreshSessionExpiry
+    sessions.refreshSessionExpiry = async () => { throw new Error('test expiry-refresh outage') }
+    const refreshFailureStatusResponse = response()
+    await getHandlers.get('/api/integrations/learn/v1/activities/:activityId/resources/:resourceLinkId/status')!(
+      { params: { activityId: 'syncdeck', resourceLinkId: resourceId }, ...signedRequest('GET', statusPath, {}, 'expiry-refresh-outage-nonce') },
+      refreshFailureStatusResponse,
+    )
+    assert.equal(refreshFailureStatusResponse.statusCode, 200)
+    assert.equal((refreshFailureStatusResponse.body as { state?: unknown }).state, 'active')
+    assert.ok(errorLogs.some((message) => message.includes('learn-entry-expiry-refresh-failed') && message.includes('test expiry-refresh outage')))
+    sessions.refreshSessionExpiry = originalRefreshSessionExpiry
+
     console.info('[TEST] Expected Learn nonce-store outage to return a retryable server error.')
     sessions.valkeyStore = {
       client: {

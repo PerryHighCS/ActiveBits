@@ -146,7 +146,12 @@ class InMemorySessionStore implements SessionStore {
     if (!session || session.data.expiresAt !== expectedExpiresAt) return null
     session.data = { ...session.data, expiresAt: nextExpiresAt }
     session.lastActivity = Date.now()
-    return normalizeSessionData(session)
+    const refreshed = normalizeSessionData(session)
+    const embeddedParentSessionId = getEmbeddedParentSessionId(refreshed)
+    if (embeddedParentSessionId && embeddedParentSessionId !== id) {
+      await this.touch(embeddedParentSessionId)
+    }
+    return refreshed
   }
 
   async getAll(): Promise<SessionRecord[]> {
@@ -261,6 +266,10 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
     if (!refreshed) return null
     const session = normalizeSessionData(toSessionRecord(refreshed))
     cache.set(id, session, false)
+    const embeddedParentSessionId = getEmbeddedParentSessionId(session)
+    if (embeddedParentSessionId && embeddedParentSessionId !== id) {
+      await touch(embeddedParentSessionId)
+    }
     return session
   }
 
