@@ -259,7 +259,7 @@ function getEntryData(session: SessionRecord | null): LearnEntryData | null {
   const resourceLinkId = readString(data.resourceLinkId, MAX_RESOURCE_ID_LENGTH)
   const state = data.state === 'waiting' || data.state === 'active' ? data.state : null
   const expiresAt = typeof data.expiresAt === 'number' && Number.isFinite(data.expiresAt) ? data.expiresAt : 0
-  if (!activityId || !provider || !resourceLinkId || !state || expiresAt <= 0) return null
+  if (!activityId || !provider || !resourceLinkId || !state || expiresAt <= Date.now()) return null
   return {
     learnIntegrationKind: 'entry',
     activityId,

@@ -591,7 +591,7 @@ function parseClientRoutes(raw: unknown, context: string): ActivityClientRoute[]
       throw new Error(`${context}.clientRoutes[${index}]: "id" is reserved`)
     }
     if (!path.startsWith('/')) throw new Error(`${context}.clientRoutes[${index}]: "path" must start with "/"`)
-    if (/[?#\\]/.test(path)) throw new Error(`${context}.clientRoutes[${index}]: "path" must be a pathname without "?", "#", or "\\"`)
+    if (/[?#\\:*]/.test(path)) throw new Error(`${context}.clientRoutes[${index}]: "path" must be a static pathname without "?", "#", "\\", ":", or "*"`)
     if (reservedPaths.some((reserved) => path === reserved || (reserved !== '/' && path.startsWith(`${reserved}/`)))) {
       throw new Error(`${context}.clientRoutes[${index}]: "path" uses a reserved shared-app route prefix`)
     }
