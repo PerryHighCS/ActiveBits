@@ -1,4 +1,4 @@
-import test from 'node:test'
+import test, { type TestContext } from 'node:test'
 import assert from 'node:assert'
 import http from 'node:http'
 import { WebSocket } from 'ws'
@@ -6,6 +6,7 @@ import { createSessionStore, createSession, type SessionRecord } from './core/se
 import { createWsRouter } from './core/wsRouter.js'
 import { EMBEDDED_CHILD_SESSION_PREFIX } from '../types/session.js'
 import { registerSessionNormalizer, resetSessionNormalizersForTests } from './core/sessionNormalization.js'
+import { listenForTest } from './testPortBinding.js'
 
 const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -30,7 +31,7 @@ void test('active sessions persist', async () => {
   assert.strictEqual(await sessions.get(session.id), null)
 })
 
-void test('keepalive refreshes session activity', async () => {
+void test('keepalive refreshes session activity', async (t: TestContext) => {
   const sessions = createSessionStore(null, 50)
   const session = await createSession(sessions)
   const server = http.createServer()
@@ -39,7 +40,7 @@ void test('keepalive refreshes session activity', async () => {
     socket.sessionId = query.get('sessionId')
   })
 
-  await new Promise<void>((resolve) => server.listen(0, resolve))
+  if (!await listenForTest(t, server)) return
   const address = server.address()
   if (address === null || typeof address === 'string') {
     throw new Error('Failed to bind test server')

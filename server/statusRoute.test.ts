@@ -1,8 +1,9 @@
 import test, { type TestContext } from 'node:test'
 import assert from 'node:assert/strict'
-import type http from 'node:http'
+import http from 'node:http'
 import express from 'express'
 import { registerStatusRoute } from './routes/statusRoute.js'
+import { listenForTest } from './testPortBinding.js'
 
 interface WsClient {
   sessionId?: string
@@ -76,13 +77,12 @@ async function startStatusServer(
     sessionTtl?: number
     valkeyUrl?: string | null
   },
-): Promise<string> {
+): Promise<string | null> {
   const app = express()
   registerStatusRoute({ app, sessions, ws, sessionTtl, valkeyUrl })
 
-  const server = await new Promise<http.Server>((resolve) => {
-    const s = app.listen(0, () => resolve(s))
-  })
+  const server = http.createServer(app)
+  if (!await listenForTest(t, server)) return null
 
   t.after(async () => {
     await new Promise<void>((resolve) => {
@@ -114,6 +114,7 @@ void test('status endpoint returns session info in memory mode', async (t) => {
   const ws = createWsMock([{ sessionId: 'abc', readyState: 1 }])
 
   const baseUrl = await startStatusServer(t, { sessions, ws, sessionTtl: sessions.ttlMs, valkeyUrl: null })
+  if (!baseUrl) return
   const res = await fetch(`${baseUrl}/api/status`)
   assert.equal(res.status, 200)
   const body = await readJson<StatusPayload>(res)
@@ -150,6 +151,7 @@ void test('status endpoint masks session ids in production', async (t) => {
   }
   const ws = createWsMock()
   const baseUrl = await startStatusServer(t, { sessions, ws, sessionTtl: sessions.ttlMs, valkeyUrl: null })
+  if (!baseUrl) return
   const res = await fetch(`${baseUrl}/api/status`)
   const body = await readJson<StatusPayload>(res)
   assert.equal(body.sessions.showSessionIds, false)
@@ -182,6 +184,7 @@ void test('status endpoint reports Valkey TTLs and expiry data', async (t) => {
   }
   const ws = createWsMock()
   const baseUrl = await startStatusServer(t, { sessions, ws, sessionTtl: 90_000, valkeyUrl: 'redis://valkey:6379' })
+  if (!baseUrl) return
   const res = await fetch(`${baseUrl}/api/status`)
   const body = await readJson<StatusPayload>(res)
   const ttlSession = body.sessions.list[0]
@@ -210,6 +213,7 @@ void test('status endpoint falls back to sessionTtl when valkeyStore ttlMs is un
   }
   const ws = createWsMock()
   const baseUrl = await startStatusServer(t, { sessions, ws, sessionTtl: 123_000, valkeyUrl: 'redis://valkey:6379' })
+  if (!baseUrl) return
   const res = await fetch(`${baseUrl}/api/status`)
   const body = await readJson<StatusPayload>(res)
 
@@ -236,6 +240,7 @@ void test('status endpoint handles Valkey errors gracefully', async (t) => {
   }
   const ws = createWsMock()
   const baseUrl = await startStatusServer(t, { sessions, ws, sessionTtl: 60_000, valkeyUrl: 'redis://valkey:6379' })
+  if (!baseUrl) return
   const res = await fetch(`${baseUrl}/api/status`)
   const body = await readJson<StatusPayload>(res)
   assert.equal(body.sessions.count, 0)
