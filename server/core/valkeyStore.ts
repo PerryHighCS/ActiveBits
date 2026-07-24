@@ -231,7 +231,7 @@ export class ValkeySessionStore {
       const result = await this.client.eval(script, 1, `session:${id}`, expectedExpiresAt, nextExpiresAt, Date.now(), ttlMs)
       return typeof result === 'string' ? JSON.parse(result) as SessionLike : null
     } catch (err) {
-      console.error(`Failed to refresh session expiry ${id}:`, err)
+      console.error(JSON.stringify({ activity: 'session-store', component: 'valkey-store', event: 'refresh-session-expiry-failed', sessionId: id, error: err instanceof Error ? { name: err.name, message: err.message } : String(err) }))
       return null
     }
   }

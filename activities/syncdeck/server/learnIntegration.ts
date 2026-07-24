@@ -356,7 +356,11 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
       ? await sessions.refreshSessionExpiry(id, data.expiresAt, nextExpiresAt, ttl)
       : null
     const refreshedData = getEntryData(refreshed)
-    if (!refreshed || !refreshedData) return null
+    if (!refreshed || !refreshedData) {
+      const current = await sessions.get(id)
+      const currentData = getEntryData(current)
+      return current && currentData ? { session: current, data: currentData } : null
+    }
     return { session: refreshed, data: refreshedData }
   }
 
@@ -397,10 +401,6 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
       return void res.status(400).json({ error: 'Invalid resourceLinkId' })
     }
     const provider = auth.provider
-    if (!provider) {
-      logLearnRequestFailure('student-entry', 'missing-provider', { resourceLinkId, status: 400 })
-      return void res.status(400).json({ error: 'Missing Learn provider' })
-    }
     const id = mappingId(auth.key.secret, ACTIVITY_ID, provider, resourceLinkId)
     let entry = await loadEntry(id)
     if (!entry) {

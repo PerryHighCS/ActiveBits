@@ -111,13 +111,16 @@ function AppShell() {
             }
 
             for (const clientRoute of activity.clientRoutes ?? []) {
+              const ClientRouteComponent = ClientRouteComponents?.[clientRoute.id]
+              if (!ClientRouteComponent) {
+                console.error(`Skipping activity client route "${clientRoute.path}" because "${activity.id}" does not export "${clientRoute.id}".`)
+                continue
+              }
               if (claimedClientRoutePaths.has(clientRoute.path)) {
                 console.error(`Skipping duplicate activity client route "${clientRoute.path}" from "${activity.id}".`)
                 continue
               }
               claimedClientRoutePaths.add(clientRoute.path)
-              const ClientRouteComponent = ClientRouteComponents?.[clientRoute.id]
-              if (!ClientRouteComponent) continue
               const TypedClientRouteComponent = ClientRouteComponent as AnyComponent
               routes.push(
                 <Route
