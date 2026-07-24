@@ -50,6 +50,7 @@ function AppShell() {
   const appClassName = shouldExpandShell
     ? 'w-full flex flex-col items-center min-h-screen print:pt-0 print:px-0 md:bg-gray-100 print:bg-white'
     : 'w-full flex flex-col items-center min-h-screen pt-4 md:pt-10 px-4 sm:px-6 md:px-10 print:pt-0 print:px-0 md:bg-gray-100 print:bg-white'
+  const claimedClientRoutePaths = new Set<string>()
 
   return (
     <div className={appClassName}>
@@ -110,6 +111,11 @@ function AppShell() {
             }
 
             for (const clientRoute of activity.clientRoutes ?? []) {
+              if (claimedClientRoutePaths.has(clientRoute.path)) {
+                console.error(`Skipping duplicate activity client route "${clientRoute.path}" from "${activity.id}".`)
+                continue
+              }
+              claimedClientRoutePaths.add(clientRoute.path)
               const ClientRouteComponent = ClientRouteComponents?.[clientRoute.id]
               if (!ClientRouteComponent) continue
               const TypedClientRouteComponent = ClientRouteComponent as AnyComponent
