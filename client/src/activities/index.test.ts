@@ -236,7 +236,7 @@ void test('activity client routes cannot claim shared application paths', () => 
 
 void test('activity client routes cannot shadow top-level session IDs', () => {
   console.info('[TEST] Expected session-ID-shaped client-route paths to be rejected.')
-  for (const path of ['/abc12', '/abcdef', '/a1b2c3d4', '//abc12', '/abc12/', '///abc12///']) {
+  for (const path of ['/abc12', '/abcdef', '/a1b2c3d4']) {
     assert.throws(
       () => parseActivityConfig({
         id: 'route-test',
@@ -247,6 +247,23 @@ void test('activity client routes cannot shadow top-level session IDs', () => {
         clientRoutes: [{ id: 'route', path }],
       }),
       /conflicts with the session ID route/i,
+    )
+  }
+})
+
+void test('activity client routes require canonical slash paths', () => {
+  console.info('[TEST] Expected non-canonical client-route paths to be rejected.')
+  for (const path of ['//manage', '/foo/', '//abc12', '/abc12/', '///abc12///']) {
+    assert.throws(
+      () => parseActivityConfig({
+        id: 'route-test',
+        name: 'Route Test',
+        description: 'route validation test',
+        color: 'blue',
+        standaloneEntry: { enabled: false },
+        clientRoutes: [{ id: 'route', path }],
+      }),
+      /must not contain repeated or trailing slashes/i,
     )
   }
 })
