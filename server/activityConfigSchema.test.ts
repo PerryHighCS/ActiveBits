@@ -613,6 +613,35 @@ void test('parseActivityConfig rejects invalid shared contract enums and shapes'
   )
 })
 
+void test('parseActivityConfig rejects unsafe client route IDs and non-pathname routes', () => {
+  console.info('[TEST] Expected unsafe activity client-route IDs and paths to be rejected.')
+  const baseConfig = {
+    id: 'route-validation',
+    name: 'Route Validation',
+    description: 'desc',
+    color: 'cyan',
+    standaloneEntry: {
+      enabled: false,
+      supportsDirectPath: false,
+      supportsPermalink: false,
+      showOnHome: false,
+    },
+  }
+
+  for (const id of ['__proto__', 'constructor', 'prototype']) {
+    assert.throws(
+      () => parseActivityConfig({ ...baseConfig, clientRoutes: [{ id, path: '/integrations/example' }] }),
+      /id.*reserved/i,
+    )
+  }
+  for (const path of ['/integrations/example?query=value', '/integrations/example#section', '/integrations\\example']) {
+    assert.throws(
+      () => parseActivityConfig({ ...baseConfig, clientRoutes: [{ id: 'example', path }] }),
+      /path.*pathname/i,
+    )
+  }
+})
+
 void test('parseActivityConfig removes optional keys when input provides null', () => {
   const parsed = parseActivityConfig(
     {

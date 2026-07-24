@@ -286,7 +286,7 @@ export const activities: ActivityRegistryEntry[] = preferredConfigEntries
       )
       if (Component) components[route.id] = Component
       return components
-    }, {})
+    }, Object.create(null) as Record<string, ActivityRenderableComponent>)
 
     return {
       ...cfg,
