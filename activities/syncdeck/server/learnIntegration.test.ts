@@ -107,6 +107,7 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
     let createdSessionId = ''
     let delayedInstructorSession: Promise<void> | null = null
     let notifyInstructorSessionStart: (() => void) | null = null
+    let failInstructorSessionCreation = false
     registerLearnSyncDeckRoutes({
       app: {
         get(path, handler) { getHandlers.set(path, handler) },
@@ -117,6 +118,7 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
       async createInstructorSession() {
         notifyInstructorSessionStart?.()
         if (delayedInstructorSession) await delayedInstructorSession
+        if (failInstructorSessionCreation) throw new Error('test instructor-session creation failure')
         createdSessionId = 'syncdeck-live'
         await sessions.set(createdSessionId, {
           id: createdSessionId,
@@ -268,6 +270,20 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
     assert.equal(repeatedStopResponse.statusCode, 200)
     assert.deepEqual(repeatedStopResponse.body, { state: 'inactive', alreadyInactive: true })
     assert.ok(infoLogs.some((message) => message.includes('learn-integration-stop-noop') && message.includes('"reason":"already-inactive"')))
+
+    console.info('[TEST] Expected Learn instructor-session creation failure to return a safe server error.')
+    failInstructorSessionCreation = true
+    const failedInstructorStartResponse = response()
+    const failedInstructorResourceId = 'learn-resource-start-failure'
+    const failedInstructorStartPath = `/api/integrations/learn/v1/activities/syncdeck/resources/${failedInstructorResourceId}/start`
+    await postHandlers.get('/api/integrations/learn/v1/activities/:activityId/resources/:resourceLinkId/start')!(
+      { params: { activityId: 'syncdeck', resourceLinkId: failedInstructorResourceId }, ...signedRequest('POST', failedInstructorStartPath, { presentationUrl: 'https://slides.example/deck', requestId: 'start-creation-failure' }, 'start-creation-failure-nonce') },
+      failedInstructorStartResponse,
+    )
+    assert.equal(failedInstructorStartResponse.statusCode, 500)
+    assert.match(String((failedInstructorStartResponse.body as { error?: unknown }).error), /unable to start/i)
+    assert.ok(errorLogs.some((message) => message.includes('learn-instructor-session-start-failed')))
+    failInstructorSessionCreation = false
 
     console.info('[TEST] Expected Learn start to release its lock after a mapping-load failure.')
     const originalGet = sessions.get.bind(sessions)

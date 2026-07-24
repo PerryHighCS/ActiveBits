@@ -497,20 +497,19 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
 
       if (!reused) {
         const previousData = entry?.data
-        if (entry) {
-          entry.session.data = { ...entry.data, startRequestId: requestId }
-          await sessions.set(id, entry.session)
-        } else {
-          const createdEntry = await createSession(sessions, { data: { learnIntegrationKind: 'entry', activityId: ACTIVITY_ID, provider, resourceLinkId, state: 'waiting', startRequestId: requestId, activeSessionId: null, presentationUrl: null, expiresAt: Date.now() + WAITING_TTL_MS } })
-          const generatedId = createdEntry.id
-          createdEntry.id = id
-          createdEntry.type = 'syncdeck-learn-entry'
-          await sessions.delete(generatedId)
-          await sessions.set(id, createdEntry, WAITING_TTL_MS)
-          entry = { session: createdEntry, data: getEntryData(createdEntry)! }
-        }
-
         try {
+          if (entry) {
+            entry.session.data = { ...entry.data, startRequestId: requestId }
+            await sessions.set(id, entry.session)
+          } else {
+            const createdEntry = await createSession(sessions, { data: { learnIntegrationKind: 'entry', activityId: ACTIVITY_ID, provider, resourceLinkId, state: 'waiting', startRequestId: requestId, activeSessionId: null, presentationUrl: null, expiresAt: Date.now() + WAITING_TTL_MS } })
+            const generatedId = createdEntry.id
+            createdEntry.id = id
+            createdEntry.type = 'syncdeck-learn-entry'
+            await sessions.delete(generatedId)
+            await sessions.set(id, createdEntry, WAITING_TTL_MS)
+            entry = { session: createdEntry, data: getEntryData(createdEntry)! }
+          }
           const created = await options.createInstructorSession(presentationUrl)
           sessionId = created.sessionId
           const nextData: LearnEntryData = {
@@ -528,13 +527,18 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
           await sessions.set(id, entry.session)
           console.info(JSON.stringify({ activity: 'syncdeck', event: 'learn-instructor-session-started', resourceLinkId, requestId, sessionId, reused: false }))
         } catch (error) {
-          if (previousData) {
-            entry.session.data = previousData
-            await sessions.set(id, entry.session)
-          } else {
-            await sessions.delete(id)
+          try {
+            if (previousData && entry) {
+              entry.session.data = previousData
+              await sessions.set(id, entry.session)
+            } else {
+              await sessions.delete(id)
+            }
+          } catch (cleanupError) {
+            console.error(JSON.stringify({ activity: ACTIVITY_ID, event: 'learn-instructor-session-start-cleanup-failed', resourceLinkId, requestId, error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError) }))
           }
-          throw error
+          console.error(JSON.stringify({ activity: ACTIVITY_ID, event: 'learn-instructor-session-start-failed', resourceLinkId, requestId, error: error instanceof Error ? error.message : String(error) }))
+          return void res.status(500).json({ error: 'Unable to start the Learn instructor session' })
         }
       }
 

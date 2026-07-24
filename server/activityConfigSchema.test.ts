@@ -634,6 +634,12 @@ void test('parseActivityConfig rejects unsafe client route IDs and non-pathname 
       /id.*reserved/i,
     )
   }
+  for (const path of ['/api/activities', '/ws/session']) {
+    assert.throws(
+      () => parseActivityConfig({ ...baseConfig, clientRoutes: [{ id: 'example', path }] }),
+      /reserved shared-app route prefix/i,
+    )
+  }
   for (const path of ['/integrations/example?query=value', '/integrations/example#section', '/integrations\\example']) {
     assert.throws(
       () => parseActivityConfig({ ...baseConfig, clientRoutes: [{ id: 'example', path }] }),

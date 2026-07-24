@@ -582,7 +582,7 @@ function parseClientRoutes(raw: unknown, context: string): ActivityClientRoute[]
 
   const ids = new Set<string>()
   const paths = new Set<string>()
-  const reservedPaths = ['/', '/status', '/manage', '/launch', '/session-ended', '/activity', '/solo', '/util']
+  const reservedPaths = ['/', '/api', '/ws', '/status', '/manage', '/launch', '/session-ended', '/activity', '/solo', '/util']
   return raw.map((entry, index) => {
     if (!isRecord(entry)) throw new Error(`${context}.clientRoutes[${index}] must be an object`)
     const id = readRequiredString(entry, 'id', `${context}.clientRoutes[${index}]`)
