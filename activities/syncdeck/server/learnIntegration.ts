@@ -337,7 +337,22 @@ function requireSyncDeckActivity(activityId: string | undefined, res: RouteRespo
 }
 
 export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions): void {
-  const { app, sessions, ws } = options
+  const { sessions, ws } = options
+  const withCoordinationErrorHandling = (
+    route: string,
+    handler: (req: RouteRequest, res: RouteResponse) => void | Promise<void>,
+  ) => async (req: RouteRequest, res: RouteResponse): Promise<void> => {
+    try {
+      await handler(req, res)
+    } catch (error) {
+      console.error(JSON.stringify({ activity: ACTIVITY_ID, event: 'learn-session-store-unavailable', route, error: error instanceof Error ? { name: error.name, message: error.message } : String(error) }))
+      res.status(503).json({ error: 'Learn session coordination is unavailable' })
+    }
+  }
+  const app: RouteApp = {
+    get: (path, handler) => options.app.get(path, withCoordinationErrorHandling(path, handler)),
+    post: (path, handler) => options.app.post(path, withCoordinationErrorHandling(path, handler)),
+  }
 
   const loadEntry = async (id: string): Promise<{ session: SessionRecord; data: LearnEntryData } | null> => {
     const session = await sessions.get(id)

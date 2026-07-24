@@ -321,15 +321,14 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
       return await originalGet(id)
     }
     const failedStartRequest = signedRequest('POST', startPath, { presentationUrl: 'https://slides.example/deck', requestId: 'start-after-load-failure' }, 'start-load-failure-nonce')
-    await assert.rejects(
-      async () => {
-        await postHandlers.get('/api/integrations/learn/v1/activities/:activityId/resources/:resourceLinkId/start')!(
-          { params: { activityId: 'syncdeck', resourceLinkId: resourceId }, ...failedStartRequest },
-          response(),
-        )
-      },
-      /test mapping-load failure/,
+    const failedStartResponse = response()
+    await postHandlers.get('/api/integrations/learn/v1/activities/:activityId/resources/:resourceLinkId/start')!(
+      { params: { activityId: 'syncdeck', resourceLinkId: resourceId }, ...failedStartRequest },
+      failedStartResponse,
     )
+    assert.equal(failedStartResponse.statusCode, 503)
+    assert.match(String((failedStartResponse.body as { error?: unknown }).error), /coordination is unavailable/i)
+    assert.ok(errorLogs.some((message) => message.includes('learn-session-store-unavailable') && message.includes('test mapping-load failure')))
     const retryStartResponse = response()
     await postHandlers.get('/api/integrations/learn/v1/activities/:activityId/resources/:resourceLinkId/start')!(
       { params: { activityId: 'syncdeck', resourceLinkId: resourceId }, ...signedRequest('POST', startPath, { presentationUrl: 'https://slides.example/deck', requestId: 'start-after-load-failure-retry' }, 'start-load-failure-retry-nonce') },
