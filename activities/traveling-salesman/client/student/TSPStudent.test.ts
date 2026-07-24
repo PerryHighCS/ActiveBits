@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { buildSoloDisplayedRoutes, sortRoutesByDistance } from './TSPStudent'
+import { buildSoloDisplayedRoutes, getTspStudentSessionEndedNavigation, sortRoutesByDistance } from './TSPStudent'
 
 void test('sortRoutesByDistance sorts ascending with nulls last', () => {
   const routes = [
@@ -39,4 +39,9 @@ void test('buildSoloDisplayedRoutes returns only active solo algorithm route', (
   assert.deepEqual(bruteForceView.map((route) => route.id), ['bruteforce'])
   assert.deepEqual(heuristicView.map((route) => route.id), ['heuristic'])
   assert.deepEqual(disabledView, [])
+})
+
+void test('getTspStudentSessionEndedNavigation returns the session-ended route only for session-ended messages', () => {
+  assert.equal(getTspStudentSessionEndedNavigation({ type: 'session-ended' }), '/session-ended')
+  assert.equal(getTspStudentSessionEndedNavigation({ type: 'problemUpdate' }), null)
 })

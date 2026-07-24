@@ -1,11 +1,12 @@
 import test, { type TestContext } from 'node:test'
 import assert from 'node:assert/strict'
-import type http from 'node:http'
+import http from 'node:http'
 import express from 'express'
 import setupGalleryWalkRoutes, { sanitizeName } from '../activities/gallery-walk/server/routes.js'
 import { createSessionStore } from 'activebits-server/core/sessions.js'
 import type { ActiveBitsWebSocket, WsRouter } from '../types/websocket.js'
 import { DEFAULT_NOTE_STYLE_ID, NOTE_STYLE_OPTIONS } from '../activities/gallery-walk/shared/noteStyles.js'
+import { listenForTest } from './testPortBinding.js'
 
 type WsStub = WsRouter
 
@@ -60,23 +61,24 @@ function createWsStub(): WsStub {
   }
 }
 
-async function startTestServer(): Promise<{
+async function startTestServer(t: TestContext): Promise<{
   app: express.Express
   sessions: ReturnType<typeof createSessionStore>
   ws: WsStub
   baseUrl: string
   close: () => Promise<void>
-}> {
+} | null> {
   const app = express()
   app.use(express.json())
   const sessions = createSessionStore(null, 60 * 1000)
   const ws = createWsStub()
   setupGalleryWalkRoutes(app, sessions, ws)
 
-  const server = await new Promise<http.Server>((resolve, reject) => {
-    const s = app.listen(0, '127.0.0.1', () => resolve(s))
-    s.on('error', reject)
-  })
+  const server = http.createServer(app)
+  if (!await listenForTest(t, server, '127.0.0.1')) {
+    await sessions.close?.()
+    return null
+  }
 
   const address = server.address()
   if (address === null || typeof address === 'string') {
@@ -105,7 +107,8 @@ async function createSession(baseUrl: string): Promise<string> {
 }
 
 void test('creates gallery-walk sessions with defaults', async (t: TestContext) => {
-  const server = await startTestServer()
+  const server = await startTestServer(t)
+  if (!server) return
   t.after(server.close)
 
   const sessionId = await createSession(server.baseUrl)
@@ -121,7 +124,8 @@ void test('creates gallery-walk sessions with defaults', async (t: TestContext) 
 })
 
 void test('submits feedback and tracks stats', async (t: TestContext) => {
-  const server = await startTestServer()
+  const server = await startTestServer(t)
+  if (!server) return
   t.after(server.close)
 
   const sessionId = await createSession(server.baseUrl)
@@ -158,7 +162,8 @@ void test('submits feedback and tracks stats', async (t: TestContext) => {
 })
 
 void test('exports and imports gallery walk data', async (t: TestContext) => {
-  const server = await startTestServer()
+  const server = await startTestServer(t)
+  if (!server) return
   t.after(server.close)
 
   const sessionId = await createSession(server.baseUrl)
@@ -186,7 +191,8 @@ void test('exports and imports gallery walk data', async (t: TestContext) => {
 })
 
 void test('updates session title metadata', async (t: TestContext) => {
-  const server = await startTestServer()
+  const server = await startTestServer(t)
+  if (!server) return
   t.after(server.close)
 
   const sessionId = await createSession(server.baseUrl)
@@ -209,7 +215,8 @@ void test('updates session title metadata', async (t: TestContext) => {
 })
 
 void test('allows reviewers to set sticky note styles', async (t: TestContext) => {
-  const server = await startTestServer()
+  const server = await startTestServer(t)
+  if (!server) return
   t.after(server.close)
 
   const sessionId = await createSession(server.baseUrl)
@@ -237,7 +244,8 @@ void test('allows reviewers to set sticky note styles', async (t: TestContext) =
 })
 
 void test('invalid note style falls back to default', async (t: TestContext) => {
-  const server = await startTestServer()
+  const server = await startTestServer(t)
+  if (!server) return
   t.after(server.close)
 
   const sessionId = await createSession(server.baseUrl)

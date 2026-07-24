@@ -161,11 +161,11 @@ Capture reusable test setup patterns, common failure modes, and reliability guid
 
 - Date: 2026-03-13
 - Scope: integration
-- Pattern: In sandboxed agent environments where some server tests fail during local port binding or related host restrictions, use `npm run test:codex` as the validation gate and record the skipped full-suite limitation alongside targeted checks for the touched server surface.
-- Why it helps: It preserves a strong merge gate (`typecheck`, `lint`, client tests, non-port server tests, activities tests) without misattributing environment-specific failures in unrelated server files to the active change.
-- Example (file/path): `package.json` (`test:codex`); waiting-room entry-policy slice validated with `node --import tsx --test server/persistentSessionRoutes.test.ts`
-- Failure signal: Full `npm test` fails in sandbox with unrelated server test files such as `server/galleryWalkRoutes.test.ts`, `server/sessionStore.test.ts`, or `server/statusRoute.test.ts`, while `npm run test:codex` passes.
-- Follow-up action: When working outside the sandbox, rerun full `npm test`; inside the sandbox, keep adding focused tests for modified server files so behavior changes are still covered.
+- Pattern: Let port-dependent tests attempt to listen, then skip only a confirmed `EPERM` or `EACCES` bind denial with an explicit `[SKIPPED]` log. Keep all other listener and endpoint failures fatal.
+- Why it helps: The ordinary server suite remains the common test path in both sandboxed and canonical environments; sandbox constraints no longer require an exclusion list that can hide real regressions.
+- Example (file/path): `server/testPortBinding.ts`; `server/galleryWalkRoutes.test.ts`; `server/sessionStore.test.ts`; `server/statusRoute.test.ts`; `package.json` (`test:codex`)
+- Failure signal: A test is skipped for any error other than the initial port-binding permission denial, or a test command maintains a hard-coded list of listener test files to omit.
+- Follow-up action: Run the full server suite with port binding enabled periodically or in CI to ensure the guarded tests execute, and keep `test:nonport` only as a compatibility alias rather than an exclusion path.
 - Owner: Codex
 
 - Date: 2026-04-07
