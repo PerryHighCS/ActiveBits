@@ -1,7 +1,7 @@
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
 import { isEmbeddedChildSessionId } from '@src/components/common/sessionHeaderUtils'
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router'
 
 interface EmbeddedTestParticipant {
   studentId: string

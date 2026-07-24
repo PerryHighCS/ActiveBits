@@ -1,5 +1,5 @@
 import { Suspense, useCallback, useEffect, useId, useRef, useState, type ComponentType, type SyntheticEvent } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router'
 import { activities, runActivityDeepLinkPreflight } from '@src/activities'
 import { arrayToCsv, downloadCsv } from '@src/utils/csvUtils'
 import { useClipboard } from '@src/hooks/useClipboard'

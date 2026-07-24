@@ -1,6 +1,6 @@
 import type { FC } from 'react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate } from 'react-router'
 import SessionHeader from '@src/components/common/SessionHeader'
 import Button from '@src/components/ui/Button'
 import ActivityRoster from '@src/components/common/ActivityRoster'

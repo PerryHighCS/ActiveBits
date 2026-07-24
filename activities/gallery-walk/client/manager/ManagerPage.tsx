@@ -2,7 +2,7 @@ import SessionHeader from '@src/components/common/SessionHeader';
 import Button from '@src/components/ui/Button';
 import type { ReactNode } from 'react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router';
 import FeedbackViewSwitcher from '../components/FeedbackViewSwitcher.js';
 import GalleryWalkFeedbackTable from '../components/GalleryWalkFeedbackTable.js';
 import GalleryWalkNotesView from '../components/GalleryWalkNotesView.js';

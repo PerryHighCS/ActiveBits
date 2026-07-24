@@ -24,6 +24,15 @@ Capture reusable test setup patterns, common failure modes, and reliability guid
 - Follow-up action: Prefer helper-level tests for timer, abort, and retry policy; only use a JSDOM component test when its DOM lifecycle is isolated from concurrent files.
 - Owner: Codex
 
+- Date: 2026-07-24
+- Scope: integration
+- Pattern: Cap multi-file activity tests with Node's `--test-concurrency`, defaulting to four workers and allowing `ACTIVITY_TEST_CONCURRENCY` to lower the cap in memory-constrained environments.
+- Why it helps: The activities workspace has many `tsx`/`jsdom` test files; Node's unconstrained test-file parallelism can trigger an OOM SIGKILL (exit 137) before test failures are reported.
+- Example (file/path): `activities/package.json` (`test`, `test:scope`, `test:activity`)
+- Failure signal: `npm --workspace activities test` or root `npm test` exits 137, with cgroup `memory.events` reporting `oom_kill` increments.
+- Follow-up action: Lower the cap with `ACTIVITY_TEST_CONCURRENCY=2` on smaller CI runners; only increase the default after confirming peak memory stays within the runner budget.
+- Owner: Codex
+
 - Date: 2026-07-16
 - Scope: e2e | MobCode Python runner
 - Pattern: Exercise error diagnostics through the Brython popup with both an assertion failure and a nested ordinary runtime failure; assert the terminal names the selected file and the deepest failing user line.

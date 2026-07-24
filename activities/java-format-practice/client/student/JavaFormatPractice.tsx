@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback, type KeyboardEvent, type MouseEvent, type SetStateAction } from 'react';
 import InterleavedOutputGrid from '../components/InterleavedOutputGrid';
 import ExpectedOutputGrid from '../components/ExpectedOutputGrid';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 import {
   persistSessionParticipantIdentity,
   readStoredSessionParticipantIdentity,

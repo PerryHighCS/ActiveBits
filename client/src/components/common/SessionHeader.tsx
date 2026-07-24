@@ -8,7 +8,7 @@ import {
   type MouseEvent,
   type ReactNode,
 } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router'
 import { useClipboard } from '@src/hooks/useClipboard'
 import Button from '../ui/Button'
 import Modal from '../ui/Modal'

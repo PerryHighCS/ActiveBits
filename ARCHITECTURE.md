@@ -470,7 +470,7 @@ Activities can use URL query parameters for direct deep linking to specific cont
 
 **Implementation pattern (Manager):**
 ```typescript
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router';
 
 export default function MyActivityManager() {
   const [searchParams] = useSearchParams();

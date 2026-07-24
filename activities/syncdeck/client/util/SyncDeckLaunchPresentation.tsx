@@ -1,5 +1,5 @@
 import { useEffect, useState, type ChangeEvent, type FormEvent } from 'react'
-import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router'
 import { runSyncDeckPresentationPreflight, type SyncDeckPreflightResult } from '../shared/presentationPreflight.js'
 import { getStudentPresentationCompatibilityError } from '../shared/presentationUrlCompatibility.js'
 import { createConfiguredSyncDeckSession } from '../shared/sessionLaunch.js'

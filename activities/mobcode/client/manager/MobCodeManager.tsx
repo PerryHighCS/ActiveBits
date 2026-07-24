@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useLocation, useParams } from 'react-router-dom'
+import { useLocation, useParams } from 'react-router'
 import SessionHeader from '@src/components/common/SessionHeader'
 import VirtualFileExplorer from '@src/components/common/VirtualFileExplorer'
 import type { VirtualFileEntry } from '@src/components/common/virtualFileExplorerTypes'

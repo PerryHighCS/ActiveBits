@@ -113,7 +113,7 @@ void test('BinaryBreachManager applies query settings once per managed session i
     const { fireEvent, render, waitFor } = testingLibrary
     cleanup = testingLibrary.cleanup
     act = testingLibrary.act
-    const { MemoryRouter, Route, Routes, useNavigate } = await import('react-router-dom')
+    const { MemoryRouter, Route, Routes, useNavigate } = await import('react-router')
     const { default: BinaryBreachManager } = await import('./BinaryBreachManager.js')
 
     function NavigationProbe(): React.JSX.Element {
@@ -210,7 +210,7 @@ void test('BinaryBreachManager keeps local edits when an older state fetch resol
     const { fireEvent, render, waitFor } = testingLibrary
     cleanup = testingLibrary.cleanup
     act = testingLibrary.act
-    const { MemoryRouter, Route, Routes } = await import('react-router-dom')
+    const { MemoryRouter, Route, Routes } = await import('react-router')
     const { default: BinaryBreachManager } = await import('./BinaryBreachManager.js')
 
     const rendered = render(
@@ -272,7 +272,7 @@ void test('BinaryBreachManager keeps local edits when roster websocket messages 
     const { fireEvent, render, waitFor } = testingLibrary
     cleanup = testingLibrary.cleanup
     act = testingLibrary.act
-    const { MemoryRouter, Route, Routes } = await import('react-router-dom')
+    const { MemoryRouter, Route, Routes } = await import('react-router')
     const { default: BinaryBreachManager } = await import('./BinaryBreachManager.js')
 
     const rendered = render(

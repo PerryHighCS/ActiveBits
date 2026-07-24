@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import type { ActivityRegistryEntry } from '../../../../types/activity.js'
 import type { JSX } from 'react'
 import { JSDOM } from 'jsdom'
-import { BrowserRouter, MemoryRouter, Route, Routes, useLocation, useParams } from 'react-router-dom'
+import { BrowserRouter, MemoryRouter, Route, Routes, useLocation, useParams } from 'react-router'
 import ActivityLauncher from './ActivityLauncher.js'
 
 const videoSyncActivity: ActivityRegistryEntry = {

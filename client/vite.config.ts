@@ -50,13 +50,13 @@ export default defineConfig({
       // Explicitly resolve React deps for files outside client/ (colocated activities)
       react: path.resolve(__dirname, '..', 'node_modules/react'),
       'react-dom': path.resolve(__dirname, '..', 'node_modules/react-dom'),
-      'react-router-dom': path.resolve(__dirname, '..', 'node_modules/react-router-dom'),
+      'react-router': path.resolve(__dirname, '..', 'node_modules/react-router'),
     },
     preserveSymlinks: false,
   },
   optimizeDeps: {
     // Pre-bundle common dependencies
-    include: ['react', 'react-dom', 'react-router-dom'],
+    include: ['react', 'react-dom', 'react-router'],
     // Don't scan activity client code upfront - let Vite discover on demand
     // This speeds up initial server start
   },
