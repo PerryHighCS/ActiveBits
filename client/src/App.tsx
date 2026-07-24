@@ -8,6 +8,7 @@ import LoadingFallback from './components/common/LoadingFallback'
 import ManagedSessionRoute from './components/common/ManagedSessionRoute'
 import ActivityLauncher from './components/common/ActivityLauncher'
 import { activities } from './activities'
+import { registerActivityClientRoutes } from './activityClientRoutes'
 import { findFooterActivity } from './appUtils'
 
 const footerClass =
@@ -50,7 +51,7 @@ function AppShell() {
   const appClassName = shouldExpandShell
     ? 'w-full flex flex-col items-center min-h-screen print:pt-0 print:px-0 md:bg-gray-100 print:bg-white'
     : 'w-full flex flex-col items-center min-h-screen pt-4 md:pt-10 px-4 sm:px-6 md:px-10 print:pt-0 print:px-0 md:bg-gray-100 print:bg-white'
-  const claimedClientRoutePaths = new Set<string>()
+  const clientRoutes = registerActivityClientRoutes(activities)
 
   return (
     <div className={appClassName}>
@@ -110,32 +111,22 @@ function AppShell() {
               )
             }
 
-            for (const clientRoute of activity.clientRoutes ?? []) {
-              const ClientRouteComponent = ClientRouteComponents?.[clientRoute.id]
-              if (!ClientRouteComponent) {
-                console.error(`Skipping activity client route "${clientRoute.path}" because "${activity.id}" does not export "${clientRoute.id}".`)
-                continue
-              }
-              if (claimedClientRoutePaths.has(clientRoute.path)) {
-                console.error(`Skipping duplicate activity client route "${clientRoute.path}" from "${activity.id}".`)
-                continue
-              }
-              claimedClientRoutePaths.add(clientRoute.path)
-              const TypedClientRouteComponent = ClientRouteComponent as AnyComponent
-              routes.push(
-                <Route
-                  key={`client-route-${clientRoute.id}`}
-                  path={clientRoute.path}
-                  element={
-                    <Suspense fallback={<LoadingFallback />}>
-                      <TypedClientRouteComponent />
-                    </Suspense>
-                  }
-                />,
-              )
-            }
-
             return <Fragment key={activity.id}>{routes}</Fragment>
+          })}
+
+          {clientRoutes.map((clientRoute) => {
+            const TypedClientRouteComponent = clientRoute.Component as AnyComponent
+            return (
+              <Route
+                key={`client-route-${clientRoute.activityId}-${clientRoute.id}`}
+                path={clientRoute.path}
+                element={
+                  <Suspense fallback={<LoadingFallback />}>
+                    <TypedClientRouteComponent />
+                  </Suspense>
+                }
+              />
+            )
           })}
 
           <Route
