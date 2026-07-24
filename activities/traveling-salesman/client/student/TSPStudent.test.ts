@@ -89,19 +89,19 @@ void test('TSPStudent navigates to the session-ended route when its session ends
     }
   }
 
-  ;(globalThis as { window?: Window & typeof globalThis }).window = dom.window as unknown as Window & typeof globalThis
-  ;(globalThis as { document?: Document }).document = dom.window.document
-  Object.defineProperty(globalThis, 'navigator', { configurable: true, value: dom.window.navigator })
-  globalThis.HTMLElement = dom.window.HTMLElement
-  globalThis.Node = dom.window.Node
-  globalThis.WebSocket = TestWebSocket as unknown as typeof WebSocket
-  dom.window.WebSocket = TestWebSocket as unknown as typeof WebSocket
-  dom.window.localStorage.setItem('student-name-session-1', 'Student One')
-
   let cleanup: (() => void) | null = null
   let unmount: (() => void) | null = null
 
   try {
+    ;(globalThis as { window?: Window & typeof globalThis }).window = dom.window as unknown as Window & typeof globalThis
+    ;(globalThis as { document?: Document }).document = dom.window.document
+    Object.defineProperty(globalThis, 'navigator', { configurable: true, value: dom.window.navigator })
+    globalThis.HTMLElement = dom.window.HTMLElement
+    globalThis.Node = dom.window.Node
+    globalThis.WebSocket = TestWebSocket as unknown as typeof WebSocket
+    dom.window.WebSocket = TestWebSocket as unknown as typeof WebSocket
+    dom.window.localStorage.setItem('student-name-session-1', 'Student One')
+
     const { act, cleanup: testingLibraryCleanup, render, waitFor } = await import('@testing-library/react')
     cleanup = testingLibraryCleanup
     const { MemoryRouter, Route, Routes } = await import('react-router')
