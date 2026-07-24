@@ -124,6 +124,13 @@ async function resolveClientModule(loader: ActivityClientLoader): Promise<Activi
   return (resolved != null && typeof resolved === 'object') ? (resolved as ActivityClientResolved) : {}
 }
 
+export function getClientRouteComponent(
+  components: Record<string, ComponentType<unknown>> | undefined,
+  routeId: string,
+): ComponentType<unknown> | undefined {
+  return components && Object.hasOwn(components, routeId) ? components[routeId] : undefined
+}
+
 export function shouldUseClientModuleResolutionCache(options: {
   isDevelopment: boolean
   hasHotModuleReload: boolean
@@ -278,7 +285,7 @@ export const activities: ActivityRegistryEntry[] = preferredConfigEntries
     const ClientRouteComponents = (cfg.clientRoutes ?? []).reduce<Record<string, ActivityRenderableComponent>>((components, route) => {
       const Component = createLazyComponent(
         clientLoader,
-        (resolved) => resolved.ClientRouteComponents?.[route.id],
+        (resolved) => getClientRouteComponent(resolved.ClientRouteComponents, route.id),
         undefined,
         activityId,
         'ClientRouteComponent',

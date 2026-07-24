@@ -659,7 +659,7 @@ function writeSyncDeckInstructorRecoveryCookie(req: RouteRequest, res: JsonRespo
 
   res.cookie?.(INSTRUCTOR_RECOVERY_COOKIE_NAME, JSON.stringify(nextEntries), {
     // This is a browser-session cookie: the server session's sliding TTL remains authoritative.
-    path: '/',
+    path: '/api/syncdeck',
     sameSite: 'lax',
     secure: process.env.NODE_ENV === 'production',
     httpOnly: true,

@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path'
 import test from 'node:test'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import activityConfigSchema from '../../../types/activityConfigSchema.js'
+import { getClientRouteComponent } from './index.js'
 
 interface ActivityConfigModule {
   default?: {
@@ -248,4 +249,13 @@ void test('activity client routes cannot use Object prototype property names as 
       /"id" is reserved/i,
     )
   }
+})
+
+void test('client route component lookup only accepts explicit exports', () => {
+  const ExplicitComponent = () => null
+  const inheritedComponents = Object.create({ toString: ExplicitComponent }) as Record<string, typeof ExplicitComponent>
+  inheritedComponents.explicit = ExplicitComponent
+
+  assert.equal(getClientRouteComponent(inheritedComponents, 'explicit'), ExplicitComponent)
+  assert.equal(getClientRouteComponent(inheritedComponents, 'toString'), undefined)
 })
