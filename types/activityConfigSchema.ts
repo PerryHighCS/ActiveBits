@@ -601,6 +601,9 @@ function parseClientRoutes(raw: unknown, context: string): ActivityClientRoute[]
     if (path !== normalizeStaticClientRoutePath(path)) {
       throw new Error(`${context}.clientRoutes[${index}]: "path" must not contain repeated or trailing slashes`)
     }
+    if (path.split('/').some((segment) => segment === '.' || segment === '..')) {
+      throw new Error(`${context}.clientRoutes[${index}]: "path" must not contain "." or ".." segments`)
+    }
     if (/[?#\\:*]/.test(path)) throw new Error(`${context}.clientRoutes[${index}]: "path" must be a static pathname without "?", "#", "\\", ":", or "*"`)
     if (reservedPaths.some((reserved) => path === reserved || (reserved !== '/' && path.startsWith(`${reserved}/`)))) {
       throw new Error(`${context}.clientRoutes[${index}]: "path" uses a reserved shared-app route prefix`)

@@ -268,6 +268,23 @@ void test('activity client routes require canonical slash paths', () => {
   }
 })
 
+void test('activity client routes cannot contain dot path segments', () => {
+  console.info('[TEST] Expected dot-segment client-route paths to be rejected.')
+  for (const path of ['/./foo', '/foo/./bar', '/foo/../manage', '/../manage']) {
+    assert.throws(
+      () => parseActivityConfig({
+        id: 'route-test',
+        name: 'Route Test',
+        description: 'route validation test',
+        color: 'blue',
+        standaloneEntry: { enabled: false },
+        clientRoutes: [{ id: 'route', path }],
+      }),
+      /must not contain "\." or "\.\." segments/i,
+    )
+  }
+})
+
 void test('activity client routes cannot use Object prototype property names as route IDs', () => {
   console.info('[TEST] Expected Object prototype client-route IDs to be rejected.')
   for (const id of [...Object.getOwnPropertyNames(Object.prototype), 'prototype']) {
