@@ -14,10 +14,14 @@ const MAX_CLOCK_SKEW_MS = 5 * 60 * 1000
 const NONCE_RETENTION_MS = 2 * MAX_CLOCK_SKEW_MS
 const BROWSER_TOKEN_TTL_MS = 5 * 60 * 1000
 const WAITING_TTL_MS = 10 * 60 * 1000
+const START_LOCK_TTL_MS = 30_000
+const START_LOCK_RENEWAL_MS = 10_000
 const MAX_PROVIDER_LENGTH = 120
 const MAX_RESOURCE_ID_LENGTH = 512
 const claimedNonces = new Map<string, number>()
 const localStartLocks = new Set<string>()
+const RENEW_START_LOCK_SCRIPT = 'if redis.call("GET", KEYS[1]) == ARGV[1] then return redis.call("PEXPIRE", KEYS[1], ARGV[2]) end return 0'
+const RELEASE_START_LOCK_SCRIPT = 'if redis.call("GET", KEYS[1]) == ARGV[1] then return redis.call("DEL", KEYS[1]) end return 0'
 
 interface RouteRequest {
   params: Record<string, string | undefined>
@@ -152,13 +156,27 @@ async function claimStartLock(sessions: SessionStore, mapping: string): Promise<
   if (valkeyClient) {
     try {
       const lockKey = `learn-syncdeck-start:${digest}`
+      const lockToken = randomBytes(16).toString('hex')
       const result = await (valkeyClient as unknown as {
         set(...args: unknown[]): Promise<unknown>
-      }).set(lockKey, '1', 'PX', 30_000, 'NX')
+      }).set(lockKey, lockToken, 'PX', START_LOCK_TTL_MS, 'NX')
       if (result !== 'OK') return { state: 'locked' }
-      return { state: 'acquired', release: async () => {
+      const renewLease = async (): Promise<void> => {
         try {
-          await valkeyClient.del(lockKey)
+          const renewed = await valkeyClient.eval(RENEW_START_LOCK_SCRIPT, 1, lockKey, lockToken, START_LOCK_TTL_MS)
+          if (renewed !== 1) {
+            console.error(JSON.stringify({ activity: 'syncdeck', event: 'learn-start-lock-renewal-failed', reason: 'lock-not-owned' }))
+          }
+        } catch (error) {
+          console.error(JSON.stringify({ activity: 'syncdeck', event: 'learn-start-lock-renewal-failed', reason: 'valkey-unavailable', error: error instanceof Error ? error.message : String(error) }))
+        }
+      }
+      const renewalTimer = setInterval(() => { void renewLease() }, START_LOCK_RENEWAL_MS)
+      renewalTimer.unref?.()
+      return { state: 'acquired', release: async () => {
+        clearInterval(renewalTimer)
+        try {
+          await valkeyClient.eval(RELEASE_START_LOCK_SCRIPT, 1, lockKey, lockToken)
         } catch (error) {
           console.error(JSON.stringify({ activity: 'syncdeck', event: 'learn-start-lock-release-failed', error: error instanceof Error ? error.message : String(error) }))
         }
@@ -171,6 +189,10 @@ async function claimStartLock(sessions: SessionStore, mapping: string): Promise<
   if (localStartLocks.has(mapping)) return { state: 'locked' }
   localStartLocks.add(mapping)
   return { state: 'acquired', release: async () => { localStartLocks.delete(mapping) } }
+}
+
+function authenticationFailureReason(status: number): 'authentication-failed' | 'nonce-storage-unavailable' {
+  return status === 503 ? 'nonce-storage-unavailable' : 'authentication-failed'
 }
 
 async function verifyHmac(req: RouteRequest, method: string, path: string, sessions: SessionStore): Promise<{ ok: true; key: { keyId: string; secret: string }; provider: string } | { ok: false; status: number; error: string }> {
@@ -340,7 +362,7 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
     const resourceLinkId = readString(req.params.resourceLinkId, MAX_RESOURCE_ID_LENGTH)
     const auth = await verifyHmac(req, 'GET', integrationPath(ACTIVITY_ID, req.params.resourceLinkId ?? '', '/status'), sessions)
     if (!auth.ok) {
-      logLearnRequestFailure('status', 'authentication-failed', { status: auth.status })
+      logLearnRequestFailure('status', authenticationFailureReason(auth.status), { status: auth.status })
       return void res.status(auth.status).json({ error: auth.error })
     }
     if (!resourceLinkId) {
@@ -363,7 +385,7 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
     const resourceLinkId = readString(req.params.resourceLinkId, MAX_RESOURCE_ID_LENGTH)
     const auth = await verifyHmac(req, 'POST', integrationPath(ACTIVITY_ID, req.params.resourceLinkId ?? '', '/student-entry'), sessions)
     if (!auth.ok) {
-      logLearnRequestFailure('student-entry', 'authentication-failed', { status: auth.status })
+      logLearnRequestFailure('student-entry', authenticationFailureReason(auth.status), { status: auth.status })
       return void res.status(auth.status).json({ error: auth.error })
     }
     if (!resourceLinkId) {
@@ -413,7 +435,7 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
     const resourceLinkId = readString(req.params.resourceLinkId, MAX_RESOURCE_ID_LENGTH)
     const auth = await verifyHmac(req, 'POST', integrationPath(ACTIVITY_ID, req.params.resourceLinkId ?? '', '/start'), sessions)
     if (!auth.ok) {
-      logLearnRequestFailure('start', 'authentication-failed', { status: auth.status })
+      logLearnRequestFailure('start', authenticationFailureReason(auth.status), { status: auth.status })
       return void res.status(auth.status).json({ error: auth.error })
     }
     if (!resourceLinkId) {
@@ -518,7 +540,7 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
     const resourceLinkId = readString(req.params.resourceLinkId, MAX_RESOURCE_ID_LENGTH)
     const auth = await verifyHmac(req, 'POST', integrationPath(ACTIVITY_ID, req.params.resourceLinkId ?? '', '/stop'), sessions)
     if (!auth.ok) {
-      logLearnRequestFailure('stop', 'authentication-failed', { status: auth.status })
+      logLearnRequestFailure('stop', authenticationFailureReason(auth.status), { status: auth.status })
       return void res.status(auth.status).json({ error: auth.error })
     }
     if (!resourceLinkId) {

@@ -289,6 +289,7 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
     assert.equal(nonceStoreFailureResponse.statusCode, 503)
     assert.match(String((nonceStoreFailureResponse.body as { error?: unknown }).error), /nonce storage/i)
     assert.ok(errorLogs.some((message) => message.includes('learn-nonce-claim-failed')))
+    assert.ok(infoLogs.some((message) => message.includes('learn-integration-request-failed') && message.includes('"reason":"nonce-storage-unavailable"') && message.includes('"status":503')))
 
     console.info('[TEST] Expected Learn start-lock outage to return a retryable server error.')
     let valkeySetCalls = 0
