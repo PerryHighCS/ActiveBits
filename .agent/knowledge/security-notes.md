@@ -83,7 +83,7 @@ Track security-relevant boundaries, risks, and mitigation decisions.
 - Area: dependency update audit
 - Threat or risk: Dependency updates can leave stale vulnerable transitive packages or accidentally move type/runtime assumptions ahead of the deployed Node major.
 - Control or mitigation: Refreshed root and workspace npm locks after point and selected major updates; `npm install --package-lock-only --include=dev --workspaces --include-workspace-root` and each workspace lock refresh reported `found 0 vulnerabilities`. Kept `@types/node` on the Node 24 line because the repo engine is `>=24 <25`, even though the registry also has Node 25 types.
-- Residual risk: Full `npm test` remains limited by known sandbox port-binding failures for selected server tests in this environment; use `npm run test:codex` as the documented sandbox gate and rerun full `npm test` in a canonical environment.
+- Residual risk: Port-dependent server tests self-skip only when sandbox policy denies the initial local bind (`EPERM` or `EACCES`); periodically run the full suite with port binding enabled so those endpoint and WebSocket paths execute.
 - Validation (test/review/path): `package.json`; `client/package.json`; `server/package.json`; `activities/package.json`; `package-lock.json`; `npm run test:codex`.
 - Follow-up action: Revisit `@types/node` only with a coordinated runtime engine update.
 - Owner: Codex
