@@ -350,14 +350,14 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
       await sessions.delete(id)
       return null
     }
-    if (!await sessions.touch(id)) return null
-    return {
-      session,
-      data: {
-        ...data,
-        expiresAt: Date.now() + (data.state === 'waiting' ? WAITING_TTL_MS : (sessions.ttlMs ?? WAITING_TTL_MS)),
-      },
-    }
+    const ttl = data.state === 'waiting' ? WAITING_TTL_MS : (sessions.ttlMs ?? WAITING_TTL_MS)
+    const nextExpiresAt = Date.now() + ttl
+    const refreshed = sessions.refreshSessionExpiry
+      ? await sessions.refreshSessionExpiry(id, data.expiresAt, nextExpiresAt, ttl)
+      : null
+    const refreshedData = getEntryData(refreshed)
+    if (!refreshed || !refreshedData) return null
+    return { session: refreshed, data: refreshedData }
   }
 
   app.get(`${INTEGRATION_PREFIX}/activities/:activityId/resources/:resourceLinkId/status`, async (req, res) => {

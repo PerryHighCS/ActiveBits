@@ -215,6 +215,27 @@ export class ValkeySessionStore {
     }
   }
 
+  async refreshSessionExpiry(id: string, expectedExpiresAt: number, nextExpiresAt: number, ttlMs: number): Promise<SessionLike | null> {
+    try {
+      const script = `
+        local data = redis.call('GET', KEYS[1])
+        if not data then return nil end
+        local session = cjson.decode(data)
+        if type(session.data) ~= 'table' or session.data.expiresAt ~= tonumber(ARGV[1]) then return nil end
+        session.data.expiresAt = tonumber(ARGV[2])
+        session.lastActivity = tonumber(ARGV[3])
+        local updated = cjson.encode(session)
+        redis.call('SET', KEYS[1], updated, 'PX', tonumber(ARGV[4]))
+        return updated
+      `
+      const result = await this.client.eval(script, 1, `session:${id}`, expectedExpiresAt, nextExpiresAt, Date.now(), ttlMs)
+      return typeof result === 'string' ? JSON.parse(result) as SessionLike : null
+    } catch (err) {
+      console.error(`Failed to refresh session expiry ${id}:`, err)
+      return null
+    }
+  }
+
   private async scanKeys(pattern: string): Promise<string[]> {
     const keys: string[] = []
     let cursor = '0'

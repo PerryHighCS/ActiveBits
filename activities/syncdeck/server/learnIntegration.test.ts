@@ -50,6 +50,14 @@ function store(broadcasts: Array<{ event: string; payload: unknown }>): SessionS
     async set(id, session) { records.set(id, structuredClone(session)) },
     async delete(id) { return records.delete(id) },
     async touch() { return true },
+    async refreshSessionExpiry(id, expectedExpiresAt, nextExpiresAt) {
+      const session = records.get(id)
+      if (!session || session.data.expiresAt !== expectedExpiresAt) return null
+      const refreshed = structuredClone(session)
+      refreshed.data.expiresAt = nextExpiresAt
+      records.set(id, refreshed)
+      return structuredClone(refreshed)
+    },
     async getAll() { return Array.from(records.values()).map((item) => structuredClone(item)) },
     async getAllIds() { return Array.from(records.keys()) },
     async consumeSessionDataToken(id, field, value) {
