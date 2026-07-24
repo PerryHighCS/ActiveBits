@@ -36,6 +36,7 @@ void test('registerActivityClientRoutes registers a declared route with its comp
 })
 
 void test('registerActivityClientRoutes skips routes missing a component mapping', () => {
+  console.info('[TEST] Expected activity route with no component mapping to be skipped.')
   const problems: string[] = []
   const routes = registerActivityClientRoutes(
     [activity('syncdeck', [{ id: 'waiting-room', path: '/integrations/learn/syncdeck/wait' }])],
@@ -47,6 +48,7 @@ void test('registerActivityClientRoutes skips routes missing a component mapping
 })
 
 void test('registerActivityClientRoutes keeps the first component for duplicate paths', () => {
+  console.info('[TEST] Expected duplicate activity route path to be skipped.')
   const problems: string[] = []
   const FirstComponent: ComponentType<unknown> = () => null
   const SecondComponent: ComponentType<unknown> = () => null
@@ -61,6 +63,7 @@ void test('registerActivityClientRoutes keeps the first component for duplicate 
 })
 
 void test('registerActivityClientRoutes does not let a missing mapping claim a later valid path', () => {
+  console.info('[TEST] Expected missing mapping not to claim a later valid route path.')
   const problems: string[] = []
   const routes = registerActivityClientRoutes([
     activity('missing', [{ id: 'route', path: '/activity-route' }]),

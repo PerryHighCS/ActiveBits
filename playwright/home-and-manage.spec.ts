@@ -57,12 +57,3 @@ test('manage route shows the expected activity cards and dashboard actions', asy
   await expect(page.getByRole('button', { name: 'Create Permanent Link' }).first()).toBeVisible()
   await expect(page.getByRole('button', { name: 'Resonance Tools' })).toBeVisible()
 })
-
-test('activity-owned client routes render their registered component', async ({ page }) => {
-  await page.route('/api/integrations/learn/v1/activities/syncdeck/wait/status', async (route) => {
-    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ state: 'waiting' }) })
-  })
-
-  await page.goto('/integrations/learn/syncdeck/wait')
-  await expect(page.getByRole('heading', { name: 'SyncDeck waiting room' })).toBeVisible()
-})

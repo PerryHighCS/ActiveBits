@@ -236,7 +236,7 @@ void test('activity client routes cannot claim shared application paths', () => 
 
 void test('activity client routes cannot shadow top-level session IDs', () => {
   console.info('[TEST] Expected session-ID-shaped client-route paths to be rejected.')
-  for (const path of ['/abc12', '/abcdef', '/a1b2c3d4']) {
+  for (const path of ['/abc12', '/abcdef', '/a1b2c3d4', '//abc12', '/abc12/', '///abc12///']) {
     assert.throws(
       () => parseActivityConfig({
         id: 'route-test',

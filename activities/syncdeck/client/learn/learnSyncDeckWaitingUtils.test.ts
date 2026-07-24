@@ -36,6 +36,7 @@ void test('readLearnSyncDeckWaitingStatus falls back to a safe error for a non-J
 })
 
 void test('readLearnSyncDeckWaitingStatus rejects an active response with an unsafe student launch URL', async () => {
+  console.info('[TEST] Expected unsafe active waiting-room launch URLs to be rejected.')
   for (const studentLaunchUrl of ['https://untrusted.example/session', '//untrusted.example/session', '/\\untrusted.example/session', '/\n//untrusted.example/session']) {
     await assert.rejects(
       () => readLearnSyncDeckWaitingStatus(async () => new Response(JSON.stringify({ state: 'active', studentLaunchUrl }))),
@@ -45,6 +46,7 @@ void test('readLearnSyncDeckWaitingStatus rejects an active response with an uns
 })
 
 void test('readLearnSyncDeckWaitingStatus rejects unknown waiting-room states', async () => {
+  console.info('[TEST] Expected unknown waiting-room status state to be rejected.')
   await assert.rejects(
     () => readLearnSyncDeckWaitingStatus(async () => new Response(JSON.stringify({ state: 'starting' }))),
     /invalid waiting-room status response/i,
