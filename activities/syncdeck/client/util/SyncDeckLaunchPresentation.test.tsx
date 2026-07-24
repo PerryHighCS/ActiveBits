@@ -260,7 +260,7 @@ void test('copyTextToClipboard writes trimmed text to the clipboard', async () =
 void test('SyncDeckLaunchPresentation shows a launch form when presentationUrl is missing', async () => {
   const restoreDomEnvironment = installDomEnvironment('https://bits.mycode.run/util/syncdeck/launch-presentation')
   const { render, waitFor } = await import('@testing-library/react')
-  const { MemoryRouter } = await import('react-router-dom')
+  const { MemoryRouter } = await import('react-router')
   const { default: SyncDeckLaunchPresentation } = await import('./SyncDeckLaunchPresentation.js')
 
   try {
@@ -288,7 +288,7 @@ void test('SyncDeckLaunchPresentation shows a permalink builder with a prefilled
     'https://bits.mycode.run/util/syncdeck/permalink?presentationUrl=https%3A%2F%2Fslides.example%2Fdeck',
   )
   const { render, waitFor } = await import('@testing-library/react')
-  const { MemoryRouter } = await import('react-router-dom')
+  const { MemoryRouter } = await import('react-router')
   const { default: SyncDeckLaunchPresentation } = await import('./SyncDeckLaunchPresentation.js')
 
   try {
@@ -330,7 +330,7 @@ void test('SyncDeckLaunchPresentation sends the selected entry mode when creatin
   )
   const previousFetch = globalThis.fetch
   const { fireEvent, render, waitFor } = await import('@testing-library/react')
-  const { MemoryRouter } = await import('react-router-dom')
+  const { MemoryRouter } = await import('react-router')
   const { default: SyncDeckLaunchPresentation } = await import('./SyncDeckLaunchPresentation.js')
   let capturedEntryPolicy: unknown = null
   let unmount: (() => void) | null = null
@@ -400,7 +400,7 @@ void test('SyncDeckLaunchPresentation falls back to instructor-required for a ta
     'https://bits.mycode.run/util/syncdeck/permalink?presentationUrl=https%3A%2F%2Fslides.example%2Fdeck',
   )
   const { fireEvent, render, waitFor } = await import('@testing-library/react')
-  const { MemoryRouter } = await import('react-router-dom')
+  const { MemoryRouter } = await import('react-router')
   const { default: SyncDeckLaunchPresentation } = await import('./SyncDeckLaunchPresentation.js')
 
   try {
@@ -436,7 +436,7 @@ void test('SyncDeckLaunchPresentation refuses to generate a permalink before URL
   const previousFetch = globalThis.fetch
   let fetchCalls = 0
   const { fireEvent, render, waitFor } = await import('@testing-library/react')
-  const { MemoryRouter } = await import('react-router-dom')
+  const { MemoryRouter } = await import('react-router')
   const { default: SyncDeckLaunchPresentation } = await import('./SyncDeckLaunchPresentation.js')
 
   ;(globalThis as { fetch: typeof fetch }).fetch = (async () => {
@@ -481,7 +481,7 @@ void test('SyncDeckLaunchPresentation copies a generated permalink to the clipbo
   const previousFetch = globalThis.fetch
   const writes: string[] = []
   const { act, fireEvent, render, waitFor } = await import('@testing-library/react')
-  const { MemoryRouter } = await import('react-router-dom')
+  const { MemoryRouter } = await import('react-router')
   const { default: SyncDeckLaunchPresentation } = await import('./SyncDeckLaunchPresentation.js')
   let unmount: (() => void) | null = null
 

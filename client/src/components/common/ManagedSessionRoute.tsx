@@ -1,5 +1,5 @@
 import { useEffect, type ReactNode } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router'
 
 interface ManagedSessionRouteProps {
   children: ReactNode

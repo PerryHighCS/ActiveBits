@@ -1,7 +1,7 @@
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
 import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler'
 import { useCallback, useEffect, useRef, useState, type ComponentType } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useSearchParams } from 'react-router'
 import {
   getAlgorithm,
   getAllAlgorithms,

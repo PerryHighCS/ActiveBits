@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router';
 import SessionHeader from '@src/components/common/SessionHeader';
 import Button from '@src/components/ui/Button';
 import { useTspSession } from '../hooks/useTspSession';

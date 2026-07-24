@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router'
 import Button from '@src/components/ui/Button'
 import SessionHeader from '@src/components/common/SessionHeader'
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'

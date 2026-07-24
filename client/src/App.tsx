@@ -1,5 +1,5 @@
 import { Fragment, Suspense, useState, type ComponentType, type ReactElement } from 'react'
-import { BrowserRouter, Route, Routes, useLocation } from 'react-router-dom'
+import { BrowserRouter, Route, Routes, useLocation } from 'react-router'
 import SessionRouter from './components/common/SessionRouter'
 import SessionEnded from './components/common/SessionEnded'
 import ManageDashboard from './components/common/ManageDashboard'

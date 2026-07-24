@@ -45,7 +45,7 @@ import {
 } from '../shared/groupedActivityRequests.js'
 import { useCallback, useEffect, useMemo, useRef, useState, type FC, type FormEvent, type KeyboardEvent, type MouseEvent, type PointerEvent } from 'react'
 import { createPortal } from 'react-dom'
-import { useLocation, useNavigate, useParams } from 'react-router-dom'
+import { useLocation, useNavigate, useParams } from 'react-router'
 import type { SyncDeckSessionReportManifest } from '../../../../types/activity.js'
 import ConnectionStatusDot from '../components/ConnectionStatusDot.js'
 

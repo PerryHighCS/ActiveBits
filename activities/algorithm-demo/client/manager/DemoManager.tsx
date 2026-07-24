@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ComponentType } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router'
 import SessionHeader from '@src/components/common/SessionHeader'
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
 import AlgorithmPicker from '../components/AlgorithmPicker.js'

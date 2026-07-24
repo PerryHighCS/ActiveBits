@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { MemoryRouter, Route, Routes } from 'react-router'
 import SyncDeckStudent from './SyncDeckStudent.js'
 import { toRevealCommandMessage } from './SyncDeckStudent.js'
 import { toRevealBoundaryCommandMessage } from './SyncDeckStudent.js'

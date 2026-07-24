@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import type { FormEvent } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler';
 import {
   persistSessionParticipantIdentity,

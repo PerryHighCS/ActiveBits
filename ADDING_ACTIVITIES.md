@@ -64,7 +64,7 @@ export default function QuizPage({ sessionData }) {
 
 ```tsx
 import React, { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router';
 import SessionHeader from '@src/components/common/SessionHeader';
 import Button from '@src/components/ui/Button';
 
@@ -539,7 +539,7 @@ deepLinkOptions: {
 
 2. **Read parameters in your Student component:**
 ```typescript
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router';
 
 export default function QuizStudent({ sessionData }) {
   const [searchParams] = useSearchParams();

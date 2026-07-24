@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import type { ComponentType } from 'react'
 import * as React from 'react'
 import { JSDOM } from 'jsdom'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter } from 'react-router'
 import type { ActivityPersistentLinkBuilderProps, ActivityRegistryEntry } from '../../../../types/activity.js'
 import {
   isPersistentLinkPreflightVerified,

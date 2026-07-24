@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter } from 'react-router'
 import DemoStudent from './DemoStudent.js'
 
 void test('DemoStudent renders solo-mode picker before algorithm selection', () => {

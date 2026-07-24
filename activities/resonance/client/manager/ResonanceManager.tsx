@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
-import { useLocation, useNavigate, useParams } from 'react-router-dom'
+import { useLocation, useNavigate, useParams } from 'react-router'
 import { consumeCreateSessionBootstrapPayload } from '@src/components/common/manageDashboardUtils'
 import { isEmbeddedChildSessionId } from '@src/components/common/sessionHeaderUtils'
 import { useEmbeddedManagerPasscodeExchange } from '@src/hooks/useEmbeddedManagerPasscodeExchange'
