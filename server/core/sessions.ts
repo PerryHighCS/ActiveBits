@@ -141,7 +141,7 @@ class InMemorySessionStore implements SessionStore {
     return true
   }
 
-  async refreshSessionExpiry(id: string, expectedExpiresAt: number, nextExpiresAt: number): Promise<SessionRecord | null> {
+  async refreshSessionExpiry(id: string, expectedExpiresAt: number, nextExpiresAt: number, _ttlMs: number): Promise<SessionRecord | null> {
     const session = this.store[id]
     if (!session || session.data.expiresAt !== expectedExpiresAt) return null
     session.data = { ...session.data, expiresAt: nextExpiresAt }
