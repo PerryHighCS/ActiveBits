@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path'
 import test from 'node:test'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import activityConfigSchema from '../../../types/activityConfigSchema.js'
-import { getClientRouteComponent } from './index.js'
+import { formatComponentExportExpectation, getClientRouteComponent } from './index.js'
 
 interface ActivityConfigModule {
   default?: {
@@ -292,4 +292,9 @@ void test('client route component lookup only accepts explicit exports', () => {
 
   assert.equal(getClientRouteComponent(inheritedComponents, 'explicit'), ExplicitComponent)
   assert.equal(getClientRouteComponent(inheritedComponents, 'toString'), undefined)
+})
+
+void test('component export expectations retain the default component hint', () => {
+  assert.equal(formatComponentExportExpectation('ManagerComponent'), 'ManagerComponent: Component')
+  assert.equal(formatComponentExportExpectation('ClientRouteComponent', 'ClientRouteComponents: { waiting-room: Component }'), 'ClientRouteComponents: { waiting-room: Component }')
 })

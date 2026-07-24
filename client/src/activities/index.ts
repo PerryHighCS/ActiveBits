@@ -131,6 +131,10 @@ export function getClientRouteComponent(
   return components && Object.hasOwn(components, routeId) ? components[routeId] : undefined
 }
 
+export function formatComponentExportExpectation(componentType: string, expectedExport?: string): string {
+  return expectedExport ?? `${componentType}: Component`
+}
+
 export function shouldUseClientModuleResolutionCache(options: {
   isDevelopment: boolean
   hasHotModuleReload: boolean
@@ -199,7 +203,7 @@ function createLazyComponent(
   fallbackComponent: ComponentType<unknown> | undefined = undefined,
   activityId = 'unknown',
   componentType = 'component',
-  expectedExport = componentType,
+  expectedExport?: string,
 ): React.LazyExoticComponent<ComponentType<unknown>> | null {
   if (!loader) return null
 
@@ -212,7 +216,7 @@ function createLazyComponent(
         return { default: fallbackComponent }
       }
       throw new Error(
-        `${componentType} not found in activity "${activityId}" client module. Expected on the client module's default export object: { ${expectedExport} }`,
+        `${componentType} not found in activity "${activityId}" client module. Expected on the client module's default export object: { ${formatComponentExportExpectation(componentType, expectedExport)} }`,
       )
     }
 
