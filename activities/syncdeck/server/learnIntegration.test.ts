@@ -245,8 +245,8 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
 
     const instructorLaunchUrl = new URL(String((startResponse.body as { instructorLaunchUrl: string }).instructorLaunchUrl), 'https://bits.example')
     const instructorLaunchResponse = response()
-    await getHandlers.get('/integrations/learn/:activityId/instructor/:tokenId')!(
-      { params: { activityId: 'syncdeck', tokenId: instructorLaunchUrl.pathname.split('/').at(-1) }, query: { token: instructorLaunchUrl.searchParams.get('token') } },
+    await getHandlers.get('/api/syncdeck/learn/instructor/:tokenId')!(
+      { params: { tokenId: instructorLaunchUrl.pathname.split('/').at(-1) }, query: { token: instructorLaunchUrl.searchParams.get('token') } },
       instructorLaunchResponse,
     )
     assert.equal(instructorLaunchResponse.redirectTo, `/manage/syncdeck/${createdSessionId}`)

@@ -5,6 +5,7 @@ import type { ActiveBitsWebSocket, WsRouter } from '../../../types/websocket.js'
 
 const INTEGRATION_PREFIX = '/api/integrations/learn/v1'
 const BROWSER_PREFIX = '/integrations/learn'
+const INSTRUCTOR_HANDOFF_PREFIX = '/api/syncdeck/learn'
 const ACTIVITY_ID = 'syncdeck'
 const HMAC_SIGNATURE_HEADER = 'x-learn-signature'
 const HMAC_KEY_ID_HEADER = 'x-learn-key-id'
@@ -554,7 +555,7 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
         state: 'active',
         activeSessionId: sessionId!,
         reused,
-        instructorLaunchUrl: `${BROWSER_PREFIX}/${ACTIVITY_ID}/instructor/${encodeURIComponent(browserToken.id)}?token=${encodeURIComponent(browserToken.value)}`,
+        instructorLaunchUrl: `${INSTRUCTOR_HANDOFF_PREFIX}/instructor/${encodeURIComponent(browserToken.id)}?token=${encodeURIComponent(browserToken.value)}`,
         studentLaunchUrl: `/${encodeURIComponent(sessionId!)}`,
       })
     } finally {
@@ -629,10 +630,9 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
     res.json({ state: 'active', studentLaunchUrl: `/${encodeURIComponent(entry.data.activeSessionId)}` })
   })
 
-  app.get(`${BROWSER_PREFIX}/:activityId/instructor/:tokenId`, async (req, res) => {
+  app.get(`${INSTRUCTOR_HANDOFF_PREFIX}/instructor/:tokenId`, async (req, res) => {
     setNoStore(res)
     res.setHeader?.('Referrer-Policy', 'no-referrer')
-    if (!requireSyncDeckActivity(req.params.activityId, res)) return
     const tokenId = readString(req.params.tokenId, 256)
     const tokenValue = readString(req.query?.token, 256)
     const token = tokenId && tokenValue ? await consumeBrowserToken(sessions, tokenId, tokenValue) : null
