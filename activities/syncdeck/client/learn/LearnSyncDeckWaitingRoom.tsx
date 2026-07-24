@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { readLearnSyncDeckWaitingStatus } from './learnSyncDeckWaitingUtils.js'
+import { createTimedAbortRequest, readLearnSyncDeckWaitingStatus } from './learnSyncDeckWaitingUtils.js'
 
 const WAITING_STATUS_TIMEOUT_MS = 15_000
 
@@ -16,9 +16,8 @@ export default function LearnSyncDeckWaitingRoom() {
   const refresh = useCallback(async (): Promise<void> => {
     if (requestInFlight.current) return
     requestInFlight.current = true
-    const controller = new AbortController()
+    const { controller, cancelTimeout } = createTimedAbortRequest(WAITING_STATUS_TIMEOUT_MS)
     activeRequest.current = controller
-    const timeout = window.setTimeout(() => controller.abort(), WAITING_STATUS_TIMEOUT_MS)
     try {
       const status = await readLearnSyncDeckWaitingStatus(fetch, controller.signal)
       if (!mounted.current) return
@@ -36,7 +35,7 @@ export default function LearnSyncDeckWaitingRoom() {
           : error instanceof Error ? error.message : 'Unable to check the waiting room.',
       })
     } finally {
-      window.clearTimeout(timeout)
+      cancelTimeout()
       if (activeRequest.current === controller) activeRequest.current = null
       requestInFlight.current = false
     }

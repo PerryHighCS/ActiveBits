@@ -4,6 +4,26 @@ interface WaitingStatusResponse {
   error?: unknown
 }
 
+export interface TimedAbortRequest {
+  controller: AbortController
+  cancelTimeout: () => void
+}
+
+type BrowserTimers = Pick<Window, 'setTimeout' | 'clearTimeout'>
+
+export function createTimedAbortRequest(
+  timeoutMs: number,
+  timers: BrowserTimers = window,
+): TimedAbortRequest {
+  const controller = new AbortController()
+  const timeout = timers.setTimeout(() => controller.abort(), timeoutMs)
+
+  return {
+    controller,
+    cancelTimeout: () => timers.clearTimeout(timeout),
+  }
+}
+
 function isSameOriginRelativePath(value: unknown): value is string {
   return typeof value === 'string' && value.startsWith('/') && !value.startsWith('//') && !value.includes('\\')
 }
