@@ -659,6 +659,8 @@ function writeSyncDeckInstructorRecoveryCookie(req: RouteRequest, res: JsonRespo
 
   res.cookie?.(INSTRUCTOR_RECOVERY_COOKIE_NAME, JSON.stringify(nextEntries), {
     // This is a browser-session cookie: the server session's sliding TTL remains authoritative.
+    // The Learn handoff redirects to /manage, but recovery is consumed only by the scoped API
+    // endpoint below; /ws/syncdeck authenticates with the recovered passcode message instead.
     path: '/api/syncdeck',
     sameSite: 'lax',
     secure: process.env.NODE_ENV === 'production',
