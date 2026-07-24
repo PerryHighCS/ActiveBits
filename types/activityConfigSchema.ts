@@ -576,6 +576,8 @@ function parseWaitingRoom(raw: unknown, context: string): ActivityWaitingRoomCon
   }
 }
 
+const RESERVED_CLIENT_ROUTE_IDS = new Set([...Object.getOwnPropertyNames(Object.prototype), 'prototype'])
+
 function parseClientRoutes(raw: unknown, context: string): ActivityClientRoute[] | undefined {
   if (raw == null) return undefined
   if (!Array.isArray(raw)) throw new Error(`${context}: "clientRoutes" must be an array when provided`)
@@ -587,7 +589,7 @@ function parseClientRoutes(raw: unknown, context: string): ActivityClientRoute[]
     if (!isRecord(entry)) throw new Error(`${context}.clientRoutes[${index}] must be an object`)
     const id = readRequiredString(entry, 'id', `${context}.clientRoutes[${index}]`)
     const path = readRequiredString(entry, 'path', `${context}.clientRoutes[${index}]`)
-    if (id === '__proto__' || id === 'constructor' || id === 'prototype') {
+    if (RESERVED_CLIENT_ROUTE_IDS.has(id)) {
       throw new Error(`${context}.clientRoutes[${index}]: "id" is reserved`)
     }
     if (!path.startsWith('/')) throw new Error(`${context}.clientRoutes[${index}]: "path" must start with "/"`)

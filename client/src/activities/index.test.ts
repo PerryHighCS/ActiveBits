@@ -232,3 +232,20 @@ void test('activity client routes cannot claim shared application paths', () => 
     )
   }
 })
+
+void test('activity client routes cannot use Object prototype property names as route IDs', () => {
+  console.info('[TEST] Expected Object prototype client-route IDs to be rejected.')
+  for (const id of [...Object.getOwnPropertyNames(Object.prototype), 'prototype']) {
+    assert.throws(
+      () => parseActivityConfig({
+        id: 'route-test',
+        name: 'Route Test',
+        description: 'route validation test',
+        color: 'blue',
+        standaloneEntry: { enabled: false },
+        clientRoutes: [{ id, path: '/activity-route' }],
+      }),
+      /"id" is reserved/i,
+    )
+  }
+})
