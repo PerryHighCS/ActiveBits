@@ -89,10 +89,13 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
   const previousSecret = process.env.LEARN_SYNCDECK_HMAC_SECRET
   const previousKeyId = process.env.LEARN_SYNCDECK_HMAC_KEY_ID
   const previousInfo = console.info
+  const previousError = console.error
   const infoLogs: string[] = []
+  const errorLogs: string[] = []
   process.env.LEARN_SYNCDECK_HMAC_SECRET = 'a test-only Learn integration secret that is long enough'
   process.env.LEARN_SYNCDECK_HMAC_KEY_ID = 'test-key'
   console.info = (...args: unknown[]) => { infoLogs.push(args.map(String).join(' ')) }
+  console.error = (...args: unknown[]) => { errorLogs.push(args.map(String).join(' ')) }
   previousInfo('[TEST] Expected Learn integration failure logs are captured by this test.')
 
   try {
@@ -271,8 +274,44 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
       retryStartResponse,
     )
     assert.equal(retryStartResponse.statusCode, 200)
+
+    console.info('[TEST] Expected Learn nonce-store outage to return a retryable server error.')
+    sessions.valkeyStore = {
+      client: {
+        async set() { throw new Error('test nonce-store outage') },
+      },
+    } as unknown as SessionStore['valkeyStore']
+    const nonceStoreFailureResponse = response()
+    await getHandlers.get('/api/integrations/learn/v1/activities/:activityId/resources/:resourceLinkId/status')!(
+      { params: { activityId: 'syncdeck', resourceLinkId: resourceId }, ...signedRequest('GET', statusPath, {}, 'nonce-store-outage-nonce') },
+      nonceStoreFailureResponse,
+    )
+    assert.equal(nonceStoreFailureResponse.statusCode, 503)
+    assert.match(String((nonceStoreFailureResponse.body as { error?: unknown }).error), /nonce storage/i)
+    assert.ok(errorLogs.some((message) => message.includes('learn-nonce-claim-failed')))
+
+    console.info('[TEST] Expected Learn start-lock outage to return a retryable server error.')
+    let valkeySetCalls = 0
+    sessions.valkeyStore = {
+      client: {
+        async set() {
+          valkeySetCalls += 1
+          if (valkeySetCalls === 1) return 'OK'
+          throw new Error('test start-lock outage')
+        },
+      },
+    } as unknown as SessionStore['valkeyStore']
+    const startLockFailureResponse = response()
+    await postHandlers.get('/api/integrations/learn/v1/activities/:activityId/resources/:resourceLinkId/start')!(
+      { params: { activityId: 'syncdeck', resourceLinkId: resourceId }, ...signedRequest('POST', startPath, { presentationUrl: 'https://slides.example/deck', requestId: 'start-lock-outage' }, 'start-lock-outage-nonce') },
+      startLockFailureResponse,
+    )
+    assert.equal(startLockFailureResponse.statusCode, 503)
+    assert.match(String((startLockFailureResponse.body as { error?: unknown }).error), /coordination/i)
+    assert.ok(errorLogs.some((message) => message.includes('learn-start-lock-claim-failed')))
   } finally {
     console.info = previousInfo
+    console.error = previousError
     if (previousSecret === undefined) delete process.env.LEARN_SYNCDECK_HMAC_SECRET
     else process.env.LEARN_SYNCDECK_HMAC_SECRET = previousSecret
     if (previousKeyId === undefined) delete process.env.LEARN_SYNCDECK_HMAC_KEY_ID

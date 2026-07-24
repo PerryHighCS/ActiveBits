@@ -192,6 +192,7 @@ function createLazyComponent(
   fallbackComponent: ComponentType<unknown> | undefined = undefined,
   activityId = 'unknown',
   componentType = 'component',
+  expectedExport = componentType,
 ): React.LazyExoticComponent<ComponentType<unknown>> | null {
   if (!loader) return null
 
@@ -204,7 +205,7 @@ function createLazyComponent(
         return { default: fallbackComponent }
       }
       throw new Error(
-        `${componentType} not found in activity "${activityId}" client module. Expected on the client module's default export object: { ${componentType}: Component }`,
+        `${componentType} not found in activity "${activityId}" client module. Expected on the client module's default export object: { ${expectedExport} }`,
       )
     }
 
@@ -280,7 +281,8 @@ export const activities: ActivityRegistryEntry[] = preferredConfigEntries
         (resolved) => resolved.ClientRouteComponents?.[route.id],
         undefined,
         activityId,
-        `ClientRouteComponents.${route.id}`,
+        'ClientRouteComponent',
+        `ClientRouteComponents: { ${route.id}: Component }`,
       )
       if (Component) components[route.id] = Component
       return components

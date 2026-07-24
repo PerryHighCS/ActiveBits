@@ -215,3 +215,20 @@ void test('client registry-style config parsing skips invalid config modules wit
     console.warn = originalWarn
   }
 })
+
+void test('activity client routes cannot claim shared application paths', () => {
+  console.info('[TEST] Expected shared application paths to be rejected for activity client routes.')
+  for (const path of ['/', '/status', '/manage/syncdeck', '/launch/activity', '/session-ended', '/activity/syncdeck/hash', '/solo/syncdeck', '/util/syncdeck']) {
+    assert.throws(
+      () => parseActivityConfig({
+        id: 'route-test',
+        name: 'Route Test',
+        description: 'route validation test',
+        color: 'blue',
+        standaloneEntry: { enabled: false },
+        clientRoutes: [{ id: 'conflict', path }],
+      }),
+      /reserved shared-app route prefix/i,
+    )
+  }
+})

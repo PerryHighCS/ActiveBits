@@ -582,11 +582,15 @@ function parseClientRoutes(raw: unknown, context: string): ActivityClientRoute[]
 
   const ids = new Set<string>()
   const paths = new Set<string>()
+  const reservedPaths = ['/', '/status', '/manage', '/launch', '/session-ended', '/activity', '/solo', '/util']
   return raw.map((entry, index) => {
     if (!isRecord(entry)) throw new Error(`${context}.clientRoutes[${index}] must be an object`)
     const id = readRequiredString(entry, 'id', `${context}.clientRoutes[${index}]`)
     const path = readRequiredString(entry, 'path', `${context}.clientRoutes[${index}]`)
     if (!path.startsWith('/')) throw new Error(`${context}.clientRoutes[${index}]: "path" must start with "/"`)
+    if (reservedPaths.some((reserved) => path === reserved || (reserved !== '/' && path.startsWith(`${reserved}/`)))) {
+      throw new Error(`${context}.clientRoutes[${index}]: "path" uses a reserved shared-app route prefix`)
+    }
     if (ids.has(id)) throw new Error(`${context}.clientRoutes: route ids must be unique`)
     if (paths.has(path)) throw new Error(`${context}.clientRoutes: route paths must be unique`)
     ids.add(id)

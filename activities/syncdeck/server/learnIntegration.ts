@@ -117,7 +117,12 @@ function sameSecret(left: string, right: string): boolean {
   return leftBytes.length === rightBytes.length && timingSafeEqual(leftBytes, rightBytes)
 }
 
-async function claimNonce(sessions: SessionStore, keyId: string, nonce: string): Promise<boolean> {
+type NonceClaimResult = 'claimed' | 'duplicate' | 'unavailable'
+type StartLockResult =
+  | { state: 'acquired'; release: () => Promise<void> }
+  | { state: 'locked' | 'unavailable' }
+
+async function claimNonce(sessions: SessionStore, keyId: string, nonce: string): Promise<NonceClaimResult> {
   const digest = createHash('sha256').update(`${keyId}\n${nonce}`, 'utf8').digest('hex')
   const valkeyClient = sessions.valkeyStore?.client
   if (valkeyClient) {
@@ -125,10 +130,10 @@ async function claimNonce(sessions: SessionStore, keyId: string, nonce: string):
       const result = await (valkeyClient as unknown as {
         set(...args: unknown[]): Promise<unknown>
       }).set(`learn-syncdeck-nonce:${digest}`, '1', 'PX', NONCE_RETENTION_MS, 'NX')
-      return result === 'OK'
+      return result === 'OK' ? 'claimed' : 'duplicate'
     } catch (error) {
       console.error(JSON.stringify({ activity: 'syncdeck', event: 'learn-nonce-claim-failed', error: error instanceof Error ? error.message : String(error) }))
-      return false
+      return 'unavailable'
     }
   }
 
@@ -136,12 +141,12 @@ async function claimNonce(sessions: SessionStore, keyId: string, nonce: string):
   for (const [knownNonce, expiresAt] of claimedNonces) {
     if (expiresAt <= now) claimedNonces.delete(knownNonce)
   }
-  if (claimedNonces.has(digest)) return false
+  if (claimedNonces.has(digest)) return 'duplicate'
   claimedNonces.set(digest, now + NONCE_RETENTION_MS)
-  return true
+  return 'claimed'
 }
 
-async function claimStartLock(sessions: SessionStore, mapping: string): Promise<(() => Promise<void>) | null> {
+async function claimStartLock(sessions: SessionStore, mapping: string): Promise<StartLockResult> {
   const digest = createHash('sha256').update(mapping, 'utf8').digest('hex')
   const valkeyClient = sessions.valkeyStore?.client
   if (valkeyClient) {
@@ -150,22 +155,22 @@ async function claimStartLock(sessions: SessionStore, mapping: string): Promise<
       const result = await (valkeyClient as unknown as {
         set(...args: unknown[]): Promise<unknown>
       }).set(lockKey, '1', 'PX', 30_000, 'NX')
-      if (result !== 'OK') return null
-      return async () => {
+      if (result !== 'OK') return { state: 'locked' }
+      return { state: 'acquired', release: async () => {
         try {
           await valkeyClient.del(lockKey)
         } catch (error) {
           console.error(JSON.stringify({ activity: 'syncdeck', event: 'learn-start-lock-release-failed', error: error instanceof Error ? error.message : String(error) }))
         }
-      }
+      } }
     } catch (error) {
       console.error(JSON.stringify({ activity: 'syncdeck', event: 'learn-start-lock-claim-failed', error: error instanceof Error ? error.message : String(error) }))
-      return null
+      return { state: 'unavailable' }
     }
   }
-  if (localStartLocks.has(mapping)) return null
+  if (localStartLocks.has(mapping)) return { state: 'locked' }
   localStartLocks.add(mapping)
-  return async () => { localStartLocks.delete(mapping) }
+  return { state: 'acquired', release: async () => { localStartLocks.delete(mapping) } }
 }
 
 async function verifyHmac(req: RouteRequest, method: string, path: string, sessions: SessionStore): Promise<{ ok: true; key: { keyId: string; secret: string }; provider: string } | { ok: false; status: number; error: string }> {
@@ -192,7 +197,11 @@ async function verifyHmac(req: RouteRequest, method: string, path: string, sessi
   if (!/^[a-f0-9]{64}$/i.test(signature) || !sameSecret(expected, signature.toLowerCase())) {
     return { ok: false, status: 401, error: 'Invalid Learn authentication signature' }
   }
-  if (!await claimNonce(sessions, keyId, nonce)) {
+  const nonceClaim = await claimNonce(sessions, keyId, nonce)
+  if (nonceClaim === 'unavailable') {
+    return { ok: false, status: 503, error: 'Learn nonce storage is unavailable' }
+  }
+  if (nonceClaim === 'duplicate') {
     return { ok: false, status: 401, error: 'Replayed Learn authentication request' }
   }
 
@@ -369,11 +378,16 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
     const id = mappingId(auth.key.secret, ACTIVITY_ID, provider, resourceLinkId)
     let entry = await loadEntry(id)
     if (!entry) {
-      const releaseStartLock = await claimStartLock(sessions, id)
-      if (!releaseStartLock) {
+      const startLock = await claimStartLock(sessions, id)
+      if (startLock.state !== 'acquired') {
+        if (startLock.state === 'unavailable') {
+          logLearnRequestFailure('student-entry', 'start-lock-unavailable', { resourceLinkId, status: 503 })
+          return void res.status(503).json({ error: 'Learn session coordination is unavailable' })
+        }
         logLearnRequestFailure('student-entry', 'session-transition-in-progress', { resourceLinkId, status: 409 })
         return void res.status(409).json({ error: 'A Learn session transition is already in progress; retry shortly' })
       }
+      const releaseStartLock = startLock.release
       try {
         entry = await loadEntry(id)
         if (!entry) {
@@ -417,11 +431,16 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
 
     const id = mappingId(auth.key.secret, ACTIVITY_ID, provider, resourceLinkId)
     let entry: { session: SessionRecord; data: LearnEntryData } | null
-    const releaseStartLock = await claimStartLock(sessions, id)
-    if (!releaseStartLock) {
+    const startLock = await claimStartLock(sessions, id)
+    if (startLock.state !== 'acquired') {
+      if (startLock.state === 'unavailable') {
+        logLearnRequestFailure('start', 'start-lock-unavailable', { resourceLinkId, requestId, status: 503 })
+        return void res.status(503).json({ error: 'Learn session coordination is unavailable' })
+      }
       logLearnRequestFailure('start', 'instructor-start-in-progress', { resourceLinkId, requestId, status: 409 })
       return void res.status(409).json({ error: 'A Learn instructor start is already in progress; retry shortly' })
     }
+    const releaseStartLock = startLock.release
     try {
       entry = await loadEntry(id)
       let sessionId: string
@@ -489,7 +508,7 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
         studentLaunchUrl: `/${encodeURIComponent(sessionId!)}`,
       })
     } finally {
-      await releaseStartLock?.()
+      await releaseStartLock()
     }
   })
 

@@ -1513,7 +1513,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       return createSyncDeckInstructorSession(sessions, presentationUrl)
     },
     writeInstructorRecoveryCookie(req, res, sessionId, token) {
-    writeSyncDeckInstructorRecoveryCookie(req, res, sessionId, token)
+      writeSyncDeckInstructorRecoveryCookie(req, res, sessionId, token)
     },
   })
 
