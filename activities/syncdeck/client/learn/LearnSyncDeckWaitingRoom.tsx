@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { readLearnSyncDeckWaitingStatus } from './learnSyncDeckWaitingUtils.js'
 
 type WaitingState =
@@ -7,24 +7,33 @@ type WaitingState =
 
 export default function LearnSyncDeckWaitingRoom() {
   const [state, setState] = useState<WaitingState>({ phase: 'waiting', detail: 'Waiting for your instructor to start the session.' })
+  const requestInFlight = useRef(false)
+  const mounted = useRef(false)
 
   const refresh = useCallback(async (): Promise<void> => {
+    if (requestInFlight.current) return
+    requestInFlight.current = true
     try {
       const status = await readLearnSyncDeckWaitingStatus()
+      if (!mounted.current) return
       if (status.state === 'active' && status.studentLaunchUrl) {
         window.location.replace(status.studentLaunchUrl)
         return
       }
       setState({ phase: 'waiting', detail: 'Waiting for your instructor to start the session.' })
     } catch (error) {
+      if (!mounted.current) return
       setState({
         phase: 'error',
         detail: error instanceof Error ? error.message : 'Unable to check the waiting room.',
       })
+    } finally {
+      requestInFlight.current = false
     }
   }, [])
 
   useEffect(() => {
+    mounted.current = true
     const initialTimer = window.setTimeout(() => {
       void refresh()
     }, 0)
@@ -32,6 +41,7 @@ export default function LearnSyncDeckWaitingRoom() {
       if (!document.hidden) void refresh()
     }, 5_000)
     return () => {
+      mounted.current = false
       window.clearTimeout(initialTimer)
       window.clearInterval(timer)
     }

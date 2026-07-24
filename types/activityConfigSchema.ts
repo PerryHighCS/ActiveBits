@@ -2,6 +2,7 @@ import type {
   ActivityConfig,
   ActivityCreateSessionBootstrapConfig,
   ActivityCreateSessionBootstrapSessionStorageEntry,
+  ActivityClientRoute,
   ActivityDeepLinkOption,
   ActivityDeepLinkOptionChoice,
   ActivityUtility,
@@ -575,6 +576,25 @@ function parseWaitingRoom(raw: unknown, context: string): ActivityWaitingRoomCon
   }
 }
 
+function parseClientRoutes(raw: unknown, context: string): ActivityClientRoute[] | undefined {
+  if (raw == null) return undefined
+  if (!Array.isArray(raw)) throw new Error(`${context}: "clientRoutes" must be an array when provided`)
+
+  const ids = new Set<string>()
+  const paths = new Set<string>()
+  return raw.map((entry, index) => {
+    if (!isRecord(entry)) throw new Error(`${context}.clientRoutes[${index}] must be an object`)
+    const id = readRequiredString(entry, 'id', `${context}.clientRoutes[${index}]`)
+    const path = readRequiredString(entry, 'path', `${context}.clientRoutes[${index}]`)
+    if (!path.startsWith('/')) throw new Error(`${context}.clientRoutes[${index}]: "path" must start with "/"`)
+    if (ids.has(id)) throw new Error(`${context}.clientRoutes: route ids must be unique`)
+    if (paths.has(path)) throw new Error(`${context}.clientRoutes: route paths must be unique`)
+    ids.add(id)
+    paths.add(path)
+    return { id, path }
+  })
+}
+
 function assignOptionalField<K extends keyof ActivityConfig>(
   target: ActivityConfig,
   key: K,
@@ -624,6 +644,7 @@ export function parseActivityConfig(rawConfig: unknown, sourceLabel = 'activity.
   const embeddedRuntime = parseEmbeddedRuntime(rawConfig.embeddedRuntime, context)
   const reportEndpoint = readOptionalString(rawConfig, 'reportEndpoint', context)
   const waitingRoom = parseWaitingRoom(rawConfig.waitingRoom, context)
+  const clientRoutes = parseClientRoutes(rawConfig.clientRoutes, context)
 
   if (utilities?.some((utility) => utility.renderTarget === 'util') && utilMode !== true) {
     throw new Error(`${context}: utilities with "renderTarget: util" require "utilMode: true"`)
@@ -645,6 +666,7 @@ export function parseActivityConfig(rawConfig: unknown, sourceLabel = 'activity.
   assignOptionalField(parsed, 'embeddedRuntime', embeddedRuntime)
   assignOptionalField(parsed, 'reportEndpoint', reportEndpoint)
   assignOptionalField(parsed, 'waitingRoom', waitingRoom)
+  assignOptionalField(parsed, 'clientRoutes', clientRoutes)
 
   return parsed
 }

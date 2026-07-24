@@ -4967,6 +4967,35 @@ void test('create route initializes syncdeck session state', async () => {
   })
 })
 
+void test('create route logs and returns a safe error when session creation fails', async () => {
+  console.info('[TEST] Expected SyncDeck create-session failure log.')
+  const app = createMockApp()
+  const ws = createMockWs()
+  const storeState = createSessionStore({})
+  const originalError = console.error
+  const errorLogs: string[] = []
+  console.error = (...args: unknown[]) => { errorLogs.push(args.map(String).join(' ')) }
+  const failingSessions: SessionStore = {
+    ...storeState.sessions,
+    async set() { throw new Error('test session-store failure') },
+  }
+
+  try {
+    setupSyncDeckRoutes(app, failingSessions, ws)
+    const handler = app.handlers.post['/api/syncdeck/create']
+    assert.equal(typeof handler, 'function')
+
+    const res = createResponse()
+    await handler?.(createRequest({}, {}), res)
+
+    assert.equal(res.statusCode, 500)
+    assert.deepEqual(res.body, { error: 'Unable to create SyncDeck session' })
+    assert.ok(errorLogs.some((entry) => entry.includes('create-session-failed')))
+  } finally {
+    console.error = originalError
+  }
+})
+
 void test('instructor-passcode route restores a temporary SyncDeck instructor from its httpOnly recovery cookie', async () => {
   const app = createMockApp()
   const ws = createMockWs()

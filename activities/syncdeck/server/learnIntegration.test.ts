@@ -169,6 +169,16 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
     )
     assert.equal(invalidWaitLaunchResponse.statusCode, 403)
 
+    console.info('[TEST] Expected waiting-room launch rejection while Learn integration is unconfigured.')
+    delete process.env.LEARN_SYNCDECK_HMAC_SECRET
+    const unconfiguredWaitLaunchResponse = response()
+    await getHandlers.get('/integrations/learn/:activityId/wait/:tokenId')!(
+      { params: { activityId: 'syncdeck', tokenId: launchUrl.pathname.split('/').at(-1) }, query: { token: launchUrl.searchParams.get('token') } },
+      unconfiguredWaitLaunchResponse,
+    )
+    assert.equal(unconfiguredWaitLaunchResponse.statusCode, 403)
+    process.env.LEARN_SYNCDECK_HMAC_SECRET = 'a test-only Learn integration secret that is long enough'
+
     const waitLaunchResponse = response()
     await getHandlers.get('/integrations/learn/:activityId/wait/:tokenId')!(
       { params: { activityId: 'syncdeck', tokenId: launchUrl.pathname.split('/').at(-1) }, query: { token: launchUrl.searchParams.get('token') } },

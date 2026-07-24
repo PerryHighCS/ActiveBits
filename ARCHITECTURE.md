@@ -140,6 +140,12 @@ export default {
       // omit "surfaces" to keep the route hidden from /manage and /
     },
   ],
+  clientRoutes: [                // Optional activity-owned browser routes
+    {
+      id: 'external-waiting-room',
+      path: '/integrations/example/wait',
+    },
+  ],
   // Optional: shared permanent-link modal options and server-side link generation
   deepLinkOptions: {
     presentationUrl: {
@@ -290,6 +296,11 @@ export default {
 ```
 
 The loader merges `{...config, ...clientEntry}`; keeping metadata in `activity.config.ts` avoids dueling sources of truth.
+
+Activities that need browser routes outside the shared session, manager, and utility
+patterns declare `clientRoutes` in their config and export matching
+`ClientRouteComponents` from their client entry. The shared app registers these
+routes generically and never imports an activity implementation directly.
 
 Client entries are lazy-loaded with `React.lazy` so each activity ships in its own Vite chunk, named `activity-<id>-<hash>.js` via `manualChunks` in `client/vite.config.ts`.
 

@@ -13,6 +13,12 @@ const syncdeckConfig: ActivityConfig = {
     title: 'SyncDeck Standalone',
     description: 'Launch a hosted standalone presentation session from a permalink.',
   },
+  clientRoutes: [
+    {
+      id: 'learn-waiting-room',
+      path: '/integrations/learn/syncdeck/wait',
+    },
+  ],
   waitingRoom: {
     fields: [
       {

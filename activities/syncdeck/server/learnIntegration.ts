@@ -510,7 +510,7 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
     const id = mappingId(auth.key.secret, ACTIVITY_ID, provider, resourceLinkId)
     const entry = await loadEntry(id)
     if (!entry?.data.activeSessionId) {
-      logLearnRequestFailure('stop', 'already-inactive', { resourceLinkId, status: 200 })
+      console.info(JSON.stringify({ activity: ACTIVITY_ID, event: 'learn-integration-stop-noop', route: 'stop', reason: 'already-inactive', resourceLinkId, status: 200 }))
       return void res.json({ state: 'inactive', alreadyInactive: true })
     }
     const sessionId = entry.data.activeSessionId
@@ -532,8 +532,12 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
     const tokenId = readString(req.params.tokenId, 256)
     const tokenValue = readString((req as RouteRequest & { query?: Record<string, unknown> }).query?.token, 256)
     const key = configuredKey()
+    if (!key) {
+      logLearnRequestFailure('waiting-room-launch', 'integration-not-configured', { status: 403 })
+      return void res.status(403).json({ error: 'Invalid or expired waiting-room launch' })
+    }
     const token = tokenId && tokenValue ? await consumeBrowserToken(sessions, tokenId, tokenValue) : null
-    if (!key || !token || token.activityId !== ACTIVITY_ID || token.purpose !== 'student-wait') {
+    if (!token || token.activityId !== ACTIVITY_ID || token.purpose !== 'student-wait') {
       logLearnRequestFailure('waiting-room-launch', 'invalid-or-expired-browser-launch', { status: 403 })
       return void res.status(403).json({ error: 'Invalid or expired waiting-room launch' })
     }

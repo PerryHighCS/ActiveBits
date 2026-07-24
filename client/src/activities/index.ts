@@ -1,6 +1,7 @@
 import React, { type ComponentType } from 'react'
 import type {
   ActivityClientModule,
+  ActivityRenderableComponent,
   ActivityConfig,
   ActivityDeepLinkPreflightConfig,
   ActivityDeepLinkPreflightResult,
@@ -273,12 +274,24 @@ export const activities: ActivityRegistryEntry[] = preferredConfigEntries
           'UtilComponent',
         )
       : null
+    const ClientRouteComponents = (cfg.clientRoutes ?? []).reduce<Record<string, ActivityRenderableComponent>>((components, route) => {
+      const Component = createLazyComponent(
+        clientLoader,
+        (resolved) => resolved.ClientRouteComponents?.[route.id],
+        undefined,
+        activityId,
+        `ClientRouteComponents.${route.id}`,
+      )
+      if (Component) components[route.id] = Component
+      return components
+    }, {})
 
     return {
       ...cfg,
       ManagerComponent,
       StudentComponent,
       UtilComponent,
+      ...(Object.keys(ClientRouteComponents).length > 0 ? { ClientRouteComponents } : {}),
       FooterComponent,
       PersistentLinkBuilderComponent,
     }

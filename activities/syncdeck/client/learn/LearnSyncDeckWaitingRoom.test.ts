@@ -18,6 +18,7 @@ void test('readLearnSyncDeckWaitingStatus returns an active launch URL without c
 })
 
 void test('readLearnSyncDeckWaitingStatus surfaces a safe server error', async () => {
+  console.info('[TEST] Expected unavailable Learn waiting-room entry error.')
   await assert.rejects(
     () => readLearnSyncDeckWaitingStatus(async () => new Response(JSON.stringify({ error: 'Waiting-room entry is unavailable' }), { status: 404 })),
     /waiting-room entry is unavailable/i,
@@ -25,17 +26,20 @@ void test('readLearnSyncDeckWaitingStatus surfaces a safe server error', async (
 })
 
 void test('readLearnSyncDeckWaitingStatus falls back to a safe error for a non-JSON response', async () => {
+  console.info('[TEST] Expected non-JSON Learn waiting-room gateway error.')
   await assert.rejects(
     () => readLearnSyncDeckWaitingStatus(async () => new Response('<html>gateway error</html>', { status: 502 })),
     /waiting-room entry is no longer available/i,
   )
 })
 
-void test('readLearnSyncDeckWaitingStatus rejects an absolute student launch URL', async () => {
-  const result = await readLearnSyncDeckWaitingStatus(async () => new Response(JSON.stringify({
-    state: 'active',
-    studentLaunchUrl: 'https://untrusted.example/session',
-  })))
+void test('readLearnSyncDeckWaitingStatus rejects unsafe student launch URLs', async () => {
+  for (const studentLaunchUrl of ['https://untrusted.example/session', '//untrusted.example/session', '/\\untrusted.example/session']) {
+    const result = await readLearnSyncDeckWaitingStatus(async () => new Response(JSON.stringify({
+      state: 'active',
+      studentLaunchUrl,
+    })))
 
-  assert.deepEqual(result, { state: 'active', studentLaunchUrl: null })
+    assert.deepEqual(result, { state: 'active', studentLaunchUrl: null })
+  }
 })

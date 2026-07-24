@@ -1839,12 +1839,15 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
   })
 
   app.post('/api/syncdeck/create', async (req, res) => {
-    const session = await createSyncDeckInstructorSession(sessions)
-
-    writeSyncDeckInstructorRecoveryCookie(req, res, session.sessionId, session.instructorRecoveryToken)
-
     const response = res as unknown as JsonResponse
-    response.json({ id: session.sessionId, instructorPasscode: session.instructorPasscode })
+    try {
+      const session = await createSyncDeckInstructorSession(sessions)
+      writeSyncDeckInstructorRecoveryCookie(req, res, session.sessionId, session.instructorRecoveryToken)
+      response.json({ id: session.sessionId, instructorPasscode: session.instructorPasscode })
+    } catch (error) {
+      console.error(JSON.stringify({ activity: 'syncdeck', event: 'create-session-failed', error: error instanceof Error ? error.message : String(error) }))
+      response.status(500).json({ error: 'Unable to create SyncDeck session' })
+    }
   })
 
   app.post('/api/syncdeck/:sessionId/embedded-context', async (req, res) => {
