@@ -3,12 +3,38 @@ export interface MobCodeGroupState {
   activeFile: string
 }
 
+/** A live participant's private, durable MobCode workspace. */
+export interface MobCodeStudentWorkspace extends MobCodeGroupState {
+  participantId: string
+  displayName: string
+  createdAt: number
+  updatedAt: number
+}
+
+export interface MobCodeSharedExample {
+  sourceParticipantId: string
+  workspace: MobCodeGroupState
+  sharedAt: number
+}
+
+/**
+ * Collaboration state is intentionally MobCode-owned. `groups.default` remains the
+ * instructor workspace so existing live and solo sessions retain their contract.
+ */
+export interface MobCodeStudentCodeState {
+  tryItEnabled: boolean
+  starterVersion: MobCodeGroupState | null
+  studentWorkspaces: Record<string, MobCodeStudentWorkspace>
+  sharedExample: MobCodeSharedExample | null
+}
+
 export interface MobCodeSessionData extends Record<string, unknown> {
   groups: Record<string, MobCodeGroupState>
   instructorPasscode?: string
   /** Opaque, per-session credential for a self-paced student workspace. */
   soloEditToken?: string
   soloMode?: boolean
+  studentCode?: MobCodeStudentCodeState
 }
 
 export type MobCodeStatePayload = MobCodeGroupState
@@ -40,10 +66,14 @@ export type MobCodeMessageType =
   | 'active-file-changed'
   | 'editor-presence-update'
   | 'file-tree-changed'
+  | 'student-code-updated'
+  | 'student-code-settings-changed'
 
 export interface MobCodeMessage {
   type: MobCodeMessageType
   sessionId?: string
   timestamp?: number
+  /** The logical workspace receiving this event; never trusts client authorization. */
+  workspaceId?: string
   payload: unknown
 }

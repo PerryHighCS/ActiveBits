@@ -383,3 +383,6 @@ Capture reusable test setup patterns, common failure modes, and reliability guid
 - Failure signal: Activity browser specs either require ad hoc commands outside the root harness or pile up in the shared root `playwright/` directory even though the behavior belongs to one activity.
 - Follow-up action: For future activity-owned browser flows, create or extend `activities/<activity-id>/playwright/...` and run them through the root `npm run test:e2e` scripts.
 - Owner: Codex
+# MobCode collaboration tests
+
+- Test student response shaping by serializing the scoped snapshot and asserting that another student's display name, paths, and content are absent. This catches accidental leakage when session state grows new collaboration fields.

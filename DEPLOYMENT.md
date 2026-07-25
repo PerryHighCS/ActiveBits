@@ -28,6 +28,7 @@ ActiveBits supports two session storage modes:
 - **WebSocket Keepalive Cache**: In-memory cache (30s TTL) for reducing Valkey traffic
 - **Pub/Sub Channels**: Cross-instance broadcasting for session events
 - **JSON request body budget**: Most routes keep Express's default JSON body limit. Only the `/api/mobcode` route prefix uses an `8mb` parser budget, and MobCode file-state payloads are capped lower at `4 MiB` after parsing.
+- **MobCode student-code retention**: Live student workspaces are retained in the MobCode session record. Each student workspace is capped at 512 KiB; MobCode retains at most 30 student workspaces and 20 MiB of aggregate student-code data. Operators should ensure the backing session store supports records of this size.
 
 ## Render.com Deployment
 

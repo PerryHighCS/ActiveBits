@@ -62,6 +62,11 @@ interface SessionResponse {
       }
     }
     runnerId?: unknown
+    studentCode?: {
+      tryItEnabled?: unknown
+      students?: Array<{ participantId?: unknown; displayName?: unknown }>
+      sharedExample?: { sourceParticipantId?: unknown } | null
+    }
   }
 }
 
@@ -153,6 +158,10 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken, soloM
   const [editorLimitMessage, setEditorLimitMessage] = useState('')
   const [runnerId, setRunnerId] = useState<MobCodeRunnerId>(DEFAULT_MOB_CODE_RUNNER_ID)
   const [runnerMessage, setRunnerMessage] = useState('')
+  const [tryItEnabled, setTryItEnabled] = useState(false)
+  const [studentCodeMessage, setStudentCodeMessage] = useState('')
+  const [studentWorkspaces, setStudentWorkspaces] = useState<Array<{ participantId: string; displayName: string }>>([])
+  const [sharedExampleParticipantId, setSharedExampleParticipantId] = useState<string | null>(null)
   const wsDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const persistDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const latestStateRef = useRef<MobCodeStatePayload>(createStateSnapshot({}, ''))
@@ -201,6 +210,37 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken, soloM
       })
       .catch((error) => console.error('Failed to fetch MobCode session:', error))
   }, [encodedSessionId, replaceFilesState, sessionId])
+
+  useEffect(() => {
+    if (isSolo || !sessionId || !instructorPasscode) return
+    void fetch(`/api/mobcode/${encodedSessionId}/manager-session`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ instructorPasscode }),
+    })
+      .then((response) => response.ok ? response.json() as Promise<SessionResponse> : null)
+      .then((session) => {
+        setTryItEnabled(session?.data?.studentCode?.tryItEnabled === true)
+        const students = session?.data?.studentCode?.students
+        setStudentWorkspaces(Array.isArray(students) ? students.flatMap((student) => typeof student.participantId === 'string' && typeof student.displayName === 'string' ? [{ participantId: student.participantId, displayName: student.displayName }] : []) : [])
+        setSharedExampleParticipantId(typeof session?.data?.studentCode?.sharedExample?.sourceParticipantId === 'string' ? session.data.studentCode.sharedExample.sourceParticipantId : null)
+      })
+      .catch((error) => console.error('Failed to fetch MobCode student-code settings:', error))
+  }, [encodedSessionId, instructorPasscode, isSolo, sessionId])
+
+  const updateStudentCodeSetting = useCallback(async (action: 'try-it' | 'share-changes' | 'share-example' | 'unshare-example', body: Record<string, unknown> = {}) => {
+    if (!sessionId || !instructorPasscode) return
+    try {
+      const response = await fetch(`/api/mobcode/${encodedSessionId}/student-code/${action}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ instructorPasscode, ...body }),
+      })
+      if (!response.ok) throw new Error('Could not update student code settings.')
+      if (action === 'try-it') setTryItEnabled(body.enabled === true)
+      if (action === 'share-example' && typeof body.participantId === 'string') setSharedExampleParticipantId(body.participantId)
+      if (action === 'unshare-example') setSharedExampleParticipantId(null)
+      setStudentCodeMessage(action === 'try-it' ? (body.enabled === true ? 'Try it enabled. Students can edit their own code.' : 'Try it disabled. Student work remains saved.') : action === 'share-changes' ? 'Shared changes published as the student reset version.' : action === 'share-example' ? 'Student work shared anonymously as a runnable example.' : 'Shared example removed.')
+    } catch (error) {
+      setStudentCodeMessage(error instanceof Error ? error.message : 'Could not update student code settings.')
+    }
+  }, [encodedSessionId, instructorPasscode, sessionId])
 
   const buildWsUrl = useCallback(() => {
     if (isSolo || !sessionId) return null
@@ -582,6 +622,10 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken, soloM
           ) : undefined}
           headerActions={(
             <div className="mobcode-header-actions">
+              {canEdit && <>
+                <button type="button" aria-pressed={tryItEnabled} onClick={() => void updateStudentCodeSetting('try-it', { enabled: !tryItEnabled })}>Try it: {tryItEnabled ? 'on' : 'off'}</button>
+                <button type="button" onClick={() => void updateStudentCodeSetting('share-changes')}>Share Changes</button>
+              </>}
               <SettingsMenu theme={theme} onThemeChange={handleThemeChange} label="Theme" />
             </div>
           )}
@@ -624,8 +668,14 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken, soloM
           {runnerMessage}
         </div>
       )}
+      {studentCodeMessage && <div className="border-b border-blue-200 bg-blue-50 px-4 py-2 text-sm text-blue-900" role="status">{studentCodeMessage}</div>}
       <div className="mobcode-workspace">
         <aside className="mobcode-sidebar">
+          {!isSolo && canEdit && (studentWorkspaces.length > 0 || sharedExampleParticipantId) && <section className="border-b border-gray-200 p-3" aria-labelledby="mobcode-students-heading">
+            <h2 id="mobcode-students-heading" className="text-sm font-semibold">Students</h2>
+            {studentWorkspaces.map((student) => <div key={student.participantId} className="mt-2 flex items-center justify-between gap-2 text-sm"><span>{student.displayName}</span><button type="button" onClick={() => void updateStudentCodeSetting('share-example', { participantId: student.participantId })}>{sharedExampleParticipantId === student.participantId ? 'Replace shared example' : 'Share anonymously'}</button></div>)}
+            {sharedExampleParticipantId && <button type="button" className="mt-2 text-sm underline" onClick={() => void updateStudentCodeSetting('unshare-example')}>Unshare example</button>}
+          </section>}
           <VirtualFileExplorer
             files={files}
             activePath={activeFile}

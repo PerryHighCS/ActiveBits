@@ -3,6 +3,7 @@ import { randomBytes, timingSafeEqual } from 'node:crypto'
 import { createSession, type SessionRecord, type SessionStore } from 'activebits-server/core/sessions.js'
 import { createBroadcastSubscriptionHelper } from 'activebits-server/core/broadcastUtils.js'
 import { registerSessionNormalizer } from 'activebits-server/core/sessionNormalization.js'
+import { findAcceptedEntryParticipant } from 'activebits-server/core/acceptedEntryParticipants.js'
 import type { ActiveBitsWebSocket, WsRouter } from '../../../types/websocket.js'
 import type {
   MobCodeEditorPresencePayload,
@@ -11,6 +12,8 @@ import type {
   MobCodeRunnerId,
   MobCodeSelectionRange,
   MobCodeSessionData,
+  MobCodeStudentCodeState,
+  MobCodeStudentWorkspace,
   MobCodeStatePayload,
 } from '../shared/types.js'
 import { isMobCodeRunnerId } from '../shared/types.js'
@@ -42,6 +45,7 @@ interface EmbeddedMobCodeLaunchOptions {
   files?: unknown
   activeFile?: unknown
   runnerId?: unknown
+  startTryItMode?: unknown
 }
 
 const DEFAULT_GROUP_ID = 'default'
@@ -49,6 +53,11 @@ const MAX_FILES = 250
 const MAX_PATH_LENGTH = 240
 const MAX_FILE_CONTENT_LENGTH = 1_000_000
 const MAX_TOTAL_CONTENT_LENGTH = 4 * 1024 * 1024
+const MAX_STUDENT_WORKSPACES = 30
+const MAX_STUDENT_WORKSPACE_BYTES = 512 * 1024
+const MAX_STUDENT_CODE_BYTES = 20 * 1024 * 1024
+const MAX_PARTICIPANT_ID_LENGTH = 128
+const MAX_DISPLAY_NAME_LENGTH = 200
 const INSTRUCTOR_PASSCODE_BYTES = 16
 const MAX_INSTRUCTOR_PASSCODE_LENGTH = 512
 const SOLO_EDIT_TOKEN_BYTES = 24
@@ -139,6 +148,82 @@ function normalizeFiles(value: unknown): Record<string, string> {
   return files
 }
 
+function normalizeGroupState(value: unknown, maxBytes = MAX_TOTAL_CONTENT_LENGTH): MobCodeGroupState {
+  if (!isPlainObject(value)) return { files: {}, activeFile: '' }
+  const files = maxBytes === MAX_TOTAL_CONTENT_LENGTH
+    ? normalizeFiles(value.files)
+    : normalizeFilesToByteLimit(value.files, maxBytes)
+  return { files, activeFile: resolveActiveFile(files, value.activeFile) }
+}
+
+function normalizeFilesToByteLimit(value: unknown, maxBytes: number): Record<string, string> {
+  const fullFiles = normalizeFiles(value)
+  const files: Record<string, string> = {}
+  let totalBytes = 0
+  for (const [path, content] of Object.entries(fullFiles)) {
+    const remainingBytes = maxBytes - totalBytes
+    if (remainingBytes <= 0) break
+    const normalizedContent = truncateUtf8ToByteLimit(content, remainingBytes)
+    files[path] = normalizedContent
+    totalBytes += getUtf8ByteLength(normalizedContent)
+  }
+  return files
+}
+
+function cloneGroupState(group: MobCodeGroupState): MobCodeGroupState {
+  return { files: { ...group.files }, activeFile: group.activeFile }
+}
+
+function getGroupBytes(group: MobCodeGroupState | null): number {
+  return group ? getTotalFileBytes(group.files) : 0
+}
+
+function normalizeStudentCodeState(value: unknown, defaultGroup: MobCodeGroupState, source: Record<string, unknown>): MobCodeStudentCodeState {
+  const raw = isPlainObject(value) ? value : {}
+  const embeddedLaunch = isPlainObject(source.embeddedLaunch) ? source.embeddedLaunch : null
+  const selectedOptions = isPlainObject(embeddedLaunch?.selectedOptions) ? embeddedLaunch.selectedOptions : null
+  const startTryItMode = selectedOptions?.startTryItMode === true
+  const tryItEnabled = raw.tryItEnabled === true || (startTryItMode && !isPlainObject(value))
+  const starterVersion = isPlainObject(raw.starterVersion)
+    ? normalizeGroupState(raw.starterVersion)
+    : tryItEnabled ? cloneGroupState(defaultGroup) : null
+  const workspaces: Record<string, MobCodeStudentWorkspace> = {}
+  const rawWorkspaces = isPlainObject(raw.studentWorkspaces) ? raw.studentWorkspaces : {}
+  let workspaceBytes = getGroupBytes(starterVersion)
+  const ordered = Object.entries(rawWorkspaces)
+    .flatMap(([participantId, workspace]) => isValidParticipantId(participantId) && isPlainObject(workspace)
+      ? [[participantId, workspace] as [string, Record<string, unknown>]]
+      : [])
+    .sort(([, left], [, right]) => Number(right.updatedAt ?? 0) - Number(left.updatedAt ?? 0))
+  for (const [participantId, rawWorkspace] of ordered) {
+    if (Object.keys(workspaces).length >= MAX_STUDENT_WORKSPACES) break
+    const displayName = normalizeDisplayName(rawWorkspace.displayName)
+    if (!displayName) continue
+    const group = normalizeGroupState(rawWorkspace, MAX_STUDENT_WORKSPACE_BYTES)
+    const nextBytes = workspaceBytes + getGroupBytes(group)
+    if (nextBytes > MAX_STUDENT_CODE_BYTES) continue
+    const createdAt = Number.isFinite(rawWorkspace.createdAt) ? Number(rawWorkspace.createdAt) : Date.now()
+    const updatedAt = Number.isFinite(rawWorkspace.updatedAt) ? Number(rawWorkspace.updatedAt) : createdAt
+    workspaces[participantId] = { participantId, displayName, ...group, createdAt, updatedAt }
+    workspaceBytes = nextBytes
+  }
+  const rawShared = isPlainObject(raw.sharedExample) ? raw.sharedExample : null
+  const sharedExample = rawShared && isValidParticipantId(rawShared.sourceParticipantId)
+    ? { sourceParticipantId: rawShared.sourceParticipantId, workspace: normalizeGroupState(rawShared.workspace), sharedAt: Number.isFinite(rawShared.sharedAt) ? Number(rawShared.sharedAt) : Date.now() }
+    : null
+  return { tryItEnabled, starterVersion, studentWorkspaces: workspaces, sharedExample }
+}
+
+function isValidParticipantId(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0 && value.trim().length <= MAX_PARTICIPANT_ID_LENGTH
+}
+
+function normalizeDisplayName(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const normalized = value.trim().slice(0, MAX_DISPLAY_NAME_LENGTH)
+  return normalized || null
+}
+
 function readEmbeddedStarterState(source: Record<string, unknown>): MobCodeGroupState | null {
   const embeddedLaunch = isPlainObject(source.embeddedLaunch) ? source.embeddedLaunch : null
   const selectedOptions = isPlainObject(embeddedLaunch?.selectedOptions) ? embeddedLaunch.selectedOptions : null
@@ -187,6 +272,8 @@ export function normalizeMobCodeSessionData(data: unknown): MobCodeSessionData {
     }
   })()
 
+  const normalizedStudentCode = normalizeStudentCodeState(source.studentCode, defaultGroup, source)
+
   return {
     ...restSource,
     groups: {
@@ -199,7 +286,66 @@ export function normalizeMobCodeSessionData(data: unknown): MobCodeSessionData {
       instructorPasscode.length <= MAX_INSTRUCTOR_PASSCODE_LENGTH
       ? instructorPasscode
       : createInstructorPasscode(),
+    studentCode: normalizedStudentCode,
   }
+}
+
+export function buildMobCodeStudentSnapshot(
+  data: MobCodeSessionData,
+  participantId: string,
+): Record<string, unknown> {
+  const studentCode = data.studentCode ?? normalizeStudentCodeState(null, data.groups[DEFAULT_GROUP_ID] ?? { files: {}, activeFile: '' }, data)
+  const ownWorkspace = studentCode.studentWorkspaces[participantId] ?? null
+  return {
+    groups: { [DEFAULT_GROUP_ID]: data.groups[DEFAULT_GROUP_ID] },
+    studentCode: {
+      tryItEnabled: studentCode.tryItEnabled,
+      starterVersionAvailable: studentCode.starterVersion != null,
+      ownWorkspace,
+      sharedExample: studentCode.sharedExample == null ? null : { workspace: studentCode.sharedExample.workspace, sharedAt: studentCode.sharedExample.sharedAt },
+    },
+    runnerId: readEmbeddedRunnerId(data),
+    soloMode: false,
+    canEditSolo: false,
+  }
+}
+
+export function buildMobCodeManagerSnapshot(data: MobCodeSessionData): Record<string, unknown> {
+  const studentCode = data.studentCode ?? normalizeStudentCodeState(null, data.groups[DEFAULT_GROUP_ID] ?? { files: {}, activeFile: '' }, data)
+  return {
+    groups: data.groups,
+    studentCode: {
+      tryItEnabled: studentCode.tryItEnabled,
+      starterVersionAvailable: studentCode.starterVersion != null,
+      students: Object.values(studentCode.studentWorkspaces).map(({ participantId, displayName, files, activeFile, createdAt, updatedAt }) => ({ participantId, displayName, files, activeFile, createdAt, updatedAt })),
+      sharedExample: studentCode.sharedExample,
+    },
+    runnerId: readEmbeddedRunnerId(data),
+    soloMode: data.soloMode === true,
+  }
+}
+
+function resolveStudentIdentity(session: SessionRecord, participantId: unknown): { participantId: string; displayName: string } | null {
+  if (!isValidParticipantId(participantId)) return null
+  const accepted = findAcceptedEntryParticipant(session, participantId.trim())
+  const displayName = normalizeDisplayName(accepted?.displayName)
+  return displayName ? { participantId: participantId.trim(), displayName } : null
+}
+
+function createStudentWorkspace(
+  data: MobCodeSessionData,
+  identity: { participantId: string; displayName: string },
+): MobCodeStudentWorkspace | null {
+  const studentCode = data.studentCode
+  if (!studentCode?.starterVersion) return null
+  const existing = studentCode.studentWorkspaces[identity.participantId]
+  if (existing) return existing
+  if (Object.keys(studentCode.studentWorkspaces).length >= MAX_STUDENT_WORKSPACES) return null
+  const now = Date.now()
+  const group = normalizeGroupState(studentCode.starterVersion, MAX_STUDENT_WORKSPACE_BYTES)
+  const workspace: MobCodeStudentWorkspace = { participantId: identity.participantId, displayName: identity.displayName, ...group, createdAt: now, updatedAt: now }
+  studentCode.studentWorkspaces[identity.participantId] = workspace
+  return workspace
 }
 
 function asMobCodeSession(session: SessionRecord | null): (SessionRecord & { data: MobCodeSessionData }) | null {
@@ -657,6 +803,157 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
     } catch (error) {
       console.error(JSON.stringify({ event: 'mobcode.fetch-failed', sessionId: req.params.sessionId, error: String(error) }))
       res.status(500).json({ error: 'Failed to fetch session' })
+    }
+  })
+
+  app.post('/api/mobcode/:sessionId/student-workspace', async (req, res) => {
+    try {
+      const session = asMobCodeSession(await sessions.get(readParam(req.params.sessionId)))
+      if (!session || session.data.soloMode === true) {
+        res.status(404).json({ error: 'Session not found' })
+        return
+      }
+      const body = isPlainObject(req.body) ? req.body : {}
+      const identity = resolveStudentIdentity(session, body.participantId)
+      if (!identity) {
+        console.warn(JSON.stringify({ event: 'mobcode.student-workspace-denied', sessionId: req.params.sessionId, reason: 'unaccepted-participant' }))
+        res.status(403).json({ error: 'Waiting-room identity required' })
+        return
+      }
+      const workspace = createStudentWorkspace(session.data, identity)
+      if (workspace) await sessions.set(session.id, session)
+      res.set('Cache-Control', 'no-store')
+      res.json({ id: session.id, type: session.type, data: buildMobCodeStudentSnapshot(session.data, identity.participantId) })
+    } catch (error) {
+      console.error(JSON.stringify({ event: 'mobcode.student-workspace-failed', sessionId: req.params.sessionId, error: String(error) }))
+      res.status(500).json({ error: 'Failed to open student workspace' })
+    }
+  })
+
+  app.post('/api/mobcode/:sessionId/manager-session', async (req, res) => {
+    try {
+      const session = asMobCodeSession(await sessions.get(readParam(req.params.sessionId)))
+      const body = isPlainObject(req.body) ? req.body : {}
+      if (!session || !verifyPasscode(session.data.instructorPasscode, body.instructorPasscode)) {
+        res.status(403).json({ error: 'Forbidden' })
+        return
+      }
+      res.set('Cache-Control', 'no-store')
+      res.json({ id: session.id, type: session.type, data: buildMobCodeManagerSnapshot(session.data) })
+    } catch (error) {
+      console.error(JSON.stringify({ event: 'mobcode.manager-session-failed', sessionId: req.params.sessionId, error: String(error) }))
+      res.status(500).json({ error: 'Failed to fetch manager session' })
+    }
+  })
+
+  app.post('/api/mobcode/:sessionId/student-workspace/state', async (req, res) => {
+    try {
+      const session = asMobCodeSession(await sessions.get(readParam(req.params.sessionId)))
+      const body = isPlainObject(req.body) ? req.body : {}
+      const identity = session ? resolveStudentIdentity(session, body.participantId) : null
+      if (!session || !identity || session.data.soloMode === true) {
+        console.warn(JSON.stringify({ event: 'mobcode.student-state-denied', sessionId: req.params.sessionId, reason: 'unaccepted-participant' }))
+        res.status(403).json({ error: 'Forbidden' })
+        return
+      }
+      if (session.data.studentCode?.tryItEnabled !== true) {
+        console.warn(JSON.stringify({ event: 'mobcode.student-state-denied', sessionId: session.id, participantId: identity.participantId, reason: 'try-it-disabled' }))
+        res.status(423).json({ error: 'Student editing is locked' })
+        return
+      }
+      const payload = readStatePayload(body)
+      if (!payload) {
+        res.status(400).json({ error: 'Invalid state payload' })
+        return
+      }
+      const workspace = createStudentWorkspace(session.data, identity)
+      if (!workspace) {
+        res.status(409).json({ error: 'Student code is not available yet' })
+        return
+      }
+      const group = normalizeGroupState(payload, MAX_STUDENT_WORKSPACE_BYTES)
+      workspace.files = group.files
+      workspace.activeFile = group.activeFile
+      workspace.updatedAt = Date.now()
+      await sessions.set(session.id, session)
+      res.json({ ok: true, workspace: { files: workspace.files, activeFile: workspace.activeFile } })
+    } catch (error) {
+      console.error(JSON.stringify({ event: 'mobcode.student-state-failed', sessionId: req.params.sessionId, error: String(error) }))
+      res.status(500).json({ error: 'Failed to update student workspace' })
+    }
+  })
+
+  app.post('/api/mobcode/:sessionId/student-workspace/reset', async (req, res) => {
+    try {
+      const session = asMobCodeSession(await sessions.get(readParam(req.params.sessionId)))
+      const body = isPlainObject(req.body) ? req.body : {}
+      const identity = session ? resolveStudentIdentity(session, body.participantId) : null
+      if (!session || !identity || session.data.soloMode === true) {
+        res.status(403).json({ error: 'Forbidden' })
+        return
+      }
+      const starter = session.data.studentCode?.starterVersion
+      if (!starter) {
+        res.status(409).json({ error: 'No shared starter version is available' })
+        return
+      }
+      const workspace = createStudentWorkspace(session.data, identity)
+      if (!workspace) {
+        res.status(409).json({ error: 'Student code is not available yet' })
+        return
+      }
+      const reset = normalizeGroupState(starter, MAX_STUDENT_WORKSPACE_BYTES)
+      workspace.files = reset.files
+      workspace.activeFile = reset.activeFile
+      workspace.updatedAt = Date.now()
+      await sessions.set(session.id, session)
+      res.json({ ok: true, workspace: { files: workspace.files, activeFile: workspace.activeFile } })
+    } catch (error) {
+      console.error(JSON.stringify({ event: 'mobcode.student-reset-failed', sessionId: req.params.sessionId, error: String(error) }))
+      res.status(500).json({ error: 'Failed to reset student workspace' })
+    }
+  })
+
+  app.post('/api/mobcode/:sessionId/student-code/:action', async (req, res) => {
+    try {
+      const session = asMobCodeSession(await sessions.get(readParam(req.params.sessionId)))
+      const body = isPlainObject(req.body) ? req.body : {}
+      if (!session || !verifyPasscode(session.data.instructorPasscode, body.instructorPasscode)) {
+        console.warn(JSON.stringify({ event: 'mobcode.student-code-manager-denied', sessionId: req.params.sessionId }))
+        res.status(403).json({ error: 'Forbidden' })
+        return
+      }
+      const action = readParam(req.params.action)
+      const studentCode = session.data.studentCode
+      if (!studentCode) {
+        res.status(409).json({ error: 'Student code is unavailable' })
+        return
+      }
+      if (action === 'try-it') {
+        studentCode.tryItEnabled = body.enabled === true
+        if (studentCode.tryItEnabled && !studentCode.starterVersion) studentCode.starterVersion = cloneGroupState(session.data.groups[DEFAULT_GROUP_ID] ?? { files: {}, activeFile: '' })
+      } else if (action === 'share-changes') {
+        studentCode.starterVersion = cloneGroupState(session.data.groups[DEFAULT_GROUP_ID] ?? { files: {}, activeFile: '' })
+      } else if (action === 'share-example') {
+        const participantId = typeof body.participantId === 'string' ? body.participantId : ''
+        const source = studentCode.studentWorkspaces[participantId]
+        if (!source) {
+          res.status(404).json({ error: 'Student workspace not found' })
+          return
+        }
+        studentCode.sharedExample = { sourceParticipantId: participantId, workspace: cloneGroupState(source), sharedAt: Date.now() }
+      } else if (action === 'unshare-example') {
+        studentCode.sharedExample = null
+      } else {
+        res.status(400).json({ error: 'Unsupported student code action' })
+        return
+      }
+      await sessions.set(session.id, session)
+      await broadcast('student-code-settings-changed', session.data.groups[DEFAULT_GROUP_ID] ?? { files: {}, activeFile: '' }, session.id)
+      res.json({ ok: true, data: buildMobCodeManagerSnapshot(session.data) })
+    } catch (error) {
+      console.error(JSON.stringify({ event: 'mobcode.student-code-manager-failed', sessionId: req.params.sessionId, error: String(error) }))
+      res.status(500).json({ error: 'Failed to update student code settings' })
     }
   })
 

@@ -677,3 +677,8 @@ Document API and data-shape assumptions that must stay compatible over time.
 - Evidence (schema/tests/path): `client/src/components/common/ActivityLauncher.tsx`; `client/src/components/common/activityLauncherUtils.ts`; `client/src/components/common/ActivityLauncher.test.tsx`; `client/src/components/common/activityLauncherUtils.test.ts`; `client/src/App.tsx`
 - Follow-up action: If future activities need server-side launch option hydration beyond manager query params, add an explicit activity-owned contract instead of copying arbitrary launcher query params into session data.
 - Owner: Codex
+# MobCode live student-code contract
+
+- `MobCodeSessionData.studentCode` keeps the live collaboration state activity-local: `tryItEnabled`, an explicit `starterVersion`, participant-keyed private workspaces, and one anonymous shared example. The instructor workspace remains `groups.default`.
+- Student snapshots are built per accepted waiting-room participant and include only instructor code, that participant's own workspace, and the anonymous shared example. Never return the complete `studentWorkspaces` map from a student endpoint.
+- Retention: at most 30 workspaces, 512 KiB each, with a 20 MiB aggregate student-code budget.

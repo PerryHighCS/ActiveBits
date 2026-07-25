@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router'
 import VirtualFileExplorer from '@src/components/common/VirtualFileExplorer'
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
 import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler'
+import { readStoredSessionParticipantIdentity } from '@src/components/common/entryParticipantIdentityUtils'
 import type { MobCodeEditorPresencePayload, MobCodeRunnerId, MobCodeThemeId } from '../../shared/types'
 import { isMobCodeRunnerId } from '../../shared/types'
 import CodeEditor from '../components/CodeEditor'
@@ -66,6 +67,12 @@ interface SessionResponse {
   data?: {
     runnerId?: unknown
     canEditSolo?: unknown
+    studentCode?: {
+      tryItEnabled?: unknown
+      starterVersionAvailable?: unknown
+      ownWorkspace?: { files?: unknown; activeFile?: unknown } | null
+      sharedExample?: { workspace?: { files?: unknown; activeFile?: unknown } } | null
+    }
     groups?: {
       default?: {
         files?: unknown
@@ -190,10 +197,27 @@ function MobCodeLiveStudent({ sessionData }: MobCodeStudentProps) {
   const [theme, setTheme] = useState<MobCodeThemeId>(() => getThemeFromCookie())
   const [instructorPresence, setInstructorPresence] = useState<MobCodeEditorPresencePayload | null>(null)
   const [canResumeSolo, setCanResumeSolo] = useState(false)
+  const [participantId, setParticipantId] = useState<string | null>(null)
+  const [tryItEnabled, setTryItEnabled] = useState(false)
+  const [starterVersionAvailable, setStarterVersionAvailable] = useState(false)
+  const [myWorkspace, setMyWorkspace] = useState<{ files: Record<string, string>; activeFile: string } | null>(null)
+  const [sharedWorkspace, setSharedWorkspace] = useState<{ files: Record<string, string>; activeFile: string } | null>(null)
+  const [workspaceView, setWorkspaceView] = useState<'instructor' | 'mine' | 'shared'>('instructor')
+  const [resetPending, setResetPending] = useState(false)
+  const [workspaceRefresh, setWorkspaceRefresh] = useState(0)
   const latestFilesRef = useRef<Record<string, string>>({})
 
   useEffect(() => {
-    void fetch(`/api/mobcode/${encodedSessionId}/session`)
+    const storedIdentity = typeof sessionStorage === 'undefined'
+      ? null
+      : readStoredSessionParticipantIdentity(sessionStorage, sessionId)
+    setParticipantId(storedIdentity?.studentId ?? null)
+    const studentUrl = storedIdentity?.studentId
+      ? `/api/mobcode/${encodedSessionId}/student-workspace`
+      : `/api/mobcode/${encodedSessionId}/session`
+    void fetch(studentUrl, storedIdentity?.studentId ? {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ participantId: storedIdentity.studentId }),
+    } : undefined)
       .then((res) => (res.ok ? res.json() as Promise<SessionResponse> : null))
       .then((session) => {
         if (!session) return
@@ -205,9 +229,15 @@ function MobCodeLiveStudent({ sessionData }: MobCodeStudentProps) {
         setRunnerMessage('')
         setInstructorPresence(null)
         setCanResumeSolo(session.data?.canEditSolo === true)
+        setTryItEnabled(session.data?.studentCode?.tryItEnabled === true)
+        setStarterVersionAvailable(session.data?.studentCode?.starterVersionAvailable === true)
+        const ownFiles = sanitizeFilesMap(session.data?.studentCode?.ownWorkspace?.files)
+        setMyWorkspace(session.data?.studentCode?.ownWorkspace ? { files: ownFiles, activeFile: resolveActiveFile(ownFiles, session.data.studentCode.ownWorkspace.activeFile) } : null)
+        const sharedFiles = sanitizeFilesMap(session.data?.studentCode?.sharedExample?.workspace?.files)
+        setSharedWorkspace(session.data?.studentCode?.sharedExample ? { files: sharedFiles, activeFile: resolveActiveFile(sharedFiles, session.data.studentCode.sharedExample.workspace?.activeFile) } : null)
       })
       .catch((error) => console.error('Failed to fetch MobCode session:', error))
-  }, [encodedSessionId, sessionId])
+  }, [encodedSessionId, sessionId, workspaceRefresh])
 
   const buildWsUrl = useCallback(() => {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -221,6 +251,10 @@ function MobCodeLiveStudent({ sessionData }: MobCodeStudentProps) {
     onMessage: (event) => {
       const msg = parseMobCodeMessage(event.data)
       if (!msg) return
+      if (msg.type === MOB_CODE_MESSAGE_TYPES.STUDENT_CODE_SETTINGS_CHANGED) {
+        setWorkspaceRefresh((version) => version + 1)
+        return
+      }
       if (
         (msg.type === MOB_CODE_MESSAGE_TYPES.STATE_SYNC || msg.type === MOB_CODE_MESSAGE_TYPES.FILE_TREE_CHANGED) &&
         isStatePayload(msg.payload)
@@ -266,9 +300,10 @@ function MobCodeLiveStudent({ sessionData }: MobCodeStudentProps) {
   }
 
   const handleRunCode = () => {
+    const workspace = workspaceView === 'mine' ? myWorkspace : workspaceView === 'shared' ? sharedWorkspace : null
     const result = openMobCodeRunnerPopup({
-      files,
-      activeFile,
+      files: workspace?.files ?? files,
+      activeFile: workspace?.activeFile ?? activeFile,
       sessionId,
       runnerId,
     })
@@ -283,6 +318,39 @@ function MobCodeLiveStudent({ sessionData }: MobCodeStudentProps) {
     )
   }
 
+  const selectedWorkspace = workspaceView === 'mine' ? myWorkspace : workspaceView === 'shared' ? sharedWorkspace : null
+  const selectedFiles = selectedWorkspace?.files ?? files
+  const selectedActiveFile = selectedWorkspace?.activeFile ?? activeFile
+  const canEditMyCode = workspaceView === 'mine' && tryItEnabled && participantId != null
+
+  const persistMyWorkspace = useCallback(async (nextFiles: Record<string, string>, nextActiveFile: string) => {
+    if (!participantId) return
+    const response = await fetch(`/api/mobcode/${encodedSessionId}/student-workspace/state`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ participantId, files: nextFiles, activeFile: nextActiveFile }),
+    })
+    if (response.status === 423) setTryItEnabled(false)
+    if (!response.ok) throw new Error('Could not save your code.')
+  }, [encodedSessionId, participantId])
+
+  const resetMyCode = useCallback(async () => {
+    if (!participantId) return
+    try {
+      const response = await fetch(`/api/mobcode/${encodedSessionId}/student-workspace/reset`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ participantId }),
+      })
+      if (!response.ok) throw new Error('Could not reset your code.')
+      const payload = await response.json() as { workspace?: { files?: unknown; activeFile?: unknown } }
+      const nextFiles = sanitizeFilesMap(payload.workspace?.files)
+      setMyWorkspace({ files: nextFiles, activeFile: resolveActiveFile(nextFiles, payload.workspace?.activeFile) })
+      setWorkspaceView('mine')
+    } catch (error) {
+      setRunnerMessage(error instanceof Error ? error.message : 'Could not reset your code.')
+    } finally {
+      setResetPending(false)
+    }
+  }, [encodedSessionId, participantId])
+
   const editorThemeClassName = `mobcode-editor-theme-${theme}`
   const studentRunners = getStudentRunnerOptions(runnerId)
 
@@ -293,13 +361,13 @@ function MobCodeLiveStudent({ sessionData }: MobCodeStudentProps) {
   return (
     <div className="mobcode-shell">
       <EditorToolbar
-        files={files}
-        readOnly
+        files={selectedFiles}
+        readOnly={!canEditMyCode}
         theme={theme}
         centerControls={(
           <div className="mobcode-runner-actions">
             <RunnerControls
-              files={files}
+              files={selectedFiles}
               runnerId={runnerId}
               runners={studentRunners}
               onRunCode={handleRunCode}
@@ -320,16 +388,35 @@ function MobCodeLiveStudent({ sessionData }: MobCodeStudentProps) {
       )}
       <div className="mobcode-workspace">
         <aside className="mobcode-sidebar">
-          <VirtualFileExplorer files={files} activePath={activeFile} readOnly onSelect={setActiveFile} />
+          <div className="border-b border-gray-200 p-2" role="tablist" aria-label="Code workspaces">
+            <button type="button" role="tab" aria-selected={workspaceView === 'instructor'} className="mobcode-workspace-tab" onClick={() => setWorkspaceView('instructor')}>Instructor code</button>
+            {myWorkspace && <button type="button" role="tab" aria-selected={workspaceView === 'mine'} className="mobcode-workspace-tab" onClick={() => setWorkspaceView('mine')}>My code</button>}
+            {sharedWorkspace && <button type="button" role="tab" aria-selected={workspaceView === 'shared'} className="mobcode-workspace-tab" onClick={() => setWorkspaceView('shared')}>Shared example</button>}
+            {workspaceView === 'mine' && !tryItEnabled && <p className="mt-2 text-xs text-amber-800" role="status">Try it is off. Your code is safe, but editing is locked.</p>}
+            {workspaceView === 'mine' && starterVersionAvailable && !resetPending && <button type="button" className="mt-2 text-sm underline" onClick={() => setResetPending(true)}>Reset my code</button>}
+            {resetPending && <div className="mt-2 text-sm" role="alert"><p>Replace only My code with the shared starter version? Instructor code and the shared example will not change.</p><button type="button" onClick={() => void resetMyCode()}>Reset my code</button><button type="button" className="ml-2" onClick={() => setResetPending(false)}>Cancel</button></div>}
+          </div>
+          <VirtualFileExplorer files={selectedFiles} activePath={selectedActiveFile} readOnly={!canEditMyCode} onSelect={(path) => {
+            if (workspaceView === 'mine' && myWorkspace) setMyWorkspace({ ...myWorkspace, activeFile: path })
+            else if (workspaceView === 'shared' && sharedWorkspace) setSharedWorkspace({ ...sharedWorkspace, activeFile: path })
+            else setActiveFile(path)
+          }} />
         </aside>
         <main className={`mobcode-editor-pane ${editorThemeClassName}`}>
-          {activeFile ? (
+          {selectedActiveFile ? (
             <CodeEditor
-              value={files[activeFile] ?? ''}
-              filename={activeFile}
+              value={selectedFiles[selectedActiveFile] ?? ''}
+              filename={selectedActiveFile}
               theme={theme}
-              readOnly
-              remotePresence={instructorPresence}
+              readOnly={!canEditMyCode}
+              remotePresence={workspaceView === 'instructor' ? instructorPresence : null}
+              onUpdate={(update) => {
+                if (!canEditMyCode || !update.docChanged || !myWorkspace) return
+                const nextFiles = { ...myWorkspace.files, [selectedActiveFile]: update.state.doc.toString() }
+                const nextWorkspace = { files: nextFiles, activeFile: selectedActiveFile }
+                setMyWorkspace(nextWorkspace)
+                void persistMyWorkspace(nextFiles, selectedActiveFile).catch((error) => setRunnerMessage(error instanceof Error ? error.message : 'Could not save your code.'))
+              }}
             />
           ) : (
             <div className="mobcode-empty">Waiting for instructor to load code...</div>

@@ -3,6 +3,7 @@ import test from 'node:test'
 import type { SessionRecord } from 'activebits-server/core/sessions.js'
 import {
   applyWsRelayMessageToGroupState,
+  buildMobCodeStudentSnapshot,
   hasOpenManagerSessionClients,
   hasOpenSessionClients,
   normalizeMobCodeSessionData,
@@ -145,6 +146,33 @@ void test('normalizeMobCodeSessionData creates default group when missing', () =
   assert.deepEqual(data.groups.default, { files: {}, activeFile: '' })
   assert.equal(typeof data.instructorPasscode, 'string')
   assert.equal(data.instructorPasscode?.length, 32)
+})
+
+void test('normalizeMobCodeSessionData enables embedded Try it with an initial immutable starter snapshot', () => {
+  const data = normalizeMobCodeSessionData({
+    embeddedLaunch: { selectedOptions: { files: { 'main.py': 'print(1)' }, activeFile: 'main.py', startTryItMode: true } },
+  })
+  assert.equal(data.studentCode?.tryItEnabled, true)
+  assert.deepEqual(data.studentCode?.starterVersion, data.groups.default)
+  assert.notEqual(data.studentCode?.starterVersion, data.groups.default)
+})
+
+void test('student snapshots never include another student workspace or identity', () => {
+  const data = normalizeMobCodeSessionData({
+    groups: { default: { files: { 'main.py': 'print("instructor")' }, activeFile: 'main.py' } },
+    studentCode: {
+      tryItEnabled: true,
+      starterVersion: { files: { 'main.py': 'print("starter")' }, activeFile: 'main.py' },
+      studentWorkspaces: {
+        ada: { participantId: 'ada', displayName: 'Ada', files: { 'main.py': 'print("ada")' }, activeFile: 'main.py', createdAt: 1, updatedAt: 2 },
+        grace: { participantId: 'grace', displayName: 'Grace', files: { 'secret.py': 'private' }, activeFile: 'secret.py', createdAt: 1, updatedAt: 3 },
+      },
+      sharedExample: null,
+    },
+  })
+  const snapshot = buildMobCodeStudentSnapshot(data, 'ada')
+  assert.match(JSON.stringify(snapshot), /Ada/)
+  assert.doesNotMatch(JSON.stringify(snapshot), /Grace|secret\.py|private/)
 })
 
 void test('POST /api/mobcode/create-solo creates a server-backed editable workspace from starter files', async () => {
