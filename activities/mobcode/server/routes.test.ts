@@ -2,6 +2,11 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import type { SessionRecord } from 'activebits-server/core/sessions.js'
 import {
+  acceptEntryParticipant,
+  getSessionParticipantCookieName,
+  issueAcceptedEntryParticipantToken,
+} from 'activebits-server/core/acceptedEntryParticipants.js'
+import {
   applyWsRelayMessageToGroupState,
   buildMobCodeManagerSnapshot,
   buildMobCodeStudentSnapshot,
@@ -220,6 +225,48 @@ void test('manager snapshots include named student workspaces for read-only revi
     }],
     sharedExample: null,
   })
+})
+
+void test('participant-scoped MobCode routes reject unauthenticated, forged, locked, and non-manager requests', async () => {
+  console.log('[TEST] Verifying expected MobCode authorization denials.')
+  const app = createMockApp()
+  const ws = createMockWs()
+  const session = createMobCodeSessionRecord()
+  acceptEntryParticipant(session, { participantId: 'ada', displayName: 'Ada' })
+  const participantToken = issueAcceptedEntryParticipantToken(session, 'ada')
+  assert.ok(participantToken)
+  setupMobCodeRoutes(app as never, {
+    async get() {
+      return session
+    },
+    async set() {},
+  }, ws as never)
+
+  const workspaceHandler = app.handlers.post['/api/mobcode/:sessionId/student-workspace']
+  const stateHandler = app.handlers.post['/api/mobcode/:sessionId/student-workspace/state']
+  const actionHandler = app.handlers.post['/api/mobcode/:sessionId/student-code/:action']
+  assert.ok(workspaceHandler && stateHandler && actionHandler)
+
+  for (const headers of [undefined, { cookie: `${getSessionParticipantCookieName(session.id)}=forged` }]) {
+    const response = createResponse()
+    await workspaceHandler({ params: { sessionId: session.id }, body: {}, headers } as never, response)
+    assert.equal(response.statusCode, 403)
+  }
+
+  const lockedResponse = createResponse()
+  await stateHandler({
+    params: { sessionId: session.id },
+    body: { files: { 'Main.java': 'class Main {}' }, activeFile: 'Main.java' },
+    headers: { cookie: `${getSessionParticipantCookieName(session.id)}=${participantToken}` },
+  } as never, lockedResponse)
+  assert.equal(lockedResponse.statusCode, 423)
+
+  const managerResponse = createResponse()
+  await actionHandler({
+    params: { sessionId: session.id, action: 'try-it' },
+    body: { instructorPasscode: 'incorrect', enabled: true },
+  } as never, managerResponse)
+  assert.equal(managerResponse.statusCode, 403)
 })
 
 void test('POST /api/mobcode/create-solo creates a server-backed editable workspace from starter files', async () => {

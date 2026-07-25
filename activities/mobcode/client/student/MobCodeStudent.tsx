@@ -597,7 +597,11 @@ function MobCodeLiveStudent({ sessionData }: MobCodeStudentProps) {
             )}
           </div>
           <VirtualFileExplorer files={selectedFiles} activePath={selectedActiveFile} readOnly={!canEditMyCode} onSelect={(path) => {
-            if (workspaceView === 'mine' && myWorkspace) setMyWorkspace({ ...myWorkspace, activeFile: path })
+            if (workspaceView === 'mine' && myWorkspace) {
+              const nextWorkspace = { ...myWorkspace, activeFile: path }
+              setMyWorkspace(nextWorkspace)
+              scheduleMyWorkspacePersist(nextWorkspace.files, path)
+            }
             else if (workspaceView === 'shared' && sharedWorkspace) setSharedWorkspace({ ...sharedWorkspace, activeFile: path })
             else setActiveFile(path)
           }} />

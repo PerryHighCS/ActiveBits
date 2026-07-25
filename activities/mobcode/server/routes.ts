@@ -187,8 +187,8 @@ function normalizeStudentCodeState(value: unknown, defaultGroup: MobCodeGroupSta
     ? normalizeGroupState(raw.publishedInstructorVersion)
     : cloneGroupState(defaultGroup)
   const starterVersion = isPlainObject(raw.starterVersion)
-    ? normalizeGroupState(raw.starterVersion)
-    : tryItEnabled ? cloneGroupState(defaultGroup) : null
+    ? normalizeGroupState(raw.starterVersion, MAX_STUDENT_WORKSPACE_BYTES)
+    : tryItEnabled ? normalizeGroupState(defaultGroup, MAX_STUDENT_WORKSPACE_BYTES) : null
   const workspaces: Record<string, MobCodeStudentWorkspace> = Object.create(null) as Record<string, MobCodeStudentWorkspace>
   const rawWorkspaces = isPlainObject(raw.studentWorkspaces) ? raw.studentWorkspaces : {}
   let workspaceBytes = getGroupBytes(starterVersion)
@@ -983,12 +983,17 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
       }
       if (action === 'try-it') {
         studentCode.tryItEnabled = body.enabled === true
-        if (studentCode.tryItEnabled && !studentCode.starterVersion) studentCode.starterVersion = cloneGroupState(session.data.groups[DEFAULT_GROUP_ID] ?? { files: {}, activeFile: '' })
+        if (studentCode.tryItEnabled && !studentCode.starterVersion) {
+          studentCode.starterVersion = normalizeGroupState(
+            session.data.groups[DEFAULT_GROUP_ID] ?? { files: {}, activeFile: '' },
+            MAX_STUDENT_WORKSPACE_BYTES,
+          )
+        }
       } else if (action === 'share-changes') {
         studentCode.shareChangesEnabled = body.enabled === true
         if (studentCode.shareChangesEnabled) {
           const currentInstructorWorkspace = session.data.groups[DEFAULT_GROUP_ID] ?? { files: {}, activeFile: '' }
-          studentCode.starterVersion = cloneGroupState(currentInstructorWorkspace)
+          studentCode.starterVersion = normalizeGroupState(currentInstructorWorkspace, MAX_STUDENT_WORKSPACE_BYTES)
           studentCode.publishedInstructorVersion = cloneGroupState(currentInstructorWorkspace)
         }
       } else if (action === 'share-example') {

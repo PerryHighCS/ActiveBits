@@ -938,14 +938,9 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken, soloM
                   </button>
                 )}
                 {selectedStudentWorkspace && (
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected="true"
-                    className="mobcode-workspace-tab"
-                  >
+                  <span className="mobcode-workspace-tab" aria-current="page">
                     {selectedStudentWorkspace.displayName}
-                  </button>
+                  </span>
                 )}
               </div>
               {workspaceSelection.kind === 'instructor' && (
@@ -971,7 +966,7 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken, soloM
             dropPrompt="Drop files or zip archives here to import"
             onSelect={(path) => {
               if (isViewingSharedExample) {
-                setSelectedSharedActiveFile(path)
+                applySharedWorkspace(sharedExampleWorkspace?.files ?? {}, path)
                 return
               }
               if (isViewingStudentWorkspace) {
