@@ -745,27 +745,30 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken, soloM
               </h2>
               {isStudentsExpanded && <div id="mobcode-students-roster">
                 {studentWorkspaces.length === 0 && <p className="mt-2 text-sm text-gray-600">No student workspaces yet.</p>}
-                {studentWorkspaces.map((student) => (
-                  <div key={student.participantId} className="mt-2 flex items-center justify-between gap-2 text-sm">
-                    <button
-                      type="button"
-                      className="text-left underline"
-                      aria-pressed={selectedStudentWorkspaceId === student.participantId}
-                      onClick={() => {
-                        setSelectedStudentWorkspaceId(student.participantId)
-                        setSelectedStudentActiveFile(student.activeFile)
-                      }}
-                    >
-                      {student.displayName}
-                    </button>
-                    <button type="button" onClick={() => void updateStudentCodeSetting(
-                      sharedExampleParticipantId === student.participantId ? 'unshare-example' : 'share-example',
-                      sharedExampleParticipantId === student.participantId ? {} : { participantId: student.participantId },
-                    )}>
-                      {sharedExampleParticipantId === student.participantId ? 'Unshare' : 'Share'}
-                    </button>
-                  </div>
-                ))}
+                {studentWorkspaces.map((student) => {
+                  const isSharedExample = sharedExampleParticipantId === student.participantId
+                  return (
+                    <div key={student.participantId} className="mt-2 flex items-center justify-between gap-2 text-sm">
+                      <button
+                        type="button"
+                        className="text-left underline"
+                        aria-pressed={selectedStudentWorkspaceId === student.participantId}
+                        onClick={() => {
+                          setSelectedStudentWorkspaceId(student.participantId)
+                          setSelectedStudentActiveFile(student.activeFile)
+                        }}
+                      >
+                        {student.displayName}
+                      </button>
+                      <button type="button" onClick={() => void updateStudentCodeSetting(
+                        isSharedExample ? 'unshare-example' : 'share-example',
+                        isSharedExample ? {} : { participantId: student.participantId },
+                      )}>
+                        {isSharedExample ? 'Unshare' : 'Share'}
+                      </button>
+                    </div>
+                  )
+                })}
               </div>}
             </section>
           </>}
