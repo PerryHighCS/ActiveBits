@@ -243,3 +243,4 @@ Track security-relevant boundaries, risks, and mitigation decisions.
 
 - Resolve a MobCode student workspace from the accepted waiting-room participant record, not from a display name or a client-selected workspace identifier. Manager-only settings still require the MobCode instructor passcode.
 - Expected denied student edits (missing accepted identity or Try it disabled) use structured MobCode event logs without source contents.
+- The generic entry-participant consume route now issues an opaque httpOnly token scoped to the accepted session. MobCode reads this token server-side and never accepts a participant ID in its student workspace API bodies.

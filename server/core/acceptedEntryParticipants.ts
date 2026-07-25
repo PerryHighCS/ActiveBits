@@ -1,4 +1,5 @@
 import type { EntryParticipantValues } from './entryParticipants.js'
+import { randomBytes } from 'node:crypto'
 
 export interface AcceptedEntryParticipantRecord {
   participantId: string
@@ -8,6 +9,7 @@ export interface AcceptedEntryParticipantRecord {
 
 interface AcceptedEntryParticipantContainer {
   acceptedEntryParticipants?: Record<string, AcceptedEntryParticipantRecord>
+  participantAuthTokens?: Record<string, string>
 }
 
 export interface AcceptedEntryParticipantSessionLike {
@@ -15,6 +17,7 @@ export interface AcceptedEntryParticipantSessionLike {
 }
 
 const MAX_ACCEPTED_ENTRY_PARTICIPANTS = 100
+const MAX_PARTICIPANT_AUTH_TOKENS = 200
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value != null && typeof value === 'object' && !Array.isArray(value)
@@ -89,6 +92,38 @@ export function findAcceptedEntryParticipant(
 
   const container = session.data as AcceptedEntryParticipantContainer
   return container.acceptedEntryParticipants?.[normalizedParticipantId] ?? null
+}
+
+export function getSessionParticipantCookieName(sessionId: string): string {
+  return `activebits_participant_${Buffer.from(sessionId, 'utf8').toString('base64url')}`
+}
+
+/** Issues an opaque, httpOnly-cookie token for an already accepted participant. */
+export function issueAcceptedEntryParticipantToken(
+  session: AcceptedEntryParticipantSessionLike,
+  participantId: string,
+): string | null {
+  if (!findAcceptedEntryParticipant(session, participantId)) return null
+  const container = getAcceptedEntryParticipantContainer(session)
+  container.participantAuthTokens ??= Object.create(null) as Record<string, string>
+  const token = randomBytes(24).toString('base64url')
+  container.participantAuthTokens[token] = participantId
+  const tokenEntries = Object.entries(container.participantAuthTokens)
+  if (tokenEntries.length > MAX_PARTICIPANT_AUTH_TOKENS) {
+    for (const [expiredToken] of tokenEntries.slice(0, tokenEntries.length - MAX_PARTICIPANT_AUTH_TOKENS)) {
+      delete container.participantAuthTokens[expiredToken]
+    }
+  }
+  return token
+}
+
+export function resolveAcceptedEntryParticipantToken(
+  session: AcceptedEntryParticipantSessionLike,
+  token: unknown,
+): AcceptedEntryParticipantRecord | null {
+  if (typeof token !== 'string' || !isRecord(session.data)) return null
+  const participantId = (session.data as AcceptedEntryParticipantContainer).participantAuthTokens?.[token]
+  return findAcceptedEntryParticipant(session, participantId ?? null)
 }
 
 export function resolveAcceptedEntryParticipantName(

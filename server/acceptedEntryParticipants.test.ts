@@ -3,6 +3,9 @@ import test from 'node:test'
 import {
   acceptEntryParticipant,
   findAcceptedEntryParticipant,
+  getSessionParticipantCookieName,
+  issueAcceptedEntryParticipantToken,
+  resolveAcceptedEntryParticipantToken,
   resolveAcceptedEntryParticipantName,
 } from './core/acceptedEntryParticipants.js'
 import type { SessionRecord } from './core/sessions.js'
@@ -68,4 +71,16 @@ void test('acceptEntryParticipant prunes oldest accepted-entry records when capa
     displayName: 'Student 100',
     acceptedAt: 100,
   })
+})
+
+void test('accepted participant tokens are opaque, session-scoped, and resolve only their participant', () => {
+  const session = createSessionRecord('session-5')
+  acceptEntryParticipant(session, { participantId: 'participant-1', displayName: 'Ada' })
+  const token = issueAcceptedEntryParticipantToken(session, 'participant-1')
+
+  assert.match(token ?? '', /^[A-Za-z0-9_-]{32}$/)
+  assert.deepEqual(resolveAcceptedEntryParticipantToken(session, token), findAcceptedEntryParticipant(session, 'participant-1'))
+  assert.equal(resolveAcceptedEntryParticipantToken(session, 'forged-token'), null)
+  assert.equal(issueAcceptedEntryParticipantToken(session, 'missing'), null)
+  assert.equal(getSessionParticipantCookieName('session-5'), 'activebits_participant_c2Vzc2lvbi01')
 })

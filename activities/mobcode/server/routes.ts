@@ -3,7 +3,7 @@ import { randomBytes, timingSafeEqual } from 'node:crypto'
 import { createSession, type SessionRecord, type SessionStore } from 'activebits-server/core/sessions.js'
 import { createBroadcastSubscriptionHelper } from 'activebits-server/core/broadcastUtils.js'
 import { registerSessionNormalizer } from 'activebits-server/core/sessionNormalization.js'
-import { findAcceptedEntryParticipant } from 'activebits-server/core/acceptedEntryParticipants.js'
+import { getSessionParticipantCookieName, resolveAcceptedEntryParticipantToken } from 'activebits-server/core/acceptedEntryParticipants.js'
 import type { ActiveBitsWebSocket, WsRouter } from '../../../types/websocket.js'
 import type {
   MobCodeEditorPresencePayload,
@@ -333,11 +333,11 @@ export function buildMobCodeManagerSnapshot(data: MobCodeSessionData): Record<st
   }
 }
 
-function resolveStudentIdentity(session: SessionRecord, participantId: unknown): { participantId: string; displayName: string } | null {
-  if (!isValidParticipantId(participantId)) return null
-  const accepted = findAcceptedEntryParticipant(session, participantId.trim())
-  const displayName = normalizeDisplayName(accepted?.displayName)
-  return displayName ? { participantId: participantId.trim(), displayName } : null
+function resolveStudentIdentity(session: SessionRecord, participantToken: unknown): { participantId: string; displayName: string } | null {
+  const accepted = resolveAcceptedEntryParticipantToken(session, participantToken)
+  if (!accepted || !isValidParticipantId(accepted.participantId)) return null
+  const displayName = normalizeDisplayName(accepted.displayName)
+  return displayName ? { participantId: accepted.participantId, displayName } : null
 }
 
 function createStudentWorkspace(
@@ -852,8 +852,7 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
         res.status(404).json({ error: 'Session not found' })
         return
       }
-      const body = isPlainObject(req.body) ? req.body : {}
-      const identity = resolveStudentIdentity(session, body.participantId)
+      const identity = resolveStudentIdentity(session, readRequestCookie(req, getSessionParticipantCookieName(session.id)))
       if (!identity) {
         console.warn(JSON.stringify({ event: 'mobcode.student-workspace-denied', sessionId: req.params.sessionId, reason: 'unaccepted-participant' }))
         res.status(403).json({ error: 'Waiting-room identity required' })
@@ -889,7 +888,7 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
     try {
       const session = asMobCodeSession(await sessions.get(readParam(req.params.sessionId)))
       const body = isPlainObject(req.body) ? req.body : {}
-      const identity = session ? resolveStudentIdentity(session, body.participantId) : null
+      const identity = session ? resolveStudentIdentity(session, readRequestCookie(req, getSessionParticipantCookieName(session.id))) : null
       if (!session || !identity || session.data.soloMode === true) {
         console.warn(JSON.stringify({ event: 'mobcode.student-state-denied', sessionId: req.params.sessionId, reason: 'unaccepted-participant' }))
         res.status(403).json({ error: 'Forbidden' })
@@ -921,8 +920,7 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
   app.post('/api/mobcode/:sessionId/student-workspace/reset', async (req, res) => {
     try {
       const session = asMobCodeSession(await sessions.get(readParam(req.params.sessionId)))
-      const body = isPlainObject(req.body) ? req.body : {}
-      const identity = session ? resolveStudentIdentity(session, body.participantId) : null
+      const identity = session ? resolveStudentIdentity(session, readRequestCookie(req, getSessionParticipantCookieName(session.id))) : null
       if (!session || !identity || session.data.soloMode === true) {
         res.status(403).json({ error: 'Forbidden' })
         return

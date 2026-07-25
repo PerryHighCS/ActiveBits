@@ -3,7 +3,6 @@ import { useLocation, useNavigate } from 'react-router'
 import VirtualFileExplorer from '@src/components/common/VirtualFileExplorer'
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
 import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler'
-import { readStoredSessionParticipantIdentity } from '@src/components/common/entryParticipantIdentityUtils'
 import type { MobCodeEditorPresencePayload, MobCodeRunnerId, MobCodeThemeId } from '../../shared/types'
 import { isMobCodeRunnerId } from '../../shared/types'
 import CodeEditor from '../components/CodeEditor'
@@ -197,7 +196,6 @@ function MobCodeLiveStudent({ sessionData }: MobCodeStudentProps) {
   const [theme, setTheme] = useState<MobCodeThemeId>(() => getThemeFromCookie())
   const [instructorPresence, setInstructorPresence] = useState<MobCodeEditorPresencePayload | null>(null)
   const [canResumeSolo, setCanResumeSolo] = useState(false)
-  const [participantId, setParticipantId] = useState<string | null>(null)
   const [tryItEnabled, setTryItEnabled] = useState(false)
   const [starterVersionAvailable, setStarterVersionAvailable] = useState(false)
   const [myWorkspace, setMyWorkspace] = useState<{ files: Record<string, string>; activeFile: string } | null>(null)
@@ -208,17 +206,12 @@ function MobCodeLiveStudent({ sessionData }: MobCodeStudentProps) {
   const latestFilesRef = useRef<Record<string, string>>({})
 
   useEffect(() => {
-    const storedIdentity = typeof sessionStorage === 'undefined'
-      ? null
-      : readStoredSessionParticipantIdentity(sessionStorage, sessionId)
-    setParticipantId(storedIdentity?.studentId ?? null)
-    const studentUrl = storedIdentity?.studentId
-      ? `/api/mobcode/${encodedSessionId}/student-workspace`
-      : `/api/mobcode/${encodedSessionId}/session`
-    void fetch(studentUrl, storedIdentity?.studentId ? {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ participantId: storedIdentity.studentId }),
-    } : undefined)
-      .then((res) => (res.ok ? res.json() as Promise<SessionResponse> : null))
+    void fetch(`/api/mobcode/${encodedSessionId}/student-workspace`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+    })
+      .then(async (res) => res.ok
+        ? res.json() as Promise<SessionResponse>
+        : fetch(`/api/mobcode/${encodedSessionId}/session`).then((fallback) => fallback.ok ? fallback.json() as Promise<SessionResponse> : null))
       .then((session) => {
         if (!session) return
         const nextFiles = sanitizeFilesMap(session.data?.groups?.default?.files)
@@ -321,23 +314,21 @@ function MobCodeLiveStudent({ sessionData }: MobCodeStudentProps) {
   const selectedWorkspace = workspaceView === 'mine' ? myWorkspace : workspaceView === 'shared' ? sharedWorkspace : null
   const selectedFiles = selectedWorkspace?.files ?? files
   const selectedActiveFile = selectedWorkspace?.activeFile ?? activeFile
-  const canEditMyCode = workspaceView === 'mine' && tryItEnabled && participantId != null
+  const canEditMyCode = workspaceView === 'mine' && tryItEnabled && myWorkspace != null
 
   const persistMyWorkspace = useCallback(async (nextFiles: Record<string, string>, nextActiveFile: string) => {
-    if (!participantId) return
     const response = await fetch(`/api/mobcode/${encodedSessionId}/student-workspace/state`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ participantId, files: nextFiles, activeFile: nextActiveFile }),
+      body: JSON.stringify({ files: nextFiles, activeFile: nextActiveFile }),
     })
     if (response.status === 423) setTryItEnabled(false)
     if (!response.ok) throw new Error('Could not save your code.')
-  }, [encodedSessionId, participantId])
+  }, [encodedSessionId])
 
   const resetMyCode = useCallback(async () => {
-    if (!participantId) return
     try {
       const response = await fetch(`/api/mobcode/${encodedSessionId}/student-workspace/reset`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ participantId }),
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
       })
       if (!response.ok) throw new Error('Could not reset your code.')
       const payload = await response.json() as { workspace?: { files?: unknown; activeFile?: unknown } }
@@ -349,7 +340,7 @@ function MobCodeLiveStudent({ sessionData }: MobCodeStudentProps) {
     } finally {
       setResetPending(false)
     }
-  }, [encodedSessionId, participantId])
+  }, [encodedSessionId])
 
   const editorThemeClassName = `mobcode-editor-theme-${theme}`
   const studentRunners = getStudentRunnerOptions(runnerId)
@@ -411,7 +402,7 @@ function MobCodeLiveStudent({ sessionData }: MobCodeStudentProps) {
               readOnly={!canEditMyCode}
               remotePresence={workspaceView === 'instructor' ? instructorPresence : null}
               onUpdate={(update) => {
-                if (!canEditMyCode || !update.docChanged || !myWorkspace) return
+                if (!canEditMyCode || !update.docChanged) return
                 const nextFiles = { ...myWorkspace.files, [selectedActiveFile]: update.state.doc.toString() }
                 const nextWorkspace = { files: nextFiles, activeFile: selectedActiveFile }
                 setMyWorkspace(nextWorkspace)
