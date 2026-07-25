@@ -57,6 +57,14 @@ export function shouldSelectMyCodeFromTryItSettings(previousTryItEnabled: boolea
   return !previousTryItEnabled && nextTryItEnabled
 }
 
+export function shouldSelectInstructorFromBroadcastSettings(
+  shouldSelectMyCode: boolean,
+  previousShareChangesEnabled: boolean,
+  nextShareChangesEnabled: boolean,
+): boolean {
+  return !shouldSelectMyCode && !previousShareChangesEnabled && nextShareChangesEnabled
+}
+
 function waitForEmbeddedEntryParticipantHandoff(sessionId: string): Promise<void> {
   if (typeof sessionStorage === 'undefined' || !isEmbeddedMobCodeChildSession(sessionId)) {
     return Promise.resolve()
@@ -317,7 +325,12 @@ function MobCodeLiveStudent({ sessionData }: MobCodeStudentProps) {
           ? { files: ownFiles, activeFile: resolveActiveFile(ownFiles, session.data.studentCode.ownWorkspace.activeFile) }
           : null
         setMyWorkspace(nextMyWorkspace)
-        if (shouldAutoSelectMyCodeOnTryItStart(previousTryItEnabledRef.current, nextTryItEnabled, nextMyWorkspace != null)) {
+        const shouldSelectMyCode = shouldAutoSelectMyCodeOnTryItStart(
+          previousTryItEnabledRef.current,
+          nextTryItEnabled,
+          nextMyWorkspace != null,
+        )
+        if (shouldSelectMyCode) {
           setWorkspaceView('mine')
         }
         previousTryItEnabledRef.current = nextTryItEnabled
@@ -327,9 +340,13 @@ function MobCodeLiveStudent({ sessionData }: MobCodeStudentProps) {
           : null
         const nextShareChangesEnabled = session.data?.studentCode?.shareChangesEnabled === true
         setShareChangesEnabled(nextShareChangesEnabled)
-        if (!previousSharedExampleAvailableRef.current && nextSharedWorkspace != null) {
+        if (!shouldSelectMyCode && !previousSharedExampleAvailableRef.current && nextSharedWorkspace != null) {
           setWorkspaceView('shared')
-        } else if (!previousShareChangesEnabledRef.current && nextShareChangesEnabled) {
+        } else if (shouldSelectInstructorFromBroadcastSettings(
+          shouldSelectMyCode,
+          previousShareChangesEnabledRef.current,
+          nextShareChangesEnabled,
+        )) {
           setWorkspaceView('instructor')
         } else if (previousSharedExampleAvailableRef.current && nextSharedWorkspace == null) {
           setWorkspaceView('instructor')
@@ -361,11 +378,17 @@ function MobCodeLiveStudent({ sessionData }: MobCodeStudentProps) {
           activeFile?: unknown
         }
         const nextTryItEnabled = settingsPayload.tryItEnabled === true
-        if (shouldSelectMyCodeFromTryItSettings(previousTryItEnabledRef.current, nextTryItEnabled)) {
+        const shouldSelectMyCode = shouldSelectMyCodeFromTryItSettings(previousTryItEnabledRef.current, nextTryItEnabled)
+        if (shouldSelectMyCode) {
           setTryItEnabled(true)
           previousTryItEnabledRef.current = true
           setWorkspaceView('mine')
         }
+        const shouldSelectInstructor = shouldSelectInstructorFromBroadcastSettings(
+          shouldSelectMyCode,
+          previousShareChangesEnabledRef.current,
+          settingsPayload.shareChangesEnabled === true,
+        )
         if (settingsPayload.shareChangesEnabled === true && isStatePayload(settingsPayload)) {
           const nextFiles = settingsPayload.files
           previousShareChangesEnabledRef.current = true
@@ -373,7 +396,7 @@ function MobCodeLiveStudent({ sessionData }: MobCodeStudentProps) {
           latestFilesRef.current = nextFiles
           setFiles(nextFiles)
           setActiveFile(resolveActiveFile(nextFiles, settingsPayload.activeFile))
-          setWorkspaceView('instructor')
+          if (shouldSelectInstructor) setWorkspaceView('instructor')
         }
         setWorkspaceRefresh((version) => version + 1)
         return

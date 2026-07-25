@@ -10,6 +10,7 @@ import {
   resolveStudentActiveFileChange,
   sanitizeStudentPresenceUpdate,
   shouldAutoSelectMyCodeOnTryItStart,
+  shouldSelectInstructorFromBroadcastSettings,
   shouldSelectMyCodeFromTryItSettings,
 } from './MobCodeStudent'
 import type { MobCodeRunnerId } from '../../shared/types'
@@ -58,6 +59,12 @@ void test('shouldSelectMyCodeFromTryItSettings switches immediately when Try it 
   assert.equal(shouldSelectMyCodeFromTryItSettings(false, true), true)
   assert.equal(shouldSelectMyCodeFromTryItSettings(true, true), false)
   assert.equal(shouldSelectMyCodeFromTryItSettings(false, false), false)
+})
+
+void test('Try it selection takes priority over the Broadcast workspace selection', () => {
+  assert.equal(shouldSelectInstructorFromBroadcastSettings(true, false, true), false)
+  assert.equal(shouldSelectInstructorFromBroadcastSettings(false, false, true), true)
+  assert.equal(shouldSelectInstructorFromBroadcastSettings(false, true, true), false)
 })
 
 void test('resolveStudentActiveFileChange ignores missing active-file updates', () => {
