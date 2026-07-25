@@ -161,6 +161,278 @@
   color: #64748b;
 }
 
+.mobcode-toggle-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: 2.25rem;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  background: #ffffff;
+  padding: 0.35rem 0.75rem;
+  color: #374151;
+  font-size: 0.875rem;
+  font-weight: 600;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.mobcode-toggle-button:hover {
+  background: #f9fafb;
+}
+
+.mobcode-toggle-button:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
+.mobcode-toggle-button--active {
+  border-color: #16a34a;
+  background: #f0fdf4;
+  color: #15803d;
+}
+
+.mobcode-status-dot {
+  display: inline-block;
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #9ca3af;
+}
+
+.mobcode-status-dot--active {
+  background: #22c55e;
+  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.16);
+}
+
+.mobcode-status-message {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.mobcode-secondary-button {
+  min-height: 2.25rem;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  background: #ffffff;
+  padding: 0.35rem 0.75rem;
+  color: #374151;
+  font-size: 0.875rem;
+  font-weight: 500;
+  transition: background-color 0.15s ease;
+}
+
+.mobcode-secondary-button:hover:not(:disabled) {
+  background: #f9fafb;
+}
+
+.mobcode-secondary-button:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
+.mobcode-secondary-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.mobcode-text-button {
+  border-radius: 6px;
+  padding: 0.2rem 0.4rem;
+  margin-left: -0.4rem;
+  color: #1d4ed8;
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.mobcode-text-button:hover {
+  background: #eff6ff;
+}
+
+.mobcode-text-button:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
+.mobcode-workspace-tabs-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.mobcode-students-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.mobcode-workspace-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+
+.mobcode-workspace-tab {
+  border: 1px solid transparent;
+  border-bottom: 2px solid transparent;
+  border-radius: 6px 6px 0 0;
+  padding: 0.4rem 0.75rem;
+  color: #6b7280;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  background: transparent;
+}
+
+.mobcode-workspace-tab:hover {
+  color: #111827;
+  background: #f3f4f6;
+}
+
+.mobcode-workspace-tab[aria-selected='true'] {
+  color: #1d4ed8;
+  background: #eff6ff;
+  border-bottom-color: #2563eb;
+}
+
+.mobcode-workspace-tab:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
+.mobcode-disclosure-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border-radius: 6px;
+  margin: -0.25rem -0.4rem;
+  padding: 0.25rem 0.4rem;
+  color: #111827;
+}
+
+.mobcode-disclosure-button:hover {
+  background: #f3f4f6;
+}
+
+.mobcode-disclosure-button:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
+.mobcode-disclosure-caret {
+  display: inline-block;
+  transition: transform 0.15s ease;
+}
+
+.mobcode-disclosure-caret--open {
+  transform: rotate(90deg);
+}
+
+.mobcode-student-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.mobcode-student-select {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  border-radius: 6px;
+  padding: 0.3rem 0.5rem;
+  color: #374151;
+  font-size: 0.8125rem;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mobcode-student-select:hover {
+  background: #f3f4f6;
+}
+
+.mobcode-student-select:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
+.mobcode-student-select[aria-current='true'] {
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-weight: 600;
+}
+
+.mobcode-student-action {
+  flex-shrink: 0;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  padding: 0.2rem 0.55rem;
+  color: #374151;
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.mobcode-student-action:hover {
+  background: #f9fafb;
+}
+
+.mobcode-student-action:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
+.mobcode-confirm-panel {
+  border: 1px solid #fde68a;
+  border-radius: 8px;
+  background: #fffbeb;
+  padding: 0.6rem 0.75rem;
+  color: #92400e;
+  font-size: 0.8125rem;
+}
+
+.mobcode-confirm-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.mobcode-confirm-danger {
+  border: 1px solid #b45309;
+  border-radius: 6px;
+  background: #b45309;
+  padding: 0.3rem 0.65rem;
+  color: #ffffff;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.mobcode-confirm-danger:hover {
+  background: #92400e;
+}
+
+.mobcode-confirm-cancel {
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  background: #ffffff;
+  padding: 0.3rem 0.65rem;
+  color: #374151;
+  font-size: 0.75rem;
+}
+
+.mobcode-confirm-cancel:hover {
+  background: #f9fafb;
+}
+
+.mobcode-confirm-danger:focus-visible,
+.mobcode-confirm-cancel:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
 @media (max-width: 760px) {
   .mobcode-workspace {
     grid-template-columns: 1fr;

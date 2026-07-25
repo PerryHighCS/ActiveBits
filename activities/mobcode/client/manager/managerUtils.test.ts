@@ -7,6 +7,7 @@ import {
   createLiveContentSyncPlan,
   createStateSnapshot,
   flushPendingMobCodeCleanupWork,
+  resolveMobCodeHasUnsharedChanges,
   sendMobCodeWsMessage,
   shouldApplyRemoteStateMessage,
 } from './managerUtils'
@@ -32,6 +33,19 @@ void test('shouldApplyRemoteStateMessage keeps editable manager state authoritat
   assert.equal(shouldApplyRemoteStateMessage('file-tree-changed', true), false)
   assert.equal(shouldApplyRemoteStateMessage('state-sync', false), true)
   assert.equal(shouldApplyRemoteStateMessage('file-content-update', true), true)
+})
+
+void test('resolveMobCodeHasUnsharedChanges treats any files as unshared before a starter version exists', () => {
+  assert.equal(resolveMobCodeHasUnsharedChanges({ 'main.py': 'print(1)' }, null), true)
+  assert.equal(resolveMobCodeHasUnsharedChanges({}, null), false)
+})
+
+void test('resolveMobCodeHasUnsharedChanges detects content, added, and removed file changes against the starter version', () => {
+  const starter = { 'main.py': 'print(1)' }
+  assert.equal(resolveMobCodeHasUnsharedChanges({ 'main.py': 'print(1)' }, starter), false)
+  assert.equal(resolveMobCodeHasUnsharedChanges({ 'main.py': 'print(2)' }, starter), true)
+  assert.equal(resolveMobCodeHasUnsharedChanges({ 'main.py': 'print(1)', 'util.py': '' }, starter), true)
+  assert.equal(resolveMobCodeHasUnsharedChanges({ 'util.py': 'print(1)' }, starter), true)
 })
 
 void test('createLiveContentSyncPlan sends immediately on first sync or after the throttle window', () => {

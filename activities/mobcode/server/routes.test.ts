@@ -208,6 +208,7 @@ void test('manager snapshots include named student workspaces for read-only revi
   assert.deepEqual(snapshot.studentCode, {
     tryItEnabled: true,
     starterVersionAvailable: true,
+    starterVersion: { files: { 'main.py': 'print("starter")' }, activeFile: 'main.py' },
     students: [{
       participantId: 'ada',
       displayName: 'Ada',

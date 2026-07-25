@@ -465,13 +465,32 @@ function MobCodeLiveStudent({ sessionData }: MobCodeStudentProps) {
       )}
       <div className="mobcode-workspace">
         <aside className="mobcode-sidebar">
-          <div className="border-b border-gray-200 p-2" role="tablist" aria-label="Code workspaces">
-            <button type="button" role="tab" aria-selected={workspaceView === 'instructor'} className="mobcode-workspace-tab" onClick={() => setWorkspaceView('instructor')}>Instructor code</button>
-            {myWorkspace && <button type="button" role="tab" aria-selected={workspaceView === 'mine'} className="mobcode-workspace-tab" onClick={() => setWorkspaceView('mine')}>My code</button>}
-            {sharedWorkspace && <button type="button" role="tab" aria-selected={workspaceView === 'shared'} className="mobcode-workspace-tab" onClick={() => setWorkspaceView('shared')}>Shared example</button>}
-            {workspaceView === 'mine' && !tryItEnabled && <p className="mt-2 text-xs text-amber-800" role="status">Try it is off. Your code is safe, but editing is locked.</p>}
-            {workspaceView === 'mine' && starterVersionAvailable && !resetPending && <button type="button" className="mt-2 text-sm underline" onClick={() => setResetPending(true)}>Reset my code</button>}
-            {resetPending && <div className="mt-2 text-sm" role="alert"><p>Replace only My code with the shared starter version? Instructor code and the shared example will not change.</p><button type="button" onClick={() => void resetMyCode()}>Reset my code</button><button type="button" className="ml-2" onClick={() => setResetPending(false)}>Cancel</button></div>}
+          <div className="border-b border-gray-200 p-2">
+            <div className="mobcode-workspace-tabs" role="tablist" aria-label="Code workspaces">
+              <button type="button" role="tab" aria-selected={workspaceView === 'instructor'} className="mobcode-workspace-tab" onClick={() => setWorkspaceView('instructor')}>Instructor</button>
+              {myWorkspace && <button type="button" role="tab" aria-selected={workspaceView === 'mine'} className="mobcode-workspace-tab" onClick={() => setWorkspaceView('mine')}>My Code</button>}
+              {sharedWorkspace && <button type="button" role="tab" aria-selected={workspaceView === 'shared'} className="mobcode-workspace-tab" onClick={() => setWorkspaceView('shared')}>Shared</button>}
+            </div>
+            {workspaceView === 'mine' && !tryItEnabled && (
+              <p className="mobcode-status-message mt-2 text-xs text-amber-800" role="status">
+                <span aria-hidden="true" className="mobcode-status-dot" />
+                Try it is off. Your code is safe, but editing is locked.
+              </p>
+            )}
+            {workspaceView === 'mine' && starterVersionAvailable && !resetPending && (
+              <button type="button" className="mobcode-text-button mt-2" onClick={() => setResetPending(true)}>
+                Reset my code
+              </button>
+            )}
+            {resetPending && (
+              <div className="mobcode-confirm-panel mt-2" role="alert">
+                <p>Replace only My code with the shared starter version? Instructor code and the shared example will not change.</p>
+                <div className="mobcode-confirm-actions">
+                  <button type="button" className="mobcode-confirm-danger" onClick={() => void resetMyCode()}>Reset my code</button>
+                  <button type="button" className="mobcode-confirm-cancel" onClick={() => setResetPending(false)}>Cancel</button>
+                </div>
+              </div>
+            )}
           </div>
           <VirtualFileExplorer files={selectedFiles} activePath={selectedActiveFile} readOnly={!canEditMyCode} onSelect={(path) => {
             if (workspaceView === 'mine' && myWorkspace) setMyWorkspace({ ...myWorkspace, activeFile: path })
