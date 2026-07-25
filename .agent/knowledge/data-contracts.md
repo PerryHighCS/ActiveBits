@@ -679,7 +679,8 @@ Document API and data-shape assumptions that must stay compatible over time.
 - Owner: Codex
 # MobCode live student-code contract
 
-- `MobCodeSessionData.studentCode` keeps the live collaboration state activity-local: `tryItEnabled`, an explicit `starterVersion`, participant-keyed private workspaces, and one anonymous shared example. The instructor workspace remains `groups.default`.
-- Student snapshots are built per accepted waiting-room participant and include only instructor code, that participant's own workspace, and the anonymous shared example. Never return the complete `studentWorkspaces` map from a student endpoint.
+- `MobCodeSessionData.studentCode` keeps the live collaboration state activity-local: `tryItEnabled`, `shareChangesEnabled`, explicit starter and last-published instructor snapshots, participant-keyed private workspaces, and one anonymous shared example. The instructor workspace remains `groups.default`.
+- Student snapshots are built per accepted waiting-room participant and include only the last published instructor code, that participant's own workspace, and the anonymous shared example. Never return the complete `studentWorkspaces` map from a student endpoint.
+- The instructor-only shared-workspace state route mutates only `studentCode.sharedExample.workspace`; manager file operations must select that route whenever the shared tab is active, never the instructor `groups.default` state route.
 - Retention: at most 30 workspaces, 512 KiB each, with a 20 MiB aggregate student-code budget.
 - Manager snapshots include named student workspaces, including files and active file, only after manager-passcode authorization. Student workspace create, save, and reset routes broadcast `student-code-updated`; manager clients use that signal only to refetch their authorized snapshot rather than carrying student code in websocket payloads.

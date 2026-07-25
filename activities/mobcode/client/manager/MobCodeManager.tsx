@@ -618,19 +618,6 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken, soloM
     [applyFiles, canEdit],
   )
 
-  const handleDroppedFiles = useCallback(
-    async (droppedFiles: File[]) => {
-      if (!canEdit) return
-      try {
-        const result = await extractImportedFiles(droppedFiles)
-        importFilesIntoWorkspace(result.files, result.skipped.length)
-      } catch (error) {
-        setFileImportMessage(error instanceof Error ? error.message : 'Could not import dropped files')
-      }
-    },
-    [canEdit, importFilesIntoWorkspace],
-  )
-
   const handleThemeChange = (nextTheme: MobCodeThemeId) => {
     setTheme(nextTheme)
     setThemeCookie(nextTheme)
@@ -660,6 +647,43 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken, soloM
     if (!response.ok) throw new Error('Could not save shared code.')
   }, [encodedSessionId, instructorPasscode, sessionId])
 
+  const applySharedWorkspace = useCallback((nextFiles: Record<string, string>, nextActiveFile: string) => {
+    const nextWorkspace = { files: nextFiles, activeFile: nextActiveFile }
+    setSharedExampleWorkspace(nextWorkspace)
+    setSelectedSharedActiveFile(nextActiveFile)
+    void persistSharedWorkspace(nextFiles, nextActiveFile).catch((error) => {
+      setRunnerMessage(error instanceof Error ? error.message : 'Could not save shared code.')
+    })
+  }, [persistSharedWorkspace])
+
+  const applyVisibleFiles = useCallback((nextFiles: Record<string, string>, nextActiveFile: string) => {
+    if (isViewingSharedExample) {
+      applySharedWorkspace(nextFiles, nextActiveFile)
+      return
+    }
+    applyFiles(nextFiles, nextActiveFile)
+  }, [applyFiles, applySharedWorkspace, isViewingSharedExample])
+
+  const importVisibleFiles = useCallback((importedFiles: Record<string, string>, skippedCount = 0) => {
+    if (!canEditVisibleWorkspace) return
+    const nextFiles = sanitizeFilesMap({ ...visibleFiles, ...importedFiles })
+    const importedPaths = Object.keys(importedFiles).sort((a, b) => a.localeCompare(b))
+    const focusPath = importedPaths.find((path) => Object.hasOwn(nextFiles, path)) ?? visibleActiveFile
+    const nextActiveFile = resolveActiveFile(nextFiles, focusPath)
+    setFileImportMessage(skippedCount > 0 ? `${skippedCount} files skipped` : '')
+    applyVisibleFiles(nextFiles, nextActiveFile)
+  }, [applyVisibleFiles, canEditVisibleWorkspace, visibleActiveFile, visibleFiles])
+
+  const handleVisibleDroppedFiles = useCallback(async (droppedFiles: File[]) => {
+    if (!canEditVisibleWorkspace) return
+    try {
+      const result = await extractImportedFiles(droppedFiles)
+      importVisibleFiles(result.files, result.skipped.length)
+    } catch (error) {
+      setFileImportMessage(error instanceof Error ? error.message : 'Could not import dropped files')
+    }
+  }, [canEditVisibleWorkspace, importVisibleFiles])
+
   const handleRunCode = () => {
     const result = openMobCodeRunnerPopup({
       files: isViewingSharedExample ? sharedExampleWorkspace?.files ?? {} : selectedStudentWorkspace?.files ?? latestStateRef.current.files,
@@ -682,27 +706,27 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken, soloM
 
   const submitModal = (path: string) => {
     if (modalMode === 'create-file') {
-      if (wouldPathConflict(files, path)) {
+      if (wouldPathConflict(visibleFiles, path)) {
         setModalErrorMessage('A file or folder already exists at that path.')
         return
       }
-      const nextFiles = { ...files, [path]: '' }
-      applyFiles(nextFiles, path)
+      const nextFiles = { ...visibleFiles, [path]: '' }
+      applyVisibleFiles(nextFiles, path)
     } else if (modalMode === 'create-folder') {
-      if (wouldPathConflict(files, path)) {
+      if (wouldPathConflict(visibleFiles, path)) {
         setModalErrorMessage('A file or folder already exists at that path.')
         return
       }
       const keepPath = `${path}/.keep`
-      const nextFiles = { ...files, [keepPath]: '' }
-      applyFiles(nextFiles, keepPath)
+      const nextFiles = { ...visibleFiles, [keepPath]: '' }
+      applyVisibleFiles(nextFiles, keepPath)
     } else if (modalMode === 'rename' && renameTarget) {
-      const nextFiles = renamePathInFiles(files, renameTarget, path)
-      if (nextFiles === files) {
+      const nextFiles = renamePathInFiles(visibleFiles, renameTarget, path)
+      if (nextFiles === visibleFiles) {
         setModalErrorMessage('A file or folder already exists at that path.')
         return
       }
-      applyFiles(nextFiles, resolveActiveFile(nextFiles, renameActiveFilePath(activeFile, renameTarget, path)))
+      applyVisibleFiles(nextFiles, resolveActiveFile(nextFiles, renameActiveFilePath(visibleActiveFile, renameTarget, path)))
     }
     setModalErrorMessage('')
     setModalMode(null)
@@ -740,9 +764,9 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken, soloM
           actionMenuRole={canEditVisibleWorkspace ? 'menu' : undefined}
           actionMenuContent={canEditVisibleWorkspace ? (
             <FileControlsMenuContent
-              files={files}
+              files={visibleFiles}
               onUploadFiles={(uploadedFiles) => {
-                importFilesIntoWorkspace(uploadedFiles)
+                importVisibleFiles(uploadedFiles)
               }}
               onCreateFile={() => setModalMode('create-file')}
               onCreateFolder={() => setModalMode('create-folder')}
@@ -935,7 +959,7 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken, soloM
             }}
             onCreateFile={canEditVisibleWorkspace ? () => setModalMode('create-file') : undefined}
             onCreateFolder={canEditVisibleWorkspace ? () => setModalMode('create-folder') : undefined}
-            onDropFiles={canEditVisibleWorkspace ? handleDroppedFiles : undefined}
+            onDropFiles={canEditVisibleWorkspace ? handleVisibleDroppedFiles : undefined}
             onRename={(path) => {
               if (!canEditVisibleWorkspace) return
               setRenameTarget(path)
@@ -943,8 +967,8 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken, soloM
             }}
             onDelete={(path) => {
               if (!canEditVisibleWorkspace) return
-              const nextFiles = deletePathFromFiles(files, path)
-              applyFiles(nextFiles, resolveActiveFile(nextFiles, activeFile))
+              const nextFiles = deletePathFromFiles(visibleFiles, path)
+              applyVisibleFiles(nextFiles, resolveActiveFile(nextFiles, visibleActiveFile))
             }}
             getItemBadges={(entry: VirtualFileEntry) => entry.path.endsWith('/.keep') ? (
               <span className="rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-500">keep</span>
@@ -967,11 +991,7 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken, soloM
                 if (!canEditVisibleWorkspace) return
                 if (isViewingSharedExample && sharedExampleWorkspace && viewUpdate.docChanged) {
                   const nextFiles = { ...sharedExampleWorkspace.files, [visibleActiveFile]: viewUpdate.state.doc.toString() }
-                  const nextWorkspace = { files: nextFiles, activeFile: visibleActiveFile }
-                  setSharedExampleWorkspace(nextWorkspace)
-                  void persistSharedWorkspace(nextFiles, visibleActiveFile).catch((error) => {
-                    setRunnerMessage(error instanceof Error ? error.message : 'Could not save shared code.')
-                  })
+                  applySharedWorkspace(nextFiles, visibleActiveFile)
                   return
                 }
                 if (!activeFile || (!viewUpdate.docChanged && !viewUpdate.selectionSet)) return

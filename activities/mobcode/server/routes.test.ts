@@ -576,6 +576,51 @@ void test('POST /api/mobcode/:sessionId/state returns 400 for an invalid payload
   assert.equal(setCalls, 0)
 })
 
+void test('POST /api/mobcode/:sessionId/shared-workspace/state updates only the editable shared copy', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const session = createMobCodeSessionRecord({
+    data: normalizeMobCodeSessionData({
+      instructorPasscode: 'secret-passcode',
+      groups: { default: { files: { 'instructor.py': 'print("instructor")' }, activeFile: 'instructor.py' } },
+      studentCode: {
+        sharedExample: {
+          sourceParticipantId: 'ada',
+          workspace: { files: { 'student.py': 'print("student")' }, activeFile: 'student.py' },
+          sharedAt: 1,
+        },
+      },
+    }),
+  })
+  let saved: SessionRecord | null = null
+  setupMobCodeRoutes(app as never, {
+    async get(id: string) { return id === session.id ? session : null },
+    async set(_id: string, nextSession: SessionRecord) { saved = nextSession },
+  }, ws as never)
+
+  const handler = app.handlers.post['/api/mobcode/:sessionId/shared-workspace/state']
+  assert.ok(handler)
+  const response = createResponse()
+  await handler({
+    params: { sessionId: session.id },
+    body: {
+      instructorPasscode: 'secret-passcode',
+      files: { 'shared.py': 'print("shared")' },
+      activeFile: 'shared.py',
+    },
+  } as never, response as never)
+
+  assert.equal(response.statusCode, 200)
+  assert.deepEqual(response.body, {
+    ok: true,
+    workspace: { files: { 'shared.py': 'print("shared")' }, activeFile: 'shared.py' },
+  })
+  if (saved === null) throw new Error('Expected shared workspace to be saved')
+  const savedData = (saved as SessionRecord & { data: ReturnType<typeof normalizeMobCodeSessionData> }).data
+  assert.deepEqual(savedData.groups.default, { files: { 'instructor.py': 'print("instructor")' }, activeFile: 'instructor.py' })
+  assert.deepEqual(savedData.studentCode?.sharedExample?.workspace, { files: { 'shared.py': 'print("shared")' }, activeFile: 'shared.py' })
+})
+
 void test('normalizeMobCodeSessionData preserves valid files and active file', () => {
   const data = normalizeMobCodeSessionData({
     instructorPasscode: 'secret',

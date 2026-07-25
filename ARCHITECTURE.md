@@ -78,7 +78,7 @@ session.
 5. Student is shown the appropriate activity component
 6. Student interacts with the activity
 
-For live MobCode sessions, the instructor workspace remains `groups.default`. When the instructor enables Try it, MobCode creates one private, server-backed workspace per accepted waiting-room participant from an explicit starter snapshot. Student responses are participant-scoped and never include peer names or files; instructors may inspect named workspaces and optionally publish one anonymous, read-only shared example.
+For live MobCode sessions, the instructor workspace remains `groups.default`. When the instructor enables Try it, MobCode creates one private, server-backed workspace per accepted waiting-room participant from an explicit starter snapshot. The instructor controls whether their code is broadcast live or students keep the last published version. Student responses are participant-scoped and never include peer names or files; instructors may inspect named workspaces and publish one anonymous shared copy that they can edit and broadcast to the class in real time.
 
 ### Session Lifecycle
 - **Temporary sessions**: Created on-demand, expire after inactivity
