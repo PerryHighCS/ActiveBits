@@ -349,6 +349,16 @@ function MobCodeLiveStudent({ sessionData }: MobCodeStudentProps) {
       const msg = parseMobCodeMessage(event.data)
       if (!msg) return
       if (msg.type === MOB_CODE_MESSAGE_TYPES.STUDENT_CODE_SETTINGS_CHANGED) {
+        const settingsPayload = msg.payload as { shareChangesEnabled?: unknown; files?: unknown; activeFile?: unknown }
+        if (settingsPayload.shareChangesEnabled === true && isStatePayload(settingsPayload)) {
+          const nextFiles = settingsPayload.files
+          previousShareChangesEnabledRef.current = true
+          setShareChangesEnabled(true)
+          latestFilesRef.current = nextFiles
+          setFiles(nextFiles)
+          setActiveFile(resolveActiveFile(nextFiles, settingsPayload.activeFile))
+          setWorkspaceView('instructor')
+        }
         setWorkspaceRefresh((version) => version + 1)
         return
       }
