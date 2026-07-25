@@ -331,7 +331,7 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken, soloM
         setWorkspaceSelection({ kind: 'shared' })
         setSelectedSharedActiveFile(session.sharedExample?.workspace.activeFile ?? resolveActiveFile(sharedFiles, ''))
       }
-      setStudentCodeMessage(action === 'try-it' ? (body.enabled === true ? 'Try it enabled. Students can edit their own code.' : 'Try it disabled. Student work remains saved.') : action === 'share-changes' ? (body.enabled === true ? 'Sharing instructor changes live.' : 'Instructor changes are private until shared again.') : action === 'share-example' ? 'Student work shared anonymously as a runnable example.' : 'Shared example removed.')
+      setStudentCodeMessage(action === 'try-it' ? (body.enabled === true ? 'Try it enabled. Students can edit their own code.' : 'Try it disabled.') : action === 'share-changes' ? (body.enabled === true ? 'Sharing instructor changes live.' : 'Instructor changes are private until shared again.') : action === 'share-example' ? 'Student work shared anonymously as a runnable example.' : 'Shared example removed.')
     } catch (error) {
       if (action === 'share-changes') {
         setShareChangesEnabled(body.enabled !== true)
