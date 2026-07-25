@@ -64,10 +64,17 @@ interface SessionResponse {
     runnerId?: unknown
     studentCode?: {
       tryItEnabled?: unknown
-      students?: Array<{ participantId?: unknown; displayName?: unknown }>
+      students?: Array<{ participantId?: unknown; displayName?: unknown; files?: unknown; activeFile?: unknown }>
       sharedExample?: { sourceParticipantId?: unknown } | null
     }
   }
+}
+
+interface MobCodeManagerStudentWorkspace {
+  participantId: string
+  displayName: string
+  files: Record<string, string>
+  activeFile: string
 }
 
 type ModalMode = 'create-file' | 'create-folder' | 'rename' | null
@@ -160,7 +167,9 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken, soloM
   const [runnerMessage, setRunnerMessage] = useState('')
   const [tryItEnabled, setTryItEnabled] = useState(false)
   const [studentCodeMessage, setStudentCodeMessage] = useState('')
-  const [studentWorkspaces, setStudentWorkspaces] = useState<Array<{ participantId: string; displayName: string }>>([])
+  const [studentWorkspaces, setStudentWorkspaces] = useState<MobCodeManagerStudentWorkspace[]>([])
+  const [selectedStudentWorkspaceId, setSelectedStudentWorkspaceId] = useState<string | null>(null)
+  const [selectedStudentActiveFile, setSelectedStudentActiveFile] = useState('')
   const [sharedExampleParticipantId, setSharedExampleParticipantId] = useState<string | null>(null)
   const wsDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const persistDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -211,20 +220,45 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken, soloM
       .catch((error) => console.error('Failed to fetch MobCode session:', error))
   }, [encodedSessionId, replaceFilesState, sessionId])
 
-  useEffect(() => {
+  const refreshStudentWorkspaces = useCallback(async () => {
     if (isSolo || !sessionId || !instructorPasscode) return
-    void fetch(`/api/mobcode/${encodedSessionId}/manager-session`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ instructorPasscode }),
-    })
-      .then((response) => response.ok ? response.json() as Promise<SessionResponse> : null)
-      .then((session) => {
-        setTryItEnabled(session?.data?.studentCode?.tryItEnabled === true)
-        const students = session?.data?.studentCode?.students
-        setStudentWorkspaces(Array.isArray(students) ? students.flatMap((student) => typeof student.participantId === 'string' && typeof student.displayName === 'string' ? [{ participantId: student.participantId, displayName: student.displayName }] : []) : [])
-        setSharedExampleParticipantId(typeof session?.data?.studentCode?.sharedExample?.sourceParticipantId === 'string' ? session.data.studentCode.sharedExample.sourceParticipantId : null)
+    try {
+      const response = await fetch(`/api/mobcode/${encodedSessionId}/manager-session`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ instructorPasscode }),
       })
-      .catch((error) => console.error('Failed to fetch MobCode student-code settings:', error))
-  }, [encodedSessionId, instructorPasscode, isSolo, sessionId])
+      if (!response.ok) return
+      const session = await response.json() as SessionResponse
+      setTryItEnabled(session.data?.studentCode?.tryItEnabled === true)
+      const students = session.data?.studentCode?.students
+      const normalizedStudents = Array.isArray(students)
+        ? students.flatMap((student) => {
+          if (typeof student.participantId !== 'string' || typeof student.displayName !== 'string') return []
+          const nextFiles = sanitizeFilesMap(student.files)
+          return [{
+            participantId: student.participantId,
+            displayName: student.displayName,
+            files: nextFiles,
+            activeFile: resolveActiveFile(nextFiles, student.activeFile),
+          }]
+        })
+        : []
+      setStudentWorkspaces(normalizedStudents)
+      setSelectedStudentWorkspaceId((current) => (
+        current != null && !normalizedStudents.some((student) => student.participantId === current) ? null : current
+      ))
+      setSelectedStudentActiveFile((current) => {
+        const selected = normalizedStudents.find((student) => student.participantId === selectedStudentWorkspaceId)
+        return selected ? resolveActiveFile(selected.files, current || selected.activeFile) : current
+      })
+      setSharedExampleParticipantId(typeof session.data?.studentCode?.sharedExample?.sourceParticipantId === 'string' ? session.data.studentCode.sharedExample.sourceParticipantId : null)
+    } catch (error) {
+      console.error('Failed to fetch MobCode student-code settings:', error)
+    }
+  }, [encodedSessionId, instructorPasscode, isSolo, selectedStudentWorkspaceId, sessionId])
+
+  useEffect(() => {
+    void refreshStudentWorkspaces()
+  }, [refreshStudentWorkspaces])
 
   const updateStudentCodeSetting = useCallback(async (action: 'try-it' | 'share-changes' | 'share-example' | 'unshare-example', body: Record<string, unknown> = {}) => {
     if (!sessionId || !instructorPasscode) return
@@ -260,7 +294,15 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken, soloM
     },
     onMessage: (event) => {
       const msg = parseMobCodeMessage(event.data)
-      if (!msg || !isStatePayload(msg.payload)) return
+      if (!msg) return
+      if (
+        msg.type === MOB_CODE_MESSAGE_TYPES.STUDENT_CODE_UPDATED
+        || msg.type === MOB_CODE_MESSAGE_TYPES.STUDENT_CODE_SETTINGS_CHANGED
+      ) {
+        void refreshStudentWorkspaces()
+        return
+      }
+      if (!isStatePayload(msg.payload)) return
       if (!shouldApplyRemoteStateMessage(msg.type, canEdit)) return
       if (msg.type === MOB_CODE_MESSAGE_TYPES.STATE_SYNC || msg.type === MOB_CODE_MESSAGE_TYPES.FILE_TREE_CHANGED) {
         replaceFilesState(msg.payload.files)
@@ -530,10 +572,17 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken, soloM
     setThemeCookie(nextTheme)
   }
 
+  const selectedStudentWorkspace = studentWorkspaces.find((student) => student.participantId === selectedStudentWorkspaceId) ?? null
+  const isViewingStudentWorkspace = selectedStudentWorkspace != null
+  const visibleFiles = selectedStudentWorkspace?.files ?? files
+  const visibleActiveFile = selectedStudentWorkspace ? selectedStudentActiveFile : activeFile
+  const visibleActiveContent = visibleActiveFile ? visibleFiles[visibleActiveFile] ?? '' : ''
+  const canEditVisibleWorkspace = canEdit && !isViewingStudentWorkspace
+
   const handleRunCode = () => {
     const result = openMobCodeRunnerPopup({
-      files: latestStateRef.current.files,
-      activeFile: latestStateRef.current.activeFile,
+      files: selectedStudentWorkspace?.files ?? latestStateRef.current.files,
+      activeFile: selectedStudentWorkspace ? selectedStudentActiveFile : latestStateRef.current.activeFile,
       sessionId,
       runnerId,
     })
@@ -548,7 +597,6 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken, soloM
     )
   }
 
-  const activeContent = activeFile ? files[activeFile] ?? '' : ''
   const editorThemeClassName = `mobcode-editor-theme-${theme}`
 
   const submitModal = (path: string) => {
@@ -607,9 +655,9 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken, soloM
           activityName="Mob Code"
           sessionId={sessionId}
           includeBottomMargin={false}
-          actionMenuLabel={canEdit ? 'Files' : undefined}
-          actionMenuRole={canEdit ? 'menu' : undefined}
-          actionMenuContent={canEdit ? (
+          actionMenuLabel={canEditVisibleWorkspace ? 'Files' : undefined}
+          actionMenuRole={canEditVisibleWorkspace ? 'menu' : undefined}
+          actionMenuContent={canEditVisibleWorkspace ? (
             <FileControlsMenuContent
               files={files}
               onUploadFiles={(uploadedFiles) => {
@@ -632,7 +680,7 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken, soloM
           centerHeaderActions={(
             <div className="mobcode-runner-actions">
               <RunnerControls
-                files={files}
+                files={visibleFiles}
                 runnerId={runnerId}
                 runners={MOB_CODE_RUNNERS}
                 onRunCode={handleRunCode}
@@ -671,36 +719,66 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken, soloM
       {studentCodeMessage && <div className="border-b border-blue-200 bg-blue-50 px-4 py-2 text-sm text-blue-900" role="status">{studentCodeMessage}</div>}
       <div className="mobcode-workspace">
         <aside className="mobcode-sidebar">
-          {!isSolo && canEdit && (studentWorkspaces.length > 0 || sharedExampleParticipantId) && <section className="border-b border-gray-200 p-3" aria-labelledby="mobcode-students-heading">
+          {!isSolo && canEdit && <section className="border-b border-gray-200 p-3" aria-labelledby="mobcode-students-heading">
             <h2 id="mobcode-students-heading" className="text-sm font-semibold">Students</h2>
-            {studentWorkspaces.map((student) => <div key={student.participantId} className="mt-2 flex items-center justify-between gap-2 text-sm"><span>{student.displayName}</span><button type="button" onClick={() => void updateStudentCodeSetting('share-example', { participantId: student.participantId })}>{sharedExampleParticipantId === student.participantId ? 'Replace shared example' : 'Share anonymously'}</button></div>)}
+            <button
+              type="button"
+              className="mt-2 text-sm underline"
+              aria-pressed={!isViewingStudentWorkspace}
+              onClick={() => setSelectedStudentWorkspaceId(null)}
+            >
+              Instructor code
+            </button>
+            {studentWorkspaces.length === 0 && <p className="mt-2 text-sm text-gray-600">No student workspaces yet.</p>}
+            {studentWorkspaces.map((student) => (
+              <div key={student.participantId} className="mt-2 flex items-center justify-between gap-2 text-sm">
+                <button
+                  type="button"
+                  className="text-left underline"
+                  aria-pressed={selectedStudentWorkspaceId === student.participantId}
+                  onClick={() => {
+                    setSelectedStudentWorkspaceId(student.participantId)
+                    setSelectedStudentActiveFile(student.activeFile)
+                  }}
+                >
+                  {student.displayName}
+                </button>
+                <button type="button" onClick={() => void updateStudentCodeSetting('share-example', { participantId: student.participantId })}>
+                  {sharedExampleParticipantId === student.participantId ? 'Replace shared example' : 'Share anonymously'}
+                </button>
+              </div>
+            ))}
             {sharedExampleParticipantId && <button type="button" className="mt-2 text-sm underline" onClick={() => void updateStudentCodeSetting('unshare-example')}>Unshare example</button>}
           </section>}
           <VirtualFileExplorer
-            files={files}
-            activePath={activeFile}
-            allowCreate={canEdit}
-            allowRename={canEdit}
-            allowDelete={canEdit}
+            files={visibleFiles}
+            activePath={visibleActiveFile}
+            allowCreate={canEditVisibleWorkspace}
+            allowRename={canEditVisibleWorkspace}
+            allowDelete={canEditVisibleWorkspace}
             dropPrompt="Drop files or zip archives here to import"
             onSelect={(path) => {
+              if (isViewingStudentWorkspace) {
+                setSelectedStudentActiveFile(path)
+                return
+              }
               setActiveFile(path)
-              if (!canEdit) return
+              if (!canEditVisibleWorkspace) return
               latestStateRef.current = applyActiveFileChange(latestStateRef.current, path)
               sendWsMessage(MOB_CODE_MESSAGE_TYPES.ACTIVE_FILE_CHANGED, { activeFile: path })
               schedulePresenceSync(path, [{ anchor: 0, head: 0 }])
               void persistState(latestStateRef.current)
             }}
-            onCreateFile={canEdit ? () => setModalMode('create-file') : undefined}
-            onCreateFolder={canEdit ? () => setModalMode('create-folder') : undefined}
-            onDropFiles={canEdit ? handleDroppedFiles : undefined}
+            onCreateFile={canEditVisibleWorkspace ? () => setModalMode('create-file') : undefined}
+            onCreateFolder={canEditVisibleWorkspace ? () => setModalMode('create-folder') : undefined}
+            onDropFiles={canEditVisibleWorkspace ? handleDroppedFiles : undefined}
             onRename={(path) => {
-              if (!canEdit) return
+              if (!canEditVisibleWorkspace) return
               setRenameTarget(path)
               setModalMode('rename')
             }}
             onDelete={(path) => {
-              if (!canEdit) return
+              if (!canEditVisibleWorkspace) return
               const nextFiles = deletePathFromFiles(files, path)
               applyFiles(nextFiles, resolveActiveFile(nextFiles, activeFile))
             }}
@@ -715,14 +793,14 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken, soloM
           )}
         </aside>
         <main className={`mobcode-editor-pane ${editorThemeClassName}`}>
-          {activeFile ? (
+          {visibleActiveFile ? (
             <CodeEditor
-              value={activeContent}
-              filename={activeFile}
+              value={visibleActiveContent}
+              filename={visibleActiveFile}
               theme={theme}
-              readOnly={!canEdit}
+              readOnly={!canEditVisibleWorkspace}
               onUpdate={(viewUpdate) => {
-                if (!canEdit) return
+                if (!canEditVisibleWorkspace) return
                 if (!activeFile || (!viewUpdate.docChanged && !viewUpdate.selectionSet)) return
                 const selections = viewUpdate.state.selection.ranges.map((range) => ({
                   anchor: range.anchor,

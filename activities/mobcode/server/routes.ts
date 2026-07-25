@@ -859,7 +859,10 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
         return
       }
       const workspace = createStudentWorkspace(session.data, identity)
-      if (workspace) await sessions.set(session.id, session)
+      if (workspace) {
+        await sessions.set(session.id, session)
+        await broadcast('student-code-updated', session.data.groups[DEFAULT_GROUP_ID] ?? { files: {}, activeFile: '' }, session.id)
+      }
       res.set('Cache-Control', 'no-store')
       res.json({ id: session.id, type: session.type, data: buildMobCodeStudentSnapshot(session.data, identity.participantId) })
     } catch (error) {
@@ -910,6 +913,7 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
         return
       }
       await sessions.set(session.id, session)
+      await broadcast('student-code-updated', session.data.groups[DEFAULT_GROUP_ID] ?? { files: {}, activeFile: '' }, session.id)
       res.json({ ok: true, workspace: { files: workspace.files, activeFile: workspace.activeFile } })
     } catch (error) {
       console.error(JSON.stringify({ event: 'mobcode.student-state-failed', sessionId: req.params.sessionId, error: String(error) }))
@@ -936,6 +940,7 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
         return
       }
       await sessions.set(session.id, session)
+      await broadcast('student-code-updated', session.data.groups[DEFAULT_GROUP_ID] ?? { files: {}, activeFile: '' }, session.id)
       res.json({ ok: true, workspace: { files: workspace.files, activeFile: workspace.activeFile } })
     } catch (error) {
       console.error(JSON.stringify({ event: 'mobcode.student-reset-failed', sessionId: req.params.sessionId, error: String(error) }))

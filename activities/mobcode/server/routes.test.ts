@@ -3,6 +3,7 @@ import test from 'node:test'
 import type { SessionRecord } from 'activebits-server/core/sessions.js'
 import {
   applyWsRelayMessageToGroupState,
+  buildMobCodeManagerSnapshot,
   buildMobCodeStudentSnapshot,
   hasOpenManagerSessionClients,
   hasOpenSessionClients,
@@ -189,6 +190,34 @@ void test('student snapshots never include another student workspace or identity
   const snapshot = buildMobCodeStudentSnapshot(data, 'ada')
   assert.match(JSON.stringify(snapshot), /Ada/)
   assert.doesNotMatch(JSON.stringify(snapshot), /Grace|secret\.py|private/)
+})
+
+void test('manager snapshots include named student workspaces for read-only review', () => {
+  const data = normalizeMobCodeSessionData({
+    studentCode: {
+      tryItEnabled: true,
+      starterVersion: { files: { 'main.py': 'print("starter")' }, activeFile: 'main.py' },
+      studentWorkspaces: {
+        ada: { participantId: 'ada', displayName: 'Ada', files: { 'main.py': 'print("ada")' }, activeFile: 'main.py', createdAt: 1, updatedAt: 2 },
+      },
+      sharedExample: null,
+    },
+  })
+
+  const snapshot = buildMobCodeManagerSnapshot(data)
+  assert.deepEqual(snapshot.studentCode, {
+    tryItEnabled: true,
+    starterVersionAvailable: true,
+    students: [{
+      participantId: 'ada',
+      displayName: 'Ada',
+      files: { 'main.py': 'print("ada")' },
+      activeFile: 'main.py',
+      createdAt: 1,
+      updatedAt: 2,
+    }],
+    sharedExample: null,
+  })
 })
 
 void test('POST /api/mobcode/create-solo creates a server-backed editable workspace from starter files', async () => {
