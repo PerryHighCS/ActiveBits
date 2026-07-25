@@ -172,7 +172,7 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken, soloM
   const [runnerId, setRunnerId] = useState<MobCodeRunnerId>(DEFAULT_MOB_CODE_RUNNER_ID)
   const [runnerMessage, setRunnerMessage] = useState('')
   const [tryItEnabled, setTryItEnabled] = useState(false)
-  const [shareChangesEnabled, setShareChangesEnabled] = useState(false)
+  const [shareChangesEnabled, setShareChangesEnabled] = useState(true)
   const [studentCodeMessage, setStudentCodeMessage] = useState('')
   const [studentWorkspaces, setStudentWorkspaces] = useState<MobCodeManagerStudentWorkspace[]>([])
   const [workspaceSelection, setWorkspaceSelection] = useState<MobCodeManagerWorkspaceSelection>({ kind: 'instructor' })
@@ -876,7 +876,7 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken, soloM
                   onClick={() => void updateStudentCodeSetting('share-changes', { enabled: !shareChangesEnabled })}
                 >
                   <span aria-hidden="true" className={`mobcode-status-dot${shareChangesEnabled ? ' mobcode-status-dot--active' : ''}`} />
-                  Share Changes: {shareChangesEnabled ? 'on' : 'off'}
+                  Share Changes
                 </button>
               )}
             </div>

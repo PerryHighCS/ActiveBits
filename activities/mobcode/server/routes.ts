@@ -329,6 +329,7 @@ export function buildMobCodeManagerSnapshot(data: MobCodeSessionData): Record<st
     groups: data.groups,
     studentCode: {
       tryItEnabled: studentCode.tryItEnabled,
+      shareChangesEnabled: studentCode.shareChangesEnabled,
       starterVersionAvailable: studentCode.starterVersion != null,
       starterVersion: studentCode.starterVersion,
       students: Object.values(studentCode.studentWorkspaces).map(({ participantId, displayName, files, activeFile, createdAt, updatedAt }) => ({ participantId, displayName, files, activeFile, createdAt, updatedAt })),

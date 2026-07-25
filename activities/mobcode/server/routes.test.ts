@@ -207,6 +207,7 @@ void test('manager snapshots include named student workspaces for read-only revi
   const snapshot = buildMobCodeManagerSnapshot(data)
   assert.deepEqual(snapshot.studentCode, {
     tryItEnabled: true,
+    shareChangesEnabled: false,
     starterVersionAvailable: true,
     starterVersion: { files: { 'main.py': 'print("starter")' }, activeFile: 'main.py' },
     students: [{
@@ -869,6 +870,7 @@ void test('websocket relay updates live validation state without mutating sessio
           activeFile: 'Main.java',
         },
       },
+      studentCode: { shareChangesEnabled: true },
     }),
   })
 
