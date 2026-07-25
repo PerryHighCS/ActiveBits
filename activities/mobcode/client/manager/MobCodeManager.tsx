@@ -619,7 +619,17 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken, soloM
     ? selectedSharedActiveFile
     : selectedStudentWorkspace ? selectedStudentActiveFile : activeFile
   const visibleActiveContent = visibleActiveFile ? visibleFiles[visibleActiveFile] ?? '' : ''
-  const canEditVisibleWorkspace = canEdit && !isViewingStudentWorkspace && !isViewingSharedExample
+  const canEditVisibleWorkspace = canEdit && !isViewingStudentWorkspace
+
+  const persistSharedWorkspace = useCallback(async (nextFiles: Record<string, string>, nextActiveFile: string) => {
+    if (!sessionId || !instructorPasscode) return
+    const response = await fetch(`/api/mobcode/${encodedSessionId}/shared-workspace/state`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ instructorPasscode, files: nextFiles, activeFile: nextActiveFile }),
+    })
+    if (!response.ok) throw new Error('Could not save shared code.')
+  }, [encodedSessionId, instructorPasscode, sessionId])
 
   const handleRunCode = () => {
     const result = openMobCodeRunnerPopup({
@@ -926,6 +936,15 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken, soloM
               readOnly={!canEditVisibleWorkspace}
               onUpdate={(viewUpdate) => {
                 if (!canEditVisibleWorkspace) return
+                if (isViewingSharedExample && sharedExampleWorkspace && viewUpdate.docChanged) {
+                  const nextFiles = { ...sharedExampleWorkspace.files, [visibleActiveFile]: viewUpdate.state.doc.toString() }
+                  const nextWorkspace = { files: nextFiles, activeFile: visibleActiveFile }
+                  setSharedExampleWorkspace(nextWorkspace)
+                  void persistSharedWorkspace(nextFiles, visibleActiveFile).catch((error) => {
+                    setRunnerMessage(error instanceof Error ? error.message : 'Could not save shared code.')
+                  })
+                  return
+                }
                 if (!activeFile || (!viewUpdate.docChanged && !viewUpdate.selectionSet)) return
                 const selections = viewUpdate.state.selection.ranges.map((range) => ({
                   anchor: range.anchor,

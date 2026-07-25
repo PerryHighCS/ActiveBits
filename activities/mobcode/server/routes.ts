@@ -1009,6 +1009,31 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
     }
   })
 
+  app.post('/api/mobcode/:sessionId/shared-workspace/state', async (req, res) => {
+    try {
+      const session = asMobCodeSession(await sessions.get(readParam(req.params.sessionId)))
+      const body = isPlainObject(req.body) ? req.body : {}
+      if (!session || !verifyPasscode(session.data.instructorPasscode, body.instructorPasscode)) {
+        res.status(403).json({ error: 'Forbidden' })
+        return
+      }
+      const payload = readStatePayload(body)
+      const sharedExample = session.data.studentCode?.sharedExample
+      if (!payload || !sharedExample) {
+        res.status(409).json({ error: 'Shared workspace is unavailable' })
+        return
+      }
+      sharedExample.workspace = normalizeGroupState(payload, MAX_STUDENT_WORKSPACE_BYTES)
+      sharedExample.sharedAt = Date.now()
+      await sessions.set(session.id, session)
+      await broadcast('student-code-settings-changed', session.data.groups[DEFAULT_GROUP_ID] ?? { files: {}, activeFile: '' }, session.id)
+      res.json({ ok: true, workspace: sharedExample.workspace })
+    } catch (error) {
+      console.error(JSON.stringify({ event: 'mobcode.shared-workspace-state-failed', sessionId: req.params.sessionId, error: String(error) }))
+      res.status(500).json({ error: 'Failed to update shared workspace' })
+    }
+  })
+
   app.post('/api/mobcode/:sessionId/state', async (req, res) => {
     try {
       const session = asMobCodeSession(await sessions.get(readParam(req.params.sessionId)))
