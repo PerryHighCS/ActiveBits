@@ -315,6 +315,9 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken, soloM
 
   const updateStudentCodeSetting = useCallback(async (action: 'try-it' | 'share-changes' | 'share-example' | 'unshare-example', body: Record<string, unknown> = {}) => {
     if (!sessionId || !instructorPasscode) return
+    if (action === 'share-changes') {
+      setShareChangesEnabled(body.enabled === true)
+    }
     try {
       const response = await fetch(`/api/mobcode/${encodedSessionId}/student-code/${action}`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ instructorPasscode, ...body }),
@@ -330,6 +333,9 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken, soloM
       }
       setStudentCodeMessage(action === 'try-it' ? (body.enabled === true ? 'Try it enabled. Students can edit their own code.' : 'Try it disabled. Student work remains saved.') : action === 'share-changes' ? (body.enabled === true ? 'Sharing instructor changes live.' : 'Instructor changes are private until shared again.') : action === 'share-example' ? 'Student work shared anonymously as a runnable example.' : 'Shared example removed.')
     } catch (error) {
+      if (action === 'share-changes') {
+        setShareChangesEnabled(body.enabled !== true)
+      }
       setStudentCodeMessage(error instanceof Error ? error.message : 'Could not update student code settings.')
     }
   }, [applyManagerSessionSnapshot, encodedSessionId, instructorPasscode, sessionId])

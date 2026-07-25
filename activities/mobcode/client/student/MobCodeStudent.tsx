@@ -245,6 +245,7 @@ function MobCodeLiveStudent({ sessionData }: MobCodeStudentProps) {
   const [instructorPresence, setInstructorPresence] = useState<MobCodeEditorPresencePayload | null>(null)
   const [canResumeSolo, setCanResumeSolo] = useState(false)
   const [tryItEnabled, setTryItEnabled] = useState(false)
+  const [shareChangesEnabled, setShareChangesEnabled] = useState(false)
   const [starterVersionAvailable, setStarterVersionAvailable] = useState(false)
   const [myWorkspace, setMyWorkspace] = useState<{ files: Record<string, string>; activeFile: string } | null>(null)
   const [sharedWorkspace, setSharedWorkspace] = useState<{ files: Record<string, string>; activeFile: string } | null>(null)
@@ -320,6 +321,7 @@ function MobCodeLiveStudent({ sessionData }: MobCodeStudentProps) {
           ? { files: sharedFiles, activeFile: resolveActiveFile(sharedFiles, session.data.studentCode.sharedExample.workspace?.activeFile) }
           : null
         const nextShareChangesEnabled = session.data?.studentCode?.shareChangesEnabled === true
+        setShareChangesEnabled(nextShareChangesEnabled)
         if (!previousSharedExampleAvailableRef.current && nextSharedWorkspace != null) {
           setWorkspaceView('shared')
         } else if (!previousShareChangesEnabledRef.current && nextShareChangesEnabled) {
@@ -354,6 +356,7 @@ function MobCodeLiveStudent({ sessionData }: MobCodeStudentProps) {
         (msg.type === MOB_CODE_MESSAGE_TYPES.STATE_SYNC || msg.type === MOB_CODE_MESSAGE_TYPES.FILE_TREE_CHANGED) &&
         isStatePayload(msg.payload)
       ) {
+        if (!shareChangesEnabled) return
         const nextFiles = msg.payload.files
         latestFilesRef.current = nextFiles
         setFiles(nextFiles)
@@ -363,6 +366,7 @@ function MobCodeLiveStudent({ sessionData }: MobCodeStudentProps) {
           return null
         })
       } else if (msg.type === MOB_CODE_MESSAGE_TYPES.FILE_CONTENT_UPDATE) {
+        if (!shareChangesEnabled) return
         const payload = msg.payload as { path?: unknown; content?: unknown }
         if (typeof payload.path === 'string' && typeof payload.content === 'string') {
           setFiles((current) => {
@@ -372,11 +376,13 @@ function MobCodeLiveStudent({ sessionData }: MobCodeStudentProps) {
           })
         }
       } else if (msg.type === MOB_CODE_MESSAGE_TYPES.ACTIVE_FILE_CHANGED) {
+        if (!shareChangesEnabled) return
         const payload = msg.payload as { activeFile?: unknown }
         setActiveFile((current) =>
           resolveStudentActiveFileChange(latestFilesRef.current, current, payload.activeFile),
         )
       } else if (msg.type === MOB_CODE_MESSAGE_TYPES.EDITOR_PRESENCE_UPDATE) {
+        if (!shareChangesEnabled) return
         setInstructorPresence(
           sanitizeStudentPresenceUpdate(latestFilesRef.current, msg.payload as RawPresencePayload),
         )

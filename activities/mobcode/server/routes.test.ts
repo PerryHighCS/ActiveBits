@@ -911,6 +911,14 @@ void test('websocket relay updates live validation state without mutating sessio
     path: 'Main.java',
     content: 'class Main { int x = 1; }',
   })
+
+  session.data.studentCode!.shareChangesEnabled = false
+  managerSocket.emit('message', JSON.stringify({
+    type: 'file-content-update',
+    payload: { path: 'Main.java', content: 'class Main { int x = 2; }' },
+  }))
+  await flushAsyncWork()
+  assert.equal(studentSocket.sent.length, 1)
 })
 
 void test('hasOpenSessionClients only retains live ws state when a session still has open sockets', () => {
