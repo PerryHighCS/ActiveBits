@@ -9,6 +9,7 @@ import {
   resolveMobCodeStudentRoute,
   resolveStudentActiveFileChange,
   sanitizeStudentPresenceUpdate,
+  shouldAutoSelectMyCodeOnTryItStart,
 } from './MobCodeStudent'
 import type { MobCodeRunnerId } from '../../shared/types'
 import type { MobCodeRunnerDefinition } from '../runner/runnerUtils'
@@ -43,6 +44,13 @@ void test('resolveMobCodeStudentRoute selects the token-authenticated solo manag
 void test('isEmbeddedMobCodeChildSession only waits for SyncDeck child sessions', () => {
   assert.equal(isEmbeddedMobCodeChildSession('CHILD:af94a:32728:mobcode'), true)
   assert.equal(isEmbeddedMobCodeChildSession('mobcode-session'), false)
+})
+
+void test('shouldAutoSelectMyCodeOnTryItStart only switches views when editing begins with a workspace', () => {
+  assert.equal(shouldAutoSelectMyCodeOnTryItStart(false, true, true), true)
+  assert.equal(shouldAutoSelectMyCodeOnTryItStart(true, true, true), false)
+  assert.equal(shouldAutoSelectMyCodeOnTryItStart(false, true, false), false)
+  assert.equal(shouldAutoSelectMyCodeOnTryItStart(true, false, true), false)
 })
 
 void test('resolveStudentActiveFileChange ignores missing active-file updates', () => {

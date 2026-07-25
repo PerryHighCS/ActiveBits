@@ -170,6 +170,7 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken, soloM
   const [studentWorkspaces, setStudentWorkspaces] = useState<MobCodeManagerStudentWorkspace[]>([])
   const [selectedStudentWorkspaceId, setSelectedStudentWorkspaceId] = useState<string | null>(null)
   const [selectedStudentActiveFile, setSelectedStudentActiveFile] = useState('')
+  const [isStudentsExpanded, setIsStudentsExpanded] = useState(true)
   const [sharedExampleParticipantId, setSharedExampleParticipantId] = useState<string | null>(null)
   const wsDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const persistDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -719,37 +720,52 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken, soloM
       {studentCodeMessage && <div className="border-b border-blue-200 bg-blue-50 px-4 py-2 text-sm text-blue-900" role="status">{studentCodeMessage}</div>}
       <div className="mobcode-workspace">
         <aside className="mobcode-sidebar">
-          {!isSolo && canEdit && <section className="border-b border-gray-200 p-3" aria-labelledby="mobcode-students-heading">
-            <h2 id="mobcode-students-heading" className="text-sm font-semibold">Students</h2>
-            <button
-              type="button"
-              className="mt-2 text-sm underline"
-              aria-pressed={!isViewingStudentWorkspace}
-              onClick={() => setSelectedStudentWorkspaceId(null)}
-            >
-              Instructor code
-            </button>
-            {studentWorkspaces.length === 0 && <p className="mt-2 text-sm text-gray-600">No student workspaces yet.</p>}
-            {studentWorkspaces.map((student) => (
-              <div key={student.participantId} className="mt-2 flex items-center justify-between gap-2 text-sm">
+          {!isSolo && canEdit && <>
+            <div className="border-b border-gray-200 p-3">
+              <button
+                type="button"
+                className="text-sm font-semibold underline"
+                aria-pressed={!isViewingStudentWorkspace}
+                onClick={() => setSelectedStudentWorkspaceId(null)}
+              >
+                Instructor code
+              </button>
+            </div>
+            <section className="border-b border-gray-200 p-3" aria-labelledby="mobcode-students-heading">
+              <h2 id="mobcode-students-heading" className="text-sm font-semibold">
                 <button
                   type="button"
-                  className="text-left underline"
-                  aria-pressed={selectedStudentWorkspaceId === student.participantId}
-                  onClick={() => {
-                    setSelectedStudentWorkspaceId(student.participantId)
-                    setSelectedStudentActiveFile(student.activeFile)
-                  }}
+                  aria-expanded={isStudentsExpanded}
+                  aria-controls="mobcode-students-roster"
+                  onClick={() => setIsStudentsExpanded((expanded) => !expanded)}
                 >
-                  {student.displayName}
+                  Students
                 </button>
-                <button type="button" onClick={() => void updateStudentCodeSetting('share-example', { participantId: student.participantId })}>
-                  {sharedExampleParticipantId === student.participantId ? 'Replace shared example' : 'Share anonymously'}
-                </button>
-              </div>
-            ))}
-            {sharedExampleParticipantId && <button type="button" className="mt-2 text-sm underline" onClick={() => void updateStudentCodeSetting('unshare-example')}>Unshare example</button>}
-          </section>}
+              </h2>
+              {isStudentsExpanded && <div id="mobcode-students-roster">
+                {studentWorkspaces.length === 0 && <p className="mt-2 text-sm text-gray-600">No student workspaces yet.</p>}
+                {studentWorkspaces.map((student) => (
+                  <div key={student.participantId} className="mt-2 flex items-center justify-between gap-2 text-sm">
+                    <button
+                      type="button"
+                      className="text-left underline"
+                      aria-pressed={selectedStudentWorkspaceId === student.participantId}
+                      onClick={() => {
+                        setSelectedStudentWorkspaceId(student.participantId)
+                        setSelectedStudentActiveFile(student.activeFile)
+                      }}
+                    >
+                      {student.displayName}
+                    </button>
+                    <button type="button" onClick={() => void updateStudentCodeSetting('share-example', { participantId: student.participantId })}>
+                      {sharedExampleParticipantId === student.participantId ? 'Replace shared example' : 'Share anonymously'}
+                    </button>
+                  </div>
+                ))}
+                {sharedExampleParticipantId && <button type="button" className="mt-2 text-sm underline" onClick={() => void updateStudentCodeSetting('unshare-example')}>Unshare example</button>}
+              </div>}
+            </section>
+          </>}
           <VirtualFileExplorer
             files={visibleFiles}
             activePath={visibleActiveFile}

@@ -44,6 +44,14 @@ export function isEmbeddedMobCodeChildSession(sessionId: string): boolean {
   return sessionId.startsWith('CHILD:')
 }
 
+export function shouldAutoSelectMyCodeOnTryItStart(
+  previousTryItEnabled: boolean,
+  nextTryItEnabled: boolean,
+  hasMyWorkspace: boolean,
+): boolean {
+  return !previousTryItEnabled && nextTryItEnabled && hasMyWorkspace
+}
+
 function waitForEmbeddedEntryParticipantHandoff(sessionId: string): Promise<void> {
   if (typeof sessionStorage === 'undefined' || !isEmbeddedMobCodeChildSession(sessionId)) {
     return Promise.resolve()
@@ -243,6 +251,7 @@ function MobCodeLiveStudent({ sessionData }: MobCodeStudentProps) {
   const [resetPending, setResetPending] = useState(false)
   const [workspaceRefresh, setWorkspaceRefresh] = useState(0)
   const latestFilesRef = useRef<Record<string, string>>({})
+  const previousTryItEnabledRef = useRef(false)
 
   useEffect(() => {
     const openStudentWorkspace = async (): Promise<SessionResponse | null> => {
@@ -291,10 +300,18 @@ function MobCodeLiveStudent({ sessionData }: MobCodeStudentProps) {
         setRunnerMessage('')
         setInstructorPresence(null)
         setCanResumeSolo(session.data?.canEditSolo === true)
-        setTryItEnabled(session.data?.studentCode?.tryItEnabled === true)
+        const nextTryItEnabled = session.data?.studentCode?.tryItEnabled === true
+        setTryItEnabled(nextTryItEnabled)
         setStarterVersionAvailable(session.data?.studentCode?.starterVersionAvailable === true)
         const ownFiles = sanitizeFilesMap(session.data?.studentCode?.ownWorkspace?.files)
-        setMyWorkspace(session.data?.studentCode?.ownWorkspace ? { files: ownFiles, activeFile: resolveActiveFile(ownFiles, session.data.studentCode.ownWorkspace.activeFile) } : null)
+        const nextMyWorkspace = session.data?.studentCode?.ownWorkspace
+          ? { files: ownFiles, activeFile: resolveActiveFile(ownFiles, session.data.studentCode.ownWorkspace.activeFile) }
+          : null
+        setMyWorkspace(nextMyWorkspace)
+        if (shouldAutoSelectMyCodeOnTryItStart(previousTryItEnabledRef.current, nextTryItEnabled, nextMyWorkspace != null)) {
+          setWorkspaceView('mine')
+        }
+        previousTryItEnabledRef.current = nextTryItEnabled
         const sharedFiles = sanitizeFilesMap(session.data?.studentCode?.sharedExample?.workspace?.files)
         setSharedWorkspace(session.data?.studentCode?.sharedExample ? { files: sharedFiles, activeFile: resolveActiveFile(sharedFiles, session.data.studentCode.sharedExample.workspace?.activeFile) } : null)
       })
