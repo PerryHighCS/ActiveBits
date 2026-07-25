@@ -506,7 +506,7 @@ function MobCodeLiveStudent({ sessionData }: MobCodeStudentProps) {
             {workspaceView === 'mine' && !tryItEnabled && (
               <p className="mobcode-status-message mt-2 text-xs text-amber-800" role="status">
                 <span aria-hidden="true" className="mobcode-status-dot" />
-                Try it is off. Your code is safe, but editing is locked.
+                Editing is locked.
               </p>
             )}
             {workspaceView === 'mine' && starterVersionAvailable && !resetPending && (
@@ -516,7 +516,7 @@ function MobCodeLiveStudent({ sessionData }: MobCodeStudentProps) {
             )}
             {resetPending && (
               <div className="mobcode-confirm-panel mt-2" role="alert">
-                <p>Replace only My code with the shared starter version? Instructor code and the shared example will not change.</p>
+                <p>Replace only My code with the shared starter version?</p>
                 <div className="mobcode-confirm-actions">
                   <button type="button" className="mobcode-confirm-danger" onClick={() => void resetMyCode()}>Reset my code</button>
                   <button type="button" className="mobcode-confirm-cancel" onClick={() => setResetPending(false)}>Cancel</button>
