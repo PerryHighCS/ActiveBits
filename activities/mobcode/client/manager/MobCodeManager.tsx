@@ -170,7 +170,7 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken, soloM
   const [studentWorkspaces, setStudentWorkspaces] = useState<MobCodeManagerStudentWorkspace[]>([])
   const [selectedStudentWorkspaceId, setSelectedStudentWorkspaceId] = useState<string | null>(null)
   const [selectedStudentActiveFile, setSelectedStudentActiveFile] = useState('')
-  const [isStudentsExpanded, setIsStudentsExpanded] = useState(true)
+  const [isStudentsExpanded, setIsStudentsExpanded] = useState(false)
   const [sharedExampleParticipantId, setSharedExampleParticipantId] = useState<string | null>(null)
   const wsDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const persistDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -739,6 +739,7 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken, soloM
                   aria-controls="mobcode-students-roster"
                   onClick={() => setIsStudentsExpanded((expanded) => !expanded)}
                 >
+                  <span aria-hidden="true">{isStudentsExpanded ? '▾' : '▸'} </span>
                   Students
                 </button>
               </h2>
@@ -757,12 +758,14 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken, soloM
                     >
                       {student.displayName}
                     </button>
-                    <button type="button" onClick={() => void updateStudentCodeSetting('share-example', { participantId: student.participantId })}>
-                      {sharedExampleParticipantId === student.participantId ? 'Replace shared example' : 'Share anonymously'}
+                    <button type="button" onClick={() => void updateStudentCodeSetting(
+                      sharedExampleParticipantId === student.participantId ? 'unshare-example' : 'share-example',
+                      sharedExampleParticipantId === student.participantId ? {} : { participantId: student.participantId },
+                    )}>
+                      {sharedExampleParticipantId === student.participantId ? 'Unshare' : 'Share'}
                     </button>
                   </div>
                 ))}
-                {sharedExampleParticipantId && <button type="button" className="mt-2 text-sm underline" onClick={() => void updateStudentCodeSetting('unshare-example')}>Unshare example</button>}
               </div>}
             </section>
           </>}
