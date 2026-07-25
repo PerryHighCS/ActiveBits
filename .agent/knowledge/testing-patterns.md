@@ -386,6 +386,7 @@ Capture reusable test setup patterns, common failure modes, and reliability guid
 # MobCode collaboration tests
 
 - Test student response shaping by serializing the scoped snapshot and asserting that another student's display name, paths, and content are absent. This catches accidental leakage when session state grows new collaboration fields.
+- For live student-mode browser coverage, use two isolated Playwright pages: bootstrap the instructor passcode through history state, issue an accepted participant token through the session entry route, and install that exact server-issued httpOnly cookie in the student context before navigation. This reliably exercises manager-to-student websocket and snapshot transitions in Chromium and WebKit. See `activities/mobcode/playwright/student-mode.spec.ts`.
 
 # Activities lint memory
 
