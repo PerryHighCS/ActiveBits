@@ -760,12 +760,15 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken, soloM
                       >
                         {student.displayName}
                       </button>
-                      <button type="button" onClick={() => void updateStudentCodeSetting(
-                        isSharedExample ? 'unshare-example' : 'share-example',
-                        isSharedExample ? {} : { participantId: student.participantId },
-                      )}>
-                        {isSharedExample ? 'Unshare' : 'Share'}
-                      </button>
+                      {isSharedExample ? (
+                        <button type="button" onClick={() => void updateStudentCodeSetting('unshare-example')}>
+                          Unshare
+                        </button>
+                      ) : (
+                        <button type="button" onClick={() => void updateStudentCodeSetting('share-example', { participantId: student.participantId })}>
+                          Share
+                        </button>
+                      )}
                     </div>
                   )
                 })}
