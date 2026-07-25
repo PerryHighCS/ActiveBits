@@ -157,6 +157,22 @@ void test('normalizeMobCodeSessionData enables embedded Try it with an initial i
   assert.notEqual(data.studentCode?.starterVersion, data.groups.default)
 })
 
+void test('normalizeMobCodeSessionData drops reserved participant keys and uses a prototype-free workspace map', () => {
+  const workspaces = Object.create(null) as Record<string, unknown>
+  workspaces.__proto__ = {
+    participantId: '__proto__', displayName: 'Unsafe', files: { 'main.py': 'unsafe' }, activeFile: 'main.py', createdAt: 1, updatedAt: 1,
+  }
+  workspaces.ada = {
+    participantId: 'ada', displayName: 'Ada', files: { 'main.py': 'safe' }, activeFile: 'main.py', createdAt: 1, updatedAt: 1,
+  }
+  const data = normalizeMobCodeSessionData({
+    studentCode: { tryItEnabled: true, starterVersion: { files: {}, activeFile: '' }, studentWorkspaces: workspaces, sharedExample: null },
+  })
+  assert.equal(Object.getPrototypeOf(data.studentCode?.studentWorkspaces), null)
+  assert.equal(Object.hasOwn(data.studentCode?.studentWorkspaces ?? {}, '__proto__'), false)
+  assert.deepEqual(Object.keys(data.studentCode?.studentWorkspaces ?? {}), ['ada'])
+})
+
 void test('student snapshots never include another student workspace or identity', () => {
   const data = normalizeMobCodeSessionData({
     groups: { default: { files: { 'main.py': 'print("instructor")' }, activeFile: 'main.py' } },

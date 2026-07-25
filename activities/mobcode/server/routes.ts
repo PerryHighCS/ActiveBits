@@ -187,7 +187,7 @@ function normalizeStudentCodeState(value: unknown, defaultGroup: MobCodeGroupSta
   const starterVersion = isPlainObject(raw.starterVersion)
     ? normalizeGroupState(raw.starterVersion)
     : tryItEnabled ? cloneGroupState(defaultGroup) : null
-  const workspaces: Record<string, MobCodeStudentWorkspace> = {}
+  const workspaces: Record<string, MobCodeStudentWorkspace> = Object.create(null) as Record<string, MobCodeStudentWorkspace>
   const rawWorkspaces = isPlainObject(raw.studentWorkspaces) ? raw.studentWorkspaces : {}
   let workspaceBytes = getGroupBytes(starterVersion)
   const ordered = Object.entries(rawWorkspaces)
@@ -204,7 +204,12 @@ function normalizeStudentCodeState(value: unknown, defaultGroup: MobCodeGroupSta
     if (nextBytes > MAX_STUDENT_CODE_BYTES) continue
     const createdAt = Number.isFinite(rawWorkspace.createdAt) ? Number(rawWorkspace.createdAt) : Date.now()
     const updatedAt = Number.isFinite(rawWorkspace.updatedAt) ? Number(rawWorkspace.updatedAt) : createdAt
-    workspaces[participantId] = { participantId, displayName, ...group, createdAt, updatedAt }
+    Object.defineProperty(workspaces, participantId, {
+      value: { participantId, displayName, ...group, createdAt, updatedAt },
+      enumerable: true,
+      configurable: true,
+      writable: true,
+    })
     workspaceBytes = nextBytes
   }
   const rawShared = isPlainObject(raw.sharedExample) ? raw.sharedExample : null
@@ -215,7 +220,10 @@ function normalizeStudentCodeState(value: unknown, defaultGroup: MobCodeGroupSta
 }
 
 function isValidParticipantId(value: unknown): value is string {
-  return typeof value === 'string' && value.trim().length > 0 && value.trim().length <= MAX_PARTICIPANT_ID_LENGTH
+  return typeof value === 'string'
+    && value.trim().length > 0
+    && value.trim().length <= MAX_PARTICIPANT_ID_LENGTH
+    && !RESERVED_PATH_SEGMENTS.has(value.trim())
 }
 
 function normalizeDisplayName(value: unknown): string | null {
@@ -338,14 +346,45 @@ function createStudentWorkspace(
 ): MobCodeStudentWorkspace | null {
   const studentCode = data.studentCode
   if (!studentCode?.starterVersion) return null
-  const existing = studentCode.studentWorkspaces[identity.participantId]
+  const existing = Object.hasOwn(studentCode.studentWorkspaces, identity.participantId)
+    ? studentCode.studentWorkspaces[identity.participantId]
+    : null
   if (existing) return existing
   if (Object.keys(studentCode.studentWorkspaces).length >= MAX_STUDENT_WORKSPACES) return null
   const now = Date.now()
   const group = normalizeGroupState(studentCode.starterVersion, MAX_STUDENT_WORKSPACE_BYTES)
   const workspace: MobCodeStudentWorkspace = { participantId: identity.participantId, displayName: identity.displayName, ...group, createdAt: now, updatedAt: now }
-  studentCode.studentWorkspaces[identity.participantId] = workspace
+  Object.defineProperty(studentCode.studentWorkspaces, identity.participantId, {
+    value: workspace,
+    enumerable: true,
+    configurable: true,
+    writable: true,
+  })
   return workspace
+}
+
+function replaceStudentWorkspace(
+  data: MobCodeSessionData,
+  identity: { participantId: string; displayName: string },
+  group: MobCodeGroupState,
+): MobCodeStudentWorkspace | null {
+  const current = createStudentWorkspace(data, identity)
+  if (!current || !data.studentCode) return null
+  const nextWorkspace: MobCodeStudentWorkspace = {
+    participantId: identity.participantId,
+    displayName: identity.displayName,
+    files: group.files,
+    activeFile: group.activeFile,
+    createdAt: current.createdAt,
+    updatedAt: Date.now(),
+  }
+  Object.defineProperty(data.studentCode.studentWorkspaces, identity.participantId, {
+    value: nextWorkspace,
+    enumerable: true,
+    configurable: true,
+    writable: true,
+  })
+  return nextWorkspace
 }
 
 function asMobCodeSession(session: SessionRecord | null): (SessionRecord & { data: MobCodeSessionData }) | null {
@@ -866,15 +905,11 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
         res.status(400).json({ error: 'Invalid state payload' })
         return
       }
-      const workspace = createStudentWorkspace(session.data, identity)
+      const workspace = replaceStudentWorkspace(session.data, identity, normalizeGroupState(payload, MAX_STUDENT_WORKSPACE_BYTES))
       if (!workspace) {
         res.status(409).json({ error: 'Student code is not available yet' })
         return
       }
-      const group = normalizeGroupState(payload, MAX_STUDENT_WORKSPACE_BYTES)
-      workspace.files = group.files
-      workspace.activeFile = group.activeFile
-      workspace.updatedAt = Date.now()
       await sessions.set(session.id, session)
       res.json({ ok: true, workspace: { files: workspace.files, activeFile: workspace.activeFile } })
     } catch (error) {
@@ -897,15 +932,11 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
         res.status(409).json({ error: 'No shared starter version is available' })
         return
       }
-      const workspace = createStudentWorkspace(session.data, identity)
+      const workspace = replaceStudentWorkspace(session.data, identity, normalizeGroupState(starter, MAX_STUDENT_WORKSPACE_BYTES))
       if (!workspace) {
         res.status(409).json({ error: 'Student code is not available yet' })
         return
       }
-      const reset = normalizeGroupState(starter, MAX_STUDENT_WORKSPACE_BYTES)
-      workspace.files = reset.files
-      workspace.activeFile = reset.activeFile
-      workspace.updatedAt = Date.now()
       await sessions.set(session.id, session)
       res.json({ ok: true, workspace: { files: workspace.files, activeFile: workspace.activeFile } })
     } catch (error) {
