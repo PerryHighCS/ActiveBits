@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router'
 import VirtualFileExplorer from '@src/components/common/VirtualFileExplorer'
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
 import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler'
+import { consumeResolvedEntryParticipantValues } from '@src/components/common/entryParticipantStorage'
 import type { MobCodeEditorPresencePayload, MobCodeRunnerId, MobCodeThemeId } from '../../shared/types'
 import { isMobCodeRunnerId } from '../../shared/types'
 import CodeEditor from '../components/CodeEditor'
@@ -206,12 +207,22 @@ function MobCodeLiveStudent({ sessionData }: MobCodeStudentProps) {
   const latestFilesRef = useRef<Record<string, string>>({})
 
   useEffect(() => {
-    void fetch(`/api/mobcode/${encodedSessionId}/student-workspace`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
-    })
-      .then(async (res) => res.ok
-        ? res.json() as Promise<SessionResponse>
-        : fetch(`/api/mobcode/${encodedSessionId}/session`).then((fallback) => fallback.ok ? fallback.json() as Promise<SessionResponse> : null))
+    const openStudentWorkspace = async (): Promise<SessionResponse | null> => {
+      if (typeof sessionStorage !== 'undefined') {
+        await consumeResolvedEntryParticipantValues(sessionStorage, {
+          activityName: 'mobcode',
+          sessionId,
+          isSoloSession: false,
+        })
+      }
+      const response = await fetch(`/api/mobcode/${encodedSessionId}/student-workspace`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+      })
+      if (response.ok) return response.json() as Promise<SessionResponse>
+      const fallback = await fetch(`/api/mobcode/${encodedSessionId}/session`)
+      return fallback.ok ? fallback.json() as Promise<SessionResponse> : null
+    }
+    void openStudentWorkspace()
       .then((session) => {
         if (!session) return
         const nextFiles = sanitizeFilesMap(session.data?.groups?.default?.files)
