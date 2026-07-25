@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "lint": "eslint .",
+    "lint": "node ../scripts/lint-activities.mjs",
     "lint:scope": "sh -c 'target=\"${npm_config_target:-.}\"; target=\"${target#./}\"; target=\"${target#activities/}\"; eslint \"$target\" \"$@\"' --",
     "lint:activity": "sh -c 'activity=\"${npm_config_activity:?set --activity=<activity-folder>}\"; activity=\"${activity#./}\"; activity=\"${activity#activities/}\"; eslint \"$activity\" \"$@\"' --",
     "test:file": "sh -c 'set -e; file=\"${1:?pass a test file path}\"; file=\"${file#./}\"; file=\"${file#activities/}\"; shift; node --import tsx --test --import ../scripts/jsx-loader-register.mjs \"$file\" \"$@\"' --",
