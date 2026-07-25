@@ -36,13 +36,13 @@ async function acceptStudent(seedPage: Page, studentPage: Page, sessionId: strin
   expect(consumedResponse.ok()).toBe(true)
 
   const cookieName = `activebits_participant_${Buffer.from(sessionId).toString('base64url')}`
-  const match = new RegExp(`^${cookieName}=([^;]+)`).exec(consumedResponse.headers()['set-cookie'] ?? '')
-  if (!match?.[1]) throw new Error('Expected the accepted participant cookie from the server.')
+  const participantCookie = (await seedPage.context().cookies()).find((cookie) => cookie.name === cookieName)
+  if (!participantCookie) throw new Error('Expected the accepted participant cookie from the server.')
   await studentPage.goto('/')
   const origin = new URL(studentPage.url())
   await studentPage.context().addCookies([{
     name: cookieName,
-    value: match[1],
+    value: participantCookie.value,
     domain: origin.hostname,
     path: '/',
     httpOnly: true,

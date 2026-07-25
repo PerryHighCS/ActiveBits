@@ -1,6 +1,6 @@
 # MobCode Live Student Code Mode
 
-## Status: Design / Pre-Implementation
+## Status: Implemented (2026-07-25)
 
 ## Goal
 
@@ -53,6 +53,8 @@ interface MobCodeStudentWorkspace extends MobCodeGroupState {
 
 interface MobCodeStudentCodeState {
   tryItEnabled: boolean
+  shareChangesEnabled: boolean
+  publishedInstructorVersion: MobCodeGroupState
   starterVersion: MobCodeGroupState | null
   studentWorkspaces: Record<string, MobCodeStudentWorkspace>
   sharedExample: {
@@ -181,24 +183,24 @@ Document this MobCode embedded activity payload shape:
 
 ## Implementation Checklist
 
-- [ ] Define normalized collaboration types, aggregate limits, and participant-scoped snapshot
+- [x] Define normalized collaboration types, aggregate limits, and participant-scoped snapshot
   builders in `activities/mobcode/shared` and `activities/mobcode/server`.
-- [ ] Add `startTryItMode` embedded-launch normalization and initial live-session setup while
+- [x] Add `startTryItMode` embedded-launch normalization and initial live-session setup while
   preserving current MobCode and standalone solo contracts.
-- [ ] Implement authenticated REST/websocket commands for workspace creation, student edits,
+- [x] Implement authenticated REST/websocket commands for workspace creation, student edits,
   reset, `Try it`, `Broadcast`, and anonymous share lifecycle.
-- [ ] Add student-safe and instructor-safe read models; ensure unauthorized cross-student
+- [x] Add student-safe and instructor-safe read models; ensure unauthorized cross-student
   reads/writes are impossible and structured denials are logged.
-- [ ] Refactor MobCode client state around a selected workspace and build accessible student
+- [x] Refactor MobCode client state around a selected workspace and build accessible student
   and instructor explorer sections.
-- [ ] Wire runnable read-only workspaces and disabled mutation controls through the existing
+- [x] Wire runnable read-only workspaces and disabled mutation controls through the existing
   runner/file-control components without runner-specific branching.
-- [ ] Add confirmation and status UX for reset, sharing, replacing, unsharing, locking, and
+- [x] Add confirmation and status UX for reset, sharing, replacing, unsharing, locking, and
   publishing changes.
-- [ ] Update `ACTIVITY_PAYLOADS.md`, MobCode capability docs, and `DEPLOYMENT.md`/`README.md`/
+- [x] Update `ACTIVITY_PAYLOADS.md`, MobCode capability docs, and `DEPLOYMENT.md`/`README.md`/
   `ARCHITECTURE.md` if the final session schema, operational limits, or live runtime behavior
   changes their documented contracts.
-- [ ] Add focused tests, run workspace checks, run root validation, and record durable
+- [x] Add focused tests, run workspace checks, run root validation, and record durable
   findings in `.agent/knowledge/data-contracts.md`, `.agent/knowledge/security-notes.md`, and
   `.agent/knowledge/testing-patterns.md` as implementation evidence is established.
 

@@ -106,6 +106,9 @@ export function issueAcceptedEntryParticipantToken(
   if (!findAcceptedEntryParticipant(session, participantId)) return null
   const container = getAcceptedEntryParticipantContainer(session)
   container.participantAuthTokens ??= Object.create(null) as Record<string, string>
+  for (const [existingToken, ownerId] of Object.entries(container.participantAuthTokens)) {
+    if (ownerId === participantId) delete container.participantAuthTokens[existingToken]
+  }
   const token = randomBytes(24).toString('base64url')
   container.participantAuthTokens[token] = participantId
   const tokenEntries = Object.entries(container.participantAuthTokens)
@@ -122,7 +125,10 @@ export function resolveAcceptedEntryParticipantToken(
   token: unknown,
 ): AcceptedEntryParticipantRecord | null {
   if (typeof token !== 'string' || !isRecord(session.data)) return null
-  const participantId = (session.data as AcceptedEntryParticipantContainer).participantAuthTokens?.[token]
+  const participantAuthTokens = (session.data as AcceptedEntryParticipantContainer).participantAuthTokens
+  const participantId = participantAuthTokens && Object.hasOwn(participantAuthTokens, token)
+    ? participantAuthTokens[token]
+    : null
   return findAcceptedEntryParticipant(session, participantId ?? null)
 }
 

@@ -266,11 +266,14 @@ function MobCodeLiveStudent({ sessionData }: MobCodeStudentProps) {
   const [resetPending, setResetPending] = useState(false)
   const [workspaceRefresh, setWorkspaceRefresh] = useState(0)
   const latestFilesRef = useRef<Record<string, string>>({})
+  const myWorkspacePersistDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const pendingMyWorkspaceRef = useRef<{ files: Record<string, string>; activeFile: string } | null>(null)
   const previousTryItEnabledRef = useRef(false)
   const previousSharedExampleAvailableRef = useRef(false)
   const previousShareChangesEnabledRef = useRef(false)
 
   useEffect(() => {
+    let cancelled = false
     const openStudentWorkspace = async (): Promise<SessionResponse | null> => {
       if (typeof sessionStorage !== 'undefined') {
         await waitForEmbeddedEntryParticipantHandoff(sessionId)
@@ -308,7 +311,7 @@ function MobCodeLiveStudent({ sessionData }: MobCodeStudentProps) {
     }
     void openStudentWorkspace()
       .then((session) => {
-        if (!session) return
+        if (!session || cancelled) return
         const nextFiles = sanitizeFilesMap(session.data?.groups?.default?.files)
         latestFilesRef.current = nextFiles
         setFiles(nextFiles)
@@ -355,7 +358,12 @@ function MobCodeLiveStudent({ sessionData }: MobCodeStudentProps) {
         previousShareChangesEnabledRef.current = nextShareChangesEnabled
         setSharedWorkspace(nextSharedWorkspace)
       })
-      .catch((error) => console.error('Failed to fetch MobCode session:', error))
+      .catch((error) => {
+        if (!cancelled) console.error('Failed to fetch MobCode session:', error)
+      })
+    return () => {
+      cancelled = true
+    }
   }, [encodedSessionId, sessionId, workspaceRefresh])
 
   const buildWsUrl = useCallback(() => {
@@ -482,6 +490,31 @@ function MobCodeLiveStudent({ sessionData }: MobCodeStudentProps) {
     if (!response.ok) throw new Error('Could not save your code.')
   }, [encodedSessionId])
 
+  const flushMyWorkspacePersist = useCallback(() => {
+    myWorkspacePersistDebounceRef.current = null
+    const pendingWorkspace = pendingMyWorkspaceRef.current
+    if (!pendingWorkspace) return
+    pendingMyWorkspaceRef.current = null
+    void persistMyWorkspace(pendingWorkspace.files, pendingWorkspace.activeFile).catch((error) => {
+      setRunnerMessage(error instanceof Error ? error.message : 'Could not save your code.')
+    })
+  }, [persistMyWorkspace])
+
+  const scheduleMyWorkspacePersist = useCallback((nextFiles: Record<string, string>, nextActiveFile: string) => {
+    pendingMyWorkspaceRef.current = { files: nextFiles, activeFile: nextActiveFile }
+    if (myWorkspacePersistDebounceRef.current == null) {
+      myWorkspacePersistDebounceRef.current = setTimeout(flushMyWorkspacePersist, 250)
+    }
+  }, [flushMyWorkspacePersist])
+
+  useEffect(() => () => {
+    if (myWorkspacePersistDebounceRef.current) {
+      clearTimeout(myWorkspacePersistDebounceRef.current)
+      myWorkspacePersistDebounceRef.current = null
+    }
+    flushMyWorkspacePersist()
+  }, [flushMyWorkspacePersist])
+
   const resetMyCode = useCallback(async () => {
     try {
       const response = await fetch(`/api/mobcode/${encodedSessionId}/student-workspace/reset`, {
@@ -582,7 +615,7 @@ function MobCodeLiveStudent({ sessionData }: MobCodeStudentProps) {
                 const nextFiles = { ...myWorkspace.files, [selectedActiveFile]: update.state.doc.toString() }
                 const nextWorkspace = { files: nextFiles, activeFile: selectedActiveFile }
                 setMyWorkspace(nextWorkspace)
-                void persistMyWorkspace(nextFiles, selectedActiveFile).catch((error) => setRunnerMessage(error instanceof Error ? error.message : 'Could not save your code.'))
+                scheduleMyWorkspacePersist(nextFiles, selectedActiveFile)
               }}
             />
           ) : (

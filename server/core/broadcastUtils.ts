@@ -14,6 +14,8 @@ interface BroadcastWsRouter {
   }
 }
 
+type BroadcastForwardPredicate = (client: BroadcastClient, message: unknown) => boolean
+
 /**
  * Utility helpers for activity-level broadcast subscriptions.
  */
@@ -24,7 +26,11 @@ interface BroadcastWsRouter {
  * @param ws WebSocket router returned by createWsRouter
  * @returns Function that ensures per-session subscription at most once
  */
-export function createBroadcastSubscriptionHelper(sessions: BroadcastSessions, ws: BroadcastWsRouter) {
+export function createBroadcastSubscriptionHelper(
+  sessions: BroadcastSessions,
+  ws: BroadcastWsRouter,
+  shouldForward: BroadcastForwardPredicate = () => true,
+) {
   const subscribedSessions = new Set<string>()
 
   return function ensureBroadcastSubscription(sessionId: string | null): void {
@@ -37,7 +43,7 @@ export function createBroadcastSubscriptionHelper(sessions: BroadcastSessions, w
       sessions.subscribeToBroadcast(channel, (message) => {
         const payload = JSON.stringify(message)
         for (const client of ws.wss.clients) {
-          if (client.readyState === 1 && client.sessionId === sessionId) {
+          if (client.readyState === 1 && client.sessionId === sessionId && shouldForward(client, message)) {
             try {
               client.send(payload)
             } catch (err) {

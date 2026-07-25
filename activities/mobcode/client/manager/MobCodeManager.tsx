@@ -211,6 +211,7 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken, soloM
   const [studentCodeMessage, setStudentCodeMessage] = useState('')
   const [studentWorkspaces, setStudentWorkspaces] = useState<MobCodeManagerStudentWorkspace[]>([])
   const [workspaceSelection, setWorkspaceSelection] = useState<MobCodeManagerWorkspaceSelection>({ kind: 'instructor' })
+  const workspaceSelectionRef = useRef<MobCodeManagerWorkspaceSelection>(workspaceSelection)
   const [selectedStudentActiveFile, setSelectedStudentActiveFile] = useState('')
   const [selectedSharedActiveFile, setSelectedSharedActiveFile] = useState('')
   const [isStudentsExpanded, setIsStudentsExpanded] = useState(false)
@@ -218,6 +219,8 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken, soloM
   const [sharedExampleWorkspace, setSharedExampleWorkspace] = useState<{ files: Record<string, string>; activeFile: string } | null>(null)
   const wsDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const persistDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const sharedWorkspacePersistDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const pendingSharedWorkspaceRef = useRef<{ files: Record<string, string>; activeFile: string } | null>(null)
   const latestStateRef = useRef<MobCodeStatePayload>(createStateSnapshot({}, ''))
   const latestFileSizeStatsRef = useRef(getMobCodeFileSizeStats({}))
   const lastLiveSyncAtRef = useRef(0)
@@ -241,6 +244,10 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken, soloM
   useEffect(() => {
     latestStateRef.current = createStateSnapshot(files, activeFile)
   }, [files, activeFile])
+
+  useEffect(() => {
+    workspaceSelectionRef.current = workspaceSelection
+  }, [workspaceSelection])
 
   const replaceFilesState = useCallback((nextFiles: Record<string, string>) => {
     latestFileSizeStatsRef.current = getMobCodeFileSizeStats(nextFiles)
@@ -272,15 +279,16 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken, soloM
     const normalizedStudents = data.students
     setStudentWorkspaces(normalizedStudents)
     setSelectedStudentActiveFile((current) => {
-      if (workspaceSelection.kind !== 'student') return current
-      const selected = normalizedStudents.find((student) => student.participantId === workspaceSelection.participantId)
+      const selection = workspaceSelectionRef.current
+      if (selection.kind !== 'student') return current
+      const selected = normalizedStudents.find((student) => student.participantId === selection.participantId)
       return selected ? resolveActiveFile(selected.files, current || selected.activeFile) : current
     })
     setSharedExampleParticipantId(data.sharedExample?.sourceParticipantId ?? null)
     const nextSharedExampleWorkspace = data.sharedExample?.workspace ?? null
     setSharedExampleWorkspace(nextSharedExampleWorkspace)
     setSelectedSharedActiveFile((current) => {
-      if (workspaceSelection.kind !== 'shared' || nextSharedExampleWorkspace == null) return current
+      if (workspaceSelectionRef.current.kind !== 'shared' || nextSharedExampleWorkspace == null) return current
       return resolveActiveFile(nextSharedExampleWorkspace.files, current || nextSharedExampleWorkspace.activeFile)
     })
     setWorkspaceSelection((current) => {
@@ -292,7 +300,7 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken, soloM
       }
       return current
     })
-  }, [workspaceSelection])
+  }, [])
 
   const refreshStudentWorkspaces = useCallback(async () => {
     if (isSolo || !sessionId || !instructorPasscode) return
@@ -647,14 +655,34 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken, soloM
     if (!response.ok) throw new Error('Could not save shared code.')
   }, [encodedSessionId, instructorPasscode, sessionId])
 
+  const flushSharedWorkspacePersist = useCallback(() => {
+    sharedWorkspacePersistDebounceRef.current = null
+    const pendingWorkspace = pendingSharedWorkspaceRef.current
+    if (!pendingWorkspace) return
+    pendingSharedWorkspaceRef.current = null
+    void persistSharedWorkspace(pendingWorkspace.files, pendingWorkspace.activeFile).catch((error) => {
+      void refreshStudentWorkspaces()
+      setRunnerMessage(error instanceof Error ? error.message : 'Could not save shared code.')
+    })
+  }, [persistSharedWorkspace, refreshStudentWorkspaces])
+
   const applySharedWorkspace = useCallback((nextFiles: Record<string, string>, nextActiveFile: string) => {
     const nextWorkspace = { files: nextFiles, activeFile: nextActiveFile }
     setSharedExampleWorkspace(nextWorkspace)
     setSelectedSharedActiveFile(nextActiveFile)
-    void persistSharedWorkspace(nextFiles, nextActiveFile).catch((error) => {
-      setRunnerMessage(error instanceof Error ? error.message : 'Could not save shared code.')
-    })
-  }, [persistSharedWorkspace])
+    pendingSharedWorkspaceRef.current = nextWorkspace
+    if (sharedWorkspacePersistDebounceRef.current == null) {
+      sharedWorkspacePersistDebounceRef.current = setTimeout(flushSharedWorkspacePersist, LIVE_CONTENT_SYNC_INTERVAL_MS)
+    }
+  }, [flushSharedWorkspacePersist])
+
+  useEffect(() => () => {
+    if (sharedWorkspacePersistDebounceRef.current) {
+      clearTimeout(sharedWorkspacePersistDebounceRef.current)
+      sharedWorkspacePersistDebounceRef.current = null
+    }
+    flushSharedWorkspacePersist()
+  }, [flushSharedWorkspacePersist])
 
   const applyVisibleFiles = useCallback((nextFiles: Record<string, string>, nextActiveFile: string) => {
     if (isViewingSharedExample) {
@@ -854,7 +882,7 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken, soloM
                   Try it
                 </button>
               </div>
-              {isStudentsExpanded && <div id="mobcode-students-roster" className="mt-2 space-y-1">
+              <div id="mobcode-students-roster" className="mt-2 space-y-1" hidden={!isStudentsExpanded}>
                 {studentWorkspaces.length === 0 && <p className="text-sm text-gray-600">No student workspaces yet.</p>}
                 {studentWorkspaces.map((student) => {
                   return (
@@ -882,7 +910,7 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken, soloM
                     </div>
                   )
                 })}
-              </div>}
+              </div>
             </section>
             <div className="mobcode-workspace-tabs-row border-b border-gray-200 p-2">
               <div className="mobcode-workspace-tabs" role="tablist" aria-label="Code workspaces">

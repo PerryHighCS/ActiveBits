@@ -83,4 +83,8 @@ void test('accepted participant tokens are opaque, session-scoped, and resolve o
   assert.equal(resolveAcceptedEntryParticipantToken(session, 'forged-token'), null)
   assert.equal(issueAcceptedEntryParticipantToken(session, 'missing'), null)
   assert.equal(getSessionParticipantCookieName('session-5'), 'activebits_participant_c2Vzc2lvbi01')
+
+  const otherSession = createSessionRecord('session-6')
+  acceptEntryParticipant(otherSession, { participantId: 'participant-1', displayName: 'Ada' })
+  assert.equal(resolveAcceptedEntryParticipantToken(otherSession, token), null)
 })

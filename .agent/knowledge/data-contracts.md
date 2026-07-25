@@ -677,11 +677,14 @@ Document API and data-shape assumptions that must stay compatible over time.
 - Evidence (schema/tests/path): `client/src/components/common/ActivityLauncher.tsx`; `client/src/components/common/activityLauncherUtils.ts`; `client/src/components/common/ActivityLauncher.test.tsx`; `client/src/components/common/activityLauncherUtils.test.ts`; `client/src/App.tsx`
 - Follow-up action: If future activities need server-side launch option hydration beyond manager query params, add an explicit activity-owned contract instead of copying arbitrary launcher query params into session data.
 - Owner: Codex
-# MobCode live student-code contract
 
-- `MobCodeSessionData.studentCode` keeps the live collaboration state activity-local: `tryItEnabled`, `shareChangesEnabled`, explicit starter and last-published instructor snapshots, participant-keyed private workspaces, and one anonymous shared example. The instructor workspace remains `groups.default`.
-- Student snapshots are built per accepted waiting-room participant and include only the last published instructor code, that participant's own workspace, and the anonymous shared example. Never return the complete `studentWorkspaces` map from a student endpoint.
-- The instructor-only shared-workspace state route mutates only `studentCode.sharedExample.workspace`; manager file operations must select that route whenever the shared tab is active, never the instructor `groups.default` state route.
-- `student-code-settings-changed` carries the current `tryItEnabled` and `shareChangesEnabled` flags with the instructor workspace so students can switch to My Code immediately when Try it is enabled, then refresh their participant-scoped snapshot.
-- Retention: at most 30 workspaces, 512 KiB each, with a 20 MiB aggregate student-code budget.
-- Manager snapshots include named student workspaces, including files and active file, only after manager-passcode authorization. Student workspace create, save, and reset routes broadcast `student-code-updated`; manager clients use that signal only to refetch their authorized snapshot rather than carrying student code in websocket payloads.
+## MobCode live student-code contract
+
+- Date: 2026-07-25
+- Surface: MobCode live collaboration
+- Contract: `MobCodeSessionData.studentCode` keeps activity-local collaboration state: `tryItEnabled`, `shareChangesEnabled`, starter and last-published instructor snapshots, participant-keyed private workspaces, and one anonymous shared example. The instructor workspace remains `groups.default`. Student snapshots contain only the published instructor code, the requesting participant's workspace, and the anonymous shared example; manager snapshots include named student workspaces only after manager-passcode authorization.
+- Compatibility constraints: The shared-workspace route mutates only `studentCode.sharedExample.workspace`; manager file operations must use it when the shared tab is active. Student workspace create, save, and reset signals are manager-only refresh events and never carry peer workspace content. Retain at most 30 workspaces, 512 KiB each, and 20 MiB total.
+- Validation rules: Resolve student workspaces from the accepted participant record, publish instructor state only when sharing is enabled, and never expose the complete `studentWorkspaces` map to a student endpoint.
+- Evidence (schema/tests/path): `activities/mobcode/shared/types.ts`; `activities/mobcode/server/routes.ts`; `activities/mobcode/server/routes.test.ts`; `activities/mobcode/client/manager/MobCodeManager.tsx`; `activities/mobcode/client/student/MobCodeStudent.tsx`
+- Follow-up action: Keep any new student-visible payload derived from the published instructor version and participant-scoped workspace snapshot.
+- Owner: Codex

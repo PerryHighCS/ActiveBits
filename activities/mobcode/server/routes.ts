@@ -148,11 +148,9 @@ function normalizeFiles(value: unknown): Record<string, string> {
   return files
 }
 
-function normalizeGroupState(value: unknown, maxBytes = MAX_TOTAL_CONTENT_LENGTH): MobCodeGroupState {
+function normalizeGroupState(value: unknown, maxBytes?: number): MobCodeGroupState {
   if (!isPlainObject(value)) return { files: {}, activeFile: '' }
-  const files = maxBytes === MAX_TOTAL_CONTENT_LENGTH
-    ? normalizeFiles(value.files)
-    : normalizeFilesToByteLimit(value.files, maxBytes)
+  const files = maxBytes == null ? normalizeFiles(value.files) : normalizeFilesToByteLimit(value.files, maxBytes)
   return { files, activeFile: resolveActiveFile(files, value.activeFile) }
 }
 
@@ -218,13 +216,14 @@ function normalizeStudentCodeState(value: unknown, defaultGroup: MobCodeGroupSta
   }
   const rawShared = isPlainObject(raw.sharedExample) ? raw.sharedExample : null
   const sharedExample = rawShared && isValidParticipantId(rawShared.sourceParticipantId)
-    ? { sourceParticipantId: rawShared.sourceParticipantId, workspace: normalizeGroupState(rawShared.workspace), sharedAt: Number.isFinite(rawShared.sharedAt) ? Number(rawShared.sharedAt) : Date.now() }
+    ? { sourceParticipantId: rawShared.sourceParticipantId, workspace: normalizeGroupState(rawShared.workspace, MAX_STUDENT_WORKSPACE_BYTES), sharedAt: Number.isFinite(rawShared.sharedAt) ? Number(rawShared.sharedAt) : Date.now() }
     : null
   return { tryItEnabled, shareChangesEnabled, publishedInstructorVersion, starterVersion, studentWorkspaces: workspaces, sharedExample }
 }
 
 function isValidParticipantId(value: unknown): value is string {
   return typeof value === 'string'
+    && value === value.trim()
     && value.trim().length > 0
     && value.trim().length <= MAX_PARTICIPANT_ID_LENGTH
     && !RESERVED_PATH_SEGMENTS.has(value.trim())
@@ -307,7 +306,9 @@ export function buildMobCodeStudentSnapshot(
   participantId: string,
 ): Record<string, unknown> {
   const studentCode = data.studentCode ?? normalizeStudentCodeState(null, data.groups[DEFAULT_GROUP_ID] ?? { files: {}, activeFile: '' }, data)
-  const ownWorkspace = studentCode.studentWorkspaces[participantId] ?? null
+  const ownWorkspace = Object.hasOwn(studentCode.studentWorkspaces, participantId)
+    ? studentCode.studentWorkspaces[participantId]
+    : null
   return {
     groups: { [DEFAULT_GROUP_ID]: studentCode.publishedInstructorVersion ?? data.groups[DEFAULT_GROUP_ID] },
     studentCode: {
@@ -657,7 +658,10 @@ registerSessionNormalizer('mobcode', (session) => {
 })
 
 export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessionStore, ws: WsRouter): void {
-  const ensureBroadcastSubscription = createBroadcastSubscriptionHelper(sessions, ws)
+  const ensureBroadcastSubscription = createBroadcastSubscriptionHelper(sessions, ws, (client, message) => {
+    const audience = isPlainObject(message) && message.audience === 'managers' ? 'managers' : 'all'
+    return audience === 'all' || (client as MobCodeSocket).mobCodeRole === 'manager'
+  })
   const liveGroupsBySession = new Map<string, MobCodeGroupState>()
   const liveGroupCleanupTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
@@ -682,9 +686,9 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
   }
 
   async function broadcast(type: string, payload: MobCodeStatePayload, sessionId: string, audience: 'all' | 'managers' = 'all'): Promise<void> {
-    const msgObj = { type, payload, timestamp: Date.now() }
+    const msgObj = { type, payload, timestamp: Date.now(), audience }
     const msg = JSON.stringify(msgObj)
-    if (audience === 'all' && sessions.publishBroadcast && sessions.valkeyStore != null) {
+    if (sessions.publishBroadcast && sessions.valkeyStore != null) {
       try {
         await sessions.publishBroadcast(`session:${sessionId}:broadcast`, msgObj)
       } catch (error) {
@@ -875,7 +879,7 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
       const workspace = createStudentWorkspace(session.data, identity)
       if (workspace) {
         await sessions.set(session.id, session)
-        await broadcast('student-code-updated', session.data.groups[DEFAULT_GROUP_ID] ?? { files: {}, activeFile: '' }, session.id)
+        await broadcast('student-code-updated', session.data.groups[DEFAULT_GROUP_ID] ?? { files: {}, activeFile: '' }, session.id, 'managers')
       }
       res.set('Cache-Control', 'no-store')
       res.json({ id: session.id, type: session.type, data: buildMobCodeStudentSnapshot(session.data, identity.participantId) })
@@ -927,7 +931,7 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
         return
       }
       await sessions.set(session.id, session)
-      await broadcast('student-code-updated', session.data.groups[DEFAULT_GROUP_ID] ?? { files: {}, activeFile: '' }, session.id)
+      await broadcast('student-code-updated', session.data.groups[DEFAULT_GROUP_ID] ?? { files: {}, activeFile: '' }, session.id, 'managers')
       res.json({ ok: true, workspace: { files: workspace.files, activeFile: workspace.activeFile } })
     } catch (error) {
       console.error(JSON.stringify({ event: 'mobcode.student-state-failed', sessionId: req.params.sessionId, error: String(error) }))
@@ -954,7 +958,7 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
         return
       }
       await sessions.set(session.id, session)
-      await broadcast('student-code-updated', session.data.groups[DEFAULT_GROUP_ID] ?? { files: {}, activeFile: '' }, session.id)
+      await broadcast('student-code-updated', session.data.groups[DEFAULT_GROUP_ID] ?? { files: {}, activeFile: '' }, session.id, 'managers')
       res.json({ ok: true, workspace: { files: workspace.files, activeFile: workspace.activeFile } })
     } catch (error) {
       console.error(JSON.stringify({ event: 'mobcode.student-reset-failed', sessionId: req.params.sessionId, error: String(error) }))
@@ -989,7 +993,9 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
         }
       } else if (action === 'share-example') {
         const participantId = typeof body.participantId === 'string' ? body.participantId : ''
-        const source = studentCode.studentWorkspaces[participantId]
+        const source = isValidParticipantId(participantId) && Object.hasOwn(studentCode.studentWorkspaces, participantId)
+          ? studentCode.studentWorkspaces[participantId]
+          : null
         if (!source) {
           res.status(404).json({ error: 'Student workspace not found' })
           return
@@ -1003,7 +1009,9 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
       }
       await sessions.set(session.id, session)
       const settingsPayload = {
-        ...(session.data.groups[DEFAULT_GROUP_ID] ?? { files: {}, activeFile: '' }),
+        ...(studentCode.shareChangesEnabled
+          ? session.data.groups[DEFAULT_GROUP_ID] ?? { files: {}, activeFile: '' }
+          : studentCode.publishedInstructorVersion ?? { files: {}, activeFile: '' }),
         tryItEnabled: studentCode.tryItEnabled,
         shareChangesEnabled: studentCode.shareChangesEnabled,
       }
@@ -1033,7 +1041,9 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
       sharedExample.sharedAt = Date.now()
       await sessions.set(session.id, session)
       const settingsPayload = {
-        ...(session.data.groups[DEFAULT_GROUP_ID] ?? { files: {}, activeFile: '' }),
+        ...(session.data.studentCode?.shareChangesEnabled
+          ? session.data.groups[DEFAULT_GROUP_ID] ?? { files: {}, activeFile: '' }
+          : session.data.studentCode?.publishedInstructorVersion ?? { files: {}, activeFile: '' }),
         tryItEnabled: session.data.studentCode?.tryItEnabled === true,
         shareChangesEnabled: session.data.studentCode?.shareChangesEnabled === true,
       }
@@ -1087,11 +1097,11 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
       if (nextPayload !== currentLiveGroup) {
         liveGroupsBySession.set(session.id, nextPayload)
       }
-      await sessions.set(session.id, session)
       const shareChangesEnabled = session.data.studentCode?.shareChangesEnabled === true
       if (shareChangesEnabled) {
         session.data.studentCode!.publishedInstructorVersion = cloneGroupState(nextPayload)
       }
+      await sessions.set(session.id, session)
       await broadcast(messageType, nextPayload, session.id, shareChangesEnabled ? 'all' : 'managers')
       if (session.data.soloMode === true) {
         scheduleLiveGroupCleanup(session.id)

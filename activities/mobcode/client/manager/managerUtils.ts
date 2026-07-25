@@ -57,16 +57,6 @@ export function applyActiveFileChange(current: MobCodeStatePayload, activeFile: 
   }
 }
 
-export function resolveMobCodeHasUnsharedChanges(
-  currentFiles: Record<string, string>,
-  starterVersionFiles: Record<string, string> | null,
-): boolean {
-  if (starterVersionFiles == null) return Object.keys(currentFiles).length > 0
-  const currentPaths = Object.keys(currentFiles)
-  if (currentPaths.length !== Object.keys(starterVersionFiles).length) return true
-  return currentPaths.some((path) => currentFiles[path] !== starterVersionFiles[path])
-}
-
 export function shouldApplyRemoteStateMessage(type: MobCodeMessage['type'], canEdit: boolean): boolean {
   if (!canEdit) return true
   return type !== 'state-sync' && type !== 'file-tree-changed'

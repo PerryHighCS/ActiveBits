@@ -239,6 +239,7 @@ Track security-relevant boundaries, risks, and mitigation decisions.
 - Validation (test/review/path): `client/src/components/common/manageDashboardUtils.ts`; `client/src/components/common/ManageDashboard.tsx`; `activities/syncdeck/server/routes.ts`; `client/src/components/common/manageDashboardUtils.test.ts`; `activities/syncdeck/server/routes.test.ts`; `npm test`.
 - Follow-up action: Add optional hostname/domain allowlist policy if deployment requires restricting presentation origins.
 - Owner: Codex
+
 # MobCode live student-code boundary
 
 - Resolve a MobCode student workspace from the accepted waiting-room participant record, not from a display name or a client-selected workspace identifier. Manager-only settings still require the MobCode instructor passcode.
