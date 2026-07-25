@@ -3,6 +3,7 @@ import test from 'node:test'
 import {
   applyStudentFileContentUpdate,
   getStudentRunnerOptions,
+  isEmbeddedMobCodeChildSession,
   removeMobCodeSoloTokenFromHash,
   removeMobCodeSoloTokenFromSearch,
   resolveMobCodeStudentRoute,
@@ -37,6 +38,11 @@ void test('resolveMobCodeStudentRoute selects the token-authenticated solo manag
   })
   assert.equal(removeMobCodeSoloTokenFromSearch('?mobcodeSoloToken=opaque-token&view=solo'), '?view=solo')
   assert.equal(removeMobCodeSoloTokenFromHash('#mobcodeSoloToken=opaque-token&view=solo'), '#view=solo')
+})
+
+void test('isEmbeddedMobCodeChildSession only waits for SyncDeck child sessions', () => {
+  assert.equal(isEmbeddedMobCodeChildSession('CHILD:af94a:32728:mobcode'), true)
+  assert.equal(isEmbeddedMobCodeChildSession('mobcode-session'), false)
 })
 
 void test('resolveStudentActiveFileChange ignores missing active-file updates', () => {

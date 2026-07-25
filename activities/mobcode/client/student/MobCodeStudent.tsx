@@ -3,7 +3,11 @@ import { useLocation, useNavigate } from 'react-router'
 import VirtualFileExplorer from '@src/components/common/VirtualFileExplorer'
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
 import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler'
-import { consumeResolvedEntryParticipantValues } from '@src/components/common/entryParticipantStorage'
+import {
+  buildSessionEntryParticipantStorageKey,
+  consumeResolvedEntryParticipantValues,
+  hasValidEntryParticipantHandoffStorageValue,
+} from '@src/components/common/entryParticipantStorage'
 import type { MobCodeEditorPresencePayload, MobCodeRunnerId, MobCodeThemeId } from '../../shared/types'
 import { isMobCodeRunnerId } from '../../shared/types'
 import CodeEditor from '../components/CodeEditor'
@@ -31,6 +35,40 @@ interface MobCodeStudentProps {
 export type MobCodeStudentRoute =
   | { mode: 'solo'; soloEditToken: string }
   | { mode: 'live' }
+
+const EMBEDDED_ENTRY_HANDOFF_WAIT_MS = 4_000
+const EMBEDDED_ENTRY_HANDOFF_POLL_MS = 50
+
+/** SyncDeck child sessions receive their opaque entry token asynchronously over its websocket. */
+export function isEmbeddedMobCodeChildSession(sessionId: string): boolean {
+  return sessionId.startsWith('CHILD:')
+}
+
+function waitForEmbeddedEntryParticipantHandoff(sessionId: string): Promise<void> {
+  if (typeof sessionStorage === 'undefined' || !isEmbeddedMobCodeChildSession(sessionId)) {
+    return Promise.resolve()
+  }
+
+  const storageKey = buildSessionEntryParticipantStorageKey('mobcode', sessionId)
+  if (hasValidEntryParticipantHandoffStorageValue(sessionStorage, storageKey)) {
+    return Promise.resolve()
+  }
+
+  return new Promise((resolve) => {
+    const deadline = Date.now() + EMBEDDED_ENTRY_HANDOFF_WAIT_MS
+    const poll = () => {
+      if (
+        hasValidEntryParticipantHandoffStorageValue(sessionStorage, storageKey)
+        || Date.now() >= deadline
+      ) {
+        resolve()
+        return
+      }
+      setTimeout(poll, EMBEDDED_ENTRY_HANDOFF_POLL_MS)
+    }
+    setTimeout(poll, EMBEDDED_ENTRY_HANDOFF_POLL_MS)
+  })
+}
 
 function readMobCodeSoloTokenFromHistoryState(locationState: unknown): string {
   if (locationState == null || typeof locationState !== 'object') return ''
@@ -209,15 +247,35 @@ function MobCodeLiveStudent({ sessionData }: MobCodeStudentProps) {
   useEffect(() => {
     const openStudentWorkspace = async (): Promise<SessionResponse | null> => {
       if (typeof sessionStorage !== 'undefined') {
+        await waitForEmbeddedEntryParticipantHandoff(sessionId)
         await consumeResolvedEntryParticipantValues(sessionStorage, {
           activityName: 'mobcode',
           sessionId,
           isSoloSession: false,
         })
       }
-      const response = await fetch(`/api/mobcode/${encodedSessionId}/student-workspace`, {
+      let response = await fetch(`/api/mobcode/${encodedSessionId}/student-workspace`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
       })
+
+      // SyncDeck can restore the child iframe from saved state before its websocket has
+      // replayed the opaque entry token. Give that replay one more bounded chance before
+      // falling back to the read-only instructor snapshot.
+      if (
+        response.status === 403
+        && typeof sessionStorage !== 'undefined'
+        && isEmbeddedMobCodeChildSession(sessionId)
+      ) {
+        await waitForEmbeddedEntryParticipantHandoff(sessionId)
+        await consumeResolvedEntryParticipantValues(sessionStorage, {
+          activityName: 'mobcode',
+          sessionId,
+          isSoloSession: false,
+        })
+        response = await fetch(`/api/mobcode/${encodedSessionId}/student-workspace`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+        })
+      }
       if (response.ok) return response.json() as Promise<SessionResponse>
       const fallback = await fetch(`/api/mobcode/${encodedSessionId}/session`)
       return fallback.ok ? fallback.json() as Promise<SessionResponse> : null
