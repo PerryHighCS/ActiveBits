@@ -746,7 +746,6 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken, soloM
               {isStudentsExpanded && <div id="mobcode-students-roster">
                 {studentWorkspaces.length === 0 && <p className="mt-2 text-sm text-gray-600">No student workspaces yet.</p>}
                 {studentWorkspaces.map((student) => {
-                  const isSharedExample = sharedExampleParticipantId === student.participantId
                   return (
                     <div key={student.participantId} className="mt-2 flex items-center justify-between gap-2 text-sm">
                       <button
@@ -760,7 +759,7 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken, soloM
                       >
                         {student.displayName}
                       </button>
-                      {isSharedExample ? (
+                      { sharedExampleParticipantId === student.participantId ? (
                         <button type="button" onClick={() => void updateStudentCodeSetting('unshare-example')}>
                           Unshare
                         </button>
