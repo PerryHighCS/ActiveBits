@@ -386,3 +386,7 @@ Capture reusable test setup patterns, common failure modes, and reliability guid
 # MobCode collaboration tests
 
 - Test student response shaping by serializing the scoped snapshot and asserting that another student's display name, paths, and content are absent. This catches accidental leakage when session state grows new collaboration fields.
+
+# Activities lint memory
+
+- Run the activities workspace lint through `scripts/lint-activities.mjs`. It starts one type-aware ESLint process per top-level activity directory, releasing the TypeScript program between directories instead of constructing one program for the whole workspace.
