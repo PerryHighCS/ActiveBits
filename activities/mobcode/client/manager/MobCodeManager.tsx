@@ -655,14 +655,16 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken, soloM
     if (!response.ok) throw new Error('Could not save shared code.')
   }, [encodedSessionId, instructorPasscode, sessionId])
 
-  const flushSharedWorkspacePersist = useCallback(() => {
+  const flushSharedWorkspacePersist = useCallback((skipUiUpdates = false) => {
     sharedWorkspacePersistDebounceRef.current = null
     const pendingWorkspace = pendingSharedWorkspaceRef.current
     if (!pendingWorkspace) return
     pendingSharedWorkspaceRef.current = null
     void persistSharedWorkspace(pendingWorkspace.files, pendingWorkspace.activeFile).catch((error) => {
-      void refreshStudentWorkspaces()
-      setRunnerMessage(error instanceof Error ? error.message : 'Could not save shared code.')
+      if (!skipUiUpdates) {
+        void refreshStudentWorkspaces()
+        setRunnerMessage(error instanceof Error ? error.message : 'Could not save shared code.')
+      }
     })
   }, [persistSharedWorkspace, refreshStudentWorkspaces])
 
@@ -681,7 +683,7 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken, soloM
       clearTimeout(sharedWorkspacePersistDebounceRef.current)
       sharedWorkspacePersistDebounceRef.current = null
     }
-    flushSharedWorkspacePersist()
+    flushSharedWorkspacePersist(true)
   }, [flushSharedWorkspacePersist])
 
   const applyVisibleFiles = useCallback((nextFiles: Record<string, string>, nextActiveFile: string) => {
@@ -938,9 +940,9 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken, soloM
                   </button>
                 )}
                 {selectedStudentWorkspace && (
-                  <span className="mobcode-workspace-tab" aria-current="page">
+                  <button type="button" role="tab" aria-selected="true" className="mobcode-workspace-tab" disabled>
                     {selectedStudentWorkspace.displayName}
-                  </span>
+                  </button>
                 )}
               </div>
               {workspaceSelection.kind === 'instructor' && (

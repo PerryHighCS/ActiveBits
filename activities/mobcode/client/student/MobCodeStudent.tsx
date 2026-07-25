@@ -481,22 +481,26 @@ function MobCodeLiveStudent({ sessionData }: MobCodeStudentProps) {
   const selectedActiveFile = selectedWorkspace?.activeFile ?? activeFile
   const canEditMyCode = workspaceView === 'mine' && tryItEnabled && myWorkspace != null
 
-  const persistMyWorkspace = useCallback(async (nextFiles: Record<string, string>, nextActiveFile: string) => {
+  const persistMyWorkspace = useCallback(async (
+    nextFiles: Record<string, string>,
+    nextActiveFile: string,
+    updateUi = true,
+  ) => {
     const response = await fetch(`/api/mobcode/${encodedSessionId}/student-workspace/state`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ files: nextFiles, activeFile: nextActiveFile }),
     })
-    if (response.status === 423) setTryItEnabled(false)
+    if (response.status === 423 && updateUi) setTryItEnabled(false)
     if (!response.ok) throw new Error('Could not save your code.')
   }, [encodedSessionId])
 
-  const flushMyWorkspacePersist = useCallback(() => {
+  const flushMyWorkspacePersist = useCallback((skipUiUpdates = false) => {
     myWorkspacePersistDebounceRef.current = null
     const pendingWorkspace = pendingMyWorkspaceRef.current
     if (!pendingWorkspace) return
     pendingMyWorkspaceRef.current = null
-    void persistMyWorkspace(pendingWorkspace.files, pendingWorkspace.activeFile).catch((error) => {
-      setRunnerMessage(error instanceof Error ? error.message : 'Could not save your code.')
+    void persistMyWorkspace(pendingWorkspace.files, pendingWorkspace.activeFile, !skipUiUpdates).catch((error) => {
+      if (!skipUiUpdates) setRunnerMessage(error instanceof Error ? error.message : 'Could not save your code.')
     })
   }, [persistMyWorkspace])
 
@@ -512,7 +516,7 @@ function MobCodeLiveStudent({ sessionData }: MobCodeStudentProps) {
       clearTimeout(myWorkspacePersistDebounceRef.current)
       myWorkspacePersistDebounceRef.current = null
     }
-    flushMyWorkspacePersist()
+    flushMyWorkspacePersist(true)
   }, [flushMyWorkspacePersist])
 
   const resetMyCode = useCallback(async () => {
