@@ -67,7 +67,10 @@ export default defineConfig({
     },
     // Disable HMR in Codespaces to avoid WebSocket proxy issues
     // The app works fine without live reload; just refresh the page after edits
-    hmr: !isCodespaces,
+    // The Express development proxy only forwards websocket upgrades on this path.
+    // Without an explicit path, Vite's injected client attempts `/?token=…` on :3000
+    // and the proxied SyncDeck presentation cannot establish its development client.
+    hmr: isCodespaces ? false : { path: '/vite-hmr' },
     host: true,
     port: 5173,
     strictPort: true,

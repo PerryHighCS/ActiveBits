@@ -155,6 +155,7 @@ SyncDeck sample decks that exist only for local development live under `activiti
 
 - They may use permissive local-development settings that are not suitable for production embedding.
 - Vite serves them during local development from the same `/presentations/...` URLs used by the app.
+- When accessing the local app through the Express server on port `3000`, Vite HMR uses `/vite-hmr`; the server proxies that websocket upgrade to Vite on port `5173`.
 - Production builds must not emit these dev-only presentation files.
 
 ## SyncDeck Embedded Media
