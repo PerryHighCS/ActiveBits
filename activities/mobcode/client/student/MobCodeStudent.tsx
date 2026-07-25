@@ -52,6 +52,11 @@ export function shouldAutoSelectMyCodeOnTryItStart(
   return !previousTryItEnabled && nextTryItEnabled && hasMyWorkspace
 }
 
+/** Switch immediately on the settings event; the subsequent snapshot creates/loads the workspace. */
+export function shouldSelectMyCodeFromTryItSettings(previousTryItEnabled: boolean, nextTryItEnabled: boolean): boolean {
+  return !previousTryItEnabled && nextTryItEnabled
+}
+
 function waitForEmbeddedEntryParticipantHandoff(sessionId: string): Promise<void> {
   if (typeof sessionStorage === 'undefined' || !isEmbeddedMobCodeChildSession(sessionId)) {
     return Promise.resolve()
@@ -349,7 +354,18 @@ function MobCodeLiveStudent({ sessionData }: MobCodeStudentProps) {
       const msg = parseMobCodeMessage(event.data)
       if (!msg) return
       if (msg.type === MOB_CODE_MESSAGE_TYPES.STUDENT_CODE_SETTINGS_CHANGED) {
-        const settingsPayload = msg.payload as { shareChangesEnabled?: unknown; files?: unknown; activeFile?: unknown }
+        const settingsPayload = msg.payload as {
+          tryItEnabled?: unknown
+          shareChangesEnabled?: unknown
+          files?: unknown
+          activeFile?: unknown
+        }
+        const nextTryItEnabled = settingsPayload.tryItEnabled === true
+        if (shouldSelectMyCodeFromTryItSettings(previousTryItEnabledRef.current, nextTryItEnabled)) {
+          setTryItEnabled(true)
+          previousTryItEnabledRef.current = true
+          setWorkspaceView('mine')
+        }
         if (settingsPayload.shareChangesEnabled === true && isStatePayload(settingsPayload)) {
           const nextFiles = settingsPayload.files
           previousShareChangesEnabledRef.current = true

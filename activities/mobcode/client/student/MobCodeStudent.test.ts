@@ -10,6 +10,7 @@ import {
   resolveStudentActiveFileChange,
   sanitizeStudentPresenceUpdate,
   shouldAutoSelectMyCodeOnTryItStart,
+  shouldSelectMyCodeFromTryItSettings,
 } from './MobCodeStudent'
 import type { MobCodeRunnerId } from '../../shared/types'
 import type { MobCodeRunnerDefinition } from '../runner/runnerUtils'
@@ -51,6 +52,12 @@ void test('shouldAutoSelectMyCodeOnTryItStart only switches views when editing b
   assert.equal(shouldAutoSelectMyCodeOnTryItStart(true, true, true), false)
   assert.equal(shouldAutoSelectMyCodeOnTryItStart(false, true, false), false)
   assert.equal(shouldAutoSelectMyCodeOnTryItStart(true, false, true), false)
+})
+
+void test('shouldSelectMyCodeFromTryItSettings switches immediately when Try it is enabled', () => {
+  assert.equal(shouldSelectMyCodeFromTryItSettings(false, true), true)
+  assert.equal(shouldSelectMyCodeFromTryItSettings(true, true), false)
+  assert.equal(shouldSelectMyCodeFromTryItSettings(false, false), false)
 })
 
 void test('resolveStudentActiveFileChange ignores missing active-file updates', () => {

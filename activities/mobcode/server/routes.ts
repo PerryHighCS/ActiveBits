@@ -1004,6 +1004,7 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
       await sessions.set(session.id, session)
       const settingsPayload = {
         ...(session.data.groups[DEFAULT_GROUP_ID] ?? { files: {}, activeFile: '' }),
+        tryItEnabled: studentCode.tryItEnabled,
         shareChangesEnabled: studentCode.shareChangesEnabled,
       }
       await broadcast('student-code-settings-changed', settingsPayload, session.id)
@@ -1031,7 +1032,12 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
       sharedExample.workspace = normalizeGroupState(payload, MAX_STUDENT_WORKSPACE_BYTES)
       sharedExample.sharedAt = Date.now()
       await sessions.set(session.id, session)
-      await broadcast('student-code-settings-changed', session.data.groups[DEFAULT_GROUP_ID] ?? { files: {}, activeFile: '' }, session.id)
+      const settingsPayload = {
+        ...(session.data.groups[DEFAULT_GROUP_ID] ?? { files: {}, activeFile: '' }),
+        tryItEnabled: session.data.studentCode?.tryItEnabled === true,
+        shareChangesEnabled: session.data.studentCode?.shareChangesEnabled === true,
+      }
+      await broadcast('student-code-settings-changed', settingsPayload, session.id)
       res.json({ ok: true, workspace: sharedExample.workspace })
     } catch (error) {
       console.error(JSON.stringify({ event: 'mobcode.shared-workspace-state-failed', sessionId: req.params.sessionId, error: String(error) }))
