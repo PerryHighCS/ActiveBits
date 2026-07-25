@@ -23,7 +23,7 @@ or introduce a new student identity system.
   read/write flag: off locks editing, on permits a student to edit only their own workspace.
 - Enabling `Try it` captures the current instructor workspace as the first starter version.
   Later instructor edits never mutate student work or the starter version automatically.
-- `Share Changes` explicitly snapshots the current instructor workspace as the version that
+- `Broadcast` explicitly snapshots the current instructor workspace as the version that
   students can choose to reset their own work to. It never overwrites student work.
 - A reset is initiated by a student, must confirm that their work will be replaced, and uses
   the current shared-changes snapshot.
@@ -91,7 +91,7 @@ new identifier, store instructor credentials in browser storage, or reuse the so
 - Every student mutation must resolve participant identity on the server, select the workspace
   from that identity rather than request input, and reject writes while `tryItEnabled` is
   false. Log expected denials with structured event names without file contents or secrets.
-- Instructor-only actions (`Try it`, `Share Changes`, share/unshare example) require the
+- Instructor-only actions (`Try it`, `Broadcast`, share/unshare example) require the
   existing MobCode instructor passcode/authenticated manager socket.
 - The instructor review surface is read-only. It must not expose controls that mutate a
   selected student workspace.
@@ -106,7 +106,7 @@ new identifier, store instructor credentials in browser storage, or reuse the so
    starter/no shared example.
 2. Create explicit authenticated commands/routes for:
    - toggling `Try it`;
-   - `Share Changes` (snapshot instructor code as `starterVersion`);
+   - `Broadcast` (snapshot instructor code as `starterVersion`);
    - creating or returning the current student's workspace from `starterVersion`;
    - resetting the current student's workspace from `starterVersion`;
    - sharing, replacing, and unsharing an anonymous student example.
@@ -153,7 +153,7 @@ Render these workspace sections:
 - `Shared example` — a read-only preview when present, with `Unshare` and `Replace` actions.
 
 Add an accessible `Try it` switch that reports its checked state and clearly states that it
-enables or locks student editing without deleting their work. Add `Share Changes` as a
+enables or locks student editing without deleting their work. Add `Broadcast` as a
 separate explicit action, with copy stating that it updates the student reset version and does
 not overwrite anyone. A student workspace's contextual instructor action creates/replaces the
 anonymous shared example and must explain that the student's name will not be shown.
@@ -175,7 +175,7 @@ Document this MobCode embedded activity payload shape:
 - It applies when SyncDeck creates a live MobCode child session. It is not a new standalone
   solo mode and does not alter the existing solo launch behavior.
 - The initial `groups.default` state supplies the first student starter version. Later
-  `Share Changes` snapshots are session state and take precedence for resets.
+  `Broadcast` snapshots are session state and take precedence for resets.
 - Update `skills/syncdeck/references/ACTIVITY_PAYLOADS.md` in the same implementation branch,
   as required for SyncDeck-embedded launch changes.
 
@@ -186,7 +186,7 @@ Document this MobCode embedded activity payload shape:
 - [ ] Add `startTryItMode` embedded-launch normalization and initial live-session setup while
   preserving current MobCode and standalone solo contracts.
 - [ ] Implement authenticated REST/websocket commands for workspace creation, student edits,
-  reset, `Try it`, `Share Changes`, and anonymous share lifecycle.
+  reset, `Try it`, `Broadcast`, and anonymous share lifecycle.
 - [ ] Add student-safe and instructor-safe read models; ensure unauthorized cross-student
   reads/writes are impossible and structured denials are logged.
 - [ ] Refactor MobCode client state around a selected workspace and build accessible student
@@ -212,7 +212,7 @@ Document this MobCode embedded activity payload shape:
   rejects edits; a student cannot reset another workspace; and manager-only routes reject a
   missing/incorrect instructor credential. Intentional denial tests log `[TEST]` markers.
 - Snapshot semantics: instructor edits do not alter existing workspaces or reset baseline;
-  `Share Changes` replaces only the baseline; reset replaces only the requesting student's
+  `Broadcast` replaces only the baseline; reset replaces only the requesting student's
   workspace; sharing never changes source or peer workspaces.
 - Response shaping: student responses contain no other student names/workspaces and manager
   responses contain named read-only student metadata without credentials.
