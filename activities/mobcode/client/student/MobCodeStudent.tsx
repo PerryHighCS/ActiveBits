@@ -115,6 +115,7 @@ interface SessionResponse {
     canEditSolo?: unknown
     studentCode?: {
       tryItEnabled?: unknown
+      shareChangesEnabled?: unknown
       starterVersionAvailable?: unknown
       ownWorkspace?: { files?: unknown; activeFile?: unknown } | null
       sharedExample?: { workspace?: { files?: unknown; activeFile?: unknown } } | null
@@ -252,6 +253,8 @@ function MobCodeLiveStudent({ sessionData }: MobCodeStudentProps) {
   const [workspaceRefresh, setWorkspaceRefresh] = useState(0)
   const latestFilesRef = useRef<Record<string, string>>({})
   const previousTryItEnabledRef = useRef(false)
+  const previousSharedExampleAvailableRef = useRef(false)
+  const previousShareChangesEnabledRef = useRef(false)
 
   useEffect(() => {
     const openStudentWorkspace = async (): Promise<SessionResponse | null> => {
@@ -313,7 +316,20 @@ function MobCodeLiveStudent({ sessionData }: MobCodeStudentProps) {
         }
         previousTryItEnabledRef.current = nextTryItEnabled
         const sharedFiles = sanitizeFilesMap(session.data?.studentCode?.sharedExample?.workspace?.files)
-        setSharedWorkspace(session.data?.studentCode?.sharedExample ? { files: sharedFiles, activeFile: resolveActiveFile(sharedFiles, session.data.studentCode.sharedExample.workspace?.activeFile) } : null)
+        const nextSharedWorkspace = session.data?.studentCode?.sharedExample
+          ? { files: sharedFiles, activeFile: resolveActiveFile(sharedFiles, session.data.studentCode.sharedExample.workspace?.activeFile) }
+          : null
+        const nextShareChangesEnabled = session.data?.studentCode?.shareChangesEnabled === true
+        if (!previousSharedExampleAvailableRef.current && nextSharedWorkspace != null) {
+          setWorkspaceView('shared')
+        } else if (!previousShareChangesEnabledRef.current && nextShareChangesEnabled) {
+          setWorkspaceView('instructor')
+        } else if (previousSharedExampleAvailableRef.current && nextSharedWorkspace == null) {
+          setWorkspaceView('instructor')
+        }
+        previousSharedExampleAvailableRef.current = nextSharedWorkspace != null
+        previousShareChangesEnabledRef.current = nextShareChangesEnabled
+        setSharedWorkspace(nextSharedWorkspace)
       })
       .catch((error) => console.error('Failed to fetch MobCode session:', error))
   }, [encodedSessionId, sessionId, workspaceRefresh])

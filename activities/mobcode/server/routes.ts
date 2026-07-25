@@ -184,6 +184,10 @@ function normalizeStudentCodeState(value: unknown, defaultGroup: MobCodeGroupSta
   const selectedOptions = isPlainObject(embeddedLaunch?.selectedOptions) ? embeddedLaunch.selectedOptions : null
   const startTryItMode = selectedOptions?.startTryItMode === true
   const tryItEnabled = raw.tryItEnabled === true || (startTryItMode && !isPlainObject(value))
+  const shareChangesEnabled = raw.shareChangesEnabled === true
+  const publishedInstructorVersion = isPlainObject(raw.publishedInstructorVersion)
+    ? normalizeGroupState(raw.publishedInstructorVersion)
+    : cloneGroupState(defaultGroup)
   const starterVersion = isPlainObject(raw.starterVersion)
     ? normalizeGroupState(raw.starterVersion)
     : tryItEnabled ? cloneGroupState(defaultGroup) : null
@@ -216,7 +220,7 @@ function normalizeStudentCodeState(value: unknown, defaultGroup: MobCodeGroupSta
   const sharedExample = rawShared && isValidParticipantId(rawShared.sourceParticipantId)
     ? { sourceParticipantId: rawShared.sourceParticipantId, workspace: normalizeGroupState(rawShared.workspace), sharedAt: Number.isFinite(rawShared.sharedAt) ? Number(rawShared.sharedAt) : Date.now() }
     : null
-  return { tryItEnabled, starterVersion, studentWorkspaces: workspaces, sharedExample }
+  return { tryItEnabled, shareChangesEnabled, publishedInstructorVersion, starterVersion, studentWorkspaces: workspaces, sharedExample }
 }
 
 function isValidParticipantId(value: unknown): value is string {
@@ -305,9 +309,10 @@ export function buildMobCodeStudentSnapshot(
   const studentCode = data.studentCode ?? normalizeStudentCodeState(null, data.groups[DEFAULT_GROUP_ID] ?? { files: {}, activeFile: '' }, data)
   const ownWorkspace = studentCode.studentWorkspaces[participantId] ?? null
   return {
-    groups: { [DEFAULT_GROUP_ID]: data.groups[DEFAULT_GROUP_ID] },
+    groups: { [DEFAULT_GROUP_ID]: studentCode.publishedInstructorVersion ?? data.groups[DEFAULT_GROUP_ID] },
     studentCode: {
       tryItEnabled: studentCode.tryItEnabled,
+      shareChangesEnabled: studentCode.shareChangesEnabled,
       starterVersionAvailable: studentCode.starterVersion != null,
       ownWorkspace,
       sharedExample: studentCode.sharedExample == null ? null : { workspace: studentCode.sharedExample.workspace, sharedAt: studentCode.sharedExample.sharedAt },
@@ -675,10 +680,10 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
     liveGroupCleanupTimers.set(sessionId, timer)
   }
 
-  async function broadcast(type: string, payload: MobCodeStatePayload, sessionId: string): Promise<void> {
+  async function broadcast(type: string, payload: MobCodeStatePayload, sessionId: string, audience: 'all' | 'managers' = 'all'): Promise<void> {
     const msgObj = { type, payload, timestamp: Date.now() }
     const msg = JSON.stringify(msgObj)
-    if (sessions.publishBroadcast && sessions.valkeyStore != null) {
+    if (audience === 'all' && sessions.publishBroadcast && sessions.valkeyStore != null) {
       try {
         await sessions.publishBroadcast(`session:${sessionId}:broadcast`, msgObj)
       } catch (error) {
@@ -686,8 +691,9 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
       }
     }
 
-    for (const client of ws.wss.clients) {
-      if (client.readyState === WS_OPEN && client.sessionId === sessionId) {
+    for (const rawClient of ws.wss.clients) {
+      const client = rawClient as MobCodeSocket
+      if (client.readyState === WS_OPEN && client.sessionId === sessionId && (audience === 'all' || client.mobCodeRole === 'manager')) {
         try {
           client.send(msg)
         } catch {
@@ -745,8 +751,14 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
         liveGroupsBySession.set(sessionId, nextGroup)
 
         const outgoing = JSON.stringify({ ...relayMessage, timestamp: Date.now() })
-        for (const peer of ws.wss.clients) {
-          if (peer !== client && peer.readyState === WS_OPEN && peer.sessionId === sessionId) {
+        for (const rawPeer of ws.wss.clients) {
+          const peer = rawPeer as MobCodeSocket
+          if (
+            peer !== client
+            && peer.readyState === WS_OPEN
+            && peer.sessionId === sessionId
+            && (session.data.studentCode?.shareChangesEnabled === true || peer.mobCodeRole === 'manager')
+          ) {
             try {
               peer.send(outgoing)
             } catch {
@@ -968,7 +980,12 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
         studentCode.tryItEnabled = body.enabled === true
         if (studentCode.tryItEnabled && !studentCode.starterVersion) studentCode.starterVersion = cloneGroupState(session.data.groups[DEFAULT_GROUP_ID] ?? { files: {}, activeFile: '' })
       } else if (action === 'share-changes') {
-        studentCode.starterVersion = cloneGroupState(session.data.groups[DEFAULT_GROUP_ID] ?? { files: {}, activeFile: '' })
+        studentCode.shareChangesEnabled = body.enabled === true
+        if (studentCode.shareChangesEnabled) {
+          const currentInstructorWorkspace = session.data.groups[DEFAULT_GROUP_ID] ?? { files: {}, activeFile: '' }
+          studentCode.starterVersion = cloneGroupState(currentInstructorWorkspace)
+          studentCode.publishedInstructorVersion = cloneGroupState(currentInstructorWorkspace)
+        }
       } else if (action === 'share-example') {
         const participantId = typeof body.participantId === 'string' ? body.participantId : ''
         const source = studentCode.studentWorkspaces[participantId]
@@ -1035,7 +1052,11 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
         liveGroupsBySession.set(session.id, nextPayload)
       }
       await sessions.set(session.id, session)
-      await broadcast(messageType, nextPayload, session.id)
+      const shareChangesEnabled = session.data.studentCode?.shareChangesEnabled === true
+      if (shareChangesEnabled) {
+        session.data.studentCode!.publishedInstructorVersion = cloneGroupState(nextPayload)
+      }
+      await broadcast(messageType, nextPayload, session.id, shareChangesEnabled ? 'all' : 'managers')
       if (session.data.soloMode === true) {
         scheduleLiveGroupCleanup(session.id)
       }

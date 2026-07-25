@@ -47,7 +47,6 @@ import {
   createStateSnapshot,
   isStatePayload,
   parseMobCodeMessage,
-  resolveMobCodeHasUnsharedChanges,
   sendMobCodeWsMessage,
   shouldApplyRemoteStateMessage,
 } from './managerUtils'
@@ -65,6 +64,7 @@ interface SessionResponse {
     runnerId?: unknown
     studentCode?: {
       tryItEnabled?: unknown
+      shareChangesEnabled?: unknown
       starterVersion?: { files?: unknown } | null
       students?: Array<{ participantId?: unknown; displayName?: unknown; files?: unknown; activeFile?: unknown }>
       sharedExample?: { sourceParticipantId?: unknown; workspace?: { files?: unknown; activeFile?: unknown } } | null
@@ -172,6 +172,7 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken, soloM
   const [runnerId, setRunnerId] = useState<MobCodeRunnerId>(DEFAULT_MOB_CODE_RUNNER_ID)
   const [runnerMessage, setRunnerMessage] = useState('')
   const [tryItEnabled, setTryItEnabled] = useState(false)
+  const [shareChangesEnabled, setShareChangesEnabled] = useState(false)
   const [studentCodeMessage, setStudentCodeMessage] = useState('')
   const [studentWorkspaces, setStudentWorkspaces] = useState<MobCodeManagerStudentWorkspace[]>([])
   const [workspaceSelection, setWorkspaceSelection] = useState<MobCodeManagerWorkspaceSelection>({ kind: 'instructor' })
@@ -180,7 +181,6 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken, soloM
   const [isStudentsExpanded, setIsStudentsExpanded] = useState(false)
   const [sharedExampleParticipantId, setSharedExampleParticipantId] = useState<string | null>(null)
   const [sharedExampleWorkspace, setSharedExampleWorkspace] = useState<{ files: Record<string, string>; activeFile: string } | null>(null)
-  const [starterVersionFiles, setStarterVersionFiles] = useState<Record<string, string> | null>(null)
   const wsDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const persistDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const latestStateRef = useRef<MobCodeStatePayload>(createStateSnapshot({}, ''))
@@ -232,8 +232,7 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken, soloM
 
   const applyManagerSessionSnapshot = useCallback((data: SessionResponse['data']) => {
     setTryItEnabled(data?.studentCode?.tryItEnabled === true)
-    const starterFiles = data?.studentCode?.starterVersion?.files
-    setStarterVersionFiles(starterFiles != null ? sanitizeFilesMap(starterFiles) : null)
+    setShareChangesEnabled(data?.studentCode?.shareChangesEnabled === true)
     const students = data?.studentCode?.students
     const normalizedStudents = Array.isArray(students)
       ? students.flatMap((student) => {
@@ -306,7 +305,7 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken, soloM
         setWorkspaceSelection({ kind: 'shared' })
         setSelectedSharedActiveFile(resolveActiveFile(sharedFiles, session.data?.studentCode?.sharedExample?.workspace?.activeFile))
       }
-      setStudentCodeMessage(action === 'try-it' ? (body.enabled === true ? 'Try it enabled. Students can edit their own code.' : 'Try it disabled. Student work remains saved.') : action === 'share-changes' ? 'Shared changes published as the student reset version.' : action === 'share-example' ? 'Student work shared anonymously as a runnable example.' : 'Shared example removed.')
+      setStudentCodeMessage(action === 'try-it' ? (body.enabled === true ? 'Try it enabled. Students can edit their own code.' : 'Try it disabled. Student work remains saved.') : action === 'share-changes' ? (body.enabled === true ? 'Sharing instructor changes live.' : 'Instructor changes are private until shared again.') : action === 'share-example' ? 'Student work shared anonymously as a runnable example.' : 'Shared example removed.')
     } catch (error) {
       setStudentCodeMessage(error instanceof Error ? error.message : 'Could not update student code settings.')
     }
@@ -621,7 +620,6 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken, soloM
     : selectedStudentWorkspace ? selectedStudentActiveFile : activeFile
   const visibleActiveContent = visibleActiveFile ? visibleFiles[visibleActiveFile] ?? '' : ''
   const canEditVisibleWorkspace = canEdit && !isViewingStudentWorkspace && !isViewingSharedExample
-  const hasUnsharedChanges = resolveMobCodeHasUnsharedChanges(files, starterVersionFiles)
 
   const handleRunCode = () => {
     const result = openMobCodeRunnerPopup({
@@ -862,12 +860,13 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken, soloM
               {workspaceSelection.kind === 'instructor' && (
                 <button
                   type="button"
-                  className="mobcode-secondary-button"
-                  disabled={!hasUnsharedChanges}
-                  title={hasUnsharedChanges ? 'Publish current instructor code as the student reset version' : 'No changes to share since the last publish'}
-                  onClick={() => void updateStudentCodeSetting('share-changes')}
+                  aria-pressed={shareChangesEnabled}
+                  className={`mobcode-toggle-button${shareChangesEnabled ? ' mobcode-toggle-button--active' : ''}`}
+                  title={shareChangesEnabled ? 'Instructor changes are shared live' : 'Instructor changes are private'}
+                  onClick={() => void updateStudentCodeSetting('share-changes', { enabled: !shareChangesEnabled })}
                 >
-                  Share Changes
+                  <span aria-hidden="true" className={`mobcode-status-dot${shareChangesEnabled ? ' mobcode-status-dot--active' : ''}`} />
+                  Share Changes: {shareChangesEnabled ? 'on' : 'off'}
                 </button>
               )}
             </div>

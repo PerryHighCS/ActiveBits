@@ -23,6 +23,10 @@ export interface MobCodeSharedExample {
  */
 export interface MobCodeStudentCodeState {
   tryItEnabled: boolean
+  /** Whether instructor edits are currently published live to students. */
+  shareChangesEnabled: boolean
+  /** Last instructor workspace explicitly published while sharing is enabled. */
+  publishedInstructorVersion: MobCodeGroupState | null
   starterVersion: MobCodeGroupState | null
   studentWorkspaces: Record<string, MobCodeStudentWorkspace>
   sharedExample: MobCodeSharedExample | null
