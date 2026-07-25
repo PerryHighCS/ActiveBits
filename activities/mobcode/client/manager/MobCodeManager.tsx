@@ -53,23 +53,9 @@ import {
 import { resolveMobCodeInstructorPasscode } from './passcodeUtils'
 import '../styles.css'
 
-interface SessionResponse {
-  data?: {
-    groups?: {
-      default?: {
-        files?: unknown
-        activeFile?: unknown
-      }
-    }
-    runnerId?: unknown
-    studentCode?: {
-      tryItEnabled?: unknown
-      shareChangesEnabled?: unknown
-      starterVersion?: { files?: unknown } | null
-      students?: Array<{ participantId?: unknown; displayName?: unknown; files?: unknown; activeFile?: unknown }>
-      sharedExample?: { sourceParticipantId?: unknown; workspace?: { files?: unknown; activeFile?: unknown } } | null
-    }
-  }
+interface MobCodeWorkspaceSnapshot {
+  files: Record<string, string>
+  activeFile: string
 }
 
 interface MobCodeManagerStudentWorkspace {
@@ -77,6 +63,16 @@ interface MobCodeManagerStudentWorkspace {
   displayName: string
   files: Record<string, string>
   activeFile: string
+}
+
+interface MobCodeManagerSessionSnapshot {
+  instructorWorkspace: MobCodeWorkspaceSnapshot
+  runnerId: MobCodeRunnerId | null
+  tryItEnabled: boolean
+  shareChangesEnabled: boolean
+  starterVersion: MobCodeWorkspaceSnapshot | null
+  students: MobCodeManagerStudentWorkspace[]
+  sharedExample: { sourceParticipantId: string; workspace: MobCodeWorkspaceSnapshot } | null
 }
 
 type ModalMode = 'create-file' | 'create-folder' | 'rename' | null
@@ -91,6 +87,45 @@ type DurableMobCodeMessageType =
 const LIVE_CONTENT_SYNC_INTERVAL_MS = 250
 const LIVE_PRESENCE_SYNC_INTERVAL_MS = 60
 const PERSIST_STATE_INTERVAL_MS = 5000
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value != null && typeof value === 'object' && !Array.isArray(value)
+}
+
+function parseWorkspaceSnapshot(value: unknown): MobCodeWorkspaceSnapshot | null {
+  if (!isRecord(value)) return null
+  const files = sanitizeFilesMap(value.files)
+  return { files, activeFile: resolveActiveFile(files, value.activeFile) }
+}
+
+export function parseMobCodeManagerSessionSnapshot(value: unknown): MobCodeManagerSessionSnapshot | null {
+  if (!isRecord(value) || !isRecord(value.data)) return null
+  const data = value.data
+  const groups = isRecord(data.groups) ? data.groups : null
+  const instructorWorkspace = parseWorkspaceSnapshot(groups?.default)
+  if (!instructorWorkspace) return null
+  const studentCode = isRecord(data.studentCode) ? data.studentCode : {}
+  const students = Array.isArray(studentCode.students)
+    ? studentCode.students.flatMap((student) => {
+      if (!isRecord(student) || typeof student.participantId !== 'string' || typeof student.displayName !== 'string') return []
+      const workspace = parseWorkspaceSnapshot(student)
+      return workspace ? [{ participantId: student.participantId, displayName: student.displayName, ...workspace }] : []
+    })
+    : []
+  const sharedSourceId = isRecord(studentCode.sharedExample) && typeof studentCode.sharedExample.sourceParticipantId === 'string'
+    ? studentCode.sharedExample.sourceParticipantId
+    : null
+  const sharedWorkspace = isRecord(studentCode.sharedExample) ? parseWorkspaceSnapshot(studentCode.sharedExample.workspace) : null
+  return {
+    instructorWorkspace,
+    runnerId: isMobCodeRunnerId(data.runnerId) ? data.runnerId : null,
+    tryItEnabled: studentCode.tryItEnabled === true,
+    shareChangesEnabled: studentCode.shareChangesEnabled === true,
+    starterVersion: parseWorkspaceSnapshot(studentCode.starterVersion),
+    students,
+    sharedExample: sharedSourceId && sharedWorkspace ? { sourceParticipantId: sharedSourceId, workspace: sharedWorkspace } : null,
+  }
+}
 
 export function createMobCodeManagerAuthMessage(
   sessionId: string | undefined,
@@ -215,48 +250,34 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken, soloM
   useEffect(() => {
     if (!sessionId) return
     void fetch(`/api/mobcode/${encodedSessionId}/session`)
-      .then((res) => (res.ok ? res.json() as Promise<SessionResponse> : null))
+      .then((res) => (res.ok ? res.json() as Promise<unknown> : null))
+      .then(parseMobCodeManagerSessionSnapshot)
       .then((session) => {
         if (!session) return
-        const nextFiles = sanitizeFilesMap(session.data?.groups?.default?.files)
-        const nextActiveFile = resolveActiveFile(nextFiles, session.data?.groups?.default?.activeFile)
+        const nextFiles = session.instructorWorkspace.files
+        const nextActiveFile = session.instructorWorkspace.activeFile
         latestStateRef.current = createStateSnapshot(nextFiles, nextActiveFile)
         replaceFilesState(nextFiles)
         setActiveFile(nextActiveFile)
-        if (isMobCodeRunnerId(session.data?.runnerId)) {
-          setRunnerId(session.data.runnerId)
+        if (session.runnerId) {
+          setRunnerId(session.runnerId)
         }
       })
       .catch((error) => console.error('Failed to fetch MobCode session:', error))
   }, [encodedSessionId, replaceFilesState, sessionId])
 
-  const applyManagerSessionSnapshot = useCallback((data: SessionResponse['data']) => {
-    setTryItEnabled(data?.studentCode?.tryItEnabled === true)
-    setShareChangesEnabled(data?.studentCode?.shareChangesEnabled === true)
-    const students = data?.studentCode?.students
-    const normalizedStudents = Array.isArray(students)
-      ? students.flatMap((student) => {
-        if (typeof student.participantId !== 'string' || typeof student.displayName !== 'string') return []
-        const nextFiles = sanitizeFilesMap(student.files)
-        return [{
-          participantId: student.participantId,
-          displayName: student.displayName,
-          files: nextFiles,
-          activeFile: resolveActiveFile(nextFiles, student.activeFile),
-        }]
-      })
-      : []
+  const applyManagerSessionSnapshot = useCallback((data: MobCodeManagerSessionSnapshot) => {
+    setTryItEnabled(data.tryItEnabled)
+    setShareChangesEnabled(data.shareChangesEnabled)
+    const normalizedStudents = data.students
     setStudentWorkspaces(normalizedStudents)
     setSelectedStudentActiveFile((current) => {
       if (workspaceSelection.kind !== 'student') return current
       const selected = normalizedStudents.find((student) => student.participantId === workspaceSelection.participantId)
       return selected ? resolveActiveFile(selected.files, current || selected.activeFile) : current
     })
-    setSharedExampleParticipantId(typeof data?.studentCode?.sharedExample?.sourceParticipantId === 'string' ? data.studentCode.sharedExample.sourceParticipantId : null)
-    const sharedFiles = data?.studentCode?.sharedExample?.workspace?.files
-    const nextSharedExampleWorkspace = sharedFiles != null
-      ? { files: sanitizeFilesMap(sharedFiles), activeFile: resolveActiveFile(sanitizeFilesMap(sharedFiles), data?.studentCode?.sharedExample?.workspace?.activeFile) }
-      : null
+    setSharedExampleParticipantId(data.sharedExample?.sourceParticipantId ?? null)
+    const nextSharedExampleWorkspace = data.sharedExample?.workspace ?? null
     setSharedExampleWorkspace(nextSharedExampleWorkspace)
     setSelectedSharedActiveFile((current) => {
       if (workspaceSelection.kind !== 'shared' || nextSharedExampleWorkspace == null) return current
@@ -280,8 +301,9 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken, soloM
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ instructorPasscode }),
       })
       if (!response.ok) return
-      const session = await response.json() as SessionResponse
-      applyManagerSessionSnapshot(session.data)
+      const session = parseMobCodeManagerSessionSnapshot(await response.json())
+      if (!session) return
+      applyManagerSessionSnapshot(session)
     } catch (error) {
       console.error('Failed to fetch MobCode student-code settings:', error)
     }
@@ -298,12 +320,13 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken, soloM
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ instructorPasscode, ...body }),
       })
       if (!response.ok) throw new Error('Could not update student code settings.')
-      const session = await response.json() as SessionResponse
-      applyManagerSessionSnapshot(session.data)
+      const session = parseMobCodeManagerSessionSnapshot(await response.json())
+      if (!session) throw new Error('Invalid MobCode manager response.')
+      applyManagerSessionSnapshot(session)
       if (action === 'share-example') {
-        const sharedFiles = sanitizeFilesMap(session.data?.studentCode?.sharedExample?.workspace?.files)
+        const sharedFiles = session.sharedExample?.workspace.files ?? {}
         setWorkspaceSelection({ kind: 'shared' })
-        setSelectedSharedActiveFile(resolveActiveFile(sharedFiles, session.data?.studentCode?.sharedExample?.workspace?.activeFile))
+        setSelectedSharedActiveFile(session.sharedExample?.workspace.activeFile ?? resolveActiveFile(sharedFiles, ''))
       }
       setStudentCodeMessage(action === 'try-it' ? (body.enabled === true ? 'Try it enabled. Students can edit their own code.' : 'Try it disabled. Student work remains saved.') : action === 'share-changes' ? (body.enabled === true ? 'Sharing instructor changes live.' : 'Instructor changes are private until shared again.') : action === 'share-example' ? 'Student work shared anonymously as a runnable example.' : 'Shared example removed.')
     } catch (error) {
