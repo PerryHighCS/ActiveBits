@@ -905,7 +905,7 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken, soloM
                   onClick={() => void updateStudentCodeSetting('share-changes', { enabled: !shareChangesEnabled })}
                 >
                   <span aria-hidden="true" className={`mobcode-status-dot${shareChangesEnabled ? ' mobcode-status-dot--active' : ''}`} />
-                  Share Changes
+                  Broadcast
                 </button>
               )}
             </div>
