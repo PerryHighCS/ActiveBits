@@ -1,6 +1,6 @@
 # Learn–SyncDeck Session Integration Plan
 
-## Status: Proposed
+## Status: Core ActiveBits integration complete; operational follow-ups and Learn implementation pending
 
 ## Purpose
 
@@ -10,6 +10,30 @@ course/resource identity and instructor controls; ActiveBits owns session creati
 live runtime state, and websocket delivery.
 
 This document is the shared implementation reference for both systems.
+
+## Current Implementation Status
+
+ActiveBits implements the versioned SyncDeck integration routes, request-HMAC
+verification, replay protection, Valkey-backed mapping and start locking when Valkey is
+configured, one-time browser handoffs, waiting-room polling, and instructor-session
+stop/status behavior. The remaining product implementation is on Learn: its server must
+sign the requests below, and its instructor/student UI must use the documented state
+transitions.
+
+### ActiveBits Server Configuration
+
+Configure these server-only environment variables in the ActiveBits deployment and the
+matching Learn server configuration:
+
+```text
+LEARN_SYNCDECK_HMAC_SECRET=<dedicated shared secret>
+LEARN_SYNCDECK_HMAC_KEY_ID=learn-default  # optional; this is the default
+```
+
+Leaving `LEARN_SYNCDECK_HMAC_SECRET` unset disables the integration. Do not reuse an
+LTI 1.1 consumer secret or expose either value to a browser. The current implementation
+accepts one active key ID/secret pair, so coordinate key rotation between the two
+servers.
 
 ---
 
@@ -149,10 +173,10 @@ Suggested constraints:
 
 ## Server-to-Server API Contract
 
-All endpoints use a versioned namespace such as `/api/integrations/learn/v1`, require
-TLS, and use a dedicated request-HMAC authentication scheme. Learn and ActiveBits each
-hold the same per-environment integration secret. This secret is separate from any LTI
-1.1 consumer secret and must not be exposed to browsers.
+All endpoints use `/api/integrations/learn/v1`, require TLS, and use a dedicated
+request-HMAC authentication scheme. Learn and ActiveBits each hold the same
+per-environment integration secret. This secret is separate from any LTI 1.1 consumer
+secret and must not be exposed to browsers.
 
 Learn signs this canonical request value with HMAC-SHA-256:
 
@@ -165,11 +189,37 @@ PROVIDER
 SHA256(request_body)
 ```
 
-Headers carry a key ID, timestamp, nonce, and signature. ActiveBits verifies the
-signature in constant time, enforces a short clock-skew window, and stores nonces for
-the full acceptance window to reject replayed requests. The initial implementation
-accepts one configured key ID/secret pair; rotate it through a coordinated Learn and
-ActiveBits deployment. Add dual-key verification before requiring no-downtime rotation.
+Canonicalization is byte-exact:
+
+- Join the six fields above with a single LF (`\n`, byte `0x0A`) between fields; do
+  not add a final newline. Encode the complete value as UTF-8.
+- `HTTP_METHOD` is uppercase. `REQUEST_PATH` is the percent-encoded URL pathname
+  beginning with `/api/integrations/learn/v1`, with no origin, query string, or fragment.
+- `TIMESTAMP` is an unpadded base-10 Unix epoch milliseconds value. `NONCE` and
+  `PROVIDER` are the exact trimmed header values.
+- Hash the parsed JSON request body using a deterministic JSON serialization: arrays
+  retain order, object keys sort lexicographically at every depth, and values use normal
+  JSON primitive encoding. Hash an absent request body as `{}`.
+- Emit the HMAC-SHA-256 digest as lowercase hexadecimal with no surrounding whitespace.
+
+Learn should use the same deterministic serialization before sending JSON; whitespace and
+object-key order in the transmitted JSON do not change the computed body hash.
+
+Send these headers with every server-to-server request:
+
+```text
+x-learn-key-id: <configured key ID>
+x-learn-timestamp: <Unix epoch milliseconds>
+x-learn-nonce: <fresh random nonce>
+x-learn-provider: <stable Learn deployment/provider namespace>
+x-learn-signature: <hex HMAC-SHA-256 of the canonical request>
+```
+
+ActiveBits verifies the signature in constant time, accepts timestamps within five
+minutes, and stores nonces for the full ten-minute acceptance window to reject replays.
+The current implementation accepts one configured key ID/secret pair; rotate it through
+a coordinated Learn and ActiveBits deployment. Add dual-key verification before
+requiring no-downtime rotation.
 
 ### Common Request Fields
 
@@ -224,7 +274,7 @@ For an active session:
   "resourceLinkId": "opaque-resource-id",
   "state": "active",
   "activeSessionId": "activebits-session-id",
-  "studentLaunchUrl": "https://bits.example/<session-id>",
+  "studentLaunchUrl": "/<session-id>",
   "connectedParticipantCount": 24,
   "connectedInstructorCount": 1
 }
@@ -237,13 +287,14 @@ student participants; `connectedInstructorCount` is the number of currently conn
 instructors. These are live connection counts, not attendance or historical enrollment
 totals.
 
-Learn may poll status while rendering its activity. The first implementation should
-poll at a modest interval (for example, every 15–30 seconds while the activity page is
+Learn may poll status while rendering its activity. The first implementation should poll
+at a modest interval (for example, every 15–30 seconds while the activity page is
 visible) and refresh immediately after Start or Stop; it should stop polling when the
-page is hidden or unmounted. ActiveBits should return `Cache-Control: no-store` and
-rate-limit the endpoint by authenticated Learn client/resource without making normal
-polling fail. ActiveBits does not retain or report historical attendance; Learn owns
-that concern, including any LMS grade notification it sends when a student connects.
+page is hidden or unmounted. ActiveBits returns `Cache-Control: no-store`; authenticated
+per-client/resource rate limiting remains an ActiveBits follow-up, so Learn should still
+handle a future `429` response without treating it as inactive state. ActiveBits does
+not retain or report historical attendance; Learn owns that concern, including any LMS
+grade notification it sends when a student connects.
 
 ### `POST /activities/:activityId/resources/:resourceLinkId/start`
 
@@ -267,10 +318,14 @@ response; a different request ID during that transition receives `409 Conflict`.
   "state": "active",
   "activeSessionId": "activebits-session-id",
   "reused": false,
-  "instructorLaunchUrl": "https://bits.example/integrations/learn/launch/<opaque-one-time-token>",
-  "studentLaunchUrl": "https://bits.example/<session-id>"
+  "instructorLaunchUrl": "/api/syncdeck/learn/instructor/<opaque-one-time-token>?token=<one-time-secret>",
+  "studentLaunchUrl": "/<session-id>"
 }
 ```
+
+All browser URLs returned by ActiveBits are same-origin relative paths. Learn must resolve
+them against its configured ActiveBits origin; it must not construct them from browser
+input or append credentials to them.
 
 If two instructor requests race, exactly one session must be created. The other
 request returns that same active session. Use an atomic store operation or a
@@ -321,14 +376,20 @@ This is an authenticated Learn-server request used only for the
 
 ```json
 {
-  "waitingLaunchUrl": "https://bits.example/integrations/learn/wait/<opaque-one-time-token>"
+  "waitingLaunchUrl": "/integrations/learn/syncdeck/wait/<opaque-one-time-token>?token=<one-time-secret>"
 }
 ```
 
 The token is not the Learn resource ID or an HMAC secret. ActiveBits consumes it
-atomically, establishes a same-origin httpOnly browser handoff, removes it from the
-final URL, and opens the waiting room. This prevents arbitrary browser clients from
-claiming a resource ID or reusing a captured wait-room URL indefinitely.
+atomically, establishes a same-origin httpOnly browser handoff, then responds with a
+302 redirect to `/integrations/learn/syncdeck/wait` with no token in the final URL. It
+also sends `Cache-Control: no-store` and `Referrer-Policy: no-referrer`. This prevents
+arbitrary browser clients from claiming a resource ID or reusing a captured wait-room
+URL indefinitely.
+
+The short-lived token necessarily appears in the initial query string. ActiveBits route
+handlers must not log it, and the deployment's reverse proxy/access-log configuration
+must redact query strings for these browser handoff paths before production enablement.
 
 ---
 
@@ -358,11 +419,11 @@ ID. Expired or consumed tokens must fail closed with a friendly re-launch instru
 
 ---
 
-## Learn Implementation Checklist
+## Learn Implementation Checklist (Pending)
 
 - [ ] Configure the dedicated request-HMAC key ID and secret in Learn's server-only
   configuration; implement signing, retry-safe `requestId` generation, nonce
-  generation, and key rotation.
+  generation, and coordinated single-key rotation.
 - [ ] Generate or obtain a stable, opaque `resourceLinkId` per Learn activity/resource;
   include the Learn deployment/provider namespace in every request.
 - [ ] Store no ActiveBits instructor credential. Treat returned launch URLs as
@@ -402,11 +463,11 @@ ID. Expired or consumed tokens must fail closed with a friendly re-launch instru
 
 ## ActiveBits Implementation Checklist
 
-- [ ] Define server-only configuration for the dedicated request-HMAC key IDs/secrets;
-  fail closed when credentials are absent in production and document key rotation.
-- [ ] Add an activity-agnostic integration authentication middleware with structured
-  security logging; keep Learn-specific mapping logic outside shared activity UI code.
-- [ ] Add a Valkey-backed temporary entry mapping and idempotency/replay store. It must
+- [x] Define server-only configuration for the dedicated request-HMAC key ID/secret;
+  fail closed when credentials are absent and document coordinated key rotation.
+- [x] Implement SyncDeck-scoped integration authentication with structured security
+  logging; keep Learn-specific mapping logic inside the activity boundary.
+- [x] Add a Valkey-backed temporary entry mapping and idempotency/replay store. It must
   have a bounded waiting TTL and, once active, must not outlive its temporary session;
   include tests for in-memory development mode.
 - [x] Add the versioned status/start/stop/student-entry routes, strict schemas,
@@ -415,7 +476,7 @@ ID. Expired or consumed tokens must fail closed with a friendly re-launch instru
   status polling and rejects abusive API traffic.
 - [x] Reuse SyncDeck session creation/configuration behavior; do not duplicate or
   weaken its presentation validation and instructor authorization rules.
-- [ ] Verify and complete cross-instance atomic waiting-to-active transition/start-reuse
+- [x] Verify and complete cross-instance atomic waiting-to-active transition/start-reuse
   behavior with the shared mapping/idempotency store. Waiting browsers already observe
   the active student session URL through no-store status polling.
 - [x] Reject presentation URL updates and mismatched Start requests with `409 Conflict`
@@ -423,24 +484,24 @@ ID. Expired or consumed tokens must fail closed with a friendly re-launch instru
   the edit control.
 - [x] Implement a one-time instructor browser handoff endpoint that consumes its token
   atomically and strips it before the manager route loads.
-- [ ] Delete mappings when their sessions end through any existing ActiveBits instructor
-  path, expiry, or deletion path; remove stale mappings on status reads and expire
+- [x] Delete mappings on Learn Stop, remove stale mappings on status reads, and expire
   inactive waiting mappings after their bounded TTL.
+- [ ] Add proactive cleanup for mappings when sessions end through every non-Learn
+  instructor path; current TTL and status-read cleanup remain the safety net.
 - [x] Report unique live student and instructor connection counts through status without
   exposing participant identities or retaining historical attendance. Cover reconnect,
   duplicate socket, and disconnect behavior in tests.
-- [ ] Return no-store status responses and rate-limit authenticated polling by Learn
-  client/resource while supporting the documented polling interval.
+- [x] Return no-store status responses while supporting the documented polling interval.
 - [x] Provide an instructor-led student launch/redirect response. Keep solo creation
   in the existing per-student SyncDeck launch flow; do not make untrusted opaque query
   parameters authoritative.
 - [x] Implement one-time student waiting-room browser handoff tokens that establish
   same-origin httpOnly state, remove tokens from final URLs, and create/refresh only a
   bounded temporary waiting mapping.
-- [ ] Add unit tests for idempotency, start races, stop idempotency, stale mappings, and
+- [x] Add unit tests for idempotency, start races, stop idempotency, stale mappings, and
   student/instructor token single consumption. Authentication failures, replay,
-  validation, stop broadcast, and instructor handoff are covered. Mark expected noisy
-  failure-path logs with `[TEST]`.
+  validation, stop broadcast, and instructor handoff are covered. Expected noisy
+  failure-path logs use `[TEST]` markers.
 - [ ] Add Playwright coverage for the Learn-style instructor new-window handoff. Student
   waiting-room polling and redirect are covered using the shared root harness.
 - [x] Update `README.md`, `ARCHITECTURE.md`, `DEPLOYMENT.md`, data-contract notes, and
