@@ -1,6 +1,6 @@
 # Learn–SyncDeck Session Integration Plan
 
-## Status: ActiveBits implementation complete; Learn implementation pending
+## Status: Core ActiveBits integration complete; operational follow-ups and Learn implementation pending
 
 ## Purpose
 
@@ -189,6 +189,22 @@ PROVIDER
 SHA256(request_body)
 ```
 
+Canonicalization is byte-exact:
+
+- Join the six fields above with a single LF (`\n`, byte `0x0A`) between fields; do
+  not add a final newline. Encode the complete value as UTF-8.
+- `HTTP_METHOD` is uppercase. `REQUEST_PATH` is the percent-encoded URL pathname
+  beginning with `/api/integrations/learn/v1`, with no origin, query string, or fragment.
+- `TIMESTAMP` is an unpadded base-10 Unix epoch milliseconds value. `NONCE` and
+  `PROVIDER` are the exact trimmed header values.
+- Hash the parsed JSON request body using a deterministic JSON serialization: arrays
+  retain order, object keys sort lexicographically at every depth, and values use normal
+  JSON primitive encoding. Hash an absent request body as `{}`.
+- Emit the HMAC-SHA-256 digest as lowercase hexadecimal with no surrounding whitespace.
+
+Learn should use the same deterministic serialization before sending JSON; whitespace and
+object-key order in the transmitted JSON do not change the computed body hash.
+
 Send these headers with every server-to-server request:
 
 ```text
@@ -365,9 +381,15 @@ This is an authenticated Learn-server request used only for the
 ```
 
 The token is not the Learn resource ID or an HMAC secret. ActiveBits consumes it
-atomically, establishes a same-origin httpOnly browser handoff, removes it from the
-final URL, and opens the waiting room. This prevents arbitrary browser clients from
-claiming a resource ID or reusing a captured wait-room URL indefinitely.
+atomically, establishes a same-origin httpOnly browser handoff, then responds with a
+302 redirect to `/integrations/learn/syncdeck/wait` with no token in the final URL. It
+also sends `Cache-Control: no-store` and `Referrer-Policy: no-referrer`. This prevents
+arbitrary browser clients from claiming a resource ID or reusing a captured wait-room
+URL indefinitely.
+
+The short-lived token necessarily appears in the initial query string. ActiveBits route
+handlers must not log it, and the deployment's reverse proxy/access-log configuration
+must redact query strings for these browser handoff paths before production enablement.
 
 ---
 
