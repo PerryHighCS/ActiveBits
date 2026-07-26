@@ -1,6 +1,6 @@
 import type { SessionRecord, SessionStore } from 'activebits-server/core/sessions.js'
 import { consumeSessionDataToken } from 'activebits-server/core/sessionTokenUtils.js'
-import { acceptEntryParticipant, findAcceptedEntryParticipant, issueAcceptedEntryParticipantToken } from 'activebits-server/core/acceptedEntryParticipants.js'
+import { acceptEntryParticipant, findAcceptedEntryParticipant, issueAcceptedEntryParticipantToken, resolveAcceptedEntryParticipantToken } from 'activebits-server/core/acceptedEntryParticipants.js'
 import {
   computePersistentLinkUrlHash,
   type PersistentLinkUrlState,
@@ -261,12 +261,13 @@ void test('SyncDeck instructor can return an accepted student to the waiting roo
   assert.deepEqual(response.body, { participantId: 'student-1' })
   assert.equal((state.store[session.id]?.data as { students: unknown[] }).students.length, 0)
   assert.equal(findAcceptedEntryParticipant(state.store[session.id]!, 'student-1'), null)
-  assert.equal(participantToken ? findAcceptedEntryParticipant(state.store[session.id]!, 'student-1') : null, null)
+  assert.equal(resolveAcceptedEntryParticipantToken(state.store[session.id]!, participantToken), null)
   assert.match(sent[0] ?? '', /participant-returned-to-waiting-room/)
   assert.deepEqual(closeCalls, [{ code: 4001, reason: 'Returned to waiting room' }])
 })
 
 void test('SyncDeck return-to-waiting-room rejects a bad instructor passcode without mutation', async () => {
+  console.info('[TEST] Expected return-to-waiting-room rejection for an unauthorized instructor.')
   const session = createSyncDeckSession('return-forbidden', 'teacher-passcode')
   session.data.students = [{
     studentId: 'student-1', name: 'Ada', joinedAt: 1, lastSeenAt: 1, lastIndices: null, lastStudentStateAt: null,

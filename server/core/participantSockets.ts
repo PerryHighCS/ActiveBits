@@ -43,7 +43,10 @@ export function closeParticipantSockets<TSocket extends ParticipantSocketLike>(
     try {
       client.close(4001, 'Returned to waiting room')
     } catch (error) {
-      console.error('Failed to close returned participant socket', error)
+      console.error(JSON.stringify({
+        event: 'returned-participant-socket-close-failed',
+        error: error instanceof Error ? error.message : String(error),
+      }))
     }
   }
 }

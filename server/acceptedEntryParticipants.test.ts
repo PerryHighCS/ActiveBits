@@ -113,6 +113,7 @@ void test('revokeAcceptedEntryParticipant removes the accepted entry and every p
 })
 
 void test('revokeAcceptedEntryParticipant does not mutate a missing participant', () => {
+  console.info('[TEST] Expected missing accepted participant revocation rejection.')
   const session = createSessionRecord('session-missing')
   acceptEntryParticipant(session, { participantId: 'participant-1', displayName: 'Ada' })
   assert.equal(revokeAcceptedEntryParticipant(session, 'missing'), false)

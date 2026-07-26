@@ -5377,7 +5377,7 @@ const SyncDeckManager: FC = () => {
             return student ? <button type="button" onClick={() => { void returnStudentToWaitingRoom(student) }} disabled={returningStudentId !== null} className="shrink-0 rounded border border-red-300 px-2 py-1 text-sm font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60" aria-label={`Return ${entry.displayName} to the waiting room`} title={`Return ${entry.displayName} to the waiting room`}>{returningStudentId === entry.participantId ? '…' : '🥾'}</button> : null
           }}
         />
-        {studentActionError ? <p role="alert" className="sr-only">{studentActionError}</p> : null}
+        {studentActionError ? <p role="alert" className="fixed bottom-4 right-4 z-50 rounded bg-red-50 px-4 py-3 text-sm text-red-700 shadow">{studentActionError}</p> : null}
       </div>
     </div>
   )
