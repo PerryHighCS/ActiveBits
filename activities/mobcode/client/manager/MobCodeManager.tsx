@@ -1014,7 +1014,7 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken, soloM
             dropPrompt="Drop files or zip archives here to import"
             onSelect={(path) => {
               if (isViewingSharedExample) {
-                applySharedWorkspace(sharedExampleWorkspace?.files ?? {}, path)
+                setSelectedSharedActiveFile(path)
                 return
               }
               if (isViewingStudentWorkspace) {
