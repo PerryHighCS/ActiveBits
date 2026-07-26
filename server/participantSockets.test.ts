@@ -60,3 +60,33 @@ void test('closeParticipantSockets closes every active target socket only', () =
   assert.deepEqual(differentStudent.closeCalls, [])
   assert.deepEqual(closed.closeCalls, [])
 })
+
+void test('closeParticipantSockets logs structured, non-identifying close failures', () => {
+  console.info('[TEST] Expected participant socket close failure.')
+  const messages: string[] = []
+  const originalError = console.error
+  console.error = (message?: unknown) => { messages.push(String(message)) }
+
+  try {
+    const failingSocket = createSocket({
+      close() { throw new TypeError('socket unavailable') },
+    })
+
+    closeParticipantSockets([failingSocket], 'session-1', 'student-1')
+
+    assert.equal(failingSocket.ignoreDisconnect, true)
+    assert.equal(messages.length, 1)
+    const logged = JSON.parse(messages[0] ?? '{}') as Record<string, unknown>
+    assert.deepEqual(logged, {
+      event: 'returned-participant-socket-close-failed',
+      sessionId: 'session-1',
+      errorName: 'TypeError',
+      error: 'socket unavailable',
+      stack: logged.stack,
+    })
+    assert.equal(typeof logged.stack, 'string')
+    assert.doesNotMatch(JSON.stringify(logged), /student-1/)
+  } finally {
+    console.error = originalError
+  }
+})
