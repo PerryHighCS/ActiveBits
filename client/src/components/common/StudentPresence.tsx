@@ -1,31 +1,6 @@
 import React, { useMemo, useState } from 'react'
-
-export interface StudentPresenceEntry {
-  participantId: string
-  displayName: string
-  connected: boolean
-  secondaryLabel?: string
-}
-
-export interface StudentPresenceState {
-  connectedCount: number
-  entries: StudentPresenceEntry[]
-}
-
-export function normalizeStudentPresence(value: unknown): StudentPresenceState {
-  const source = value != null && typeof value === 'object' ? value as { connectedCount?: unknown; entries?: unknown; students?: unknown } : {}
-  const candidates = Array.isArray(source.entries) ? source.entries : Array.isArray(source.students) ? source.students : []
-  const entries = candidates.flatMap((candidate): StudentPresenceEntry[] => {
-    if (candidate == null || typeof candidate !== 'object') return []
-    const record = candidate as { participantId?: unknown; studentId?: unknown; displayName?: unknown; name?: unknown; connected?: unknown }
-    const participantId = typeof record.participantId === 'string' ? record.participantId.trim() : typeof record.studentId === 'string' ? record.studentId.trim() : ''
-    if (!participantId) return []
-    const displayName = typeof record.displayName === 'string' ? record.displayName.trim() : typeof record.name === 'string' ? record.name.trim() : ''
-    return [{ participantId, displayName: displayName || 'Student', connected: record.connected === true }]
-  }).sort((left, right) => Number(right.connected) - Number(left.connected) || left.displayName.localeCompare(right.displayName) || left.participantId.localeCompare(right.participantId))
-  const suppliedCount = typeof source.connectedCount === 'number' && Number.isFinite(source.connectedCount) && source.connectedCount >= 0 ? source.connectedCount : null
-  return { entries, connectedCount: suppliedCount ?? entries.filter((entry) => entry.connected).length }
-}
+import type { StudentPresenceEntry } from './studentPresenceUtils'
+export type { StudentPresenceEntry, StudentPresenceState } from './studentPresenceUtils'
 
 export function StudentPresenceToggleButton({ connectedCount, isOpen, onToggle, controlsId, label = 'Students' }: { connectedCount: number; isOpen: boolean; onToggle: () => void; controlsId: string; label?: string }) {
   return <button id={`${controlsId}-toggle`} type="button" onClick={onToggle} aria-expanded={isOpen} aria-controls={controlsId} className="px-2 py-1 rounded border border-gray-300 text-sm text-gray-700 hover:bg-gray-50">{label}: {connectedCount}</button>
