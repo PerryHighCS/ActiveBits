@@ -126,10 +126,10 @@ export function resolveAcceptedEntryParticipantToken(
 ): AcceptedEntryParticipantRecord | null {
   if (typeof token !== 'string' || !isRecord(session.data)) return null
   const participantAuthTokens = (session.data as AcceptedEntryParticipantContainer).participantAuthTokens
-  const participantId = participantAuthTokens && Object.hasOwn(participantAuthTokens, token)
+  const participantId = isRecord(participantAuthTokens) && Object.hasOwn(participantAuthTokens, token)
     ? participantAuthTokens[token]
     : null
-  return findAcceptedEntryParticipant(session, participantId ?? null)
+  return findAcceptedEntryParticipant(session, typeof participantId === 'string' ? participantId : null)
 }
 
 export function resolveAcceptedEntryParticipantName(

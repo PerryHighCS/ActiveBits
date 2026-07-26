@@ -1014,12 +1014,14 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken, soloM
               readOnly={!canEditVisibleWorkspace}
               onUpdate={(viewUpdate) => {
                 if (!canEditVisibleWorkspace) return
-                if (isViewingSharedExample && sharedExampleWorkspace && viewUpdate.docChanged) {
-                  const nextFiles = { ...sharedExampleWorkspace.files, [visibleActiveFile]: viewUpdate.state.doc.toString() }
-                  applySharedWorkspace(nextFiles, visibleActiveFile)
+                if (isViewingSharedExample) {
+                  if (sharedExampleWorkspace && viewUpdate.docChanged) {
+                    const nextFiles = { ...sharedExampleWorkspace.files, [visibleActiveFile]: viewUpdate.state.doc.toString() }
+                    applySharedWorkspace(nextFiles, visibleActiveFile)
+                  }
                   return
                 }
-                if (!activeFile || (!viewUpdate.docChanged && !viewUpdate.selectionSet)) return
+                if (!visibleActiveFile || (!viewUpdate.docChanged && !viewUpdate.selectionSet)) return
                 const selections = viewUpdate.state.selection.ranges.map((range) => ({
                   anchor: range.anchor,
                   head: range.head,
@@ -1028,7 +1030,7 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken, soloM
                   const content = viewUpdate.state.doc.toString()
                   const clampedEdit = clampMobCodeContentEdit(
                     latestStateRef.current.files,
-                    activeFile,
+                    visibleActiveFile,
                     content,
                     latestFileSizeStatsRef.current,
                   )
@@ -1041,7 +1043,7 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken, soloM
                   )
                   const nextState = applyContentChange(
                     createStateSnapshot(clampedEdit.files, latestStateRef.current.activeFile),
-                    activeFile,
+                    visibleActiveFile,
                     clampedEdit.content,
                   )
                   const nextContentBytes = getUtf8ByteLength(clampedEdit.content)
@@ -1059,9 +1061,9 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken, soloM
                   }
                   latestStateRef.current = nextState
                   setFiles(nextState.files)
-                  scheduleContentSync(activeFile, clampedEdit.content, selections)
+                  scheduleContentSync(visibleActiveFile, clampedEdit.content, selections)
                 } else {
-                  schedulePresenceSync(activeFile, selections)
+                  schedulePresenceSync(visibleActiveFile, selections)
                 }
               }}
             />

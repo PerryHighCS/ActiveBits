@@ -10,7 +10,7 @@ const eslintBin = join(repositoryRoot, 'node_modules', 'eslint', 'bin', 'eslint.
 const extraArgs = process.argv.slice(2)
 
 const targets = readdirSync(activitiesDir, { withFileTypes: true })
-  .filter((entry) => entry.isDirectory() && !entry.name.startsWith('.'))
+  .filter((entry) => entry.isDirectory() && !entry.name.startsWith('.') && entry.name !== 'node_modules')
   .map((entry) => entry.name)
   .sort((left, right) => left.localeCompare(right))
 

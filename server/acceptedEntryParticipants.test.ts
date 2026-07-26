@@ -88,3 +88,10 @@ void test('accepted participant tokens are opaque, session-scoped, and resolve o
   acceptEntryParticipant(otherSession, { participantId: 'participant-1', displayName: 'Ada' })
   assert.equal(resolveAcceptedEntryParticipantToken(otherSession, token), null)
 })
+
+void test('accepted participant token resolution ignores malformed rehydrated token maps', () => {
+  const session = createSessionRecord('session-malformed-token-map')
+  session.data = { participantAuthTokens: 'not-a-map' }
+
+  assert.equal(resolveAcceptedEntryParticipantToken(session, 'token'), null)
+})

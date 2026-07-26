@@ -386,21 +386,22 @@ function MobCodeLiveStudent({ sessionData }: MobCodeStudentProps) {
           activeFile?: unknown
         }
         const nextTryItEnabled = settingsPayload.tryItEnabled === true
+        const nextShareChangesEnabled = settingsPayload.shareChangesEnabled === true
         const shouldSelectMyCode = shouldSelectMyCodeFromTryItSettings(previousTryItEnabledRef.current, nextTryItEnabled)
+        setTryItEnabled(nextTryItEnabled)
+        previousTryItEnabledRef.current = nextTryItEnabled
         if (shouldSelectMyCode) {
-          setTryItEnabled(true)
-          previousTryItEnabledRef.current = true
           setWorkspaceView('mine')
         }
         const shouldSelectInstructor = shouldSelectInstructorFromBroadcastSettings(
           shouldSelectMyCode,
           previousShareChangesEnabledRef.current,
-          settingsPayload.shareChangesEnabled === true,
+          nextShareChangesEnabled,
         )
-        if (settingsPayload.shareChangesEnabled === true && isStatePayload(settingsPayload)) {
+        setShareChangesEnabled(nextShareChangesEnabled)
+        previousShareChangesEnabledRef.current = nextShareChangesEnabled
+        if (isStatePayload(settingsPayload)) {
           const nextFiles = settingsPayload.files
-          previousShareChangesEnabledRef.current = true
-          setShareChangesEnabled(true)
           latestFilesRef.current = nextFiles
           setFiles(nextFiles)
           setActiveFile(resolveActiveFile(nextFiles, settingsPayload.activeFile))
