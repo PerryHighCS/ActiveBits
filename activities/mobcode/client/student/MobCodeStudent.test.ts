@@ -5,12 +5,14 @@ import {
   cancelPendingStudentWorkspacePersist,
   getStudentRunnerOptions,
   isEmbeddedMobCodeChildSession,
+  normalizeStudentWorkspaceResponse,
   removeMobCodeSoloTokenFromHash,
   removeMobCodeSoloTokenFromSearch,
   resolveMobCodeStudentRoute,
   resolveStudentActiveFileChange,
   sanitizeStudentPresenceUpdate,
   shouldAutoSelectMyCodeOnTryItStart,
+  shouldReconcileStudentWorkspacePersist,
   shouldSelectInstructorFromBroadcastSettings,
   shouldSelectMyCodeFromTryItSettings,
 } from './MobCodeStudent'
@@ -26,6 +28,21 @@ void test('applyStudentFileContentUpdate ignores updates for missing paths', () 
   assert.deepEqual(applyStudentFileContentUpdate(files, 'Main.java', 'updated'), {
     'Main.java': 'updated',
   })
+})
+
+void test('student workspace save reconciliation normalizes responses and ignores stale writes', () => {
+  assert.deepEqual(normalizeStudentWorkspaceResponse({
+    workspace: {
+      files: { 'main.py': 'print("saved")', '../ignored.py': 'ignored' },
+      activeFile: '../ignored.py',
+    },
+  }), {
+    files: { 'main.py': 'print("saved")' },
+    activeFile: 'main.py',
+  })
+  assert.equal(shouldReconcileStudentWorkspacePersist(2, 2, true), true)
+  assert.equal(shouldReconcileStudentWorkspacePersist(1, 2, true), false)
+  assert.equal(shouldReconcileStudentWorkspacePersist(2, 2, false), false)
 })
 
 void test('resolveMobCodeStudentRoute selects the token-authenticated solo manager route only when present', () => {

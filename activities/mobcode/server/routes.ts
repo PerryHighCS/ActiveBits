@@ -931,7 +931,7 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
         return
       }
       if (session.data.studentCode?.tryItEnabled !== true) {
-        console.warn(JSON.stringify({ event: 'mobcode.student-state-denied', sessionId: session.id, participantId: identity.participantId, reason: 'try-it-disabled' }))
+        console.warn(JSON.stringify({ event: 'mobcode.student-state-denied', sessionId: session.id, reason: 'try-it-disabled' }))
         res.status(423).json({ error: 'Student editing is locked' })
         return
       }

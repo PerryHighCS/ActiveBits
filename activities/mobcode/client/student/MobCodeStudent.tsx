@@ -163,6 +163,23 @@ interface SessionResponse {
   }
 }
 
+interface WorkspaceResponse {
+  workspace?: { files?: unknown; activeFile?: unknown }
+}
+
+export function normalizeStudentWorkspaceResponse(payload: WorkspaceResponse): { files: Record<string, string>; activeFile: string } {
+  const files = sanitizeFilesMap(payload.workspace?.files)
+  return { files, activeFile: resolveActiveFile(files, payload.workspace?.activeFile) }
+}
+
+export function shouldReconcileStudentWorkspacePersist(
+  responseVersion: number,
+  currentVersion: number,
+  updateUi: boolean,
+): boolean {
+  return updateUi && responseVersion === currentVersion
+}
+
 interface RawPresenceSelection {
   anchor?: unknown
   head?: unknown
@@ -292,9 +309,13 @@ function MobCodeLiveStudent({ sessionData }: MobCodeStudentProps) {
   const [workspaceRefresh, setWorkspaceRefresh] = useState(0)
   const latestFilesRef = useRef<Record<string, string>>({})
   const myWorkspacePersistDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const pendingMyWorkspaceRef = useRef<{ files: Record<string, string>; activeFile: string } | null>(null)
+  const pendingMyWorkspaceRef = useRef<{ files: Record<string, string>; activeFile: string; version: number } | null>(null)
   const inFlightMyWorkspacePersistRef = useRef<Promise<void> | null>(null)
+  const myWorkspacePersistVersionRef = useRef(0)
   const isResettingMyWorkspaceRef = useRef(false)
+  const resetTriggerRef = useRef<HTMLButtonElement | null>(null)
+  const resetConfirmationRef = useRef<HTMLButtonElement | null>(null)
+  const shouldRestoreResetFocusRef = useRef(false)
   const runnerRendererRef = useRef<MobCodeRunnerRenderer | null>(null)
   const previousTryItEnabledRef = useRef(false)
   const previousSharedExampleAvailableRef = useRef(false)
@@ -545,7 +566,7 @@ function MobCodeLiveStudent({ sessionData }: MobCodeStudentProps) {
     nextFiles: Record<string, string>,
     nextActiveFile: string,
     updateUi = true,
-  ) => {
+  ): Promise<{ files: Record<string, string>; activeFile: string }> => {
     const response = await fetch(`/api/mobcode/${encodedSessionId}/student-workspace/state`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ files: nextFiles, activeFile: nextActiveFile }),
@@ -555,6 +576,7 @@ function MobCodeLiveStudent({ sessionData }: MobCodeStudentProps) {
       throw new Error('Editing was turned off by the instructor.')
     }
     if (!response.ok) throw new Error('Could not save your code.')
+    return normalizeStudentWorkspaceResponse(await response.json() as WorkspaceResponse)
   }, [encodedSessionId])
 
   const flushMyWorkspacePersist = useCallback((skipUiUpdates = false) => {
@@ -564,7 +586,16 @@ function MobCodeLiveStudent({ sessionData }: MobCodeStudentProps) {
     pendingMyWorkspaceRef.current = null
     const persist = (inFlightMyWorkspacePersistRef.current ?? Promise.resolve())
       .catch(() => undefined)
-      .then(() => persistMyWorkspace(pendingWorkspace.files, pendingWorkspace.activeFile, !skipUiUpdates))
+      .then(async () => {
+        const normalizedWorkspace = await persistMyWorkspace(pendingWorkspace.files, pendingWorkspace.activeFile, !skipUiUpdates)
+        if (shouldReconcileStudentWorkspacePersist(
+          pendingWorkspace.version,
+          myWorkspacePersistVersionRef.current,
+          !skipUiUpdates,
+        )) {
+          setMyWorkspace(normalizedWorkspace)
+        }
+      })
     inFlightMyWorkspacePersistRef.current = persist
     void persist.catch((error) => {
       if (!skipUiUpdates) setRunnerMessage(error instanceof Error ? error.message : 'Could not save your code.')
@@ -575,7 +606,12 @@ function MobCodeLiveStudent({ sessionData }: MobCodeStudentProps) {
 
   const scheduleMyWorkspacePersist = useCallback((nextFiles: Record<string, string>, nextActiveFile: string) => {
     if (isResettingMyWorkspaceRef.current) return
-    pendingMyWorkspaceRef.current = { files: nextFiles, activeFile: nextActiveFile }
+    pendingMyWorkspaceRef.current = {
+      files: nextFiles,
+      activeFile: nextActiveFile,
+      version: myWorkspacePersistVersionRef.current + 1,
+    }
+    myWorkspacePersistVersionRef.current += 1
     if (myWorkspacePersistDebounceRef.current == null) {
       myWorkspacePersistDebounceRef.current = setTimeout(flushMyWorkspacePersist, LIVE_CONTENT_SYNC_INTERVAL_MS)
     }
@@ -591,6 +627,7 @@ function MobCodeLiveStudent({ sessionData }: MobCodeStudentProps) {
 
   const resetMyCode = useCallback(async () => {
     isResettingMyWorkspaceRef.current = true
+    myWorkspacePersistVersionRef.current += 1
     try {
       await cancelPendingStudentWorkspacePersist(
         myWorkspacePersistDebounceRef,
@@ -612,6 +649,12 @@ function MobCodeLiveStudent({ sessionData }: MobCodeStudentProps) {
       setResetPending(false)
     }
   }, [encodedSessionId])
+
+  useEffect(() => {
+    const target = resetPending ? resetConfirmationRef.current : shouldRestoreResetFocusRef.current ? resetTriggerRef.current : null
+    target?.focus()
+    if (!resetPending) shouldRestoreResetFocusRef.current = false
+  }, [resetPending])
 
   const editorThemeClassName = `mobcode-editor-theme-${theme}`
   const studentRunners = getStudentRunnerOptions(runnerId)
@@ -667,7 +710,16 @@ function MobCodeLiveStudent({ sessionData }: MobCodeStudentProps) {
               </p>
             )}
             {workspaceView === 'mine' && starterVersionAvailable && !resetPending && (
-              <button type="button" className="mobcode-text-button mt-2" onClick={() => setResetPending(true)}>
+              <button
+                ref={resetTriggerRef}
+                type="button"
+                className="mobcode-text-button mt-2"
+                onClick={(event) => {
+                  resetTriggerRef.current = event.currentTarget
+                  shouldRestoreResetFocusRef.current = true
+                  setResetPending(true)
+                }}
+              >
                 Reset my code
               </button>
             )}
@@ -675,7 +727,7 @@ function MobCodeLiveStudent({ sessionData }: MobCodeStudentProps) {
               <div className="mobcode-confirm-panel mt-2" role="alert">
                 <p>Replace only My code with the shared starter version?</p>
                 <div className="mobcode-confirm-actions">
-                  <button type="button" className="mobcode-confirm-danger" onClick={() => void resetMyCode()}>Reset my code</button>
+                  <button ref={resetConfirmationRef} type="button" className="mobcode-confirm-danger" onClick={() => void resetMyCode()}>Reset my code</button>
                   <button type="button" className="mobcode-confirm-cancel" onClick={() => setResetPending(false)}>Cancel</button>
                 </div>
               </div>
