@@ -3193,7 +3193,7 @@ const SyncDeckManager: FC = () => {
 
   const returnStudentToWaitingRoom = async (student: SyncDeckStudentPresence): Promise<void> => {
     if (!sessionId || !instructorPasscode || returningStudentId) return
-    if (!window.confirm(`Return ${student.name} to the waiting room so they can choose a new display name?`)) return
+    if (!window.confirm(`Return ${student.name} to the waiting room?`)) return
 
     setReturningStudentId(student.studentId)
     setStudentActionError(null)
@@ -5374,7 +5374,7 @@ const SyncDeckManager: FC = () => {
           entries={students.map((student) => ({ participantId: student.studentId, displayName: student.name, connected: student.connected }))}
           renderRowActions={(entry) => {
             const student = students.find((candidate) => candidate.studentId === entry.participantId)
-            return student ? <button type="button" onClick={() => { void returnStudentToWaitingRoom(student) }} disabled={returningStudentId !== null} className="shrink-0 rounded border border-red-300 px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60" aria-label={`Return ${entry.displayName} to the waiting room`}>{returningStudentId === entry.participantId ? 'Returning…' : 'Return'}</button> : null
+            return student ? <button type="button" onClick={() => { void returnStudentToWaitingRoom(student) }} disabled={returningStudentId !== null} className="shrink-0 rounded border border-red-300 px-2 py-1 text-sm font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60" aria-label={`Return ${entry.displayName} to the waiting room`} title={`Return ${entry.displayName} to the waiting room`}>{returningStudentId === entry.participantId ? '…' : '🥾'}</button> : null
           }}
         />
         {studentActionError ? <p role="alert" className="sr-only">{studentActionError}</p> : null}
