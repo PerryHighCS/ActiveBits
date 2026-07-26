@@ -2364,7 +2364,7 @@ const SyncDeckStudent: FC = () => {
           && parsed.participantId === registeredStudentId
           && sessionId
         ) {
-          if (typeof window !== 'undefined') handleReturnedToWaitingRoom({ participantId: parsed.participantId, registeredStudentId, sessionId, storage: window.localStorage, redirect: window.location.assign.bind(window.location) })
+          if (typeof window !== 'undefined') handleReturnedToWaitingRoom({ participantId: parsed.participantId, registeredStudentId, sessionId, storage: window.localStorage, sessionStorage: window.sessionStorage, redirect: window.location.assign.bind(window.location) })
           return
         }
         if (parsed.type !== 'syncdeck-state') {
