@@ -26,9 +26,9 @@ Track security-relevant boundaries, risks, and mitigation decisions.
 - Residual risk: The signed payload is not encrypted and the stateless initial design
   cannot revoke an individual link before expiry.
 - Validation (test/review/path): `activities/syncdeck/server/learnIntegration.ts`;
-  `activities/syncdeck/server/learnIntegration.test.ts`.
-- Follow-up action: Add browser coverage and a controlled expired-link test; use a
-  short class/day expiry from Learn.
+  `activities/syncdeck/server/learnIntegration.test.ts`;
+  `activities/syncdeck/playwright/substitute-instructor-link.spec.ts`.
+- Follow-up action: Use a short class/day expiry from Learn when generating links.
 - Owner: Codex
 
 - Date: 2026-07-15

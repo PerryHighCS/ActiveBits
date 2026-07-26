@@ -37,6 +37,7 @@ interface RouteRequest {
 interface RouteResponse {
   status(code: number): RouteResponse
   json(payload: unknown): void
+  send?(body: string): void
   cookie?(name: string, value: string, options: Record<string, unknown>): void
   redirect?(status: number, url: string): void
   setHeader?(name: string, value: string): void
@@ -354,6 +355,23 @@ function setNoStore(res: RouteResponse): void {
   res.setHeader?.('Cache-Control', 'no-store')
 }
 
+function substituteLaunchErrorPage(status: number, message: string): string {
+  const retryHint = status === 202 || status === 409 || status === 503
+    ? '<p>Please wait a moment and refresh this page.</p>'
+    : '<p>Ask the instructor who shared this link for a new one.</p>'
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="referrer" content="no-referrer"><title>SyncDeck launch unavailable</title></head><body><main><h1>SyncDeck launch unavailable</h1><p>${message}</p>${retryHint}</main></body></html>`
+}
+
+function respondToSubstituteLaunchError(res: RouteResponse, status: number, message: string): void {
+  if (typeof res.send === 'function') {
+    res.setHeader?.('Content-Type', 'text/html; charset=utf-8')
+    res.status(status)
+    res.send(substituteLaunchErrorPage(status, message))
+    return
+  }
+  res.status(status).json({ error: message })
+}
+
 function logLearnRequestFailure(route: string, reason: string, context: Record<string, unknown> = {}): void {
   console.info(JSON.stringify({ activity: ACTIVITY_ID, event: 'learn-integration-request-failed', route, reason, ...context }))
 }
@@ -659,13 +677,21 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
     const link = key ? readSubstituteInstructorLink(req.query?.payload, req.query?.sig, key.secret) : null
     if (!key || !link) {
       console.info(JSON.stringify({ activity: ACTIVITY_ID, event: 'learn-substitute-link-rejected' }))
-      return void res.status(403).json({ error: 'Invalid or expired substitute instructor link' })
+      return void respondToSubstituteLaunchError(res, 403, 'Invalid or expired substitute instructor link')
     }
     const id = mappingId(key.secret, ACTIVITY_ID, link.provider, link.resourceLinkId)
     const startLock = await claimStartLock(sessions, id)
     if (startLock.state !== 'acquired') {
-      const status = startLock.state === 'unavailable' ? 503 : 409
-      return void res.status(status).json({ error: status === 503 ? 'Learn session coordination is unavailable' : 'A substitute instructor launch is already in progress; retry shortly' })
+      if (startLock.state === 'locked') {
+        const pendingEntry = await loadEntry(id)
+        if (pendingEntry?.data.startRequestId === `substitute:${link.jti}`) {
+          return void respondToSubstituteLaunchError(res, 202, 'Your substitute instructor session is starting')
+        }
+      }
+      const [status, message] = startLock.state === 'unavailable'
+        ? [503, 'Learn session coordination is unavailable'] as const
+        : [409, 'A substitute instructor launch is already in progress'] as const
+      return void respondToSubstituteLaunchError(res, status, message)
     }
     try {
       let entry = await loadEntry(id)
@@ -679,6 +705,10 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
         if (activeSession) {
           sessionId = entry.data.activeSessionId
           recoveryToken = typeof activeSession.data.instructorRecoveryToken === 'string' ? activeSession.data.instructorRecoveryToken : null
+          if (!recoveryToken) {
+            console.error(JSON.stringify({ activity: ACTIVITY_ID, event: 'learn-substitute-link-recovery-unavailable', jti: link.jti, sessionId }))
+            return void respondToSubstituteLaunchError(res, 500, 'Active instructor recovery is unavailable')
+          }
         } else {
           await sessions.delete(id)
           entry = null
@@ -709,7 +739,7 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
             await sessions.delete(id)
           }
           console.error(JSON.stringify({ activity: ACTIVITY_ID, event: 'learn-substitute-link-start-failed', jti: link.jti, error: error instanceof Error ? error.message : String(error) }))
-          return void res.status(500).json({ error: 'Unable to start the substitute instructor session' })
+          return void respondToSubstituteLaunchError(res, 500, 'Unable to start the substitute instructor session')
         }
       }
       options.writeInstructorRecoveryCookie(req, res, sessionId, recoveryToken)

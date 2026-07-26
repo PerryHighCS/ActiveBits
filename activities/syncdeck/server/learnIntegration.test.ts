@@ -16,6 +16,7 @@ interface MockResponse {
   cookie(name: string, value: string, options: Record<string, unknown>): void
   redirect(status: number, url: string): void
   setHeader(name: string, value: string): void
+  send(body: string): void
 }
 
 interface MockRequest {
@@ -40,6 +41,7 @@ function response(): MockResponse {
     cookie(name, value, options) { this.cookies.push({ name, value, options }) },
     redirect(status, url) { this.statusCode = status; this.redirectTo = url },
     setHeader(name, value) { this.headers[name] = value },
+    send(body) { this.body = body },
   }
 }
 
@@ -128,6 +130,7 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
     const sessions = store(broadcasts)
     const ws: WsRouter = { wss: { clients: new Set<ActiveBitsWebSocket>(), close() {} }, register() {} }
     let createdSessionId = ''
+    let instructorSessionCreateCount = 0
     let delayedInstructorSession: Promise<void> | null = null
     let notifyInstructorSessionStart: (() => void) | null = null
     let failInstructorSessionCreation = false
@@ -139,6 +142,7 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
       sessions,
       ws,
       async createInstructorSession() {
+        instructorSessionCreateCount += 1
         notifyInstructorSessionStart?.()
         if (delayedInstructorSession) await delayedInstructorSession
         if (failInstructorSessionCreation) throw new Error('test instructor-session creation failure')
@@ -271,6 +275,16 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
     assert.equal(substituteLaunchResponse.headers['Referrer-Policy'], 'no-referrer')
     assert.ok(substituteLaunchResponse.cookies.some((item) => item.name === 'syncdeck_instructor_recoveries'))
 
+    const reusedSubstituteLaunchResponse = response()
+    await getHandlers.get('/api/syncdeck/learn/substitute')!(
+      { params: {}, query: substituteLaunch },
+      reusedSubstituteLaunchResponse,
+    )
+    assert.equal(reusedSubstituteLaunchResponse.statusCode, 302)
+    assert.equal(reusedSubstituteLaunchResponse.redirectTo, `/manage/syncdeck/${createdSessionId}`)
+    assert.ok(reusedSubstituteLaunchResponse.cookies.some((item) => item.name === 'syncdeck_instructor_recoveries'))
+    assert.equal(instructorSessionCreateCount, 1)
+
     console.info('[TEST] Expected invalid substitute instructor link to fail closed.')
     const invalidSubstituteResponse = response()
     await getHandlers.get('/api/syncdeck/learn/substitute')!(
@@ -278,6 +292,8 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
       invalidSubstituteResponse,
     )
     assert.equal(invalidSubstituteResponse.statusCode, 403)
+    assert.equal(invalidSubstituteResponse.headers['Content-Type'], 'text/html; charset=utf-8')
+    assert.match(String(invalidSubstituteResponse.body), /SyncDeck launch unavailable/)
 
     console.info('[TEST] Expected expired substitute instructor link to fail closed.')
     const expiredSubstituteResponse = response()
@@ -296,6 +312,21 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
     assert.equal(instructorLaunchResponse.redirectTo, `/manage/syncdeck/${createdSessionId}`)
     assert.equal(instructorLaunchResponse.headers['Referrer-Policy'], 'no-referrer')
     assert.deepEqual(instructorLaunchResponse.cookies, [{ name: 'syncdeck_instructor_recoveries', value: 'recovered', options: {} }])
+
+    const activeSessionWithoutRecovery = await sessions.get(createdSessionId)
+    assert.ok(activeSessionWithoutRecovery)
+    delete activeSessionWithoutRecovery.data.instructorRecoveryToken
+    await sessions.set(createdSessionId, activeSessionWithoutRecovery)
+    console.info('[TEST] Expected substitute launch without active recovery state to fail closed.')
+    const missingRecoverySubstituteResponse = response()
+    await getHandlers.get('/api/syncdeck/learn/substitute')!(
+      { params: {}, query: substituteLaunch },
+      missingRecoverySubstituteResponse,
+    )
+    assert.equal(missingRecoverySubstituteResponse.statusCode, 500)
+    assert.equal(missingRecoverySubstituteResponse.headers['Content-Type'], 'text/html; charset=utf-8')
+    assert.match(String(missingRecoverySubstituteResponse.body), /Active instructor recovery is unavailable/)
+    assert.equal(instructorSessionCreateCount, 1)
 
     const waitStatusResponse = response()
     await getHandlers.get('/api/integrations/learn/v1/activities/:activityId/wait/status')!(
