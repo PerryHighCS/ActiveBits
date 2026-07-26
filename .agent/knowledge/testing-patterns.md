@@ -15,6 +15,15 @@ Capture reusable test setup patterns, common failure modes, and reliability guid
 
 ## Entries
 
+- Date: 2026-07-26
+- Scope: unit | e2e | MobCode Python runner
+- Pattern: When wrapping user Python in a function, treat blank and comment-only source as an empty suite and emit `pass`; test both source shapes in the real Brython popup as well as the source builder.
+- Why it helps: Indented comments and blank lines do not satisfy Python's requirement for a function body, so string-presence checks can generate an `IndentationError` even though the user file has no executable code.
+- Example (file/path): `activities/mobcode/client/runner/runnerUtils.ts`; `activities/mobcode/playwright/runner.spec.ts`
+- Failure signal: Running an empty or comment-only Python file reports `expected an indented block` against the generated async wrapper.
+- Follow-up action: Keep this coverage when changing the runner wrapper or source transformations.
+- Owner: Codex
+
 - Date: 2026-07-24
 - Scope: unit | CI
 - Pattern: Keep activity tests free of mutations to `globalThis.window`, `document`, `navigator`, or global browser timers when the activities workspace runs files concurrently; extract browser-timer behavior behind an injected helper and test it with a local timer double instead.

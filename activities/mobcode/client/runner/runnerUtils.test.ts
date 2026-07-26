@@ -345,6 +345,14 @@ void test('buildBrythonAsyncEntrySource rewrites top-level and function input', 
   assert.match(source, /mobcode_run_async\(__mobcode_run__\(\)\)/)
 })
 
+void test('buildBrythonAsyncEntrySource gives blank and comment-only files a valid body', () => {
+  for (const source of ['', '# Nothing to run\n# Yet']) {
+    const wrappedSource = buildBrythonAsyncEntrySource(source)
+
+    assert.match(wrappedSource, /async def __mobcode_user_main__\(\):\n {4}pass\n/)
+  }
+})
+
 void test('buildBrythonAsyncEntrySource rewrites class method input', () => {
   const source = buildBrythonAsyncEntrySource([
     'class Prompter:',
