@@ -623,7 +623,7 @@ export function hasOpenManagerSessionClients(
     if (
       client.readyState === WS_OPEN &&
       client.sessionId === sessionId &&
-      client.isAuthenticatedManager === true &&
+      client.mobCodeRole === 'manager' &&
       verifyPasscode(instructorPasscode, client.instructorPasscode)
     ) {
       return true

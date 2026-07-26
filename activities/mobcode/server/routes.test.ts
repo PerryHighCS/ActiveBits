@@ -1072,7 +1072,7 @@ void test('hasOpenSessionClients only retains live ws state when a session still
   )
 })
 
-void test('hasOpenManagerSessionClients requires an authenticated open manager socket for the session', () => {
+void test('hasOpenManagerSessionClients requires an open manager socket with a verified passcode', () => {
   assert.equal(
     hasOpenManagerSessionClients([
       { readyState: 1, sessionId: 'session-a', mobCodeRole: 'student', instructorPasscode: 'secret' },
@@ -1092,7 +1092,6 @@ void test('hasOpenManagerSessionClients requires an authenticated open manager s
         readyState: 1,
         sessionId: 'session-a',
         mobCodeRole: 'manager',
-        isAuthenticatedManager: true,
         instructorPasscode: 'secret',
       },
     ], 'session-a', 'secret'),
