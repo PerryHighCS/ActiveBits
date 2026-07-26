@@ -9,7 +9,11 @@ void test('requestStudentReturn does not request when confirmation is cancelled'
   assert.equal(called, false)
 })
 void test('requestStudentReturn reports failed requests and posts the instructor passcode', async () => {
+  console.info('[TEST] Expected return-to-waiting-room request failure.')
   let request: RequestInit | undefined
   assert.equal(await requestStudentReturn({ ...params, confirm: () => true, fetchImpl: async (_url, init) => { request = init; return new Response('', { status: 500 }) } }), 'failed')
   assert.match(String(request?.body), /code/)
+})
+void test('requestStudentReturn reports success for a successful request', async () => {
+  assert.equal(await requestStudentReturn({ ...params, confirm: () => true, fetchImpl: async () => new Response('', { status: 200 }) }), 'returned')
 })
