@@ -365,6 +365,14 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
     assert.equal(inProgressSubstituteResponse.statusCode, 202)
     assert.equal(inProgressSubstituteResponse.headers['Content-Type'], 'text/html; charset=utf-8')
     assert.match(String(inProgressSubstituteResponse.body), /SyncDeck session is starting/)
+    const contendedSubstituteResponse = response()
+    await getHandlers.get('/api/syncdeck/learn/substitute')!(
+      { params: {}, query: substituteInstructorLink(startingSubstituteResourceId, 'https://slides.example/substitute-starting', 'substitute-contended') },
+      contendedSubstituteResponse,
+    )
+    assert.equal(contendedSubstituteResponse.statusCode, 409)
+    assert.equal(contendedSubstituteResponse.headers['Content-Type'], 'text/html; charset=utf-8')
+    assert.match(String(contendedSubstituteResponse.body), /SyncDeck session is starting/)
     releaseDelayedSubstituteStart()
     await firstSubstituteLaunch
     delayedInstructorSession = null

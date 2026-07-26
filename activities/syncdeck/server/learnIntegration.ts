@@ -356,7 +356,7 @@ function setNoStore(res: RouteResponse): void {
 }
 
 function substituteLaunchErrorPage(status: number, message: string, retryable: boolean): string {
-  const isStarting = status === 202
+  const isStarting = status === 202 || (status === 409 && retryable)
   const title = isStarting ? 'SyncDeck session is starting' : 'SyncDeck launch unavailable'
   const retryHint = retryable
     ? '<p>Please wait a moment and refresh this page.</p>'
