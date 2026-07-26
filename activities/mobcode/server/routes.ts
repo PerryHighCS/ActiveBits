@@ -1039,9 +1039,9 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
       }
       await sessions.set(session.id, session)
       const settingsPayload = {
-        ...(studentCode.shareChangesEnabled
+        ...(studentCode.shareChangesEnabled || !studentCode.publishedInstructorVersion
           ? session.data.groups[DEFAULT_GROUP_ID] ?? { files: {}, activeFile: '' }
-          : studentCode.publishedInstructorVersion ?? { files: {}, activeFile: '' }),
+          : studentCode.publishedInstructorVersion),
         tryItEnabled: studentCode.tryItEnabled,
         shareChangesEnabled: studentCode.shareChangesEnabled,
       }
@@ -1072,9 +1072,9 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
       sharedExample.sharedAt = Date.now()
       await sessions.set(session.id, session)
       const settingsPayload = {
-        ...(session.data.studentCode?.shareChangesEnabled
+        ...(session.data.studentCode?.shareChangesEnabled || !session.data.studentCode?.publishedInstructorVersion
           ? session.data.groups[DEFAULT_GROUP_ID] ?? { files: {}, activeFile: '' }
-          : session.data.studentCode?.publishedInstructorVersion ?? { files: {}, activeFile: '' }),
+          : session.data.studentCode.publishedInstructorVersion),
         tryItEnabled: session.data.studentCode?.tryItEnabled === true,
         shareChangesEnabled: session.data.studentCode?.shareChangesEnabled === true,
       }
@@ -1138,6 +1138,7 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
       if (session.data.soloMode === true) {
         scheduleLiveGroupCleanup(session.id)
       }
+      res.set('Cache-Control', 'no-store')
       res.json({ ok: true })
     } catch (error) {
       console.error(JSON.stringify({ event: 'mobcode.state-failed', sessionId: req.params.sessionId, error: String(error) }))

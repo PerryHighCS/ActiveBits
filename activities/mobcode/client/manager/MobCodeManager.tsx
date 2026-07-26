@@ -18,7 +18,7 @@ import FileNameModal from '../components/FileNameModal'
 import FileControlsMenuContent from '../components/FileControlsMenuContent'
 import RunnerControls from '../components/RunnerControls'
 import SettingsMenu from '../components/SettingsMenu'
-import { MOB_CODE_MESSAGE_TYPES } from '../utils/constants'
+import { LIVE_CONTENT_SYNC_INTERVAL_MS, MOB_CODE_MESSAGE_TYPES } from '../utils/constants'
 import {
   clampMobCodeContentEdit,
   deletePathFromFiles,
@@ -94,7 +94,6 @@ type DurableMobCodeMessageType =
   | typeof MOB_CODE_MESSAGE_TYPES.STATE_SYNC
   | typeof MOB_CODE_MESSAGE_TYPES.FILE_TREE_CHANGED
 
-const LIVE_CONTENT_SYNC_INTERVAL_MS = 250
 const LIVE_PRESENCE_SYNC_INTERVAL_MS = 60
 const PERSIST_STATE_INTERVAL_MS = 5000
 

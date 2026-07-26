@@ -561,6 +561,7 @@ void test('POST /api/mobcode/:sessionId/state accepts the scoped solo edit token
   } as unknown as Parameters<typeof handler>[0], response as unknown as Parameters<typeof handler>[1])
 
   assert.equal(response.statusCode, 200)
+  assert.equal(response.headers['Cache-Control'], 'no-store')
   if (saved === null) throw new Error('Expected solo state to be saved')
   const savedGroup = (saved as SessionRecord & { data: ReturnType<typeof normalizeMobCodeSessionData> }).data.groups.default
   if (!savedGroup) throw new Error('Expected saved default group')
@@ -973,9 +974,19 @@ void test('websocket relay updates live validation state without mutating sessio
           activeFile: 'Main.java',
         },
       },
-      studentCode: { shareChangesEnabled: true },
+      studentCode: {
+        tryItEnabled: true,
+        shareChangesEnabled: true,
+        starterVersion: {
+          files: { 'Main.java': 'class Main {}' },
+          activeFile: 'Main.java',
+        },
+      },
     }),
   })
+  acceptEntryParticipant(session, { participantId: 'ada', displayName: 'Ada' })
+  const participantToken = issueAcceptedEntryParticipantToken(session, 'ada')
+  assert.ok(participantToken)
 
   setupMobCodeRoutes(app as never, {
     async get(id: string) {
@@ -1018,6 +1029,21 @@ void test('websocket relay updates live validation state without mutating sessio
     path: 'Main.java',
     content: 'class Main { int x = 1; }',
   })
+
+  const studentStateHandler = app.handlers.post['/api/mobcode/:sessionId/student-workspace/state']
+  assert.ok(studentStateHandler)
+  managerSocket.sent.length = 0
+  forgedManagerSocket.sent.length = 0
+  const studentStateResponse = createResponse()
+  await studentStateHandler({
+    params: { sessionId: session.id },
+    body: { files: { 'Main.java': 'class Main { int student = 1; }' }, activeFile: 'Main.java' },
+    headers: { cookie: `${getSessionParticipantCookieName(session.id)}=${participantToken}` },
+  } as never, studentStateResponse)
+  assert.equal(studentStateResponse.statusCode, 200)
+  assert.equal(managerSocket.sent.length, 1)
+  assert.equal(JSON.parse(managerSocket.sent[0] ?? '{}').type, 'student-code-updated')
+  assert.equal(forgedManagerSocket.sent.length, 0)
 
   session.data.studentCode!.shareChangesEnabled = false
   forgedManagerSocket.sent.length = 0

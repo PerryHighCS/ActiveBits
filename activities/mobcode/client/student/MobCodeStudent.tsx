@@ -19,7 +19,7 @@ import {
 import { openMobCodeRunnerPopupShell } from '../runner/runnerPopupShell'
 import type { MobCodeRunnerDefinition } from '../runner/runnerTypes'
 import type { openMobCodeRunnerPopup, renderMobCodeRunnerPopup } from '../runner/runnerUtils'
-import { MOB_CODE_MESSAGE_TYPES } from '../utils/constants'
+import { LIVE_CONTENT_SYNC_INTERVAL_MS, MOB_CODE_MESSAGE_TYPES } from '../utils/constants'
 import { resolveActiveFile, sanitizeFilesMap } from '../utils/fileUtils'
 import { getThemeFromCookie, setThemeCookie } from '../utils/themeUtils'
 import { isStatePayload, parseMobCodeMessage } from '../manager/managerUtils'
@@ -538,7 +538,10 @@ function MobCodeLiveStudent({ sessionData }: MobCodeStudentProps) {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ files: nextFiles, activeFile: nextActiveFile }),
     })
-    if (response.status === 423 && updateUi) setTryItEnabled(false)
+    if (response.status === 423) {
+      if (updateUi) setTryItEnabled(false)
+      throw new Error('Editing was turned off by the instructor.')
+    }
     if (!response.ok) throw new Error('Could not save your code.')
   }, [encodedSessionId])
 
@@ -561,7 +564,7 @@ function MobCodeLiveStudent({ sessionData }: MobCodeStudentProps) {
   const scheduleMyWorkspacePersist = useCallback((nextFiles: Record<string, string>, nextActiveFile: string) => {
     pendingMyWorkspaceRef.current = { files: nextFiles, activeFile: nextActiveFile }
     if (myWorkspacePersistDebounceRef.current == null) {
-      myWorkspacePersistDebounceRef.current = setTimeout(flushMyWorkspacePersist, 250)
+      myWorkspacePersistDebounceRef.current = setTimeout(flushMyWorkspacePersist, LIVE_CONTENT_SYNC_INTERVAL_MS)
     }
   }, [flushMyWorkspacePersist])
 

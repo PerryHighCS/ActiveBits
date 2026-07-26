@@ -1,6 +1,7 @@
 import type { MobCodeThemeId } from '../../shared/types'
 
 export const DEFAULT_GROUP_ID = 'default'
+export const LIVE_CONTENT_SYNC_INTERVAL_MS = 250
 
 export const MOB_CODE_MESSAGE_TYPES = {
   STATE_SYNC: 'state-sync',
