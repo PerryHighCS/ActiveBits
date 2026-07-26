@@ -35,10 +35,10 @@ export function closeDuplicateParticipantSockets<TSocket extends ParticipantSock
 export function closeParticipantSockets<TSocket extends ParticipantSocketLike>(
   clients: Iterable<TSocket>,
   sessionId: string,
-  participantId: string,
+  studentId: string,
 ): void {
   for (const client of clients) {
-    if (client.readyState !== 1 || client.sessionId !== sessionId || client.studentId !== participantId) continue
+    if (client.readyState !== 1 || client.sessionId !== sessionId || client.studentId !== studentId) continue
     client.ignoreDisconnect = true
     try {
       client.close(4001, 'Returned to waiting room')

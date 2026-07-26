@@ -300,6 +300,31 @@ void test('SyncDeck return-to-waiting-room rejects a bad instructor passcode wit
   assert.ok(findAcceptedEntryParticipant(state.store[session.id]!, 'student-1'))
 })
 
+void test('SyncDeck return-to-waiting-room does not mutate a live session when persistence fails', async () => {
+  console.info('[TEST] Expected return-to-waiting-room persistence failure.')
+  const session = createSyncDeckSession('return-persist-failure', 'teacher-passcode')
+  session.data.students = [{
+    studentId: 'student-1', name: 'Ada', joinedAt: 1, lastSeenAt: 1, lastIndices: null, lastStudentStateAt: null,
+  }]
+  acceptEntryParticipant(session, { participantId: 'student-1', displayName: 'Ada' })
+  const state = createSessionStore({ [session.id]: session })
+  state.sessions.get = async (id: string) => state.store[id] ?? null
+  state.sessions.set = async () => { throw new Error('store unavailable') }
+  const app = createMockApp()
+  const ws = createMockWs()
+  setupSyncDeckRoutes(app, state.sessions, ws)
+
+  const response = createResponse()
+  await app.handlers.post['/api/syncdeck/:sessionId/students/:studentId/return-to-waiting-room']!(
+    createRequest({ sessionId: session.id, studentId: 'student-1' }, { instructorPasscode: 'teacher-passcode' }),
+    response,
+  )
+
+  assert.equal(response.statusCode, 500)
+  assert.equal((state.store[session.id]?.data as { students: unknown[] }).students.length, 1)
+  assert.ok(findAcceptedEntryParticipant(state.store[session.id]!, 'student-1'))
+})
+
 class MockSocket implements ActiveBitsWebSocket {
   sessionId?: string | null
   studentId?: string | null

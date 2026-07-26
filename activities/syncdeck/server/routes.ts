@@ -1871,24 +1871,26 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       res.status(403).json({ error: 'forbidden' })
       return
     }
-    if (!findSyncDeckStudentById(session.data.students, studentId) || !revokeAcceptedEntryParticipant(session, studentId)) {
+    const updatedSession = structuredClone(session)
+    if (!findSyncDeckStudentById(updatedSession.data.students, studentId) || !revokeAcceptedEntryParticipant(updatedSession, studentId)) {
       res.status(404).json({ error: 'participant not found' })
       return
     }
 
     const childSessionIds: string[] = []
     try {
-      revokeSessionEntryParticipants(session, studentId)
-      for (const embeddedActivity of Object.values(session.data.embeddedActivities)) {
+      revokeSessionEntryParticipants(updatedSession, studentId)
+      for (const embeddedActivity of Object.values(updatedSession.data.embeddedActivities)) {
         const childSession = await sessions.get(embeddedActivity.childSessionId)
         if (!childSession) continue
-        revokeAcceptedEntryParticipant(childSession, studentId)
-        revokeSessionEntryParticipants(childSession, studentId)
-        await sessions.set(childSession.id, childSession)
-        childSessionIds.push(childSession.id)
+        const updatedChildSession = structuredClone(childSession)
+        revokeAcceptedEntryParticipant(updatedChildSession, studentId)
+        revokeSessionEntryParticipants(updatedChildSession, studentId)
+        await sessions.set(updatedChildSession.id, updatedChildSession)
+        childSessionIds.push(updatedChildSession.id)
       }
-      session.data.students = session.data.students.filter((student) => student.studentId !== studentId)
-      await sessions.set(session.id, session)
+      updatedSession.data.students = updatedSession.data.students.filter((student) => student.studentId !== studentId)
+      await sessions.set(updatedSession.id, updatedSession)
     } catch (error) {
       console.error(JSON.stringify({ activity: 'syncdeck', event: 'participant-return-persist-failed', error: error instanceof Error ? error.message : String(error) }))
       res.status(500).json({ error: 'Unable to return participant to waiting room' })
