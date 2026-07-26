@@ -45,6 +45,7 @@ export function closeParticipantSockets<TSocket extends ParticipantSocketLike>(
     } catch (error) {
       console.error(JSON.stringify({
         event: 'returned-participant-socket-close-failed',
+        sessionId,
         error: error instanceof Error ? error.message : String(error),
       }))
     }

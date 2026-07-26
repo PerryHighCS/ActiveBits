@@ -1876,13 +1876,16 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       return
     }
 
+    const childSessionIds: string[] = []
     try {
+      revokeSessionEntryParticipants(session, studentId)
       for (const embeddedActivity of Object.values(session.data.embeddedActivities)) {
         const childSession = await sessions.get(embeddedActivity.childSessionId)
         if (!childSession) continue
         revokeAcceptedEntryParticipant(childSession, studentId)
         revokeSessionEntryParticipants(childSession, studentId)
         await sessions.set(childSession.id, childSession)
+        childSessionIds.push(childSession.id)
       }
       session.data.students = session.data.students.filter((student) => student.studentId !== studentId)
       await sessions.set(session.id, session)
@@ -1907,6 +1910,9 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       }
     }
     closeParticipantSockets(ws.wss.clients as Set<SyncDeckSocket>, session.id, studentId)
+    for (const childSessionId of childSessionIds) {
+      closeParticipantSockets(ws.wss.clients as Set<SyncDeckSocket>, childSessionId, studentId)
+    }
     await broadcastStudentsToInstructors(session.id)
     console.info(JSON.stringify({ activity: 'syncdeck', event: 'participant-returned-to-waiting-room', sessionId: session.id, participantId: studentId }))
     res.json({ participantId: studentId })

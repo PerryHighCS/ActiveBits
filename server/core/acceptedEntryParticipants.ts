@@ -141,7 +141,7 @@ export function revokeAcceptedEntryParticipant(
   if (!normalizedParticipantId || !isRecord(session.data)) return false
 
   const container = session.data as AcceptedEntryParticipantContainer
-  if (!container.acceptedEntryParticipants || !Object.hasOwn(container.acceptedEntryParticipants, normalizedParticipantId)) {
+  if (!isRecord(container.acceptedEntryParticipants) || !Object.hasOwn(container.acceptedEntryParticipants, normalizedParticipantId)) {
     return false
   }
 
