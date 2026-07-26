@@ -1,6 +1,18 @@
-import ManagerComponent from './manager/MobCodeManager'
-import StudentComponent from './student/MobCodeStudent'
+import { createElement, lazy, type ComponentProps } from 'react'
 import type { ActivityPersistentSoloLaunchParams, ActivityPersistentSoloLaunchResult } from '../../../types/activity.js'
+
+// The registry already renders activity components inside Suspense. Keeping the two role
+// views lazy prevents one role's implementation from inflating the other's entry chunk.
+const LazyManagerComponent = lazy(() => import('./manager/MobCodeManager'))
+const LazyStudentComponent = lazy(() => import('./student/MobCodeStudent'))
+
+function ManagerComponent() {
+  return createElement(LazyManagerComponent)
+}
+
+function StudentComponent(props: ComponentProps<typeof LazyStudentComponent>) {
+  return createElement(LazyStudentComponent, { sessionData: props.sessionData })
+}
 
 export async function launchMobCodePersistentSoloEntry(
   params: ActivityPersistentSoloLaunchParams,

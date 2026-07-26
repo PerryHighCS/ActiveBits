@@ -6,6 +6,7 @@ import {
   buildBrythonRunnerHtml,
   MOB_CODE_RUNNERS,
   openMobCodeRunnerPopup,
+  renderMobCodeRunnerPopup,
   resolveBrythonEntryFile,
 } from './runnerUtils'
 
@@ -563,4 +564,51 @@ void test('openMobCodeRunnerPopup reports missing entry and thrown popup open fa
     }),
     { opened: false, reason: 'popup-blocked' },
   )
+})
+
+void test('renderMobCodeRunnerPopup populates a synchronously opened popup for lazy loading', () => {
+  let focused = false
+  let runnerUrl = ''
+  const popup = {
+    focus() {
+      focused = true
+    },
+    location: {
+      set href(value: string) {
+        runnerUrl = value
+      },
+    },
+  }
+
+  assert.deepEqual(renderMobCodeRunnerPopup(popup, {
+    files: { 'main.py': 'print("hello")' },
+    activeFile: 'main.py',
+    runnerId: 'brython-terminal',
+  }, 'https://bits.example'), { opened: true })
+  assert.equal(focused, true)
+  assert.match(runnerUrl, /^blob:/)
+  URL.revokeObjectURL(runnerUrl)
+})
+
+void test('renderMobCodeRunnerPopup reports launch failures before changing a popup', () => {
+  console.log('[TEST] exercising the expected unknown-runner path')
+  assert.deepEqual(renderMobCodeRunnerPopup({ focus() {} }, {
+    files: { 'main.py': 'print("hello")' },
+    activeFile: 'main.py',
+    runnerId: 'unknown-runner' as never,
+  }), { opened: false, reason: 'unknown-runner' })
+
+  console.log('[TEST] exercising the expected missing-entry path')
+  assert.deepEqual(renderMobCodeRunnerPopup({ focus() {} }, {
+    files: { 'Main.java': 'class Main {}' },
+    activeFile: 'Main.java',
+    runnerId: 'brython-terminal',
+  }), { opened: false, reason: 'missing-entry' })
+
+  console.log('[TEST] exercising the expected popup-without-location path')
+  assert.deepEqual(renderMobCodeRunnerPopup({ focus() {} }, {
+    files: { 'main.py': 'print("hello")' },
+    activeFile: 'main.py',
+    runnerId: 'brython-terminal',
+  }), { opened: false, reason: 'popup-blocked' })
 })

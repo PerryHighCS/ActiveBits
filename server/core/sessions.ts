@@ -17,7 +17,11 @@ import {
   storeSessionEntryParticipant,
 } from './sessionEntryParticipants.js'
 import { buildSessionEntryStatus } from './entryStatus.js'
-import { acceptEntryParticipant } from './acceptedEntryParticipants.js'
+import {
+  acceptEntryParticipant,
+  getSessionParticipantCookieName,
+  issueAcceptedEntryParticipantToken,
+} from './acceptedEntryParticipants.js'
 import { consumeSessionDataToken } from './sessionTokenUtils.js'
 
 export interface SessionRecord extends SharedSession<Record<string, unknown>> {
@@ -478,8 +482,19 @@ export function setupSessionRoutes(app: {
         return
       }
 
-      acceptEntryParticipant(session, values)
+      const acceptedParticipant = acceptEntryParticipant(session, values)
+      const participantToken = acceptedParticipant
+        ? issueAcceptedEntryParticipantToken(session, acceptedParticipant.participantId)
+        : null
       await sessions.set(sessionId, session)
+      if (participantToken) {
+        res.cookie?.(getSessionParticipantCookieName(sessionId), participantToken, {
+          httpOnly: true,
+          sameSite: 'lax',
+          secure: process.env.NODE_ENV === 'production',
+          path: '/',
+        })
+      }
       res.json({ values })
     } catch (error) {
       console.error('Error consuming session entry participant:', { sessionId, error })
@@ -523,5 +538,6 @@ export function setupSessionRoutes(app: {
 interface ResponseLike {
   status(code: number): ResponseLike
   set?(field: string, value: string): ResponseLike
+  cookie?(name: string, value: string, options: Record<string, unknown>): ResponseLike
   json(payload: Record<string, unknown>): void
 }

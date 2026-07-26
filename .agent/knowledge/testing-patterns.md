@@ -383,3 +383,11 @@ Capture reusable test setup patterns, common failure modes, and reliability guid
 - Failure signal: Activity browser specs either require ad hoc commands outside the root harness or pile up in the shared root `playwright/` directory even though the behavior belongs to one activity.
 - Follow-up action: For future activity-owned browser flows, create or extend `activities/<activity-id>/playwright/...` and run them through the root `npm run test:e2e` scripts.
 - Owner: Codex
+# MobCode collaboration tests
+
+- Test student response shaping by serializing the scoped snapshot and asserting that another student's display name, paths, and content are absent. This catches accidental leakage when session state grows new collaboration fields.
+- For live student-mode browser coverage, use two isolated Playwright pages: bootstrap the instructor passcode through history state, issue an accepted participant token through the session entry route, and install that exact server-issued httpOnly cookie in the student context before navigation. This reliably exercises manager-to-student websocket and snapshot transitions in Chromium and WebKit. See `activities/mobcode/playwright/student-mode.spec.ts`.
+
+# Activities lint memory
+
+- Run the activities workspace lint through `scripts/lint-activities.mjs`. It starts one type-aware ESLint process per top-level activity directory, releasing the TypeScript program between directories instead of constructing one program for the whole workspace.

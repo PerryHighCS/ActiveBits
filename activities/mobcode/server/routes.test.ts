@@ -2,7 +2,14 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import type { SessionRecord } from 'activebits-server/core/sessions.js'
 import {
+  acceptEntryParticipant,
+  getSessionParticipantCookieName,
+  issueAcceptedEntryParticipantToken,
+} from 'activebits-server/core/acceptedEntryParticipants.js'
+import {
   applyWsRelayMessageToGroupState,
+  buildMobCodeManagerSnapshot,
+  buildMobCodeStudentSnapshot,
   hasOpenManagerSessionClients,
   hasOpenSessionClients,
   normalizeMobCodeSessionData,
@@ -145,6 +152,130 @@ void test('normalizeMobCodeSessionData creates default group when missing', () =
   assert.deepEqual(data.groups.default, { files: {}, activeFile: '' })
   assert.equal(typeof data.instructorPasscode, 'string')
   assert.equal(data.instructorPasscode?.length, 32)
+})
+
+void test('normalizeMobCodeSessionData enables embedded Try it with an initial immutable starter snapshot', () => {
+  const data = normalizeMobCodeSessionData({
+    embeddedLaunch: { selectedOptions: { files: { 'main.py': 'print(1)' }, activeFile: 'main.py', startTryItMode: true } },
+  })
+  assert.equal(data.studentCode?.tryItEnabled, true)
+  assert.deepEqual(data.studentCode?.starterVersion, data.groups.default)
+  assert.notEqual(data.studentCode?.starterVersion, data.groups.default)
+})
+
+void test('normalizeMobCodeSessionData drops reserved participant keys and uses a prototype-free workspace map', () => {
+  const workspaces = Object.create(null) as Record<string, unknown>
+  workspaces.__proto__ = {
+    participantId: '__proto__', displayName: 'Unsafe', files: { 'main.py': 'unsafe' }, activeFile: 'main.py', createdAt: 1, updatedAt: 1,
+  }
+  workspaces.ada = {
+    participantId: 'ada', displayName: 'Ada', files: { 'main.py': 'safe' }, activeFile: 'main.py', createdAt: 1, updatedAt: 1,
+  }
+  const data = normalizeMobCodeSessionData({
+    studentCode: { tryItEnabled: true, starterVersion: { files: {}, activeFile: '' }, studentWorkspaces: workspaces, sharedExample: null },
+  })
+  assert.equal(Object.getPrototypeOf(data.studentCode?.studentWorkspaces), null)
+  assert.equal(Object.hasOwn(data.studentCode?.studentWorkspaces ?? {}, '__proto__'), false)
+  assert.deepEqual(Object.keys(data.studentCode?.studentWorkspaces ?? {}), ['ada'])
+})
+
+void test('student snapshots never include another student workspace or identity', () => {
+  const data = normalizeMobCodeSessionData({
+    groups: { default: { files: { 'main.py': 'print("instructor")' }, activeFile: 'main.py' } },
+    studentCode: {
+      tryItEnabled: true,
+      starterVersion: { files: { 'main.py': 'print("starter")' }, activeFile: 'main.py' },
+      studentWorkspaces: {
+        ada: { participantId: 'ada', displayName: 'Ada', files: { 'main.py': 'print("ada")' }, activeFile: 'main.py', createdAt: 1, updatedAt: 2 },
+        grace: { participantId: 'grace', displayName: 'Grace', files: { 'secret.py': 'private' }, activeFile: 'secret.py', createdAt: 1, updatedAt: 3 },
+      },
+      sharedExample: null,
+    },
+  })
+  const snapshot = buildMobCodeStudentSnapshot(data, 'ada')
+  assert.match(JSON.stringify(snapshot), /Ada/)
+  assert.doesNotMatch(JSON.stringify(snapshot), /Grace|secret\.py|private/)
+})
+
+void test('manager snapshots include named student workspaces for read-only review', () => {
+  const data = normalizeMobCodeSessionData({
+    studentCode: {
+      tryItEnabled: true,
+      starterVersion: { files: { 'main.py': 'print("starter")' }, activeFile: 'main.py' },
+      studentWorkspaces: {
+        ada: { participantId: 'ada', displayName: 'Ada', files: { 'main.py': 'print("ada")' }, activeFile: 'main.py', createdAt: 1, updatedAt: 2 },
+      },
+      sharedExample: null,
+    },
+  })
+
+  const snapshot = buildMobCodeManagerSnapshot(data)
+  assert.deepEqual(snapshot.studentCode, {
+    tryItEnabled: true,
+    shareChangesEnabled: false,
+    starterVersionAvailable: true,
+    starterVersion: { files: { 'main.py': 'print("starter")' }, activeFile: 'main.py' },
+    students: [{
+      participantId: 'ada',
+      displayName: 'Ada',
+      files: { 'main.py': 'print("ada")' },
+      activeFile: 'main.py',
+      createdAt: 1,
+      updatedAt: 2,
+    }],
+    sharedExample: null,
+  })
+})
+
+void test('participant-scoped MobCode routes reject unauthenticated, forged, locked, and non-manager requests', async () => {
+  console.log('[TEST] Verifying expected MobCode authorization denials.')
+  const app = createMockApp()
+  const ws = createMockWs()
+  const session = createMobCodeSessionRecord()
+  acceptEntryParticipant(session, { participantId: 'ada', displayName: 'Ada' })
+  const participantToken = issueAcceptedEntryParticipantToken(session, 'ada')
+  assert.ok(participantToken)
+  setupMobCodeRoutes(app as never, {
+    async get() {
+      return session
+    },
+    async set() {},
+  }, ws as never)
+
+  const workspaceHandler = app.handlers.post['/api/mobcode/:sessionId/student-workspace']
+  const stateHandler = app.handlers.post['/api/mobcode/:sessionId/student-workspace/state']
+  const resetHandler = app.handlers.post['/api/mobcode/:sessionId/student-workspace/reset']
+  const actionHandler = app.handlers.post['/api/mobcode/:sessionId/student-code/:action']
+  assert.ok(workspaceHandler && stateHandler && resetHandler && actionHandler)
+
+  for (const headers of [undefined, { cookie: `${getSessionParticipantCookieName(session.id)}=forged` }]) {
+    const response = createResponse()
+    await workspaceHandler({ params: { sessionId: session.id }, body: {}, headers } as never, response)
+    assert.equal(response.statusCode, 403)
+  }
+
+  const lockedResponse = createResponse()
+  await stateHandler({
+    params: { sessionId: session.id },
+    body: { files: { 'Main.java': 'class Main {}' }, activeFile: 'Main.java' },
+    headers: { cookie: `${getSessionParticipantCookieName(session.id)}=${participantToken}` },
+  } as never, lockedResponse)
+  assert.equal(lockedResponse.statusCode, 423)
+
+  const lockedResetResponse = createResponse()
+  await resetHandler({
+    params: { sessionId: session.id },
+    body: {},
+    headers: { cookie: `${getSessionParticipantCookieName(session.id)}=${participantToken}` },
+  } as never, lockedResetResponse)
+  assert.equal(lockedResetResponse.statusCode, 423)
+
+  const managerResponse = createResponse()
+  await actionHandler({
+    params: { sessionId: session.id, action: 'try-it' },
+    body: { instructorPasscode: 'incorrect', enabled: true },
+  } as never, managerResponse)
+  assert.equal(managerResponse.statusCode, 403)
 })
 
 void test('POST /api/mobcode/create-solo creates a server-backed editable workspace from starter files', async () => {
@@ -309,6 +440,7 @@ void test('GET /api/mobcode/:sessionId/session exposes sanitized embedded runner
   } as unknown as Parameters<typeof sessionHandler>[0], response as unknown as Parameters<typeof sessionHandler>[1])
 
   assert.equal(response.statusCode, 200)
+  assert.equal(response.headers['Cache-Control'], 'no-store')
   assert.deepEqual(response.body, {
     id: session.id,
     type: session.type,
@@ -429,6 +561,7 @@ void test('POST /api/mobcode/:sessionId/state accepts the scoped solo edit token
   } as unknown as Parameters<typeof handler>[0], response as unknown as Parameters<typeof handler>[1])
 
   assert.equal(response.statusCode, 200)
+  assert.equal(response.headers['Cache-Control'], 'no-store')
   if (saved === null) throw new Error('Expected solo state to be saved')
   const savedGroup = (saved as SessionRecord & { data: ReturnType<typeof normalizeMobCodeSessionData> }).data.groups.default
   if (!savedGroup) throw new Error('Expected saved default group')
@@ -499,6 +632,52 @@ void test('POST /api/mobcode/:sessionId/state returns 400 for an invalid payload
   assert.equal(response.statusCode, 400)
   assert.deepEqual(response.body, { error: 'Invalid state payload' })
   assert.equal(setCalls, 0)
+})
+
+void test('POST /api/mobcode/:sessionId/shared-workspace/state updates only the editable shared copy', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const session = createMobCodeSessionRecord({
+    data: normalizeMobCodeSessionData({
+      instructorPasscode: 'secret-passcode',
+      groups: { default: { files: { 'instructor.py': 'print("instructor")' }, activeFile: 'instructor.py' } },
+      studentCode: {
+        sharedExample: {
+          sourceParticipantId: 'ada',
+          workspace: { files: { 'student.py': 'print("student")' }, activeFile: 'student.py' },
+          sharedAt: 1,
+        },
+      },
+    }),
+  })
+  let saved: SessionRecord | null = null
+  setupMobCodeRoutes(app as never, {
+    async get(id: string) { return id === session.id ? session : null },
+    async set(_id: string, nextSession: SessionRecord) { saved = nextSession },
+  }, ws as never)
+
+  const handler = app.handlers.post['/api/mobcode/:sessionId/shared-workspace/state']
+  assert.ok(handler)
+  const response = createResponse()
+  await handler({
+    params: { sessionId: session.id },
+    body: {
+      instructorPasscode: 'secret-passcode',
+      files: { 'shared.py': 'print("shared")' },
+      activeFile: 'shared.py',
+    },
+  } as never, response as never)
+
+  assert.equal(response.statusCode, 200)
+  assert.equal(response.headers['Cache-Control'], 'no-store')
+  assert.deepEqual(response.body, {
+    ok: true,
+    workspace: { files: { 'shared.py': 'print("shared")' }, activeFile: 'shared.py' },
+  })
+  if (saved === null) throw new Error('Expected shared workspace to be saved')
+  const savedData = (saved as SessionRecord & { data: ReturnType<typeof normalizeMobCodeSessionData> }).data
+  assert.deepEqual(savedData.groups.default, { files: { 'instructor.py': 'print("instructor")' }, activeFile: 'instructor.py' })
+  assert.deepEqual(savedData.studentCode?.sharedExample?.workspace, { files: { 'shared.py': 'print("shared")' }, activeFile: 'shared.py' })
 })
 
 void test('normalizeMobCodeSessionData preserves valid files and active file', () => {
@@ -795,8 +974,19 @@ void test('websocket relay updates live validation state without mutating sessio
           activeFile: 'Main.java',
         },
       },
+      studentCode: {
+        tryItEnabled: true,
+        shareChangesEnabled: true,
+        starterVersion: {
+          files: { 'Main.java': 'class Main {}' },
+          activeFile: 'Main.java',
+        },
+      },
     }),
   })
+  acceptEntryParticipant(session, { participantId: 'ada', displayName: 'Ada' })
+  const participantToken = issueAcceptedEntryParticipantToken(session, 'ada')
+  assert.ok(participantToken)
 
   setupMobCodeRoutes(app as never, {
     async get(id: string) {
@@ -807,13 +997,16 @@ void test('websocket relay updates live validation state without mutating sessio
 
   const managerSocket = createMockSocket()
   const studentSocket = createMockSocket()
+  const forgedManagerSocket = createMockSocket()
   ws.wss.clients.add(managerSocket)
   ws.wss.clients.add(studentSocket)
+  ws.wss.clients.add(forgedManagerSocket)
 
   const wsHandler = ws.getHandler()
   assert.ok(wsHandler)
   wsHandler(managerSocket, new URLSearchParams({ sessionId: session.id, role: 'manager' }))
   wsHandler(studentSocket, new URLSearchParams({ sessionId: session.id, role: 'student' }))
+  wsHandler(forgedManagerSocket, new URLSearchParams({ sessionId: session.id, role: 'manager' }))
 
   managerSocket.emit('message', JSON.stringify({
     type: 'manager-auth',
@@ -835,6 +1028,31 @@ void test('websocket relay updates live validation state without mutating sessio
     path: 'Main.java',
     content: 'class Main { int x = 1; }',
   })
+
+  const studentStateHandler = app.handlers.post['/api/mobcode/:sessionId/student-workspace/state']
+  assert.ok(studentStateHandler)
+  managerSocket.sent.length = 0
+  forgedManagerSocket.sent.length = 0
+  const studentStateResponse = createResponse()
+  await studentStateHandler({
+    params: { sessionId: session.id },
+    body: { files: { 'Main.java': 'class Main { int student = 1; }' }, activeFile: 'Main.java' },
+    headers: { cookie: `${getSessionParticipantCookieName(session.id)}=${participantToken}` },
+  } as never, studentStateResponse)
+  assert.equal(studentStateResponse.statusCode, 200)
+  assert.equal(managerSocket.sent.length, 1)
+  assert.equal(JSON.parse(managerSocket.sent[0] ?? '{}').type, 'student-code-updated')
+  assert.equal(forgedManagerSocket.sent.length, 0)
+
+  session.data.studentCode!.shareChangesEnabled = false
+  forgedManagerSocket.sent.length = 0
+  managerSocket.emit('message', JSON.stringify({
+    type: 'file-content-update',
+    payload: { path: 'Main.java', content: 'class Main { int x = 2; }' },
+  }))
+  await flushAsyncWork()
+  assert.equal(studentSocket.sent.length, 1)
+  assert.equal(forgedManagerSocket.sent.length, 0)
 })
 
 void test('hasOpenSessionClients only retains live ws state when a session still has open sockets', () => {
@@ -854,7 +1072,7 @@ void test('hasOpenSessionClients only retains live ws state when a session still
   )
 })
 
-void test('hasOpenManagerSessionClients requires an authenticated open manager socket for the session', () => {
+void test('hasOpenManagerSessionClients requires an open manager socket with a verified passcode', () => {
   assert.equal(
     hasOpenManagerSessionClients([
       { readyState: 1, sessionId: 'session-a', mobCodeRole: 'student', instructorPasscode: 'secret' },
@@ -870,7 +1088,12 @@ void test('hasOpenManagerSessionClients requires an authenticated open manager s
   )
   assert.equal(
     hasOpenManagerSessionClients([
-      { readyState: 1, sessionId: 'session-a', mobCodeRole: 'manager', instructorPasscode: 'secret' },
+      {
+        readyState: 1,
+        sessionId: 'session-a',
+        mobCodeRole: 'manager',
+        instructorPasscode: 'secret',
+      },
     ], 'session-a', 'secret'),
     true,
   )

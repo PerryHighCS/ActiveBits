@@ -74,9 +74,11 @@ session.
 1. Receive session ID or permanent link from teacher
 2. Navigate to `/{session-id}` or enter ID at `/` or use permanent link ( `/activity/{activityName}/{hash}` )
 3. System fetches session data and determines activity type
-4. In waiting rooms, the entered `displayName` is remembered in a same-site, one-year browser cookie and used as the default on later visits; no participant IDs, credentials, or other waiting-room fields are stored there
+4. In waiting rooms, the entered `displayName` is remembered in a same-site, one-year browser cookie and used as the default on later visits; no participant IDs, credentials, or other waiting-room fields are stored there. After the server accepts an entry participant, it issues a separate opaque, httpOnly session-scoped token so activity APIs can resolve that participant server-side without trusting a client-supplied ID.
 5. Student is shown the appropriate activity component
 6. Student interacts with the activity
+
+For live MobCode sessions, the instructor workspace remains `groups.default`. When the instructor enables Try it, MobCode creates one private, server-backed workspace per accepted waiting-room participant from an explicit starter snapshot. The instructor controls whether their code is broadcast live or students keep the last published version. Student responses are participant-scoped and never include peer names or files; instructors may inspect named workspaces and publish one anonymous shared copy that they can edit and broadcast to the class in real time.
 
 ### Session Lifecycle
 - **Temporary sessions**: Created on-demand, expire after inactivity
@@ -302,7 +304,7 @@ patterns declare `clientRoutes` in their config and export matching
 `ClientRouteComponents` from their client entry. The shared app registers these
 routes generically and never imports an activity implementation directly.
 
-Client entries are lazy-loaded with `React.lazy` so each activity ships in its own Vite chunk, named `activity-<id>-<hash>.js` via `manualChunks` in `client/vite.config.ts`.
+Client entries are lazy-loaded with `React.lazy` so each activity ships in its own Vite chunk, named `activity-<id>-<hash>.js` via `manualChunks` in `client/vite.config.ts`. An activity may add inner lazy boundaries for independently entered roles or optional tools; its entry should export ordinary component wrappers that render those lazy views, because the registry itself wraps the exported component in `React.lazy`.
 
 ### Automatic Route Generation
 

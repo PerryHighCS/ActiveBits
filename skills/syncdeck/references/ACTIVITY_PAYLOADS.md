@@ -299,7 +299,7 @@ Example:
 <section
   data-activity-id="mobcode"
   data-activity-trigger="slide-enter"
-  data-activity-options='{"files":{"main.py":"name = input(\"Name? \")\nprint(f\"Hello, {name}!\")\n","README.md":"Pair on the starter code and explain each change.\n"},"activeFile":"main.py","runnerId":"brython-terminal"}'
+  data-activity-options='{"files":{"main.py":"name = input(\"Name? \")\nprint(f\"Hello, {name}!\")\n","README.md":"Pair on the starter code and explain each change.\n"},"activeFile":"main.py","runnerId":"brython-terminal","startTryItMode":true}'
 >
 ```
 
@@ -308,6 +308,7 @@ Field guidance:
 - `files` is an object map of relative virtual paths to UTF-8 text content
 - `activeFile` is optional and should match one of the `files` keys when provided
 - `runnerId` is optional; use `brython-terminal` to preselect the Python popup runner for Python-focused launches
+- `startTryItMode` is optional and boolean-only. For a live embedded session, `true` enables students' private `My code` workspaces and publishes the initial instructor files as their reset baseline. It does not affect solo launches.
 - paths are normalized as safe relative virtual paths such as `src/Main.java`; traversal segments such as `../`, empty paths, oversized paths, and reserved JavaScript object segments such as `__proto__`, `constructor`, or `prototype` are rejected and will not load
 - MobCode currently keeps up to 250 starter files, truncates individual file content at 1 MB, and stops accepting starter content once the total workspace seed reaches 4 MiB
 - omit `files` to start with an empty MobCode workspace

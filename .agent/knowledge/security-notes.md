@@ -239,3 +239,10 @@ Track security-relevant boundaries, risks, and mitigation decisions.
 - Validation (test/review/path): `client/src/components/common/manageDashboardUtils.ts`; `client/src/components/common/ManageDashboard.tsx`; `activities/syncdeck/server/routes.ts`; `client/src/components/common/manageDashboardUtils.test.ts`; `activities/syncdeck/server/routes.test.ts`; `npm test`.
 - Follow-up action: Add optional hostname/domain allowlist policy if deployment requires restricting presentation origins.
 - Owner: Codex
+
+# MobCode live student-code boundary
+
+- Resolve a MobCode student workspace from the accepted waiting-room participant record, not from a display name or a client-selected workspace identifier. Manager-only settings still require the MobCode instructor passcode.
+- Expected denied student edits (missing accepted identity or Try it disabled) use structured MobCode event logs without source contents.
+- The generic entry-participant consume route now issues an opaque httpOnly token scoped to the accepted session. MobCode reads this token server-side and never accepts a participant ID in its student workspace API bodies.
+- SyncDeck embedded child sessions receive that one-time entry token asynchronously over the parent websocket, so MobCode waits briefly for the token and retries a denied child-workspace bootstrap once. The retry still redeems the opaque token through the generic consume route; it must not reintroduce a browser-supplied participant ID.

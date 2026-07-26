@@ -7,8 +7,10 @@ interface MockResponse {
   statusCode: number
   jsonBody: Record<string, unknown> | null
   headers: Record<string, string>
+  cookies: Array<{ name: string; value: string; options: Record<string, unknown> }>
   status(code: number): MockResponse
   set(field: string, value: string): MockResponse
+  cookie(name: string, value: string, options: Record<string, unknown>): MockResponse
   json(payload: Record<string, unknown>): void
 }
 
@@ -45,12 +47,17 @@ function createMockResponse(): MockResponse {
     statusCode: 200,
     jsonBody: null,
     headers: {},
+    cookies: [],
     status(code: number) {
       this.statusCode = code
       return this
     },
     set(field: string, value: string) {
       this.headers[field.toLowerCase()] = value
+      return this
+    },
+    cookie(name: string, value: string, options: Record<string, unknown>) {
+      this.cookies.push({ name, value, options })
       return this
     },
     json(payload: Record<string, unknown>) {
@@ -365,6 +372,11 @@ void test('session entry participant routes store and consume waiting-room value
 
   assert.equal(consumeRes.statusCode, 200)
   assert.equal(consumeRes.headers['cache-control'], 'no-store')
+  assert.equal(consumeRes.cookies.length, 1)
+  assert.equal(consumeRes.cookies[0]?.name, 'activebits_participant_c2Vzc2lvbi0z')
+  assert.equal(consumeRes.cookies[0]?.options.httpOnly, true)
+  assert.equal(consumeRes.cookies[0]?.options.sameSite, 'lax')
+  assert.equal(consumeRes.cookies[0]?.options.path, '/')
   assert.deepEqual(
     consumeRes.jsonBody,
     {

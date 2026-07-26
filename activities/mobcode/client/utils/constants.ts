@@ -1,6 +1,7 @@
 import type { MobCodeThemeId } from '../../shared/types'
 
 export const DEFAULT_GROUP_ID = 'default'
+export const LIVE_CONTENT_SYNC_INTERVAL_MS = 250
 
 export const MOB_CODE_MESSAGE_TYPES = {
   STATE_SYNC: 'state-sync',
@@ -9,6 +10,8 @@ export const MOB_CODE_MESSAGE_TYPES = {
   ACTIVE_FILE_CHANGED: 'active-file-changed',
   EDITOR_PRESENCE_UPDATE: 'editor-presence-update',
   FILE_TREE_CHANGED: 'file-tree-changed',
+  STUDENT_CODE_UPDATED: 'student-code-updated',
+  STUDENT_CODE_SETTINGS_CHANGED: 'student-code-settings-changed',
 } as const
 
 export const MOB_CODE_THEMES: Array<{ id: MobCodeThemeId; label: string }> = [

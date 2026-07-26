@@ -28,6 +28,7 @@ ActiveBits supports two session storage modes:
 - **WebSocket Keepalive Cache**: In-memory cache (30s TTL) for reducing Valkey traffic
 - **Pub/Sub Channels**: Cross-instance broadcasting for session events
 - **JSON request body budget**: Most routes keep Express's default JSON body limit. Only the `/api/mobcode` route prefix uses an `8mb` parser budget, and MobCode file-state payloads are capped lower at `4 MiB` after parsing.
+- **MobCode student-code retention**: Live student workspaces are retained in the MobCode session record. Each student workspace is capped at 512 KiB; MobCode retains at most 30 student workspaces and 20 MiB of aggregate student-code data. Operators should ensure the backing session store supports records of this size.
 
 ## Render.com Deployment
 
@@ -147,6 +148,7 @@ ActiveBits intentionally ships source maps in production for debugging and teach
 ## Bundled Client Runtime Assets
 
 - The shared QR scanner uses `react-zxing` with the `zxing-wasm` reader binary imported through Vite. Production client builds emit `zxing_reader-*.wasm` under `client/dist/assets/`; deploy that file with the rest of the built client assets so QR scanning does not fall back to a third-party CDN.
+- Deploy every generated file under `client/dist/assets/`, not only the activity entry chunks. MobCode lazy-loads its role views, editor, ZIP support, and runner renderer into separate hashed chunks after the initial activity shell.
 
 ## Dev-Only Presentation Assets
 
@@ -154,6 +156,7 @@ SyncDeck sample decks that exist only for local development live under `activiti
 
 - They may use permissive local-development settings that are not suitable for production embedding.
 - Vite serves them during local development from the same `/presentations/...` URLs used by the app.
+- When accessing the local app through the Express server on port `3000`, Vite HMR uses `/vite-hmr`; the server proxies that websocket upgrade to Vite on port `5173`.
 - Production builds must not emit these dev-only presentation files.
 
 ## SyncDeck Embedded Media
