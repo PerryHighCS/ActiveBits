@@ -148,6 +148,7 @@ ActiveBits intentionally ships source maps in production for debugging and teach
 ## Bundled Client Runtime Assets
 
 - The shared QR scanner uses `react-zxing` with the `zxing-wasm` reader binary imported through Vite. Production client builds emit `zxing_reader-*.wasm` under `client/dist/assets/`; deploy that file with the rest of the built client assets so QR scanning does not fall back to a third-party CDN.
+- Deploy every generated file under `client/dist/assets/`, not only the activity entry chunks. MobCode lazy-loads its role views, editor, ZIP support, and runner renderer into separate hashed chunks after the initial activity shell.
 
 ## Dev-Only Presentation Assets
 

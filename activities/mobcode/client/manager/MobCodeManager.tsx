@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useParams } from 'react-router'
 import SessionHeader from '@src/components/common/SessionHeader'
 import VirtualFileExplorer from '@src/components/common/VirtualFileExplorer'
@@ -13,7 +13,6 @@ import type {
   MobCodeThemeId,
 } from '../../shared/types'
 import { isMobCodeRunnerId } from '../../shared/types'
-import CodeEditor from '../components/CodeEditor'
 import EditorToolbar from '../components/EditorToolbar'
 import FileNameModal from '../components/FileNameModal'
 import FileControlsMenuContent from '../components/FileControlsMenuContent'
@@ -36,8 +35,9 @@ import { extractImportedFiles } from '../utils/zipUtils'
 import {
   DEFAULT_MOB_CODE_RUNNER_ID,
   MOB_CODE_RUNNERS,
-  openMobCodeRunnerPopup,
-} from '../runner/runnerUtils'
+} from '../runner/runnerCatalog'
+import { openMobCodeRunnerPopupShell } from '../runner/runnerPopupShell'
+import type { openMobCodeRunnerPopup, renderMobCodeRunnerPopup } from '../runner/runnerUtils'
 import {
   applyActiveFileChange,
   applyContentChange,
@@ -52,6 +52,16 @@ import {
 } from './managerUtils'
 import { resolveMobCodeInstructorPasscode } from './passcodeUtils'
 import '../styles.css'
+
+const CodeEditor = lazy(() => import('../components/CodeEditor'))
+type MobCodeRunnerRenderer = {
+  openMobCodeRunnerPopup: typeof openMobCodeRunnerPopup
+  renderMobCodeRunnerPopup: typeof renderMobCodeRunnerPopup
+}
+
+function MobCodeEditorLoading() {
+  return <div className="mobcode-empty" role="status">Loading editor…</div>
+}
 
 interface MobCodeWorkspaceSnapshot {
   files: Record<string, string>
@@ -222,6 +232,7 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken, soloM
   const sharedWorkspacePersistDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pendingSharedWorkspaceRef = useRef<{ files: Record<string, string>; activeFile: string } | null>(null)
   const inFlightSharedWorkspacePersistRef = useRef<Promise<void> | null>(null)
+  const runnerRendererRef = useRef<MobCodeRunnerRenderer | null>(null)
   const latestStateRef = useRef<MobCodeStatePayload>(createStateSnapshot({}, ''))
   const latestFileSizeStatsRef = useRef(getMobCodeFileSizeStats({}))
   const lastLiveSyncAtRef = useRef(0)
@@ -273,6 +284,12 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken, soloM
       })
       .catch((error) => console.error('Failed to fetch MobCode session:', error))
   }, [encodedSessionId, replaceFilesState, sessionId])
+
+  useEffect(() => {
+    void import('../runner/runnerUtils').then((runnerRenderer) => {
+      runnerRendererRef.current = runnerRenderer
+    })
+  }, [])
 
   const applyManagerSessionSnapshot = useCallback((data: MobCodeManagerSessionSnapshot) => {
     setTryItEnabled(data.tryItEnabled)
@@ -722,21 +739,46 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken, soloM
   }, [canEditVisibleWorkspace, importVisibleFiles])
 
   const handleRunCode = () => {
-    const result = openMobCodeRunnerPopup({
+    const request = {
       files: isViewingSharedExample ? sharedExampleWorkspace?.files ?? {} : selectedStudentWorkspace?.files ?? latestStateRef.current.files,
       activeFile: isViewingSharedExample ? selectedSharedActiveFile : selectedStudentWorkspace ? selectedStudentActiveFile : latestStateRef.current.activeFile,
       sessionId,
       runnerId,
-    })
+    }
+    const runnerRenderer = runnerRendererRef.current
+    if (runnerRenderer) {
+      const result = runnerRenderer.openMobCodeRunnerPopup(request)
+      setRunnerMessage(
+        result.opened
+          ? ''
+          : result.reason === 'missing-entry'
+            ? 'Add or select a Python file before running it.'
+            : result.reason === 'popup-blocked'
+              ? 'The runner popup was blocked. Allow popups for this site and try again.'
+              : 'That runner is not available yet.',
+      )
+      return
+    }
+    const shell = openMobCodeRunnerPopupShell()
     setRunnerMessage(
-      result.opened
+      shell.opened
         ? ''
-        : result.reason === 'missing-entry'
-          ? 'Add or select a Python file before running it.'
-          : result.reason === 'popup-blocked'
+        : shell.reason === 'popup-blocked'
             ? 'The runner popup was blocked. Allow popups for this site and try again.'
             : 'That runner is not available yet.',
     )
+    if (!shell.opened || !shell.popup) return
+    void import('../runner/runnerUtils').then(({ renderMobCodeRunnerPopup }) => {
+      const result = renderMobCodeRunnerPopup(shell.popup!, request, window.location.origin)
+      if (result.opened) return
+      shell.popup?.close?.()
+      setRunnerMessage(result.reason === 'missing-entry'
+        ? 'Add or select a Python file before running it.'
+        : 'That runner is not available yet.')
+    }).catch(() => {
+      shell.popup?.close?.()
+      setRunnerMessage('Could not load the Python runner. Please try again.')
+    })
   }
 
   const editorThemeClassName = `mobcode-editor-theme-${theme}`
@@ -1014,66 +1056,68 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken, soloM
         </aside>
         <main className={`mobcode-editor-pane ${editorThemeClassName}`}>
           {visibleActiveFile ? (
-            <CodeEditor
-              value={visibleActiveContent}
-              filename={visibleActiveFile}
-              theme={theme}
-              readOnly={!canEditVisibleWorkspace}
-              onUpdate={(viewUpdate) => {
-                if (!canEditVisibleWorkspace) return
-                if (isViewingSharedExample) {
-                  if (sharedExampleWorkspace && viewUpdate.docChanged) {
-                    const nextFiles = { ...sharedExampleWorkspace.files, [visibleActiveFile]: viewUpdate.state.doc.toString() }
-                    applySharedWorkspace(nextFiles, visibleActiveFile)
+            <Suspense fallback={<MobCodeEditorLoading />}>
+              <CodeEditor
+                value={visibleActiveContent}
+                filename={visibleActiveFile}
+                theme={theme}
+                readOnly={!canEditVisibleWorkspace}
+                onUpdate={(viewUpdate) => {
+                  if (!canEditVisibleWorkspace) return
+                  if (isViewingSharedExample) {
+                    if (sharedExampleWorkspace && viewUpdate.docChanged) {
+                      const nextFiles = { ...sharedExampleWorkspace.files, [visibleActiveFile]: viewUpdate.state.doc.toString() }
+                      applySharedWorkspace(nextFiles, visibleActiveFile)
+                    }
+                    return
                   }
-                  return
-                }
-                if (!visibleActiveFile || (!viewUpdate.docChanged && !viewUpdate.selectionSet)) return
-                const selections = viewUpdate.state.selection.ranges.map((range) => ({
-                  anchor: range.anchor,
-                  head: range.head,
-                }))
-                if (viewUpdate.docChanged) {
-                  const content = viewUpdate.state.doc.toString()
-                  const clampedEdit = clampMobCodeContentEdit(
-                    latestStateRef.current.files,
-                    visibleActiveFile,
-                    content,
-                    latestFileSizeStatsRef.current,
-                  )
-                  setEditorLimitMessage(
-                    clampedEdit.limitReason === 'per-file'
-                      ? 'This file reached the 1 MB MobCode limit and was truncated.'
-                      : clampedEdit.limitReason === 'total'
-                        ? 'The MobCode workspace reached the 4 MiB limit. This edit was truncated.'
-                        : '',
-                  )
-                  const nextState = applyContentChange(
-                    createStateSnapshot(clampedEdit.files, latestStateRef.current.activeFile),
-                    visibleActiveFile,
-                    clampedEdit.content,
-                  )
-                  const nextContentBytes = getUtf8ByteLength(clampedEdit.content)
-                  latestFileSizeStatsRef.current = {
-                    perFileBytes: {
-                      ...latestFileSizeStatsRef.current.perFileBytes,
-                      [activeFile]: nextContentBytes,
-                    },
-                    totalBytes: Math.max(
-                      0,
-                      latestFileSizeStatsRef.current.totalBytes
-                        - (latestFileSizeStatsRef.current.perFileBytes[activeFile] ?? 0)
-                        + nextContentBytes,
-                    ),
+                  if (!visibleActiveFile || (!viewUpdate.docChanged && !viewUpdate.selectionSet)) return
+                  const selections = viewUpdate.state.selection.ranges.map((range) => ({
+                    anchor: range.anchor,
+                    head: range.head,
+                  }))
+                  if (viewUpdate.docChanged) {
+                    const content = viewUpdate.state.doc.toString()
+                    const clampedEdit = clampMobCodeContentEdit(
+                      latestStateRef.current.files,
+                      visibleActiveFile,
+                      content,
+                      latestFileSizeStatsRef.current,
+                    )
+                    setEditorLimitMessage(
+                      clampedEdit.limitReason === 'per-file'
+                        ? 'This file reached the 1 MB MobCode limit and was truncated.'
+                        : clampedEdit.limitReason === 'total'
+                          ? 'The MobCode workspace reached the 4 MiB limit. This edit was truncated.'
+                          : '',
+                    )
+                    const nextState = applyContentChange(
+                      createStateSnapshot(clampedEdit.files, latestStateRef.current.activeFile),
+                      visibleActiveFile,
+                      clampedEdit.content,
+                    )
+                    const nextContentBytes = getUtf8ByteLength(clampedEdit.content)
+                    latestFileSizeStatsRef.current = {
+                      perFileBytes: {
+                        ...latestFileSizeStatsRef.current.perFileBytes,
+                        [activeFile]: nextContentBytes,
+                      },
+                      totalBytes: Math.max(
+                        0,
+                        latestFileSizeStatsRef.current.totalBytes
+                          - (latestFileSizeStatsRef.current.perFileBytes[activeFile] ?? 0)
+                          + nextContentBytes,
+                      ),
+                    }
+                    latestStateRef.current = nextState
+                    setFiles(nextState.files)
+                    scheduleContentSync(visibleActiveFile, clampedEdit.content, selections)
+                  } else {
+                    schedulePresenceSync(visibleActiveFile, selections)
                   }
-                  latestStateRef.current = nextState
-                  setFiles(nextState.files)
-                  scheduleContentSync(visibleActiveFile, clampedEdit.content, selections)
-                } else {
-                  schedulePresenceSync(visibleActiveFile, selections)
-                }
-              }}
-            />
+                }}
+              />
+            </Suspense>
           ) : (
             <div className="mobcode-empty">Create or upload files to start coding.</div>
           )}

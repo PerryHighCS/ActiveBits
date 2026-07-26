@@ -1,5 +1,5 @@
 import type { MobCodeRunnerId } from '../../shared/types'
-import type { MobCodeRunnerDefinition } from '../runner/runnerUtils'
+import type { MobCodeRunnerDefinition } from '../runner/runnerTypes'
 
 interface RunnerControlsProps {
   files: Record<string, string>

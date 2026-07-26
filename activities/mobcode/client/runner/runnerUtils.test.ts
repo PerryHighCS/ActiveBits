@@ -6,6 +6,7 @@ import {
   buildBrythonRunnerHtml,
   MOB_CODE_RUNNERS,
   openMobCodeRunnerPopup,
+  renderMobCodeRunnerPopup,
   resolveBrythonEntryFile,
 } from './runnerUtils'
 
@@ -563,4 +564,28 @@ void test('openMobCodeRunnerPopup reports missing entry and thrown popup open fa
     }),
     { opened: false, reason: 'popup-blocked' },
   )
+})
+
+void test('renderMobCodeRunnerPopup populates a synchronously opened popup for lazy loading', () => {
+  let focused = false
+  let runnerUrl = ''
+  const popup = {
+    focus() {
+      focused = true
+    },
+    location: {
+      set href(value: string) {
+        runnerUrl = value
+      },
+    },
+  }
+
+  assert.deepEqual(renderMobCodeRunnerPopup(popup, {
+    files: { 'main.py': 'print("hello")' },
+    activeFile: 'main.py',
+    runnerId: 'brython-terminal',
+  }, 'https://bits.example'), { opened: true })
+  assert.equal(focused, true)
+  assert.match(runnerUrl, /^blob:/)
+  URL.revokeObjectURL(runnerUrl)
 })

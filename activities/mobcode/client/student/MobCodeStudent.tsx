@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router'
 import VirtualFileExplorer from '@src/components/common/VirtualFileExplorer'
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
@@ -10,21 +10,31 @@ import {
 } from '@src/components/common/entryParticipantStorage'
 import type { MobCodeEditorPresencePayload, MobCodeRunnerId, MobCodeThemeId } from '../../shared/types'
 import { isMobCodeRunnerId } from '../../shared/types'
-import CodeEditor from '../components/CodeEditor'
 import EditorToolbar from '../components/EditorToolbar'
 import RunnerControls from '../components/RunnerControls'
 import {
   DEFAULT_MOB_CODE_RUNNER_ID,
   MOB_CODE_RUNNERS,
-  type MobCodeRunnerDefinition,
-  openMobCodeRunnerPopup,
-} from '../runner/runnerUtils'
+} from '../runner/runnerCatalog'
+import { openMobCodeRunnerPopupShell } from '../runner/runnerPopupShell'
+import type { MobCodeRunnerDefinition } from '../runner/runnerTypes'
+import type { openMobCodeRunnerPopup, renderMobCodeRunnerPopup } from '../runner/runnerUtils'
 import { MOB_CODE_MESSAGE_TYPES } from '../utils/constants'
 import { resolveActiveFile, sanitizeFilesMap } from '../utils/fileUtils'
 import { getThemeFromCookie, setThemeCookie } from '../utils/themeUtils'
 import { isStatePayload, parseMobCodeMessage } from '../manager/managerUtils'
-import MobCodeManager from '../manager/MobCodeManager'
 import '../styles.css'
+
+const MobCodeManager = lazy(() => import('../manager/MobCodeManager'))
+const CodeEditor = lazy(() => import('../components/CodeEditor'))
+type MobCodeRunnerRenderer = {
+  openMobCodeRunnerPopup: typeof openMobCodeRunnerPopup
+  renderMobCodeRunnerPopup: typeof renderMobCodeRunnerPopup
+}
+
+function MobCodeEditorLoading() {
+  return <div className="mobcode-empty" role="status">Loading editor…</div>
+}
 
 interface MobCodeStudentProps {
   sessionData: {
@@ -242,7 +252,11 @@ export default function MobCodeStudent({ sessionData }: MobCodeStudentProps) {
   }, [location.hash, location.pathname, location.search, location.state, navigate, route])
 
   return route.mode === 'solo'
-    ? <MobCodeManager sessionIdOverride={sessionData.sessionId} soloEditToken={route.soloEditToken} soloMode />
+    ? (
+        <Suspense fallback={<MobCodeEditorLoading />}>
+          <MobCodeManager sessionIdOverride={sessionData.sessionId} soloEditToken={route.soloEditToken} soloMode />
+        </Suspense>
+      )
     : <MobCodeLiveStudent sessionData={sessionData} />
 }
 
@@ -269,6 +283,7 @@ function MobCodeLiveStudent({ sessionData }: MobCodeStudentProps) {
   const myWorkspacePersistDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pendingMyWorkspaceRef = useRef<{ files: Record<string, string>; activeFile: string } | null>(null)
   const inFlightMyWorkspacePersistRef = useRef<Promise<void> | null>(null)
+  const runnerRendererRef = useRef<MobCodeRunnerRenderer | null>(null)
   const previousTryItEnabledRef = useRef(false)
   const previousSharedExampleAvailableRef = useRef(false)
   const previousShareChangesEnabledRef = useRef(false)
@@ -454,6 +469,12 @@ function MobCodeLiveStudent({ sessionData }: MobCodeStudentProps) {
     return () => disconnect()
   }, [connect, disconnect])
 
+  useEffect(() => {
+    void import('../runner/runnerUtils').then((runnerRenderer) => {
+      runnerRendererRef.current = runnerRenderer
+    })
+  }, [])
+
   const handleThemeChange = (nextTheme: MobCodeThemeId) => {
     setTheme(nextTheme)
     setThemeCookie(nextTheme)
@@ -461,21 +482,46 @@ function MobCodeLiveStudent({ sessionData }: MobCodeStudentProps) {
 
   const handleRunCode = () => {
     const workspace = workspaceView === 'mine' ? myWorkspace : workspaceView === 'shared' ? sharedWorkspace : null
-    const result = openMobCodeRunnerPopup({
+    const request = {
       files: workspace?.files ?? files,
       activeFile: workspace?.activeFile ?? activeFile,
       sessionId,
       runnerId,
-    })
+    }
+    const runnerRenderer = runnerRendererRef.current
+    if (runnerRenderer) {
+      const result = runnerRenderer.openMobCodeRunnerPopup(request)
+      setRunnerMessage(
+        result.opened
+          ? ''
+          : result.reason === 'missing-entry'
+            ? 'Add or select a Python file before running it.'
+            : result.reason === 'popup-blocked'
+              ? 'The runner popup was blocked. Allow popups for this site and try again.'
+              : 'That runner is not available yet.',
+      )
+      return
+    }
+    const shell = openMobCodeRunnerPopupShell()
     setRunnerMessage(
-      result.opened
+      shell.opened
         ? ''
-        : result.reason === 'missing-entry'
-          ? 'Add or select a Python file before running it.'
-          : result.reason === 'popup-blocked'
+        : shell.reason === 'popup-blocked'
             ? 'The runner popup was blocked. Allow popups for this site and try again.'
             : 'That runner is not available yet.',
     )
+    if (!shell.opened || !shell.popup) return
+    void import('../runner/runnerUtils').then(({ renderMobCodeRunnerPopup }) => {
+      const result = renderMobCodeRunnerPopup(shell.popup!, request, window.location.origin)
+      if (result.opened) return
+      shell.popup?.close?.()
+      setRunnerMessage(result.reason === 'missing-entry'
+        ? 'Add or select a Python file before running it.'
+        : 'That runner is not available yet.')
+    }).catch(() => {
+      shell.popup?.close?.()
+      setRunnerMessage('Could not load the Python runner. Please try again.')
+    })
   }
 
   const selectedWorkspace = workspaceView === 'mine' ? myWorkspace : workspaceView === 'shared' ? sharedWorkspace : null
@@ -548,7 +594,11 @@ function MobCodeLiveStudent({ sessionData }: MobCodeStudentProps) {
   const studentRunners = getStudentRunnerOptions(runnerId)
 
   if (canResumeSolo) {
-    return <MobCodeManager sessionIdOverride={sessionId} soloMode />
+    return (
+      <Suspense fallback={<MobCodeEditorLoading />}>
+        <MobCodeManager sessionIdOverride={sessionId} soloMode />
+      </Suspense>
+    )
   }
 
   return (
@@ -620,20 +670,22 @@ function MobCodeLiveStudent({ sessionData }: MobCodeStudentProps) {
         </aside>
         <main className={`mobcode-editor-pane ${editorThemeClassName}`}>
           {selectedActiveFile ? (
-            <CodeEditor
-              value={selectedFiles[selectedActiveFile] ?? ''}
-              filename={selectedActiveFile}
-              theme={theme}
-              readOnly={!canEditMyCode}
-              remotePresence={workspaceView === 'instructor' ? instructorPresence : null}
-              onUpdate={(update) => {
-                if (!canEditMyCode || !update.docChanged) return
-                const nextFiles = { ...myWorkspace.files, [selectedActiveFile]: update.state.doc.toString() }
-                const nextWorkspace = { files: nextFiles, activeFile: selectedActiveFile }
-                setMyWorkspace(nextWorkspace)
-                scheduleMyWorkspacePersist(nextFiles, selectedActiveFile)
-              }}
-            />
+            <Suspense fallback={<MobCodeEditorLoading />}>
+              <CodeEditor
+                value={selectedFiles[selectedActiveFile] ?? ''}
+                filename={selectedActiveFile}
+                theme={theme}
+                readOnly={!canEditMyCode}
+                remotePresence={workspaceView === 'instructor' ? instructorPresence : null}
+                onUpdate={(update) => {
+                  if (!canEditMyCode || !update.docChanged) return
+                  const nextFiles = { ...myWorkspace.files, [selectedActiveFile]: update.state.doc.toString() }
+                  const nextWorkspace = { files: nextFiles, activeFile: selectedActiveFile }
+                  setMyWorkspace(nextWorkspace)
+                  scheduleMyWorkspacePersist(nextFiles, selectedActiveFile)
+                }}
+              />
+            </Suspense>
           ) : (
             <div className="mobcode-empty">Waiting for instructor to load code...</div>
           )}

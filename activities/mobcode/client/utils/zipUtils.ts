@@ -1,5 +1,17 @@
-import JSZip from 'jszip'
+import type JSZip from 'jszip'
 import { isValidMobCodePath, normalizeMobCodePath } from './fileUtils'
+
+interface JSZipConstructor {
+  new(): JSZip
+  loadAsync(data: ArrayBuffer): Promise<JSZip>
+}
+
+let jsZipLoader: Promise<JSZipConstructor> | null = null
+
+function loadJsZip(): Promise<JSZipConstructor> {
+  jsZipLoader ??= import('jszip').then((module) => module.default as unknown as JSZipConstructor)
+  return jsZipLoader
+}
 
 export const ZIP_LIMITS = {
   maxZipBytes: 10 * 1024 * 1024,
@@ -131,6 +143,7 @@ export async function extractZipFiles(file: File): Promise<ZipImportResult> {
     throw new Error('Zip file is larger than 10 MB.')
   }
 
+  const JSZip = await loadJsZip()
   const archive = await JSZip.loadAsync(await file.arrayBuffer())
   const accumulator = createImportAccumulator()
 
@@ -150,11 +163,13 @@ export async function extractZipFiles(file: File): Promise<ZipImportResult> {
 
 export async function extractImportedFiles(inputFiles: Iterable<File>): Promise<ZipImportResult> {
   const accumulator = createImportAccumulator()
+  let JSZip: JSZipConstructor | null = null
   for (const file of inputFiles) {
     if (isZipFile(file)) {
       if (file.size > ZIP_LIMITS.maxZipBytes) {
         throw new Error('Zip file is larger than 10 MB.')
       }
+      JSZip ??= await loadJsZip()
       const archive = await JSZip.loadAsync(await file.arrayBuffer())
       for (const entry of Object.values(archive.files)) {
         if (entry.dir) continue
@@ -184,6 +199,7 @@ export async function extractImportedFiles(inputFiles: Iterable<File>): Promise<
 }
 
 export async function buildZipBlob(files: Record<string, string>): Promise<Blob> {
+  const JSZip = await loadJsZip()
   const zip = new JSZip()
   for (const [path, content] of Object.entries(files)) {
     zip.file(path, content)

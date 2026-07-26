@@ -304,7 +304,7 @@ patterns declare `clientRoutes` in their config and export matching
 `ClientRouteComponents` from their client entry. The shared app registers these
 routes generically and never imports an activity implementation directly.
 
-Client entries are lazy-loaded with `React.lazy` so each activity ships in its own Vite chunk, named `activity-<id>-<hash>.js` via `manualChunks` in `client/vite.config.ts`.
+Client entries are lazy-loaded with `React.lazy` so each activity ships in its own Vite chunk, named `activity-<id>-<hash>.js` via `manualChunks` in `client/vite.config.ts`. An activity may add inner lazy boundaries for independently entered roles or optional tools; its entry should export ordinary component wrappers that render those lazy views, because the registry itself wraps the exported component in `React.lazy`.
 
 ### Automatic Route Generation
 

@@ -16,6 +16,16 @@ Record performance findings, bottlenecks, and optimization decisions.
 
 ## Notes
 
+- Date: 2026-07-26
+- Area: activities | mobcode | bundle-size
+- Observation: MobCode's role views, CodeMirror editor, JSZip, and Brython runner renderer were all statically reachable from the activity entry, producing a 609 KB initial activity chunk.
+- Baseline metric: `activity-mobcode` was 609.7 KB minified before splitting.
+- Change applied: Added lazy role wrappers, deferred CodeMirror until an active file is rendered, imported JSZip only for import/export, and opened the runner popup synchronously before lazy-loading its renderer. Vite assigns the role, editor, ZIP, and runner modules to separate chunks; CodeMirror language imports remain independently emitted chunks.
+- Result metric: the initial `activity-mobcode` chunk is 15.37 KB minified / 5.57 KB gzip. The deferred chunks are 13.16 KB student, 28.97 KB manager, 40.93 KB runner, 95.92 KB ZIP, and 410.95 KB editor; the latter loads only when an editor pane needs it.
+- Tradeoffs: First editor paint can show a short loading state, and the runner popup briefly opens blank while its renderer chunk downloads. Opening the shell synchronously preserves browser popup permission.
+- Evidence (profile/log/path): `npm --workspace client run build` on 2026-07-26; `activities/mobcode/client/index.ts`; `client/vite.config.ts`.
+- Owner: Codex
+
 - Date: 2026-06-05
 - Area: activities | mobcode | live typing sync
 - Observation: `clampMobCodeContentEdit(...)` originally recomputed total workspace UTF-8 bytes from every file on each CodeMirror document change, and live full-file websocket updates were throttled at 120 ms.

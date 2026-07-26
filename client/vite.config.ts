@@ -96,6 +96,16 @@ export default defineConfig({
       output: {
         // Name per-activity chunks for clearer artifacts
         manualChunks: (id: string) => {
+          // MobCode's role views are lazy. Keep the editor and ZIP dependency separate so
+          // the generic activity rule below does not fold optional code back into its entry.
+          if (
+            id.includes('/activities/mobcode/client/components/CodeEditor')
+            || id.includes('/activities/mobcode/client/utils/languageMap')
+          ) return 'mobcode-editor'
+          if (id.includes('/node_modules/jszip/')) return 'mobcode-zip'
+          if (id.includes('/activities/mobcode/client/runner/runnerUtils')) return 'mobcode-runner'
+          if (id.includes('/activities/mobcode/client/manager/')) return 'mobcode-manager'
+          if (id.includes('/activities/mobcode/client/student/')) return 'mobcode-student'
           const match = id.match(/\/activities\/([^/]+)\/client\//)
           if (match?.[1]) return `activity-${match[1]}`
           return undefined

@@ -1,31 +1,17 @@
-import type { MobCodeRunnerId } from '../../shared/types'
+import { DEFAULT_MOB_CODE_RUNNER_ID, MOB_CODE_RUNNERS } from './runnerCatalog'
+import type {
+  MobCodeRunnerLaunchRequest,
+  MobCodeRunnerLaunchResult,
+  MobCodeRunnerPopup,
+  MobCodeRunnerWindow,
+} from './runnerTypes'
 
-export interface MobCodeRunnerDefinition {
-  id: MobCodeRunnerId
-  label: string
-  description: string
-}
-
-export interface MobCodeRunnerLaunchRequest {
-  files: Record<string, string>
-  activeFile: string
-  sessionId?: string
-  runnerId: MobCodeRunnerId
-}
-
-export interface MobCodeRunnerLaunchResult {
-  opened: boolean
-  reason?: 'missing-entry' | 'popup-blocked' | 'unknown-runner'
-}
-
-interface MobCodeRunnerPopup {
-  focus: () => void
-}
-
-interface MobCodeRunnerWindow {
-  open: (url?: string | URL, target?: string, features?: string) => MobCodeRunnerPopup | null
-  location?: { origin?: string }
-}
+export { DEFAULT_MOB_CODE_RUNNER_ID, MOB_CODE_RUNNERS }
+export type {
+  MobCodeRunnerDefinition,
+  MobCodeRunnerLaunchRequest,
+  MobCodeRunnerLaunchResult,
+} from './runnerTypes'
 
 interface BrythonRunnerPayload {
   files: Record<string, string>
@@ -40,15 +26,6 @@ interface MobCodeImportDiagnostic {
   moduleName: string
 }
 
-export const MOB_CODE_RUNNERS: readonly MobCodeRunnerDefinition[] = [
-  {
-    id: 'brython-terminal',
-    label: 'Python Terminal',
-    description: 'Run a Python entry file in a popup terminal.',
-  },
-]
-
-export const DEFAULT_MOB_CODE_RUNNER_ID: MobCodeRunnerId = 'brython-terminal'
 const RUNNER_POPUP_FEATURES = 'popup=yes,width=1120,height=760'
 const TERMINAL_BLOCKED_IMPORT_ROOTS = [
   'browser',
@@ -1539,6 +1516,31 @@ export function openMobCodeRunnerPopup(
     return { opened: false, reason: 'popup-blocked' }
   }
 
+  popup.focus()
+  return { opened: true }
+}
+
+/** Populate a popup that was synchronously opened before this lazy module loaded. */
+export function renderMobCodeRunnerPopup(
+  popup: MobCodeRunnerPopup,
+  request: MobCodeRunnerLaunchRequest,
+  origin?: string,
+): MobCodeRunnerLaunchResult {
+  if (request.runnerId !== 'brython-terminal') return { opened: false, reason: 'unknown-runner' }
+  const entryFile = resolveBrythonEntryFile(request.files, request.activeFile)
+  if (!entryFile) return { opened: false, reason: 'missing-entry' }
+  const runnerUrl = createMobCodeRunnerDocumentUrl(buildBrythonRunnerHtml({
+    files: request.files,
+    entryFile,
+    sessionId: request.sessionId,
+    title: `MobCode Runner - ${entryFile}`,
+    assetBaseUrl: origin,
+  }))
+  if (!popup.location) {
+    URL.revokeObjectURL(runnerUrl)
+    return { opened: false, reason: 'popup-blocked' }
+  }
+  popup.location.href = runnerUrl
   popup.focus()
   return { opened: true }
 }
