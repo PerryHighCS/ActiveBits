@@ -293,6 +293,7 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
     assert.equal(mismatchedDeckSubstituteResponse.statusCode, 409)
     assert.equal(mismatchedDeckSubstituteResponse.headers['Content-Type'], 'text/html; charset=utf-8')
     assert.match(String(mismatchedDeckSubstituteResponse.body), /Presentation URL cannot change while the instructor session is active/)
+    assert.match(String(mismatchedDeckSubstituteResponse.body), /Ask the instructor who shared this link for a new one/)
 
     console.info('[TEST] Expected invalid substitute instructor link to fail closed.')
     const invalidSubstituteResponse = response()

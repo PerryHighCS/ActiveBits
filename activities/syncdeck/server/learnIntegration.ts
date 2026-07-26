@@ -355,20 +355,20 @@ function setNoStore(res: RouteResponse): void {
   res.setHeader?.('Cache-Control', 'no-store')
 }
 
-function substituteLaunchErrorPage(status: number, message: string): string {
+function substituteLaunchErrorPage(status: number, message: string, retryable: boolean): string {
   const isStarting = status === 202
   const title = isStarting ? 'SyncDeck session is starting' : 'SyncDeck launch unavailable'
-  const retryHint = status === 202 || status === 409 || status === 503
+  const retryHint = retryable
     ? '<p>Please wait a moment and refresh this page.</p>'
     : '<p>Ask the instructor who shared this link for a new one.</p>'
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="referrer" content="no-referrer"><title>${title}</title></head><body><main><h1>${title}</h1><p>${message}</p>${retryHint}</main></body></html>`
 }
 
-function respondToSubstituteLaunchError(res: RouteResponse, status: number, message: string): void {
+function respondToSubstituteLaunchError(res: RouteResponse, status: number, message: string, retryable = status === 202 || status === 409 || status === 503): void {
   if (typeof res.send === 'function') {
     res.setHeader?.('Content-Type', 'text/html; charset=utf-8')
     res.status(status)
-    res.send(substituteLaunchErrorPage(status, message))
+    res.send(substituteLaunchErrorPage(status, message, retryable))
     return
   }
   res.status(status).json({ error: message })
@@ -701,7 +701,7 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
       let recoveryToken: string | null = null
       if (entry?.data.state === 'active' && entry.data.activeSessionId) {
         if (entry.data.presentationUrl !== link.presentationUrl) {
-          return void respondToSubstituteLaunchError(res, 409, 'Presentation URL cannot change while the instructor session is active')
+          return void respondToSubstituteLaunchError(res, 409, 'Presentation URL cannot change while the instructor session is active', false)
         }
         const activeSession = await sessions.get(entry.data.activeSessionId)
         if (activeSession) {
