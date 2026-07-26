@@ -356,10 +356,12 @@ function setNoStore(res: RouteResponse): void {
 }
 
 function substituteLaunchErrorPage(status: number, message: string): string {
+  const isStarting = status === 202
+  const title = isStarting ? 'SyncDeck session is starting' : 'SyncDeck launch unavailable'
   const retryHint = status === 202 || status === 409 || status === 503
     ? '<p>Please wait a moment and refresh this page.</p>'
     : '<p>Ask the instructor who shared this link for a new one.</p>'
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="referrer" content="no-referrer"><title>SyncDeck launch unavailable</title></head><body><main><h1>SyncDeck launch unavailable</h1><p>${message}</p>${retryHint}</main></body></html>`
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="referrer" content="no-referrer"><title>${title}</title></head><body><main><h1>${title}</h1><p>${message}</p>${retryHint}</main></body></html>`
 }
 
 function respondToSubstituteLaunchError(res: RouteResponse, status: number, message: string): void {

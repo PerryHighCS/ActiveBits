@@ -344,6 +344,31 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
     )
     assert.deepEqual(waitStatusResponse.body, { state: 'active', studentLaunchUrl: '/syncdeck-live' })
 
+    const startingSubstituteResourceId = 'learn-resource-substitute-starting'
+    const startingSubstituteLaunch = substituteInstructorLink(startingSubstituteResourceId, 'https://slides.example/substitute-starting', 'substitute-starting')
+    let releaseDelayedSubstituteStart!: () => void
+    delayedInstructorSession = new Promise<void>((resolve) => { releaseDelayedSubstituteStart = resolve })
+    let resolveSubstituteSessionStart!: () => void
+    const substituteSessionStarted = new Promise<void>((resolve) => { resolveSubstituteSessionStart = resolve })
+    notifyInstructorSessionStart = resolveSubstituteSessionStart
+    const firstSubstituteLaunch = getHandlers.get('/api/syncdeck/learn/substitute')!(
+      { params: {}, query: startingSubstituteLaunch },
+      response(),
+    )
+    await substituteSessionStarted
+    const inProgressSubstituteResponse = response()
+    await getHandlers.get('/api/syncdeck/learn/substitute')!(
+      { params: {}, query: startingSubstituteLaunch },
+      inProgressSubstituteResponse,
+    )
+    assert.equal(inProgressSubstituteResponse.statusCode, 202)
+    assert.equal(inProgressSubstituteResponse.headers['Content-Type'], 'text/html; charset=utf-8')
+    assert.match(String(inProgressSubstituteResponse.body), /SyncDeck session is starting/)
+    releaseDelayedSubstituteStart()
+    await firstSubstituteLaunch
+    delayedInstructorSession = null
+    notifyInstructorSessionStart = null
+
     const replayResponse = response()
     await postHandlers.get('/api/integrations/learn/v1/activities/:activityId/resources/:resourceLinkId/start')!(
       { params: { activityId: 'syncdeck', resourceLinkId: resourceId }, ...signedRequest('POST', startPath, { presentationUrl: 'https://slides.example/deck', requestId: 'start-1' }, 'start-nonce') },
