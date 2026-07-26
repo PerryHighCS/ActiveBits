@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react'
+import { getStudentPresenceEmptyMessage } from './studentPresenceUtils'
 import type { StudentPresenceEntry } from './studentPresenceUtils'
 export type { StudentPresenceEntry, StudentPresenceState } from './studentPresenceUtils'
 
@@ -14,7 +15,7 @@ export function StudentPresencePanel({ isOpen, onClose, entries, title = 'Connec
   return <aside id={controlsId} className="h-full w-80 border-l border-gray-200 bg-white shadow-lg overflow-hidden" aria-hidden="false">
     <div className="h-full flex flex-col"><div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between"><h2 className="text-base font-semibold text-gray-800">{title}</h2><button type="button" onClick={close} aria-label={`Close ${title}`} className="text-sm text-gray-600 hover:text-gray-900">Close</button></div>
       <div className="p-4"><label className="sr-only" htmlFor={`${controlsId}-search`}>Search students</label><input id={`${controlsId}-search`} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search students" className="w-full rounded border border-gray-300 px-2 py-1 text-sm" /></div>
-      <div className="flex-1 overflow-y-auto px-4 pb-4 space-y-2">{visible.length === 0 ? <p className="text-sm text-gray-600">No connected students yet.</p> : visible.map((entry) => <div key={entry.participantId} className={`flex items-center justify-between gap-2 px-3 py-2 rounded border border-gray-200 bg-gray-50 ${getRowClassName?.(entry) ?? ''}`} style={getRowStyle?.(entry)}><div className="min-w-0">{renderRowContent?.(entry) ?? <p className="text-sm font-medium text-gray-800 truncate">{entry.displayName}</p>}{renderBadges?.(entry)}</div>{renderRowActions?.(entry)}</div>)}</div>
+      <div className="flex-1 overflow-y-auto px-4 pb-4 space-y-2">{visible.length === 0 ? <p className="text-sm text-gray-600">{getStudentPresenceEmptyMessage(query, showDisconnected)}</p> : visible.map((entry) => <div key={entry.participantId} className={`flex items-center justify-between gap-2 px-3 py-2 rounded border border-gray-200 bg-gray-50 ${getRowClassName?.(entry) ?? ''}`} style={getRowStyle?.(entry)}><div className="min-w-0">{renderRowContent?.(entry) ?? <p className="text-sm font-medium text-gray-800 truncate">{entry.displayName}</p>}{renderBadges?.(entry)}</div>{renderRowActions?.(entry)}</div>)}</div>
     </div>
   </aside>
 }

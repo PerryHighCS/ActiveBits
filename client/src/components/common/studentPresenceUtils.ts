@@ -10,6 +10,11 @@ export interface StudentPresenceState {
   entries: StudentPresenceEntry[]
 }
 
+export function getStudentPresenceEmptyMessage(query: string, showDisconnected: boolean): string {
+  if (query.trim()) return 'No students match your search.'
+  return showDisconnected ? 'No students yet.' : 'No connected students yet.'
+}
+
 export function normalizeStudentPresence(value: unknown): StudentPresenceState {
   const source = value != null && typeof value === 'object' ? value as { connectedCount?: unknown; entries?: unknown; students?: unknown } : {}
   const candidates = Array.isArray(source.entries) ? source.entries : Array.isArray(source.students) ? source.students : []
