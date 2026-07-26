@@ -330,3 +330,7 @@ const styles = { /* ... */ };
 - React docs: https://react.dev
 - React DevTools Profiler for identifying performance issues
 - Lighthouse for accessibility audits
+
+## Browser API callbacks
+
+When passing a browser method such as `window.confirm` or `window.fetch` to a helper, wrap or bind it at the call site. Some browser implementations require the original `window` receiver; passing the detached method can fail with an `Illegal invocation` error that unit doubles do not reveal. Cover these flows in a real-browser test when they cross dialog or fetch boundaries.

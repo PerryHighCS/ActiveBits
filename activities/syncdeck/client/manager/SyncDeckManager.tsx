@@ -2,6 +2,8 @@ import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
 import { copyTextWithReset } from '@src/hooks/useClipboard'
 import { storeCreateSessionBootstrapPayload } from '@src/components/common/manageDashboardUtils'
 import { readEmbeddedManagerBootstrapRefreshRequest } from '@src/components/common/embeddedManagerBootstrap'
+import { StudentPresencePanel, StudentPresenceToggleButton } from '@src/components/common/StudentPresence'
+import { requestStudentReturn } from './studentReturnUtils.js'
 import { resolvePersistentSessionEntryPolicy, type PersistentSessionEntryPolicy } from '../../../../types/waitingRoom.js'
 import { runSyncDeckPresentationPreflight } from '../shared/presentationPreflight.js'
 import {
@@ -2212,6 +2214,8 @@ const SyncDeckManager: FC = () => {
   const [connectedStudentCount, setConnectedStudentCount] = useState(0)
   const [students, setStudents] = useState<SyncDeckStudentPresence[]>([])
   const [isStudentsPanelOpen, setIsStudentsPanelOpen] = useState(false)
+  const [returningStudentId, setReturningStudentId] = useState<string | null>(null)
+  const [studentActionError, setStudentActionError] = useState<string | null>(null)
   const [embeddedActivities, setEmbeddedActivities] = useState<SyncDeckEmbeddedActivitiesMap>({})
   const embeddedActivitiesRef = useRef<SyncDeckEmbeddedActivitiesMap>({})
   const [isEmbeddedPanelOpen, setIsEmbeddedPanelOpen] = useState(false)
@@ -3186,6 +3190,28 @@ const SyncDeckManager: FC = () => {
       timeoutRef: copiedValueResetTimeoutRef,
       resetDelay: 1500,
     })
+  }
+
+  const returnStudentToWaitingRoom = async (student: SyncDeckStudentPresence): Promise<void> => {
+    if (!sessionId || !instructorPasscode || returningStudentId) return
+    setReturningStudentId(student.studentId)
+    setStudentActionError(null)
+    try {
+      const result = await requestStudentReturn({
+        sessionId,
+        studentId: student.studentId,
+        studentName: student.name,
+        instructorPasscode,
+        confirm: (message) => window.confirm(message),
+        fetchImpl: window.fetch.bind(window),
+      })
+      if (result === 'cancelled') return
+      if (result === 'failed') throw new Error('Unable to return this student to the waiting room.')
+    } catch (error) {
+      setStudentActionError(error instanceof Error ? error.message : 'Unable to return this student to the waiting room.')
+    } finally {
+      setReturningStudentId(null)
+    }
   }
 
   const handleEndSession = async (): Promise<void> => {
@@ -4759,13 +4785,12 @@ const SyncDeckManager: FC = () => {
               >
                 Activities
               </button>
-              <button
-                type="button"
-                onClick={() => setIsStudentsPanelOpen((current) => !current)}
-                className="px-2 py-1 rounded border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
-              >
-                Students: {connectedStudentCount}
-              </button>
+              <StudentPresenceToggleButton
+                connectedCount={connectedStudentCount}
+                isOpen={isStudentsPanelOpen}
+                onToggle={() => setIsStudentsPanelOpen((current) => !current)}
+                controlsId="syncdeck-students-panel"
+              />
               <ConnectionStatusDot state={instructorConnectionState} tooltip={instructorConnectionTooltip} />
               <div className="flex items-center gap-1" role="group" aria-label="Session join details">
                 <span className="text-sm text-gray-600">Join Code:</span>
@@ -5342,38 +5367,17 @@ const SyncDeckManager: FC = () => {
           </div>
         </div>
 
-        <aside
-          className={`h-full bg-white shadow-lg overflow-hidden transition-[width] duration-200 ${
-            isStudentsPanelOpen ? 'w-80 border-l border-gray-200' : 'w-0 border-l-0'
-          }`}
-        >
-          <div className="h-full flex flex-col">
-            <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
-              <h2 className="text-base font-semibold text-gray-800">Connected Students</h2>
-              <button
-                type="button"
-                onClick={() => setIsStudentsPanelOpen(false)}
-                className="text-sm text-gray-600 hover:text-gray-900"
-              >
-                Close
-              </button>
-            </div>
-
-            <div className="flex-1 overflow-y-auto p-4 space-y-2">
-              {students.filter((student) => student.connected).length === 0 ? (
-                <p className="text-sm text-gray-600">No connected students yet.</p>
-              ) : (
-                students
-                  .filter((student) => student.connected)
-                  .map((student) => (
-                    <div key={student.studentId} className="px-3 py-2 rounded border border-gray-200 bg-gray-50">
-                      <p className="text-sm font-medium text-gray-800 truncate">{student.name}</p>
-                    </div>
-                  ))
-              )}
-            </div>
-          </div>
-        </aside>
+        <StudentPresencePanel
+          isOpen={isStudentsPanelOpen}
+          onClose={() => setIsStudentsPanelOpen(false)}
+          controlsId="syncdeck-students-panel"
+          entries={students.map((student) => ({ participantId: student.studentId, displayName: student.name, connected: student.connected }))}
+          renderRowActions={(entry) => {
+            const student: SyncDeckStudentPresence = { studentId: entry.participantId, name: entry.displayName, connected: entry.connected }
+            return <button type="button" onClick={() => { void returnStudentToWaitingRoom(student) }} disabled={returningStudentId !== null} className="shrink-0 rounded border border-red-300 px-2 py-1 text-sm font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60" aria-label={`Return ${entry.displayName} to the waiting room`} title={`Return ${entry.displayName} to the waiting room`}>{returningStudentId === entry.participantId ? '…' : '🥾'}</button>
+          }}
+        />
+        {studentActionError ? <p role="alert" className="fixed bottom-4 right-4 z-50 rounded bg-red-50 px-4 py-3 text-sm text-red-700 shadow">{studentActionError}</p> : null}
       </div>
     </div>
   )

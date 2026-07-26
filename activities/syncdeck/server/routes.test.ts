@@ -1,6 +1,7 @@
 import type { SessionRecord, SessionStore } from 'activebits-server/core/sessions.js'
 import { consumeSessionDataToken } from 'activebits-server/core/sessionTokenUtils.js'
-import { acceptEntryParticipant } from 'activebits-server/core/acceptedEntryParticipants.js'
+import { acceptEntryParticipant, findAcceptedEntryParticipant, issueAcceptedEntryParticipantToken, resolveAcceptedEntryParticipantToken } from 'activebits-server/core/acceptedEntryParticipants.js'
+import { storeSessionEntryParticipant } from 'activebits-server/core/sessionEntryParticipants.js'
 import {
   computePersistentLinkUrlHash,
   type PersistentLinkUrlState,
@@ -229,6 +230,138 @@ function createSyncDeckSession(id: string, instructorPasscode = 'passcode-1'): S
     },
   }
 }
+
+void test('SyncDeck instructor can return an accepted student to the waiting room', async () => {
+  const session = createSyncDeckSession('return-session', 'teacher-passcode')
+  session.data.students = [{
+    studentId: 'student-1', name: 'Ada', joinedAt: 1, lastSeenAt: 1, lastIndices: null, lastStudentStateAt: null,
+  }]
+  acceptEntryParticipant(session, { participantId: 'student-1', displayName: 'Ada' })
+  const participantToken = issueAcceptedEntryParticipantToken(session, 'student-1')
+  const child = createSyncDeckSession('CHILD:return-session:resonance')
+  acceptEntryParticipant(child, { participantId: 'student-1', displayName: 'Ada' })
+  const childToken = issueAcceptedEntryParticipantToken(child, 'student-1')
+  const childEntryToken = storeSessionEntryParticipant(child, { participantId: 'student-1', displayName: 'Ada' }).token
+  ;(session.data as { embeddedActivities: Record<string, unknown> }).embeddedActivities['resonance:0:0'] = { childSessionId: child.id, activityId: 'resonance', startedAt: 1, owner: 'syncdeck-instructor' }
+  const state = createSessionStore({ [session.id]: session, [child.id]: child })
+  const app = createMockApp()
+  const ws = createMockWs()
+  const sent: string[] = []
+  const closeCalls: Array<{ code?: number; reason?: string }> = []
+  const childCloseCalls: Array<{ code?: number; reason?: string }> = []
+  ws.wss.clients.add({
+    readyState: 1,
+    sessionId: session.id,
+    studentId: 'student-1',
+    send(payload: string) { sent.push(payload) },
+    close(code?: number, reason?: string) { closeCalls.push({ code, reason }) },
+  } as unknown as ActiveBitsWebSocket)
+  ws.wss.clients.add({ readyState: 1, sessionId: child.id, studentId: 'student-1', send() {}, close(code?: number, reason?: string) { childCloseCalls.push({ code, reason }) } } as unknown as ActiveBitsWebSocket)
+  setupSyncDeckRoutes(app, state.sessions, ws)
+
+  const response = createResponse()
+  await app.handlers.post['/api/syncdeck/:sessionId/students/:studentId/return-to-waiting-room']!(
+    createRequest({ sessionId: session.id, studentId: 'student-1' }, { instructorPasscode: 'teacher-passcode' }),
+    response,
+  )
+
+  assert.equal(response.statusCode, 200)
+  assert.deepEqual(response.body, { participantId: 'student-1' })
+  assert.equal((state.store[session.id]?.data as { students: unknown[] }).students.length, 0)
+  assert.equal(findAcceptedEntryParticipant(state.store[session.id]!, 'student-1'), null)
+  assert.equal(resolveAcceptedEntryParticipantToken(state.store[session.id]!, participantToken), null)
+  assert.equal(resolveAcceptedEntryParticipantToken(state.store[child.id]!, childToken), null)
+  assert.equal((state.store[child.id]?.data as { entryParticipants?: Record<string, unknown> }).entryParticipants?.[childEntryToken], undefined)
+  assert.match(sent[0] ?? '', /participant-returned-to-waiting-room/)
+  assert.deepEqual(closeCalls, [{ code: 4001, reason: 'Returned to waiting room' }])
+  assert.deepEqual(childCloseCalls, [{ code: 4001, reason: 'Returned to waiting room' }])
+})
+
+void test('SyncDeck return-to-waiting-room rejects a bad instructor passcode without mutation', async () => {
+  console.info('[TEST] Expected return-to-waiting-room rejection for an unauthorized instructor.')
+  const session = createSyncDeckSession('return-forbidden', 'teacher-passcode')
+  session.data.students = [{
+    studentId: 'student-1', name: 'Ada', joinedAt: 1, lastSeenAt: 1, lastIndices: null, lastStudentStateAt: null,
+  }]
+  acceptEntryParticipant(session, { participantId: 'student-1', displayName: 'Ada' })
+  const state = createSessionStore({ [session.id]: session })
+  const app = createMockApp()
+  const ws = createMockWs()
+  setupSyncDeckRoutes(app, state.sessions, ws)
+
+  const response = createResponse()
+  await app.handlers.post['/api/syncdeck/:sessionId/students/:studentId/return-to-waiting-room']!(
+    createRequest({ sessionId: session.id, studentId: 'student-1' }, { instructorPasscode: 'wrong' }),
+    response,
+  )
+
+  assert.equal(response.statusCode, 403)
+  assert.equal((state.store[session.id]?.data as { students: unknown[] }).students.length, 1)
+  assert.ok(findAcceptedEntryParticipant(state.store[session.id]!, 'student-1'))
+})
+
+void test('SyncDeck return-to-waiting-room does not mutate a live session when persistence fails', async () => {
+  console.info('[TEST] Expected return-to-waiting-room persistence failure.')
+  const session = createSyncDeckSession('return-persist-failure', 'teacher-passcode')
+  session.data.students = [{
+    studentId: 'student-1', name: 'Ada', joinedAt: 1, lastSeenAt: 1, lastIndices: null, lastStudentStateAt: null,
+  }]
+  acceptEntryParticipant(session, { participantId: 'student-1', displayName: 'Ada' })
+  const state = createSessionStore({ [session.id]: session })
+  state.sessions.get = async (id: string) => state.store[id] ?? null
+  state.sessions.set = async () => { throw new Error('store unavailable') }
+  const app = createMockApp()
+  const ws = createMockWs()
+  setupSyncDeckRoutes(app, state.sessions, ws)
+
+  const response = createResponse()
+  await app.handlers.post['/api/syncdeck/:sessionId/students/:studentId/return-to-waiting-room']!(
+    createRequest({ sessionId: session.id, studentId: 'student-1' }, { instructorPasscode: 'teacher-passcode' }),
+    response,
+  )
+
+  assert.equal(response.statusCode, 500)
+  assert.equal((state.store[session.id]?.data as { students: unknown[] }).students.length, 1)
+  assert.ok(findAcceptedEntryParticipant(state.store[session.id]!, 'student-1'))
+})
+
+void test('SyncDeck return-to-waiting-room rolls back persisted child changes when a later child write fails', async () => {
+  console.info('[TEST] Expected return-to-waiting-room embedded child persistence failure.')
+  const session = createSyncDeckSession('return-child-persist-failure', 'teacher-passcode')
+  session.data.students = [{
+    studentId: 'student-1', name: 'Ada', joinedAt: 1, lastSeenAt: 1, lastIndices: null, lastStudentStateAt: null,
+  }]
+  acceptEntryParticipant(session, { participantId: 'student-1', displayName: 'Ada' })
+  const firstChild = createSyncDeckSession('CHILD:return-child-persist-failure:first')
+  const failingChild = createSyncDeckSession('CHILD:return-child-persist-failure:failing')
+  acceptEntryParticipant(firstChild, { participantId: 'student-1', displayName: 'Ada' })
+  acceptEntryParticipant(failingChild, { participantId: 'student-1', displayName: 'Ada' })
+  ;(session.data as { embeddedActivities: Record<string, unknown> }).embeddedActivities = {
+    first: { childSessionId: firstChild.id, activityId: 'resonance', startedAt: 1, owner: 'syncdeck-instructor' },
+    failing: { childSessionId: failingChild.id, activityId: 'resonance', startedAt: 1, owner: 'syncdeck-instructor' },
+  }
+  const state = createSessionStore({ [session.id]: session, [firstChild.id]: firstChild, [failingChild.id]: failingChild })
+  const originalSet = state.sessions.set
+  state.sessions.set = async (id, nextSession) => {
+    if (id === failingChild.id) throw new Error('child store unavailable')
+    await originalSet(id, nextSession)
+  }
+  const app = createMockApp()
+  const ws = createMockWs()
+  setupSyncDeckRoutes(app, state.sessions, ws)
+
+  const response = createResponse()
+  await app.handlers.post['/api/syncdeck/:sessionId/students/:studentId/return-to-waiting-room']!(
+    createRequest({ sessionId: session.id, studentId: 'student-1' }, { instructorPasscode: 'teacher-passcode' }),
+    response,
+  )
+
+  assert.equal(response.statusCode, 500)
+  assert.equal((state.store[session.id]?.data as { students: unknown[] }).students.length, 1)
+  assert.ok(findAcceptedEntryParticipant(state.store[session.id]!, 'student-1'))
+  assert.ok(findAcceptedEntryParticipant(state.store[firstChild.id]!, 'student-1'))
+  assert.ok(findAcceptedEntryParticipant(state.store[failingChild.id]!, 'student-1'))
+})
 
 class MockSocket implements ActiveBitsWebSocket {
   sessionId?: string | null

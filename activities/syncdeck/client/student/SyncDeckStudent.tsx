@@ -17,6 +17,7 @@ import {
   buildSessionEntryParticipantSubmitApiUrl,
 } from '@src/components/common/entryParticipantStorage'
 import { persistWaitingRoomServerBackedHandoff } from '@src/components/common/waitingRoomHandoffUtils'
+import { handleReturnedToWaitingRoom } from './returnedToWaitingRoomUtils.js'
 import {
   REVEAL_SYNC_PROTOCOL_VERSION,
   assessRevealSyncProtocolCompatibility,
@@ -2357,6 +2358,15 @@ const SyncDeckStudent: FC = () => {
     (event: MessageEvent<string>) => {
       try {
         const parsed = JSON.parse(event.data) as SyncDeckWsMessage
+        if (
+          parsed.type === 'participant-returned-to-waiting-room'
+          && isPlainObject(parsed)
+          && parsed.participantId === registeredStudentId
+          && sessionId
+        ) {
+          if (typeof window !== 'undefined') handleReturnedToWaitingRoom({ participantId: parsed.participantId, registeredStudentId, sessionId, storage: window.localStorage, sessionStorage: window.sessionStorage, redirect: window.location.assign.bind(window.location) })
+          return
+        }
         if (parsed.type !== 'syncdeck-state') {
           return
         }
@@ -2533,7 +2543,7 @@ const SyncDeckStudent: FC = () => {
         return
       }
     },
-    [applyDrawingToolModeToIframe, embeddedActivities, sendPayloadToIframe, sendSyncContextToEmbeddedIframe, setBacktrackOptOut, traceSync],
+    [applyDrawingToolModeToIframe, embeddedActivities, registeredStudentId, sendPayloadToIframe, sendSyncContextToEmbeddedIframe, sessionId, setBacktrackOptOut, traceSync],
   )
 
   const replayLatestInstructorSyncToIframe = useCallback(() => {

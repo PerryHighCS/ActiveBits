@@ -15,7 +15,8 @@ import {
   isValidHttpUrl,
   normalizePossiblyEncodedHttpUrl,
 } from 'activebits-server/core/httpUrlUtils.js'
-import { closeDuplicateParticipantSockets } from 'activebits-server/core/participantSockets.js'
+import { closeDuplicateParticipantSockets, closeParticipantSockets } from 'activebits-server/core/participantSockets.js'
+import { revokeAcceptedEntryParticipant } from 'activebits-server/core/acceptedEntryParticipants.js'
 import {
   createSession,
   EMBEDDED_CHILD_SESSION_PREFIX,
@@ -24,6 +25,7 @@ import {
   type SessionStore,
 } from 'activebits-server/core/sessions.js'
 import { storeSessionEntryParticipant } from 'activebits-server/core/sessionEntryParticipants.js'
+import { revokeSessionEntryParticipants } from 'activebits-server/core/sessionEntryParticipants.js'
 import { randomBytes, timingSafeEqual } from 'node:crypto'
 import type { ActiveBitsWebSocket, WsRouter } from '../../../types/websocket.js'
 import {
@@ -1848,6 +1850,89 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       console.error(JSON.stringify({ activity: 'syncdeck', event: 'create-session-failed', error: error instanceof Error ? error.message : String(error) }))
       response.status(500).json({ error: 'Unable to create SyncDeck session' })
     }
+  })
+
+  app.post('/api/syncdeck/:sessionId/students/:studentId/return-to-waiting-room', async (req, res) => {
+    const sessionId = req.params.sessionId
+    const studentId = normalizeStudentId(req.params.studentId)
+    if (!sessionId || !studentId) {
+      res.status(400).json({ error: 'invalid participant' })
+      return
+    }
+
+    const session = await getSyncDeckSessionWithEmbeddedKeepalive(sessions, sessionId)
+    if (!session) {
+      res.status(404).json({ error: 'invalid session' })
+      return
+    }
+
+    const instructorPasscode = normalizeInstructorPasscode(readStringField(req.body, 'instructorPasscode'))
+    if (!instructorPasscode || !verifyInstructorPasscode(session.data.instructorPasscode, instructorPasscode)) {
+      res.status(403).json({ error: 'forbidden' })
+      return
+    }
+    const updatedSession = structuredClone(session)
+    if (!findSyncDeckStudentById(updatedSession.data.students, studentId) || !revokeAcceptedEntryParticipant(updatedSession, studentId)) {
+      res.status(404).json({ error: 'participant not found' })
+      return
+    }
+
+    const childSessionIds: string[] = []
+    const persistedChildSessions: SessionRecord[] = []
+    try {
+      revokeSessionEntryParticipants(updatedSession, studentId)
+      for (const embeddedActivity of Object.values(updatedSession.data.embeddedActivities)) {
+        const childSession = await sessions.get(embeddedActivity.childSessionId)
+        if (!childSession) continue
+        const originalChildSession = structuredClone(childSession)
+        const updatedChildSession = structuredClone(childSession)
+        revokeAcceptedEntryParticipant(updatedChildSession, studentId)
+        revokeSessionEntryParticipants(updatedChildSession, studentId)
+        await sessions.set(updatedChildSession.id, updatedChildSession)
+        persistedChildSessions.push(originalChildSession)
+        childSessionIds.push(updatedChildSession.id)
+      }
+      updatedSession.data.students = updatedSession.data.students.filter((student) => student.studentId !== studentId)
+      await sessions.set(updatedSession.id, updatedSession)
+    } catch (error) {
+      for (const childSession of persistedChildSessions.reverse()) {
+        try {
+          await sessions.set(childSession.id, childSession)
+        } catch (rollbackError) {
+          console.error(JSON.stringify({
+            activity: 'syncdeck',
+            event: 'participant-return-child-rollback-failed',
+            sessionId: childSession.id,
+            error: rollbackError instanceof Error ? rollbackError.message : String(rollbackError),
+          }))
+        }
+      }
+      console.error(JSON.stringify({ activity: 'syncdeck', event: 'participant-return-persist-failed', error: error instanceof Error ? error.message : String(error) }))
+      res.status(500).json({ error: 'Unable to return participant to waiting room' })
+      return
+    }
+
+    const lifecyclePayload = JSON.stringify({
+      type: 'participant-returned-to-waiting-room',
+      version: '1',
+      participantId: studentId,
+    })
+    for (const peer of ws.wss.clients as Set<SyncDeckSocket>) {
+      if (peer.readyState === WS_OPEN_READY_STATE && peer.sessionId === session.id && peer.studentId === studentId) {
+        try {
+          peer.send(lifecyclePayload)
+        } catch {
+          // The close below remains authoritative if the notification cannot be delivered.
+        }
+      }
+    }
+    closeParticipantSockets(ws.wss.clients as Set<SyncDeckSocket>, session.id, studentId)
+    for (const childSessionId of childSessionIds) {
+      closeParticipantSockets(ws.wss.clients as Set<SyncDeckSocket>, childSessionId, studentId)
+    }
+    await broadcastStudentsToInstructors(session.id)
+    console.info(JSON.stringify({ activity: 'syncdeck', event: 'participant-returned-to-waiting-room', sessionId: session.id }))
+    res.json({ participantId: studentId })
   })
 
   app.post('/api/syncdeck/:sessionId/embedded-context', async (req, res) => {
