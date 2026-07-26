@@ -3197,7 +3197,14 @@ const SyncDeckManager: FC = () => {
     setReturningStudentId(student.studentId)
     setStudentActionError(null)
     try {
-      const result = await requestStudentReturn({ sessionId, studentId: student.studentId, studentName: student.name, instructorPasscode, confirm: window.confirm, fetchImpl: fetch })
+      const result = await requestStudentReturn({
+        sessionId,
+        studentId: student.studentId,
+        studentName: student.name,
+        instructorPasscode,
+        confirm: (message) => window.confirm(message),
+        fetchImpl: window.fetch.bind(window),
+      })
       if (result === 'cancelled') return
       if (result === 'failed') throw new Error('Unable to return this student to the waiting room.')
     } catch (error) {
