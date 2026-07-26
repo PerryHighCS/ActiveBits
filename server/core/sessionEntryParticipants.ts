@@ -83,3 +83,14 @@ export function consumeSessionEntryParticipant(
 ): SessionEntryParticipantValues | null {
   return consumeEntryParticipant(getSessionEntryParticipantContainer(session), token)
 }
+
+/** Removes unconsumed handoff tokens for a participant from a session. */
+export function revokeSessionEntryParticipants(session: SessionRecord, participantId: string): void {
+  const normalizedId = participantId.trim()
+  if (!normalizedId || !isRecord(session.data)) return
+  const entries = (session.data as SessionEntryParticipantContainer).entryParticipants
+  if (!isRecord(entries)) return
+  for (const [token, values] of Object.entries(entries)) {
+    if (isRecord(values) && values.participantId === normalizedId) delete entries[token]
+  }
+}

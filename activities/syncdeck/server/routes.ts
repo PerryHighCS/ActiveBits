@@ -25,6 +25,7 @@ import {
   type SessionStore,
 } from 'activebits-server/core/sessions.js'
 import { storeSessionEntryParticipant } from 'activebits-server/core/sessionEntryParticipants.js'
+import { revokeSessionEntryParticipants } from 'activebits-server/core/sessionEntryParticipants.js'
 import { randomBytes, timingSafeEqual } from 'node:crypto'
 import type { ActiveBitsWebSocket, WsRouter } from '../../../types/websocket.js'
 import {
@@ -1875,8 +1876,21 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       return
     }
 
-    session.data.students = session.data.students.filter((student) => student.studentId !== studentId)
-    await sessions.set(session.id, session)
+    try {
+      for (const embeddedActivity of Object.values(session.data.embeddedActivities)) {
+        const childSession = await sessions.get(embeddedActivity.childSessionId)
+        if (!childSession) continue
+        revokeAcceptedEntryParticipant(childSession, studentId)
+        revokeSessionEntryParticipants(childSession, studentId)
+        await sessions.set(childSession.id, childSession)
+      }
+      session.data.students = session.data.students.filter((student) => student.studentId !== studentId)
+      await sessions.set(session.id, session)
+    } catch (error) {
+      console.error(JSON.stringify({ activity: 'syncdeck', event: 'participant-return-persist-failed', error: error instanceof Error ? error.message : String(error) }))
+      res.status(500).json({ error: 'Unable to return participant to waiting room' })
+      return
+    }
 
     const lifecyclePayload = JSON.stringify({
       type: 'participant-returned-to-waiting-room',
