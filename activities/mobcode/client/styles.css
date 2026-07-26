@@ -292,7 +292,8 @@
   background: #f3f4f6;
 }
 
-.mobcode-workspace-tab[aria-pressed='true'] {
+.mobcode-workspace-tab[aria-pressed='true'],
+.mobcode-workspace-tab--active {
   color: #1d4ed8;
   background: #eff6ff;
   border-bottom-color: #2563eb;

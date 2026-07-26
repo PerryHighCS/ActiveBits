@@ -986,9 +986,9 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken, soloM
                   </button>
                 )}
                 {selectedStudentWorkspace && (
-                  <button type="button" aria-pressed="true" className="mobcode-workspace-tab">
+                  <span className="mobcode-workspace-tab mobcode-workspace-tab--active" role="status">
                     {selectedStudentWorkspace.displayName}
-                  </button>
+                  </span>
                 )}
               </div>
               {workspaceSelection.kind === 'instructor' && (
