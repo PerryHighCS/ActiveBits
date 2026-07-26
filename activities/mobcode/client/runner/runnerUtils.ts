@@ -532,7 +532,11 @@ function buildBrythonTransformedSource(
 
     return rewrittenLine
   })
-  const userBody = transformedLines.length > 0
+  const hasExecutableLine = transformedLines.some((line) => {
+    const trimmed = line.trim()
+    return trimmed !== '' && !trimmed.startsWith('#')
+  })
+  const userBody = hasExecutableLine
     ? transformedLines.map((line) => `    ${line}`).join('\n')
     : '    pass'
 

@@ -109,6 +109,20 @@ test('MobCode Python runner popup prints terminal output', async ({ page }) => {
   await clickRunnerDoneAndWaitForClose(popup)
 })
 
+test('MobCode Python runner completes blank and comment-only files', async ({ page }) => {
+  for (const source of ['', '# Nothing to run yet\n']) {
+    const session = await createMobCodeSession(page)
+    await seedMobCodeFile(page, session, source)
+    await openMobCodeManager(page, session)
+
+    const popup = await runMobCodePopup(page)
+    const terminal = popup.locator('#terminal')
+    await expect(popup.getByRole('button', { name: 'Close Python runner' })).toHaveText('Done')
+    await expect(terminal).not.toContainText('IndentationError')
+    await clickRunnerDoneAndWaitForClose(popup)
+  }
+})
+
 test('MobCode Python runner popup imports workspace Python modules', async ({ page }) => {
   const session = await createMobCodeSession(page)
   await seedMobCodeFiles(page, session, {
