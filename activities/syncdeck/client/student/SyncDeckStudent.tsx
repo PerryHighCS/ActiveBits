@@ -17,7 +17,7 @@ import {
   buildSessionEntryParticipantSubmitApiUrl,
 } from '@src/components/common/entryParticipantStorage'
 import { persistWaitingRoomServerBackedHandoff } from '@src/components/common/waitingRoomHandoffUtils'
-import { buildSessionParticipantContextStorageKey } from '@src/components/common/sessionParticipantContext'
+import { handleReturnedToWaitingRoom } from './returnedToWaitingRoomUtils.js'
 import {
   REVEAL_SYNC_PROTOCOL_VERSION,
   assessRevealSyncProtocolCompatibility,
@@ -2364,14 +2364,7 @@ const SyncDeckStudent: FC = () => {
           && parsed.participantId === registeredStudentId
           && sessionId
         ) {
-          if (typeof window !== 'undefined') {
-            window.sessionStorage.removeItem(`syncdeck_student_name_${sessionId}`)
-            window.sessionStorage.removeItem(`syncdeck_student_id_${sessionId}`)
-            window.localStorage.removeItem(`student-name-${sessionId}`)
-            window.localStorage.removeItem(`student-id-${sessionId}`)
-            window.localStorage.removeItem(buildSessionParticipantContextStorageKey(sessionId))
-            window.location.assign(`/${encodeURIComponent(sessionId)}`)
-          }
+          if (typeof window !== 'undefined') handleReturnedToWaitingRoom({ participantId: parsed.participantId, registeredStudentId, sessionId, storage: window.localStorage, redirect: window.location.assign.bind(window.location) })
           return
         }
         if (parsed.type !== 'syncdeck-state') {

@@ -3,6 +3,7 @@ import { copyTextWithReset } from '@src/hooks/useClipboard'
 import { storeCreateSessionBootstrapPayload } from '@src/components/common/manageDashboardUtils'
 import { readEmbeddedManagerBootstrapRefreshRequest } from '@src/components/common/embeddedManagerBootstrap'
 import { StudentPresencePanel, StudentPresenceToggleButton } from '@src/components/common/StudentPresence'
+import { requestStudentReturn } from './studentReturnUtils.js'
 import { resolvePersistentSessionEntryPolicy, type PersistentSessionEntryPolicy } from '../../../../types/waitingRoom.js'
 import { runSyncDeckPresentationPreflight } from '../shared/presentationPreflight.js'
 import {
@@ -3193,20 +3194,12 @@ const SyncDeckManager: FC = () => {
 
   const returnStudentToWaitingRoom = async (student: SyncDeckStudentPresence): Promise<void> => {
     if (!sessionId || !instructorPasscode || returningStudentId) return
-    if (!window.confirm(`Return ${student.name} to the waiting room?`)) return
-
     setReturningStudentId(student.studentId)
     setStudentActionError(null)
     try {
-      const response = await fetch(
-        `/api/syncdeck/${encodeURIComponent(sessionId)}/students/${encodeURIComponent(student.studentId)}/return-to-waiting-room`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ instructorPasscode }),
-        },
-      )
-      if (!response.ok) throw new Error('Unable to return this student to the waiting room.')
+      const result = await requestStudentReturn({ sessionId, studentId: student.studentId, studentName: student.name, instructorPasscode, confirm: window.confirm, fetchImpl: fetch })
+      if (result === 'cancelled') return
+      if (result === 'failed') throw new Error('Unable to return this student to the waiting room.')
     } catch (error) {
       setStudentActionError(error instanceof Error ? error.message : 'Unable to return this student to the waiting room.')
     } finally {
