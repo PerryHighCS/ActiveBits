@@ -5,6 +5,7 @@ export function handleReturnedToWaitingRoom(params: { participantId: unknown; re
   const { sessionId, storage } = params
   params.sessionStorage.removeItem(`syncdeck_student_name_${sessionId}`)
   params.sessionStorage.removeItem(`syncdeck_student_id_${sessionId}`)
+  params.sessionStorage.removeItem(buildSessionParticipantContextStorageKey(sessionId))
   storage.removeItem(`syncdeck_student_name_${sessionId}`)
   storage.removeItem(`syncdeck_student_id_${sessionId}`)
   storage.removeItem(`student-name-${sessionId}`)

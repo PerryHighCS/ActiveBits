@@ -5366,8 +5366,8 @@ const SyncDeckManager: FC = () => {
           controlsId="syncdeck-students-panel"
           entries={students.map((student) => ({ participantId: student.studentId, displayName: student.name, connected: student.connected }))}
           renderRowActions={(entry) => {
-            const student = students.find((candidate) => candidate.studentId === entry.participantId)
-            return student ? <button type="button" onClick={() => { void returnStudentToWaitingRoom(student) }} disabled={returningStudentId !== null} className="shrink-0 rounded border border-red-300 px-2 py-1 text-sm font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60" aria-label={`Return ${entry.displayName} to the waiting room`} title={`Return ${entry.displayName} to the waiting room`}>{returningStudentId === entry.participantId ? '…' : '🥾'}</button> : null
+            const student: SyncDeckStudentPresence = { studentId: entry.participantId, name: entry.displayName, connected: entry.connected }
+            return <button type="button" onClick={() => { void returnStudentToWaitingRoom(student) }} disabled={returningStudentId !== null} className="shrink-0 rounded border border-red-300 px-2 py-1 text-sm font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60" aria-label={`Return ${entry.displayName} to the waiting room`} title={`Return ${entry.displayName} to the waiting room`}>{returningStudentId === entry.participantId ? '…' : '🥾'}</button>
           }}
         />
         {studentActionError ? <p role="alert" className="fixed bottom-4 right-4 z-50 rounded bg-red-50 px-4 py-3 text-sm text-red-700 shadow">{studentActionError}</p> : null}

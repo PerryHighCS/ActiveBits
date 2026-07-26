@@ -47,6 +47,7 @@ export function closeParticipantSockets<TSocket extends ParticipantSocketLike>(
         event: 'returned-participant-socket-close-failed',
         sessionId,
         error: error instanceof Error ? error.message : String(error),
+        ...(error instanceof Error && error.stack ? { stack: error.stack } : {}),
       }))
     }
   }
