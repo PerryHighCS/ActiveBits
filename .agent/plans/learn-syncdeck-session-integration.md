@@ -393,7 +393,7 @@ must redact query strings for these browser handoff paths before production enab
 
 ---
 
-## Direct Substitute Instructor Link (Proposed Extension)
+## Direct Substitute Instructor Link (Approved Extension)
 
 An instructor with Learn access may create a time-bounded substitute-teacher link and
 give it to a substitute who cannot access the LMS. The substitute opens ActiveBits
@@ -440,10 +440,10 @@ use `Cache-Control: no-store`, `Referrer-Policy: no-referrer`, query-string reda
 proxy/access logs, and a bounded expiry. The payload is signed, not encrypted, so a
 presentation URL in it is visible to anyone who has the link.
 
-A purely self-contained signed URL cannot be individually revoked. Learn can set a short
-class/day expiry or rotate the shared key to invalidate all links. If individual
-revocation is required, ActiveBits must additionally store a revocation record keyed by
-`jti`; that is an intentional trade-off against the stateless permalink model.
+A purely self-contained signed URL cannot be individually revoked. The initial
+implementation deliberately uses this stateless permalink model: Learn sets a bounded
+class/day expiry, and shared-key rotation invalidates all links if necessary. ActiveBits
+does not add a long-term per-link revocation store for this version.
 
 ### Substitute Link Implementation Tasks
 
@@ -457,8 +457,8 @@ revocation is required, ActiveBits must additionally store a revocation record k
   mismatch while an instructor-led session is active.
 - [ ] ActiveBits: add tests for valid reuse/start, expired/tampered links, final URL
   stripping, and the no-passcode/log-redaction boundary.
-- [ ] Decide before implementation whether per-link revocation is required. If yes,
-  define a bounded ActiveBits `jti` revocation store and a Learn revoke action.
+- [x] Product decision: do not add per-link revocation or long-term ActiveBits storage
+  in the initial version; rely on bounded expiry and coordinated key rotation.
 
 ---
 
