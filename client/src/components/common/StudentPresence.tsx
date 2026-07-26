@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from 'react'
+import React, { useMemo, useState } from 'react'
 
 export interface StudentPresenceEntry {
   participantId: string
@@ -31,7 +31,7 @@ export function StudentPresenceToggleButton({ connectedCount, isOpen, onToggle, 
   return <button type="button" onClick={onToggle} aria-expanded={isOpen} aria-controls={controlsId} className="px-2 py-1 rounded border border-gray-300 text-sm text-gray-700 hover:bg-gray-50">{label}: {connectedCount}</button>
 }
 
-export function StudentPresencePanel({ isOpen, onClose, entries, title = 'Connected Students', controlsId, renderRowActions }: { isOpen: boolean; onClose: () => void; entries: StudentPresenceEntry[]; title?: string; controlsId: string; renderRowActions?: (entry: StudentPresenceEntry) => ReactNode }) {
+export function StudentPresencePanel({ isOpen, onClose, entries, title = 'Connected Students', controlsId, renderRowActions }: { isOpen: boolean; onClose: () => void; entries: StudentPresenceEntry[]; title?: string; controlsId: string; renderRowActions?: (entry: StudentPresenceEntry) => React.ReactNode }) {
   const [query, setQuery] = useState('')
   const visible = useMemo(() => entries.filter((entry) => entry.connected && `${entry.displayName} ${entry.participantId}`.toLowerCase().includes(query.trim().toLowerCase())), [entries, query])
   return <aside id={controlsId} className={`h-full bg-white shadow-lg overflow-hidden transition-[width] duration-200 ${isOpen ? 'w-80 border-l border-gray-200' : 'w-0 border-l-0'}`} aria-hidden={!isOpen}>
