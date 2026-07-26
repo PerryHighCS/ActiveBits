@@ -699,7 +699,7 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
       let recoveryToken: string | null = null
       if (entry?.data.state === 'active' && entry.data.activeSessionId) {
         if (entry.data.presentationUrl !== link.presentationUrl) {
-          return void res.status(409).json({ error: 'Presentation URL cannot change while the instructor session is active' })
+          return void respondToSubstituteLaunchError(res, 409, 'Presentation URL cannot change while the instructor session is active')
         }
         const activeSession = await sessions.get(entry.data.activeSessionId)
         if (activeSession) {

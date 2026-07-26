@@ -285,6 +285,15 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
     assert.ok(reusedSubstituteLaunchResponse.cookies.some((item) => item.name === 'syncdeck_instructor_recoveries'))
     assert.equal(instructorSessionCreateCount, 1)
 
+    const mismatchedDeckSubstituteResponse = response()
+    await getHandlers.get('/api/syncdeck/learn/substitute')!(
+      { params: {}, query: substituteInstructorLink(resourceId, 'https://slides.example/other-deck') },
+      mismatchedDeckSubstituteResponse,
+    )
+    assert.equal(mismatchedDeckSubstituteResponse.statusCode, 409)
+    assert.equal(mismatchedDeckSubstituteResponse.headers['Content-Type'], 'text/html; charset=utf-8')
+    assert.match(String(mismatchedDeckSubstituteResponse.body), /Presentation URL cannot change while the instructor session is active/)
+
     console.info('[TEST] Expected invalid substitute instructor link to fail closed.')
     const invalidSubstituteResponse = response()
     await getHandlers.get('/api/syncdeck/learn/substitute')!(
