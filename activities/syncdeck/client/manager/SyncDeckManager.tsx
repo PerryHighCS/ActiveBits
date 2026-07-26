@@ -2212,6 +2212,8 @@ const SyncDeckManager: FC = () => {
   const [connectedStudentCount, setConnectedStudentCount] = useState(0)
   const [students, setStudents] = useState<SyncDeckStudentPresence[]>([])
   const [isStudentsPanelOpen, setIsStudentsPanelOpen] = useState(false)
+  const [returningStudentId, setReturningStudentId] = useState<string | null>(null)
+  const [studentActionError, setStudentActionError] = useState<string | null>(null)
   const [embeddedActivities, setEmbeddedActivities] = useState<SyncDeckEmbeddedActivitiesMap>({})
   const embeddedActivitiesRef = useRef<SyncDeckEmbeddedActivitiesMap>({})
   const [isEmbeddedPanelOpen, setIsEmbeddedPanelOpen] = useState(false)
@@ -3186,6 +3188,29 @@ const SyncDeckManager: FC = () => {
       timeoutRef: copiedValueResetTimeoutRef,
       resetDelay: 1500,
     })
+  }
+
+  const returnStudentToWaitingRoom = async (student: SyncDeckStudentPresence): Promise<void> => {
+    if (!sessionId || !instructorPasscode || returningStudentId) return
+    if (!window.confirm(`Return ${student.name} to the waiting room so they can choose a new display name?`)) return
+
+    setReturningStudentId(student.studentId)
+    setStudentActionError(null)
+    try {
+      const response = await fetch(
+        `/api/syncdeck/${encodeURIComponent(sessionId)}/students/${encodeURIComponent(student.studentId)}/return-to-waiting-room`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ instructorPasscode }),
+        },
+      )
+      if (!response.ok) throw new Error('Unable to return this student to the waiting room.')
+    } catch (error) {
+      setStudentActionError(error instanceof Error ? error.message : 'Unable to return this student to the waiting room.')
+    } finally {
+      setReturningStudentId(null)
+    }
   }
 
   const handleEndSession = async (): Promise<void> => {
@@ -5360,14 +5385,24 @@ const SyncDeckManager: FC = () => {
             </div>
 
             <div className="flex-1 overflow-y-auto p-4 space-y-2">
+              {studentActionError ? <p role="alert" className="text-sm text-red-700">{studentActionError}</p> : null}
               {students.filter((student) => student.connected).length === 0 ? (
                 <p className="text-sm text-gray-600">No connected students yet.</p>
               ) : (
                 students
                   .filter((student) => student.connected)
                   .map((student) => (
-                    <div key={student.studentId} className="px-3 py-2 rounded border border-gray-200 bg-gray-50">
-                      <p className="text-sm font-medium text-gray-800 truncate">{student.name}</p>
+                    <div key={student.studentId} className="flex items-center justify-between gap-2 px-3 py-2 rounded border border-gray-200 bg-gray-50">
+                      <p className="min-w-0 text-sm font-medium text-gray-800 truncate">{student.name}</p>
+                      <button
+                        type="button"
+                        onClick={() => { void returnStudentToWaitingRoom(student) }}
+                        disabled={returningStudentId !== null}
+                        className="shrink-0 rounded border border-red-300 px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+                        aria-label={`Return ${student.name} to the waiting room`}
+                      >
+                        {returningStudentId === student.studentId ? 'Returning…' : 'Return'}
+                      </button>
                     </div>
                   ))
               )}
