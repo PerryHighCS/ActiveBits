@@ -729,13 +729,14 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
       if (msg.type === 'manager-auth') {
         if (client.mobCodeRole !== 'manager') return
         const instructorPasscode = readWsInstructorPasscode(msg)
+        if (!instructorPasscode) return
+        client.instructorPasscode = instructorPasscode
         ;(async () => {
           const session = asMobCodeSession(await sessions.get(sessionId))
           if (!session || !verifyPasscode(session.data.instructorPasscode, instructorPasscode)) {
             console.warn(JSON.stringify({ event: 'mobcode.ws-manager-auth-denied', sessionId }))
             return
           }
-          client.instructorPasscode = instructorPasscode
           client.isAuthenticatedManager = true
         })().catch((error) => {
           console.error(JSON.stringify({ event: 'mobcode.ws-manager-auth-failed', sessionId, error: String(error) }))
@@ -747,7 +748,7 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
         msg.type !== 'active-file-changed' &&
         msg.type !== 'editor-presence-update'
       ) return
-      if (client.isAuthenticatedManager !== true) return
+      if (client.mobCodeRole !== 'manager' || !client.instructorPasscode) return
 
       ;(async () => {
         const session = asMobCodeSession(await sessions.get(sessionId))

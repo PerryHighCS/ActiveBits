@@ -1012,7 +1012,6 @@ void test('websocket relay updates live validation state without mutating sessio
     type: 'manager-auth',
     payload: { instructorPasscode: 'secret-passcode' },
   }))
-  await flushAsyncWork()
   managerSocket.emit('message', JSON.stringify({
     type: 'file-content-update',
     payload: { path: 'Main.java', content: 'class Main { int x = 1; }' },
