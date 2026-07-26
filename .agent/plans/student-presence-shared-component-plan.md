@@ -17,7 +17,7 @@
 - Allow parent managers to inject custom per-student row content/components for wide-open extensibility.
 - Support per-student badges for quick visual identification (issues, communication flags, statuses).
 - Support per-student style overrides/hooks for future highlighting and workflow cues.
-- Provide a safe, reusable extension point for instructor-authorized participant actions, beginning with returning a student to the waiting room so they can choose a new display name.
+- Provide a shared, secure return-to-waiting-room process that activities can opt into, beginning with students who need to choose a replacement display name.
 - Preserve accessibility and existing SyncDeck behavior during migration.
 
 ## Current Behavior To Preserve
@@ -107,34 +107,62 @@ Behavior:
 - Optional search filter by name/id.
 - Sort connected first, then display name.
 - Parent can mount custom row content container per student to host command buttons or any arbitrary UI.
-- Parent-owned row actions may include an instructor-confirmed **Return to waiting room** control. The shared component only renders and exposes the action; the activity owns the authorization, request, lifecycle update, and error handling.
+- The shared panel exposes an optional instructor-confirmed **Return to waiting room** control. Hosts opt in by supplying the shared action configuration; they do not need to reimplement the request, revocation, socket closure, or student redirect flow.
 - Parent can use either entry-level badges or custom badge renderer for status/communication markers.
 - Parent can apply per-student style/class overrides while preserving base layout and accessibility semantics.
 - Keep panel closed state width transition configurable by host layout.
 
 ### Instructor Participant Action: Return to Waiting Room
 
-The first reusable row action is a moderation/re-entry flow for an instructor who needs a
-student to choose a replacement display name.
+The first shared row action is a moderation/re-entry flow for an instructor who needs a
+student to choose a replacement display name. It is intentionally a shared process rather
+than a separate protocol for every activity.
 
-- The action must be explicitly labeled (for example, `Return to waiting room`) and identify
-  the affected student in its accessible confirmation text.
-- The hosting activity supplies the action through `renderRowActions`; the shared component
-  must not assume an endpoint, websocket event, or credential format.
-- The activity's server endpoint must authenticate instructor authority, validate the target
-  participant belongs to that live session, revoke that participant's accepted-entry/token
-  state, and close their active session sockets. Client-provided participant or display-name
-  values must never be treated as authority.
-- The target student's active client receives a dedicated, non-sensitive lifecycle event and
-  navigates to the normal waiting room for the same session. A reconnect using the revoked
-  participant token must also be rejected server-side, so closing a socket alone cannot be
-  bypassed by refresh or a second tab.
+#### Shared process contract
+
+- Add a generic server-side participant-action handler/factory in shared core code. It accepts
+  a session id and target participant id, authenticates the request through an activity-provided
+  instructor-auth adapter, then performs the common return-to-waiting-room transition.
+- The common transition validates that the target is an accepted participant in that exact live
+  session; removes its accepted-entry record; revokes every opaque participant token mapped to
+  that id; broadcasts a versioned, non-sensitive `participant-returned-to-waiting-room`
+  lifecycle event; and closes all matching participant sockets. Client-provided participant or
+  display-name values must never be treated as authority.
+- Expose a shared client action/controller that renders the explicit `Return to waiting room`
+  control, includes the affected student's name in its accessible confirmation text, manages
+  pending/disabled and error states, and calls the standard handler route.
+- Expose a shared student lifecycle helper that handles the event only when it targets the
+  current participant, clears shared transient participant handoff/context state, and routes to
+  the normal waiting room for the same session. Activities only wire this helper into their
+  existing websocket dispatcher; they do not recreate redirect semantics.
+- Activities opt in with a small adapter: their instructor authorization check, standard-route
+  registration, presence refresh callback, and any activity-owned participant-state cleanup.
+  Activity-specific data such as responses or workspaces is not deleted by the common process
+  unless that activity explicitly registers cleanup behavior.
+- A reconnect using the revoked participant token must be rejected server-side, so closing a
+  socket alone cannot be bypassed by refresh or a second tab.
 - Re-entry follows the existing waiting-room validation and creates a fresh opaque participant
   identity/token. The remembered display-name cookie may prefill the form, but it must remain
   editable so the student can replace an inappropriate name.
-- The row action should show a pending/disabled state while the request is in flight, surface a
-  host-provided error on failure, and disappear or update once the participant is removed from
-  presence state.
+
+#### Shared API shape (proposed)
+
+```ts
+export interface ReturnParticipantToWaitingRoomAdapter {
+  authorizeInstructor(request: Request, session: Session): Promise<boolean>
+  onParticipantReturned?(params: { session: Session; participantId: string }): Promise<void>
+}
+
+export interface StudentPresenceReturnAction {
+  endpoint: string
+  sessionId: string
+  requestHeaders?: Record<string, string>
+}
+```
+
+The server factory owns the standard request/response shape and returns typed `401`, `403`,
+`404`, and `409` failures. The activity adapter must not receive or trust a display name from
+the request; it receives only the loaded server session and validated participant id.
 
 ## Migration Strategy
 
@@ -142,6 +170,8 @@ student to choose a replacement display name.
 
 - Add shared types + normalization helper under `client/src/components/common/`.
 - Add shared toggle + panel components under `client/src/components/common/`.
+- Add shared return-to-waiting-room server transition, route factory, client action/controller,
+  and student lifecycle helper.
 - Add focused unit tests for helper and UI component behavior.
 
 ### Phase 2: SyncDeck adoption
@@ -154,8 +184,8 @@ student to choose a replacement display name.
 
 - Integrate in one additional manager surface to validate generality.
 - Use optional row metadata/actions to confirm flexibility.
-- Use the row-action extension point for the return-to-waiting-room flow, including its
-  activity-owned authorization and websocket lifecycle handling.
+- Opt SyncDeck into the shared return-to-waiting-room process, with only its instructor-auth
+  adapter and any SyncDeck-specific cleanup remaining local.
 
 ### Phase 4: Cleanup and docs
 
@@ -173,6 +203,7 @@ student to choose a replacement display name.
   - search filtering
   - custom row content container rendering
   - instructor action rendering, accessible name/confirmation wiring, and pending/disabled state
+  - shared student lifecycle helper clears handoff state and routes only the targeted participant
   - badge rendering (entry-provided and custom renderer)
   - per-row class/style override application
   - empty states
@@ -184,6 +215,8 @@ student to choose a replacement display name.
   - the removed participant's current and reconnecting sockets cannot continue in the session
   - the student receives the re-entry lifecycle event and can submit a replacement display name
   - unauthorized, missing, and cross-session target requests fail without changing participant state
+  - generic core transition revokes every target token, broadcasts the lifecycle event, and closes all target sockets
+  - an opt-in activity adapter can reject an instructor request without duplicating common transition logic
 
 ## Risks and Mitigations
 
@@ -191,18 +224,19 @@ student to choose a replacement display name.
   - Mitigation: Keep normalization helper payload-agnostic and type-safe.
 - Risk: Behavior regression in SyncDeck panel UX.
   - Mitigation: Snapshot/component tests around current expected states before migration.
-- Risk: Shared component creeps into activity-specific logic.
-  - Mitigation: Keep side effects and transport parsing in activity manager code.
+- Risk: Shared process creeps into activity-specific data cleanup.
+  - Mitigation: The core transition only revokes entry authorization and connection state; optional activity cleanup is an explicit adapter callback.
 - Risk: A client-only "boot" lets a student refresh or reuse a second tab to bypass moderation.
   - Mitigation: Require server-side revocation of accepted-entry identity/token state and enforce it on every reconnect.
 - Risk: A generic shared action API obscures authorization boundaries.
-  - Mitigation: Limit the shared API to rendering callbacks; each activity owns its authenticated endpoint and protocol.
+  - Mitigation: The shared route factory always delegates instructor authentication to a required activity adapter before any participant state changes.
 
 ## Deliverables
 
 - Shared student presence type and normalization helper.
 - Shared `StudentPresenceToggleButton` and `StudentPresencePanel` components.
 - Shared extension points for parent-provided row content, badges, and per-row style customization.
-- Documented activity-owned return-to-waiting-room action contract with server-side revocation and reconnection protection.
+- Shared return-to-waiting-room server transition, standard route factory, client action/controller, and student lifecycle helper.
+- Activity opt-in adapter contract for instructor authorization and optional activity-specific cleanup.
 - SyncDeck migrated to shared components.
 - Test coverage for shared and SyncDeck integration points.
