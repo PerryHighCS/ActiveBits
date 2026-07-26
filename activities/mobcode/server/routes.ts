@@ -31,6 +31,7 @@ interface AppLike {
 
 interface MobCodeSocket extends ActiveBitsWebSocket {
   mobCodeRole?: 'manager' | 'student'
+  isAuthenticatedManager?: boolean
   instructorPasscode?: string | null
 }
 
@@ -38,6 +39,7 @@ interface SessionScopedWsClient {
   readyState: number
   sessionId?: string | null
   mobCodeRole?: 'manager' | 'student'
+  isAuthenticatedManager?: boolean
   instructorPasscode?: string | null
 }
 
@@ -621,7 +623,7 @@ export function hasOpenManagerSessionClients(
     if (
       client.readyState === WS_OPEN &&
       client.sessionId === sessionId &&
-      client.mobCodeRole === 'manager' &&
+      client.isAuthenticatedManager === true &&
       verifyPasscode(instructorPasscode, client.instructorPasscode)
     ) {
       return true
@@ -660,7 +662,7 @@ registerSessionNormalizer('mobcode', (session) => {
 export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessionStore, ws: WsRouter): void {
   const ensureBroadcastSubscription = createBroadcastSubscriptionHelper(sessions, ws, (client, message) => {
     const audience = isPlainObject(message) && message.audience === 'managers' ? 'managers' : 'all'
-    return audience === 'all' || (client as MobCodeSocket).mobCodeRole === 'manager'
+    return audience === 'all' || (client as MobCodeSocket).isAuthenticatedManager === true
   })
   const liveGroupsBySession = new Map<string, MobCodeGroupState>()
   const liveGroupCleanupTimers = new Map<string, ReturnType<typeof setTimeout>>()
@@ -698,7 +700,7 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
 
     for (const rawClient of ws.wss.clients) {
       const client = rawClient as MobCodeSocket
-      if (client.readyState === WS_OPEN && client.sessionId === sessionId && (audience === 'all' || client.mobCodeRole === 'manager')) {
+      if (client.readyState === WS_OPEN && client.sessionId === sessionId && (audience === 'all' || client.isAuthenticatedManager === true)) {
         try {
           client.send(msg)
         } catch {
@@ -712,6 +714,7 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
     const client = socket as MobCodeSocket
     client.sessionId = query.get('sessionId') || null
     client.mobCodeRole = query.get('role') === 'manager' ? 'manager' : 'student'
+    client.isAuthenticatedManager = false
     client.instructorPasscode = null
     if (client.sessionId) {
       cancelLiveGroupCleanup(client.sessionId)
@@ -725,7 +728,18 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
       cancelLiveGroupCleanup(sessionId)
       if (msg.type === 'manager-auth') {
         if (client.mobCodeRole !== 'manager') return
-        client.instructorPasscode = readWsInstructorPasscode(msg)
+        const instructorPasscode = readWsInstructorPasscode(msg)
+        ;(async () => {
+          const session = asMobCodeSession(await sessions.get(sessionId))
+          if (!session || !verifyPasscode(session.data.instructorPasscode, instructorPasscode)) {
+            console.warn(JSON.stringify({ event: 'mobcode.ws-manager-auth-denied', sessionId }))
+            return
+          }
+          client.instructorPasscode = instructorPasscode
+          client.isAuthenticatedManager = true
+        })().catch((error) => {
+          console.error(JSON.stringify({ event: 'mobcode.ws-manager-auth-failed', sessionId, error: String(error) }))
+        })
         return
       }
       if (
@@ -733,7 +747,7 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
         msg.type !== 'active-file-changed' &&
         msg.type !== 'editor-presence-update'
       ) return
-      if (client.mobCodeRole !== 'manager') return
+      if (client.isAuthenticatedManager !== true) return
 
       ;(async () => {
         const session = asMobCodeSession(await sessions.get(sessionId))
@@ -762,7 +776,7 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
             peer !== client
             && peer.readyState === WS_OPEN
             && peer.sessionId === sessionId
-            && (session.data.studentCode?.shareChangesEnabled === true || peer.mobCodeRole === 'manager')
+            && (session.data.studentCode?.shareChangesEnabled === true || peer.isAuthenticatedManager === true)
           ) {
             try {
               peer.send(outgoing)
@@ -945,6 +959,16 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
       const identity = session ? resolveStudentIdentity(session, readRequestCookie(req, getSessionParticipantCookieName(session.id))) : null
       if (!session || !identity || session.data.soloMode === true) {
         res.status(403).json({ error: 'Forbidden' })
+        return
+      }
+      if (session.data.studentCode?.tryItEnabled !== true) {
+        console.warn(JSON.stringify({
+          event: 'mobcode.student-reset-denied',
+          sessionId: session.id,
+          participantId: identity.participantId,
+          reason: 'try-it-disabled',
+        }))
+        res.status(423).json({ error: 'Student editing is locked' })
         return
       }
       const starter = session.data.studentCode?.starterVersion

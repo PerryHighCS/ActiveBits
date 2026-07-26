@@ -268,6 +268,7 @@ function MobCodeLiveStudent({ sessionData }: MobCodeStudentProps) {
   const latestFilesRef = useRef<Record<string, string>>({})
   const myWorkspacePersistDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pendingMyWorkspaceRef = useRef<{ files: Record<string, string>; activeFile: string } | null>(null)
+  const inFlightMyWorkspacePersistRef = useRef<Promise<void> | null>(null)
   const previousTryItEnabledRef = useRef(false)
   const previousSharedExampleAvailableRef = useRef(false)
   const previousShareChangesEnabledRef = useRef(false)
@@ -500,8 +501,14 @@ function MobCodeLiveStudent({ sessionData }: MobCodeStudentProps) {
     const pendingWorkspace = pendingMyWorkspaceRef.current
     if (!pendingWorkspace) return
     pendingMyWorkspaceRef.current = null
-    void persistMyWorkspace(pendingWorkspace.files, pendingWorkspace.activeFile, !skipUiUpdates).catch((error) => {
+    const persist = (inFlightMyWorkspacePersistRef.current ?? Promise.resolve())
+      .catch(() => undefined)
+      .then(() => persistMyWorkspace(pendingWorkspace.files, pendingWorkspace.activeFile, !skipUiUpdates))
+    inFlightMyWorkspacePersistRef.current = persist
+    void persist.catch((error) => {
       if (!skipUiUpdates) setRunnerMessage(error instanceof Error ? error.message : 'Could not save your code.')
+    }).finally(() => {
+      if (inFlightMyWorkspacePersistRef.current === persist) inFlightMyWorkspacePersistRef.current = null
     })
   }, [persistMyWorkspace])
 

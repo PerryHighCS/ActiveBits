@@ -14,7 +14,7 @@ interface BroadcastWsRouter {
   }
 }
 
-type BroadcastForwardPredicate = (client: BroadcastClient, message: unknown) => boolean
+export type BroadcastForwardPredicate = (client: BroadcastClient, message: unknown) => boolean
 
 /**
  * Utility helpers for activity-level broadcast subscriptions.
@@ -43,11 +43,12 @@ export function createBroadcastSubscriptionHelper(
       sessions.subscribeToBroadcast(channel, (message) => {
         const payload = JSON.stringify(message)
         for (const client of ws.wss.clients) {
-          if (client.readyState === 1 && client.sessionId === sessionId && shouldForward(client, message)) {
+          if (client.readyState === 1 && client.sessionId === sessionId) {
             try {
+              if (!shouldForward(client, message)) continue
               client.send(payload)
             } catch (err) {
-              console.error('Failed to forward broadcast to client:', err)
+              console.error(JSON.stringify({ event: 'broadcast.forward-failed', sessionId, error: String(err) }))
             }
           }
         }

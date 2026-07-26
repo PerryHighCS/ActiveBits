@@ -78,3 +78,31 @@ void test('createBroadcastSubscriptionHelper no-ops without subscribe support or
   const ensureMissingId = createBroadcastSubscriptionHelper(sessionsWithSubscribe, ws)
   assert.doesNotThrow(() => ensureMissingId(null))
 })
+
+void test('createBroadcastSubscriptionHelper continues after a forwarding predicate failure', () => {
+  let broadcastHandler: ((message: MockBroadcastMessage) => void) | null = null
+  const rejectedClient: MockClient = { sessionId: 'abc', readyState: 1, send: () => { throw new Error('must not send') } }
+  const sentPayloads: string[] = []
+  const forwardedClient: MockClient = {
+    sessionId: 'abc',
+    readyState: 1,
+    send: (msg) => sentPayloads.push(msg),
+  }
+  const sessions = {
+    subscribeToBroadcast: (_channel: string, handler: (message: MockBroadcastMessage) => void) => {
+      broadcastHandler = handler
+    },
+  }
+  const ws = { wss: { clients: new Set<MockClient>([rejectedClient, forwardedClient]) } }
+  const ensure = createBroadcastSubscriptionHelper(sessions, ws, (client) => {
+    if (client === rejectedClient) throw new Error('predicate failed')
+    return true
+  })
+
+  ensure('abc')
+  // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions
+  assert.ok(broadcastHandler, 'handler was registered')
+  console.log('[TEST] Testing broadcast robustness against predicate failures (expected error output follows):')
+  assert.doesNotThrow(() => void broadcastHandler!({ type: 'foo' }))
+  assert.deepEqual(sentPayloads, [JSON.stringify({ type: 'foo' })])
+})

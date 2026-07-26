@@ -221,6 +221,7 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken, soloM
   const persistDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const sharedWorkspacePersistDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pendingSharedWorkspaceRef = useRef<{ files: Record<string, string>; activeFile: string } | null>(null)
+  const inFlightSharedWorkspacePersistRef = useRef<Promise<void> | null>(null)
   const latestStateRef = useRef<MobCodeStatePayload>(createStateSnapshot({}, ''))
   const latestFileSizeStatsRef = useRef(getMobCodeFileSizeStats({}))
   const lastLiveSyncAtRef = useRef(0)
@@ -660,11 +661,17 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken, soloM
     const pendingWorkspace = pendingSharedWorkspaceRef.current
     if (!pendingWorkspace) return
     pendingSharedWorkspaceRef.current = null
-    void persistSharedWorkspace(pendingWorkspace.files, pendingWorkspace.activeFile).catch((error) => {
+    const persist = (inFlightSharedWorkspacePersistRef.current ?? Promise.resolve())
+      .catch(() => undefined)
+      .then(() => persistSharedWorkspace(pendingWorkspace.files, pendingWorkspace.activeFile))
+    inFlightSharedWorkspacePersistRef.current = persist
+    void persist.catch((error) => {
       if (!skipUiUpdates) {
         void refreshStudentWorkspaces()
         setRunnerMessage(error instanceof Error ? error.message : 'Could not save shared code.')
       }
+    }).finally(() => {
+      if (inFlightSharedWorkspacePersistRef.current === persist) inFlightSharedWorkspacePersistRef.current = null
     })
   }, [persistSharedWorkspace, refreshStudentWorkspaces])
 

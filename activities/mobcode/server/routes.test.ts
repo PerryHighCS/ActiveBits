@@ -244,8 +244,9 @@ void test('participant-scoped MobCode routes reject unauthenticated, forged, loc
 
   const workspaceHandler = app.handlers.post['/api/mobcode/:sessionId/student-workspace']
   const stateHandler = app.handlers.post['/api/mobcode/:sessionId/student-workspace/state']
+  const resetHandler = app.handlers.post['/api/mobcode/:sessionId/student-workspace/reset']
   const actionHandler = app.handlers.post['/api/mobcode/:sessionId/student-code/:action']
-  assert.ok(workspaceHandler && stateHandler && actionHandler)
+  assert.ok(workspaceHandler && stateHandler && resetHandler && actionHandler)
 
   for (const headers of [undefined, { cookie: `${getSessionParticipantCookieName(session.id)}=forged` }]) {
     const response = createResponse()
@@ -260,6 +261,14 @@ void test('participant-scoped MobCode routes reject unauthenticated, forged, loc
     headers: { cookie: `${getSessionParticipantCookieName(session.id)}=${participantToken}` },
   } as never, lockedResponse)
   assert.equal(lockedResponse.statusCode, 423)
+
+  const lockedResetResponse = createResponse()
+  await resetHandler({
+    params: { sessionId: session.id },
+    body: {},
+    headers: { cookie: `${getSessionParticipantCookieName(session.id)}=${participantToken}` },
+  } as never, lockedResetResponse)
+  assert.equal(lockedResetResponse.statusCode, 423)
 
   const managerResponse = createResponse()
   await actionHandler({
@@ -975,18 +984,22 @@ void test('websocket relay updates live validation state without mutating sessio
 
   const managerSocket = createMockSocket()
   const studentSocket = createMockSocket()
+  const forgedManagerSocket = createMockSocket()
   ws.wss.clients.add(managerSocket)
   ws.wss.clients.add(studentSocket)
+  ws.wss.clients.add(forgedManagerSocket)
 
   const wsHandler = ws.getHandler()
   assert.ok(wsHandler)
   wsHandler(managerSocket, new URLSearchParams({ sessionId: session.id, role: 'manager' }))
   wsHandler(studentSocket, new URLSearchParams({ sessionId: session.id, role: 'student' }))
+  wsHandler(forgedManagerSocket, new URLSearchParams({ sessionId: session.id, role: 'manager' }))
 
   managerSocket.emit('message', JSON.stringify({
     type: 'manager-auth',
     payload: { instructorPasscode: 'secret-passcode' },
   }))
+  await flushAsyncWork()
   managerSocket.emit('message', JSON.stringify({
     type: 'file-content-update',
     payload: { path: 'Main.java', content: 'class Main { int x = 1; }' },
@@ -1005,12 +1018,14 @@ void test('websocket relay updates live validation state without mutating sessio
   })
 
   session.data.studentCode!.shareChangesEnabled = false
+  forgedManagerSocket.sent.length = 0
   managerSocket.emit('message', JSON.stringify({
     type: 'file-content-update',
     payload: { path: 'Main.java', content: 'class Main { int x = 2; }' },
   }))
   await flushAsyncWork()
   assert.equal(studentSocket.sent.length, 1)
+  assert.equal(forgedManagerSocket.sent.length, 0)
 })
 
 void test('hasOpenSessionClients only retains live ws state when a session still has open sockets', () => {
@@ -1046,7 +1061,13 @@ void test('hasOpenManagerSessionClients requires an authenticated open manager s
   )
   assert.equal(
     hasOpenManagerSessionClients([
-      { readyState: 1, sessionId: 'session-a', mobCodeRole: 'manager', instructorPasscode: 'secret' },
+      {
+        readyState: 1,
+        sessionId: 'session-a',
+        mobCodeRole: 'manager',
+        isAuthenticatedManager: true,
+        instructorPasscode: 'secret',
+      },
     ], 'session-a', 'secret'),
     true,
   )
