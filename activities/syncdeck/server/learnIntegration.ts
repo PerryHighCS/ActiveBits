@@ -6,6 +6,8 @@ import type { ActiveBitsWebSocket, WsRouter } from '../../../types/websocket.js'
 const INTEGRATION_PREFIX = '/api/integrations/learn/v1'
 const BROWSER_PREFIX = '/integrations/learn'
 const INSTRUCTOR_HANDOFF_PREFIX = '/api/syncdeck/learn'
+const SUBSTITUTE_INSTRUCTOR_PREFIX = '/api/syncdeck/learn/substitute'
+const SUBSTITUTE_LINK_CONTEXT = 'LEARN_SYNCDECK_SUBSTITUTE_LINK'
 const ACTIVITY_ID = 'syncdeck'
 const HMAC_SIGNATURE_HEADER = 'x-learn-signature'
 const HMAC_KEY_ID_HEADER = 'x-learn-key-id'
@@ -66,6 +68,15 @@ interface BrowserTokenData extends Record<string, unknown> {
   expiresAt: number
 }
 
+interface SubstituteInstructorLinkPayload {
+  v: 1
+  provider: string
+  resourceLinkId: string
+  presentationUrl: string
+  expiresAt: number
+  jti: string
+}
+
 export interface LearnSyncDeckRouteOptions {
   app: RouteApp
   sessions: SessionStore
@@ -122,6 +133,28 @@ function sameSecret(left: string, right: string): boolean {
   const leftBytes = Buffer.from(left, 'utf8')
   const rightBytes = Buffer.from(right, 'utf8')
   return leftBytes.length === rightBytes.length && timingSafeEqual(leftBytes, rightBytes)
+}
+
+function readSubstituteInstructorLink(payloadValue: unknown, signature: unknown, secret: string): SubstituteInstructorLinkPayload | null {
+  const payload = readString(payloadValue, 8192)
+  const signatureValue = readString(signature, 128)
+  if (!payload || !signatureValue || !/^[A-Za-z0-9_-]+$/.test(payload) || !/^[a-f0-9]{64}$/i.test(signatureValue)) return null
+  const expected = createHmac('sha256', secret).update(`${SUBSTITUTE_LINK_CONTEXT}\n${payload}`, 'utf8').digest('hex')
+  if (!sameSecret(expected, signatureValue.toLowerCase())) return null
+  try {
+    const decoded = Buffer.from(payload, 'base64url').toString('utf8')
+    const parsed = JSON.parse(decoded) as Record<string, unknown>
+    if (Buffer.from(stableJson(parsed), 'utf8').toString('base64url') !== payload) return null
+    const provider = readString(parsed.provider, MAX_PROVIDER_LENGTH)
+    const resourceLinkId = readString(parsed.resourceLinkId, MAX_RESOURCE_ID_LENGTH)
+    const presentationUrl = readString(parsed.presentationUrl, 4096)
+    const jti = readString(parsed.jti, 256)
+    const expiresAt = typeof parsed.expiresAt === 'number' && Number.isFinite(parsed.expiresAt) ? parsed.expiresAt : 0
+    if (parsed.v !== 1 || !provider || !resourceLinkId || !presentationUrl || !isValidHttpUrl(presentationUrl) || !jti || expiresAt <= Date.now()) return null
+    return { v: 1, provider, resourceLinkId, presentationUrl, expiresAt, jti }
+  } catch {
+    return null
+  }
 }
 
 type NonceClaimResult = 'claimed' | 'duplicate' | 'unavailable'
@@ -617,6 +650,75 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
     await sessions.delete(id)
     console.info(JSON.stringify({ activity: 'syncdeck', event: 'learn-instructor-session-stopped', resourceLinkId, sessionId }))
     res.json({ state: 'inactive', alreadyInactive: false })
+  })
+
+  app.get(SUBSTITUTE_INSTRUCTOR_PREFIX, async (req, res) => {
+    setNoStore(res)
+    res.setHeader?.('Referrer-Policy', 'no-referrer')
+    const key = configuredKey()
+    const link = key ? readSubstituteInstructorLink(req.query?.payload, req.query?.sig, key.secret) : null
+    if (!key || !link) {
+      console.info(JSON.stringify({ activity: ACTIVITY_ID, event: 'learn-substitute-link-rejected' }))
+      return void res.status(403).json({ error: 'Invalid or expired substitute instructor link' })
+    }
+    const id = mappingId(key.secret, ACTIVITY_ID, link.provider, link.resourceLinkId)
+    const startLock = await claimStartLock(sessions, id)
+    if (startLock.state !== 'acquired') {
+      const status = startLock.state === 'unavailable' ? 503 : 409
+      return void res.status(status).json({ error: status === 503 ? 'Learn session coordination is unavailable' : 'A substitute instructor launch is already in progress; retry shortly' })
+    }
+    try {
+      let entry = await loadEntry(id)
+      let sessionId: string | null = null
+      let recoveryToken: string | null = null
+      if (entry?.data.state === 'active' && entry.data.activeSessionId) {
+        if (entry.data.presentationUrl !== link.presentationUrl) {
+          return void res.status(409).json({ error: 'Presentation URL cannot change while the instructor session is active' })
+        }
+        const activeSession = await sessions.get(entry.data.activeSessionId)
+        if (activeSession) {
+          sessionId = entry.data.activeSessionId
+          recoveryToken = typeof activeSession.data.instructorRecoveryToken === 'string' ? activeSession.data.instructorRecoveryToken : null
+        } else {
+          await sessions.delete(id)
+          entry = null
+        }
+      }
+      if (!sessionId || !recoveryToken) {
+        const previousData = entry?.data
+        try {
+          if (!entry) {
+            const createdEntry = await createSession(sessions, { data: { learnIntegrationKind: 'entry', activityId: ACTIVITY_ID, provider: link.provider, resourceLinkId: link.resourceLinkId, state: 'waiting', startRequestId: `substitute:${link.jti}`, activeSessionId: null, presentationUrl: null, expiresAt: Date.now() + WAITING_TTL_MS } })
+            const generatedId = createdEntry.id
+            createdEntry.id = id
+            createdEntry.type = 'syncdeck-learn-entry'
+            await sessions.delete(generatedId)
+            await sessions.set(id, createdEntry, WAITING_TTL_MS)
+            entry = { session: createdEntry, data: getEntryData(createdEntry)! }
+          }
+          const created = await options.createInstructorSession(link.presentationUrl)
+          sessionId = created.sessionId
+          recoveryToken = created.instructorRecoveryToken
+          entry.session.data = { learnIntegrationKind: 'entry', activityId: ACTIVITY_ID, provider: link.provider, resourceLinkId: link.resourceLinkId, state: 'active', startRequestId: `substitute:${link.jti}`, activeSessionId: sessionId, presentationUrl: link.presentationUrl, expiresAt: Date.now() + (sessions.ttlMs ?? WAITING_TTL_MS) }
+          await sessions.set(id, entry.session)
+        } catch (error) {
+          if (previousData && entry) {
+            entry.session.data = previousData
+            await sessions.set(id, entry.session)
+          } else {
+            await sessions.delete(id)
+          }
+          console.error(JSON.stringify({ activity: ACTIVITY_ID, event: 'learn-substitute-link-start-failed', jti: link.jti, error: error instanceof Error ? error.message : String(error) }))
+          return void res.status(500).json({ error: 'Unable to start the substitute instructor session' })
+        }
+      }
+      options.writeInstructorRecoveryCookie(req, res, sessionId, recoveryToken)
+      console.info(JSON.stringify({ activity: ACTIVITY_ID, event: 'learn-substitute-link-launched', jti: link.jti, sessionId }))
+      if (typeof res.redirect === 'function') return void res.redirect(302, `/manage/syncdeck/${encodeURIComponent(sessionId)}`)
+      res.status(302).json({ redirectTo: `/manage/syncdeck/${encodeURIComponent(sessionId)}` })
+    } finally {
+      await startLock.release()
+    }
   })
 
   app.get(`${BROWSER_PREFIX}/:activityId/wait/:tokenId`, async (req, res) => {

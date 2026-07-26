@@ -93,6 +93,15 @@ function signedRequest(method: string, path: string, body: unknown, nonce: strin
   }
 }
 
+function substituteInstructorLink(resourceLinkId: string, presentationUrl: string, jti = 'substitute-link-test', expiresAt = Date.now() + 60_000) {
+  const secret = process.env.LEARN_SYNCDECK_HMAC_SECRET!
+  const payload = Buffer.from(JSON.stringify({ expiresAt, jti, presentationUrl, provider: 'learn-test', resourceLinkId, v: 1 }), 'utf8').toString('base64url')
+  return {
+    payload,
+    sig: createHmac('sha256', secret).update(`LEARN_SYNCDECK_SUBSTITUTE_LINK\n${payload}`, 'utf8').digest('hex'),
+  }
+}
+
 void test('buildLearnHmacCanonicalRequest orders object keys by codepoint', () => {
   const request = buildLearnHmacCanonicalRequest('POST', '/path', '123', 'nonce', 'provider', { ä: 'umlaut', z: 'zee' })
   const expectedHash = createHash('sha256').update('{"z":"zee","ä":"umlaut"}', 'utf8').digest('hex')
@@ -250,6 +259,33 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
     notifyInstructorSessionStart = null
     assert.equal(startResponse.statusCode, 200)
     assert.equal((startResponse.body as { activeSessionId?: unknown }).activeSessionId, createdSessionId)
+
+    const substituteLaunch = substituteInstructorLink(resourceId, 'https://slides.example/deck')
+    const substituteLaunchResponse = response()
+    await getHandlers.get('/api/syncdeck/learn/substitute')!(
+      { params: {}, query: substituteLaunch },
+      substituteLaunchResponse,
+    )
+    assert.equal(substituteLaunchResponse.statusCode, 302)
+    assert.equal(substituteLaunchResponse.redirectTo, `/manage/syncdeck/${createdSessionId}`)
+    assert.equal(substituteLaunchResponse.headers['Referrer-Policy'], 'no-referrer')
+    assert.ok(substituteLaunchResponse.cookies.some((item) => item.name === 'syncdeck_instructor_recoveries'))
+
+    console.info('[TEST] Expected invalid substitute instructor link to fail closed.')
+    const invalidSubstituteResponse = response()
+    await getHandlers.get('/api/syncdeck/learn/substitute')!(
+      { params: {}, query: { payload: substituteLaunch.payload, sig: '0'.repeat(64) } },
+      invalidSubstituteResponse,
+    )
+    assert.equal(invalidSubstituteResponse.statusCode, 403)
+
+    console.info('[TEST] Expected expired substitute instructor link to fail closed.')
+    const expiredSubstituteResponse = response()
+    await getHandlers.get('/api/syncdeck/learn/substitute')!(
+      { params: {}, query: substituteInstructorLink(resourceId, 'https://slides.example/deck', 'expired-substitute-link', Date.now() - 1) },
+      expiredSubstituteResponse,
+    )
+    assert.equal(expiredSubstituteResponse.statusCode, 403)
 
     const instructorLaunchUrl = new URL(String((startResponse.body as { instructorLaunchUrl: string }).instructorLaunchUrl), 'https://bits.example')
     const instructorLaunchResponse = response()

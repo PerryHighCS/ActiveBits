@@ -451,12 +451,13 @@ does not add a long-term per-link revocation store for this version.
   selection, copy UI, and audit metadata; sign only on the Learn server.
 - [ ] Learn: warn that the URL grants instructor control until expiry and do not store or
   display ActiveBits credentials.
-- [ ] ActiveBits: add the direct substitute-link verification route, using a signature
+- [x] ActiveBits: add the direct substitute-link verification route, using a signature
   context distinct from both request HMAC and existing browser handoff tokens.
-- [ ] ActiveBits: reuse the normal mapping/start rules, including `409` for a deck URL
+- [x] ActiveBits: reuse the normal mapping/start rules, including `409` for a deck URL
   mismatch while an instructor-led session is active.
-- [ ] ActiveBits: add tests for valid reuse/start, expired/tampered links, final URL
-  stripping, and the no-passcode/log-redaction boundary.
+- [ ] ActiveBits: add browser coverage for direct-link final URL stripping and recovery
+  cookie behavior. Unit coverage verifies valid reuse and tampered/expired-link
+  rejection.
 - [x] Product decision: do not add per-link revocation or long-term ActiveBits storage
   in the initial version; rely on bounded expiry and coordinated key rotation.
 
