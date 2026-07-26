@@ -347,6 +347,13 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
 
     const startingSubstituteResourceId = 'learn-resource-substitute-starting'
     const startingSubstituteLaunch = substituteInstructorLink(startingSubstituteResourceId, 'https://slides.example/substitute-starting', 'substitute-starting')
+    const startingStudentEntryPath = `/api/integrations/learn/v1/activities/syncdeck/resources/${startingSubstituteResourceId}/student-entry`
+    const startingStudentEntryResponse = response()
+    await postHandlers.get('/api/integrations/learn/v1/activities/:activityId/resources/:resourceLinkId/student-entry')!(
+      { params: { activityId: 'syncdeck', resourceLinkId: startingSubstituteResourceId }, ...signedRequest('POST', startingStudentEntryPath, {}, 'substitute-starting-student-entry') },
+      startingStudentEntryResponse,
+    )
+    assert.equal((startingStudentEntryResponse.body as { state?: unknown }).state, 'waiting')
     let releaseDelayedSubstituteStart!: () => void
     delayedInstructorSession = new Promise<void>((resolve) => { releaseDelayedSubstituteStart = resolve })
     let resolveSubstituteSessionStart!: () => void

@@ -727,6 +727,9 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
             await sessions.delete(generatedId)
             await sessions.set(id, createdEntry, WAITING_TTL_MS)
             entry = { session: createdEntry, data: getEntryData(createdEntry)! }
+          } else {
+            entry.session.data = { ...entry.data, startRequestId: `substitute:${link.jti}` }
+            await sessions.set(id, entry.session)
           }
           const created = await options.createInstructorSession(link.presentationUrl)
           sessionId = created.sessionId
