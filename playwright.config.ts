@@ -10,6 +10,12 @@ const serverPort =
 const persistentSessionSecret =
   process.env.PLAYWRIGHT_PERSISTENT_SESSION_SECRET ??
   randomBytes(32).toString('hex')
+const learnSyncdeckHmacSecret =
+  process.env.PLAYWRIGHT_LEARN_SYNCDECK_HMAC_SECRET ??
+  randomBytes(32).toString('hex')
+// Keep the test worker and the spawned server on the same ephemeral integration
+// key; production configuration is supplied exclusively through its environment.
+process.env.PLAYWRIGHT_LEARN_SYNCDECK_HMAC_SECRET = learnSyncdeckHmacSecret
 const shouldReuseClientBuild =
   isCi || process.env.PLAYWRIGHT_REUSE_CLIENT_DIST === '1'
 const webServerCommand = shouldReuseClientBuild
@@ -40,6 +46,8 @@ export default defineConfig({
       NODE_ENV: 'production',
       PORT: serverPort,
       PERSISTENT_SESSION_SECRET: persistentSessionSecret,
+      LEARN_SYNCDECK_HMAC_SECRET: learnSyncdeckHmacSecret,
+      LEARN_SYNCDECK_HMAC_KEY_ID: 'playwright-learn',
     },
     url: baseURL,
     reuseExistingServer: !isCi,

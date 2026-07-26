@@ -455,7 +455,7 @@ does not add a long-term per-link revocation store for this version.
   context distinct from both request HMAC and existing browser handoff tokens.
 - [x] ActiveBits: reuse the normal mapping/start rules, including `409` for a deck URL
   mismatch while an instructor-led session is active.
-- [ ] ActiveBits: add browser coverage for direct-link final URL stripping and recovery
+- [x] ActiveBits: add browser coverage for direct-link final URL stripping and recovery
   cookie behavior. Unit coverage verifies valid reuse and tampered/expired-link
   rejection.
 - [x] Product decision: do not add per-link revocation or long-term ActiveBits storage
