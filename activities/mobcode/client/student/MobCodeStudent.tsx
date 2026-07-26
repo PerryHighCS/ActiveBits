@@ -632,10 +632,10 @@ function MobCodeLiveStudent({ sessionData }: MobCodeStudentProps) {
       <div className="mobcode-workspace">
         <aside className="mobcode-sidebar">
           <div className="border-b border-gray-200 p-2">
-            <div className="mobcode-workspace-tabs" role="tablist" aria-label="Code workspaces">
-              <button type="button" role="tab" aria-selected={workspaceView === 'instructor'} className="mobcode-workspace-tab" onClick={() => setWorkspaceView('instructor')}>Instructor</button>
-              {myWorkspace && <button type="button" role="tab" aria-selected={workspaceView === 'mine'} className="mobcode-workspace-tab" onClick={() => setWorkspaceView('mine')}>My Code</button>}
-              {sharedWorkspace && <button type="button" role="tab" aria-selected={workspaceView === 'shared'} className="mobcode-workspace-tab" onClick={() => setWorkspaceView('shared')}>Shared</button>}
+            <div className="mobcode-workspace-tabs" role="group" aria-label="Code workspaces">
+              <button type="button" aria-pressed={workspaceView === 'instructor'} className="mobcode-workspace-tab" onClick={() => setWorkspaceView('instructor')}>Instructor</button>
+              {myWorkspace && <button type="button" aria-pressed={workspaceView === 'mine'} className="mobcode-workspace-tab" onClick={() => setWorkspaceView('mine')}>My Code</button>}
+              {sharedWorkspace && <button type="button" aria-pressed={workspaceView === 'shared'} className="mobcode-workspace-tab" onClick={() => setWorkspaceView('shared')}>Shared</button>}
             </div>
             {workspaceView === 'mine' && !tryItEnabled && (
               <p className="mobcode-status-message mt-2 text-xs text-amber-800" role="status">

@@ -964,11 +964,10 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken, soloM
               </div>
             </section>
             <div className="mobcode-workspace-tabs-row border-b border-gray-200 p-2">
-              <div className="mobcode-workspace-tabs" role="tablist" aria-label="Code workspaces">
+              <div className="mobcode-workspace-tabs" role="group" aria-label="Code workspaces">
                 <button
                   type="button"
-                  role="tab"
-                  aria-selected={workspaceSelection.kind === 'instructor'}
+                  aria-pressed={workspaceSelection.kind === 'instructor'}
                   className="mobcode-workspace-tab"
                   onClick={() => setWorkspaceSelection({ kind: 'instructor' })}
                 >
@@ -977,8 +976,7 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken, soloM
                 {sharedExampleWorkspace && (
                   <button
                     type="button"
-                    role="tab"
-                    aria-selected={isViewingSharedExample}
+                    aria-pressed={isViewingSharedExample}
                     className="mobcode-workspace-tab"
                     onClick={() => {
                       setWorkspaceSelection({ kind: 'shared' })
@@ -989,7 +987,7 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken, soloM
                   </button>
                 )}
                 {selectedStudentWorkspace && (
-                  <button type="button" role="tab" aria-selected="true" className="mobcode-workspace-tab" disabled>
+                  <button type="button" aria-pressed="true" className="mobcode-workspace-tab" disabled>
                     {selectedStudentWorkspace.displayName}
                   </button>
                 )}

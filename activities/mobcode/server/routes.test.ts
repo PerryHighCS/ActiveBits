@@ -440,6 +440,7 @@ void test('GET /api/mobcode/:sessionId/session exposes sanitized embedded runner
   } as unknown as Parameters<typeof sessionHandler>[0], response as unknown as Parameters<typeof sessionHandler>[1])
 
   assert.equal(response.statusCode, 200)
+  assert.equal(response.headers['Cache-Control'], 'no-store')
   assert.deepEqual(response.body, {
     id: session.id,
     type: session.type,
@@ -667,6 +668,7 @@ void test('POST /api/mobcode/:sessionId/shared-workspace/state updates only the 
   } as never, response as never)
 
   assert.equal(response.statusCode, 200)
+  assert.equal(response.headers['Cache-Control'], 'no-store')
   assert.deepEqual(response.body, {
     ok: true,
     workspace: { files: { 'shared.py': 'print("shared")' }, activeFile: 'shared.py' },

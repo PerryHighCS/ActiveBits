@@ -946,6 +946,7 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
       }
       await sessions.set(session.id, session)
       await broadcast('student-code-updated', session.data.groups[DEFAULT_GROUP_ID] ?? { files: {}, activeFile: '' }, session.id, 'managers')
+      res.set('Cache-Control', 'no-store')
       res.json({ ok: true, workspace: { files: workspace.files, activeFile: workspace.activeFile } })
     } catch (error) {
       console.error(JSON.stringify({ event: 'mobcode.student-state-failed', sessionId: req.params.sessionId, error: String(error) }))
@@ -983,6 +984,7 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
       }
       await sessions.set(session.id, session)
       await broadcast('student-code-updated', session.data.groups[DEFAULT_GROUP_ID] ?? { files: {}, activeFile: '' }, session.id, 'managers')
+      res.set('Cache-Control', 'no-store')
       res.json({ ok: true, workspace: { files: workspace.files, activeFile: workspace.activeFile } })
     } catch (error) {
       console.error(JSON.stringify({ event: 'mobcode.student-reset-failed', sessionId: req.params.sessionId, error: String(error) }))
@@ -1045,6 +1047,7 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
         shareChangesEnabled: studentCode.shareChangesEnabled,
       }
       await broadcast('student-code-settings-changed', settingsPayload, session.id)
+      res.set('Cache-Control', 'no-store')
       res.json({ ok: true, data: buildMobCodeManagerSnapshot(session.data) })
     } catch (error) {
       console.error(JSON.stringify({ event: 'mobcode.student-code-manager-failed', sessionId: req.params.sessionId, error: String(error) }))
@@ -1077,6 +1080,7 @@ export default function setupMobCodeRoutes(app: AppLike, sessions: MobCodeSessio
         shareChangesEnabled: session.data.studentCode?.shareChangesEnabled === true,
       }
       await broadcast('student-code-settings-changed', settingsPayload, session.id)
+      res.set('Cache-Control', 'no-store')
       res.json({ ok: true, workspace: sharedExample.workspace })
     } catch (error) {
       console.error(JSON.stringify({ event: 'mobcode.shared-workspace-state-failed', sessionId: req.params.sessionId, error: String(error) }))
