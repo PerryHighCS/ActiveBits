@@ -70,14 +70,14 @@ test('starting Try it moves an accepted student to My Code', async ({ browser })
   await acceptStudent(instructorPage, studentPage, session.id, 'Ada Lovelace')
 
   await studentPage.goto(`/${encodeURIComponent(session.id)}`)
-  await expect(studentPage.getByRole('tab', { name: 'Instructor' })).toHaveAttribute('aria-selected', 'true')
+  await expect(studentPage.getByRole('button', { name: 'Instructor' })).toHaveAttribute('aria-pressed', 'true')
 
   await openMobCodeManager(instructorPage, session)
   await instructorPage.getByRole('button', { name: 'Try it' }).click()
 
-  const myCodeTab = studentPage.getByRole('tab', { name: 'My Code' })
-  await expect(myCodeTab).toBeVisible({ timeout: 10_000 })
-  await expect(myCodeTab).toHaveAttribute('aria-selected', 'true')
+  const myCodeButton = studentPage.getByRole('button', { name: 'My Code', exact: true })
+  await expect(myCodeButton).toBeVisible({ timeout: 10_000 })
+  await expect(myCodeButton).toHaveAttribute('aria-pressed', 'true')
   await expect(studentPage.getByText('starter.py', { exact: true })).toBeVisible()
 
   await instructorPage.close()
