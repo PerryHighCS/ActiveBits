@@ -4,8 +4,8 @@
 
 - [x] Discovery pass complete
 - [ ] API contract approved
-- [ ] Shared component implemented
-- [ ] SyncDeck migrated to shared component
+- [x] Shared component implemented
+- [x] SyncDeck migrated to shared component
 - [ ] One additional activity integrated
 - [ ] Tests and docs complete
 
