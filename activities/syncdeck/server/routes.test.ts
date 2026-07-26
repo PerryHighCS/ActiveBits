@@ -1,6 +1,7 @@
 import type { SessionRecord, SessionStore } from 'activebits-server/core/sessions.js'
 import { consumeSessionDataToken } from 'activebits-server/core/sessionTokenUtils.js'
 import { acceptEntryParticipant, findAcceptedEntryParticipant, issueAcceptedEntryParticipantToken, resolveAcceptedEntryParticipantToken } from 'activebits-server/core/acceptedEntryParticipants.js'
+import { storeSessionEntryParticipant } from 'activebits-server/core/sessionEntryParticipants.js'
 import {
   computePersistentLinkUrlHash,
   type PersistentLinkUrlState,
@@ -237,11 +238,17 @@ void test('SyncDeck instructor can return an accepted student to the waiting roo
   }]
   acceptEntryParticipant(session, { participantId: 'student-1', displayName: 'Ada' })
   const participantToken = issueAcceptedEntryParticipantToken(session, 'student-1')
-  const state = createSessionStore({ [session.id]: session })
+  const child = createSyncDeckSession('CHILD:return-session:resonance')
+  acceptEntryParticipant(child, { participantId: 'student-1', displayName: 'Ada' })
+  const childToken = issueAcceptedEntryParticipantToken(child, 'student-1')
+  const childEntryToken = storeSessionEntryParticipant(child, { participantId: 'student-1', displayName: 'Ada' }).token
+  ;(session.data as { embeddedActivities: Record<string, unknown> }).embeddedActivities['resonance:0:0'] = { childSessionId: child.id, activityId: 'resonance', startedAt: 1, owner: 'syncdeck-instructor' }
+  const state = createSessionStore({ [session.id]: session, [child.id]: child })
   const app = createMockApp()
   const ws = createMockWs()
   const sent: string[] = []
   const closeCalls: Array<{ code?: number; reason?: string }> = []
+  const childCloseCalls: Array<{ code?: number; reason?: string }> = []
   ws.wss.clients.add({
     readyState: 1,
     sessionId: session.id,
@@ -249,6 +256,7 @@ void test('SyncDeck instructor can return an accepted student to the waiting roo
     send(payload: string) { sent.push(payload) },
     close(code?: number, reason?: string) { closeCalls.push({ code, reason }) },
   } as unknown as ActiveBitsWebSocket)
+  ws.wss.clients.add({ readyState: 1, sessionId: child.id, studentId: 'student-1', send() {}, close(code?: number, reason?: string) { childCloseCalls.push({ code, reason }) } } as unknown as ActiveBitsWebSocket)
   setupSyncDeckRoutes(app, state.sessions, ws)
 
   const response = createResponse()
@@ -262,8 +270,11 @@ void test('SyncDeck instructor can return an accepted student to the waiting roo
   assert.equal((state.store[session.id]?.data as { students: unknown[] }).students.length, 0)
   assert.equal(findAcceptedEntryParticipant(state.store[session.id]!, 'student-1'), null)
   assert.equal(resolveAcceptedEntryParticipantToken(state.store[session.id]!, participantToken), null)
+  assert.equal(resolveAcceptedEntryParticipantToken(state.store[child.id]!, childToken), null)
+  assert.equal((state.store[child.id]?.data as { entryParticipants?: Record<string, unknown> }).entryParticipants?.[childEntryToken], undefined)
   assert.match(sent[0] ?? '', /participant-returned-to-waiting-room/)
   assert.deepEqual(closeCalls, [{ code: 4001, reason: 'Returned to waiting room' }])
+  assert.deepEqual(childCloseCalls, [{ code: 4001, reason: 'Returned to waiting room' }])
 })
 
 void test('SyncDeck return-to-waiting-room rejects a bad instructor passcode without mutation', async () => {
