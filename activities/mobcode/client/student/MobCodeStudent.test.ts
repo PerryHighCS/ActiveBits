@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   applyStudentFileContentUpdate,
+  cancelPendingStudentWorkspacePersist,
   getStudentRunnerOptions,
   isEmbeddedMobCodeChildSession,
   removeMobCodeSoloTokenFromHash,
@@ -65,6 +66,33 @@ void test('Try it selection takes priority over the Broadcast workspace selectio
   assert.equal(shouldSelectInstructorFromBroadcastSettings(true, false, true), false)
   assert.equal(shouldSelectInstructorFromBroadcastSettings(false, false, true), true)
   assert.equal(shouldSelectInstructorFromBroadcastSettings(false, true, true), false)
+})
+
+void test('reset cancels a delayed pre-reset workspace save and waits for the active save', async () => {
+  let delayedSaveFlushed = false
+  const debounceRef = {
+    current: setTimeout(() => { delayedSaveFlushed = true }, 0) as ReturnType<typeof setTimeout> | null,
+  }
+  const pendingWorkspaceRef = { current: { files: { 'main.py': 'pre-reset edit' }, activeFile: 'main.py' } as unknown }
+  let finishActiveSave!: () => void
+  let activeSaveFinished = false
+  const inFlightPersistRef = {
+    current: new Promise<void>((resolve) => { finishActiveSave = resolve }).then(() => { activeSaveFinished = true }),
+  }
+  let resetRequestStarted = false
+  const reset = cancelPendingStudentWorkspacePersist(debounceRef, pendingWorkspaceRef, inFlightPersistRef).then(() => {
+    assert.equal(activeSaveFinished, true)
+    resetRequestStarted = true
+  })
+
+  assert.equal(resetRequestStarted, false)
+  finishActiveSave()
+  await reset
+  await new Promise((resolve) => setTimeout(resolve, 5))
+
+  assert.equal(resetRequestStarted, true)
+  assert.equal(delayedSaveFlushed, false)
+  assert.equal(pendingWorkspaceRef.current, null)
 })
 
 void test('resolveStudentActiveFileChange ignores missing active-file updates', () => {

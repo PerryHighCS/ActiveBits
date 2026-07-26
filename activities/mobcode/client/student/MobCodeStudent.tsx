@@ -75,6 +75,17 @@ export function shouldSelectInstructorFromBroadcastSettings(
   return !shouldSelectMyCode && !previousShareChangesEnabled && nextShareChangesEnabled
 }
 
+export async function cancelPendingStudentWorkspacePersist(
+  debounceRef: { current: ReturnType<typeof setTimeout> | null },
+  pendingWorkspaceRef: { current: unknown },
+  inFlightPersistRef: { current: Promise<void> | null },
+): Promise<void> {
+  if (debounceRef.current) clearTimeout(debounceRef.current)
+  debounceRef.current = null
+  pendingWorkspaceRef.current = null
+  await inFlightPersistRef.current?.catch(() => undefined)
+}
+
 function waitForEmbeddedEntryParticipantHandoff(sessionId: string): Promise<void> {
   if (typeof sessionStorage === 'undefined' || !isEmbeddedMobCodeChildSession(sessionId)) {
     return Promise.resolve()
@@ -283,6 +294,7 @@ function MobCodeLiveStudent({ sessionData }: MobCodeStudentProps) {
   const myWorkspacePersistDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pendingMyWorkspaceRef = useRef<{ files: Record<string, string>; activeFile: string } | null>(null)
   const inFlightMyWorkspacePersistRef = useRef<Promise<void> | null>(null)
+  const isResettingMyWorkspaceRef = useRef(false)
   const runnerRendererRef = useRef<MobCodeRunnerRenderer | null>(null)
   const previousTryItEnabledRef = useRef(false)
   const previousSharedExampleAvailableRef = useRef(false)
@@ -562,6 +574,7 @@ function MobCodeLiveStudent({ sessionData }: MobCodeStudentProps) {
   }, [persistMyWorkspace])
 
   const scheduleMyWorkspacePersist = useCallback((nextFiles: Record<string, string>, nextActiveFile: string) => {
+    if (isResettingMyWorkspaceRef.current) return
     pendingMyWorkspaceRef.current = { files: nextFiles, activeFile: nextActiveFile }
     if (myWorkspacePersistDebounceRef.current == null) {
       myWorkspacePersistDebounceRef.current = setTimeout(flushMyWorkspacePersist, LIVE_CONTENT_SYNC_INTERVAL_MS)
@@ -577,7 +590,13 @@ function MobCodeLiveStudent({ sessionData }: MobCodeStudentProps) {
   }, [flushMyWorkspacePersist])
 
   const resetMyCode = useCallback(async () => {
+    isResettingMyWorkspaceRef.current = true
     try {
+      await cancelPendingStudentWorkspacePersist(
+        myWorkspacePersistDebounceRef,
+        pendingMyWorkspaceRef,
+        inFlightMyWorkspacePersistRef,
+      )
       const response = await fetch(`/api/mobcode/${encodedSessionId}/student-workspace/reset`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
       })
@@ -589,6 +608,7 @@ function MobCodeLiveStudent({ sessionData }: MobCodeStudentProps) {
     } catch (error) {
       setRunnerMessage(error instanceof Error ? error.message : 'Could not reset your code.')
     } finally {
+      isResettingMyWorkspaceRef.current = false
       setResetPending(false)
     }
   }, [encodedSessionId])
