@@ -681,7 +681,7 @@ function MobCodeLiveStudent({ sessionData }: MobCodeStudentProps) {
                 readOnly={!canEditMyCode}
                 remotePresence={workspaceView === 'instructor' ? instructorPresence : null}
                 onUpdate={(update) => {
-                  if (!canEditMyCode || !update.docChanged) return
+                  if (workspaceView !== 'mine' || !tryItEnabled || !myWorkspace || !update.docChanged) return
                   const nextFiles = { ...myWorkspace.files, [selectedActiveFile]: update.state.doc.toString() }
                   const nextWorkspace = { files: nextFiles, activeFile: selectedActiveFile }
                   setMyWorkspace(nextWorkspace)
