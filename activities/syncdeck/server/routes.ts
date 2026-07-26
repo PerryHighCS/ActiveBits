@@ -15,7 +15,8 @@ import {
   isValidHttpUrl,
   normalizePossiblyEncodedHttpUrl,
 } from 'activebits-server/core/httpUrlUtils.js'
-import { closeDuplicateParticipantSockets } from 'activebits-server/core/participantSockets.js'
+import { closeDuplicateParticipantSockets, closeParticipantSockets } from 'activebits-server/core/participantSockets.js'
+import { revokeAcceptedEntryParticipant } from 'activebits-server/core/acceptedEntryParticipants.js'
 import {
   createSession,
   EMBEDDED_CHILD_SESSION_PREFIX,
@@ -1848,6 +1849,53 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       console.error(JSON.stringify({ activity: 'syncdeck', event: 'create-session-failed', error: error instanceof Error ? error.message : String(error) }))
       response.status(500).json({ error: 'Unable to create SyncDeck session' })
     }
+  })
+
+  app.post('/api/syncdeck/:sessionId/students/:studentId/return-to-waiting-room', async (req, res) => {
+    const sessionId = req.params.sessionId
+    const studentId = normalizeStudentId(req.params.studentId)
+    if (!sessionId || !studentId) {
+      res.status(400).json({ error: 'invalid participant' })
+      return
+    }
+
+    const session = await getSyncDeckSessionWithEmbeddedKeepalive(sessions, sessionId)
+    if (!session) {
+      res.status(404).json({ error: 'invalid session' })
+      return
+    }
+
+    const instructorPasscode = normalizeInstructorPasscode(readStringField(req.body, 'instructorPasscode'))
+    if (!instructorPasscode || !verifyInstructorPasscode(session.data.instructorPasscode, instructorPasscode)) {
+      res.status(403).json({ error: 'forbidden' })
+      return
+    }
+    if (!findSyncDeckStudentById(session.data.students, studentId) || !revokeAcceptedEntryParticipant(session, studentId)) {
+      res.status(404).json({ error: 'participant not found' })
+      return
+    }
+
+    session.data.students = session.data.students.filter((student) => student.studentId !== studentId)
+    await sessions.set(session.id, session)
+
+    const lifecyclePayload = JSON.stringify({
+      type: 'participant-returned-to-waiting-room',
+      version: '1',
+      participantId: studentId,
+    })
+    for (const peer of ws.wss.clients as Set<SyncDeckSocket>) {
+      if (peer.readyState === WS_OPEN_READY_STATE && peer.sessionId === session.id && peer.studentId === studentId) {
+        try {
+          peer.send(lifecyclePayload)
+        } catch {
+          // The close below remains authoritative if the notification cannot be delivered.
+        }
+      }
+    }
+    closeParticipantSockets(ws.wss.clients as Set<SyncDeckSocket>, session.id, studentId)
+    await broadcastStudentsToInstructors(session.id)
+    console.info(JSON.stringify({ activity: 'syncdeck', event: 'participant-returned-to-waiting-room', sessionId: session.id, participantId: studentId }))
+    res.json({ participantId: studentId })
   })
 
   app.post('/api/syncdeck/:sessionId/embedded-context', async (req, res) => {
