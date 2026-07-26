@@ -284,7 +284,9 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
     assert.equal(reusedSubstituteLaunchResponse.redirectTo, `/manage/syncdeck/${createdSessionId}`)
     assert.ok(reusedSubstituteLaunchResponse.cookies.some((item) => item.name === 'syncdeck_instructor_recoveries'))
     assert.equal(instructorSessionCreateCount, 1)
+    assert.ok(infoLogs.some((message) => message.includes('learn-substitute-link-launched') && message.includes('"reused":true')))
 
+    console.info('[TEST] Expected substitute launch with an active mismatched deck to return a non-retryable response.')
     const mismatchedDeckSubstituteResponse = response()
     await getHandlers.get('/api/syncdeck/learn/substitute')!(
       { params: {}, query: substituteInstructorLink(resourceId, 'https://slides.example/other-deck') },
@@ -294,6 +296,7 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
     assert.equal(mismatchedDeckSubstituteResponse.headers['Content-Type'], 'text/html; charset=utf-8')
     assert.match(String(mismatchedDeckSubstituteResponse.body), /Presentation URL cannot change while the instructor session is active/)
     assert.match(String(mismatchedDeckSubstituteResponse.body), /Ask the instructor who shared this link for a new one/)
+    assert.ok(infoLogs.some((message) => message.includes('learn-substitute-link-presentation-url-mismatch') && message.includes('"status":409')))
 
     console.info('[TEST] Expected invalid substitute instructor link to fail closed.')
     const invalidSubstituteResponse = response()
@@ -365,6 +368,7 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
     )
     await substituteSessionStarted
     const inProgressSubstituteResponse = response()
+    console.info('[TEST] Expected a duplicate substitute launch to report the pending session start.')
     await getHandlers.get('/api/syncdeck/learn/substitute')!(
       { params: {}, query: startingSubstituteLaunch },
       inProgressSubstituteResponse,
@@ -372,7 +376,9 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
     assert.equal(inProgressSubstituteResponse.statusCode, 202)
     assert.equal(inProgressSubstituteResponse.headers['Content-Type'], 'text/html; charset=utf-8')
     assert.match(String(inProgressSubstituteResponse.body), /SyncDeck session is starting/)
+    assert.ok(infoLogs.some((message) => message.includes('learn-substitute-link-start-pending') && message.includes('"status":202')))
     const contendedSubstituteResponse = response()
+    console.info('[TEST] Expected a different substitute launch to report the in-progress session start.')
     await getHandlers.get('/api/syncdeck/learn/substitute')!(
       { params: {}, query: substituteInstructorLink(startingSubstituteResourceId, 'https://slides.example/substitute-starting', 'substitute-contended') },
       contendedSubstituteResponse,
@@ -380,10 +386,30 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
     assert.equal(contendedSubstituteResponse.statusCode, 409)
     assert.equal(contendedSubstituteResponse.headers['Content-Type'], 'text/html; charset=utf-8')
     assert.match(String(contendedSubstituteResponse.body), /SyncDeck session is starting/)
+    assert.ok(infoLogs.some((message) => message.includes('learn-substitute-link-start-in-progress') && message.includes('"status":409')))
     releaseDelayedSubstituteStart()
     await firstSubstituteLaunch
+    assert.ok(infoLogs.some((message) => message.includes('learn-substitute-link-launched') && message.includes('"reused":false')))
     delayedInstructorSession = null
     notifyInstructorSessionStart = null
+
+    console.info('[TEST] Expected substitute-launch cleanup failures to preserve the safe error response.')
+    const originalDeleteForSubstituteCleanup = sessions.delete.bind(sessions)
+    sessions.delete = async (id) => {
+      if (id.startsWith('learn-syncdeck-entry-')) throw new Error('test substitute cleanup failure')
+      return await originalDeleteForSubstituteCleanup(id)
+    }
+    failInstructorSessionCreation = true
+    const substituteCleanupFailureResponse = response()
+    await getHandlers.get('/api/syncdeck/learn/substitute')!(
+      { params: {}, query: substituteInstructorLink('learn-resource-substitute-cleanup', 'https://slides.example/substitute-cleanup', 'substitute-cleanup') },
+      substituteCleanupFailureResponse,
+    )
+    assert.equal(substituteCleanupFailureResponse.statusCode, 500)
+    assert.ok(errorLogs.some((message) => message.includes('learn-substitute-link-start-cleanup-failed') && message.includes('test substitute cleanup failure')))
+    assert.ok(errorLogs.some((message) => message.includes('learn-substitute-link-start-failed') && message.includes('test instructor-session creation failure')))
+    sessions.delete = originalDeleteForSubstituteCleanup
+    failInstructorSessionCreation = false
 
     const replayResponse = response()
     await postHandlers.get('/api/integrations/learn/v1/activities/:activityId/resources/:resourceLinkId/start')!(
