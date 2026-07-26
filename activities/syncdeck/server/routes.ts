@@ -1878,20 +1878,35 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
     }
 
     const childSessionIds: string[] = []
+    const persistedChildSessions: SessionRecord[] = []
     try {
       revokeSessionEntryParticipants(updatedSession, studentId)
       for (const embeddedActivity of Object.values(updatedSession.data.embeddedActivities)) {
         const childSession = await sessions.get(embeddedActivity.childSessionId)
         if (!childSession) continue
+        const originalChildSession = structuredClone(childSession)
         const updatedChildSession = structuredClone(childSession)
         revokeAcceptedEntryParticipant(updatedChildSession, studentId)
         revokeSessionEntryParticipants(updatedChildSession, studentId)
         await sessions.set(updatedChildSession.id, updatedChildSession)
+        persistedChildSessions.push(originalChildSession)
         childSessionIds.push(updatedChildSession.id)
       }
       updatedSession.data.students = updatedSession.data.students.filter((student) => student.studentId !== studentId)
       await sessions.set(updatedSession.id, updatedSession)
     } catch (error) {
+      for (const childSession of persistedChildSessions.reverse()) {
+        try {
+          await sessions.set(childSession.id, childSession)
+        } catch (rollbackError) {
+          console.error(JSON.stringify({
+            activity: 'syncdeck',
+            event: 'participant-return-child-rollback-failed',
+            sessionId: childSession.id,
+            error: rollbackError instanceof Error ? rollbackError.message : String(rollbackError),
+          }))
+        }
+      }
       console.error(JSON.stringify({ activity: 'syncdeck', event: 'participant-return-persist-failed', error: error instanceof Error ? error.message : String(error) }))
       res.status(500).json({ error: 'Unable to return participant to waiting room' })
       return
@@ -1916,7 +1931,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       closeParticipantSockets(ws.wss.clients as Set<SyncDeckSocket>, childSessionId, studentId)
     }
     await broadcastStudentsToInstructors(session.id)
-    console.info(JSON.stringify({ activity: 'syncdeck', event: 'participant-returned-to-waiting-room', sessionId: session.id, participantId: studentId }))
+    console.info(JSON.stringify({ activity: 'syncdeck', event: 'participant-returned-to-waiting-room', sessionId: session.id }))
     res.json({ participantId: studentId })
   })
 

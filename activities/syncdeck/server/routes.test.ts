@@ -325,6 +325,44 @@ void test('SyncDeck return-to-waiting-room does not mutate a live session when p
   assert.ok(findAcceptedEntryParticipant(state.store[session.id]!, 'student-1'))
 })
 
+void test('SyncDeck return-to-waiting-room rolls back persisted child changes when a later child write fails', async () => {
+  console.info('[TEST] Expected return-to-waiting-room embedded child persistence failure.')
+  const session = createSyncDeckSession('return-child-persist-failure', 'teacher-passcode')
+  session.data.students = [{
+    studentId: 'student-1', name: 'Ada', joinedAt: 1, lastSeenAt: 1, lastIndices: null, lastStudentStateAt: null,
+  }]
+  acceptEntryParticipant(session, { participantId: 'student-1', displayName: 'Ada' })
+  const firstChild = createSyncDeckSession('CHILD:return-child-persist-failure:first')
+  const failingChild = createSyncDeckSession('CHILD:return-child-persist-failure:failing')
+  acceptEntryParticipant(firstChild, { participantId: 'student-1', displayName: 'Ada' })
+  acceptEntryParticipant(failingChild, { participantId: 'student-1', displayName: 'Ada' })
+  ;(session.data as { embeddedActivities: Record<string, unknown> }).embeddedActivities = {
+    first: { childSessionId: firstChild.id, activityId: 'resonance', startedAt: 1, owner: 'syncdeck-instructor' },
+    failing: { childSessionId: failingChild.id, activityId: 'resonance', startedAt: 1, owner: 'syncdeck-instructor' },
+  }
+  const state = createSessionStore({ [session.id]: session, [firstChild.id]: firstChild, [failingChild.id]: failingChild })
+  const originalSet = state.sessions.set
+  state.sessions.set = async (id, nextSession) => {
+    if (id === failingChild.id) throw new Error('child store unavailable')
+    await originalSet(id, nextSession)
+  }
+  const app = createMockApp()
+  const ws = createMockWs()
+  setupSyncDeckRoutes(app, state.sessions, ws)
+
+  const response = createResponse()
+  await app.handlers.post['/api/syncdeck/:sessionId/students/:studentId/return-to-waiting-room']!(
+    createRequest({ sessionId: session.id, studentId: 'student-1' }, { instructorPasscode: 'teacher-passcode' }),
+    response,
+  )
+
+  assert.equal(response.statusCode, 500)
+  assert.equal((state.store[session.id]?.data as { students: unknown[] }).students.length, 1)
+  assert.ok(findAcceptedEntryParticipant(state.store[session.id]!, 'student-1'))
+  assert.ok(findAcceptedEntryParticipant(state.store[firstChild.id]!, 'student-1'))
+  assert.ok(findAcceptedEntryParticipant(state.store[failingChild.id]!, 'student-1'))
+})
+
 class MockSocket implements ActiveBitsWebSocket {
   sessionId?: string | null
   studentId?: string | null
