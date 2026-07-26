@@ -30,3 +30,20 @@ export function closeDuplicateParticipantSockets<TSocket extends ParticipantSock
     }
   }
 }
+
+/** Closes every active socket for a participant after their session entry is revoked. */
+export function closeParticipantSockets<TSocket extends ParticipantSocketLike>(
+  clients: Iterable<TSocket>,
+  sessionId: string,
+  participantId: string,
+): void {
+  for (const client of clients) {
+    if (client.readyState !== 1 || client.sessionId !== sessionId || client.studentId !== participantId) continue
+    client.ignoreDisconnect = true
+    try {
+      client.close(4001, 'Returned to waiting room')
+    } catch (error) {
+      console.error('Failed to close returned participant socket', error)
+    }
+  }
+}

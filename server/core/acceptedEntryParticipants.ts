@@ -132,6 +132,28 @@ export function resolveAcceptedEntryParticipantToken(
   return findAcceptedEntryParticipant(session, typeof participantId === 'string' ? participantId : null)
 }
 
+/** Revokes a participant's current accepted entry and every token issued for it. */
+export function revokeAcceptedEntryParticipant(
+  session: AcceptedEntryParticipantSessionLike,
+  participantId: string | null,
+): boolean {
+  const normalizedParticipantId = typeof participantId === 'string' ? participantId.trim() : ''
+  if (!normalizedParticipantId || !isRecord(session.data)) return false
+
+  const container = session.data as AcceptedEntryParticipantContainer
+  if (!container.acceptedEntryParticipants || !Object.hasOwn(container.acceptedEntryParticipants, normalizedParticipantId)) {
+    return false
+  }
+
+  delete container.acceptedEntryParticipants[normalizedParticipantId]
+  if (isRecord(container.participantAuthTokens)) {
+    for (const [token, ownerId] of Object.entries(container.participantAuthTokens)) {
+      if (ownerId === normalizedParticipantId) delete container.participantAuthTokens[token]
+    }
+  }
+  return true
+}
+
 export function resolveAcceptedEntryParticipantName(
   session: AcceptedEntryParticipantSessionLike,
   participantId: string | null,

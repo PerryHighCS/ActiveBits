@@ -5,6 +5,7 @@ import {
   findAcceptedEntryParticipant,
   getSessionParticipantCookieName,
   issueAcceptedEntryParticipantToken,
+  revokeAcceptedEntryParticipant,
   resolveAcceptedEntryParticipantToken,
   resolveAcceptedEntryParticipantName,
 } from './core/acceptedEntryParticipants.js'
@@ -94,4 +95,26 @@ void test('accepted participant token resolution ignores malformed rehydrated to
   session.data = { participantAuthTokens: 'not-a-map' }
 
   assert.equal(resolveAcceptedEntryParticipantToken(session, 'token'), null)
+})
+
+void test('revokeAcceptedEntryParticipant removes the accepted entry and every participant token', () => {
+  const session = createSessionRecord('session-revoked')
+  acceptEntryParticipant(session, { participantId: 'participant-1', displayName: 'Ada' })
+  const token = issueAcceptedEntryParticipantToken(session, 'participant-1')
+  const data = session.data as { participantAuthTokens?: Record<string, string> }
+  data.participantAuthTokens ??= {}
+  data.participantAuthTokens['older-token'] = 'participant-1'
+  data.participantAuthTokens['other-token'] = 'participant-2'
+
+  assert.equal(revokeAcceptedEntryParticipant(session, ' participant-1 '), true)
+  assert.equal(findAcceptedEntryParticipant(session, 'participant-1'), null)
+  assert.equal(resolveAcceptedEntryParticipantToken(session, token), null)
+  assert.deepEqual({ ...data.participantAuthTokens }, { 'other-token': 'participant-2' })
+})
+
+void test('revokeAcceptedEntryParticipant does not mutate a missing participant', () => {
+  const session = createSessionRecord('session-missing')
+  acceptEntryParticipant(session, { participantId: 'participant-1', displayName: 'Ada' })
+  assert.equal(revokeAcceptedEntryParticipant(session, 'missing'), false)
+  assert.ok(findAcceptedEntryParticipant(session, 'participant-1'))
 })
