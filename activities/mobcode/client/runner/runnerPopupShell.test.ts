@@ -21,6 +21,7 @@ void test('openMobCodeRunnerPopupShell opens and focuses a blank popup during th
 })
 
 void test('openMobCodeRunnerPopupShell reports a blocked popup', () => {
+  console.log('[TEST] exercising the expected blocked-popup path')
   assert.deepEqual(openMobCodeRunnerPopupShell({ open: () => null }), {
     opened: false,
     reason: 'popup-blocked',

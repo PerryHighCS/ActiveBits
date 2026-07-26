@@ -288,7 +288,7 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken, soloM
   useEffect(() => {
     void import('../runner/runnerUtils').then((runnerRenderer) => {
       runnerRendererRef.current = runnerRenderer
-    })
+    }).catch((error: unknown) => console.error('Failed to preload MobCode runner:', error))
   }, [])
 
   const applyManagerSessionSnapshot = useCallback((data: MobCodeManagerSessionSnapshot) => {
@@ -987,7 +987,7 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken, soloM
                   </button>
                 )}
                 {selectedStudentWorkspace && (
-                  <button type="button" aria-pressed="true" className="mobcode-workspace-tab" disabled>
+                  <button type="button" aria-pressed="true" className="mobcode-workspace-tab">
                     {selectedStudentWorkspace.displayName}
                   </button>
                 )}
@@ -1098,12 +1098,12 @@ export default function MobCodeManager({ sessionIdOverride, soloEditToken, soloM
                     latestFileSizeStatsRef.current = {
                       perFileBytes: {
                         ...latestFileSizeStatsRef.current.perFileBytes,
-                        [activeFile]: nextContentBytes,
+                        [visibleActiveFile]: nextContentBytes,
                       },
                       totalBytes: Math.max(
                         0,
                         latestFileSizeStatsRef.current.totalBytes
-                          - (latestFileSizeStatsRef.current.perFileBytes[activeFile] ?? 0)
+                          - (latestFileSizeStatsRef.current.perFileBytes[visibleActiveFile] ?? 0)
                           + nextContentBytes,
                       ),
                     }

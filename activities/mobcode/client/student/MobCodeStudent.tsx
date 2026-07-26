@@ -472,7 +472,7 @@ function MobCodeLiveStudent({ sessionData }: MobCodeStudentProps) {
   useEffect(() => {
     void import('../runner/runnerUtils').then((runnerRenderer) => {
       runnerRendererRef.current = runnerRenderer
-    })
+    }).catch((error: unknown) => console.error('Failed to preload MobCode runner:', error))
   }, [])
 
   const handleThemeChange = (nextTheme: MobCodeThemeId) => {
