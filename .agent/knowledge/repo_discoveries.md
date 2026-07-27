@@ -14,6 +14,14 @@ Use this log for durable findings that future contributors and agents should reu
 
 ## Discoveries
 
+- Date: 2026-07-27
+- Area: client | activities | syncdeck | reporting
+- Discovery: SyncDeck's end-session confirmation can only know that the browser successfully initiated a report download in the active manager view; browsers do not expose a reliable signal that a user retained the downloaded file.
+- Why it matters: The irreversible-session warning should clear only after the report endpoint succeeds and the download link has been clicked. A failed request must keep the warning in place.
+- Evidence: `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/client/manager/SyncDeckManager.test.tsx`.
+- Follow-up action: If this acknowledgement must survive reloads or be shared across instructors, add an authenticated server-side report-export audit field rather than storing instructor credentials or sensitive state in browser storage.
+- Owner: Codex
+
 - Date: 2026-07-23
 - Area: server | persistent sessions | instructor recovery
 - Discovery: The shared `persistent_sessions` httpOnly cookie contains remembered teacher codes and permalink state. A fixed entry-count cap alone can exceed browser cookie limits when several SyncDeck entries carry presentation URLs; browsers may silently reject the oversized replacement cookie. Bounds must measure the percent-encoded JSON cookie value and skip individually oversized entries without evicting older valid remembered sessions.

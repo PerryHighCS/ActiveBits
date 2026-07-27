@@ -1333,6 +1333,15 @@ export function buildReportPreviewSummary(
   })
 }
 
+export function buildEndSessionConfirmationMessage(hasDownloadedSessionReport: boolean): string {
+  const disconnectionWarning = 'End this session? All students will be disconnected.'
+  if (hasDownloadedSessionReport) {
+    return disconnectionWarning
+  }
+
+  return `${disconnectionWarning} You will not be able to download a report once the session is ended.`
+}
+
 function resolveReportContributionClassName(
   contribution: ReportContributionState | undefined,
   isLoading: boolean,
@@ -2223,6 +2232,7 @@ const SyncDeckManager: FC = () => {
   const [endingEmbeddedInstanceKey, setEndingEmbeddedInstanceKey] = useState<string | null>(null)
   const [pendingEmbeddedEndConfirmInstanceKey, setPendingEmbeddedEndConfirmInstanceKey] = useState<string | null>(null)
   const [isDownloadingSessionReport, setIsDownloadingSessionReport] = useState(false)
+  const [hasDownloadedSessionReport, setHasDownloadedSessionReport] = useState(false)
   const [sessionReportError, setSessionReportError] = useState<string | null>(null)
   const [reportContributionByInstanceKey, setReportContributionByInstanceKey] =
     useState<Record<string, ReportContributionState>>({})
@@ -3218,7 +3228,7 @@ const SyncDeckManager: FC = () => {
     if (!sessionId) return
 
     if (typeof window !== 'undefined') {
-      const confirmed = window.confirm('End this session? All students will be disconnected.')
+      const confirmed = window.confirm(buildEndSessionConfirmationMessage(hasDownloadedSessionReport))
       if (!confirmed) return
     }
 
@@ -4580,6 +4590,7 @@ const SyncDeckManager: FC = () => {
       downloadLink.click()
       document.body.removeChild(downloadLink)
       URL.revokeObjectURL(objectUrl)
+      setHasDownloadedSessionReport(true)
       void refreshReportContributionStatus()
     } catch {
       setSessionReportError('Session report download failed. Check your connection and try again.')

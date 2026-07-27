@@ -15,6 +15,15 @@ Capture reusable test setup patterns, common failure modes, and reliability guid
 
 ## Entries
 
+- Date: 2026-07-27
+- Scope: typecheck | activities
+- Pattern: Run the activities TypeScript check one activity directory at a time through `scripts/typecheck-activities.mjs`. The runner reuses `activities/tsconfig.json` compiler options and shared contracts, but narrows source inclusion to the current activity.
+- Why it helps: Isolated typechecks identify the failing activity and reduce peak compiler memory while retaining the activity's normal type boundary.
+- Example (file/path): `scripts/typecheck-activities.mjs`; `activities/package.json`
+- Failure signal: A workspace-wide `tsc --noEmit` is killed or reports errors without identifying the smallest activity scope.
+- Follow-up action: Keep this runner's activity discovery aligned with `scripts/lint-activities.mjs` when adding a new excluded directory.
+- Owner: Codex
+
 - Date: 2026-07-26
 - Scope: unit | e2e | MobCode Python runner
 - Pattern: When wrapping user Python in a function, treat blank and comment-only source as an empty suite and emit `pass`; test both source shapes in the real Brython popup as well as the source builder.
