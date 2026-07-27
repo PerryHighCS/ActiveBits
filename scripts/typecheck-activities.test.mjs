@@ -20,9 +20,9 @@ void test('activity typecheck runner uses sorted activity directories', () => {
 void test('activity typecheck config scopes sources to one activity while retaining shared contracts', () => {
   const config = buildActivityTypecheckConfig('syncdeck')
   assert.deepEqual(config.errors, [])
-  assert.ok(config.fileNames.some((fileName) => fileName.includes('/activities/syncdeck/')))
-  assert.ok(config.fileNames.some((fileName) => fileName.includes('/activities/shared/')))
-  assert.equal(config.fileNames.some((fileName) => fileName.includes('/activities/resonance/')), false)
+  assert.ok(config.fileNames.some((fileName) => /[\\/]activities[\\/]syncdeck[\\/]/.test(fileName)))
+  assert.ok(config.fileNames.some((fileName) => /[\\/]activities[\\/]shared[\\/]/.test(fileName)))
+  assert.equal(config.fileNames.some((fileName) => /[\\/]activities[\\/]resonance[\\/]/.test(fileName)), false)
   assert.equal(config.options.strict, true)
   assert.equal(config.options.noUnusedLocals, true)
 })
@@ -57,6 +57,16 @@ void test('activity typecheck runner reports a subprocess spawn failure', () => 
   )
 })
 
+void test('activity typecheck runner reports a non-zero subprocess exit status', () => {
+  const errors = []
+  console.info('[TEST] Expected activity typecheck subprocess non-zero exit status.')
+  assert.equal(
+    runActivityTypecheckProcess('syncdeck', () => ({ status: 1 }), (message) => errors.push(message)),
+    false,
+  )
+  assert.match(errors[0], /exited with status 1/i)
+})
+
 void test('activity typecheck runner spawns this runner module for each activity', () => {
   let spawnedArguments
   assert.equal(
@@ -67,6 +77,6 @@ void test('activity typecheck runner spawns this runner module for each activity
     true,
   )
   assert.equal(spawnedArguments[0], process.execPath)
-  assert.match(spawnedArguments[1][0], /scripts\/typecheck-activities\.mjs$/)
+  assert.match(spawnedArguments[1][0], /scripts[\\/]typecheck-activities\.mjs$/)
   assert.equal(spawnedArguments[1][1], 'syncdeck')
 })

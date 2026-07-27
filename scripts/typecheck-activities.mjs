@@ -71,10 +71,10 @@ export function typecheckActivity(activityName) {
   return false
 }
 
-export function runActivityTypecheckProcess(activityName, spawn = spawnSync) {
+export function runActivityTypecheckProcess(activityName, spawn = spawnSync, reportError = console.error) {
   const result = spawn(process.execPath, [typecheckActivitiesRunnerPath, activityName], { stdio: 'inherit' })
   if (result.error) {
-    console.error(`Unable to typecheck activities/${activityName}: ${result.error.message}`)
+    reportError(`Unable to typecheck activities/${activityName}: ${result.error.message}`)
     return false
   }
 
@@ -83,7 +83,9 @@ export function runActivityTypecheckProcess(activityName, spawn = spawnSync) {
   }
 
   if (result.signal) {
-    console.error(`Typechecking activities/${activityName} ended with signal ${result.signal}.`)
+    reportError(`Typechecking activities/${activityName} ended with signal ${result.signal}.`)
+  } else {
+    reportError(`Typechecking activities/${activityName} exited with status ${result.status ?? 'unknown'}.`)
   }
   return false
 }
