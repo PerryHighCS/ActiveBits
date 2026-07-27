@@ -27,6 +27,11 @@ void test('activity typecheck config scopes sources to one activity while retain
   assert.equal(config.options.noUnusedLocals, true)
 })
 
+void test('activity typecheck config reports an unreadable base configuration', () => {
+  const config = buildActivityTypecheckConfig('syncdeck', () => undefined)
+  assert.equal(config.errors.length, 1)
+})
+
 void test('activity typecheck runner invokes each activity independently', () => {
   const checkedTargets = []
   const success = runActivityTypechecks({

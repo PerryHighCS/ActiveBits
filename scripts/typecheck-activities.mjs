@@ -17,10 +17,15 @@ export function getActivityTargets(directoryEntries) {
     .sort((left, right) => left.localeCompare(right))
 }
 
-export function buildActivityTypecheckConfig(activityName) {
-  const config = ts.getParsedCommandLineOfConfigFile(activitiesTsconfigPath, {}, ts.sys)
+export function buildActivityTypecheckConfig(
+  activityName,
+  parseConfig = ts.getParsedCommandLineOfConfigFile,
+) {
+  const config = parseConfig(activitiesTsconfigPath, {}, ts.sys)
   if (!config) {
-    return { errors: [] }
+    return {
+      errors: [ts.createCompilerDiagnostic(ts.Diagnostics.Cannot_read_file_0, activitiesTsconfigPath)],
+    }
   }
 
   const includedDirectoryPrefixes = [
