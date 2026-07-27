@@ -8,7 +8,7 @@
 - [ ] Implement the versioned request/response relay and roster capability.
 - [ ] Implement validated presentation report contributions and parent-report rendering.
 - [ ] Add unit, route, and browser coverage.
-- [ ] Update durable protocol and payload documentation.
+- [ ] Update the SyncDeck skill, durable protocol/payload documentation, and shared skill subtree.
 - [ ] Run required validation.
 
 ## Goal
@@ -89,6 +89,146 @@ An embedded activity's server decides when a parent event is warranted, then cal
 server-authorized SyncDeck parent-event adapter using the child session's persisted
 parent linkage. Do not treat a raw child-iframe `postMessage` or a browser-claimed
 activity identity as authorization to publish into the parent session.
+
+## Delivery Phases
+
+Each phase is independently deployable and preserves the existing presentation,
+SyncDeck, and embedded-activity behavior when its new capability is unused. Later phases
+must build on the same server-authoritative session-event service rather than introduce
+parallel message paths.
+
+### Phase 0 — Contract foundation
+
+**Purpose:** Establish the shared types, validation limits, and versioned protocol before
+any new behavior is available to decks.
+
+- [ ] Decide and document the reveal-sync protocol compatibility/version strategy.
+- [ ] Define the host-capability request/response, participant-reference, session-event,
+  error, and bounded JSON/report schemas.
+- [ ] Add parsing/validation unit tests and source/origin/schema reject-path tests.
+- [ ] Update `skills/syncdeck/references/IFRAME_SYNC_PROTOCOL.md` and
+  `skills/syncdeck/SKILL.md` with draft deck-side request, response, and event-listener
+  examples that a presentation author can use without direct ActiveBits API access.
+- [ ] Update `skills/syncdeck/references/ACTIVITY_PAYLOADS.md` with explicit role,
+  privacy, compatibility, and capability-limit rules; link it to the protocol reference
+  instead of duplicating the canonical envelope schema.
+
+**Exit criteria:** No runtime capability is enabled, but all new messages have a single
+documented TypeScript contract with explicit limits and errors, and the SyncDeck skill
+can guide a presentation author through the planned contract.
+
+### Phase 1 — Instructor roster and host selection
+
+**Purpose:** Deliver a useful deck-author feature with the smallest new runtime surface:
+an instructor presentation can request a roster and have the server choose a student.
+
+- [ ] Implement `participants.list` and `participants.pickRandom` over the authenticated
+  manager WebSocket bridge.
+- [ ] Generate server-only, parent-session-scoped participant refs; return names, refs,
+  and documented presence state without internal student IDs.
+- [ ] Add idempotent selection results, empty-roster handling, bounded pending requests,
+  logging, and manager iframe source/origin checks.
+- [ ] Add a same-origin fixture deck and browser coverage for roster retrieval/random
+  selection, plus student/untrusted-iframe denial.
+
+**Exit criteria:** An instructor deck can run a reliable random chooser. It does not yet
+broadcast the selection, publish events, or write report data.
+
+### Phase 2 — Shared all-audience session events
+
+**Purpose:** Establish the parent-owned event service and make visible shared effects
+available without the extra complexity of private delivery or child producers.
+
+- [ ] Implement normalized bounded session-event persistence, idempotency, expiry, and
+  all-audience websocket delivery.
+- [ ] Add `announcement` and a small allowlisted `emote` vocabulary.
+- [ ] Add the instructor-presentation `sessionEvents.publish` adapter.
+- [ ] Add the SyncDeck UI adapter for instructor/enrolled-student emotes, with rate
+  limits, accessibility text equivalents, reduced-motion support, and instructor
+  disable/moderation controls.
+- [ ] Deliver `sessionEvent` envelopes to ready student presentation iframes and the
+  manager; test reconnect replay for stateful events and non-replay for ephemeral emotes.
+
+**Exit criteria:** SyncDeck UI and instructor decks can publish safe all-class
+announcements/emotes through one service. Targeted events and activity producers are not
+yet enabled.
+
+### Phase 3 — Private delivery and embedded-activity producers
+
+**Purpose:** Add participant-targeted effects and safely let activities contribute
+low-volume shared-presentation events without displacing their own runtime sockets.
+
+- [ ] Add server-side private audience resolution from opaque participant refs and ensure
+  non-target browsers receive neither target metadata nor event payload.
+- [ ] Add bounded stateful-event replay only for eligible reconnecting recipients.
+- [ ] Add a server-authorized child-to-parent adapter based on persisted child-parent
+  linkage; reject raw child-browser/iframe event publication.
+- [ ] Add activity/server, websocket, and multi-student browser tests for targeting,
+  expiry, provenance, rate limits, and reconnect behavior.
+
+**Exit criteria:** A selected student can receive a private prompt/emote, and an embedded
+activity can emit an authorized completion/celebration event. Activity WebSockets remain
+authoritative for activity state and high-frequency traffic.
+
+### Phase 4 — Presentation report contributions
+
+**Purpose:** Let instructor decks provide validated class-level report sections using the
+existing self-contained SyncDeck report shell.
+
+- [ ] Add normalized `report.upsert`/`report.remove` persistence and byte/count limits.
+- [ ] Render presentation-provided summary cards and generic blocks in the report
+  manifest and offline HTML with clear provenance.
+- [ ] Test replacement/removal, escaping, self-contained export, and reload/deploy
+  normalization.
+- [ ] Defer presentation-provided per-student report blocks unless a concrete,
+  privacy-reviewed use case is approved.
+
+**Exit criteria:** Deck-authored, bounded class-level report data survives session reloads
+and appears in the downloaded report. It is clearly distinct from activity-generated
+student work.
+
+### Phase 5 — Hardening, documentation, and expansion decisions
+
+**Purpose:** Complete cross-boundary documentation, operational validation, and decide
+which optional capabilities should expand next.
+
+- [ ] Update `ARCHITECTURE.md`, `DEPLOYMENT.md` as warranted, the SyncDeck payload
+  reference, deck/activity author guidance, and durable data/security contract notes.
+- [ ] Run the full unit/typecheck/lint gate and browser suite; record sandbox port-binding
+  limitations if applicable.
+- [ ] Review event rates, stored payload size, classroom UX, and accessibility feedback
+  before adding more emotes, event kinds, selection policies, or per-student reporting.
+
+**Exit criteria:** The deployed behavior, trust boundaries, operational limits, and
+authoring API are documented and tested. Any expanded event type begins as a new planned
+increment rather than bypassing validation.
+
+## SyncDeck Skill Maintenance
+
+The checked-in `skills/syncdeck/` subtree is the deck-authoring product surface for this
+protocol. It must be updated in the same implementation phase as any deck-facing
+capability change, not retroactively after code ships.
+
+For each implemented capability, update:
+
+- `skills/syncdeck/SKILL.md` with when to use the capability, role restrictions, and a
+  link to the canonical reference;
+- `skills/syncdeck/references/IFRAME_SYNC_PROTOCOL.md` with the exact versioned request,
+  response, and host-delivered event envelopes; correlation, timeout, and error handling;
+- `skills/syncdeck/references/ACTIVITY_PAYLOADS.md` with the interaction between deck
+  capabilities and embedded activity payloads/channel ownership;
+- a minimal copyable deck-side helper/example that sends requests to the parent, verifies
+  `event.origin`/message shape on responses, handles `sessionEvent`, and never calls an
+  ActiveBits API or treats browser data as authority.
+
+Documentation must state the compatibility story for decks that do not implement the
+new capability, the instructor-only roster restriction, opaque participant-reference
+handling, session-event privacy/expiry behavior, and the rule that embedded activities'
+own WebSockets remain authoritative for their runtime state.
+
+Because `skills/syncdeck` is intended for sharing across repositories, push the updated
+subtree back to `syncdeck-agent-skills` as part of the completion flow, following the
+repository rule to perform subtree synchronization only from a non-`main` branch.
 
 ## Product and Privacy Decisions
 
@@ -406,9 +546,13 @@ session.data.sessionEvents: Record<string, {
 5. Add clear unavailable/invalid status in the report only for persisted contributions
    that can no longer be rendered; do not silently omit valid data.
 
-## Implementation Checklist
+## Cross-Phase Implementation Workstreams
 
-### Phase 1 — Contract and shared types
+The delivery phases above determine release order. These workstreams track the technical
+tasks that support one or more phases and should be completed only when their associated
+delivery phase is active.
+
+### Contract and shared types
 
 - [ ] Confirm whether this is a `2.x` additive protocol change or requires the next
   major reveal-sync protocol version; update version compatibility deliberately.
@@ -416,10 +560,11 @@ session.data.sessionEvents: Record<string, {
   `activities/syncdeck/shared/`.
 - [ ] Add examples for `participants.list` and `report.upsert` to
   `.agent/knowledge/reveal-iframe-sync-message-schema.md`.
-- [ ] Update `skills/syncdeck/references/ACTIVITY_PAYLOADS.md` because this changes the
-  SyncDeck presentation/host payload contract.
+- [ ] Update the SyncDeck skill (`SKILL.md`, `IFRAME_SYNC_PROTOCOL.md`, and
+  `ACTIVITY_PAYLOADS.md`) with copyable deck-author examples and compatibility/security
+  guidance as each protocol capability is implemented.
 
-### Phase 2 — Server-authoritative capability service
+### Server-authoritative capability service
 
 - [ ] Add normalized contribution persistence to `SyncDeckSessionData` and the session
   normalizer in `activities/syncdeck/server/routes.ts`.
@@ -444,7 +589,7 @@ session.data.sessionEvents: Record<string, {
 - [ ] Add bounded deduplication/replay behavior for mutation request IDs; an exact retry
   must return its stored result rather than write twice.
 
-### Phase 3 — Manager iframe bridge
+### Manager iframe bridge
 
 - [ ] Add source/origin/version/schema validation to the manager's existing presentation
   message handler before accepting capability requests.
@@ -458,7 +603,7 @@ session.data.sessionEvents: Record<string, {
   bounded in-memory request tracking.
 - [ ] Ensure request messages never fall through to the generic presentation-state relay.
 
-### Phase 4 — Report aggregation
+### Report aggregation
 
 - [ ] Extend manifest/report types and `reportHtml.ts` for presentation-provided
   sections, summary cards, generic blocks, and per-student blocks.
@@ -466,7 +611,7 @@ session.data.sessionEvents: Record<string, {
 - [ ] Verify that removal/replacement changes the report exactly once and that session
   normalization survives reload/deploy.
 
-### Phase 5 — Tests and browser coverage
+### Tests and browser coverage
 
 - [ ] Unit-test valid/invalid capability envelope parsing, version compatibility,
   request ID limits, participant-reference stability, and report-data limits.
@@ -486,7 +631,7 @@ session.data.sessionEvents: Record<string, {
   expected section appears. Add SyncDeck-UI emote coverage. Assert that a student iframe
   cannot obtain names and a non-target student does not receive the private event.
 
-### Phase 6 — Documentation, evidence, and validation
+### Documentation, evidence, and validation
 
 - [ ] Update `ARCHITECTURE.md` for the new SyncDeck presentation-host trust boundary and
   realtime channel-ownership boundary; update `DEPLOYMENT.md` if rate limits or
@@ -500,6 +645,8 @@ session.data.sessionEvents: Record<string, {
   `skills/syncdeck/references/ACTIVITY_PAYLOADS.md` and deck/activity author guidance:
   activity WebSockets own activity runtime; SyncDeck session events are only for
   server-authorized, low-volume cross-cutting effects.
+- [ ] Push the changed `skills/syncdeck` subtree to `syncdeck-agent-skills` from this
+  non-`main` implementation branch after the skill documentation is verified.
 - [ ] Run scoped tests while iterating, then `npm test`; run `npm run test:e2e` for the
   real-browser boundary. If the sandbox cannot bind ports, use `npm run test:codex` and
   record the limitation as required by the repository verification matrix.
