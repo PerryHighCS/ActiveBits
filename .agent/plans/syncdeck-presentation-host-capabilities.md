@@ -299,16 +299,13 @@ interface SyncDeckHostCapabilityRequest {
   version: string
   action: 'hostCapabilityRequest'
   source: 'reveal-iframe-sync'
-  requestId: string                 // 1–128 safe characters; unique per deck runtime
-  payload: {
-    capability:
-      | 'participants.list'
-      | 'participants.pickRandom'
-      | 'sessionEvents.publish'
-      | 'report.upsert'
-      | 'report.remove'
-    input?: unknown
-  }
+  requestId: string                 // /^[A-Za-z0-9_-]{1,128}$/; correlation only
+  payload:
+    | { capability: 'participants.list' }
+    | { capability: 'participants.pickRandom'; input: ParticipantPickRandomInput }
+    | { capability: 'sessionEvents.publish'; input: PresentationEventInputPhase2 | PresentationEventInputPhase3 }
+    | { capability: 'report.upsert'; input: PresentationReportContributionInput }
+    | { capability: 'report.remove'; input: PresentationReportRemoveInput }
 }
 ```
 
@@ -330,10 +327,19 @@ interface SyncDeckHostCapabilityResponse {
 }
 ```
 
-`requestId` is correlation only, never authentication. The host must always respond with
-the configured `presentationOrigin`, and only to the current presentation iframe window.
-Malformed, unsupported, incompatible-version, and unauthorized requests receive a
-bounded error response where it is safe to reply; never echo untrusted input or secrets.
+`requestId` is correlation only, never authentication or mutation idempotency. The host
+must always respond with the configured `presentationOrigin`, and only to the current
+presentation iframe window. Malformed, unsupported, incompatible-version, and
+unauthorized requests receive a bounded error response where it is safe to reply; never
+echo untrusted input or secrets.
+
+Use the following exact syntax for deck-supplied durable keys. It is intentionally
+URL-safe and must be implemented identically by deck helpers and server validators:
+
+```ts
+const DECK_KEY_REGEX = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/
+// 1–100 characters; first character is alphanumeric.
+```
 
 ### `participants.list`
 
@@ -354,8 +360,9 @@ interface ParticipantListResult {
 - `participantRef` is derived by the server from the parent session ID and student ID
   using an HMAC or similarly non-reversible keyed mapping; it must be stable for one
   parent session and unusable as an entry/authentication token.
-- The deck performs random selection locally from the returned snapshot. Do not pretend
-  selection is cryptographically fair or persist a winner in the first slice.
+- A deck may select locally only for a non-shared, non-persisted display effect. Any
+  winner that is announced, targeted, reported, or otherwise shared session state must
+  use server-authoritative `participants.pickRandom`.
 
 ### `participants.pickRandom`
 
@@ -363,6 +370,10 @@ interface ParticipantListResult {
 announced, targeted, reported, or otherwise become shared session state.
 
 ```ts
+interface ParticipantPickRandomInput {
+  idempotencyKey: string             // DECK_KEY_REGEX
+}
+
 interface ParticipantPickResult {
   selectionId: string
   participant: {
@@ -376,8 +387,11 @@ interface ParticipantPickResult {
 
 - In v1 it selects uniformly from the current accepted participant roster; if the roster
   is empty it returns `no-participants`.
-- The request includes an idempotency key so a transport retry returns the same result
-  rather than selecting a second student.
+- Its required input is `{ idempotencyKey: string }`, where `idempotencyKey` matches
+  `DECK_KEY_REGEX`. Deduplication scope is `(parentSessionId, authenticated instructor,
+  'participants.pickRandom', idempotencyKey)`; the server stores the resolved result in
+  a bounded parent-session record for the lifetime of the active parent session. A retry
+  with the same scope returns the original result rather than selecting a second student.
 - Exclusion, weighted selection, history avoidance, and audit/fairness rules are later
   capabilities, not implicit behavior in v1.
 - The deck may then publish an announcement/emote using the returned opaque
@@ -402,22 +416,44 @@ All three paths call the same server-side service. SyncDeck UI and presentation 
 not each invent audience, expiry, persistence, or broadcast logic.
 
 ```ts
-type PresentationEventInput =
+type PresentationEventInputPhase2 =
   | {
       kind: 'announcement'
-      eventKey: string
-      audience: { type: 'all' } | { type: 'participant'; participantRef: string }
+      eventKey: string               // DECK_KEY_REGEX
+      audience: { type: 'all' }
       title?: string
       messageMarkdown: string
       expiresAt?: number
     }
   | {
       kind: 'emote'
-      eventKey: string
-      audience: { type: 'all' } | { type: 'participant'; participantRef: string }
+      eventKey: string               // DECK_KEY_REGEX
+      audience: { type: 'all' }
       emote: 'celebrate' | 'confetti' | 'thumbs-up' | 'drumroll'
       expiresAt?: number
     }
+
+// Phase 3 capability addition only; phase 2 validators reject this audience.
+type PresentationEventInputPhase3 = PresentationEventInputPhase2
+  | {
+      kind: 'announcement'
+      eventKey: string               // DECK_KEY_REGEX
+      audience: { type: 'participant'; participantRef: string }
+      title?: string
+      messageMarkdown: string
+      expiresAt?: number
+    }
+  | {
+      kind: 'emote'
+      eventKey: string               // DECK_KEY_REGEX
+      audience: { type: 'participant'; participantRef: string }
+      emote: 'celebrate' | 'confetti' | 'thumbs-up' | 'drumroll'
+      expiresAt?: number
+    }
+
+Phase 2 accepts only `PresentationEventInputPhase2`; its validators reject participant
+audiences. Phase 3 expands the same capability to accept `PresentationEventInputPhase3`
+only after server-side audience resolution and recipient filtering are implemented.
 
 interface SyncDeckSessionEvent {
   eventId: string
@@ -449,7 +485,8 @@ Audience filtering is server-side. A private event reaches only the selected stu
 SyncDeck UI/presentation (plus the instructor manager view when appropriate for control
 feedback); other student browsers do not receive the event or its target reference.
 Event keys are idempotent per parent session and producer scope, while server-generated
-event IDs identify individual deliveries.
+event IDs identify individual deliveries. The server retains those bounded idempotency
+records only for the active parent-session lifetime.
 
 Delivery lifecycle:
 
@@ -463,25 +500,37 @@ Delivery lifecycle:
 
 ### `report.upsert`
 
-The deck provides one idempotent contribution under a deck-defined `reportKey`.
+The deck provides one idempotent, class-level contribution under a deck-defined
+`reportKey`.
 
 ```ts
 interface PresentationReportContributionInput {
-  reportKey: string                 // 1–100 safe chars, unique within this parent session
+  reportKey: string                 // DECK_KEY_REGEX; unique within this parent session
   title: string                     // bounded plain text
   location?: { h: number; v: number; f: number }
   summaryCards?: Array<{ label: string; value: string; detail?: string }>
   scopeBlocks?: GenericReportBlock[]
-  studentScopeBlocks?: GenericStudentReportBlock[]
   payload?: JsonValue               // bounded JSON, rendered only by a documented generic view
 }
+
+interface PresentationReportRemoveInput {
+  reportKey: string                 // DECK_KEY_REGEX; parent session comes from authenticated host context
+}
+
+type ReportMutationResult =
+  | { operation: 'upsert'; reportKey: string; replaced: boolean }
+  | { operation: 'remove'; reportKey: string; removed: boolean }
 ```
 
 `report.upsert` replaces only the matching deck contribution (`reportKey`) rather than
 append-on-every-message. This supports an instructor revisiting a slide without report
-duplication. `report.remove` removes an identified contribution. The server stamps the
-current presentation location when absent, and refuses a supplied location that is not
-finite/bounded.
+duplication. `report.remove` accepts `PresentationReportRemoveInput` and is idempotent:
+it returns `{ operation: 'remove', reportKey, removed: true }` when it removes an
+existing contribution and the same shape with `removed: false` when it is already absent.
+The capability is already bound to the authenticated parent session, so no parent-session
+ID is accepted from the deck. The server stamps the current presentation location when
+absent, and refuses a supplied location that is not finite/bounded. Any invalid input
+returns a validation error without changing an existing contribution.
 
 Reuse or extract the generic report-block vocabulary already consumed by
 `ActivityStructuredReportSection`; do not invent a parallel free-form report renderer.
@@ -501,7 +550,6 @@ session.data.presentationReportContributions: Record<string, {
   updatedAt: number
   summaryCards: GenericSummaryCard[]
   scopeBlocks: GenericReportBlock[]
-  studentScopeBlocks: GenericStudentReportBlock[]
   payload: JsonValue | null
 }>
 
@@ -559,8 +607,8 @@ session.data.sessionEvents: Record<string, {
 3. Reuse the current offline report HTML views:
    - session summary includes contribution counts and summary cards;
    - activity/section drill-down renders generic scope blocks;
-   - student drill-down renders only contributions whose student blocks explicitly refer
-     to a participant by safe presentation reference/display label.
+   - v1 has no presentation-provided student drill-down blocks; those require a future
+     explicit capability/version gate and privacy review.
 4. Serialize validated contribution data in the existing inline report JSON. Apply the
    same secret/token exclusion audit as activity report builders.
 5. Add clear unavailable/invalid status in the report only for persisted contributions
@@ -626,7 +674,8 @@ delivery phase is active.
 ### Report aggregation
 
 - [ ] Extend manifest/report types and `reportHtml.ts` for presentation-provided
-  sections, summary cards, generic blocks, and per-student blocks.
+  class-level sections, summary cards, and generic blocks. Do not accept or persist
+  presentation-provided per-student blocks in v1.
 - [ ] Preserve self-contained offline report behavior and clear provenance labels.
 - [ ] Verify that removal/replacement changes the report exactly once and that session
   normalization survives reload/deploy.
@@ -644,7 +693,7 @@ delivery phase is active.
   request correlation, timeout/disconnect behavior, and prevention of state-relay
   fallthrough.
 - [ ] Report-test contribution ordering, rendering, escaping, offline JSON completeness,
-  upsert/replacement/removal, and student-block isolation.
+  upsert/replacement/removal idempotency, and rejection of per-student block input.
 - [ ] Add a Playwright spec under `activities/syncdeck/playwright/` using a same-origin
   fixture deck: request roster, select a name, publish an all-student announcement and
   a private emote, submit a report contribution, download the report, and assert the
@@ -699,9 +748,9 @@ delivery phase is active.
    or should ActiveBits publish a standalone deck-side helper package/snippet?
 3. What generic report-block vocabulary is sufficient for v1? Prefer the existing report
    section shapes; introduce a new block type only if a real deck fixture needs it.
-4. Should presentation-supplied per-student report blocks be allowed in v1, or should
-   v1 accept class-level blocks only until we have a concrete privacy-reviewed use case?
-   The recommended default is class-level plus optional safe refs only, never raw IDs.
+4. What concrete, privacy-reviewed use case would justify a future versioned capability
+   for presentation-supplied per-student report blocks? V1 accepts, persists, and renders
+   class-level blocks only.
 5. What report payload byte/count ceilings work for the expected class/deck size? Set
    explicit conservative defaults and measure before widening them.
 6. Which initial emotes are useful and accessible? The recommendation is a short
