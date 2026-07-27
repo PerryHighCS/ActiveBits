@@ -2232,7 +2232,7 @@ const SyncDeckManager: FC = () => {
   const [endingEmbeddedInstanceKey, setEndingEmbeddedInstanceKey] = useState<string | null>(null)
   const [pendingEmbeddedEndConfirmInstanceKey, setPendingEmbeddedEndConfirmInstanceKey] = useState<string | null>(null)
   const [isDownloadingSessionReport, setIsDownloadingSessionReport] = useState(false)
-  const [hasDownloadedSessionReport, setHasDownloadedSessionReport] = useState(false)
+  const [downloadedSessionReportId, setDownloadedSessionReportId] = useState<string | null>(null)
   const [sessionReportError, setSessionReportError] = useState<string | null>(null)
   const [reportContributionByInstanceKey, setReportContributionByInstanceKey] =
     useState<Record<string, ReportContributionState>>({})
@@ -3228,7 +3228,7 @@ const SyncDeckManager: FC = () => {
     if (!sessionId) return
 
     if (typeof window !== 'undefined') {
-      const confirmed = window.confirm(buildEndSessionConfirmationMessage(hasDownloadedSessionReport))
+      const confirmed = window.confirm(buildEndSessionConfirmationMessage(downloadedSessionReportId === sessionId))
       if (!confirmed) return
     }
 
@@ -4590,7 +4590,7 @@ const SyncDeckManager: FC = () => {
       downloadLink.click()
       document.body.removeChild(downloadLink)
       URL.revokeObjectURL(objectUrl)
-      setHasDownloadedSessionReport(true)
+      setDownloadedSessionReportId(sessionId)
       void refreshReportContributionStatus()
     } catch {
       setSessionReportError('Session report download failed. Check your connection and try again.')

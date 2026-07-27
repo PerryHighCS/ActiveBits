@@ -67,6 +67,23 @@ export function typecheckActivity(activityName) {
   return false
 }
 
+export function runActivityTypecheckProcess(activityName, spawn = spawnSync) {
+  const result = spawn(process.execPath, [process.argv[1], activityName], { stdio: 'inherit' })
+  if (result.error) {
+    console.error(`Unable to typecheck activities/${activityName}: ${result.error.message}`)
+    return false
+  }
+
+  if (result.status === 0) {
+    return true
+  }
+
+  if (result.signal) {
+    console.error(`Typechecking activities/${activityName} ended with signal ${result.signal}.`)
+  }
+  return false
+}
+
 export function runActivityTypechecks({
   directoryEntries = readdirSync(activitiesDir, { withFileTypes: true }),
   runTarget = (target) => typecheckActivity(target),
@@ -89,7 +106,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     process.exitCode = typecheckActivity(activityName) ? 0 : 1
   } else {
     process.exitCode = runActivityTypechecks({
-      runTarget: (target) => spawnSync(process.execPath, [process.argv[1], target], { stdio: 'inherit' }).status === 0,
+      runTarget: runActivityTypecheckProcess,
     }) ? 0 : 1
   }
 }

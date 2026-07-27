@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { buildActivityTypecheckConfig, getActivityTargets, runActivityTypechecks } from './typecheck-activities.mjs'
+import {
+  buildActivityTypecheckConfig,
+  getActivityTargets,
+  runActivityTypecheckProcess,
+  runActivityTypechecks,
+} from './typecheck-activities.mjs'
 
 void test('activity typecheck runner uses sorted activity directories', () => {
   assert.deepEqual(getActivityTargets([
@@ -35,4 +40,12 @@ void test('activity typecheck runner invokes each activity independently', () =>
 
   assert.equal(success, true)
   assert.deepEqual(checkedTargets, ['resonance', 'syncdeck'])
+})
+
+void test('activity typecheck runner reports a subprocess spawn failure', () => {
+  console.info('[TEST] Expected activity typecheck subprocess spawn failure.')
+  assert.equal(
+    runActivityTypecheckProcess('syncdeck', () => ({ error: new Error('permission denied') })),
+    false,
+  )
 })
