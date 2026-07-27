@@ -12,6 +12,7 @@ void test('activity typecheck runner uses sorted activity directories', () => {
     { name: 'syncdeck', isDirectory: () => true },
     { name: '.cache', isDirectory: () => true },
     { name: 'node_modules', isDirectory: () => true },
+    { name: 'shared', isDirectory: () => true },
     { name: 'resonance', isDirectory: () => true },
     { name: 'README.md', isDirectory: () => false },
   ]), ['resonance', 'syncdeck'])
@@ -46,6 +47,24 @@ void test('activity typecheck runner invokes each activity independently', () =>
   })
 
   assert.equal(success, true)
+  assert.deepEqual(checkedTargets, ['resonance', 'syncdeck'])
+})
+
+void test('activity typecheck runner continues after an activity failure', () => {
+  const checkedTargets = []
+  console.info('[TEST] Expected one activity typecheck failure while later targets still run.')
+  const success = runActivityTypechecks({
+    directoryEntries: [
+      { name: 'syncdeck', isDirectory: () => true },
+      { name: 'resonance', isDirectory: () => true },
+    ],
+    runTarget: (target) => {
+      checkedTargets.push(target)
+      return target !== 'resonance'
+    },
+  })
+
+  assert.equal(success, false)
   assert.deepEqual(checkedTargets, ['resonance', 'syncdeck'])
 })
 

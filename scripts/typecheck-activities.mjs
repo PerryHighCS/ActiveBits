@@ -12,7 +12,12 @@ const activitiesTsconfigPath = join(activitiesDir, 'tsconfig.json')
 
 export function getActivityTargets(directoryEntries) {
   return directoryEntries
-    .filter((entry) => entry.isDirectory() && !entry.name.startsWith('.') && entry.name !== 'node_modules')
+    .filter((entry) => (
+      entry.isDirectory()
+      && !entry.name.startsWith('.')
+      && entry.name !== 'node_modules'
+      && entry.name !== 'shared'
+    ))
     .map((entry) => entry.name)
     .sort((left, right) => left.localeCompare(right))
 }
@@ -100,10 +105,12 @@ export function runActivityTypechecks({
     return true
   }
 
-  return targets.every((target) => {
+  let succeeded = true
+  for (const target of targets) {
     console.log(`Typechecking activities/${target}`)
-    return runTarget(target)
-  })
+    succeeded = runTarget(target) && succeeded
+  }
+  return succeeded
 }
 
 if (process.argv[1] && typecheckActivitiesRunnerPath === process.argv[1]) {

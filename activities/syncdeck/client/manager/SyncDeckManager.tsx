@@ -1342,6 +1342,21 @@ export function buildEndSessionConfirmationMessage(hasDownloadedSessionReport: b
   return `${disconnectionWarning} You will not be able to download a report once the session is ended.`
 }
 
+export function resolveDownloadedSessionReportId(
+  currentDownloadedSessionReportId: string | null,
+  sessionId: string,
+  didDownloadSessionReport: boolean,
+): string | null {
+  return didDownloadSessionReport ? sessionId : currentDownloadedSessionReportId
+}
+
+export function hasDownloadedSessionReportForSession(
+  downloadedSessionReportId: string | null,
+  sessionId: string,
+): boolean {
+  return downloadedSessionReportId === sessionId
+}
+
 function resolveReportContributionClassName(
   contribution: ReportContributionState | undefined,
   isLoading: boolean,
@@ -3228,7 +3243,9 @@ const SyncDeckManager: FC = () => {
     if (!sessionId) return
 
     if (typeof window !== 'undefined') {
-      const confirmed = window.confirm(buildEndSessionConfirmationMessage(downloadedSessionReportId === sessionId))
+      const confirmed = window.confirm(buildEndSessionConfirmationMessage(
+        hasDownloadedSessionReportForSession(downloadedSessionReportId, sessionId),
+      ))
       if (!confirmed) return
     }
 
@@ -4566,6 +4583,7 @@ const SyncDeckManager: FC = () => {
 
     setIsDownloadingSessionReport(true)
     setSessionReportError(null)
+    let didDownloadSessionReport = false
     try {
       const response = await fetch(
         `/api/syncdeck/${encodeURIComponent(sessionId)}/report`,
@@ -4590,11 +4608,16 @@ const SyncDeckManager: FC = () => {
       downloadLink.click()
       document.body.removeChild(downloadLink)
       URL.revokeObjectURL(objectUrl)
-      setDownloadedSessionReportId(sessionId)
+      didDownloadSessionReport = true
       void refreshReportContributionStatus()
     } catch {
       setSessionReportError('Session report download failed. Check your connection and try again.')
     } finally {
+      setDownloadedSessionReportId((current) => resolveDownloadedSessionReportId(
+        current,
+        sessionId,
+        didDownloadSessionReport,
+      ))
       setIsDownloadingSessionReport(false)
     }
   }
