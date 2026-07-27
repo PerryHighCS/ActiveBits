@@ -142,6 +142,8 @@ available without the extra complexity of private delivery or child producers.
 - [ ] Implement normalized bounded session-event persistence, idempotency, expiry, and
   all-audience websocket delivery.
 - [ ] Add `announcement` and a small allowlisted `emote` vocabulary.
+- [ ] Allow bounded Markdown in announcement/prompt message fields through the same
+  report/session-event-safe renderer; keep emotes as structured allowlisted tokens.
 - [ ] Add the instructor-presentation `sessionEvents.publish` adapter.
 - [ ] Add the SyncDeck UI adapter for instructor/enrolled-student emotes, with rate
   limits, accessibility text equivalents, reduced-motion support, and instructor
@@ -177,8 +179,13 @@ existing self-contained SyncDeck report shell.
 
 - [ ] Add normalized `report.upsert`/`report.remove` persistence and byte/count limits.
 - [ ] Render presentation-provided summary cards and generic blocks in the report
-  manifest and offline HTML with clear provenance.
-- [ ] Test replacement/removal, escaping, self-contained export, and reload/deploy
+  manifest and offline HTML with clear provenance, including bounded deck-authored
+  Markdown blocks.
+- [ ] Reuse or extract `activities/resonance/client/components/FormattedMarkdown.tsx`
+  with a SyncDeck report-safe configuration: GFM and raw-HTML escaping retained; remote
+  images blocked; embedded data images allowed only if bounded and explicitly approved.
+- [ ] Test replacement/removal, Markdown rendering, raw-HTML escaping, safe-link
+  filtering, report-safe image policy, self-contained export, and reload/deploy
   normalization.
 - [ ] Defer presentation-provided per-student report blocks unless a concrete,
   privacy-reviewed use case is approved.
@@ -252,8 +259,21 @@ repository rule to perform subtree synchronization only from a non-`main` branch
    label contributed sections with their presentation title/slide location. The server
    records receive/update time and location, but does not represent arbitrary deck
    assertions as verified student work.
-6. **No raw HTML.** The deck sends a constrained structured schema. SyncDeck's existing
-   report renderer remains responsible for escaping and offline rendering.
+6. **No raw HTML; constrained Markdown is allowed for presentation-authored reports.**
+   The deck sends a constrained structured schema. A generic report block may carry
+   bounded Markdown for deck-authored explanations, outcomes, links, and formatted
+   summaries, but it never carries HTML. The offline SyncDeck report renderer owns
+   Markdown parsing, escapes raw HTML, restricts links to an explicit safe protocol
+   allowlist, and does not load remote images/assets. Student-entered text remains
+   escaped plain text unless a later activity-owned contract explicitly permits Markdown.
+   Reuse or extract Resonance's existing `FormattedMarkdown` renderer and its tested GFM,
+   raw-HTML, and URL-filtering behavior; add a SyncDeck report-safe policy rather than
+   creating a second Markdown implementation. The report profile must reject remote
+   image URLs and may allow only bounded, non-SVG `data:image/...;base64` assets if a
+   self-contained report use case requires them.
+   The same renderer profile applies to human-readable `announcement`/prompt messages
+   delivered to SyncDeck and presentation views. Emotes remain structured allowlisted
+   tokens, not Markdown or arbitrary emoji/animation payloads.
 7. **Selection and delivery are host-authoritative.** Deck-local `Math.random()` is not
    adequate when a selection needs to be visible to every student, survive a reconnect,
    or appear in a report. The host selects from the server roster and assigns the event
@@ -388,7 +408,7 @@ type PresentationEventInput =
       eventKey: string
       audience: { type: 'all' } | { type: 'participant'; participantRef: string }
       title?: string
-      message: string
+      messageMarkdown: string
       expiresAt?: number
     }
   | {
@@ -405,7 +425,7 @@ interface SyncDeckSessionEvent {
   source: 'syncdeck-ui' | 'presentation' | 'embedded-activity'
   audience: { type: 'all' } | { type: 'participant' }
   // Contains no participantRef in a recipient's browser event.
-  payload: { title?: string; message?: string; emote?: string }
+  payload: { title?: string; messageMarkdown?: string; emote?: string }
   createdAt: number
   expiresAt: number | null
 }
@@ -491,7 +511,7 @@ session.data.sessionEvents: Record<string, {
   kind: 'announcement' | 'emote'
   source: 'syncdeck-ui' | 'presentation' | 'embedded-activity'
   audience: { type: 'all' } | { type: 'participant'; studentId: string }
-  payload: { title?: string; message?: string; emote?: string }
+  payload: { title?: string; messageMarkdown?: string; emote?: string }
   createdAt: number
   expiresAt: number | null
   replayOnReconnect: boolean
@@ -619,7 +639,7 @@ delivery phase is active.
   rate/deduplication behavior, persistence, and no-secret responses.
 - [ ] Test random-selection retries, empty rosters, UI/presentation/activity provenance,
   private versus all-audience delivery, expiry/pruning, reconnect replay for stateful
-  events, and no replay for ephemeral emotes.
+  events, Markdown announcement rendering/safety, and no replay for ephemeral emotes.
 - [ ] Manager-test exact iframe source/origin validation, response target origin,
   request correlation, timeout/disconnect behavior, and prevention of state-relay
   fallthrough.
