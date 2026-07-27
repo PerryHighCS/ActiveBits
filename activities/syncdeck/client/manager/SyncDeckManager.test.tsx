@@ -71,6 +71,9 @@ import { resolveDeckActivityRequestsFromDeckDocument } from './SyncDeckManager.j
 import { buildReportContributionMap } from './SyncDeckManager.js'
 import { resolveReportContributionLabel } from './SyncDeckManager.js'
 import { buildReportPreviewSummary } from './SyncDeckManager.js'
+import { buildEndSessionConfirmationMessage } from './SyncDeckManager.js'
+import { hasDownloadedSessionReportForSession } from './SyncDeckManager.js'
+import { resolveDownloadedSessionReportId } from './SyncDeckManager.js'
 import { getReportPreviewFocusableElements } from './SyncDeckManager.js'
 import { resolveReportPreviewDialogTabTarget } from './SyncDeckManager.js'
 
@@ -350,6 +353,32 @@ void test('buildReportPreviewSummary counts report availability states', () => {
     unsupportedCount: 1,
     unavailableCount: 1,
   })
+})
+
+void test('end-session confirmation warns until the session report has been downloaded', () => {
+  assert.match(
+    buildEndSessionConfirmationMessage(false),
+    /will not be able to download a report once the session is ended/i,
+  )
+  assert.doesNotMatch(
+    buildEndSessionConfirmationMessage(true),
+    /will not be able to download a report once the session is ended/i,
+  )
+})
+
+void test('end-session confirmation reflects successful and failed session report downloads', () => {
+  const sessionId = 'session-123'
+  const successfulDownloadId = resolveDownloadedSessionReportId(null, sessionId, true)
+  assert.doesNotMatch(
+    buildEndSessionConfirmationMessage(hasDownloadedSessionReportForSession(successfulDownloadId, sessionId)),
+    /will not be able to download a report once the session is ended/i,
+  )
+
+  const failedDownloadId = resolveDownloadedSessionReportId(null, sessionId, false)
+  assert.match(
+    buildEndSessionConfirmationMessage(hasDownloadedSessionReportForSession(failedDownloadId, sessionId)),
+    /will not be able to download a report once the session is ended/i,
+  )
 })
 
 void test('validatePresentationUrl rejects empty and whitespace-only values', () => {

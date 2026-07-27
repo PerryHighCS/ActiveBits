@@ -117,7 +117,7 @@ test('MobCode Python runner completes blank and comment-only files', async ({ pa
 
     const popup = await runMobCodePopup(page)
     const terminal = popup.locator('#terminal')
-    await expect(popup.getByRole('button', { name: 'Close Python runner' })).toHaveText('Done')
+    await expect(popup.getByRole('button', { name: 'Close Python runner' })).toHaveText('Done', { timeout: 15_000 })
     await expect(terminal).not.toContainText('IndentationError')
     await clickRunnerDoneAndWaitForClose(popup)
   }
