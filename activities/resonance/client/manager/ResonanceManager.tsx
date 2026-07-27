@@ -753,11 +753,7 @@ export default function ResonanceManager() {
             >
               {isEndingSession ? 'Ending...' : 'End session'}
             </button>
-          ) : (
-            <span className="text-xs text-slate-400 dark:text-slate-500">
-              Embedded session managed by parent
-            </span>
-          )}
+          ) : null}
         </div>
       </header>
 
