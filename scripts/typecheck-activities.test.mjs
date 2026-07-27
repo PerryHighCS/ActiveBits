@@ -23,6 +23,8 @@ void test('activity typecheck config scopes sources to one activity while retain
   assert.ok(config.fileNames.some((fileName) => fileName.includes('/activities/syncdeck/')))
   assert.ok(config.fileNames.some((fileName) => fileName.includes('/activities/shared/')))
   assert.equal(config.fileNames.some((fileName) => fileName.includes('/activities/resonance/')), false)
+  assert.equal(config.options.strict, true)
+  assert.equal(config.options.noUnusedLocals, true)
 })
 
 void test('activity typecheck runner invokes each activity independently', () => {
@@ -48,4 +50,18 @@ void test('activity typecheck runner reports a subprocess spawn failure', () => 
     runActivityTypecheckProcess('syncdeck', () => ({ error: new Error('permission denied') })),
     false,
   )
+})
+
+void test('activity typecheck runner spawns this runner module for each activity', () => {
+  let spawnedArguments
+  assert.equal(
+    runActivityTypecheckProcess('syncdeck', (...arguments_) => {
+      spawnedArguments = arguments_
+      return { status: 0 }
+    }),
+    true,
+  )
+  assert.equal(spawnedArguments[0], process.execPath)
+  assert.match(spawnedArguments[1][0], /scripts\/typecheck-activities\.mjs$/)
+  assert.equal(spawnedArguments[1][1], 'syncdeck')
 })

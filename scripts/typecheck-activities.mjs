@@ -1,10 +1,11 @@
 import { spawnSync } from 'node:child_process'
 import { readdirSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { dirname, join, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import ts from 'typescript'
 
-const scriptsDir = dirname(fileURLToPath(import.meta.url))
+const typecheckActivitiesRunnerPath = fileURLToPath(import.meta.url)
+const scriptsDir = dirname(typecheckActivitiesRunnerPath)
 const repositoryRoot = dirname(scriptsDir)
 const activitiesDir = join(repositoryRoot, 'activities')
 const activitiesTsconfigPath = join(activitiesDir, 'tsconfig.json')
@@ -17,25 +18,23 @@ export function getActivityTargets(directoryEntries) {
 }
 
 export function buildActivityTypecheckConfig(activityName) {
-  const readResult = ts.readConfigFile(activitiesTsconfigPath, ts.sys.readFile)
-  if (readResult.error) {
-    return { errors: [readResult.error] }
+  const config = ts.getParsedCommandLineOfConfigFile(activitiesTsconfigPath, {}, ts.sys)
+  if (!config) {
+    return { errors: [] }
   }
 
-  const config = {
-    ...readResult.config,
-    include: [
-      `${activityName}/client/**/*`,
-      `${activityName}/server/**/*`,
-      `${activityName}/shared/**/*`,
-      `${activityName}/playwright/**/*`,
-      `${activityName}/activity.config.*`,
-      'shared/**/*',
-      '../types/**/*.d.ts',
-    ],
-  }
+  const includedDirectoryPrefixes = [
+    join(activitiesDir, activityName),
+    join(activitiesDir, 'shared'),
+    join(repositoryRoot, 'types'),
+  ].map((directory) => `${directory}${sep}`)
 
-  return ts.parseJsonConfigFileContent(config, ts.sys, activitiesDir, undefined, activitiesTsconfigPath)
+  return {
+    ...config,
+    fileNames: config.fileNames.filter((fileName) => (
+      includedDirectoryPrefixes.some((directoryPrefix) => fileName.startsWith(directoryPrefix))
+    )),
+  }
 }
 
 function formatDiagnostics(diagnostics) {
@@ -68,7 +67,7 @@ export function typecheckActivity(activityName) {
 }
 
 export function runActivityTypecheckProcess(activityName, spawn = spawnSync) {
-  const result = spawn(process.execPath, [process.argv[1], activityName], { stdio: 'inherit' })
+  const result = spawn(process.execPath, [typecheckActivitiesRunnerPath, activityName], { stdio: 'inherit' })
   if (result.error) {
     console.error(`Unable to typecheck activities/${activityName}: ${result.error.message}`)
     return false
@@ -100,7 +99,7 @@ export function runActivityTypechecks({
   })
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+if (process.argv[1] && typecheckActivitiesRunnerPath === process.argv[1]) {
   const activityName = process.argv[2]
   if (activityName) {
     process.exitCode = typecheckActivity(activityName) ? 0 : 1
