@@ -16,6 +16,15 @@ Capture reusable test setup patterns, common failure modes, and reliability guid
 ## Entries
 
 - Date: 2026-07-27
+- Scope: e2e | MobCode Python runner | WebKit
+- Pattern: Use the runner suite's 15-second completion window when asserting the terminal popup reaches its `Done` state, including blank and comment-only source files.
+- Why it helps: WebKit can finish Brython worker initialization after Playwright's default five-second assertion timeout even though the popup and terminal have loaded correctly.
+- Example (file/path): `activities/mobcode/playwright/runner.spec.ts`
+- Failure signal: The popup accessibility tree still shows `Stop Python runner` and `[Python] Running test.py`, while `Close Python runner` is absent after five seconds.
+- Follow-up action: Keep the terminal-running assertion as the popup readiness check and use the longer timeout only for actual execution completion.
+- Owner: Codex
+
+- Date: 2026-07-27
 - Scope: typecheck | activities
 - Pattern: Run the activities TypeScript check one activity directory at a time through `scripts/typecheck-activities.mjs`. The runner reuses `activities/tsconfig.json` compiler options and shared contracts, but narrows source inclusion to the current activity.
 - Why it helps: Isolated typechecks identify the failing activity and reduce peak compiler memory while retaining the activity's normal type boundary.
