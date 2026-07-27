@@ -129,6 +129,10 @@ ActiveBits supports two session storage modes:
 | `LEARN_SYNCDECK_HMAC_SECRET` | Conditional | (none) | Dedicated shared secret for the Learn SyncDeck server-to-server integration. Leave unset to disable the integration. Never reuse an LTI consumer secret. |
 | `LEARN_SYNCDECK_HMAC_KEY_ID` | No | `learn-default` | Identifies the active Learn SyncDeck HMAC key. Use a new key ID during rotation. |
 
+Learn substitute-instructor capability URLs are signed bearer links. Configure reverse
+proxy and access logging to redact their query strings, and use bounded expiration when
+issuing them from Learn.
+
 ## Source Map Policy (Open-Source Repo)
 
 ActiveBits intentionally ships source maps in production for debugging and teaching transparency.

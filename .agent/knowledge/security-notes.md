@@ -15,6 +15,22 @@ Track security-relevant boundaries, risks, and mitigation decisions.
 
 ## Notes
 
+- Date: 2026-07-26
+- Area: Learn SyncDeck substitute instructor link
+- Threat or risk: A direct substitute link is a bearer capability that can start or reuse
+  an instructor-led SyncDeck session without LMS access.
+- Control or mitigation: ActiveBits verifies an expiry-bound, canonical base64url payload
+  signed with a domain-separated HMAC context, establishes only httpOnly instructor
+  recovery state, and redirects to a token-free manager URL with no-referrer/no-store
+  headers. It does not log the link payload or signature.
+- Residual risk: The signed payload is not encrypted and the stateless initial design
+  cannot revoke an individual link before expiry.
+- Validation (test/review/path): `activities/syncdeck/server/learnIntegration.ts`;
+  `activities/syncdeck/server/learnIntegration.test.ts`;
+  `activities/syncdeck/playwright/substitute-instructor-link.spec.ts`.
+- Follow-up action: Use a short class/day expiry from Learn when generating links.
+- Owner: Codex
+
 - Date: 2026-07-15
 - Area: waiting-room student display-name persistence
 - Threat or risk: Remembering a student's lobby name across days in browser persistence could inadvertently expand into storing participant IDs, credentials, or activity-specific form data.

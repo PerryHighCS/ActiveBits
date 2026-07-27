@@ -56,3 +56,7 @@ consumer secret. Set `LEARN_SYNCDECK_HMAC_SECRET` and, optionally,
 `LEARN_SYNCDECK_HMAC_KEY_ID` (default: `learn-default`) only in server-side environment
 configuration. See `.agent/plans/learn-syncdeck-session-integration.md` for the request
 contract and launch lifecycle.
+
+Learn can also issue a time-bounded signed substitute-instructor link that opens a
+SyncDeck instructor session directly in ActiveBits. It is a bearer capability: use a
+bounded expiry and do not expose it in logs or analytics.

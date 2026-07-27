@@ -51,6 +51,11 @@ ActiveBits/
 5. Teacher manages the activity from the manager view
 6. Additional instructors can use `Teacher Join` on `/` with the session ID plus teacher code to recover the live manage view
 
+For Learn-managed SyncDeck resources, a substitute teacher can use a time-bounded,
+signed ActiveBits capability URL. ActiveBits verifies the capability, starts or reuses
+the resource's instructor session, establishes its httpOnly recovery state, and redirects
+to the normal SyncDeck manager route without retaining the capability in the final URL.
+
 Teachers can also open `/launch/{activity-id}` to start the same temporary-session flow
 from a URL-addressable launcher. The default launcher page requires a button click before
 creating a session. Adding `?start=1` lets trusted instructor-authored links, such as links

@@ -16,6 +16,7 @@ interface MockResponse {
   cookie(name: string, value: string, options: Record<string, unknown>): void
   redirect(status: number, url: string): void
   setHeader(name: string, value: string): void
+  send(body: string): void
 }
 
 interface MockRequest {
@@ -40,6 +41,7 @@ function response(): MockResponse {
     cookie(name, value, options) { this.cookies.push({ name, value, options }) },
     redirect(status, url) { this.statusCode = status; this.redirectTo = url },
     setHeader(name, value) { this.headers[name] = value },
+    send(body) { this.body = body },
   }
 }
 
@@ -93,6 +95,15 @@ function signedRequest(method: string, path: string, body: unknown, nonce: strin
   }
 }
 
+function substituteInstructorLink(resourceLinkId: string, presentationUrl: string, jti = 'substitute-link-test', expiresAt = Date.now() + 60_000) {
+  const secret = process.env.LEARN_SYNCDECK_HMAC_SECRET!
+  const payload = Buffer.from(JSON.stringify({ expiresAt, jti, presentationUrl, provider: 'learn-test', resourceLinkId, v: 1 }), 'utf8').toString('base64url')
+  return {
+    payload,
+    sig: createHmac('sha256', secret).update(`LEARN_SYNCDECK_SUBSTITUTE_LINK\n${payload}`, 'utf8').digest('hex'),
+  }
+}
+
 void test('buildLearnHmacCanonicalRequest orders object keys by codepoint', () => {
   const request = buildLearnHmacCanonicalRequest('POST', '/path', '123', 'nonce', 'provider', { ä: 'umlaut', z: 'zee' })
   const expectedHash = createHash('sha256').update('{"z":"zee","ä":"umlaut"}', 'utf8').digest('hex')
@@ -119,6 +130,7 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
     const sessions = store(broadcasts)
     const ws: WsRouter = { wss: { clients: new Set<ActiveBitsWebSocket>(), close() {} }, register() {} }
     let createdSessionId = ''
+    let instructorSessionCreateCount = 0
     let delayedInstructorSession: Promise<void> | null = null
     let notifyInstructorSessionStart: (() => void) | null = null
     let failInstructorSessionCreation = false
@@ -130,6 +142,7 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
       sessions,
       ws,
       async createInstructorSession() {
+        instructorSessionCreateCount += 1
         notifyInstructorSessionStart?.()
         if (delayedInstructorSession) await delayedInstructorSession
         if (failInstructorSessionCreation) throw new Error('test instructor-session creation failure')
@@ -251,6 +264,58 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
     assert.equal(startResponse.statusCode, 200)
     assert.equal((startResponse.body as { activeSessionId?: unknown }).activeSessionId, createdSessionId)
 
+    const substituteLaunch = substituteInstructorLink(resourceId, 'https://slides.example/deck')
+    const substituteLaunchResponse = response()
+    await getHandlers.get('/api/syncdeck/learn/substitute')!(
+      { params: {}, query: substituteLaunch },
+      substituteLaunchResponse,
+    )
+    assert.equal(substituteLaunchResponse.statusCode, 302)
+    assert.equal(substituteLaunchResponse.redirectTo, `/manage/syncdeck/${createdSessionId}`)
+    assert.equal(substituteLaunchResponse.headers['Referrer-Policy'], 'no-referrer')
+    assert.ok(substituteLaunchResponse.cookies.some((item) => item.name === 'syncdeck_instructor_recoveries'))
+
+    const reusedSubstituteLaunchResponse = response()
+    await getHandlers.get('/api/syncdeck/learn/substitute')!(
+      { params: {}, query: substituteLaunch },
+      reusedSubstituteLaunchResponse,
+    )
+    assert.equal(reusedSubstituteLaunchResponse.statusCode, 302)
+    assert.equal(reusedSubstituteLaunchResponse.redirectTo, `/manage/syncdeck/${createdSessionId}`)
+    assert.ok(reusedSubstituteLaunchResponse.cookies.some((item) => item.name === 'syncdeck_instructor_recoveries'))
+    assert.equal(instructorSessionCreateCount, 1)
+    assert.ok(infoLogs.some((message) => message.includes('learn-substitute-link-launched') && message.includes('"reused":true')))
+
+    console.info('[TEST] Expected substitute launch with an active mismatched deck to return a non-retryable response.')
+    const mismatchedDeckSubstituteResponse = response()
+    await getHandlers.get('/api/syncdeck/learn/substitute')!(
+      { params: {}, query: substituteInstructorLink(resourceId, 'https://slides.example/other-deck') },
+      mismatchedDeckSubstituteResponse,
+    )
+    assert.equal(mismatchedDeckSubstituteResponse.statusCode, 409)
+    assert.equal(mismatchedDeckSubstituteResponse.headers['Content-Type'], 'text/html; charset=utf-8')
+    assert.match(String(mismatchedDeckSubstituteResponse.body), /Presentation URL cannot change while the instructor session is active/)
+    assert.match(String(mismatchedDeckSubstituteResponse.body), /Ask the instructor who shared this link for a new one/)
+    assert.ok(infoLogs.some((message) => message.includes('learn-substitute-link-presentation-url-mismatch') && message.includes('"status":409')))
+
+    console.info('[TEST] Expected invalid substitute instructor link to fail closed.')
+    const invalidSubstituteResponse = response()
+    await getHandlers.get('/api/syncdeck/learn/substitute')!(
+      { params: {}, query: { payload: substituteLaunch.payload, sig: '0'.repeat(64) } },
+      invalidSubstituteResponse,
+    )
+    assert.equal(invalidSubstituteResponse.statusCode, 403)
+    assert.equal(invalidSubstituteResponse.headers['Content-Type'], 'text/html; charset=utf-8')
+    assert.match(String(invalidSubstituteResponse.body), /SyncDeck launch unavailable/)
+
+    console.info('[TEST] Expected expired substitute instructor link to fail closed.')
+    const expiredSubstituteResponse = response()
+    await getHandlers.get('/api/syncdeck/learn/substitute')!(
+      { params: {}, query: substituteInstructorLink(resourceId, 'https://slides.example/deck', 'expired-substitute-link', Date.now() - 1) },
+      expiredSubstituteResponse,
+    )
+    assert.equal(expiredSubstituteResponse.statusCode, 403)
+
     const instructorLaunchUrl = new URL(String((startResponse.body as { instructorLaunchUrl: string }).instructorLaunchUrl), 'https://bits.example')
     const instructorLaunchResponse = response()
     await getHandlers.get('/api/syncdeck/learn/instructor/:tokenId')!(
@@ -261,12 +326,90 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
     assert.equal(instructorLaunchResponse.headers['Referrer-Policy'], 'no-referrer')
     assert.deepEqual(instructorLaunchResponse.cookies, [{ name: 'syncdeck_instructor_recoveries', value: 'recovered', options: {} }])
 
+    const activeSessionWithoutRecovery = await sessions.get(createdSessionId)
+    assert.ok(activeSessionWithoutRecovery)
+    delete activeSessionWithoutRecovery.data.instructorRecoveryToken
+    await sessions.set(createdSessionId, activeSessionWithoutRecovery)
+    console.info('[TEST] Expected substitute launch without active recovery state to fail closed.')
+    const missingRecoverySubstituteResponse = response()
+    await getHandlers.get('/api/syncdeck/learn/substitute')!(
+      { params: {}, query: substituteLaunch },
+      missingRecoverySubstituteResponse,
+    )
+    assert.equal(missingRecoverySubstituteResponse.statusCode, 500)
+    assert.equal(missingRecoverySubstituteResponse.headers['Content-Type'], 'text/html; charset=utf-8')
+    assert.match(String(missingRecoverySubstituteResponse.body), /Active instructor recovery is unavailable/)
+    assert.equal(instructorSessionCreateCount, 1)
+
     const waitStatusResponse = response()
     await getHandlers.get('/api/integrations/learn/v1/activities/:activityId/wait/status')!(
       { params: { activityId: 'syncdeck' }, cookies: { learn_syncdeck_wait: waitingCookie } },
       waitStatusResponse,
     )
     assert.deepEqual(waitStatusResponse.body, { state: 'active', studentLaunchUrl: '/syncdeck-live' })
+
+    const startingSubstituteResourceId = 'learn-resource-substitute-starting'
+    const startingSubstituteLaunch = substituteInstructorLink(startingSubstituteResourceId, 'https://slides.example/substitute-starting', 'substitute-starting')
+    const startingStudentEntryPath = `/api/integrations/learn/v1/activities/syncdeck/resources/${startingSubstituteResourceId}/student-entry`
+    const startingStudentEntryResponse = response()
+    await postHandlers.get('/api/integrations/learn/v1/activities/:activityId/resources/:resourceLinkId/student-entry')!(
+      { params: { activityId: 'syncdeck', resourceLinkId: startingSubstituteResourceId }, ...signedRequest('POST', startingStudentEntryPath, {}, 'substitute-starting-student-entry') },
+      startingStudentEntryResponse,
+    )
+    assert.equal((startingStudentEntryResponse.body as { state?: unknown }).state, 'waiting')
+    let releaseDelayedSubstituteStart!: () => void
+    delayedInstructorSession = new Promise<void>((resolve) => { releaseDelayedSubstituteStart = resolve })
+    let resolveSubstituteSessionStart!: () => void
+    const substituteSessionStarted = new Promise<void>((resolve) => { resolveSubstituteSessionStart = resolve })
+    notifyInstructorSessionStart = resolveSubstituteSessionStart
+    const firstSubstituteLaunch = getHandlers.get('/api/syncdeck/learn/substitute')!(
+      { params: {}, query: startingSubstituteLaunch },
+      response(),
+    )
+    await substituteSessionStarted
+    const inProgressSubstituteResponse = response()
+    console.info('[TEST] Expected a duplicate substitute launch to report the pending session start.')
+    await getHandlers.get('/api/syncdeck/learn/substitute')!(
+      { params: {}, query: startingSubstituteLaunch },
+      inProgressSubstituteResponse,
+    )
+    assert.equal(inProgressSubstituteResponse.statusCode, 202)
+    assert.equal(inProgressSubstituteResponse.headers['Content-Type'], 'text/html; charset=utf-8')
+    assert.match(String(inProgressSubstituteResponse.body), /SyncDeck session is starting/)
+    assert.ok(infoLogs.some((message) => message.includes('learn-substitute-link-start-pending') && message.includes('"status":202')))
+    const contendedSubstituteResponse = response()
+    console.info('[TEST] Expected a different substitute launch to report the in-progress session start.')
+    await getHandlers.get('/api/syncdeck/learn/substitute')!(
+      { params: {}, query: substituteInstructorLink(startingSubstituteResourceId, 'https://slides.example/substitute-starting', 'substitute-contended') },
+      contendedSubstituteResponse,
+    )
+    assert.equal(contendedSubstituteResponse.statusCode, 409)
+    assert.equal(contendedSubstituteResponse.headers['Content-Type'], 'text/html; charset=utf-8')
+    assert.match(String(contendedSubstituteResponse.body), /SyncDeck session is starting/)
+    assert.ok(infoLogs.some((message) => message.includes('learn-substitute-link-start-in-progress') && message.includes('"status":409')))
+    releaseDelayedSubstituteStart()
+    await firstSubstituteLaunch
+    assert.ok(infoLogs.some((message) => message.includes('learn-substitute-link-launched') && message.includes('"reused":false')))
+    delayedInstructorSession = null
+    notifyInstructorSessionStart = null
+
+    console.info('[TEST] Expected substitute-launch cleanup failures to preserve the safe error response.')
+    const originalDeleteForSubstituteCleanup = sessions.delete.bind(sessions)
+    sessions.delete = async (id) => {
+      if (id.startsWith('learn-syncdeck-entry-')) throw new Error('test substitute cleanup failure')
+      return await originalDeleteForSubstituteCleanup(id)
+    }
+    failInstructorSessionCreation = true
+    const substituteCleanupFailureResponse = response()
+    await getHandlers.get('/api/syncdeck/learn/substitute')!(
+      { params: {}, query: substituteInstructorLink('learn-resource-substitute-cleanup', 'https://slides.example/substitute-cleanup', 'substitute-cleanup') },
+      substituteCleanupFailureResponse,
+    )
+    assert.equal(substituteCleanupFailureResponse.statusCode, 500)
+    assert.ok(errorLogs.some((message) => message.includes('learn-substitute-link-start-cleanup-failed') && message.includes('test substitute cleanup failure')))
+    assert.ok(errorLogs.some((message) => message.includes('learn-substitute-link-start-failed') && message.includes('test instructor-session creation failure')))
+    sessions.delete = originalDeleteForSubstituteCleanup
+    failInstructorSessionCreation = false
 
     const replayResponse = response()
     await postHandlers.get('/api/integrations/learn/v1/activities/:activityId/resources/:resourceLinkId/start')!(

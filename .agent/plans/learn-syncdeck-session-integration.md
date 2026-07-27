@@ -393,6 +393,76 @@ must redact query strings for these browser handoff paths before production enab
 
 ---
 
+## Direct Substitute Instructor Link (Approved Extension)
+
+An instructor with Learn access may create a time-bounded substitute-teacher link and
+give it to a substitute who cannot access the LMS. The substitute opens ActiveBits
+directly; Learn is not in the browser redirect path. Students continue to enter through
+their normal Learn/LTI launches and therefore join the same Learn resource mapping.
+
+Learn creates a self-contained signed capability URL. Its canonical payload contains:
+
+```ts
+interface LearnSyncDeckSubstituteLinkPayload {
+  v: 1
+  provider: string
+  resourceLinkId: string
+  presentationUrl: string
+  expiresAt: number             // Unix epoch milliseconds; normally end of class/day
+  jti: string                   // random ID for audit correlation
+}
+```
+
+Learn serializes this payload with the same deterministic JSON rules used by the
+server-to-server HMAC contract, base64url-encodes the UTF-8 bytes, and signs the literal
+base64url payload with the domain-separated value:
+
+```text
+LEARN_SYNCDECK_SUBSTITUTE_LINK\n<payload-base64url>
+```
+
+using HMAC-SHA-256 and the dedicated Learn–ActiveBits shared secret. The result is a URL
+such as:
+
+```text
+https://bits.example/api/syncdeck/learn/substitute?payload=<base64url>&sig=<lowercase-hex>
+```
+
+On navigation, ActiveBits verifies the signature, payload shape, provider, expiration,
+and presentation URL. It then uses the normal deterministic resource mapping to start a
+new instructor-led session or reuse the active one when its presentation URL matches.
+It creates the usual short-lived httpOnly instructor recovery state and redirects to
+`/manage/syncdeck/:sessionId`, stripping `payload` and `sig` from the final URL.
+
+The capability is reusable until expiry; each visit receives fresh browser recovery
+state. It never contains an instructor passcode. It is nevertheless a bearer credential:
+use `Cache-Control: no-store`, `Referrer-Policy: no-referrer`, query-string redaction in
+proxy/access logs, and a bounded expiry. The payload is signed, not encrypted, so a
+presentation URL in it is visible to anyone who has the link.
+
+A purely self-contained signed URL cannot be individually revoked. The initial
+implementation deliberately uses this stateless permalink model: Learn sets a bounded
+class/day expiry, and shared-key rotation invalidates all links if necessary. ActiveBits
+does not add a long-term per-link revocation store for this version.
+
+### Substitute Link Implementation Tasks
+
+- [ ] Learn: provide an instructor-only Generate Substitute Link control, with expiry
+  selection, copy UI, and audit metadata; sign only on the Learn server.
+- [ ] Learn: warn that the URL grants instructor control until expiry and do not store or
+  display ActiveBits credentials.
+- [x] ActiveBits: add the direct substitute-link verification route, using a signature
+  context distinct from both request HMAC and existing browser handoff tokens.
+- [x] ActiveBits: reuse the normal mapping/start rules, including `409` for a deck URL
+  mismatch while an instructor-led session is active.
+- [x] ActiveBits: add browser coverage for direct-link final URL stripping and recovery
+  cookie behavior. Unit coverage verifies valid reuse and tampered/expired-link
+  rejection.
+- [x] Product decision: do not add per-link revocation or long-term ActiveBits storage
+  in the initial version; rely on bounded expiry and coordinated key rotation.
+
+---
+
 ## Instructor Browser Handoff
 
 Learn's Start button calls the server-to-server `start` endpoint, then opens
