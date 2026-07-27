@@ -130,6 +130,8 @@ an instructor presentation can request a roster and have the server choose a stu
   logging, and manager iframe source/origin checks.
 - [ ] Add a same-origin fixture deck and browser coverage for roster retrieval/random
   selection, plus student/untrusted-iframe denial.
+- [ ] Run the external Disruptus instructor-deck acceptance test described below once its
+  hosted deck/test environment is available.
 
 **Exit criteria:** An instructor deck can run a reliable random chooser. It does not yet
 broadcast the selection, publish events, or write report data.
@@ -150,10 +152,38 @@ available without the extra complexity of private delivery or child producers.
   disable/moderation controls.
 - [ ] Deliver `sessionEvent` envelopes to ready student presentation iframes and the
   manager; test reconnect replay for stateful events and non-replay for ephemeral emotes.
+- [ ] Verify the Disruptus instructor deck can publish an instructor-originated game
+  event to all connected student views through the shared session-event service.
 
 **Exit criteria:** SyncDeck UI and instructor decks can publish safe all-class
 announcements/emotes through one service. Targeted events and activity producers are not
 yet enabled.
+
+### External integration acceptance test — Disruptus
+
+Disruptus is the first named external consumer of this protocol. It is not currently a
+checked-in ActiveBits activity, so this scenario is an external integration/acceptance
+test rather than a repository-local fixture. Execute it against the hosted Disruptus
+instructor deck once its test environment and student-view deck are available.
+
+1. Start a managed SyncDeck session with one Disruptus instructor presentation and at
+   least two enrolled student presentation views.
+2. Confirm only the instructor presentation can call `participants.list` and render its
+   random-student selector widget; student and untrusted frames receive no roster data.
+3. Use the widget to call `participants.pickRandom` twice with the same
+   `idempotencyKey`, and verify it returns the same student; verify a new key can make a
+   new selection.
+4. From the instructor presentation, publish an all-audience `announcement` or allowed
+   game `emote` through `sessionEvents.publish`; verify every connected student view
+   receives the same validated event, rendered with its Markdown/accessibility policy.
+5. Verify the instructor event is unavailable to student-originated deck calls, does not
+   expose internal student IDs/participant refs to student views, and has the configured
+   expiry/reconnect behavior.
+
+Capture the hosted deck URL/version, browser matrix, participant count, and observed
+event/selection outcomes in the implementation validation notes. Keep any Disruptus
+activity-specific game state on its own runtime channel; this test covers only the
+generic instructor roster, selector, and all-student session-event interfaces.
 
 ### Phase 3 — Private delivery and embedded-activity producers
 
@@ -699,6 +729,9 @@ delivery phase is active.
   a private emote, submit a report contribution, download the report, and assert the
   expected section appears. Add SyncDeck-UI emote coverage. Assert that a student iframe
   cannot obtain names and a non-target student does not receive the private event.
+- [ ] Execute and record the external Disruptus acceptance test: instructor-only random
+  selector plus instructor-originated all-student game event. Do not substitute it for
+  the repository-local fixture or automated multi-student browser coverage.
 
 ### Documentation, evidence, and validation
 
