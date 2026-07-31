@@ -489,9 +489,12 @@ function isTopLevelClassMethod(
   return false
 }
 
-function topLevelPythonBlocks(lines: readonly string[], literalLines: ReadonlySet<number>): PythonBlock[] {
+function topLevelPythonBlocks(
+  lines: readonly string[],
+  literalLines: ReadonlySet<number>,
+  rewriteBareSleep: boolean,
+): PythonBlock[] {
   const blocks: PythonBlock[] = []
-  const rewriteBareSleep = importsTimeSleep(lines.filter((_, lineIndex) => !literalLines.has(lineIndex)))
   for (let index = 0; index < lines.length; index += 1) {
     if (literalLines.has(index)) continue
     const line = lines[index] ?? ''
@@ -575,7 +578,7 @@ function buildBrythonTransformedSource(
   const { literalLines, linesRequiringWrapperIndent } = tripleQuotedStringLines(lines)
   const executableLines = lines.filter((_, lineIndex) => !literalLines.has(lineIndex))
   const rewriteBareSleep = importsTimeSleep(executableLines)
-  const inputBlocks = topLevelPythonBlocks(lines, literalLines)
+  const inputBlocks = topLevelPythonBlocks(lines, literalLines, rewriteBareSleep)
     .filter((block) => block.name !== '' && block.containsInput)
   const asyncInputFunctionNames = new Set(inputBlocks
     .filter((block) => block.callStyle === 'function')
