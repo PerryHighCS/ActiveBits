@@ -16,10 +16,10 @@ Use this log for durable findings that future contributors and agents should reu
 
 - Date: 2026-07-31
 - Area: activities | mobcode | Python runner
-- Discovery: MobCode's Brython async-entry source transform must classify every line of a triple-quoted literal as non-executable. Literal text can look like a function or `input()` call and can have less indentation than its surrounding function, so line-by-line transforms otherwise rewrite it or incorrectly close the function scope.
+- Discovery: MobCode's Brython async-entry source transform must distinguish literal-only lines from an opening triple-quote line. Literal-only text can look like a function or `input()` call and can have less indentation than its surrounding function, while the opening line may contain executable code that still needs analysis and rewriting.
 - Why it matters: The runner wraps user Python in an async function to support terminal input. Its opening line must be indented as executable code, but following literal-only lines must retain their original columns so their string value is unchanged.
 - Evidence: `activities/mobcode/client/runner/runnerUtils.ts`; `activities/mobcode/client/runner/runnerUtils.test.ts`; `activities/mobcode/playwright/runner.spec.ts`.
-- Follow-up action: Extend the literal-line classifier before adding any further line-oriented Python rewrites so multiline strings remain isolated from executable-source analysis.
+- Follow-up action: Extend the literal-line classifier before adding line-oriented Python rewrites so literal-only content remains isolated without skipping executable delimiter lines.
 - Owner: Codex
 
 - Date: 2026-07-27

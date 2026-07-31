@@ -184,8 +184,9 @@ function indentationWidth(value: string): number {
  * Identify lines that form part of a multiline string literal. The async-entry
  * wrapper must indent the opening executable line, but adding that indentation
  * to multiline literal content changes the value. Source transforms must also
- * not mistake literal text for Python statements or use its indentation to end
- * a surrounding function block.
+ * not mistake literal-only text for Python statements or use its indentation to
+ * end a surrounding function block. The opening delimiter line remains
+ * executable so any code on it is still analyzed and rewritten.
  */
 interface TripleQuotedStringLineInfo {
   literalLines: ReadonlySet<number>
@@ -548,7 +549,7 @@ function topLevelPythonBlocks(
 }
 
 export function buildBrythonAsyncEntrySource(source: string): string {
-  const userBody = buildBrythonTransformedSource(source, { rewriteTopLevelInput: true })
+  const userBody = buildBrythonTransformedSource(source, { rewriteTopLevelInput: true, indentForAsyncEntry: true })
 
   return `async def __mobcode_user_main__():
 ${userBody || '    pass'}
@@ -567,18 +568,21 @@ mobcode_run_async(__mobcode_run__())
 }
 
 export function buildBrythonModuleSource(source: string): string {
-  return buildBrythonTransformedSource(source, { rewriteTopLevelInput: false }).replace(/^ {4}/gm, '')
+  return buildBrythonTransformedSource(source, { rewriteTopLevelInput: false, indentForAsyncEntry: false })
 }
 
 function buildBrythonTransformedSource(
   source: string,
-  options: { rewriteTopLevelInput: boolean },
+  options: { rewriteTopLevelInput: boolean; indentForAsyncEntry: boolean },
 ): string {
   const lines = source.split(/\r?\n/)
   const { literalLines, linesRequiringWrapperIndent } = tripleQuotedStringLines(lines)
-  const executableLines = lines.filter((_, lineIndex) => !literalLines.has(lineIndex))
+  const literalOnlyLines = new Set(
+    Array.from(literalLines).filter((lineIndex) => !linesRequiringWrapperIndent.has(lineIndex)),
+  )
+  const executableLines = lines.filter((_, lineIndex) => !literalOnlyLines.has(lineIndex))
   const rewriteBareSleep = importsTimeSleep(executableLines)
-  const inputBlocks = topLevelPythonBlocks(lines, literalLines, rewriteBareSleep)
+  const inputBlocks = topLevelPythonBlocks(lines, literalOnlyLines, rewriteBareSleep)
     .filter((block) => block.name !== '' && block.containsInput)
   const asyncInputFunctionNames = new Set(inputBlocks
     .filter((block) => block.callStyle === 'function')
@@ -589,7 +593,7 @@ function buildBrythonTransformedSource(
   const inputBlockByStartLine = new Map(inputBlocks.map((block) => [block.startLine, block]))
   const functionScopes: number[] = []
   const transformedLines = lines.map((line, lineIndex) => {
-    if (literalLines.has(lineIndex)) return line
+    if (literalOnlyLines.has(lineIndex)) return line
     const trimmed = line.trim()
     if (!trimmed || trimmed.startsWith('#')) return line
 
@@ -624,15 +628,13 @@ function buildBrythonTransformedSource(
     const trimmed = line.trim()
     return trimmed !== '' && !trimmed.startsWith('#')
   })
-  const userBody = hasExecutableLine
-    ? transformedLines.map((line, lineIndex) => (
-      literalLines.has(lineIndex) && !linesRequiringWrapperIndent.has(lineIndex)
-        ? line
-        : `    ${line}`
-    )).join('\n')
-    : '    pass'
+  if (!hasExecutableLine) return options.indentForAsyncEntry ? '    pass' : 'pass'
 
-  return userBody
+  return options.indentForAsyncEntry
+    ? transformedLines.map((line, lineIndex) => (
+      literalOnlyLines.has(lineIndex) ? line : `    ${line}`
+    )).join('\n')
+    : transformedLines.join('\n')
 }
 
 export function buildBrythonRunnerHtml(payload: BrythonRunnerPayload): string {
