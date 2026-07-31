@@ -123,6 +123,47 @@ test('MobCode Python runner completes blank and comment-only files', async ({ pa
   }
 })
 
+test('MobCode Python runner preserves triple-quoted literal content', async ({ page }) => {
+  const session = await createMobCodeSession(page)
+  await seedMobCodeFile(page, session, [
+    'def show_example():',
+    '    example = """',
+    'def prompt():',
+    '    return input("This is literal text")',
+    '"""',
+    '    return example',
+    'print(show_example())',
+  ].join('\n'))
+  await openMobCodeManager(page, session)
+
+  const popup = await runMobCodePopup(page)
+  const terminal = popup.locator('#terminal')
+
+  await expect(terminal).toContainText('def prompt():', { timeout: 15_000 })
+  await expect(terminal).toContainText('return input("This is literal text")')
+  await expect(terminal).not.toContainText('async def prompt():')
+  await expect(terminal).not.toContainText('await mobcode_input')
+  await expect(popup.getByRole('button', { name: 'Close Python runner' })).toHaveText('Done', { timeout: 15_000 })
+  await clickRunnerDoneAndWaitForClose(popup)
+})
+
+test('MobCode Python runner preserves triple-quoted string indentation', async ({ page }) => {
+  const session = await createMobCodeSession(page)
+  await seedMobCodeFile(page, session, [
+    "s = '''",
+    'hi',
+    "'''",
+    'print(len(s))',
+  ].join('\n'))
+  await openMobCodeManager(page, session)
+
+  const popup = await runMobCodePopup(page)
+
+  await expect(popup.locator('#terminal')).toContainText('4', { timeout: 15_000 })
+  await expect(popup.getByRole('button', { name: 'Close Python runner' })).toHaveText('Done', { timeout: 15_000 })
+  await clickRunnerDoneAndWaitForClose(popup)
+})
+
 test('MobCode Python runner popup imports workspace Python modules', async ({ page }) => {
   const session = await createMobCodeSession(page)
   await seedMobCodeFiles(page, session, {

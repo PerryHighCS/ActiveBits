@@ -353,6 +353,35 @@ void test('buildBrythonAsyncEntrySource gives blank and comment-only files a val
   }
 })
 
+void test('buildBrythonAsyncEntrySource safely indents triple-quoted literal content', () => {
+  const source = buildBrythonAsyncEntrySource([
+    'def show_example():',
+    '    example = """',
+    'def prompt():',
+    '    return input("This is literal text")',
+    '"""',
+    '    return example',
+    'print(show_example())',
+  ].join('\n'))
+
+  assert.match(source, /def show_example\(\):/)
+  assert.doesNotMatch(source, /async def show_example\(\):/)
+  assert.match(source, /def prompt\(\):\n {4}return input\("This is literal text"\)\n"""/)
+  assert.doesNotMatch(source, /await mobcode_input\("This is literal text"\)/)
+  assert.match(source, / {8}return example/)
+})
+
+void test('buildBrythonAsyncEntrySource preserves triple-quoted string values', () => {
+  const source = buildBrythonAsyncEntrySource([
+    "s = '''",
+    'hi',
+    "'''",
+    'print(len(s))',
+  ].join('\n'))
+
+  assert.match(source, / {4}s = '''\nhi\n'''\n {4}print\(len\(s\)\)/)
+})
+
 void test('buildBrythonAsyncEntrySource rewrites class method input', () => {
   const source = buildBrythonAsyncEntrySource([
     'class Prompter:',

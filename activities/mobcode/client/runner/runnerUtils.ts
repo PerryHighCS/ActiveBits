@@ -180,6 +180,77 @@ function indentationWidth(value: string): number {
   return width
 }
 
+/**
+ * Identify lines that form part of a multiline string literal. The async-entry
+ * wrapper must indent the opening executable line, but adding that indentation
+ * to multiline literal content changes the value. Source transforms must also
+ * not mistake literal text for Python statements or use its indentation to end
+ * a surrounding function block.
+ */
+interface TripleQuotedStringLineInfo {
+  literalLines: ReadonlySet<number>
+  linesRequiringWrapperIndent: ReadonlySet<number>
+}
+
+function tripleQuotedStringLines(lines: readonly string[]): TripleQuotedStringLineInfo {
+  const literalLines = new Set<number>()
+  const linesRequiringWrapperIndent = new Set<number>()
+  let quote: '"' | "'" | null = null
+
+  for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+    const line = lines[lineIndex] ?? ''
+    let index = 0
+    while (index < line.length) {
+      const character = line[index] ?? ''
+      const nextThree = line.slice(index, index + 3)
+
+      if (quote) {
+        literalLines.add(lineIndex)
+        if (character === '\\') {
+          index += 2
+          continue
+        }
+        if (nextThree === quote.repeat(3)) {
+          index += 3
+          quote = null
+          continue
+        }
+        index += 1
+        continue
+      }
+
+      if (character === '#') break
+      if ((character === '"' || character === "'") && nextThree === character.repeat(3)) {
+        literalLines.add(lineIndex)
+        // The opening line is still executable Python (or the function's
+        // docstring), so it needs the wrapper's block indentation. Subsequent
+        // physical string lines do not: adding spaces there changes the value.
+        linesRequiringWrapperIndent.add(lineIndex)
+        quote = character
+        index += 3
+        continue
+      }
+      if (character === '"' || character === "'") {
+        const stringQuote = character
+        index += 1
+        while (index < line.length) {
+          const stringCharacter = line[index] ?? ''
+          if (stringCharacter === '\\') {
+            index += 2
+            continue
+          }
+          index += 1
+          if (stringCharacter === stringQuote) break
+        }
+        continue
+      }
+      index += 1
+    }
+  }
+
+  return { literalLines, linesRequiringWrapperIndent }
+}
+
 function rewriteCallNamesForAwait(line: string, names: ReadonlySet<string>, replacementName?: string): string {
   let output = ''
   let index = 0
@@ -396,10 +467,16 @@ interface PythonBlock {
   callStyle: 'function' | 'method'
 }
 
-function isTopLevelClassMethod(lines: readonly string[], lineIndex: number, startIndent: number): boolean {
+function isTopLevelClassMethod(
+  lines: readonly string[],
+  lineIndex: number,
+  startIndent: number,
+  literalLines: ReadonlySet<number>,
+): boolean {
   if (startIndent === 0) return false
 
   for (let index = lineIndex - 1; index >= 0; index -= 1) {
+    if (literalLines.has(index)) continue
     const line = lines[index] ?? ''
     const trimmed = line.trim()
     if (!trimmed || trimmed.startsWith('#')) continue
@@ -412,10 +489,11 @@ function isTopLevelClassMethod(lines: readonly string[], lineIndex: number, star
   return false
 }
 
-function topLevelPythonBlocks(lines: readonly string[]): PythonBlock[] {
+function topLevelPythonBlocks(lines: readonly string[], literalLines: ReadonlySet<number>): PythonBlock[] {
   const blocks: PythonBlock[] = []
-  const rewriteBareSleep = importsTimeSleep(lines)
+  const rewriteBareSleep = importsTimeSleep(lines.filter((_, lineIndex) => !literalLines.has(lineIndex)))
   for (let index = 0; index < lines.length; index += 1) {
+    if (literalLines.has(index)) continue
     const line = lines[index] ?? ''
     const trimmed = line.trim()
     const match = trimmed.match(/^def\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/)
@@ -424,7 +502,7 @@ function topLevelPythonBlocks(lines: readonly string[]): PythonBlock[] {
     const startIndent = indentationWidth(line)
     const callStyle: PythonBlock['callStyle'] | null = startIndent === 0
       ? 'function'
-      : isTopLevelClassMethod(lines, index, startIndent) ? 'method' : null
+      : isTopLevelClassMethod(lines, index, startIndent, literalLines) ? 'method' : null
     if (callStyle === null) continue
 
     let bodyEndLine = index
@@ -432,6 +510,10 @@ function topLevelPythonBlocks(lines: readonly string[]): PythonBlock[] {
     let nestedBlockIndent: number | null = null
     for (let bodyIndex = index + 1; bodyIndex < lines.length; bodyIndex += 1) {
       const bodyLine = lines[bodyIndex] ?? ''
+      if (literalLines.has(bodyIndex)) {
+        bodyEndLine = bodyIndex
+        continue
+      }
       const bodyTrimmed = bodyLine.trim()
       if (!bodyTrimmed || bodyTrimmed.startsWith('#')) {
         bodyEndLine = bodyIndex
@@ -490,8 +572,10 @@ function buildBrythonTransformedSource(
   options: { rewriteTopLevelInput: boolean },
 ): string {
   const lines = source.split(/\r?\n/)
-  const rewriteBareSleep = importsTimeSleep(lines)
-  const inputBlocks = topLevelPythonBlocks(lines)
+  const { literalLines, linesRequiringWrapperIndent } = tripleQuotedStringLines(lines)
+  const executableLines = lines.filter((_, lineIndex) => !literalLines.has(lineIndex))
+  const rewriteBareSleep = importsTimeSleep(executableLines)
+  const inputBlocks = topLevelPythonBlocks(lines, literalLines)
     .filter((block) => block.name !== '' && block.containsInput)
   const asyncInputFunctionNames = new Set(inputBlocks
     .filter((block) => block.callStyle === 'function')
@@ -502,6 +586,7 @@ function buildBrythonTransformedSource(
   const inputBlockByStartLine = new Map(inputBlocks.map((block) => [block.startLine, block]))
   const functionScopes: number[] = []
   const transformedLines = lines.map((line, lineIndex) => {
+    if (literalLines.has(lineIndex)) return line
     const trimmed = line.trim()
     if (!trimmed || trimmed.startsWith('#')) return line
 
@@ -537,7 +622,11 @@ function buildBrythonTransformedSource(
     return trimmed !== '' && !trimmed.startsWith('#')
   })
   const userBody = hasExecutableLine
-    ? transformedLines.map((line) => `    ${line}`).join('\n')
+    ? transformedLines.map((line, lineIndex) => (
+      literalLines.has(lineIndex) && !linesRequiringWrapperIndent.has(lineIndex)
+        ? line
+        : `    ${line}`
+    )).join('\n')
     : '    pass'
 
   return userBody
