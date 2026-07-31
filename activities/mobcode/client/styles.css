@@ -1,7 +1,10 @@
 .mobcode-shell {
   display: flex;
   flex-direction: column;
-  min-height: 100vh;
+  height: 100vh;
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
   background: #f8fafc;
 }
 
@@ -9,19 +12,30 @@
   display: grid;
   flex: 1;
   grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   min-height: 0;
+  overflow: hidden;
 }
 
 .mobcode-sidebar {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  overflow: auto;
 }
 
 .mobcode-editor-pane {
+  display: flex;
   min-width: 0;
   min-height: 0;
+  overflow: hidden;
   background: #ffffff;
+}
+
+.mobcode-editor-pane > div {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
 }
 
 .mobcode-header-actions {

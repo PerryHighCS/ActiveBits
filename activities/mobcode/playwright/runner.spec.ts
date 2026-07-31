@@ -109,6 +109,33 @@ test('MobCode Python runner popup prints terminal output', async ({ page }) => {
   await clickRunnerDoneAndWaitForClose(popup)
 })
 
+test('MobCode keeps the workspace header fixed while long source scrolls', async ({ page }) => {
+  const session = await createMobCodeSession(page)
+  await seedMobCodeFile(page, session, Array.from({ length: 500 }, (_, index) => `print(${index})`).join('\n'))
+  await openMobCodeManager(page, session)
+
+  const editorScroller = page.locator('.mobcode-editor-pane .cm-scroller')
+  await expect(editorScroller).toBeVisible()
+  const headerTopBeforeScroll = await page.locator('.mobcode-shell h1').evaluate((header) => header.getBoundingClientRect().top)
+
+  await editorScroller.evaluate((scroller) => {
+    scroller.scrollTop = scroller.scrollHeight
+  })
+
+  const layout = await editorScroller.evaluate((scroller) => ({
+    editorScrollTop: scroller.scrollTop,
+    editorScrollHeight: scroller.scrollHeight,
+    editorClientHeight: scroller.clientHeight,
+    documentScrollTop: document.scrollingElement?.scrollTop ?? 0,
+  }))
+  const headerTopAfterScroll = await page.locator('.mobcode-shell h1').evaluate((header) => header.getBoundingClientRect().top)
+
+  expect(layout.editorScrollHeight).toBeGreaterThan(layout.editorClientHeight)
+  expect(layout.editorScrollTop).toBeGreaterThan(0)
+  expect(layout.documentScrollTop).toBe(0)
+  expect(headerTopAfterScroll).toBe(headerTopBeforeScroll)
+})
+
 test('MobCode Python runner completes blank and comment-only files', async ({ page }) => {
   for (const source of ['', '# Nothing to run yet\n']) {
     const session = await createMobCodeSession(page)
