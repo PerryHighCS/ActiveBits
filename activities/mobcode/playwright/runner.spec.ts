@@ -109,6 +109,33 @@ test('MobCode Python runner popup prints terminal output', async ({ page }) => {
   await clickRunnerDoneAndWaitForClose(popup)
 })
 
+test('MobCode keeps the workspace header fixed while long source scrolls', async ({ page }) => {
+  const session = await createMobCodeSession(page)
+  await seedMobCodeFile(page, session, Array.from({ length: 500 }, (_, index) => `print(${index})`).join('\n'))
+  await openMobCodeManager(page, session)
+
+  const editorScroller = page.locator('.mobcode-editor-pane .cm-scroller')
+  await expect(editorScroller).toBeVisible()
+  const headerTopBeforeScroll = await page.locator('.mobcode-shell h1').evaluate((header) => header.getBoundingClientRect().top)
+
+  await editorScroller.evaluate((scroller) => {
+    scroller.scrollTop = scroller.scrollHeight
+  })
+
+  const layout = await editorScroller.evaluate((scroller) => ({
+    editorScrollTop: scroller.scrollTop,
+    editorScrollHeight: scroller.scrollHeight,
+    editorClientHeight: scroller.clientHeight,
+    documentScrollTop: document.scrollingElement?.scrollTop ?? 0,
+  }))
+  const headerTopAfterScroll = await page.locator('.mobcode-shell h1').evaluate((header) => header.getBoundingClientRect().top)
+
+  expect(layout.editorScrollHeight).toBeGreaterThan(layout.editorClientHeight)
+  expect(layout.editorScrollTop).toBeGreaterThan(0)
+  expect(layout.documentScrollTop).toBe(0)
+  expect(headerTopAfterScroll).toBe(headerTopBeforeScroll)
+})
+
 test('MobCode Python runner completes blank and comment-only files', async ({ page }) => {
   for (const source of ['', '# Nothing to run yet\n']) {
     const session = await createMobCodeSession(page)
@@ -121,6 +148,47 @@ test('MobCode Python runner completes blank and comment-only files', async ({ pa
     await expect(terminal).not.toContainText('IndentationError')
     await clickRunnerDoneAndWaitForClose(popup)
   }
+})
+
+test('MobCode Python runner preserves triple-quoted literal content', async ({ page }) => {
+  const session = await createMobCodeSession(page)
+  await seedMobCodeFile(page, session, [
+    'def show_example():',
+    '    example = """',
+    'def prompt():',
+    '    return input("This is literal text")',
+    '"""',
+    '    return example',
+    'print(show_example())',
+  ].join('\n'))
+  await openMobCodeManager(page, session)
+
+  const popup = await runMobCodePopup(page)
+  const terminal = popup.locator('#terminal')
+
+  await expect(terminal).toContainText('def prompt():', { timeout: 15_000 })
+  await expect(terminal).toContainText('return input("This is literal text")')
+  await expect(terminal).not.toContainText('async def prompt():')
+  await expect(terminal).not.toContainText('await mobcode_input')
+  await expect(popup.getByRole('button', { name: 'Close Python runner' })).toHaveText('Done', { timeout: 15_000 })
+  await clickRunnerDoneAndWaitForClose(popup)
+})
+
+test('MobCode Python runner preserves triple-quoted string indentation', async ({ page }) => {
+  const session = await createMobCodeSession(page)
+  await seedMobCodeFile(page, session, [
+    "s = '''",
+    'hi',
+    "'''",
+    'print(len(s))',
+  ].join('\n'))
+  await openMobCodeManager(page, session)
+
+  const popup = await runMobCodePopup(page)
+
+  await expect(popup.locator('#terminal')).toContainText('4', { timeout: 15_000 })
+  await expect(popup.getByRole('button', { name: 'Close Python runner' })).toHaveText('Done', { timeout: 15_000 })
+  await clickRunnerDoneAndWaitForClose(popup)
 })
 
 test('MobCode Python runner popup imports workspace Python modules', async ({ page }) => {

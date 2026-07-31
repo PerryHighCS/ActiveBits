@@ -12,6 +12,16 @@ Capture reusable React patterns, performance guidance, and accessibility convent
 - Tradeoffs:
 - Owner:
 
+## MobCode Layout
+
+- Date: 2026-07-31
+- Area: activities | mobcode | layout
+- Pattern: Bound the flex shell, grid row, and direct CodeMirror wrapper with `minmax(0, 1fr)`/`min-height: 0` so only the editor scroller owns long-source overflow.
+- Why it helps: Without all three bounds, CodeMirror expands to source height, the document scrolls, and the activity header leaves the viewport.
+- Example (file/path): `activities/mobcode/client/styles.css`; `activities/mobcode/playwright/runner.spec.ts`.
+- Tradeoffs: The sidebar now scrolls internally when its file/student controls exceed the available workspace height.
+- Owner: Codex
+
 ## Performance Optimization
 
 ### Memoize Expensive Computations

@@ -327,6 +327,17 @@ void test('buildBrythonModuleSource transforms functions without adding entry wr
   assert.doesNotMatch(source, /mobcode_run_async/)
 })
 
+void test('buildBrythonModuleSource preserves triple-quoted literal indentation', () => {
+  const source = buildBrythonModuleSource([
+    'def message():',
+    '    return """',
+    '    keep these spaces',
+    '    """',
+  ].join('\n'))
+
+  assert.match(source, /return """\n {4}keep these spaces\n {4}"""/)
+})
+
 void test('buildBrythonAsyncEntrySource rewrites top-level and function input', () => {
   const source = buildBrythonAsyncEntrySource([
     'name = input("Name?")',
@@ -351,6 +362,47 @@ void test('buildBrythonAsyncEntrySource gives blank and comment-only files a val
 
     assert.match(wrappedSource, /async def __mobcode_user_main__\(\):\n {4}pass\n/)
   }
+})
+
+void test('buildBrythonAsyncEntrySource safely indents triple-quoted literal content', () => {
+  const source = buildBrythonAsyncEntrySource([
+    'def show_example():',
+    '    example = """',
+    'def prompt():',
+    '    return input("This is literal text")',
+    '"""',
+    '    return example',
+    'print(show_example())',
+  ].join('\n'))
+
+  assert.match(source, /def show_example\(\):/)
+  assert.doesNotMatch(source, /async def show_example\(\):/)
+  assert.match(source, /def prompt\(\):\n {4}return input\("This is literal text"\)\n"""/)
+  assert.doesNotMatch(source, /await mobcode_input\("This is literal text"\)/)
+  assert.match(source, / {8}return example/)
+})
+
+void test('buildBrythonAsyncEntrySource preserves triple-quoted string values', () => {
+  const source = buildBrythonAsyncEntrySource([
+    "s = '''",
+    'hi',
+    "'''",
+    'print(len(s))',
+  ].join('\n'))
+
+  assert.match(source, / {4}s = '''\nhi\n'''\n {4}print\(len\(s\)\)/)
+})
+
+void test('buildBrythonAsyncEntrySource analyzes code on an opening triple-quote line', () => {
+  const source = buildBrythonAsyncEntrySource([
+    'from time import sleep; example = """',
+    'literal text',
+    '"""',
+    'sleep(0)',
+  ].join('\n'))
+
+  assert.match(source, /from time import sleep; example = """\nliteral text\n"""/)
+  assert.match(source, /await mobcode_sleep\(0\)/)
 })
 
 void test('buildBrythonAsyncEntrySource rewrites class method input', () => {
