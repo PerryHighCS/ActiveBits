@@ -1,4 +1,5 @@
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
+import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler'
 import { copyTextWithReset } from '@src/hooks/useClipboard'
 import { storeCreateSessionBootstrapPayload } from '@src/components/common/manageDashboardUtils'
 import { readEmbeddedManagerBootstrapRefreshRequest } from '@src/components/common/embeddedManagerBootstrap'
@@ -2666,6 +2667,8 @@ const SyncDeckManager: FC = () => {
     })
   }, [sessionId, isConfigurePanelOpen])
 
+  const attachSessionEndedHandler = useSessionEndedHandler()
+
   const { connect: connectInstructorWs, disconnect: disconnectInstructorWs, socketRef: instructorSocketRef } =
     useResilientWebSocket({
       buildUrl: buildInstructorWsUrl,
@@ -2840,6 +2843,7 @@ const SyncDeckManager: FC = () => {
           return
         }
       },
+      attachSessionEndedHandler,
     })
 
   const studentJoinUrl = sessionId && typeof window !== 'undefined' ? `${window.location.origin}/${sessionId}` : ''

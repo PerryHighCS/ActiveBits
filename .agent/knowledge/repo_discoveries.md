@@ -14,6 +14,14 @@ Use this log for durable findings that future contributors and agents should reu
 
 ## Discoveries
 
+- Date: 2026-08-01
+- Area: client | activities | syncdeck | instructor lifecycle
+- Discovery: SyncDeck's instructor manager uses the same parent-session websocket as students, so it must attach the shared `useSessionEndedHandler` when creating its resilient websocket. Without that attachment, a valid server `session-ended` broadcast leaves the instructor on a deleted manager route while students redirect correctly.
+- Why it matters: Session termination is authoritative for every connected role, including instructors. Keeping the manager active after deletion makes the UI appear connected to a session that no longer exists.
+- Evidence: `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/playwright/instructor-session-ended.spec.ts`.
+- Follow-up action: Keep instructor websocket creation wired through the shared session-ended handler whenever SyncDeck connection setup is refactored.
+- Owner: Codex
+
 - Date: 2026-07-31
 - Area: activities | mobcode | Python runner
 - Discovery: MobCode's Brython async-entry source transform must distinguish literal-only lines from an opening triple-quote line. Literal-only text can look like a function or `input()` call and can have less indentation than its surrounding function, while the opening line may contain executable code that still needs analysis and rewriting.
