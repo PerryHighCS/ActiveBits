@@ -265,6 +265,8 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
     assert.equal((startResponse.body as { activeSessionId?: unknown }).activeSessionId, createdSessionId)
 
     ws.wss.clients.add({ readyState: 1, sessionId: createdSessionId, isInstructor: true } as unknown as ActiveBitsWebSocket)
+    ws.wss.clients.add({ readyState: 1, sessionId: createdSessionId, studentId: 'student-1' } as unknown as ActiveBitsWebSocket)
+    ws.wss.clients.add({ readyState: 1, sessionId: createdSessionId, studentId: 'student-1' } as unknown as ActiveBitsWebSocket)
     const activeStatusResponse = response()
     await getHandlers.get('/api/integrations/learn/v1/activities/:activityId/resources/:resourceLinkId/status')!(
       { params: { activityId: 'syncdeck', resourceLinkId: resourceId }, ...signedRequest('GET', statusPath, {}, 'active-status-nonce') },
@@ -277,8 +279,21 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
         joinCode: (activeStatusResponse.body as { joinCode: unknown }).joinCode,
         participantCount: (activeStatusResponse.body as { participantCount: unknown }).participantCount,
         instructorCount: (activeStatusResponse.body as { instructorCount: unknown }).instructorCount,
+        activeSessionId: (activeStatusResponse.body as { activeSessionId: unknown }).activeSessionId,
+        studentLaunchUrl: (activeStatusResponse.body as { studentLaunchUrl: unknown }).studentLaunchUrl,
+        connectedParticipantCount: (activeStatusResponse.body as { connectedParticipantCount: unknown }).connectedParticipantCount,
+        connectedInstructorCount: (activeStatusResponse.body as { connectedInstructorCount: unknown }).connectedInstructorCount,
       },
-      { state: 'active', joinCode: createdSessionId, participantCount: 0, instructorCount: 1 },
+      {
+        state: 'active',
+        joinCode: createdSessionId,
+        participantCount: 1,
+        instructorCount: 1,
+        activeSessionId: createdSessionId,
+        studentLaunchUrl: `/${createdSessionId}`,
+        connectedParticipantCount: 1,
+        connectedInstructorCount: 1,
+      },
     )
 
     const substituteLaunch = substituteInstructorLink(resourceId, 'https://slides.example/deck')
