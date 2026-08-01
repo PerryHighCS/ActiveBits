@@ -8,7 +8,7 @@ interface SyncDeckCreateResponse {
 test('an instructor manager redirects when its SyncDeck session ends', async ({ page }) => {
   test.skip(
     test.info().project.name !== 'chromium',
-    'WebKit test contexts do not retain Set-Cookie responses from fetch in this harness.',
+    'Non-Chromium test contexts do not retain Set-Cookie responses from fetch in this harness.',
   )
   await page.goto('/')
 
@@ -28,7 +28,7 @@ test('an instructor manager redirects when its SyncDeck session ends', async ({ 
   const sessionId = created.id as string
   const instructorPasscode = created.instructorPasscode as string
 
-  const configured = await page.evaluate(async ({ id, passcode }) => {
+  await page.evaluate(async ({ id, passcode }) => {
     const response = await fetch(`/api/syncdeck/${encodeURIComponent(id)}/configure`, {
       method: 'POST',
       credentials: 'include',
@@ -38,15 +38,15 @@ test('an instructor manager redirects when its SyncDeck session ends', async ({ 
         instructorPasscode: passcode,
       }),
     })
-    return response.ok
+    if (!response.ok) {
+      throw new Error(`Unable to configure SyncDeck session: ${response.status}`)
+    }
   }, { id: sessionId, passcode: instructorPasscode })
-
-  expect(configured).toBe(true)
 
   await page.goto(`/manage/syncdeck/${encodeURIComponent(sessionId)}`)
   await expect(page.getByRole('button', { name: 'Force sync students to current position' })).toBeEnabled()
 
-  const ended = await page.evaluate(async (id) => {
+  await page.evaluate(async (id) => {
     const passcodeResponse = await fetch(`/api/syncdeck/${encodeURIComponent(id)}/instructor-passcode`, {
       credentials: 'include',
     })
@@ -54,16 +54,20 @@ test('an instructor manager redirects when its SyncDeck session ends', async ({ 
       throw new Error(`Unable to recover SyncDeck instructor credentials: ${passcodeResponse.status}`)
     }
     const { instructorPasscode } = await passcodeResponse.json() as { instructorPasscode?: unknown }
+    if (typeof instructorPasscode !== 'string' || instructorPasscode.length === 0) {
+      throw new Error('SyncDeck instructor credential recovery returned an invalid passcode')
+    }
     const response = await fetch(`/api/syncdeck/${encodeURIComponent(id)}`, {
       method: 'DELETE',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ instructorPasscode }),
     })
-    return response.ok
+    if (!response.ok) {
+      throw new Error(`Unable to end SyncDeck session: ${response.status}`)
+    }
   }, sessionId)
 
-  expect(ended).toBe(true)
   await expect(page).toHaveURL(/\/session-ended$/)
   await expect(page.getByRole('heading', { name: 'Session Ended' })).toBeVisible()
 })
