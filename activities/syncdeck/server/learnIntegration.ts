@@ -461,7 +461,17 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
       return void res.json({ resourceLinkId, state: 'waiting', activeSessionId: null, studentLaunchUrl: null, connectedParticipantCount: 0, connectedInstructorCount: 0 })
     }
     const counts = countConnections(ws, entry.data.activeSessionId)
-    res.json({ resourceLinkId, state: 'active', activeSessionId: entry.data.activeSessionId, studentLaunchUrl: `/${encodeURIComponent(entry.data.activeSessionId)}`, connectedParticipantCount: counts.participants, connectedInstructorCount: counts.instructors })
+    res.json({
+      resourceLinkId,
+      state: 'active',
+      joinCode: entry.data.activeSessionId,
+      participantCount: counts.participants,
+      instructorCount: counts.instructors,
+      activeSessionId: entry.data.activeSessionId,
+      studentLaunchUrl: `/${encodeURIComponent(entry.data.activeSessionId)}`,
+      connectedParticipantCount: counts.participants,
+      connectedInstructorCount: counts.instructors,
+    })
   })
 
   app.post(`${INTEGRATION_PREFIX}/activities/:activityId/resources/:resourceLinkId/student-entry`, async (req, res) => {

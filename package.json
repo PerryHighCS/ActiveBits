@@ -11,7 +11,7 @@
         "build": "npm run typecheck && echo 'Quick build (assumes dependencies installed). Use npm run deploy for full install+build.' && npm run build --workspace client",
         "deploy": "npm install --include=dev --workspaces --include-workspace-root && npm run build --workspace client",
         "start": "npm start --prefix server",
-        "dev": "export NODE_ENV='dev' && concurrently \"npm run dev --prefix client\" \"npm run start --prefix server\"",
+        "dev": "cross-env NODE_ENV=dev node --env-file-if-exists=.env ./node_modules/concurrently/dist/bin/index.js \"npm run dev --prefix client\" \"npm run start --prefix server\"",
         "lint": "npm --workspace client run lint && npm --workspace server run lint && npm --workspace activities run lint",
         "lint:activities": "npm --workspace activities run lint",
         "lint:activities:scope": "npm --workspace activities run lint:scope",
@@ -56,6 +56,7 @@
         "@playwright/test": "^1.60.0",
         "@types/node": "^24.13.2",
         "concurrently": "^10.0.4",
+        "cross-env": "^10.1.0",
         "tsx": "^4.22.4",
         "typescript": "^6.0.3",
         "vite": "^8.1.0"

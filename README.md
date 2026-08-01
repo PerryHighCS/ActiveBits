@@ -42,6 +42,13 @@ Additional operational docs:
   - Use only for nested sandbox tooling inside the devcontainer, such as agent/debug environments that launch their own sandbox layer.
   - Do not use this profile for routine development unless you specifically need those tools.
 
+## Development
+
+Run `npm run dev` to start the client and server. When a root `.env` file is present,
+the command loads it for both processes; it is optional, so a fresh checkout still
+starts without one. For an externally reachable development server, set
+`HOST=0.0.0.0` and `PORT=3000` in that file.
+
 ## Access
 
 - Student site: <https://bits.mycode.run>

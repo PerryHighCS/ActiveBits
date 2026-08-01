@@ -273,6 +273,9 @@ For an active session:
 {
   "resourceLinkId": "opaque-resource-id",
   "state": "active",
+  "joinCode": "activebits-session-id",
+  "participantCount": 24,
+  "instructorCount": 1,
   "activeSessionId": "activebits-session-id",
   "studentLaunchUrl": "/<session-id>",
   "connectedParticipantCount": 24,
@@ -280,12 +283,12 @@ For an active session:
 }
 ```
 
-`studentLaunchUrl` is a navigation URL, not an API credential. It may be omitted from
-the status response if Learn instead asks ActiveBits for a redirect response at student
-launch time. `connectedParticipantCount` is the number of unique, currently connected
-student participants; `connectedInstructorCount` is the number of currently connected
-instructors. These are live connection counts, not attendance or historical enrollment
-totals.
+`joinCode` is the active SyncDeck session ID that students can enter directly.
+`participantCount` is the number of unique, currently connected student participants;
+`instructorCount` is the number of currently connected instructors. These are live
+connection counts, not attendance or historical enrollment totals. `activeSessionId`,
+`studentLaunchUrl`, `connectedParticipantCount`, and `connectedInstructorCount` remain
+available for existing Learn clients.
 
 Learn may poll status while rendering its activity. The first implementation should poll
 at a modest interval (for example, every 15–30 seconds while the activity page is
