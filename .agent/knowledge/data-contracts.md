@@ -15,6 +15,15 @@ Document API and data-shape assumptions that must stay compatible over time.
 
 ## Contracts
 
+- Date: 2026-08-01
+- Surface: REST | Learn SyncDeck resource status
+- Contract: An active `GET /api/integrations/learn/v1/activities/syncdeck/resources/:resourceLinkId/status` response exposes `joinCode` (the active SyncDeck session ID), `participantCount`, and `instructorCount` alongside the existing active-session status fields.
+- Compatibility constraints: Existing `activeSessionId`, `studentLaunchUrl`, `connectedParticipantCount`, and `connectedInstructorCount` fields remain available. The new counts are live websocket connection counts, not attendance totals.
+- Validation rules: The route authenticates the request and derives the join code only from the active server-side entry mapping. Participants are deduplicated by student ID; instructor sockets are counted individually.
+- Evidence (schema/tests/path): `activities/syncdeck/server/learnIntegration.ts`; `activities/syncdeck/server/learnIntegration.test.ts`; `.agent/plans/learn-syncdeck-session-integration.md`.
+- Follow-up action: Retain both field sets until Learn has migrated all consumers to the concise status shape.
+- Owner: Codex
+
 - Date: 2026-07-23
 - Surface: REST | browser handoff | SyncDeck waiting room
 - Contract: Learn-managed instructor sessions use a dedicated HMAC-authenticated API and a temporary `(activityId, provider, resourceLinkId)` entry mapping. The activity ID is a required URL path segment; the first implementation accepts `syncdeck`. A `student-entry` request returns a short-lived, single-use ActiveBits browser URL; consuming it establishes an httpOnly waiting-room handoff. Learn `start` transitions the mapping from waiting to active and returns a distinct single-use instructor manager handoff. `stop` broadcasts session end, clears the mapping, and leaves the stopped session to normal ActiveBits TTL cleanup.
