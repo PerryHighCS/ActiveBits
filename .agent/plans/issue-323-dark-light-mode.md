@@ -48,6 +48,18 @@ inline `style={{ color: '#...' }}` literals that bypass Tailwind entirely.
   (`client/src/App.tsx`), not duplicated per activity header — it must be
   visible on every route, including ones without a `SessionHeader` (e.g.
   `StatusDashboard`, `ManageDashboard`, standalone/solo activity routes).
+- **Suppress the toggle in embedded activity contexts.** Embedded launches
+  (SyncDeck slides embedding an activity session, e.g. Raffle/Resonance) run
+  through the same `AppShell`, so a naive global toggle would render inside
+  every embedded iframe on a deck — a redundant floating control per slide,
+  and a way for an embedded activity's theme to visually diverge from the
+  presentation hosting it. Reuse the existing embedded-session detection
+  (`isEmbeddedChildSessionId` in
+  `client/src/components/common/sessionHeaderUtils.ts`, already used by
+  `SessionHeader` to strip chrome for embedded sessions) to hide
+  `ThemeToggle` there. Embedded activities still resolve and apply a theme
+  (system preference, or a top-level stored preference if present in the
+  same browser) — they just don't offer their own control to change it.
 
 ## Architecture
 
@@ -105,6 +117,11 @@ inline `style={{ color: '#...' }}` literals that bypass Tailwind entirely.
 - Rendered once in `client/src/App.tsx`'s `AppShell`, positioned so it's
   visible on every route (fixed corner placement, or integrated into a
   slot that already renders on every page).
+- `AppShell` must not render `ThemeToggle` when `isEmbeddedChildSessionId`
+  indicates the current route is an embedded child session (see Product
+  Decisions above). Determine the embedded flag the same way
+  `SessionHeader` does today, rather than inventing a second detection
+  path.
 
 ## Implementation Checklist
 
@@ -114,9 +131,10 @@ inline `style={{ color: '#...' }}` literals that bypass Tailwind entirely.
 - [ ] Add the synchronous inline bootstrap script to `client/index.html` (try/catch around `localStorage`, fallback to `matchMedia`).
 - [ ] Add `client/src/hooks/useTheme.ts` (+ `useTheme.test.ts`) covering: no stored preference follows system and live-updates on system change; explicit `light`/`dark` persists and stops following system; returning to `system` clears the stored key; `localStorage` throwing (private mode) degrades gracefully.
 - [ ] Add `client/src/components/ui/ThemeToggle.tsx` (+ `ThemeToggle.test.tsx`) with correct ARIA state semantics for the three modes.
-- [ ] Wire `ThemeToggle` into `client/src/App.tsx`'s `AppShell` so it renders globally on every route.
+- [ ] Wire `ThemeToggle` into `client/src/App.tsx`'s `AppShell` so it renders globally on every route, except embedded child-session routes (check via `isEmbeddedChildSessionId`, matching how `SessionHeader` already detects embedded sessions).
 - [ ] Add baseline dark tokens to `client/src/App.tsx`'s own shell classes (background, footer) so the toggle has something visible to prove out immediately.
 - [ ] Manually verify in a browser: hard reload with system dark and no stored preference shows dark with no light-then-dark flash; toggling to Light persists across reload; toggling back to System resumes following OS; toggling OS preference live updates the page while in System mode.
+- [ ] Manually verify an embedded child-session route (e.g. a SyncDeck-embedded activity URL) renders with no `ThemeToggle` visible while still resolving to the correct theme.
 
 ### Phase 1 — Shared chrome retrofit
 
@@ -172,3 +190,4 @@ tokens/conventions exist:
 - Per-activity custom color themes/branding beyond light/dark — out of scope for this issue.
 - A settings/profile page — the toggle lives in the app shell, not a separate settings surface.
 - Server-side rendering of the initial theme (no SSR exists in this app; the inline script handles the client-only no-flash requirement).
+- Forwarding the SyncDeck/presentation host's own theme into embedded activity iframes (e.g. via `activityOptions` or a `postMessage`) so an embedded activity visually matches the deck around it. Out of scope here; embedded activities fall back to system/stored preference for now. Worth a future issue if presentation-matching becomes a real ask.
