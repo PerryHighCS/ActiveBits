@@ -5,6 +5,8 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { JSDOM } from 'jsdom'
 import FormattedMarkdown, { isAllowedMarkdownUrl, plainTextFromMarkdown } from './FormattedMarkdown.js'
 
+;(globalThis as { React?: typeof React }).React = React
+
 function installDomEnvironment(): () => void {
   const dom = new JSDOM('<!doctype html><html><body></body></html>', {
     url: 'https://activebits.local/',
