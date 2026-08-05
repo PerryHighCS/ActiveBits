@@ -24,6 +24,10 @@ function installDomEnvironment(): () => void {
   })
 
   return () => {
+    const documentBody = globalThis.document?.body
+    if (documentBody != null) {
+      documentBody.innerHTML = ''
+    }
     dom.window.close()
     ;(globalThis as { window?: Window & typeof globalThis }).window = previousWindow
     ;(globalThis as { document?: Document }).document = previousDocument
