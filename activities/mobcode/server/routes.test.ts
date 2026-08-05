@@ -186,8 +186,10 @@ void test('normalizeMobCodeSessionData keeps the manager roster alphabetical aft
       starterVersion: { files: {}, activeFile: '' },
       studentWorkspaces: {
         grace: { participantId: 'grace', displayName: 'Grace', files: {}, activeFile: '', createdAt: 200, updatedAt: 800 },
-        ada: { participantId: 'ada', displayName: 'Ada', files: {}, activeFile: '', createdAt: 100, updatedAt: 900 },
-        alan: { participantId: 'alan', displayName: 'Alan', files: {}, activeFile: '', createdAt: 200, updatedAt: 1_000 },
+        zeta: { participantId: 'zeta', displayName: 'Ada', files: {}, activeFile: '', createdAt: 100, updatedAt: 900 },
+        alpha: { participantId: 'alpha', displayName: 'ada', files: {}, activeFile: '', createdAt: 200, updatedAt: 1_000 },
+        2: { participantId: '2', displayName: 'bea', files: {}, activeFile: '', createdAt: 300, updatedAt: 1_100 },
+        10: { participantId: '10', displayName: 'Bea', files: {}, activeFile: '', createdAt: 400, updatedAt: 1_200 },
       },
       sharedExample: null,
     },
@@ -195,7 +197,35 @@ void test('normalizeMobCodeSessionData keeps the manager roster alphabetical aft
 
   const snapshot = buildMobCodeManagerSnapshot(data)
   const students = (snapshot.studentCode as { students: Array<{ participantId: string }> }).students
-  assert.deepEqual(students.map((student) => student.participantId), ['ada', 'alan', 'grace'])
+  assert.deepEqual(students.map((student) => student.participantId), ['alpha', 'zeta', '10', '2', 'grace'])
+})
+
+void test('normalizeMobCodeSessionData preserves retention selection before alphabetizing the manager roster', () => {
+  const studentWorkspaces = Object.fromEntries(Array.from({ length: 31 }, (_, index) => {
+    const studentNumber = 31 - index
+    const participantId = `student-${String(studentNumber).padStart(2, '0')}`
+    return [participantId, {
+      participantId,
+      displayName: `Student ${String(studentNumber).padStart(2, '0')}`,
+      files: {},
+      activeFile: '',
+      createdAt: studentNumber,
+      updatedAt: 1_000 - studentNumber,
+    }]
+  }))
+  const data = normalizeMobCodeSessionData({
+    studentCode: {
+      tryItEnabled: true,
+      starterVersion: { files: {}, activeFile: '' },
+      studentWorkspaces,
+      sharedExample: null,
+    },
+  })
+
+  assert.deepEqual(Object.keys(data.studentCode?.studentWorkspaces ?? {}), Array.from({ length: 30 }, (_, index) => `student-${String(31 - index).padStart(2, '0')}`))
+  const snapshot = buildMobCodeManagerSnapshot(data)
+  const students = (snapshot.studentCode as { students: Array<{ participantId: string }> }).students
+  assert.deepEqual(students.map((student) => student.participantId), Array.from({ length: 30 }, (_, index) => `student-${String(index + 2).padStart(2, '0')}`))
 })
 
 void test('student snapshots never include another student workspace or identity', () => {
