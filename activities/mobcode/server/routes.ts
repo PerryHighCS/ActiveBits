@@ -67,6 +67,7 @@ const MAX_PRESENCE_SELECTIONS = 16
 const WS_OPEN = 1
 const LIVE_GROUP_CLEANUP_DELAY_MS = 30_000
 const SOLO_EDIT_COOKIE_MAX_AGE_MS = 365 * 24 * 60 * 60 * 1000
+const ROSTER_SORT_LOCALE = 'en-US'
 const DURABLE_MESSAGE_TYPES = new Set<MobCodeMessage['type']>(['state-sync', 'file-tree-changed'])
 const RESERVED_PATH_SEGMENTS = new Set(['__proto__', 'constructor', 'prototype'])
 
@@ -179,8 +180,8 @@ function getGroupBytes(group: MobCodeGroupState | null): number {
 }
 
 function compareStudentWorkspaces(left: MobCodeStudentWorkspace, right: MobCodeStudentWorkspace): number {
-  return left.displayName.localeCompare(right.displayName, undefined, { sensitivity: 'base' })
-    || left.participantId.localeCompare(right.participantId)
+  return left.displayName.localeCompare(right.displayName, ROSTER_SORT_LOCALE, { sensitivity: 'base' })
+    || left.participantId.localeCompare(right.participantId, ROSTER_SORT_LOCALE)
 }
 
 function normalizeStudentCodeState(value: unknown, defaultGroup: MobCodeGroupState, source: Record<string, unknown>): MobCodeStudentCodeState {

@@ -17,7 +17,7 @@ Document API and data-shape assumptions that must stay compatible over time.
 
 - Date: 2026-08-05
 - Surface: REST | MobCode manager session snapshot
-- Contract: The named student workspace roster is ordered alphabetically by display name, case-insensitively, with participant ID as a deterministic tie-breaker. A student's later workspace updates do not affect their roster position.
+- Contract: The named student workspace roster is ordered with the fixed `en-US` locale by display name, case-insensitively, with participant ID as a deterministic tie-breaker. A student's later workspace updates do not affect their roster position.
 - Compatibility constraints: The manager snapshot continues to expose the same `studentCode.students` fields; only its ordering is stabilized.
 - Validation rules: Normalize display names before comparison and preserve a deterministic order when names compare equally.
 - Evidence (schema/tests/path): `activities/mobcode/server/routes.ts`; `activities/mobcode/server/routes.test.ts`.

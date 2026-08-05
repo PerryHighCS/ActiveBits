@@ -113,8 +113,8 @@ ActiveBits supports two session storage modes:
    ```
 3. Visit your Render URL (e.g., `https://activebits.onrender.com`)
 4. Test health check: `https://activebits.onrender.com/health-check`
-5. Create a test activity session and verify it persists after redeployment
-6. Verify the intended activity dashboard cards are available.
+5. Before creating a session, open `/manage` and verify the **Activity Dashboard** heading plus the **Mob Code** card with **Start Session Now** and **Create Permanent Link** controls. These are rendered from the activity registry by [`ManageDashboard`](client/src/components/common/ManageDashboard.tsx).
+6. Start a test session from the Mob Code card and verify it persists after redeployment.
 
 ## Environment Variables Reference
 

@@ -190,6 +190,8 @@ void test('normalizeMobCodeSessionData keeps the manager roster alphabetical aft
         alpha: { participantId: 'alpha', displayName: 'ada', files: {}, activeFile: '', createdAt: 200, updatedAt: 1_000 },
         2: { participantId: '2', displayName: 'bea', files: {}, activeFile: '', createdAt: 300, updatedAt: 1_100 },
         10: { participantId: '10', displayName: 'Bea', files: {}, activeFile: '', createdAt: 400, updatedAt: 1_200 },
+        asa: { participantId: 'asa', displayName: 'Åsa', files: {}, activeFile: '', createdAt: 500, updatedAt: 1_300 },
+        zoe: { participantId: 'zoe', displayName: 'Zoë', files: {}, activeFile: '', createdAt: 600, updatedAt: 1_400 },
       },
       sharedExample: null,
     },
@@ -197,7 +199,7 @@ void test('normalizeMobCodeSessionData keeps the manager roster alphabetical aft
 
   const snapshot = buildMobCodeManagerSnapshot(data)
   const students = (snapshot.studentCode as { students: Array<{ participantId: string }> }).students
-  assert.deepEqual(students.map((student) => student.participantId), ['alpha', 'zeta', '10', '2', 'grace'])
+  assert.deepEqual(students.map((student) => student.participantId), ['alpha', 'zeta', 'asa', '10', '2', 'grace', 'zoe'])
 })
 
 void test('normalizeMobCodeSessionData preserves retention selection before alphabetizing the manager roster', () => {
