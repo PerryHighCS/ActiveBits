@@ -344,3 +344,7 @@ const styles = { /* ... */ };
 ## Browser API callbacks
 
 When passing a browser method such as `window.confirm` or `window.fetch` to a helper, wrap or bind it at the call site. Some browser implementations require the original `window` receiver; passing the detached method can fail with an `Illegal invocation` error that unit doubles do not reveal. Cover these flows in a real-browser test when they cross dialog or fetch boundaries.
+
+## Stable renderer component maps
+
+For renderers that accept React component maps (such as `react-markdown`), memoize the map when the variant is unchanged. Recreating functions in the map on every parent render changes their React element types, which unmounts and reloads descendants such as image nodes. Add a DOM-identity regression test when preserving media state matters.

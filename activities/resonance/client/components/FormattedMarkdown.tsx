@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import ReactMarkdown from 'react-markdown'
 import type { AllowElement, Components, UrlTransform } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -220,7 +221,10 @@ export default function FormattedMarkdown({
   className,
   variant = 'block',
 }: Props) {
-  const components = createMarkdownComponents(variant)
+  // The manager re-renders for live state and countdown updates. Keeping these
+  // component types stable prevents ReactMarkdown from unmounting and reloading
+  // every rendered image on each update.
+  const components = useMemo(() => createMarkdownComponents(variant), [variant])
 
   return (
     <div className={cx('resonance-markdown', variant === 'inline' ? compactText : baseText, variant === 'block' ? 'space-y-3' : 'space-y-1', className)}>
