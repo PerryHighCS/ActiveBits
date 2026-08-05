@@ -67,6 +67,7 @@ const MAX_PRESENCE_SELECTIONS = 16
 const WS_OPEN = 1
 const LIVE_GROUP_CLEANUP_DELAY_MS = 30_000
 const SOLO_EDIT_COOKIE_MAX_AGE_MS = 365 * 24 * 60 * 60 * 1000
+const ROSTER_SORT_LOCALE = 'en-US'
 const DURABLE_MESSAGE_TYPES = new Set<MobCodeMessage['type']>(['state-sync', 'file-tree-changed'])
 const RESERVED_PATH_SEGMENTS = new Set(['__proto__', 'constructor', 'prototype'])
 
@@ -178,6 +179,11 @@ function getGroupBytes(group: MobCodeGroupState | null): number {
   return group ? getTotalFileBytes(group.files) : 0
 }
 
+function compareStudentWorkspaces(left: MobCodeStudentWorkspace, right: MobCodeStudentWorkspace): number {
+  return left.displayName.localeCompare(right.displayName, ROSTER_SORT_LOCALE, { sensitivity: 'base' })
+    || left.participantId.localeCompare(right.participantId, ROSTER_SORT_LOCALE)
+}
+
 function normalizeStudentCodeState(value: unknown, defaultGroup: MobCodeGroupState, source: Record<string, unknown>): MobCodeStudentCodeState {
   const raw = isPlainObject(value) ? value : {}
   const embeddedLaunch = isPlainObject(source.embeddedLaunch) ? source.embeddedLaunch : null
@@ -194,12 +200,11 @@ function normalizeStudentCodeState(value: unknown, defaultGroup: MobCodeGroupSta
   const workspaces: Record<string, MobCodeStudentWorkspace> = Object.create(null) as Record<string, MobCodeStudentWorkspace>
   const rawWorkspaces = isPlainObject(raw.studentWorkspaces) ? raw.studentWorkspaces : {}
   let workspaceBytes = getGroupBytes(starterVersion)
-  const ordered = Object.entries(rawWorkspaces)
+  const entries = Object.entries(rawWorkspaces)
     .flatMap(([participantId, workspace]) => isValidParticipantId(participantId) && isPlainObject(workspace)
       ? [[participantId, workspace] as [string, Record<string, unknown>]]
       : [])
-    .sort(([, left], [, right]) => Number(right.updatedAt ?? 0) - Number(left.updatedAt ?? 0))
-  for (const [participantId, rawWorkspace] of ordered) {
+  for (const [participantId, rawWorkspace] of entries) {
     if (Object.keys(workspaces).length >= MAX_STUDENT_WORKSPACES) break
     const displayName = normalizeDisplayName(rawWorkspace.displayName)
     if (!displayName) continue
@@ -335,7 +340,11 @@ export function buildMobCodeManagerSnapshot(data: MobCodeSessionData): Record<st
       shareChangesEnabled: studentCode.shareChangesEnabled,
       starterVersionAvailable: studentCode.starterVersion != null,
       starterVersion: studentCode.starterVersion,
-      students: Object.values(studentCode.studentWorkspaces).map(({ participantId, displayName, files, activeFile, createdAt, updatedAt }) => ({ participantId, displayName, files, activeFile, createdAt, updatedAt })),
+      // Object values place integer-like keys in numeric order, so sort the response
+      // explicitly to preserve the instructor-facing alphabetical roster.
+      students: Object.values(studentCode.studentWorkspaces)
+        .sort(compareStudentWorkspaces)
+        .map(({ participantId, displayName, files, activeFile, createdAt, updatedAt }) => ({ participantId, displayName, files, activeFile, createdAt, updatedAt })),
       sharedExample: studentCode.sharedExample,
     },
     runnerId: readEmbeddedRunnerId(data),
