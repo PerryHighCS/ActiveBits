@@ -179,6 +179,25 @@ void test('normalizeMobCodeSessionData drops reserved participant keys and uses 
   assert.deepEqual(Object.keys(data.studentCode?.studentWorkspaces ?? {}), ['ada'])
 })
 
+void test('normalizeMobCodeSessionData keeps the manager roster alphabetical after student edits', () => {
+  const data = normalizeMobCodeSessionData({
+    studentCode: {
+      tryItEnabled: true,
+      starterVersion: { files: {}, activeFile: '' },
+      studentWorkspaces: {
+        grace: { participantId: 'grace', displayName: 'Grace', files: {}, activeFile: '', createdAt: 200, updatedAt: 800 },
+        ada: { participantId: 'ada', displayName: 'Ada', files: {}, activeFile: '', createdAt: 100, updatedAt: 900 },
+        alan: { participantId: 'alan', displayName: 'Alan', files: {}, activeFile: '', createdAt: 200, updatedAt: 1_000 },
+      },
+      sharedExample: null,
+    },
+  })
+
+  const snapshot = buildMobCodeManagerSnapshot(data)
+  const students = (snapshot.studentCode as { students: Array<{ participantId: string }> }).students
+  assert.deepEqual(students.map((student) => student.participantId), ['ada', 'alan', 'grace'])
+})
+
 void test('student snapshots never include another student workspace or identity', () => {
   const data = normalizeMobCodeSessionData({
     groups: { default: { files: { 'main.py': 'print("instructor")' }, activeFile: 'main.py' } },

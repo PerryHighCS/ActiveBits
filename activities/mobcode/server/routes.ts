@@ -198,7 +198,14 @@ function normalizeStudentCodeState(value: unknown, defaultGroup: MobCodeGroupSta
     .flatMap(([participantId, workspace]) => isValidParticipantId(participantId) && isPlainObject(workspace)
       ? [[participantId, workspace] as [string, Record<string, unknown>]]
       : [])
-    .sort(([, left], [, right]) => Number(right.updatedAt ?? 0) - Number(left.updatedAt ?? 0))
+    // A student edit must not rearrange the instructor's roster. Keep it alphabetized
+    // by display name, with participant ID as a deterministic tie-breaker.
+    .sort(([leftParticipantId, left], [rightParticipantId, right]) => {
+      const leftDisplayName = normalizeDisplayName(left.displayName) ?? ''
+      const rightDisplayName = normalizeDisplayName(right.displayName) ?? ''
+      return leftDisplayName.localeCompare(rightDisplayName, undefined, { sensitivity: 'base' })
+        || leftParticipantId.localeCompare(rightParticipantId)
+    })
   for (const [participantId, rawWorkspace] of ordered) {
     if (Object.keys(workspaces).length >= MAX_STUDENT_WORKSPACES) break
     const displayName = normalizeDisplayName(rawWorkspace.displayName)
