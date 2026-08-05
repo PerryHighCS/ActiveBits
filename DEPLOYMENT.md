@@ -114,7 +114,7 @@ ActiveBits supports two session storage modes:
 3. Visit your Render URL (e.g., `https://activebits.onrender.com`)
 4. Test health check: `https://activebits.onrender.com/health-check`
 5. Create a test activity session and verify it persists after redeployment
-6. Verify the production activity registry surfaces all intended dashboard cards, including Resonance on `/manage`
+6. Verify the intended activity dashboard cards are available.
 
 ## Environment Variables Reference
 
@@ -154,14 +154,9 @@ ActiveBits intentionally ships source maps in production for debugging and teach
 - The shared QR scanner uses `react-zxing` with the `zxing-wasm` reader binary imported through Vite. Production client builds emit `zxing_reader-*.wasm` under `client/dist/assets/`; deploy that file with the rest of the built client assets so QR scanning does not fall back to a third-party CDN.
 - Deploy every generated file under `client/dist/assets/`, not only the activity entry chunks. MobCode lazy-loads its role views, editor, ZIP support, and runner renderer into separate hashed chunks after the initial activity shell.
 
-## Dev-Only Presentation Assets
+## Excluded Development Assets
 
-SyncDeck sample decks that exist only for local development live under `activities/syncdeck/dev-presentations/`.
-
-- They may use permissive local-development settings that are not suitable for production embedding.
-- Vite serves them during local development from the same `/presentations/...` URLs used by the app.
-- When accessing the local app through the Express server on port `3000`, Vite HMR uses `/vite-hmr`; the server proxies that websocket upgrade to Vite on port `5173`.
-- Production builds must not emit these dev-only presentation files.
+SyncDeck sample decks under `activities/syncdeck/dev-presentations/` are local-only and must not be emitted by production builds.
 
 ## SyncDeck Embedded Media
 
@@ -193,19 +188,6 @@ When scaling to multiple instances:
 8. **Embedded child bootstrap payloads**: SyncDeck embedded launches now persist child-session bootstrap data under `session.data.embeddedLaunch.selectedOptions`. That session record must survive reloads and hot redeploys because embedded managers such as Video Sync rehydrate launch intent from the sanitized `GET /api/session/:childSessionId/embedded-launch` endpoint. In production, validate that this route remains available after deploys and returns only `{ embeddedLaunch: { selectedOptions } }`, not the raw session record.
 9. **SyncDeck embedded-session keepalive coupling**: launched embedded child sessions are expected to stay alive while their parent SyncDeck session is still active, and child-session reads now refresh the parent too. In production, treat unexpected pruning of either side as a keepalive regression rather than as normal temporary-session expiry.
 10. **Canonical persistent-link recovery**: Persistent manager recovery routes that return bootstrap data (for example Video Sync `persistentSourceUrl`) should source that data from canonical remembered permalink `selectedOptions` rather than from raw query params on redirected manage routes.
-11. **Activity live-run compatibility fields**: When activity session schemas gain new runtime fields, preserve them across redeploys and normalizer passes. Resonance now relies on `activeQuestionIds` and `activeQuestionDeadlineAt` for multi-question live runs, while older consumers may still read the compatibility field `activeQuestionId`.
-12. **SyncDeck static-presentation utilities**: `/util/syncdeck/launch-presentation` and `/util/syncdeck/permalink` are same-origin browser utility flows, not cross-origin API integrations. They depend on the client being able to iframe-load and preflight the requested `presentationUrl` from the ActiveBits origin before creating a session or permalink. If deployment policy blocks that iframe load or the URL fails Reveal sync preflight, the utilities must stop before creating server state. The launch utility creates a standalone student session by default and redirects to `/:sessionId`; `mode=instructor` creates a hosted instructor session, hands the generated instructor passcode to the manager through same-tab router state only, clears that router state after consumption, and redirects to `/manage/syncdeck/:sessionId?presentationUrl=...`. Do not use `sessionStorage`, `localStorage`, IndexedDB, or other browser storage for SyncDeck instructor passcodes; if reload-stable recovery is needed later, use httpOnly cookies or short-lived server-issued recovery tokens. The permalink utility renders a teacher-code builder page and calls `POST /api/syncdeck/generate-url` only after verification. Deployments should preserve both `presentationUrl` and `presentation-url` query spellings for externally hosted deck links.
-13. **Teacher Join recovery**: The home-page `Teacher Join` flow authenticates a live `sessionId` by resolving it back to shared persistent-session metadata. In multi-instance deployments, that active-session-to-persistent lookup must remain available anywhere the live session can be resumed.
-14. **SyncDeck embedded activity start serialization**: SyncDeck serializes `/api/syncdeck/:sessionId/embedded-activity/start` per `sessionId + instanceKey` inside each app process so concurrent instructors on the same instance cannot create duplicate child sessions for the same slide anchor. This is a per-process guard, so sticky routing still helps minimize any remaining cross-instance race window.
-15. **SyncDeck embedded activity identity**: SyncDeck derives embedded activity instance keys from the instructor-visible Reveal position and also persists a separate `location` object on the parent embedded activity record. Activation should rely on this stored/broadcast location instead of presentation-authored IDs, so parent and child session records must preserve `location` across redeploys.
-16. **SyncDeck embedded activity websocket bootstrap**: New SyncDeck instructor/student websocket connections replay currently stored embedded-activity starts from `session.data.embeddedActivities`. Student replays also mint fresh child-session entry tokens, so the parent and child session records must be read/write consistent across the instance that accepts the websocket.
-17. **Standalone activity launcher route**: `/launch/:activityId` is a client-owned launcher page. It must remain safe to load because the GET route does not create sessions; session creation still happens through `POST /api/:activityId/create` after the launcher button or explicit `?start=1` client auto-start. Deployments should preserve fallback routing to the SPA for `/launch/...` paths.
-18. **Video Sync natural completion handoff**: When the instructor preview reaches YouTube's natural `ENDED` state, the manager client converts that player event into the same authoritative pause command used for manual pauses. Preserve that browser-to-command path so the server does not continue projecting a finished video as still playing and heartbeat updates do not restart the preview loop.
-19. **SyncDeck embedded manager bootstrap timing**: SyncDeck embedded-start responses carry a short-lived `managerEntryToken` for the child manager. The parent must wait for this authenticated response before mounting the instructor iframe. Credentialed children exchange the token at the same-origin SyncDeck endpoint for their child passcode, then replace the URL to remove the attempted query token whether that exchange succeeds or fails; credentialless children such as Raffle use the token only as a parent launch-readiness signal and do not redeem it. In-memory and Valkey session stores must preserve atomic token consumption for credentialed children so concurrent requests cannot redeem a token twice. This avoids the websocket-start race and does not persist credentials in browser storage. Ad-hoc sessions depend on this path because they do not have persistent teacher-cookie recovery.
-    The parent manager also reconciles that authenticated start response locally; do not rely exclusively on the instructor websocket lifecycle echo, because an activity request can precede websocket authentication on first load. Validate that the response `instanceKey` matches the requested embedded instance before applying credentials, lifecycle state, retry completion, or success UI.
-    A child whose exchange fails requests a fresh bootstrap from its same-origin parent by child-session id only; the parent must keep this message path and authenticated refresh behavior intact so consumed or stale tokens do not leave an embedded manager unauthenticated. Refreshes are bounded per child and must preserve parent backfill retry history so hard failures still surface recovery UI.
-20. **SyncDeck embedded manager recovery**: The client treats 5xx embedded-start failures as transient and retries them with a bounded backoff, but presents the explicit recovery action immediately for non-retryable failures. Warm-iframe eviction clears all bootstrap retry/failure state for the evicted child so a return to that slide can request a new short-lived token.
-21. **MobCode Python runner popup**: The MobCode Python runner opens a same-origin popup and loads Brython from the npm-installed `brython` package through a rate-limited, allowlisted `/vendor/brython/...` route for `brython.min.js`, `brython.js`, and `brython_stdlib.js` before executing the selected Python entry file in the browser. Production deployments must include installed workspace dependencies so those vendor assets are present beside the server process. Interactive terminal `input()` is handled by compiling the entry file into an async worker wrapper and passing prompt responses through worker messages, so it does not require cross-origin-isolated shared memory. The popup includes a Stop control that terminates the active worker, caps terminal output to avoid runaway print loops exhausting the page, blocks direct imports of browser/JavaScript/system escape-hatch modules in the terminal runner profile, preflights unsupported entry imports before Brython attempts browser module loading, rewrites common `time.sleep(...)` calls to an async browser sleep bridge, and exposes only read-only MobCode workspace files through helper imports and `open(...)`. Python failures report a traceback with the deepest applicable lines in the selected entry file; Brython wrapper frames are skipped so assertion and other runtime errors point to user code.
 
 **To scale horizontally**:
 1. Go to **Settings** → **Scaling**
@@ -285,24 +267,8 @@ When a new deployment is triggered:
 - **Cause**: Valkey instance in different region or overloaded
 - **Fix**: Move Valkey to same region, upgrade plan, or reduce TTL/cache flush frequency
 
-## Cost Optimization
+## Operational Tuning
 
-### Development/Testing
-- **Valkey**: Starter plan (~$7/month)
-- **Web Service**: Starter plan (~$7/month)
-- **Total**: ~$14/month
-
-### Small Production (<100 concurrent sessions)
-- **Valkey**: Starter plan (~$7/month)
-- **Web Service**: Standard plan (~$25/month)
-- **Total**: ~$32/month
-
-### Large Production (100+ concurrent sessions)
-- **Valkey**: Standard+ plan (~$35/month)
-- **Web Service**: Pro plan + scaling (~$85/month + per instance)
-- **Total**: ~$120+/month
-
-**Optimization Tips**:
 1. Increase cache TTL to reduce Valkey reads (trade: longer stale data window)
 2. Reduce session TTL if users don't need long sessions
 3. Use single instance if horizontal scaling not needed
@@ -338,41 +304,6 @@ To migrate an existing deployment:
 3. Redeploy
 4. **Warning**: All active sessions will be lost during this transition
 5. Future sessions will persist across redeployments
-
-## Local Development with Valkey
-
-For local testing with Valkey:
-
-1. Install Valkey/Redis locally:
-   ```bash
-   # macOS
-   brew install redis
-   brew services start redis
-   
-   # Ubuntu
-   sudo apt install redis-server
-   sudo systemctl start redis
-   ```
-
-2. Set environment variable:
-   ```bash
-   export VALKEY_URL=redis://localhost:6379
-   ```
-
-3. Run server:
-   ```bash
-   cd server
-   npm run dev
-   ```
-
-4. Verify logs show "Using Valkey session store"
-
-## Support and Resources
-
-- **Render Documentation**: https://render.com/docs
-- **Valkey GitHub**: https://github.com/valkey-io/valkey
-- **ioredis Documentation**: https://github.com/redis/ioredis
-- **ActiveBits Repository**: [Your GitHub URL]
 
 ## Changelog
 
