@@ -372,11 +372,34 @@ export default function PostboardManager(): React.JSX.Element {
       <SessionHeader
         activityName="Postboard"
         sessionId={sessionId}
-        centerHeaderActions={(
-          <div className="postboard-header-setup">
-            <span className="postboard-header-prompt" title={snapshot?.prompt.text || 'No prompt set'}>
-              {snapshot?.prompt.text || 'No prompt set'}
-            </span>
+      />
+
+      {error && <div className="postboard-alert" role="alert">{error}</div>}
+
+      <div className="postboard-layout">
+        <div className="postboard-main">
+          <div className="postboard-prompt-bar">
+            {isSetupOpen ? (
+              <form id="postboard-setup-form" className="postboard-prompt-bar-form" onSubmit={handleSetupSubmit}>
+                <label className="postboard-prompt-bar-field">
+                  <span className="postboard-sr-only">Prompt text</span>
+                  <textarea
+                    value={promptDraft}
+                    onChange={(event) => setPromptDraft(event.target.value)}
+                    rows={2}
+                    maxLength={1000}
+                    autoFocus
+                  />
+                </label>
+                <Button type="submit" disabled={isSavingSetup} aria-disabled={isSavingSetup}>
+                  {isSavingSetup ? 'Saving...' : 'Save prompt'}
+                </Button>
+              </form>
+            ) : (
+              <span className="postboard-prompt-bar-text" title={snapshot?.prompt.text || 'No prompt set'}>
+                {snapshot?.prompt.text || 'No prompt set'}
+              </span>
+            )}
             <button
               type="button"
               className="postboard-header-icon-button"
@@ -386,7 +409,7 @@ export default function PostboardManager(): React.JSX.Element {
               aria-label={isSetupOpen ? 'Close prompt editor' : 'Edit prompt'}
               title={isSetupOpen ? 'Close prompt editor' : 'Edit prompt'}
             >
-              ✏️
+              {isSetupOpen ? '✕' : '✏️'}
             </button>
             <button
               type="button"
@@ -404,31 +427,6 @@ export default function PostboardManager(): React.JSX.Element {
               </span>
             </button>
           </div>
-        )}
-      />
-
-      {error && <div className="postboard-alert" role="alert">{error}</div>}
-
-      <div className="postboard-layout">
-        <div className="postboard-main">
-          {isSetupOpen && (
-            <section className="postboard-panel" aria-label="Edit prompt">
-              <form id="postboard-setup-form" className="postboard-form" onSubmit={handleSetupSubmit}>
-                <label>
-                  <span>Prompt text</span>
-                  <textarea
-                    value={promptDraft}
-                    onChange={(event) => setPromptDraft(event.target.value)}
-                    rows={3}
-                    maxLength={1000}
-                  />
-                </label>
-                <Button type="submit" disabled={isSavingSetup} aria-disabled={isSavingSetup}>
-                  {isSavingSetup ? 'Saving...' : 'Save prompt'}
-                </Button>
-              </form>
-            </section>
-          )}
 
           <section className="postboard-panel" aria-labelledby="postboard-all-posts-title">
             <h2 id="postboard-all-posts-title">Board Posts ({boardPosts.length})</h2>

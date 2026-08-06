@@ -27,6 +27,7 @@
 .postboard-main {
   flex: 1 1 auto;
   min-width: 0;
+  align-self: flex-start;
 }
 
 .postboard-sticky-side {
@@ -150,20 +151,60 @@
   margin-left: auto;
 }
 
-.postboard-header-setup {
+.postboard-prompt-bar {
+  position: sticky;
+  top: 0;
+  z-index: 30;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 0.4rem;
-  max-width: min(28rem, 40vw);
+  gap: 0.6rem;
+  margin-bottom: 1rem;
+  border: 1px solid #d8e2ea;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 0.6rem 0.9rem;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
 }
 
-.postboard-header-prompt {
-  overflow: hidden;
+.postboard-prompt-bar-text {
+  overflow-wrap: anywhere;
+  flex: 1 1 auto;
+  min-width: 0;
   color: #334155;
-  font-size: 0.9rem;
+  font-size: 0.95rem;
   font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+}
+
+.postboard-prompt-bar-form {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 0.6rem;
+  min-width: 0;
+}
+
+.postboard-prompt-bar-field {
+  flex: 1 1 16rem;
+  min-width: 0;
+}
+
+.postboard-prompt-bar-field textarea {
+  width: 100%;
+  resize: vertical;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 0.5rem 0.65rem;
+  color: #111827;
+  font: inherit;
+}
+
+.postboard-prompt-bar-field textarea:focus {
+  border-color: #0f766e;
+  box-shadow: 0 0 0 2px rgba(15, 118, 110, 0.14);
+  outline: none;
 }
 
 .postboard-header-icon-button {
