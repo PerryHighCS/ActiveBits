@@ -24,6 +24,14 @@ Capture reusable test setup patterns, common failure modes, and reliability guid
 - Follow-up action: Keep the terminal-running assertion as the popup readiness check and use the longer timeout only for actual execution completion.
 - Owner: Codex
 
+## Valkey session-wrapper coverage without an external service
+
+- Date: 2026-08-08
+- Pattern: Pass a minimal in-memory `ValkeySessionStore` test double as the optional third argument to `createSessionStore()` when a test must execute the real cache/wrapped-store branch. Assert through its record map and touch call list after `flushCache()` for cached touches, and immediately for uncached touches.
+- Why it helps: This exercises production cache/direct-touch sequencing without requiring a running Valkey instance or opening a network connection in unit tests.
+- Evidence: `server/sessionStore.test.ts`.
+- Owner: Codex
+
 - Date: 2026-07-27
 - Scope: typecheck | activities
 - Pattern: Run the activities TypeScript check one activity directory at a time through `scripts/typecheck-activities.mjs`. The runner reuses `activities/tsconfig.json` compiler options and shared contracts, but narrows source inclusion to the current activity.

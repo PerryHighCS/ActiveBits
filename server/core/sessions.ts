@@ -208,14 +208,14 @@ class InMemorySessionStore implements SessionStore {
   async publishBroadcast(): Promise<void> {}
 }
 
-export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 * 60 * 1000): SessionStore {
-  if (!valkeyUrl) {
+export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 * 60 * 1000, providedValkeyStore: ValkeySessionStore | null = null): SessionStore {
+  if (!valkeyUrl && !providedValkeyStore) {
     console.log('Using in-memory session store (no VALKEY_URL configured)')
     return new InMemorySessionStore(ttlMs)
   }
 
   console.log('Using Valkey session store with caching')
-  const valkeyStore = new ValkeySessionStore(valkeyUrl, { ttlMs })
+  const valkeyStore = providedValkeyStore ?? new ValkeySessionStore(valkeyUrl!, { ttlMs })
   const cache = new SessionCache<SessionRecord>({
     ttlMs: 30_000,
     maxSize: 1000,

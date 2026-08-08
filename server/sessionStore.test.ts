@@ -3,12 +3,52 @@ import assert from 'node:assert'
 import http from 'node:http'
 import { WebSocket } from 'ws'
 import { createSessionStore, createSession, type SessionRecord } from './core/sessions.js'
+import { type ValkeySessionStore } from './core/valkeyStore.js'
 import { createWsRouter } from './core/wsRouter.js'
 import { EMBEDDED_CHILD_SESSION_PREFIX } from '../types/session.js'
 import { registerSessionNormalizer, resetSessionNormalizersForTests } from './core/sessionNormalization.js'
 import { listenForTest } from './testPortBinding.js'
 
 const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
+
+function valkeyStoreForTest(records: Map<string, SessionRecord>, touches: string[], ttlMs = 1_000): ValkeySessionStore {
+  return {
+    ttlMs,
+    async get(id: string) {
+      const session = records.get(id)
+      return session ? structuredClone(session) : null
+    },
+    async set(id: string, session: SessionRecord) {
+      records.set(id, structuredClone(session))
+    },
+    async delete(id: string) {
+      return records.delete(id)
+    },
+    async touch(id: string) {
+      const session = records.get(id)
+      if (!session) return false
+      touches.push(id)
+      session.lastActivity = Date.now()
+      return true
+    },
+    async getAll() {
+      return Array.from(records.values()).map((session) => structuredClone(session))
+    },
+    async getAllIds() {
+      return Array.from(records.keys())
+    },
+    async refreshSessionExpiry() {
+      return null
+    },
+    async consumeSessionDataToken() {
+      return null
+    },
+    async close() {},
+    subscribeToBroadcast() {},
+    initializePubSub() {},
+    async publishBroadcast() {},
+  } as unknown as ValkeySessionStore
+}
 
 void test('inactive sessions expire', async () => {
   const sessions = createSessionStore(null, 50)
@@ -213,6 +253,40 @@ void test('touching a two-record linked-session cycle completes', async (t) => {
   assert.equal(await sessions.touch(firstSession.id), true)
   assert.ok(firstSession.lastActivity! > 1)
   assert.ok(secondSession.lastActivity! > 1)
+})
+
+void test('Valkey-backed linked touches refresh cached and uncached records exactly one hop', async (t) => {
+  const records = new Map<string, SessionRecord>()
+  const touches: string[] = []
+  const sessions = createSessionStore('redis://test', 1_000, valkeyStoreForTest(records, touches))
+  t.after(async () => {
+    await sessions.close()
+  })
+
+  const terminalSession = await createSession(sessions)
+  terminalSession.lastActivity = 1
+  await sessions.set(terminalSession.id, terminalSession)
+  const linkedSession = await createSession(sessions)
+  linkedSession.lastActivity = 1
+  linkedSession.data = { linkedSessionId: terminalSession.id }
+  await sessions.set(linkedSession.id, linkedSession)
+  const liveSession = await createSession(sessions)
+  liveSession.lastActivity = 1
+  liveSession.data = { linkedSessionId: linkedSession.id }
+  await sessions.set(liveSession.id, liveSession)
+
+  assert.equal(await sessions.touch(liveSession.id), true)
+  await sessions.flushCache!()
+  assert.deepEqual(touches.sort(), [linkedSession.id, liveSession.id].sort(), 'cached touches should flush the live and direct linked records to Valkey only')
+  assert.ok((records.get(linkedSession.id)?.lastActivity ?? 0) > 1)
+  assert.equal(records.get(terminalSession.id)?.lastActivity, 1)
+
+  touches.length = 0
+  sessions.cache!.invalidate(liveSession.id)
+  sessions.cache!.invalidate(linkedSession.id)
+  assert.equal(await sessions.touch(liveSession.id), true)
+  assert.deepEqual(touches.sort(), [linkedSession.id, liveSession.id].sort(), 'uncached touches should directly refresh the live and direct linked records in Valkey only')
+  assert.equal(records.get(terminalSession.id)?.lastActivity, 1)
 })
 
 void test('a linked session survives past its own ttl as long as the session pointing at it keeps getting touched', async (t) => {
