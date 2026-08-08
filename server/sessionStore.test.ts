@@ -169,8 +169,54 @@ void test('touching a session refreshes a linked session declared via data.linke
   assert.ok((refreshedLinked?.lastActivity ?? 0) > 1)
 })
 
+void test('touching a linked session refreshes exactly one hop', async (t) => {
+  const sessions = createSessionStore(null, 1_000)
+  t.after(async () => {
+    await sessions.close()
+  })
+
+  const terminalSession = await createSession(sessions)
+  terminalSession.lastActivity = 1
+  await sessions.set(terminalSession.id, terminalSession)
+
+  const linkedSession = await createSession(sessions)
+  linkedSession.lastActivity = 1
+  linkedSession.data = { linkedSessionId: terminalSession.id }
+  await sessions.set(linkedSession.id, linkedSession)
+
+  const liveSession = await createSession(sessions)
+  liveSession.lastActivity = 1
+  liveSession.data = { linkedSessionId: linkedSession.id }
+  await sessions.set(liveSession.id, liveSession)
+
+  assert.equal(await sessions.touch(liveSession.id), true)
+  assert.ok(liveSession.lastActivity! > 1)
+  assert.ok(linkedSession.lastActivity! > 1)
+  assert.equal(terminalSession.lastActivity, 1)
+})
+
+void test('touching a two-record linked-session cycle completes', async (t) => {
+  const sessions = createSessionStore(null, 1_000)
+  t.after(async () => {
+    await sessions.close()
+  })
+
+  const firstSession = await createSession(sessions)
+  const secondSession = await createSession(sessions)
+  firstSession.lastActivity = 1
+  firstSession.data = { linkedSessionId: secondSession.id }
+  secondSession.lastActivity = 1
+  secondSession.data = { linkedSessionId: firstSession.id }
+  await sessions.set(firstSession.id, firstSession)
+  await sessions.set(secondSession.id, secondSession)
+
+  assert.equal(await sessions.touch(firstSession.id), true)
+  assert.ok(firstSession.lastActivity! > 1)
+  assert.ok(secondSession.lastActivity! > 1)
+})
+
 void test('a linked session survives past its own ttl as long as the session pointing at it keeps getting touched', async (t) => {
-  const sessions = createSessionStore(null, 50)
+  const sessions = createSessionStore(null, 200)
   t.after(async () => {
     await sessions.close()
   })
@@ -181,16 +227,16 @@ void test('a linked session survives past its own ttl as long as the session poi
   liveSession.data = { linkedSessionId: linkedSession.id }
   await sessions.set(liveSession.id, liveSession)
 
-  await wait(40)
+  await wait(125)
   await sessions.touch(liveSession.id)
-  await wait(40)
+  await wait(125)
   sessions.cleanup()
 
   const survivingIds = await sessions.getAllIds()
   assert.ok(survivingIds.includes(linkedSession.id), 'linked session should survive because the session pointing at it was touched')
   assert.ok(!survivingIds.includes(unlinkedControlSession.id), 'an untouched, unlinked session should not survive the same window')
 
-  await wait(60)
+  await wait(250)
   sessions.cleanup()
   assert.ok(!(await sessions.getAllIds()).includes(linkedSession.id))
 })

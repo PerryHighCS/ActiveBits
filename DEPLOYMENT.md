@@ -188,6 +188,7 @@ When scaling to multiple instances:
 8. **Embedded child bootstrap payloads**: SyncDeck embedded launches now persist child-session bootstrap data under `session.data.embeddedLaunch.selectedOptions`. That session record must survive reloads and hot redeploys because embedded managers such as Video Sync rehydrate launch intent from the sanitized `GET /api/session/:childSessionId/embedded-launch` endpoint. In production, validate that this route remains available after deploys and returns only `{ embeddedLaunch: { selectedOptions } }`, not the raw session record.
 9. **SyncDeck embedded-session keepalive coupling**: launched embedded child sessions are expected to stay alive while their parent SyncDeck session is still active, and child-session reads now refresh the parent too. In production, treat unexpected pruning of either side as a keepalive regression rather than as normal temporary-session expiry.
 10. **Canonical persistent-link recovery**: Persistent manager recovery routes that return bootstrap data (for example Video Sync `persistentSourceUrl`) should source that data from canonical remembered permalink `selectedOptions` rather than from raw query params on redirected manage routes.
+11. **Linked-session refresh scope**: `data.linkedSessionId` refreshes only the directly linked record. Do not depend on transitive refreshes; keeping the relationship single-hop prevents a malformed cycle from blocking a keepalive request.
 
 **To scale horizontally**:
 1. Go to **Settings** → **Scaling**

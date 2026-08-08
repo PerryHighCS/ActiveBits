@@ -111,6 +111,14 @@ Track security-relevant boundaries, risks, and mitigation decisions.
   one — see the generic contract in `.agent/knowledge/data-contracts.md`.
 - Owner: Codex
 
+## Learn pending-start logging and linked-session safety
+
+- Date: 2026-08-08
+- Finding: The `learn-instructor-session-start-pending` event previously included raw `resourceLinkId`, despite the fingerprint-only logging contract. The linked-session helper also needed to avoid recursive traversal so malformed `A -> B -> C` and `A <-> B` links cannot refresh beyond one hop or recurse indefinitely.
+- Resolution: The pending event now retains `requestId`, state, and identity fingerprints but omits the raw resource identifier. Both in-memory and Valkey-backed session stores use a non-propagating direct refresh for `linkedSessionId` targets.
+- Validation: `activities/syncdeck/server/learnIntegration.test.ts` parses the pending event and verifies the raw field is absent; `server/sessionStore.test.ts` covers chain and two-record-cycle behavior plus a widened expiry margin.
+- Owner: Codex
+
 - Date: 2026-07-15
 - Area: waiting-room student display-name persistence
 - Threat or risk: Remembering a student's lobby name across days in browser persistence could inadvertently expand into storing participant IDs, credentials, or activity-specific form data.

@@ -284,6 +284,13 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
     assert.match(String(startIdentityLog.sessionFingerprint), /^[a-f0-9]{16}$/)
     const startedSessionFingerprint = startIdentityLog.sessionFingerprint
     assert.ok(infoLogs.some((message) => message.includes('learn-instructor-session-start-pending') && message.includes(`"mappingFingerprint":"${resourceMappingFingerprint}"`)))
+    const pendingStartLog = JSON.parse(
+      infoLogs.find((message) => message.includes('"event":"learn-instructor-session-start-pending"'))!,
+    ) as Record<string, unknown>
+    assert.equal(pendingStartLog.requestId, 'start-1')
+    assert.equal(pendingStartLog.state, 'starting')
+    assert.equal(pendingStartLog.resourceLinkId, undefined)
+    assert.match(String(pendingStartLog.resourceLinkFingerprint), /^[a-f0-9]{16}$/)
 
     const learnEntryIds = (await sessions.getAllIds()).filter((candidateId) => candidateId.startsWith('learn-syncdeck-entry-'))
     let resourceEntryId: string | undefined

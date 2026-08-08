@@ -154,8 +154,18 @@ class InMemorySessionStore implements SessionStore {
     session.lastActivity = Date.now()
     const linkedSessionId = getLinkedSessionId(session)
     if (linkedSessionId && linkedSessionId !== id) {
-      await this.touch(linkedSessionId)
+      this.touchDirect(linkedSessionId)
     }
+    return true
+  }
+
+  private touchDirect(id: string): boolean {
+    const session = this.store[id]
+    if (!session) {
+      return false
+    }
+
+    session.lastActivity = Date.now()
     return true
   }
 
@@ -259,29 +269,33 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
     return await valkeyStore.delete(id)
   }
 
-  const touch = async (id: string): Promise<boolean> => {
+  const touchDirect = async (id: string): Promise<{ touched: boolean; session: SessionRecord | null }> => {
     const cached = cache.getFresh(id)
     if (cached) {
       cache.touch(id)
-      const linkedSessionId = getLinkedSessionId(cached)
-      if (linkedSessionId && linkedSessionId !== id) {
-        await touch(linkedSessionId)
-      }
-      return true
+      return { touched: true, session: cached }
     }
 
     const touched = await valkeyStore.touch(id)
     if (!touched) {
-      return false
+      return { touched: false, session: null }
     }
 
     const session = await loadSessionRecord(id)
     if (session) {
       cache.set(id, session, false)
-      const linkedSessionId = getLinkedSessionId(session)
-      if (linkedSessionId && linkedSessionId !== id) {
-        await touch(linkedSessionId)
-      }
+    }
+
+    return { touched: true, session }
+  }
+
+  const touch = async (id: string): Promise<boolean> => {
+    const { touched, session } = await touchDirect(id)
+    if (!touched) return false
+
+    const linkedSessionId = getLinkedSessionId(session)
+    if (linkedSessionId && linkedSessionId !== id) {
+      await touchDirect(linkedSessionId)
     }
 
     return true
