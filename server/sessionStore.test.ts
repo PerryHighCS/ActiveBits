@@ -147,3 +147,50 @@ void test('refreshing an embedded child session refreshes its parent activity an
   const refreshedParent = await sessions.get(parentSession.id)
   assert.ok((refreshedParent?.lastActivity ?? 0) > 1)
 })
+
+void test('touching a session refreshes a linked session declared via data.linkedSessionId', async (t) => {
+  const sessions = createSessionStore(null, 1_000)
+  t.after(async () => {
+    await sessions.close()
+  })
+
+  const linkedSession = await createSession(sessions)
+  linkedSession.lastActivity = 1
+  await sessions.set(linkedSession.id, linkedSession)
+
+  const liveSession = await createSession(sessions)
+  liveSession.lastActivity = 1
+  liveSession.data = { linkedSessionId: linkedSession.id }
+  await sessions.set(liveSession.id, liveSession)
+
+  assert.equal(await sessions.touch(liveSession.id), true)
+
+  const refreshedLinked = await sessions.get(linkedSession.id)
+  assert.ok((refreshedLinked?.lastActivity ?? 0) > 1)
+})
+
+void test('a linked session survives past its own ttl as long as the session pointing at it keeps getting touched', async (t) => {
+  const sessions = createSessionStore(null, 50)
+  t.after(async () => {
+    await sessions.close()
+  })
+
+  const linkedSession = await createSession(sessions)
+  const unlinkedControlSession = await createSession(sessions)
+  const liveSession = await createSession(sessions)
+  liveSession.data = { linkedSessionId: linkedSession.id }
+  await sessions.set(liveSession.id, liveSession)
+
+  await wait(40)
+  await sessions.touch(liveSession.id)
+  await wait(40)
+  sessions.cleanup()
+
+  const survivingIds = await sessions.getAllIds()
+  assert.ok(survivingIds.includes(linkedSession.id), 'linked session should survive because the session pointing at it was touched')
+  assert.ok(!survivingIds.includes(unlinkedControlSession.id), 'an untouched, unlinked session should not survive the same window')
+
+  await wait(60)
+  sessions.cleanup()
+  assert.ok(!(await sessions.getAllIds()).includes(linkedSession.id))
+})

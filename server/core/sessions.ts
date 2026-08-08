@@ -40,6 +40,16 @@ function getEmbeddedParentSessionId(session: SessionRecord | SessionLike | null 
   return parentSessionId.length > 0 ? parentSessionId : null
 }
 
+// Generic cross-record keepalive: any session may declare `data.linkedSessionId` to have its own
+// touch()es refresh another store record (e.g. a Learn integration entry mapping keyed off this
+// live session, so the mapping stays alive for as long as anyone is actually connected to it,
+// independent of whatever external polling cadence would otherwise refresh it).
+function getLinkedSessionId(session: SessionRecord | SessionLike | null | undefined): string | null {
+  const data = ensurePlainObject(session?.data)
+  const linkedSessionId = typeof data.linkedSessionId === 'string' ? data.linkedSessionId.trim() : ''
+  return linkedSessionId.length > 0 ? linkedSessionId : null
+}
+
 function toSessionRecord(session: SessionLike): SessionRecord {
   return {
     ...session,
@@ -142,6 +152,10 @@ class InMemorySessionStore implements SessionStore {
     }
 
     session.lastActivity = Date.now()
+    const linkedSessionId = getLinkedSessionId(session)
+    if (linkedSessionId && linkedSessionId !== id) {
+      await this.touch(linkedSessionId)
+    }
     return true
   }
 
@@ -246,8 +260,13 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
   }
 
   const touch = async (id: string): Promise<boolean> => {
-    if (cache.getFresh(id)) {
+    const cached = cache.getFresh(id)
+    if (cached) {
       cache.touch(id)
+      const linkedSessionId = getLinkedSessionId(cached)
+      if (linkedSessionId && linkedSessionId !== id) {
+        await touch(linkedSessionId)
+      }
       return true
     }
 
@@ -259,6 +278,10 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
     const session = await loadSessionRecord(id)
     if (session) {
       cache.set(id, session, false)
+      const linkedSessionId = getLinkedSessionId(session)
+      if (linkedSessionId && linkedSessionId !== id) {
+        await touch(linkedSessionId)
+      }
     }
 
     return true

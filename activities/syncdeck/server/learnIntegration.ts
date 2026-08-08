@@ -273,6 +273,65 @@ function mappingId(secret: string, activityId: string, provider: string, resourc
   return `learn-syncdeck-entry-${digest.slice(0, 40)}`
 }
 
+// Domain-separated, secret-keyed digests so provider/resourceLinkId/session identifiers can be correlated
+// across ActiveBits and Learn logs without either side logging the underlying opaque values.
+function identityFingerprint(secret: string, ...parts: string[]): string {
+  return createHmac('sha256', secret).update(parts.join('|'), 'utf8').digest('hex').slice(0, 16)
+}
+
+function identityFingerprints(secret: string, provider: string, resourceLinkId: string, mapping: string): {
+  providerFingerprint: string
+  resourceLinkFingerprint: string
+  mappingFingerprint: string
+} {
+  return {
+    providerFingerprint: identityFingerprint(secret, 'learn-provider', provider),
+    resourceLinkFingerprint: identityFingerprint(secret, 'learn-resource-link', resourceLinkId),
+    mappingFingerprint: identityFingerprint(secret, 'learn-mapping', mapping),
+  }
+}
+
+function logIdentityResolution(
+  secret: string,
+  operation: string,
+  provider: string,
+  resourceLinkId: string,
+  mapping: string,
+  state: 'inactive' | 'waiting' | 'active',
+  activeSessionId: string | null,
+  reused?: boolean,
+): void {
+  console.info(JSON.stringify({
+    activity: ACTIVITY_ID,
+    event: 'learn-identity-resolved',
+    operation,
+    ...identityFingerprints(secret, provider, resourceLinkId, mapping),
+    state,
+    sessionFingerprint: activeSessionId ? identityFingerprint(secret, 'learn-session', activeSessionId) : null,
+    ...(reused === undefined ? {} : { reused }),
+  }))
+}
+
+// `sessions.ttlMs` is only populated on the in-memory store; the Valkey-backed store (production)
+// exposes its real configured TTL on `sessions.valkeyStore.ttlMs` instead, so an active entry's TTL
+// must check both before falling back to the (much shorter) waiting-room default.
+function resolveActiveEntryTtlMs(sessions: SessionStore): number {
+  if (typeof sessions.ttlMs === 'number') return sessions.ttlMs
+  if (typeof sessions.valkeyStore?.ttlMs === 'number') return sessions.valkeyStore.ttlMs
+  return WAITING_TTL_MS
+}
+
+// Stamps the live SyncDeck session with a back-reference to its Learn entry mapping so that
+// ordinary websocket keepalive activity on the session (see `linkedSessionId` handling in
+// server/core/sessions.ts) also refreshes the entry, instead of the entry's lifetime depending
+// solely on Learn re-polling `status`/`start` while the class may already be underway.
+async function linkLiveSessionToEntry(sessions: SessionStore, sessionId: string, entryMappingId: string): Promise<void> {
+  const liveSession = await sessions.get(sessionId)
+  if (!liveSession) return
+  liveSession.data = { ...liveSession.data, linkedSessionId: entryMappingId }
+  await sessions.set(sessionId, liveSession)
+}
+
 function cookieValue(secret: string, mapping: string): string {
   const signature = createHmac('sha256', secret).update(mapping, 'utf8').digest('base64url')
   return `${mapping}.${signature}`
@@ -418,7 +477,7 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
       await sessions.delete(id)
       return null
     }
-    const ttl = data.state === 'waiting' ? WAITING_TTL_MS : (sessions.ttlMs ?? WAITING_TTL_MS)
+    const ttl = data.state === 'waiting' ? WAITING_TTL_MS : resolveActiveEntryTtlMs(sessions)
     const nextExpiresAt = Date.now() + ttl
     let refreshed: SessionRecord | null = null
     try {
@@ -455,12 +514,18 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
       return void res.status(400).json({ error: 'Invalid resourceLinkId' })
     }
     const provider = auth.provider
-    const entry = await loadEntry(mappingId(auth.key.secret, ACTIVITY_ID, provider, resourceLinkId))
-    if (!entry) return void res.json({ resourceLinkId, state: 'inactive', activeSessionId: null, studentLaunchUrl: null, connectedParticipantCount: 0, connectedInstructorCount: 0 })
+    const id = mappingId(auth.key.secret, ACTIVITY_ID, provider, resourceLinkId)
+    const entry = await loadEntry(id)
+    if (!entry) {
+      logIdentityResolution(auth.key.secret, 'status', provider, resourceLinkId, id, 'inactive', null)
+      return void res.json({ resourceLinkId, state: 'inactive', activeSessionId: null, studentLaunchUrl: null, connectedParticipantCount: 0, connectedInstructorCount: 0 })
+    }
     if (entry.data.state === 'waiting' || !entry.data.activeSessionId) {
+      logIdentityResolution(auth.key.secret, 'status', provider, resourceLinkId, id, 'waiting', null)
       return void res.json({ resourceLinkId, state: 'waiting', activeSessionId: null, studentLaunchUrl: null, connectedParticipantCount: 0, connectedInstructorCount: 0 })
     }
     const counts = countConnections(ws, entry.data.activeSessionId)
+    logIdentityResolution(auth.key.secret, 'status', provider, resourceLinkId, id, 'active', entry.data.activeSessionId)
     res.json({
       resourceLinkId,
       state: 'active',
@@ -490,6 +555,7 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
     const provider = auth.provider
     const id = mappingId(auth.key.secret, ACTIVITY_ID, provider, resourceLinkId)
     let entry = await loadEntry(id)
+    let reused = Boolean(entry)
     if (!entry) {
       const startLock = await claimStartLock(sessions, id)
       if (startLock.state !== 'acquired') {
@@ -503,6 +569,7 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
       const releaseStartLock = startLock.release
       try {
         entry = await loadEntry(id)
+        reused = Boolean(entry)
         if (!entry) {
           const created = await createSession(sessions, { data: { learnIntegrationKind: 'entry', activityId: ACTIVITY_ID, provider, resourceLinkId, state: 'waiting', activeSessionId: null, presentationUrl: null, expiresAt: Date.now() + WAITING_TTL_MS } })
           const generatedId = created.id
@@ -516,6 +583,7 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
         await releaseStartLock()
       }
     }
+    logIdentityResolution(auth.key.secret, 'student-entry', provider, resourceLinkId, id, entry.data.state, entry.data.activeSessionId, reused)
     const token = await createBrowserToken(sessions, { learnIntegrationKind: 'browser-token', activityId: ACTIVITY_ID, purpose: 'student-wait', mappingId: id, expiresAt: Date.now() + BROWSER_TOKEN_TTL_MS })
     res.json({ waitingLaunchUrl: `${BROWSER_PREFIX}/${ACTIVITY_ID}/wait/${encodeURIComponent(token.id)}?token=${encodeURIComponent(token.value)}`, state: entry.data.state })
   })
@@ -552,7 +620,7 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
       }
       const pendingEntry = await loadEntry(id)
       if (pendingEntry?.data.startRequestId === requestId) {
-        console.info(JSON.stringify({ activity: ACTIVITY_ID, event: 'learn-instructor-session-start-pending', resourceLinkId, requestId }))
+        console.info(JSON.stringify({ activity: ACTIVITY_ID, event: 'learn-instructor-session-start-pending', resourceLinkId, requestId, ...identityFingerprints(auth.key.secret, provider, resourceLinkId, id), state: 'starting' }))
         return void res.status(202).json({ state: 'starting', activeSessionId: null, reused: false })
       }
       logLearnRequestFailure('start', 'instructor-start-in-progress', { resourceLinkId, requestId, status: 409 })
@@ -600,6 +668,7 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
           }
           const created = await options.createInstructorSession(presentationUrl)
           sessionId = created.sessionId
+          await linkLiveSessionToEntry(sessions, sessionId, id)
           const nextData: LearnEntryData = {
             learnIntegrationKind: 'entry',
             activityId: ACTIVITY_ID,
@@ -609,7 +678,7 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
             startRequestId: requestId,
             activeSessionId: sessionId,
             presentationUrl,
-            expiresAt: Date.now() + (sessions.ttlMs ?? WAITING_TTL_MS),
+            expiresAt: Date.now() + resolveActiveEntryTtlMs(sessions),
           }
           entry.session.data = nextData
           await sessions.set(id, entry.session)
@@ -630,6 +699,7 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
         }
       }
 
+      logIdentityResolution(auth.key.secret, 'start', provider, resourceLinkId, id, 'active', sessionId!, reused)
       const browserToken = await createBrowserToken(sessions, {
         learnIntegrationKind: 'browser-token',
         activityId: ACTIVITY_ID,
@@ -667,6 +737,7 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
     const id = mappingId(auth.key.secret, ACTIVITY_ID, provider, resourceLinkId)
     const entry = await loadEntry(id)
     if (!entry?.data.activeSessionId) {
+      logIdentityResolution(auth.key.secret, 'stop', provider, resourceLinkId, id, 'inactive', null)
       console.info(JSON.stringify({ activity: ACTIVITY_ID, event: 'learn-integration-stop-noop', route: 'stop', reason: 'already-inactive', resourceLinkId, status: 200 }))
       return void res.json({ state: 'inactive', alreadyInactive: true })
     }
@@ -678,6 +749,7 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
       await sessions.publishBroadcast?.('session-ended', { sessionId })
     }
     await sessions.delete(id)
+    logIdentityResolution(auth.key.secret, 'stop', provider, resourceLinkId, id, 'inactive', sessionId)
     console.info(JSON.stringify({ activity: 'syncdeck', event: 'learn-instructor-session-stopped', resourceLinkId, sessionId }))
     res.json({ state: 'inactive', alreadyInactive: false })
   })
@@ -752,7 +824,8 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
           const created = await options.createInstructorSession(link.presentationUrl)
           sessionId = created.sessionId
           recoveryToken = created.instructorRecoveryToken
-          entry.session.data = { learnIntegrationKind: 'entry', activityId: ACTIVITY_ID, provider: link.provider, resourceLinkId: link.resourceLinkId, state: 'active', startRequestId: `substitute:${link.jti}`, activeSessionId: sessionId, presentationUrl: link.presentationUrl, expiresAt: Date.now() + (sessions.ttlMs ?? WAITING_TTL_MS) }
+          await linkLiveSessionToEntry(sessions, sessionId, id)
+          entry.session.data = { learnIntegrationKind: 'entry', activityId: ACTIVITY_ID, provider: link.provider, resourceLinkId: link.resourceLinkId, state: 'active', startRequestId: `substitute:${link.jti}`, activeSessionId: sessionId, presentationUrl: link.presentationUrl, expiresAt: Date.now() + resolveActiveEntryTtlMs(sessions) }
           await sessions.set(id, entry.session)
         } catch (error) {
           try {
