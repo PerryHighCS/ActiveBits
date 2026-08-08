@@ -533,6 +533,10 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
     assert.match(String((replayResponse.body as { error?: unknown }).error), /replayed/i)
 
     const stopPath = `/api/integrations/learn/v1/activities/syncdeck/resources/${resourceId}/stop`
+    const sessionBeforeStop = await sessions.get(createdSessionId)
+    assert.ok(sessionBeforeStop)
+    sessionBeforeStop.data.linkedSessionId = resourceEntryId
+    await sessions.set(createdSessionId, sessionBeforeStop)
     const stopResponse = response()
     await postHandlers.get('/api/integrations/learn/v1/activities/:activityId/resources/:resourceLinkId/stop')!(
       { params: { activityId: 'syncdeck', resourceLinkId: resourceId }, ...signedRequest('POST', stopPath, {}, 'stop-nonce') },
@@ -540,6 +544,7 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
     )
     assert.deepEqual(stopResponse.body, { state: 'inactive', alreadyInactive: false })
     assert.equal(typeof (await sessions.get(createdSessionId))?.data.learnIntegrationStoppedAt, 'number')
+    assert.equal((await sessions.get(createdSessionId))?.data.linkedSessionId, undefined)
     assert.deepEqual(broadcasts, [{ event: 'session-ended', payload: { sessionId: createdSessionId } }])
 
     const stopIdentityLog = JSON.parse(

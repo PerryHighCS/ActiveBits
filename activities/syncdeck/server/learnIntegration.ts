@@ -350,6 +350,17 @@ async function linkLiveSessionToEntry(sessions: SessionStore, sessionId: string,
   await sessions.set(sessionId, liveSession)
 }
 
+// Clear the link only when it still belongs to this entry. A stopped or rolled-back
+// session can retain open sockets, so it must not refresh a later mapping with the same id.
+async function unlinkLiveSessionFromEntry(sessions: SessionStore, sessionId: string, entryMappingId: string): Promise<void> {
+  const liveSession = await sessions.get(sessionId)
+  if (!liveSession || liveSession.data.linkedSessionId !== entryMappingId) return
+  const { linkedSessionId: _linkedSessionId, ...data } = liveSession.data
+  void _linkedSessionId
+  liveSession.data = data
+  await sessions.set(sessionId, liveSession)
+}
+
 function cookieValue(secret: string, mapping: string): string {
   const signature = createHmac('sha256', secret).update(mapping, 'utf8').digest('base64url')
   return `${mapping}.${signature}`
@@ -647,7 +658,7 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
     const releaseStartLock = startLock.release
     try {
       entry = await loadEntry(id)
-      let sessionId: string
+      let sessionId: string | null = null
       let reused = false
       if (entry?.data.state === 'active' && entry.data.activeSessionId) {
         if (entry.data.presentationUrl !== presentationUrl) {
@@ -703,6 +714,11 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
           logLearnLifecycle(auth.key.secret, 'learn-instructor-session-started', provider, resourceLinkId, id, sessionId, { requestId, reused: false })
         } catch (error) {
           try {
+            if (sessionId) await unlinkLiveSessionFromEntry(sessions, sessionId, id)
+          } catch (unlinkError) {
+            console.error(JSON.stringify({ activity: ACTIVITY_ID, event: 'learn-instructor-session-unlink-failed', requestId, error: unlinkError instanceof Error ? unlinkError.message : String(unlinkError) }))
+          }
+          try {
             if (previousData && entry) {
               entry.session.data = previousData
               await sessions.set(id, entry.session)
@@ -717,7 +733,7 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
         }
       }
 
-      logIdentityResolution(auth.key.secret, 'start', provider, resourceLinkId, id, 'active', sessionId!, reused)
+      logIdentityResolution(auth.key.secret, 'start', provider, resourceLinkId, id, 'active', sessionId, reused)
       const browserToken = await createBrowserToken(sessions, {
         learnIntegrationKind: 'browser-token',
         activityId: ACTIVITY_ID,
@@ -760,6 +776,7 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
       return void res.json({ state: 'inactive', alreadyInactive: true })
     }
     const sessionId = entry.data.activeSessionId
+    await unlinkLiveSessionFromEntry(sessions, sessionId, id)
     const activeSession = await sessions.get(sessionId)
     if (activeSession) {
       activeSession.data.learnIntegrationStoppedAt = Date.now()
@@ -846,6 +863,11 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
           entry.session.data = { learnIntegrationKind: 'entry', activityId: ACTIVITY_ID, provider: link.provider, resourceLinkId: link.resourceLinkId, state: 'active', startRequestId: `substitute:${link.jti}`, activeSessionId: sessionId, presentationUrl: link.presentationUrl, expiresAt: Date.now() + resolveActiveEntryTtlMs(sessions) }
           await sessions.set(id, entry.session)
         } catch (error) {
+          try {
+            if (sessionId) await unlinkLiveSessionFromEntry(sessions, sessionId, id)
+          } catch (unlinkError) {
+            console.error(JSON.stringify({ activity: ACTIVITY_ID, event: 'learn-substitute-link-unlink-failed', jti: link.jti, error: unlinkError instanceof Error ? unlinkError.message : String(unlinkError) }))
+          }
           try {
             if (previousData && entry) {
               entry.session.data = previousData

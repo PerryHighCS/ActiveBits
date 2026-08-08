@@ -742,3 +742,10 @@ Document API and data-shape assumptions that must stay compatible over time.
 - Contract: An activity normalizer that reconstructs `session.data` must retain a valid generic `data.linkedSessionId`. SyncDeck's normalizer preserves the trimmed non-empty string so its Learn live session can keep the linked entry mapping alive.
 - Validation: `server/sessionStore.test.ts` registers the real SyncDeck normalizer, writes a `syncdeck` record through `createSessionStore()`, and verifies both persistence and linked touch propagation.
 - Owner: Codex
+
+## Learn live-session link lifecycle
+
+- Date: 2026-08-08
+- Contract: A Learn-created SyncDeck session carries `linkedSessionId` only while its entry mapping is active. Learn stop and either instructor-activation rollback clear the link, but only if it still matches that mapping, so a stale socket cannot refresh a recreated entry mapping.
+- Validation: `activities/syncdeck/server/learnIntegration.test.ts` verifies the link is absent from the live session after a Learn stop.
+- Owner: Codex
