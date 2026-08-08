@@ -3,7 +3,7 @@ import { createHash, createHmac } from 'node:crypto'
 import test from 'node:test'
 import type { SessionRecord, SessionStore } from 'activebits-server/core/sessions.js'
 import type { ActiveBitsWebSocket, WsRouter } from '../../../types/websocket.js'
-import { buildLearnHmacCanonicalRequest, registerLearnSyncDeckRoutes } from './learnIntegration.js'
+import { buildLearnHmacCanonicalRequest, identityFingerprint, identityFingerprints, mappingId, registerLearnSyncDeckRoutes } from './learnIntegration.js'
 
 interface MockResponse {
   statusCode: number
@@ -108,6 +108,22 @@ void test('buildLearnHmacCanonicalRequest orders object keys by codepoint', () =
   const request = buildLearnHmacCanonicalRequest('POST', '/path', '123', 'nonce', 'provider', { ä: 'umlaut', z: 'zee' })
   const expectedHash = createHash('sha256').update('{"z":"zee","ä":"umlaut"}', 'utf8').digest('hex')
   assert.equal(request, `POST\n/path\n123\nnonce\nprovider\n${expectedHash}`)
+})
+
+void test('Learn identity fingerprints match the documented cross-system vector', () => {
+  const secret = 'example-shared-learn-syncdeck-hmac-secret'
+  const provider = 'learn-district-42'
+  const resourceLinkId = 'course-101-unit-3-syncdeck'
+  const sessionId = 'a1b2c3d4e5'
+  const entryMappingId = mappingId(secret, 'syncdeck', provider, resourceLinkId)
+
+  assert.equal(entryMappingId, 'learn-syncdeck-entry-b9c5d450c1f196cebf05fbe6b034ae5b51b6b134')
+  assert.deepEqual(identityFingerprints(secret, provider, resourceLinkId, entryMappingId), {
+    providerFingerprint: 'db808f2d2f402a98',
+    resourceLinkFingerprint: '3a45e4cde6b2ad4c',
+    mappingFingerprint: '33f001c81d0a7df5',
+  })
+  assert.equal(identityFingerprint(secret, 'learn-session', sessionId), '342b379d90c2f61d')
 })
 
 void test('Learn routes transition a one-time waiting-room entry into an active SyncDeck session', async () => {
@@ -308,6 +324,12 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
       resourceEntryId,
       'starting a Learn instructor session should stamp the live session with its entry mapping id so websocket keepalive refreshes the entry too',
     )
+
+    const activeEntryWithExpiredLogicalTimestamp = await sessions.get(resourceEntryId)
+    assert.ok(activeEntryWithExpiredLogicalTimestamp)
+    activeEntryWithExpiredLogicalTimestamp.data.expiresAt = Date.now() - 1
+    await sessions.set(resourceEntryId, activeEntryWithExpiredLogicalTimestamp)
+    await sessions.touch(createdSessionId)
 
     ws.wss.clients.add({ readyState: 1, sessionId: createdSessionId, isInstructor: true } as unknown as ActiveBitsWebSocket)
     ws.wss.clients.add({ readyState: 1, sessionId: createdSessionId, studentId: 'student-1' } as unknown as ActiveBitsWebSocket)
@@ -665,10 +687,10 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
     )
     sessions.ttlMs = originalTtlMs
 
-    console.info('[TEST] Verifying identity-fingerprint logs never leak raw resourceLinkId, sessionId, or handoff material.')
-    const identityResolvedLogs = infoLogs.filter((message) => message.includes('"event":"learn-identity-resolved"'))
-    assert.ok(identityResolvedLogs.length >= 5)
-    for (const message of identityResolvedLogs) {
+    console.info('[TEST] Verifying Learn lifecycle logs never leak raw resourceLinkId, sessionId, or handoff material.')
+    const learnLifecycleLogs = infoLogs.filter((message) => message.includes('"event":"learn-identity-resolved"') || message.includes('"event":"learn-instructor-session-') || message.includes('"event":"learn-integration-stop-noop"'))
+    assert.ok(learnLifecycleLogs.length >= 8)
+    for (const message of learnLifecycleLogs) {
       assert.ok(!message.includes(resourceId))
       assert.ok(!message.includes(createdSessionId))
       assert.ok(!message.includes('waitingLaunchUrl'))

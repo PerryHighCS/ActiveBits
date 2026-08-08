@@ -268,18 +268,18 @@ async function verifyHmac(req: RouteRequest, method: string, path: string, sessi
   return { ok: true, key, provider }
 }
 
-function mappingId(secret: string, activityId: string, provider: string, resourceLinkId: string): string {
+export function mappingId(secret: string, activityId: string, provider: string, resourceLinkId: string): string {
   const digest = createHmac('sha256', secret).update(`${activityId}\n${provider}\n${resourceLinkId}`, 'utf8').digest('hex')
   return `learn-syncdeck-entry-${digest.slice(0, 40)}`
 }
 
 // Domain-separated, secret-keyed digests so provider/resourceLinkId/session identifiers can be correlated
 // across ActiveBits and Learn logs without either side logging the underlying opaque values.
-function identityFingerprint(secret: string, ...parts: string[]): string {
+export function identityFingerprint(secret: string, ...parts: string[]): string {
   return createHmac('sha256', secret).update(parts.join('|'), 'utf8').digest('hex').slice(0, 16)
 }
 
-function identityFingerprints(secret: string, provider: string, resourceLinkId: string, mapping: string): {
+export function identityFingerprints(secret: string, provider: string, resourceLinkId: string, mapping: string): {
   providerFingerprint: string
   resourceLinkFingerprint: string
   mappingFingerprint: string
@@ -309,6 +309,24 @@ function logIdentityResolution(
     state,
     sessionFingerprint: activeSessionId ? identityFingerprint(secret, 'learn-session', activeSessionId) : null,
     ...(reused === undefined ? {} : { reused }),
+  }))
+}
+
+function logLearnLifecycle(
+  secret: string,
+  event: string,
+  provider: string,
+  resourceLinkId: string,
+  mapping: string,
+  sessionId: string | null,
+  context: Record<string, unknown> = {},
+): void {
+  console.info(JSON.stringify({
+    activity: ACTIVITY_ID,
+    event,
+    ...context,
+    ...identityFingerprints(secret, provider, resourceLinkId, mapping),
+    sessionFingerprint: sessionId ? identityFingerprint(secret, 'learn-session', sessionId) : null,
   }))
 }
 
@@ -353,7 +371,7 @@ function getEntryData(session: SessionRecord | null): LearnEntryData | null {
   const resourceLinkId = readString(data.resourceLinkId, MAX_RESOURCE_ID_LENGTH)
   const state = data.state === 'waiting' || data.state === 'active' ? data.state : null
   const expiresAt = typeof data.expiresAt === 'number' && Number.isFinite(data.expiresAt) ? data.expiresAt : 0
-  if (!activityId || !provider || !resourceLinkId || !state || expiresAt <= Date.now()) return null
+  if (!activityId || !provider || !resourceLinkId || !state || (state === 'waiting' && expiresAt <= Date.now())) return null
   return {
     learnIntegrationKind: 'entry',
     activityId,
@@ -682,7 +700,7 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
           }
           entry.session.data = nextData
           await sessions.set(id, entry.session)
-          console.info(JSON.stringify({ activity: 'syncdeck', event: 'learn-instructor-session-started', resourceLinkId, requestId, sessionId, reused: false }))
+          logLearnLifecycle(auth.key.secret, 'learn-instructor-session-started', provider, resourceLinkId, id, sessionId, { requestId, reused: false })
         } catch (error) {
           try {
             if (previousData && entry) {
@@ -738,7 +756,7 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
     const entry = await loadEntry(id)
     if (!entry?.data.activeSessionId) {
       logIdentityResolution(auth.key.secret, 'stop', provider, resourceLinkId, id, 'inactive', null)
-      console.info(JSON.stringify({ activity: ACTIVITY_ID, event: 'learn-integration-stop-noop', route: 'stop', reason: 'already-inactive', resourceLinkId, status: 200 }))
+      logLearnLifecycle(auth.key.secret, 'learn-integration-stop-noop', provider, resourceLinkId, id, null, { route: 'stop', reason: 'already-inactive', status: 200 })
       return void res.json({ state: 'inactive', alreadyInactive: true })
     }
     const sessionId = entry.data.activeSessionId
@@ -750,7 +768,7 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
     }
     await sessions.delete(id)
     logIdentityResolution(auth.key.secret, 'stop', provider, resourceLinkId, id, 'inactive', sessionId)
-    console.info(JSON.stringify({ activity: 'syncdeck', event: 'learn-instructor-session-stopped', resourceLinkId, sessionId }))
+    logLearnLifecycle(auth.key.secret, 'learn-instructor-session-stopped', provider, resourceLinkId, id, sessionId)
     res.json({ state: 'inactive', alreadyInactive: false })
   })
 

@@ -119,6 +119,13 @@ Track security-relevant boundaries, risks, and mitigation decisions.
 - Validation: `activities/syncdeck/server/learnIntegration.test.ts` parses the pending event and verifies the raw field is absent; `server/sessionStore.test.ts` covers chain and two-record-cycle behavior plus a widened expiry margin.
 - Owner: Codex
 
+## Learn active-entry expiry and lifecycle logging
+
+- Date: 2026-08-08
+- Contract: Waiting Learn entries retain their bounded `data.expiresAt` gate. Active entries rely on the underlying session-store TTL, refreshed through the single-hop live-session link, so a stale logical timestamp cannot split an active class from its mapping.
+- Privacy: Learn lifecycle audit events use provider/resource/mapping/session fingerprints rather than raw identifiers. Exact tests lock the cross-system HMAC vector from `.agent/plans/learn-syncdeck-session-integration.md`.
+- Owner: Codex
+
 - Date: 2026-07-15
 - Area: waiting-room student display-name persistence
 - Threat or risk: Remembering a student's lobby name across days in browser persistence could inadvertently expand into storing participant IDs, credentials, or activity-specific form data.

@@ -728,3 +728,10 @@ Document API and data-shape assumptions that must stay compatible over time.
 - Evidence (schema/tests/path): `server/core/sessions.ts` (`getLinkedSessionId`, `InMemorySessionStore.touch`, the Valkey-wrapped `touch` closure); `server/sessionStore.test.ts`; `activities/syncdeck/server/learnIntegration.ts` (`linkLiveSessionToEntry`); `activities/syncdeck/server/learnIntegration.test.ts`; `.agent/knowledge/security-notes.md` (2026-08-08 entry).
 - Follow-up action: If a second activity adopts `linkedSessionId`, consider whether single-hop propagation is still sufficient before extending it to chains.
 - Owner: Codex
+
+## Learn active-entry lifetime and fingerprint regression vector
+
+- Date: 2026-08-08
+- Contract: A Learn entry in `waiting` state is bounded by `data.expiresAt`; once `active`, its backing session-store TTL is the lifetime authority and is refreshed through the live session's `linkedSessionId`. Active-entry reads must not reject the mapping solely because its historical `data.expiresAt` has passed.
+- Observability: Learn lifecycle logs use the documented HMAC fingerprints for provider, resource, mapping, and session identity. The exact shared test vector in `.agent/plans/learn-syncdeck-session-integration.md` is asserted in `activities/syncdeck/server/learnIntegration.test.ts`; change it only through a coordinated cross-system migration.
+- Owner: Codex

@@ -507,8 +507,10 @@ the in-flight `learn-instructor-session-start-pending` log. Each line carries:
 
 - `operation`: `"status" | "student-entry" | "start" | "stop"`
 - `state`: the resolved entry state (`"inactive" | "waiting" | "active" | "starting"`)
-- `reused`: boolean, only present for `student-entry`/`start` — whether an existing
-  entry record was found/reused vs. newly created by that call
+- `reused`: boolean, only present for `student-entry`/`start`. For `student-entry`, it
+  means an existing entry mapping was found rather than created. For `start`, it means
+  an already-active instructor session was reused; finding a waiting entry and creating
+  its live session still reports `false`.
 - `providerFingerprint`, `resourceLinkFingerprint`, `mappingFingerprint`: non-reversible
   16-hex-character fingerprints (below)
 - `sessionFingerprint`: same fingerprint scheme applied to the internal SyncDeck
