@@ -8,6 +8,7 @@ import { createWsRouter } from './core/wsRouter.js'
 import { EMBEDDED_CHILD_SESSION_PREFIX } from '../types/session.js'
 import { registerSessionNormalizer, resetSessionNormalizersForTests } from './core/sessionNormalization.js'
 import { listenForTest } from './testPortBinding.js'
+import { normalizeSyncDeckSessionData } from '../activities/syncdeck/server/routes.js'
 
 const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -146,6 +147,32 @@ void test('registered session normalizers populate activity defaults', async (t)
   const loadedItems = (loaded.data as { items?: unknown }).items
   assert.ok(Array.isArray(loadedItems))
   assert.equal(loadedItems.length, 0)
+})
+
+void test('SyncDeck normalization preserves linked-session keepalive records', async (t) => {
+  resetSessionNormalizersForTests()
+  registerSessionNormalizer('syncdeck', (session) => {
+    session.data = normalizeSyncDeckSessionData(session.data)
+  })
+  const sessions = createSessionStore(null, 1_000)
+  t.after(async () => {
+    await sessions.close()
+    resetSessionNormalizersForTests()
+  })
+
+  const linkedSession = await createSession(sessions)
+  linkedSession.lastActivity = 1
+  await sessions.set(linkedSession.id, linkedSession)
+
+  const liveSession = await createSession(sessions)
+  liveSession.type = 'syncdeck'
+  liveSession.lastActivity = 1
+  liveSession.data = { linkedSessionId: linkedSession.id }
+  await sessions.set(liveSession.id, liveSession)
+
+  assert.equal((await sessions.get(liveSession.id))?.data.linkedSessionId, linkedSession.id)
+  assert.equal(await sessions.touch(liveSession.id), true)
+  assert.ok((await sessions.get(linkedSession.id))!.lastActivity! > 1)
 })
 
 void test('embedded child session reads refresh the parent session activity timestamp', async (t) => {

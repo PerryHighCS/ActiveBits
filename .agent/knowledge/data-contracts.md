@@ -735,3 +735,10 @@ Document API and data-shape assumptions that must stay compatible over time.
 - Contract: A Learn entry in `waiting` state is bounded by `data.expiresAt`; once `active`, its backing session-store TTL is the lifetime authority and is refreshed through the live session's `linkedSessionId`. Active-entry reads must not reject the mapping solely because its historical `data.expiresAt` has passed.
 - Observability: Learn lifecycle logs use the documented HMAC fingerprints for provider, resource, mapping, and session identity. The exact shared test vector in `.agent/plans/learn-syncdeck-session-integration.md` is asserted in `activities/syncdeck/server/learnIntegration.test.ts`; change it only through a coordinated cross-system migration.
 - Owner: Codex
+
+## Activity normalizers preserve generic keepalive links
+
+- Date: 2026-08-08
+- Contract: An activity normalizer that reconstructs `session.data` must retain a valid generic `data.linkedSessionId`. SyncDeck's normalizer preserves the trimmed non-empty string so its Learn live session can keep the linked entry mapping alive.
+- Validation: `server/sessionStore.test.ts` registers the real SyncDeck normalizer, writes a `syncdeck` record through `createSessionStore()`, and verifies both persistence and linked touch propagation.
+- Owner: Codex
