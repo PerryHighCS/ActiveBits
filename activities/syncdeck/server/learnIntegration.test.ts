@@ -303,8 +303,11 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
     const pendingStartLog = JSON.parse(
       infoLogs.find((message) => message.includes('"event":"learn-instructor-session-start-pending"'))!,
     ) as Record<string, unknown>
+    assert.equal(pendingStartLog.operation, 'start')
     assert.equal(pendingStartLog.requestId, 'start-1')
     assert.equal(pendingStartLog.state, 'starting')
+    assert.equal(pendingStartLog.sessionFingerprint, null)
+    assert.equal(pendingStartLog.reused, false)
     assert.equal(pendingStartLog.resourceLinkId, undefined)
     assert.match(String(pendingStartLog.resourceLinkFingerprint), /^[a-f0-9]{16}$/)
 

@@ -638,7 +638,7 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
       }
       const pendingEntry = await loadEntry(id)
       if (pendingEntry?.data.startRequestId === requestId) {
-        console.info(JSON.stringify({ activity: ACTIVITY_ID, event: 'learn-instructor-session-start-pending', requestId, ...identityFingerprints(auth.key.secret, provider, resourceLinkId, id), state: 'starting' }))
+        console.info(JSON.stringify({ activity: ACTIVITY_ID, event: 'learn-instructor-session-start-pending', operation: 'start', requestId, ...identityFingerprints(auth.key.secret, provider, resourceLinkId, id), state: 'starting', sessionFingerprint: null, reused: false }))
         return void res.status(202).json({ state: 'starting', activeSessionId: null, reused: false })
       }
       logLearnRequestFailure('start', 'instructor-start-in-progress', { resourceLinkId, requestId, status: 409 })
