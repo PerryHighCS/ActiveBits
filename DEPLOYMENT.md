@@ -24,6 +24,7 @@ ActiveBits supports two session storage modes:
 ### Components
 
 - **Session Store**: Temporary session data (1-hour TTL)
+- **Session-store selection logging**: Startup emits a structured `session-store` / `store-selected` event identifying the in-memory or Valkey-backed mode; use this event when confirming deployed storage configuration.
 - **Persistent Metadata**: Waiting room state (10-minute TTL)
 - **WebSocket Keepalive Cache**: In-memory cache (30s TTL) for reducing Valkey traffic
 - **Pub/Sub Channels**: Cross-instance broadcasting for session events

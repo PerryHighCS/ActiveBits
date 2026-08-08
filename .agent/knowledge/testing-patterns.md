@@ -32,6 +32,13 @@ Capture reusable test setup patterns, common failure modes, and reliability guid
 - Evidence: `server/sessionStore.test.ts`.
 - Owner: Codex
 
+## Session-store selection logging
+
+- Date: 2026-08-08
+- Pattern: Treat session-store startup selection as a structured server event, and capture `console.info` in a focused unit test to assert its stable discriminator fields for both in-memory and Valkey-backed modes.
+- Evidence: `server/core/sessions.ts`; `server/sessionStore.test.ts`.
+- Owner: Codex
+
 - Date: 2026-07-27
 - Scope: typecheck | activities
 - Pattern: Run the activities TypeScript check one activity directory at a time through `scripts/typecheck-activities.mjs`. The runner reuses `activities/tsconfig.json` compiler options and shared contracts, but narrows source inclusion to the current activity.

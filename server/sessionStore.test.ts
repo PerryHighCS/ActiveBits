@@ -50,6 +50,25 @@ function valkeyStoreForTest(records: Map<string, SessionRecord>, touches: string
   } as unknown as ValkeySessionStore
 }
 
+void test('session-store selection is logged with stable structured fields', async (t) => {
+  const previousInfo = console.info
+  const logs: string[] = []
+  console.info = (...args: unknown[]) => { logs.push(args.map(String).join(' ')) }
+  t.after(() => {
+    console.info = previousInfo
+  })
+
+  const inMemoryStore = createSessionStore(null)
+  const valkeyStore = createSessionStore('redis://test', 1_000, valkeyStoreForTest(new Map(), []))
+  await inMemoryStore.close()
+  await valkeyStore.close()
+
+  assert.deepEqual(logs.map((message) => JSON.parse(message)), [
+    { component: 'session-store', event: 'store-selected', store: 'in-memory', reason: 'valkey-url-not-configured' },
+    { component: 'session-store', event: 'store-selected', store: 'valkey', cacheEnabled: true },
+  ])
+})
+
 void test('inactive sessions expire', async () => {
   const sessions = createSessionStore(null, 50)
   const session = await createSession(sessions)

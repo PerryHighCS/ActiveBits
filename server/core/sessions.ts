@@ -210,11 +210,21 @@ class InMemorySessionStore implements SessionStore {
 
 export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 * 60 * 1000, providedValkeyStore: ValkeySessionStore | null = null): SessionStore {
   if (!valkeyUrl && !providedValkeyStore) {
-    console.log('Using in-memory session store (no VALKEY_URL configured)')
+    console.info(JSON.stringify({
+      component: 'session-store',
+      event: 'store-selected',
+      store: 'in-memory',
+      reason: 'valkey-url-not-configured',
+    }))
     return new InMemorySessionStore(ttlMs)
   }
 
-  console.log('Using Valkey session store with caching')
+  console.info(JSON.stringify({
+    component: 'session-store',
+    event: 'store-selected',
+    store: 'valkey',
+    cacheEnabled: true,
+  }))
   const valkeyStore = providedValkeyStore ?? new ValkeySessionStore(valkeyUrl!, { ttlMs })
   const cache = new SessionCache<SessionRecord>({
     ttlMs: 30_000,
