@@ -226,6 +226,8 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
     cacheEnabled: true,
   }))
   const valkeyStore = providedValkeyStore ?? new ValkeySessionStore(valkeyUrl!, { ttlMs })
+  const linkedSessionRevalidatedAt = new Map<string, number>()
+  const LINKED_SESSION_REVALIDATION_MS = 5_000
   const cache = new SessionCache<SessionRecord>({
     ttlMs: 30_000,
     maxSize: 1000,
@@ -304,12 +306,19 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
     if (!touched) return false
 
     // A stop handled by another process may have removed linkedSessionId after this
-    // process cached the live session. Re-read before propagating so stale sockets
-    // cannot keep a recreated mapping alive indefinitely.
-    const authoritativeSession = fromCache ? await loadSessionRecord(id) : session
-    if (fromCache && !authoritativeSession) {
+    // process cached the live session. Revalidate source data on a bounded cadence,
+    // separate from high-frequency keepalive touches, before following the link.
+    const now = Date.now()
+    const shouldRevalidate = fromCache && (now - (linkedSessionRevalidatedAt.get(id) ?? 0) >= LINKED_SESSION_REVALIDATION_MS)
+    const authoritativeSession = shouldRevalidate ? await loadSessionRecord(id) : session
+    if (shouldRevalidate) linkedSessionRevalidatedAt.set(id, now)
+    if (shouldRevalidate && !authoritativeSession) {
       cache.invalidate(id)
+      linkedSessionRevalidatedAt.delete(id)
       return false
+    }
+    if (shouldRevalidate && authoritativeSession) {
+      cache.set(id, authoritativeSession, false)
     }
     const linkedSessionId = getLinkedSessionId(authoritativeSession)
     if (linkedSessionId && linkedSessionId !== id) {

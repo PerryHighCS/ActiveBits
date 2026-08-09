@@ -12,10 +12,11 @@ import { normalizeSyncDeckSessionData } from '../activities/syncdeck/server/rout
 
 const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
 
-function valkeyStoreForTest(records: Map<string, SessionRecord>, touches: string[], ttlMs = 1_000): ValkeySessionStore {
+function valkeyStoreForTest(records: Map<string, SessionRecord>, touches: string[], ttlMs = 1_000, gets: string[] = []): ValkeySessionStore {
   return {
     ttlMs,
     async get(id: string) {
+      gets.push(id)
       const session = records.get(id)
       return session ? structuredClone(session) : null
     },
@@ -339,8 +340,9 @@ void test('a Valkey-backed cached touch observes a remote linked-session unlink'
   const records = new Map<string, SessionRecord>()
   const firstTouches: string[] = []
   const secondTouches: string[] = []
+  const secondGets: string[] = []
   const firstStore = createSessionStore('redis://first', 1_000, valkeyStoreForTest(records, firstTouches))
-  const secondStore = createSessionStore('redis://second', 1_000, valkeyStoreForTest(records, secondTouches))
+  const secondStore = createSessionStore('redis://second', 1_000, valkeyStoreForTest(records, secondTouches, 1_000, secondGets))
   t.after(async () => {
     await firstStore.close()
     await secondStore.close()
@@ -356,9 +358,15 @@ void test('a Valkey-backed cached touch observes a remote linked-session unlink'
   liveSession.data = {}
   await firstStore.set(liveSession.id, liveSession)
 
+  secondGets.length = 0
   assert.equal(await secondStore.touch(liveSession.id), true)
   await secondStore.flushCache!()
   assert.deepEqual(secondTouches, [liveSession.id], 'a cached touch must not use a link cleared by another Valkey-backed process')
+  assert.deepEqual(secondGets, [liveSession.id], 'the first cached touch revalidates its source record')
+
+  secondGets.length = 0
+  assert.equal(await secondStore.touch(liveSession.id), true)
+  assert.deepEqual(secondGets, [], 'subsequent cached touches reuse bounded source-data freshness instead of reading Valkey per event')
 })
 
 void test('a linked session survives past its own ttl as long as the session pointing at it keeps getting touched', async (t) => {

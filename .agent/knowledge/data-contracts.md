@@ -753,8 +753,8 @@ Document API and data-shape assumptions that must stay compatible over time.
 ## Cross-instance linked-session invalidation
 
 - Date: 2026-08-09
-- Contract: In the Valkey-backed store, a cached source record is re-read from Valkey before its `linkedSessionId` is propagated. This makes a remote stop/unlink authoritative even when a websocket remains connected to a different application instance.
-- Validation: `server/sessionStore.test.ts` uses two independent wrapped stores over one fake Valkey record map and verifies the second store does not refresh a target after the first store removes the link.
+- Contract: In the Valkey-backed store, a cached source record is re-read from Valkey at most once per five seconds before its `linkedSessionId` is propagated. This makes a remote stop/unlink authoritative within that bounded interval without a Valkey read for every websocket touch.
+- Validation: `server/sessionStore.test.ts` uses two independent wrapped stores over one fake Valkey record map and verifies the second store does not refresh a target after the first store removes the link, while an immediate subsequent touch performs no extra read.
 - Owner: Codex
 
 ## Learn lifecycle failure logging

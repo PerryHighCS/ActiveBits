@@ -480,8 +480,21 @@ function respondToSubstituteLaunchError(res: RouteResponse, status: number, mess
   res.status(status).json({ error: message })
 }
 
-function logLearnRequestFailure(route: string, reason: string, context: Record<string, unknown> = {}): void {
-  console.info(JSON.stringify({ activity: ACTIVITY_ID, event: 'learn-integration-request-failed', route, reason, ...context }))
+function logLearnRequestFailure(route: string, reason: string, context: Record<string, unknown> = {}, identity?: { secret: string; provider: string; resourceLinkId: string; mapping: string; sessionId?: string | null }): void {
+  const { resourceLinkId: _resourceLinkId, sessionId: _sessionId, ...safeContext } = context
+  void _resourceLinkId
+  void _sessionId
+  console.info(JSON.stringify({
+    activity: ACTIVITY_ID,
+    event: 'learn-integration-request-failed',
+    route,
+    reason,
+    ...safeContext,
+    ...(identity ? {
+      ...identityFingerprints(identity.secret, identity.provider, identity.resourceLinkId, identity.mapping),
+      sessionFingerprint: identity.sessionId ? identityFingerprint(identity.secret, 'learn-session', identity.sessionId) : null,
+    } : {}),
+  }))
 }
 
 function integrationPath(activityId: string, resourceLinkId: string, suffix: string): string {
@@ -607,10 +620,10 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
       const startLock = await claimStartLock(sessions, id)
       if (startLock.state !== 'acquired') {
         if (startLock.state === 'unavailable') {
-          logLearnRequestFailure('student-entry', 'start-lock-unavailable', { resourceLinkId, status: 503 })
+          logLearnRequestFailure('student-entry', 'start-lock-unavailable', { status: 503 }, { secret: auth.key.secret, provider, resourceLinkId, mapping: id })
           return void res.status(503).json({ error: 'Learn session coordination is unavailable' })
         }
-        logLearnRequestFailure('student-entry', 'session-transition-in-progress', { resourceLinkId, status: 409 })
+        logLearnRequestFailure('student-entry', 'session-transition-in-progress', { status: 409 }, { secret: auth.key.secret, provider, resourceLinkId, mapping: id })
         return void res.status(409).json({ error: 'A Learn session transition is already in progress; retry shortly' })
       }
       const releaseStartLock = startLock.release
@@ -649,20 +662,20 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
       return void res.status(400).json({ error: 'Invalid resourceLinkId' })
     }
     const provider = auth.provider
+    const id = mappingId(auth.key.secret, ACTIVITY_ID, provider, resourceLinkId)
     const body = isPlainObject(req.body) ? req.body : {}
     const presentationUrl = readString(body.presentationUrl, 4096)
     const requestId = readString(body.requestId, 256)
     if (!presentationUrl || !requestId || !isValidHttpUrl(presentationUrl)) {
-      logLearnRequestFailure('start', 'invalid-start-payload', { resourceLinkId, status: 400 })
+      logLearnRequestFailure('start', 'invalid-start-payload', { status: 400 }, { secret: auth.key.secret, provider, resourceLinkId, mapping: id })
       return void res.status(400).json({ error: 'Missing or invalid Learn start payload' })
     }
 
-    const id = mappingId(auth.key.secret, ACTIVITY_ID, provider, resourceLinkId)
     let entry: { session: SessionRecord; data: LearnEntryData } | null
     const startLock = await claimStartLock(sessions, id)
     if (startLock.state !== 'acquired') {
       if (startLock.state === 'unavailable') {
-        logLearnRequestFailure('start', 'start-lock-unavailable', { resourceLinkId, requestId, status: 503 })
+        logLearnRequestFailure('start', 'start-lock-unavailable', { requestId, status: 503 }, { secret: auth.key.secret, provider, resourceLinkId, mapping: id })
         return void res.status(503).json({ error: 'Learn session coordination is unavailable' })
       }
       const pendingEntry = await loadEntry(id)
@@ -670,7 +683,7 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
         console.info(JSON.stringify({ activity: ACTIVITY_ID, event: 'learn-instructor-session-start-pending', operation: 'start', requestId, ...identityFingerprints(auth.key.secret, provider, resourceLinkId, id), state: 'starting', sessionFingerprint: null, reused: false }))
         return void res.status(202).json({ state: 'starting', activeSessionId: null, reused: false })
       }
-      logLearnRequestFailure('start', 'instructor-start-in-progress', { resourceLinkId, requestId, status: 409 })
+      logLearnRequestFailure('start', 'instructor-start-in-progress', { requestId, status: 409 }, { secret: auth.key.secret, provider, resourceLinkId, mapping: id })
       return void res.status(409).json({ error: 'A Learn instructor start is already in progress; retry shortly' })
     }
     const releaseStartLock = startLock.release
@@ -680,7 +693,7 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
       let reused = false
       if (entry?.data.state === 'active' && entry.data.activeSessionId) {
         if (entry.data.presentationUrl !== presentationUrl) {
-          logLearnRequestFailure('start', 'presentation-url-change-while-active', { resourceLinkId, requestId, sessionId: entry.data.activeSessionId, status: 409 })
+          logLearnRequestFailure('start', 'presentation-url-change-while-active', { requestId, status: 409 }, { secret: auth.key.secret, provider, resourceLinkId, mapping: id, sessionId: entry.data.activeSessionId })
           return void res.status(409).json({ error: 'Presentation URL cannot change while the instructor session is active' })
         }
         const activeSession = await sessions.get(entry.data.activeSessionId)
@@ -691,7 +704,7 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
           sessionId = entry.data.activeSessionId
           const token = typeof activeSession.data.instructorRecoveryToken === 'string' ? activeSession.data.instructorRecoveryToken : null
           if (!token) {
-            logLearnRequestFailure('start', 'active-instructor-recovery-unavailable', { resourceLinkId, requestId, sessionId, status: 500 })
+            logLearnRequestFailure('start', 'active-instructor-recovery-unavailable', { requestId, status: 500 }, { secret: auth.key.secret, provider, resourceLinkId, mapping: id, sessionId })
             return void res.status(500).json({ error: 'Active instructor recovery is unavailable' })
           }
           reused = true
