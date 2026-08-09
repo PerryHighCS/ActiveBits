@@ -275,8 +275,8 @@ export function mappingId(secret: string, activityId: string, provider: string, 
 
 // Domain-separated, secret-keyed digests so provider/resourceLinkId/session identifiers can be correlated
 // across ActiveBits and Learn logs without either side logging the underlying opaque values.
-export function identityFingerprint(secret: string, ...parts: string[]): string {
-  return createHmac('sha256', secret).update(parts.join('|'), 'utf8').digest('hex').slice(0, 16)
+export function identityFingerprint(secret: string, domainTag: string, value: string): string {
+  return createHmac('sha256', secret).update(`${domainTag}|${value}`, 'utf8').digest('hex').slice(0, 16)
 }
 
 export function identityFingerprints(secret: string, provider: string, resourceLinkId: string, mapping: string): {
