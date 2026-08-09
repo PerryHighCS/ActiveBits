@@ -87,6 +87,7 @@ For live MobCode sessions, the instructor workspace remains `groups.default`. Wh
 
 ### Session Lifecycle
 - **Temporary sessions**: Created on-demand, expire after inactivity
+- **Linked-session keepalive**: A session may refresh one directly linked session on genuine activity; the relationship is deliberately single-hop to keep cycles safe. Activity session normalizers must preserve this generic field. An active Learn entry relies on this store-backed lifetime rather than a separate logical-expiry gate, and its link is cleared when that entry stops or activation rolls back.
 - **Persistent sessions**: Permanent URLs that create on-demand sessions and allow both teacher and student to enter
 - **Session termination**: Teacher can end any session, broadcasting to all connected students
 - **WebSocket notifications**: Students automatically redirected when session ends

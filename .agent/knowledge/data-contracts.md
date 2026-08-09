@@ -706,3 +706,60 @@ Document API and data-shape assumptions that must stay compatible over time.
 - Evidence (schema/tests/path): `activities/mobcode/shared/types.ts`; `activities/mobcode/server/routes.ts`; `activities/mobcode/server/routes.test.ts`; `activities/mobcode/client/manager/MobCodeManager.tsx`; `activities/mobcode/client/student/MobCodeStudent.tsx`
 - Follow-up action: Keep any new student-visible payload derived from the published instructor version and participant-scoped workspace snapshot.
 - Owner: Codex
+
+## Learn SyncDeck identity-fingerprint cross-system correlation contract
+
+- Date: 2026-08-07
+- Surface: internal module | Learn SyncDeck integration logging
+- Contract: ActiveBits' only session identity is `mappingId = HMAC-SHA256(sharedSecret, "syncdeck\n<provider>\n<resourceLinkId>")` (`mappingId()` in `activities/syncdeck/server/learnIntegration.ts`) — there is no `context_id` or "slot" concept on the ActiveBits side; any such composition happens upstream, in whatever `provider`/`resourceLinkId` Learn sends per request. To let Learn and ActiveBits correlate requests without either side logging raw identity values, ActiveBits computes three **non-reversible** log fingerprints using the same shared HMAC secret used for Learn request signing: `providerFingerprint = HMAC-SHA256(sharedSecret, "learn-provider|" + provider).hex.slice(0,16)`, `resourceLinkFingerprint = HMAC-SHA256(sharedSecret, "learn-resource-link|" + resourceLinkId).hex.slice(0,16)`, `mappingFingerprint = HMAC-SHA256(sharedSecret, "learn-mapping|" + mappingId).hex.slice(0,16)` (see `identityFingerprint`/`identityFingerprints` in `learnIntegration.ts`; the HMAC input is `parts.join('|')` over `[domainTag, value]`). A `sessionFingerprint` for the internal SyncDeck session id uses the domain tag `"learn-session"` the same way. Learn must use the identical domain-separation strings, `|`-joined two-part HMAC input, secret, and 16-hex-char truncation to produce fingerprints that match ActiveBits' logs byte-for-byte for the same underlying value.
+- Compatibility constraints: These are log-correlation identifiers only, never returned in any API response and never used for authorization or session lookup (`mappingId` remains the actual lookup key). Changing the domain-separation tags, the join character (`|`), the HMAC algorithm, or the truncation length breaks correlation with Learn's matching implementation and with historical logs — treat this as a cross-system contract, not an internal implementation detail, and coordinate any change with the Learn team.
+- Validation rules: `status`, `student-entry`, `start`, and `stop` each emit a `learn-identity-resolved` log line (or, for the in-flight `start` retry case, a schema-compatible `learn-instructor-session-start-pending` line) with `operation`, `state`, `reused` (where applicable), the three identity fingerprints, and `sessionFingerprint`. Pending starts always emit `operation: "start"`, `reused: false`, and `sessionFingerprint: null`. None of these lines include raw `provider`, `resourceLinkId`, the internal mapping id, internal session ids, handoff/launch URLs, or browser tokens.
+- Evidence (schema/tests/path): `activities/syncdeck/server/learnIntegration.ts`; `activities/syncdeck/server/learnIntegration.test.ts`; `.agent/knowledge/security-notes.md` (2026-08-07 entry).
+- Follow-up action: Once Learn ships its matching fingerprint implementation, verify a sample of correlated `provider`/`resourceLinkId` values produce identical fingerprints across both systems' logs before relying on this for incident tracing.
+- Owner: Codex
+
+## Generic session-store `linkedSessionId` keepalive contract
+
+- Date: 2026-08-08
+- Surface: internal module | `server/core/sessions.ts` (`SessionStore.touch`)
+- Contract: Any session record may declare `data.linkedSessionId: string` pointing at another record in the same store. `SessionStore.touch(id)` — for both `InMemorySessionStore` and the Valkey-wrapped store returned by `createSessionStore()` — checks the touched record's `data.linkedSessionId` and, when present and not self-referential, directly refreshes that linked record without inspecting its own link (single hop, not recursive/multi-hop; mirrors the existing `embeddedParentSessionId` propagation already used by `get`/`consumeSessionDataToken`/`refreshSessionExpiry`, but that field is intentionally kept separate and is not itself propagated by `touch`). Any activity-agnostic caller that already touches session A on real activity (e.g. `server/core/wsRouter.ts`'s 30s websocket ping/pong/message loop, which calls `sessions.touch(ws.sessionId)`) will therefore also keep session B alive for as long as A has a connected client, with no changes needed to `wsRouter.ts` or to whatever drives A's own touches.
+- Compatibility constraints: This is a generic store-level primitive, not owned by any one activity — the field name and propagation behavior must stay activity-agnostic per the Activity Containment Policy. First consumer: `activities/syncdeck/server/learnIntegration.ts` stamps `data.linkedSessionId` on a live SyncDeck session (`type: 'syncdeck'`) with its Learn entry-mapping id (`type: 'syncdeck-learn-entry'`) via `linkLiveSessionToEntry()`, so the entry's lifetime tracks the session's actual connectivity instead of depending solely on Learn re-polling `status`/`start`. Any future activity needing "this record should stay alive exactly as long as that other record has real activity" should reuse this field rather than adding a new one.
+- Validation rules: `touch()` only propagates one hop and only when `linkedSessionId !== id`; the direct-refresh helper never follows the linked record's own link, so chains stop after one hop and two-record cycles complete safely. Only `touch()` propagates `linkedSessionId` — `get()`/`refreshSessionExpiry()`/`consumeSessionDataToken()` do not, since reading a session (as opposed to genuine touch/keepalive activity) is not the right signal for "keep the linked record alive."
+- Evidence (schema/tests/path): `server/core/sessions.ts` (`getLinkedSessionId`, `InMemorySessionStore.touch`, the Valkey-wrapped `touch` closure); `server/sessionStore.test.ts`; `activities/syncdeck/server/learnIntegration.ts` (`linkLiveSessionToEntry`); `activities/syncdeck/server/learnIntegration.test.ts`; `.agent/knowledge/security-notes.md` (2026-08-08 entry).
+- Follow-up action: If a second activity adopts `linkedSessionId`, consider whether single-hop propagation is still sufficient before extending it to chains.
+- Owner: Codex
+
+## Learn active-entry lifetime and fingerprint regression vector
+
+- Date: 2026-08-08
+- Contract: A Learn entry in `waiting` state is bounded by `data.expiresAt`; once `active`, its backing session-store TTL is the lifetime authority and is refreshed through the live session's `linkedSessionId`. Active-entry reads must not reject the mapping solely because its historical `data.expiresAt` has passed.
+- Observability: Learn lifecycle logs use the documented HMAC fingerprints for provider, resource, mapping, and session identity. The exact shared test vector in `.agent/plans/learn-syncdeck-session-integration.md` is asserted in `activities/syncdeck/server/learnIntegration.test.ts`; change it only through a coordinated cross-system migration.
+- Owner: Codex
+
+## Activity normalizers preserve generic keepalive links
+
+- Date: 2026-08-08
+- Contract: An activity normalizer that reconstructs `session.data` must retain a valid generic `data.linkedSessionId`. SyncDeck's normalizer preserves the trimmed non-empty string so its Learn live session can keep the linked entry mapping alive.
+- Validation: `server/sessionStore.test.ts` registers the real SyncDeck normalizer, writes a `syncdeck` record through `createSessionStore()`, and verifies both persistence and linked touch propagation.
+- Owner: Codex
+
+## Learn live-session link lifecycle
+
+- Date: 2026-08-08
+- Contract: A Learn-created SyncDeck session carries `linkedSessionId` only while its entry mapping is active. Learn stop and either instructor-activation rollback clear the link, but only if it still matches that mapping, so a stale socket cannot refresh a recreated entry mapping.
+- Validation: `activities/syncdeck/server/learnIntegration.test.ts` verifies the link is absent from the live session after a Learn stop.
+- Owner: Codex
+
+## Cross-instance linked-session invalidation
+
+- Date: 2026-08-08
+- Contract: In the Valkey-backed store, a cached source record is re-read from Valkey at most once per five seconds before its `linkedSessionId` is propagated. This makes a remote stop/unlink authoritative within that bounded interval without a Valkey read for every websocket touch.
+- Validation: `server/sessionStore.test.ts` uses two independent wrapped stores over one fake Valkey record map and verifies the second store does not refresh a target after the first store removes the link, while an immediate subsequent touch performs no extra read.
+- Owner: Codex
+
+## Learn lifecycle failure logging
+
+- Date: 2026-08-08
+- Contract: Instructor-start lifecycle errors use an allowlisted schema of event, operation, requestId, stable errorCode, identity fingerprints, and `sessionFingerprint`; error messages and arbitrary context values are excluded. Error logs never include raw Learn resource identifiers or internal session IDs.
+- Validation: `activities/syncdeck/server/learnIntegration.test.ts` scans both captured info and error lifecycle logs, including a forced instructor-start failure containing sentinel resource, session, URL, and token values.
+- Owner: Codex

@@ -3,7 +3,7 @@ import { createHash, createHmac } from 'node:crypto'
 import test from 'node:test'
 import type { SessionRecord, SessionStore } from 'activebits-server/core/sessions.js'
 import type { ActiveBitsWebSocket, WsRouter } from '../../../types/websocket.js'
-import { buildLearnHmacCanonicalRequest, registerLearnSyncDeckRoutes } from './learnIntegration.js'
+import { buildLearnHmacCanonicalRequest, identityFingerprint, identityFingerprints, mappingId, registerLearnSyncDeckRoutes } from './learnIntegration.js'
 
 interface MockResponse {
   statusCode: number
@@ -110,6 +110,22 @@ void test('buildLearnHmacCanonicalRequest orders object keys by codepoint', () =
   assert.equal(request, `POST\n/path\n123\nnonce\nprovider\n${expectedHash}`)
 })
 
+void test('Learn identity fingerprints match the documented cross-system vector', () => {
+  const secret = 'example-shared-learn-syncdeck-hmac-secret'
+  const provider = 'learn-district-42'
+  const resourceLinkId = 'course-101-unit-3-syncdeck'
+  const sessionId = 'a1b2c3d4e5'
+  const entryMappingId = mappingId(secret, 'syncdeck', provider, resourceLinkId)
+
+  assert.equal(entryMappingId, 'learn-syncdeck-entry-b9c5d450c1f196cebf05fbe6b034ae5b51b6b134')
+  assert.deepEqual(identityFingerprints(secret, provider, resourceLinkId, entryMappingId), {
+    providerFingerprint: 'db808f2d2f402a98',
+    resourceLinkFingerprint: '3a45e4cde6b2ad4c',
+    mappingFingerprint: '33f001c81d0a7df5',
+  })
+  assert.equal(identityFingerprint(secret, 'learn-session', sessionId), '342b379d90c2f61d')
+})
+
 void test('Learn routes transition a one-time waiting-room entry into an active SyncDeck session', async () => {
   const previousSecret = process.env.LEARN_SYNCDECK_HMAC_SECRET
   const previousKeyId = process.env.LEARN_SYNCDECK_HMAC_KEY_ID
@@ -134,6 +150,7 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
     let delayedInstructorSession: Promise<void> | null = null
     let notifyInstructorSessionStart: (() => void) | null = null
     let failInstructorSessionCreation = false
+    let instructorFailureMessage = 'test instructor-session creation failure'
     registerLearnSyncDeckRoutes({
       app: {
         get(path, handler) { getHandlers.set(path, handler) },
@@ -145,7 +162,7 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
         instructorSessionCreateCount += 1
         notifyInstructorSessionStart?.()
         if (delayedInstructorSession) await delayedInstructorSession
-        if (failInstructorSessionCreation) throw new Error('test instructor-session creation failure')
+        if (failInstructorSessionCreation) throw new Error(instructorFailureMessage)
         createdSessionId = 'syncdeck-live'
         await sessions.set(createdSessionId, {
           id: createdSessionId,
@@ -209,6 +226,17 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
     const waitingLaunchUrl = String((entryResponse.body as { waitingLaunchUrl: string }).waitingLaunchUrl)
     const launchUrl = new URL(waitingLaunchUrl, 'https://bits.example')
 
+    const initialStudentEntryLog = JSON.parse(
+      infoLogs.find((message) => message.includes('"event":"learn-identity-resolved"') && message.includes('"operation":"student-entry"'))!,
+    ) as Record<string, unknown>
+    assert.equal(initialStudentEntryLog.state, 'waiting')
+    assert.equal(initialStudentEntryLog.reused, false)
+    assert.equal(initialStudentEntryLog.sessionFingerprint, null)
+    assert.match(String(initialStudentEntryLog.providerFingerprint), /^[a-f0-9]{16}$/)
+    assert.match(String(initialStudentEntryLog.resourceLinkFingerprint), /^[a-f0-9]{16}$/)
+    assert.match(String(initialStudentEntryLog.mappingFingerprint), /^[a-f0-9]{16}$/)
+    const resourceMappingFingerprint = initialStudentEntryLog.mappingFingerprint
+
     const invalidWaitLaunchResponse = response()
     await getHandlers.get('/integrations/learn/:activityId/wait/:tokenId')!(
       { params: { activityId: 'syncdeck', tokenId: launchUrl.pathname.split('/').at(-1) }, query: { token: 'invalid-token' } },
@@ -264,6 +292,49 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
     assert.equal(startResponse.statusCode, 200)
     assert.equal((startResponse.body as { activeSessionId?: unknown }).activeSessionId, createdSessionId)
 
+    const startIdentityLog = JSON.parse(
+      infoLogs.find((message) => message.includes('"event":"learn-identity-resolved"') && message.includes('"operation":"start"'))!,
+    ) as Record<string, unknown>
+    assert.equal(startIdentityLog.state, 'active')
+    assert.equal(startIdentityLog.reused, false)
+    assert.equal(startIdentityLog.mappingFingerprint, resourceMappingFingerprint)
+    assert.match(String(startIdentityLog.sessionFingerprint), /^[a-f0-9]{16}$/)
+    const startedSessionFingerprint = startIdentityLog.sessionFingerprint
+    assert.ok(infoLogs.some((message) => message.includes('learn-instructor-session-start-pending') && message.includes(`"mappingFingerprint":"${resourceMappingFingerprint}"`)))
+    const pendingStartLog = JSON.parse(
+      infoLogs.find((message) => message.includes('"event":"learn-instructor-session-start-pending"'))!,
+    ) as Record<string, unknown>
+    assert.equal(pendingStartLog.operation, 'start')
+    assert.equal(pendingStartLog.requestId, 'start-1')
+    assert.equal(pendingStartLog.state, 'starting')
+    assert.equal(pendingStartLog.sessionFingerprint, null)
+    assert.equal(pendingStartLog.reused, false)
+    assert.equal(pendingStartLog.resourceLinkId, undefined)
+    assert.match(String(pendingStartLog.resourceLinkFingerprint), /^[a-f0-9]{16}$/)
+
+    const learnEntryIds = (await sessions.getAllIds()).filter((candidateId) => candidateId.startsWith('learn-syncdeck-entry-'))
+    let resourceEntryId: string | undefined
+    for (const candidateId of learnEntryIds) {
+      const candidate = await sessions.get(candidateId)
+      if ((candidate?.data as { resourceLinkId?: unknown })?.resourceLinkId === resourceId) {
+        resourceEntryId = candidateId
+        break
+      }
+    }
+    assert.ok(resourceEntryId, 'expected exactly one Learn entry mapping for resourceId')
+    const liveSessionRecord = await sessions.get(createdSessionId)
+    assert.equal(
+      (liveSessionRecord?.data as { linkedSessionId?: unknown })?.linkedSessionId,
+      resourceEntryId,
+      'starting a Learn instructor session should stamp the live session with its entry mapping id so websocket keepalive refreshes the entry too',
+    )
+
+    const activeEntryWithExpiredLogicalTimestamp = await sessions.get(resourceEntryId)
+    assert.ok(activeEntryWithExpiredLogicalTimestamp)
+    activeEntryWithExpiredLogicalTimestamp.data.expiresAt = Date.now() - 1
+    await sessions.set(resourceEntryId, activeEntryWithExpiredLogicalTimestamp)
+    await sessions.touch(createdSessionId)
+
     ws.wss.clients.add({ readyState: 1, sessionId: createdSessionId, isInstructor: true } as unknown as ActiveBitsWebSocket)
     ws.wss.clients.add({ readyState: 1, sessionId: createdSessionId, studentId: 'student-1' } as unknown as ActiveBitsWebSocket)
     ws.wss.clients.add({ readyState: 1, sessionId: createdSessionId, studentId: 'student-1' } as unknown as ActiveBitsWebSocket)
@@ -295,6 +366,13 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
         connectedInstructorCount: 1,
       },
     )
+
+    const statusIdentityLog = JSON.parse(
+      infoLogs.find((message) => message.includes('"event":"learn-identity-resolved"') && message.includes('"operation":"status"') && message.includes('"state":"active"'))!,
+    ) as Record<string, unknown>
+    assert.equal(statusIdentityLog.mappingFingerprint, resourceMappingFingerprint)
+    assert.equal(statusIdentityLog.sessionFingerprint, startedSessionFingerprint)
+    assert.equal(statusIdentityLog.reused, undefined)
 
     const substituteLaunch = substituteInstructorLink(resourceId, 'https://slides.example/deck')
     const substituteLaunchResponse = response()
@@ -389,6 +467,10 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
       startingStudentEntryResponse,
     )
     assert.equal((startingStudentEntryResponse.body as { state?: unknown }).state, 'waiting')
+    const otherResourceStudentEntryLogs = infoLogs.filter((message) => message.includes('"event":"learn-identity-resolved"') && message.includes('"operation":"student-entry"'))
+    const otherResourceIdentityLog = JSON.parse(otherResourceStudentEntryLogs.at(-1)!) as Record<string, unknown>
+    assert.notEqual(otherResourceIdentityLog.mappingFingerprint, resourceMappingFingerprint)
+    assert.notEqual(otherResourceIdentityLog.resourceLinkFingerprint, initialStudentEntryLog.resourceLinkFingerprint)
     let releaseDelayedSubstituteStart!: () => void
     delayedInstructorSession = new Promise<void>((resolve) => { releaseDelayedSubstituteStart = resolve })
     let resolveSubstituteSessionStart!: () => void
@@ -438,8 +520,28 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
       substituteCleanupFailureResponse,
     )
     assert.equal(substituteCleanupFailureResponse.statusCode, 500)
-    assert.ok(errorLogs.some((message) => message.includes('learn-substitute-link-start-cleanup-failed') && message.includes('test substitute cleanup failure')))
-    assert.ok(errorLogs.some((message) => message.includes('learn-substitute-link-start-failed') && message.includes('test instructor-session creation failure')))
+    const substituteCleanupError = JSON.parse(
+      errorLogs.find((message) => message.includes('"event":"learn-substitute-link-start-cleanup-failed"'))!,
+    ) as Record<string, unknown>
+    const substituteStartError = JSON.parse(
+      errorLogs.find((message) => message.includes('"event":"learn-substitute-link-start-failed"'))!,
+    ) as Record<string, unknown>
+    for (const lifecycleError of [substituteCleanupError, substituteStartError]) {
+      assert.deepEqual(Object.keys(lifecycleError).sort(), [
+        'activity',
+        'errorCode',
+        'event',
+        'mappingFingerprint',
+        'operation',
+        'providerFingerprint',
+        'resourceLinkFingerprint',
+        'sessionFingerprint',
+      ])
+      assert.equal(lifecycleError.operation, 'substitute-launch')
+      assert.equal(lifecycleError.sessionFingerprint, null)
+    }
+    assert.equal(substituteCleanupError.errorCode, 'entry-cleanup-failed')
+    assert.equal(substituteStartError.errorCode, 'activation-failed')
     sessions.delete = originalDeleteForSubstituteCleanup
     failInstructorSessionCreation = false
 
@@ -452,6 +554,10 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
     assert.match(String((replayResponse.body as { error?: unknown }).error), /replayed/i)
 
     const stopPath = `/api/integrations/learn/v1/activities/syncdeck/resources/${resourceId}/stop`
+    const sessionBeforeStop = await sessions.get(createdSessionId)
+    assert.ok(sessionBeforeStop)
+    sessionBeforeStop.data.linkedSessionId = resourceEntryId
+    await sessions.set(createdSessionId, sessionBeforeStop)
     const stopResponse = response()
     await postHandlers.get('/api/integrations/learn/v1/activities/:activityId/resources/:resourceLinkId/stop')!(
       { params: { activityId: 'syncdeck', resourceLinkId: resourceId }, ...signedRequest('POST', stopPath, {}, 'stop-nonce') },
@@ -459,7 +565,14 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
     )
     assert.deepEqual(stopResponse.body, { state: 'inactive', alreadyInactive: false })
     assert.equal(typeof (await sessions.get(createdSessionId))?.data.learnIntegrationStoppedAt, 'number')
+    assert.equal((await sessions.get(createdSessionId))?.data.linkedSessionId, undefined)
     assert.deepEqual(broadcasts, [{ event: 'session-ended', payload: { sessionId: createdSessionId } }])
+
+    const stopIdentityLog = JSON.parse(
+      infoLogs.find((message) => message.includes('"event":"learn-identity-resolved"') && message.includes('"operation":"stop"') && message.includes('"sessionFingerprint":"'))!,
+    ) as Record<string, unknown>
+    assert.equal(stopIdentityLog.mappingFingerprint, resourceMappingFingerprint)
+    assert.equal(stopIdentityLog.sessionFingerprint, startedSessionFingerprint)
 
     console.info('[TEST] Expected idempotent Learn stop no-op log.')
     const repeatedStopResponse = response()
@@ -471,10 +584,21 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
     assert.deepEqual(repeatedStopResponse.body, { state: 'inactive', alreadyInactive: true })
     assert.ok(infoLogs.some((message) => message.includes('learn-integration-stop-noop') && message.includes('"reason":"already-inactive"')))
 
-    console.info('[TEST] Expected Learn instructor-session creation failure to return a safe server error.')
+    const noopStopIdentityLog = JSON.parse(
+      infoLogs.filter((message) => message.includes('"event":"learn-identity-resolved"') && message.includes('"operation":"stop"')).at(-1)!,
+    ) as Record<string, unknown>
+    assert.equal(noopStopIdentityLog.state, 'inactive')
+    assert.equal(noopStopIdentityLog.sessionFingerprint, null)
+
+    const failureSentinelResource = 'sentinel-resource-identifier'
+    const failureSentinelSession = 'sentinel-session-identifier'
+    const failureSentinelUrl = 'https://sentinel.example/private-launch'
+    const failureSentinelToken = 'sentinel-browser-token'
+    console.info('[TEST] Expected Learn instructor-session creation failure to return a safe server error without logging failure sentinels.')
     failInstructorSessionCreation = true
+    instructorFailureMessage = `${failureSentinelResource} ${failureSentinelSession} ${failureSentinelUrl} ${failureSentinelToken}`
     const failedInstructorStartResponse = response()
-    const failedInstructorResourceId = 'learn-resource-start-failure'
+    const failedInstructorResourceId = failureSentinelResource
     const failedInstructorStartPath = `/api/integrations/learn/v1/activities/syncdeck/resources/${failedInstructorResourceId}/start`
     await postHandlers.get('/api/integrations/learn/v1/activities/:activityId/resources/:resourceLinkId/start')!(
       { params: { activityId: 'syncdeck', resourceLinkId: failedInstructorResourceId }, ...signedRequest('POST', failedInstructorStartPath, { presentationUrl: 'https://slides.example/deck', requestId: 'start-creation-failure' }, 'start-creation-failure-nonce') },
@@ -484,6 +608,7 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
     assert.match(String((failedInstructorStartResponse.body as { error?: unknown }).error), /unable to start/i)
     assert.ok(errorLogs.some((message) => message.includes('learn-instructor-session-start-failed')))
     failInstructorSessionCreation = false
+    instructorFailureMessage = 'test instructor-session creation failure'
 
     console.info('[TEST] Expected Learn start to release its lock after a mapping-load failure.')
     const originalGet = sessions.get.bind(sessions)
@@ -559,6 +684,76 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
     assert.equal(startLockFailureResponse.statusCode, 503)
     assert.match(String((startLockFailureResponse.body as { error?: unknown }).error), /coordination/i)
     assert.ok(errorLogs.some((message) => message.includes('learn-start-lock-claim-failed')))
+
+    console.info('[TEST] Expected Learn start to resolve the active-entry TTL from valkeyStore.ttlMs when the wrapped store omits a top-level ttlMs, matching production Valkey wiring.')
+    const ttlFallbackResourceId = 'learn-resource-ttl-fallback'
+    const ttlFallbackStartPath = `/api/integrations/learn/v1/activities/syncdeck/resources/${ttlFallbackResourceId}/start`
+    const originalTtlMs = sessions.ttlMs
+    sessions.ttlMs = undefined
+    sessions.valkeyStore = { ttlMs: 4_242_000 } as unknown as SessionStore['valkeyStore']
+    const beforeTtlFallbackStart = Date.now()
+    const ttlFallbackStartResponse = response()
+    await postHandlers.get('/api/integrations/learn/v1/activities/:activityId/resources/:resourceLinkId/start')!(
+      { params: { activityId: 'syncdeck', resourceLinkId: ttlFallbackResourceId }, ...signedRequest('POST', ttlFallbackStartPath, { presentationUrl: 'https://slides.example/ttl-fallback', requestId: 'ttl-fallback-start' }, 'ttl-fallback-nonce') },
+      ttlFallbackStartResponse,
+    )
+    assert.equal(ttlFallbackStartResponse.statusCode, 200)
+    let ttlFallbackEntryId: string | undefined
+    for (const candidateId of await sessions.getAllIds()) {
+      if (!candidateId.startsWith('learn-syncdeck-entry-')) continue
+      const candidate = await sessions.get(candidateId)
+      if ((candidate?.data as { resourceLinkId?: unknown })?.resourceLinkId === ttlFallbackResourceId) {
+        ttlFallbackEntryId = candidateId
+        break
+      }
+    }
+    assert.ok(ttlFallbackEntryId, 'expected a Learn entry mapping for the ttl-fallback resource')
+    const ttlFallbackEntry = await sessions.get(ttlFallbackEntryId!)
+    const ttlFallbackExpiresAt = (ttlFallbackEntry?.data as { expiresAt?: unknown })?.expiresAt
+    assert.equal(typeof ttlFallbackExpiresAt, 'number')
+    assert.ok(
+      (ttlFallbackExpiresAt as number) >= beforeTtlFallbackStart + 4_242_000 && (ttlFallbackExpiresAt as number) <= Date.now() + 4_242_000,
+      'active entry expiresAt should reflect valkeyStore.ttlMs, not fall back to the 10-minute waiting TTL',
+    )
+    const ttlFallbackLiveSession = await sessions.get((ttlFallbackEntry?.data as { activeSessionId?: unknown })?.activeSessionId as string)
+    assert.equal(
+      (ttlFallbackLiveSession?.data as { linkedSessionId?: unknown })?.linkedSessionId,
+      ttlFallbackEntryId,
+    )
+    sessions.ttlMs = originalTtlMs
+
+    console.info('[TEST] Verifying Learn lifecycle logs never leak raw resourceLinkId, sessionId, or handoff material.')
+    const learnLifecycleLogs = [...infoLogs, ...errorLogs].filter((message) => message.includes('"event":"learn-identity-resolved"') || message.includes('"event":"learn-instructor-session-') || message.includes('"event":"learn-integration-stop-noop"') || message.includes('"event":"learn-integration-request-failed"'))
+    assert.ok(learnLifecycleLogs.length >= 8)
+    const failedLifecycleError = JSON.parse(
+      errorLogs.find((message) => message.includes('"event":"learn-instructor-session-start-failed"'))!,
+    ) as Record<string, unknown>
+    assert.deepEqual(Object.keys(failedLifecycleError).sort(), [
+      'activity',
+      'errorCode',
+      'event',
+      'mappingFingerprint',
+      'operation',
+      'providerFingerprint',
+      'requestId',
+      'resourceLinkFingerprint',
+      'sessionFingerprint',
+    ])
+    assert.equal(failedLifecycleError.activity, 'syncdeck')
+    assert.equal(failedLifecycleError.operation, 'start')
+    assert.equal(failedLifecycleError.requestId, 'start-creation-failure')
+    assert.equal(failedLifecycleError.errorCode, 'activation-failed')
+    assert.equal(failedLifecycleError.sessionFingerprint, null)
+    for (const message of learnLifecycleLogs) {
+      assert.ok(!message.includes(resourceId))
+      assert.ok(!message.includes(createdSessionId))
+      assert.ok(!message.includes(failedInstructorResourceId))
+      assert.ok(!message.includes(failureSentinelSession))
+      assert.ok(!message.includes(failureSentinelToken))
+      assert.ok(!message.includes('waitingLaunchUrl'))
+      assert.ok(!message.includes('instructorLaunchUrl'))
+      assert.ok(!message.includes('browserToken'))
+    }
   } finally {
     console.info = previousInfo
     console.error = previousError

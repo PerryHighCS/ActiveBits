@@ -67,3 +67,7 @@ contract and launch lifecycle.
 Learn can also issue a time-bounded signed substitute-instructor link that opens a
 SyncDeck instructor session directly in ActiveBits. It is a bearer capability: use a
 bounded expiry and do not expose it in logs or analytics.
+
+While a Learn-backed SyncDeck session has real activity, its entry mapping receives a
+single-hop keepalive refresh. Active mappings use that session-store lifetime as the
+authority; mapping chains are intentionally not followed.

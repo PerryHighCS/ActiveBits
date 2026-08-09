@@ -3,12 +3,73 @@ import assert from 'node:assert'
 import http from 'node:http'
 import { WebSocket } from 'ws'
 import { createSessionStore, createSession, type SessionRecord } from './core/sessions.js'
+import { type ValkeySessionStore } from './core/valkeyStore.js'
 import { createWsRouter } from './core/wsRouter.js'
 import { EMBEDDED_CHILD_SESSION_PREFIX } from '../types/session.js'
 import { registerSessionNormalizer, resetSessionNormalizersForTests } from './core/sessionNormalization.js'
 import { listenForTest } from './testPortBinding.js'
 
 const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
+
+function valkeyStoreForTest(records: Map<string, SessionRecord>, touches: string[], ttlMs = 1_000, gets: string[] = []): ValkeySessionStore {
+  return {
+    ttlMs,
+    async get(id: string) {
+      gets.push(id)
+      const session = records.get(id)
+      return session ? structuredClone(session) : null
+    },
+    async set(id: string, session: SessionRecord) {
+      records.set(id, structuredClone(session))
+    },
+    async delete(id: string) {
+      return records.delete(id)
+    },
+    async touch(id: string) {
+      const session = records.get(id)
+      if (!session) return false
+      touches.push(id)
+      session.lastActivity = Date.now()
+      return true
+    },
+    async getAll() {
+      return Array.from(records.values()).map((session) => structuredClone(session))
+    },
+    async getAllIds() {
+      return Array.from(records.keys())
+    },
+    async refreshSessionExpiry() {
+      return null
+    },
+    async consumeSessionDataToken() {
+      return null
+    },
+    async close() {},
+    subscribeToBroadcast() {},
+    initializePubSub() {},
+    async publishBroadcast() {},
+  } as unknown as ValkeySessionStore
+}
+
+void test('session-store selection is logged with stable structured fields', async () => {
+  const previousInfo = console.info
+  const logs: string[] = []
+  try {
+    console.info = (...args: unknown[]) => { logs.push(args.map(String).join(' ')) }
+
+    const inMemoryStore = createSessionStore(null)
+    const valkeyStore = createSessionStore('redis://test', 1_000, valkeyStoreForTest(new Map(), []))
+    await inMemoryStore.close()
+    await valkeyStore.close()
+
+    assert.deepEqual(logs.map((message) => JSON.parse(message)), [
+      { component: 'session-store', event: 'store-selected', store: 'in-memory', reason: 'valkey-url-not-configured' },
+      { component: 'session-store', event: 'store-selected', store: 'valkey', cacheEnabled: true },
+    ])
+  } finally {
+    console.info = previousInfo
+  }
+})
 
 void test('inactive sessions expire', async () => {
   const sessions = createSessionStore(null, 50)
@@ -89,6 +150,33 @@ void test('registered session normalizers populate activity defaults', async (t)
   assert.equal(loadedItems.length, 0)
 })
 
+void test('SyncDeck normalization preserves linked-session keepalive records', async (t) => {
+  const { normalizeSyncDeckSessionData } = await import('../activities/syncdeck/server/routes.js')
+  resetSessionNormalizersForTests()
+  registerSessionNormalizer('syncdeck', (session) => {
+    session.data = normalizeSyncDeckSessionData(session.data)
+  })
+  const sessions = createSessionStore(null, 1_000)
+  t.after(async () => {
+    await sessions.close()
+    resetSessionNormalizersForTests()
+  })
+
+  const linkedSession = await createSession(sessions)
+  linkedSession.lastActivity = 1
+  await sessions.set(linkedSession.id, linkedSession)
+
+  const liveSession = await createSession(sessions)
+  liveSession.type = 'syncdeck'
+  liveSession.lastActivity = 1
+  liveSession.data = { linkedSessionId: linkedSession.id }
+  await sessions.set(liveSession.id, liveSession)
+
+  assert.equal((await sessions.get(liveSession.id))?.data.linkedSessionId, linkedSession.id)
+  assert.equal(await sessions.touch(liveSession.id), true)
+  assert.ok((await sessions.get(linkedSession.id))!.lastActivity! > 1)
+})
+
 void test('embedded child session reads refresh the parent session activity timestamp', async (t) => {
   const sessions = createSessionStore(null, 1_000)
   t.after(async () => {
@@ -146,4 +234,164 @@ void test('refreshing an embedded child session refreshes its parent activity an
   assert.ok((refreshed?.lastActivity ?? 0) > 1)
   const refreshedParent = await sessions.get(parentSession.id)
   assert.ok((refreshedParent?.lastActivity ?? 0) > 1)
+})
+
+void test('touching a session refreshes a linked session declared via data.linkedSessionId', async (t) => {
+  const sessions = createSessionStore(null, 1_000)
+  t.after(async () => {
+    await sessions.close()
+  })
+
+  const linkedSession = await createSession(sessions)
+  linkedSession.lastActivity = 1
+  await sessions.set(linkedSession.id, linkedSession)
+
+  const liveSession = await createSession(sessions)
+  liveSession.lastActivity = 1
+  liveSession.data = { linkedSessionId: linkedSession.id }
+  await sessions.set(liveSession.id, liveSession)
+
+  assert.equal(await sessions.touch(liveSession.id), true)
+
+  const refreshedLinked = await sessions.get(linkedSession.id)
+  assert.ok((refreshedLinked?.lastActivity ?? 0) > 1)
+})
+
+void test('touching a linked session refreshes exactly one hop', async (t) => {
+  const sessions = createSessionStore(null, 1_000)
+  t.after(async () => {
+    await sessions.close()
+  })
+
+  const terminalSession = await createSession(sessions)
+  terminalSession.lastActivity = 1
+  await sessions.set(terminalSession.id, terminalSession)
+
+  const linkedSession = await createSession(sessions)
+  linkedSession.lastActivity = 1
+  linkedSession.data = { linkedSessionId: terminalSession.id }
+  await sessions.set(linkedSession.id, linkedSession)
+
+  const liveSession = await createSession(sessions)
+  liveSession.lastActivity = 1
+  liveSession.data = { linkedSessionId: linkedSession.id }
+  await sessions.set(liveSession.id, liveSession)
+
+  assert.equal(await sessions.touch(liveSession.id), true)
+  assert.ok(liveSession.lastActivity! > 1)
+  assert.ok(linkedSession.lastActivity! > 1)
+  assert.equal(terminalSession.lastActivity, 1)
+})
+
+void test('touching a two-record linked-session cycle completes', async (t) => {
+  const sessions = createSessionStore(null, 1_000)
+  t.after(async () => {
+    await sessions.close()
+  })
+
+  const firstSession = await createSession(sessions)
+  const secondSession = await createSession(sessions)
+  firstSession.lastActivity = 1
+  firstSession.data = { linkedSessionId: secondSession.id }
+  secondSession.lastActivity = 1
+  secondSession.data = { linkedSessionId: firstSession.id }
+  await sessions.set(firstSession.id, firstSession)
+  await sessions.set(secondSession.id, secondSession)
+
+  assert.equal(await sessions.touch(firstSession.id), true)
+  assert.ok(firstSession.lastActivity! > 1)
+  assert.ok(secondSession.lastActivity! > 1)
+})
+
+void test('Valkey-backed linked touches refresh cached and uncached records exactly one hop', async (t) => {
+  const records = new Map<string, SessionRecord>()
+  const touches: string[] = []
+  const sessions = createSessionStore('redis://test', 1_000, valkeyStoreForTest(records, touches))
+  t.after(async () => {
+    await sessions.close()
+  })
+
+  const terminalSession = await createSession(sessions)
+  terminalSession.lastActivity = 1
+  await sessions.set(terminalSession.id, terminalSession)
+  const linkedSession = await createSession(sessions)
+  linkedSession.lastActivity = 1
+  linkedSession.data = { linkedSessionId: terminalSession.id }
+  await sessions.set(linkedSession.id, linkedSession)
+  const liveSession = await createSession(sessions)
+  liveSession.lastActivity = 1
+  liveSession.data = { linkedSessionId: linkedSession.id }
+  await sessions.set(liveSession.id, liveSession)
+
+  assert.equal(await sessions.touch(liveSession.id), true)
+  await sessions.flushCache!()
+  assert.deepEqual(touches.sort(), [linkedSession.id, liveSession.id].sort(), 'cached touches should flush the live and direct linked records to Valkey only')
+  assert.ok((records.get(linkedSession.id)?.lastActivity ?? 0) > 1)
+  assert.equal(records.get(terminalSession.id)?.lastActivity, 1)
+
+  touches.length = 0
+  sessions.cache!.invalidate(liveSession.id)
+  sessions.cache!.invalidate(linkedSession.id)
+  assert.equal(await sessions.touch(liveSession.id), true)
+  assert.deepEqual(touches.sort(), [linkedSession.id, liveSession.id].sort(), 'uncached touches should directly refresh the live and direct linked records in Valkey only')
+  assert.equal(records.get(terminalSession.id)?.lastActivity, 1)
+})
+
+void test('a Valkey-backed cached touch observes a remote linked-session unlink', async (t) => {
+  const records = new Map<string, SessionRecord>()
+  const firstTouches: string[] = []
+  const secondTouches: string[] = []
+  const secondGets: string[] = []
+  const firstStore = createSessionStore('redis://first', 1_000, valkeyStoreForTest(records, firstTouches))
+  const secondStore = createSessionStore('redis://second', 1_000, valkeyStoreForTest(records, secondTouches, 1_000, secondGets))
+  t.after(async () => {
+    await firstStore.close()
+    await secondStore.close()
+  })
+
+  const linkedSession = await createSession(firstStore)
+  await firstStore.set(linkedSession.id, linkedSession)
+  const liveSession = await createSession(firstStore)
+  liveSession.data = { linkedSessionId: linkedSession.id }
+  await firstStore.set(liveSession.id, liveSession)
+  await secondStore.get(liveSession.id)
+
+  liveSession.data = {}
+  await firstStore.set(liveSession.id, liveSession)
+
+  secondGets.length = 0
+  assert.equal(await secondStore.touch(liveSession.id), true)
+  await secondStore.flushCache!()
+  assert.deepEqual(secondTouches, [liveSession.id], 'a cached touch must not use a link cleared by another Valkey-backed process')
+  assert.deepEqual(secondGets, [liveSession.id], 'the first cached touch revalidates its source record')
+
+  secondGets.length = 0
+  assert.equal(await secondStore.touch(liveSession.id), true)
+  assert.deepEqual(secondGets, [], 'subsequent cached touches reuse bounded source-data freshness instead of reading Valkey per event')
+})
+
+void test('a linked session survives past its own ttl as long as the session pointing at it keeps getting touched', async (t) => {
+  const sessions = createSessionStore(null, 200)
+  t.after(async () => {
+    await sessions.close()
+  })
+
+  const linkedSession = await createSession(sessions)
+  const unlinkedControlSession = await createSession(sessions)
+  const liveSession = await createSession(sessions)
+  liveSession.data = { linkedSessionId: linkedSession.id }
+  await sessions.set(liveSession.id, liveSession)
+
+  await wait(125)
+  await sessions.touch(liveSession.id)
+  await wait(125)
+  sessions.cleanup()
+
+  const survivingIds = await sessions.getAllIds()
+  assert.ok(survivingIds.includes(linkedSession.id), 'linked session should survive because the session pointing at it was touched')
+  assert.ok(!survivingIds.includes(unlinkedControlSession.id), 'an untouched, unlinked session should not survive the same window')
+
+  await wait(250)
+  sessions.cleanup()
+  assert.ok(!(await sessions.getAllIds()).includes(linkedSession.id))
 })

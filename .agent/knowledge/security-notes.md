@@ -31,6 +31,101 @@ Track security-relevant boundaries, risks, and mitigation decisions.
 - Follow-up action: Use a short class/day expiry from Learn when generating links.
 - Owner: Codex
 
+- Date: 2026-08-07
+- Area: Learn SyncDeck identity-fingerprint logging (session-split investigation)
+- Threat or risk: A session-split incident (instructor editor showed an active session/join
+  code; a student's launch with the same intended placement was handed off to a waiting
+  room; the instructor's later reopen landed in a separate session the student had started)
+  could not be traced after the fact, because `status`/`student-entry` logged nothing on
+  success and no log line captured `provider`, `resourceLinkId`, or the computed mapping id
+  needed to tell whether the three requests resolved to the same internal identity.
+- Control or mitigation: Added `learn-identity-resolved` log lines (and inline fingerprint
+  fields on the existing `learn-instructor-session-start-pending` log) to `status`,
+  `student-entry`, `start`, and `stop`. Each line records `operation`, resolved `state`,
+  `reused` (for `student-entry`/`start`), and three **non-reversible** fingerprints —
+  `providerFingerprint`, `resourceLinkFingerprint`, `mappingFingerprint` — plus a
+  `sessionFingerprint` for the internal SyncDeck session, all derived via a domain-separated
+  HMAC-SHA256 (truncated to 16 hex chars) keyed by the same shared Learn HMAC secret used for
+  request signing. Raw `provider`, `resourceLinkId`, the internal mapping id, and internal
+  session ids are never included in these lines; handoff/launch URLs and browser tokens are
+  never logged. See `identityFingerprint`/`identityFingerprints`/`logIdentityResolution` in
+  `activities/syncdeck/server/learnIntegration.ts`.
+- Residual risk: Fingerprints are stable only as long as the shared HMAC secret is unchanged;
+  rotating the secret makes historical and post-rotation fingerprints for the same identity
+  incomparable (expected — same tradeoff as `mappingId` itself). Fingerprints reveal identity
+  *equality/inequality* across log lines, not the underlying values, by design.
+- Validation (test/review/path): `activities/syncdeck/server/learnIntegration.test.ts` (asserts
+  fingerprint stability across `student-entry`/`start`/`status`/`stop` calls for the same
+  resource, divergence for a different `resourceLinkId`, and that `learn-identity-resolved`
+  lines never contain the raw resourceLinkId, session id, or handoff/token material).
+- Follow-up action: Learn is adding a matching fingerprint scheme on their side (see the
+  `learn-provider`/`learn-resource-link`/`learn-mapping` domain-separation contract in
+  `.agent/knowledge/data-contracts.md`) so calls can be correlated across both systems without
+  either side logging raw identity values. If a future incident needs finer-grained tracing,
+  extend `logIdentityResolution` call sites rather than logging raw values.
+- Owner: Codex
+
+- Date: 2026-08-08
+- Area: Learn SyncDeck entry-mapping TTL (session-split root cause)
+- Threat or risk: Root-caused the session-split class from the entry above to two compounding
+  bugs, neither requiring any `provider`/`resourceLinkId` mismatch: (1) the active-entry TTL
+  fallback `sessions.ttlMs ?? WAITING_TTL_MS` in `learnIntegration.ts` silently resolved to the
+  10-minute `WAITING_TTL_MS` in production, because the Valkey-backed store returned by
+  `createSessionStore()` never exposes a top-level `ttlMs` (only `InMemorySessionStore`, used
+  without `VALKEY_URL`, has one; `server/routes/statusRoute.ts` already had to work around this
+  same gap). (2) Even at the intended ~1h value, the entry's expiry was refreshed only by Learn
+  REST calls (`status`/`student-entry`/`start`/`stop` -> `loadEntry`), never by the live
+  SyncDeck session's own websocket activity — so an entry could silently expire out of the store
+  mid-class while the session it pointed at was genuinely live and busy (confirmed against an
+  incident where an embedded videosync child had just run under the "orphaned" session). Once
+  the entry was gone, the next student launch created a fresh waiting entry under the same
+  identity, and the instructor's next `start`/reopen created a brand-new session under that
+  entry — splitting the class exactly as observed, entirely independent of the identity-mismatch
+  hypothesis in the entry above.
+- Control or mitigation: (1) Added `resolveActiveEntryTtlMs()` in `learnIntegration.ts`, which
+  checks `sessions.ttlMs`, then `sessions.valkeyStore?.ttlMs`, before falling back to
+  `WAITING_TTL_MS`, replacing all three `sessions.ttlMs ?? WAITING_TTL_MS` call sites (`start`'s
+  create branch, the substitute-instructor-link create branch, and `loadEntry`'s refresh calc).
+  (2) Added a generic, activity-agnostic `linkedSessionId` convention to `server/core/sessions.ts`
+  (parallel to the existing `embeddedParentSessionId` pattern): any session may declare
+  `data.linkedSessionId`, and `SessionStore.touch()` (both `InMemorySessionStore` and the
+  Valkey-wrapped store) propagates a touch to that linked record. `learnIntegration.ts` now
+  stamps the live SyncDeck session with `data.linkedSessionId = <entry mapping id>` via
+  `linkLiveSessionToEntry()` whenever `start` or the substitute-link route creates a session.
+  Since `wsRouter.ts`'s existing 30s ping loop already calls `sessions.touch(ws.sessionId)` on
+  any connected instructor/student/embedded-child socket, the entry now stays alive for as long
+  as anyone is actually connected to the class session, independent of whether Learn ever polls
+  `status` again.
+- Residual risk: Sessions created before this change lack `linkedSessionId` and won't benefit
+  from propagation until they naturally end and a new one is created (no migration needed — the
+  old poll-driven refresh path still applies to them). The entry still has no live-session
+  connection during the window between `start` creating it and the first client connecting; the
+  TTL value fix (1) covers that window, not propagation (2).
+- Validation (test/review/path): `server/sessionStore.test.ts` (`linkedSessionId` touch
+  propagation, and an entry surviving past its own ttl purely via a linked session being
+  touched, with a negative control); `activities/syncdeck/server/learnIntegration.test.ts`
+  (`linkedSessionId` stamped on the live session after `start`; active-entry `expiresAt`
+  resolves from `valkeyStore.ttlMs` when the wrapped store's top-level `ttlMs` is undefined).
+- Follow-up action: If a future activity needs the same "entry mapping tied to a live session's
+  actual connectivity" shape, reuse the `linkedSessionId` convention rather than inventing a new
+  one — see the generic contract in `.agent/knowledge/data-contracts.md`.
+- Owner: Codex
+
+## Learn pending-start logging and linked-session safety
+
+- Date: 2026-08-08
+- Finding: The `learn-instructor-session-start-pending` event previously included raw `resourceLinkId`, despite the fingerprint-only logging contract. The linked-session helper also needed to avoid recursive traversal so malformed `A -> B -> C` and `A <-> B` links cannot refresh beyond one hop or recurse indefinitely.
+- Resolution: The pending event now retains `requestId`, state, and identity fingerprints but omits the raw resource identifier. Both in-memory and Valkey-backed session stores use a non-propagating direct refresh for `linkedSessionId` targets.
+- Validation: `activities/syncdeck/server/learnIntegration.test.ts` parses the pending event and verifies the raw field is absent; `server/sessionStore.test.ts` covers chain and two-record-cycle behavior plus a widened expiry margin.
+- Owner: Codex
+
+## Learn active-entry expiry and lifecycle logging
+
+- Date: 2026-08-08
+- Contract: Waiting Learn entries retain their bounded `data.expiresAt` gate. Active entries rely on the underlying session-store TTL, refreshed through the single-hop live-session link, so a stale logical timestamp cannot split an active class from its mapping.
+- Privacy: Learn lifecycle audit events use provider/resource/mapping/session fingerprints rather than raw identifiers. Exact tests lock the cross-system HMAC vector from `.agent/plans/learn-syncdeck-session-integration.md`.
+- Owner: Codex
+
 - Date: 2026-07-15
 - Area: waiting-room student display-name persistence
 - Threat or risk: Remembering a student's lobby name across days in browser persistence could inadvertently expand into storing participant IDs, credentials, or activity-specific form data.

@@ -40,6 +40,16 @@ function getEmbeddedParentSessionId(session: SessionRecord | SessionLike | null 
   return parentSessionId.length > 0 ? parentSessionId : null
 }
 
+// Generic cross-record keepalive: any session may declare `data.linkedSessionId` to have its own
+// touch()es refresh another store record (e.g. a Learn integration entry mapping keyed off this
+// live session, so the mapping stays alive for as long as anyone is actually connected to it,
+// independent of whatever external polling cadence would otherwise refresh it).
+function getLinkedSessionId(session: SessionRecord | SessionLike | null | undefined): string | null {
+  const data = ensurePlainObject(session?.data)
+  const linkedSessionId = typeof data.linkedSessionId === 'string' ? data.linkedSessionId.trim() : ''
+  return linkedSessionId.length > 0 ? linkedSessionId : null
+}
+
 function toSessionRecord(session: SessionLike): SessionRecord {
   return {
     ...session,
@@ -142,6 +152,20 @@ class InMemorySessionStore implements SessionStore {
     }
 
     session.lastActivity = Date.now()
+    const linkedSessionId = getLinkedSessionId(session)
+    if (linkedSessionId && linkedSessionId !== id) {
+      this.touchDirect(linkedSessionId)
+    }
+    return true
+  }
+
+  private touchDirect(id: string): boolean {
+    const session = this.store[id]
+    if (!session) {
+      return false
+    }
+
+    session.lastActivity = Date.now()
     return true
   }
 
@@ -184,14 +208,41 @@ class InMemorySessionStore implements SessionStore {
   async publishBroadcast(): Promise<void> {}
 }
 
-export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 * 60 * 1000): SessionStore {
-  if (!valkeyUrl) {
-    console.log('Using in-memory session store (no VALKEY_URL configured)')
+export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 * 60 * 1000, providedValkeyStore: ValkeySessionStore | null = null): SessionStore {
+  if (!valkeyUrl && !providedValkeyStore) {
+    console.info(JSON.stringify({
+      component: 'session-store',
+      event: 'store-selected',
+      store: 'in-memory',
+      reason: 'valkey-url-not-configured',
+    }))
     return new InMemorySessionStore(ttlMs)
   }
 
-  console.log('Using Valkey session store with caching')
-  const valkeyStore = new ValkeySessionStore(valkeyUrl, { ttlMs })
+  console.info(JSON.stringify({
+    component: 'session-store',
+    event: 'store-selected',
+    store: 'valkey',
+    cacheEnabled: true,
+  }))
+  const valkeyStore = providedValkeyStore ?? new ValkeySessionStore(valkeyUrl!, { ttlMs })
+  const linkedSessionRevalidatedAt = new Map<string, number>()
+  const LINKED_SESSION_REVALIDATION_MS = 5_000
+  const MAX_LINKED_SESSION_REVALIDATIONS = 1_000
+  const recordLinkedSessionRevalidation = (id: string, timestamp: number): void => {
+    linkedSessionRevalidatedAt.delete(id)
+    linkedSessionRevalidatedAt.set(id, timestamp)
+    while (linkedSessionRevalidatedAt.size > MAX_LINKED_SESSION_REVALIDATIONS) {
+      const oldestId = linkedSessionRevalidatedAt.keys().next().value
+      if (oldestId === undefined) break
+      linkedSessionRevalidatedAt.delete(oldestId)
+    }
+  }
+  const pruneLinkedSessionRevalidations = (): void => {
+    for (const id of linkedSessionRevalidatedAt.keys()) {
+      if (!cache.has(id)) linkedSessionRevalidatedAt.delete(id)
+    }
+  }
   const cache = new SessionCache<SessionRecord>({
     ttlMs: 30_000,
     maxSize: 1000,
@@ -242,23 +293,52 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
 
   const del = async (id: string): Promise<boolean> => {
     cache.invalidate(id)
+    linkedSessionRevalidatedAt.delete(id)
     return await valkeyStore.delete(id)
   }
 
-  const touch = async (id: string): Promise<boolean> => {
-    if (cache.getFresh(id)) {
+  const touchDirect = async (id: string): Promise<{ touched: boolean; session: SessionRecord | null; fromCache: boolean }> => {
+    const cached = cache.getFresh(id)
+    if (cached) {
       cache.touch(id)
-      return true
+      return { touched: true, session: cached, fromCache: true }
     }
 
     const touched = await valkeyStore.touch(id)
     if (!touched) {
-      return false
+      return { touched: false, session: null, fromCache: false }
     }
 
     const session = await loadSessionRecord(id)
     if (session) {
       cache.set(id, session, false)
+    }
+
+    return { touched: true, session, fromCache: false }
+  }
+
+  const touch = async (id: string): Promise<boolean> => {
+    const { touched, session, fromCache } = await touchDirect(id)
+    if (!touched) return false
+
+    // A stop handled by another process may have removed linkedSessionId after this
+    // process cached the live session. Revalidate source data on a bounded cadence,
+    // separate from high-frequency keepalive touches, before following the link.
+    const now = Date.now()
+    const shouldRevalidate = fromCache && (now - (linkedSessionRevalidatedAt.get(id) ?? 0) >= LINKED_SESSION_REVALIDATION_MS)
+    const authoritativeSession = shouldRevalidate ? await loadSessionRecord(id) : session
+    if (shouldRevalidate) recordLinkedSessionRevalidation(id, now)
+    if (shouldRevalidate && !authoritativeSession) {
+      cache.invalidate(id)
+      linkedSessionRevalidatedAt.delete(id)
+      return false
+    }
+    if (shouldRevalidate && authoritativeSession) {
+      cache.set(id, authoritativeSession, false)
+    }
+    const linkedSessionId = getLinkedSessionId(authoritativeSession)
+    if (linkedSessionId && linkedSessionId !== id) {
+      await touchDirect(linkedSessionId)
     }
 
     return true
@@ -288,6 +368,7 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
 
   const cleanup = (): void => {
     cache.cleanup()
+    pruneLinkedSessionRevalidations()
   }
 
   const flushCache = async (): Promise<void> => {
@@ -301,6 +382,7 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
       await valkeyStore.touch(id)
     })
     await valkeyStore.close()
+    linkedSessionRevalidatedAt.clear()
   }
 
   const subscribeToBroadcast = (channel: string, handler: (message: unknown) => void): void => {

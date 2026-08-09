@@ -574,7 +574,7 @@ function extractIndicesFromInstructorPayload(payload: unknown): { h: number; v: 
   return extractIndicesFromRevealStateObject(payload.payload.revealState) ?? extractIndicesFromRevealStateObject(payload.payload)
 }
 
-function normalizeSessionData(data: unknown): SyncDeckSessionData {
+export function normalizeSyncDeckSessionData(data: unknown): SyncDeckSessionData {
   const source = isPlainObject(data) ? data : {}
   const normalizedLastInstructorPayload = source.lastInstructorPayload ?? null
   const normalizedLastInstructorStatePayload =
@@ -591,6 +591,9 @@ function normalizeSessionData(data: unknown): SyncDeckSessionData {
     : undefined
 
   return {
+    ...(typeof source.linkedSessionId === 'string' && source.linkedSessionId.trim().length > 0
+      ? { linkedSessionId: source.linkedSessionId.trim() }
+      : {}),
     ...(preservedAcceptedEntryParticipants ? { acceptedEntryParticipants: preservedAcceptedEntryParticipants } : {}),
     ...(preservedEntryParticipants ? { entryParticipants: preservedEntryParticipants } : {}),
     presentationUrl: typeof source.presentationUrl === 'string' ? source.presentationUrl : null,
@@ -913,7 +916,7 @@ function asSyncDeckSession(session: SessionRecord | null): SyncDeckSession | nul
     return null
   }
 
-  session.data = normalizeSessionData(session.data)
+  session.data = normalizeSyncDeckSessionData(session.data)
   return session as SyncDeckSession
 }
 
@@ -1484,7 +1487,7 @@ function buildEmbeddedActivityEndPayload(instanceKey: string, childSessionId: st
 }
 
 registerSessionNormalizer('syncdeck', (session) => {
-  session.data = normalizeSessionData(session.data)
+  session.data = normalizeSyncDeckSessionData(session.data)
 })
 
 async function createSyncDeckInstructorSession(
@@ -1493,7 +1496,7 @@ async function createSyncDeckInstructorSession(
 ): Promise<{ sessionId: string; instructorRecoveryToken: string; instructorPasscode: string }> {
   const session = await createSession(sessions, { data: {} })
   session.type = 'syncdeck'
-  session.data = normalizeSessionData({
+  session.data = normalizeSyncDeckSessionData({
     ...session.data,
     ...(presentationUrl ? { presentationUrl, standaloneMode: false } : {}),
   })

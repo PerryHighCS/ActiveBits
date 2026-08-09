@@ -492,6 +492,102 @@ ID. Expired or consumed tokens must fail closed with a friendly re-launch instru
 
 ---
 
+## Identity-Fingerprint Correlation Logging
+
+Both systems independently resolve identity on every `status`/`start`/`student-entry`/
+`stop` call from `provider` + `resourceLinkId`. Because neither side has visibility into
+the other's resolution, a split (e.g. an instructor's status check and a student's
+launch silently resolving to different sessions) can only be diagnosed after the fact if
+both systems' logs can be correlated — without either system logging the raw `provider`,
+`resourceLinkId`, internal mapping id, or internal session id anywhere.
+
+ActiveBits emits a `learn-identity-resolved` log line (event name) on every resolution
+path of `status`, `student-entry`, `start`, and `stop`, and inline fingerprint fields on
+the in-flight `learn-instructor-session-start-pending` log. Each line carries:
+
+- `operation`: `"status" | "student-entry" | "start" | "stop"`
+- `state`: the resolved entry state (`"inactive" | "waiting" | "active" | "starting"`)
+- `reused`: boolean, only present for `student-entry`/`start`. For `student-entry`, it
+  means an existing entry mapping was found rather than created. For `start`, it means
+  an already-active instructor session was reused; finding a waiting entry and creating
+  its live session still reports `false`.
+- `providerFingerprint`, `resourceLinkFingerprint`, `mappingFingerprint`: non-reversible
+  16-hex-character fingerprints (below)
+- `sessionFingerprint`: same fingerprint scheme applied to the internal SyncDeck
+  session id, or `null` when there is no active session yet
+
+None of these lines ever contain the raw `provider`, `resourceLinkId`, the internal
+mapping id, internal session ids, handoff/launch URLs, or browser tokens.
+
+### Fingerprint algorithm (implement identically on the Learn side)
+
+All four fingerprints are truncated HMAC-SHA256 digests keyed by the **same shared
+`LEARN_SYNCDECK_HMAC_SECRET`** already used for request signing — Learn does not need a
+new secret to implement this.
+
+```text
+fingerprint(secret, domainTag, value) =
+  hex(HMAC-SHA256(secret, domainTag + "|" + value))[0:16]
+```
+
+- `providerFingerprint = fingerprint(secret, "learn-provider", provider)`
+- `resourceLinkFingerprint = fingerprint(secret, "learn-resource-link", resourceLinkId)`
+- `mappingFingerprint = fingerprint(secret, "learn-mapping", mappingId)`, where
+  `mappingId = "learn-syncdeck-entry-" + hex(HMAC-SHA256(secret, activityId + "\n" + provider + "\n" + resourceLinkId))[0:40]`
+  and `activityId` is always the literal string `"syncdeck"`
+- `sessionFingerprint = fingerprint(secret, "learn-session", activeSessionId)`, where
+  `activeSessionId` is the `activeSessionId`/`joinCode` value ActiveBits already returns
+  in `status` and `start` responses
+
+Learn has every input needed to reproduce all four values exactly: `provider` and
+`resourceLinkId` are whatever it sent on the request, `activityId` is fixed, and
+`activeSessionId` is returned in the response body of `status`/`start`. Matching this
+recipe exactly (domain-separation tag text, the `|` join character, UTF-8 encoding,
+lower-case hex, and the 16-char / 40-char truncation lengths) is required — any
+deviation silently breaks correlation instead of erroring.
+
+**Worked test vector** (verify your implementation against this before relying on it):
+
+| Input | Value |
+| --- | --- |
+| `secret` | `example-shared-learn-syncdeck-hmac-secret` |
+| `activityId` | `syncdeck` |
+| `provider` | `learn-district-42` |
+| `resourceLinkId` | `course-101-unit-3-syncdeck` |
+| `activeSessionId` | `a1b2c3d4e5` |
+
+| Output | Value |
+| --- | --- |
+| `mappingId` | `learn-syncdeck-entry-b9c5d450c1f196cebf05fbe6b034ae5b51b6b134` |
+| `providerFingerprint` | `db808f2d2f402a98` |
+| `resourceLinkFingerprint` | `3a45e4cde6b2ad4c` |
+| `mappingFingerprint` | `33f001c81d0a7df5` |
+| `sessionFingerprint` | `342b379d90c2f61d` |
+
+### Correlating a split
+
+Given logs from both systems for the same time window, compare `providerFingerprint` +
+`resourceLinkFingerprint` across an instructor's `status`/`start` calls and a student's
+`student-entry` call:
+
+- **Same fingerprints throughout, but the entry/session state diverges anyway** — not an
+  identity mismatch; look at ActiveBits' TTL/keepalive behavior for that mapping instead
+  (see the entry-mapping TTL and `linkedSessionId` keepalive notes in
+  `.agent/knowledge/security-notes.md` and `.agent/knowledge/data-contracts.md`).
+- **Different fingerprints between the instructor's and student's calls** — Learn
+  computed a different `provider` or `resourceLinkId` for the two launches (e.g. the
+  instructor editor re-reading drifted/mutable launch placement across tabs). This is
+  the class of bug the editor's planned launch-token binding is meant to close.
+
+This is a cross-system contract: changing the domain-separation tags, the `|` join
+character, the HMAC algorithm, or either truncation length on either side breaks
+correlation with the other system's logs and with historical logs. Coordinate any
+change here between both teams. See `.agent/knowledge/data-contracts.md` for the
+ActiveBits-side implementation reference (`identityFingerprint`/`identityFingerprints`/
+`logIdentityResolution` in `activities/syncdeck/server/learnIntegration.ts`).
+
+---
+
 ## Learn Implementation Checklist (Pending)
 
 - [ ] Configure the dedicated request-HMAC key ID and secret in Learn's server-only
@@ -531,6 +627,10 @@ ID. Expired or consumed tokens must fail closed with a friendly re-launch instru
   generate a new value only for a new instructor click.
 - [ ] Test concurrent instructor Start clicks, stale browser launch URLs, Stop after
   an external session end, and student launch during/after a start race.
+- [ ] Implement the identity-fingerprint logging scheme (see "Identity-Fingerprint
+  Correlation Logging" above) on every `status`/`start`/`student-entry`/`stop` call,
+  using the shared `LEARN_SYNCDECK_HMAC_SECRET`. Verify against the worked test vector
+  before relying on it to correlate logs with ActiveBits.
 
 ---
 
@@ -579,6 +679,15 @@ ID. Expired or consumed tokens must fail closed with a friendly re-launch instru
   waiting-room polling and redirect are covered using the shared root harness.
 - [x] Update `README.md`, `ARCHITECTURE.md`, `DEPLOYMENT.md`, data-contract notes, and
   any SyncDeck payload documentation affected by the final launch contract.
+- [x] Emit the identity-fingerprint logging scheme (see "Identity-Fingerprint
+  Correlation Logging" above) on `status`/`student-entry`/`start`/`stop`, without
+  logging raw `provider`, `resourceLinkId`, internal mapping ids, internal session ids,
+  handoff/launch URLs, or browser tokens. Fixed the active-entry TTL fallback resolving
+  to 10 minutes instead of the configured session TTL on the Valkey-backed store, and
+  added `linkedSessionId` keepalive propagation so the entry mapping's lifetime tracks
+  the live session's actual websocket connectivity instead of depending solely on Learn
+  re-polling `status`/`start`. See `.agent/knowledge/security-notes.md` (2026-08-07 and
+  2026-08-08 entries) and `.agent/knowledge/data-contracts.md`.
 
 ---
 
