@@ -110,6 +110,55 @@ void test('buildLearnHmacCanonicalRequest orders object keys by codepoint', () =
   assert.equal(request, `POST\n/path\n123\nnonce\nprovider\n${expectedHash}`)
 })
 
+void test('Learn waiting-room handoff retains local cookie attributes outside production', async () => {
+  const previousSecret = process.env.LEARN_SYNCDECK_HMAC_SECRET
+  const previousKeyId = process.env.LEARN_SYNCDECK_HMAC_KEY_ID
+  const previousNodeEnv = process.env.NODE_ENV
+  process.env.LEARN_SYNCDECK_HMAC_SECRET = 'a test-only Learn integration secret that is long enough'
+  process.env.LEARN_SYNCDECK_HMAC_KEY_ID = 'test-key'
+  process.env.NODE_ENV = 'development'
+
+  try {
+    const getHandlers = new Map<string, RouteHandler>()
+    const postHandlers = new Map<string, RouteHandler>()
+    registerLearnSyncDeckRoutes({
+      app: {
+        get(path, handler) { getHandlers.set(path, handler) },
+        post(path, handler) { postHandlers.set(path, handler) },
+      },
+      sessions: store([]),
+      ws: { wss: { clients: new Set<ActiveBitsWebSocket>(), close() {} }, register() {} },
+      async createInstructorSession() { throw new Error('not used by the waiting-room handoff test') },
+      writeInstructorRecoveryCookie() {},
+    })
+
+    const resourceLinkId = 'learn-resource-non-production-cookie'
+    const entryPath = `/api/integrations/learn/v1/activities/syncdeck/resources/${resourceLinkId}/student-entry`
+    const entryResponse = response()
+    await postHandlers.get('/api/integrations/learn/v1/activities/:activityId/resources/:resourceLinkId/student-entry')!(
+      { params: { activityId: 'syncdeck', resourceLinkId }, ...signedRequest('POST', entryPath, {}, 'non-production-cookie-entry') },
+      entryResponse,
+    )
+    const launchUrl = new URL(String((entryResponse.body as { waitingLaunchUrl: string }).waitingLaunchUrl), 'https://bits.example')
+    const handoffResponse = response()
+    await getHandlers.get('/integrations/learn/:activityId/wait/:tokenId')!(
+      { params: { activityId: 'syncdeck', tokenId: launchUrl.pathname.split('/').at(-1) }, query: { token: launchUrl.searchParams.get('token') } },
+      handoffResponse,
+    )
+    const waitCookie = handoffResponse.cookies.find((item) => item.name === 'learn_syncdeck_wait')
+    assert.equal(waitCookie?.options.sameSite, 'lax')
+    assert.equal(waitCookie?.options.secure, false)
+    assert.equal(waitCookie?.options.partitioned, false)
+  } finally {
+    if (previousSecret === undefined) delete process.env.LEARN_SYNCDECK_HMAC_SECRET
+    else process.env.LEARN_SYNCDECK_HMAC_SECRET = previousSecret
+    if (previousKeyId === undefined) delete process.env.LEARN_SYNCDECK_HMAC_KEY_ID
+    else process.env.LEARN_SYNCDECK_HMAC_KEY_ID = previousKeyId
+    if (previousNodeEnv === undefined) delete process.env.NODE_ENV
+    else process.env.NODE_ENV = previousNodeEnv
+  }
+})
+
 void test('Learn identity fingerprints match the documented cross-system vector', () => {
   const secret = 'example-shared-learn-syncdeck-hmac-secret'
   const provider = 'learn-district-42'
