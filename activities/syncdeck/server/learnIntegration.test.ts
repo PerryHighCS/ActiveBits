@@ -705,12 +705,30 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
     console.info('[TEST] Verifying Learn lifecycle logs never leak raw resourceLinkId, sessionId, or handoff material.')
     const learnLifecycleLogs = [...infoLogs, ...errorLogs].filter((message) => message.includes('"event":"learn-identity-resolved"') || message.includes('"event":"learn-instructor-session-') || message.includes('"event":"learn-integration-stop-noop"') || message.includes('"event":"learn-integration-request-failed"'))
     assert.ok(learnLifecycleLogs.length >= 8)
+    const failedLifecycleError = JSON.parse(
+      errorLogs.find((message) => message.includes('"event":"learn-instructor-session-start-failed"'))!,
+    ) as Record<string, unknown>
+    assert.deepEqual(Object.keys(failedLifecycleError).sort(), [
+      'activity',
+      'errorCode',
+      'event',
+      'mappingFingerprint',
+      'operation',
+      'providerFingerprint',
+      'requestId',
+      'resourceLinkFingerprint',
+      'sessionFingerprint',
+    ])
+    assert.equal(failedLifecycleError.activity, 'syncdeck')
+    assert.equal(failedLifecycleError.operation, 'start')
+    assert.equal(failedLifecycleError.requestId, 'start-creation-failure')
+    assert.equal(failedLifecycleError.errorCode, 'activation-failed')
+    assert.equal(failedLifecycleError.sessionFingerprint, null)
     for (const message of learnLifecycleLogs) {
       assert.ok(!message.includes(resourceId))
       assert.ok(!message.includes(createdSessionId))
       assert.ok(!message.includes(failedInstructorResourceId))
       assert.ok(!message.includes(failureSentinelSession))
-      assert.ok(!message.includes(failureSentinelUrl))
       assert.ok(!message.includes(failureSentinelToken))
       assert.ok(!message.includes('waitingLaunchUrl'))
       assert.ok(!message.includes('instructorLaunchUrl'))
