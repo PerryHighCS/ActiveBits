@@ -960,7 +960,17 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
       logLearnRequestFailure('waiting-room-launch', 'invalid-or-expired-browser-launch', { status: 403 })
       return void res.status(403).json({ error: 'Invalid or expired waiting-room launch' })
     }
-    res.cookie?.('learn_syncdeck_wait', cookieValue(key.secret, token.mappingId), { path: '/', httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production' })
+    // Learn launches this route inside an LMS iframe. Production needs a Secure third-party
+    // cookie so the waiting page can send the signed mapping handoff to its same-origin status poll.
+    const isProduction = process.env.NODE_ENV === 'production'
+    res.cookie?.('learn_syncdeck_wait', cookieValue(key.secret, token.mappingId), {
+      maxAge: WAITING_TTL_MS,
+      path: '/',
+      httpOnly: true,
+      sameSite: isProduction ? 'none' : 'lax',
+      secure: isProduction,
+      partitioned: isProduction,
+    })
     if (typeof res.redirect === 'function') return void res.redirect(302, `${BROWSER_PREFIX}/${ACTIVITY_ID}/wait`)
     res.status(302).json({ redirectTo: `${BROWSER_PREFIX}/${ACTIVITY_ID}/wait` })
   })

@@ -718,6 +718,15 @@ Document API and data-shape assumptions that must stay compatible over time.
 - Follow-up action: Once Learn ships its matching fingerprint implementation, verify a sample of correlated `provider`/`resourceLinkId` values produce identical fingerprints across both systems' logs before relying on this for incident tracing.
 - Owner: Codex
 
+## Learn SyncDeck iframe waiting-room handoff
+
+- Date: 2026-08-09
+- Surface: Learn student waiting-room browser handoff
+- Contract: The one-time Learn `waitingLaunchUrl` is consumed in the student's browser and establishes a 10-minute httpOnly `learn_syncdeck_wait` cookie. In production it uses `Secure; SameSite=None; Partitioned` so an LMS-hosted ActiveBits iframe can send the handoff cookie on its same-origin `/wait/status` poll and receive the active student-session URL without a global third-party cookie.
+- Compatibility constraints: Production requires HTTPS. Development retains `SameSite=Lax` without `Secure` or `Partitioned` for local HTTP test environments.
+- Validation rules: The server integration test consumes the one-time URL, asserts production cookie attributes, and verifies that the cookie resolves an active mapping. The existing Playwright waiting-room test verifies the browser transitions to an active student-session URL after a successful status poll. Validate third-party-cookie behavior in a real LMS cross-site iframe before relying on the production integration.
+- Owner: Codex
+
 ## Generic session-store `linkedSessionId` keepalive contract
 
 - Date: 2026-08-08

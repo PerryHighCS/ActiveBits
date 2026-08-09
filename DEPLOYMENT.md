@@ -134,6 +134,10 @@ Learn substitute-instructor capability URLs are signed bearer links. Configure r
 proxy and access logging to redact their query strings, and use bounded expiration when
 issuing them from Learn.
 
+Learn student waiting-room launches embedded in an LMS use a `Secure; SameSite=None; Partitioned` httpOnly handoff cookie so the ActiveBits iframe can poll its same-origin
+waiting-room status endpoint without requiring a global third-party cookie. Production
+must therefore use HTTPS.
+
 ## Source Map Policy (Open-Source Repo)
 
 ActiveBits intentionally ships source maps in production for debugging and teaching transparency.
