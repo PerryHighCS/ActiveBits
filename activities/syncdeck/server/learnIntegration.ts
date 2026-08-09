@@ -351,6 +351,25 @@ function logLearnLifecycleError(
   }))
 }
 
+function logLearnSubstituteLifecycleError(
+  secret: string,
+  event: string,
+  provider: string,
+  resourceLinkId: string,
+  mapping: string,
+  sessionId: string | null,
+  errorCode: 'activation-failed' | 'entry-cleanup-failed' | 'unlink-failed',
+): void {
+  console.error(JSON.stringify({
+    activity: ACTIVITY_ID,
+    event,
+    operation: 'substitute-launch',
+    errorCode,
+    ...identityFingerprints(secret, provider, resourceLinkId, mapping),
+    sessionFingerprint: sessionId ? identityFingerprint(secret, 'learn-session', sessionId) : null,
+  }))
+}
+
 // `sessions.ttlMs` is only populated on the in-memory store; the Valkey-backed store (production)
 // exposes its real configured TTL on `sessions.valkeyStore.ttlMs` instead, so an active entry's TTL
 // must check both before falling back to the (much shorter) waiting-room default.
@@ -896,11 +915,11 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
           await linkLiveSessionToEntry(sessions, sessionId, id)
           entry.session.data = { learnIntegrationKind: 'entry', activityId: ACTIVITY_ID, provider: link.provider, resourceLinkId: link.resourceLinkId, state: 'active', startRequestId: `substitute:${link.jti}`, activeSessionId: sessionId, presentationUrl: link.presentationUrl, expiresAt: Date.now() + resolveActiveEntryTtlMs(sessions) }
           await sessions.set(id, entry.session)
-        } catch (error) {
+        } catch {
           try {
             if (sessionId) await unlinkLiveSessionFromEntry(sessions, sessionId, id)
-          } catch (unlinkError) {
-            console.error(JSON.stringify({ activity: ACTIVITY_ID, event: 'learn-substitute-link-unlink-failed', jti: link.jti, error: unlinkError instanceof Error ? unlinkError.message : String(unlinkError) }))
+          } catch {
+            logLearnSubstituteLifecycleError(key.secret, 'learn-substitute-link-unlink-failed', link.provider, link.resourceLinkId, id, sessionId, 'unlink-failed')
           }
           try {
             if (previousData && entry) {
@@ -909,10 +928,10 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
             } else {
               await sessions.delete(id)
             }
-          } catch (cleanupError) {
-            console.error(JSON.stringify({ activity: ACTIVITY_ID, event: 'learn-substitute-link-start-cleanup-failed', resourceLinkId: link.resourceLinkId, jti: link.jti, error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError) }))
+          } catch {
+            logLearnSubstituteLifecycleError(key.secret, 'learn-substitute-link-start-cleanup-failed', link.provider, link.resourceLinkId, id, sessionId, 'entry-cleanup-failed')
           }
-          console.error(JSON.stringify({ activity: ACTIVITY_ID, event: 'learn-substitute-link-start-failed', jti: link.jti, error: error instanceof Error ? error.message : String(error) }))
+          logLearnSubstituteLifecycleError(key.secret, 'learn-substitute-link-start-failed', link.provider, link.resourceLinkId, id, sessionId, 'activation-failed')
           return void respondToSubstituteLaunchError(res, 500, 'Unable to start the substitute instructor session')
         }
       }

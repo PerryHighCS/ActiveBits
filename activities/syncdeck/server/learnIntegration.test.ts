@@ -520,8 +520,28 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
       substituteCleanupFailureResponse,
     )
     assert.equal(substituteCleanupFailureResponse.statusCode, 500)
-    assert.ok(errorLogs.some((message) => message.includes('learn-substitute-link-start-cleanup-failed') && message.includes('test substitute cleanup failure')))
-    assert.ok(errorLogs.some((message) => message.includes('learn-substitute-link-start-failed') && message.includes('test instructor-session creation failure')))
+    const substituteCleanupError = JSON.parse(
+      errorLogs.find((message) => message.includes('"event":"learn-substitute-link-start-cleanup-failed"'))!,
+    ) as Record<string, unknown>
+    const substituteStartError = JSON.parse(
+      errorLogs.find((message) => message.includes('"event":"learn-substitute-link-start-failed"'))!,
+    ) as Record<string, unknown>
+    for (const lifecycleError of [substituteCleanupError, substituteStartError]) {
+      assert.deepEqual(Object.keys(lifecycleError).sort(), [
+        'activity',
+        'errorCode',
+        'event',
+        'mappingFingerprint',
+        'operation',
+        'providerFingerprint',
+        'resourceLinkFingerprint',
+        'sessionFingerprint',
+      ])
+      assert.equal(lifecycleError.operation, 'substitute-launch')
+      assert.equal(lifecycleError.sessionFingerprint, null)
+    }
+    assert.equal(substituteCleanupError.errorCode, 'entry-cleanup-failed')
+    assert.equal(substituteStartError.errorCode, 'activation-failed')
     sessions.delete = originalDeleteForSubstituteCleanup
     failInstructorSessionCreation = false
 

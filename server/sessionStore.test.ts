@@ -8,7 +8,6 @@ import { createWsRouter } from './core/wsRouter.js'
 import { EMBEDDED_CHILD_SESSION_PREFIX } from '../types/session.js'
 import { registerSessionNormalizer, resetSessionNormalizersForTests } from './core/sessionNormalization.js'
 import { listenForTest } from './testPortBinding.js'
-import { normalizeSyncDeckSessionData } from '../activities/syncdeck/server/routes.js'
 
 const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -52,23 +51,24 @@ function valkeyStoreForTest(records: Map<string, SessionRecord>, touches: string
   } as unknown as ValkeySessionStore
 }
 
-void test('session-store selection is logged with stable structured fields', async (t) => {
+void test('session-store selection is logged with stable structured fields', async () => {
   const previousInfo = console.info
   const logs: string[] = []
-  console.info = (...args: unknown[]) => { logs.push(args.map(String).join(' ')) }
-  t.after(() => {
+  try {
+    console.info = (...args: unknown[]) => { logs.push(args.map(String).join(' ')) }
+
+    const inMemoryStore = createSessionStore(null)
+    const valkeyStore = createSessionStore('redis://test', 1_000, valkeyStoreForTest(new Map(), []))
+    await inMemoryStore.close()
+    await valkeyStore.close()
+
+    assert.deepEqual(logs.map((message) => JSON.parse(message)), [
+      { component: 'session-store', event: 'store-selected', store: 'in-memory', reason: 'valkey-url-not-configured' },
+      { component: 'session-store', event: 'store-selected', store: 'valkey', cacheEnabled: true },
+    ])
+  } finally {
     console.info = previousInfo
-  })
-
-  const inMemoryStore = createSessionStore(null)
-  const valkeyStore = createSessionStore('redis://test', 1_000, valkeyStoreForTest(new Map(), []))
-  await inMemoryStore.close()
-  await valkeyStore.close()
-
-  assert.deepEqual(logs.map((message) => JSON.parse(message)), [
-    { component: 'session-store', event: 'store-selected', store: 'in-memory', reason: 'valkey-url-not-configured' },
-    { component: 'session-store', event: 'store-selected', store: 'valkey', cacheEnabled: true },
-  ])
+  }
 })
 
 void test('inactive sessions expire', async () => {
@@ -151,6 +151,7 @@ void test('registered session normalizers populate activity defaults', async (t)
 })
 
 void test('SyncDeck normalization preserves linked-session keepalive records', async (t) => {
+  const { normalizeSyncDeckSessionData } = await import('../activities/syncdeck/server/routes.js')
   resetSessionNormalizersForTests()
   registerSessionNormalizer('syncdeck', (session) => {
     session.data = normalizeSyncDeckSessionData(session.data)
