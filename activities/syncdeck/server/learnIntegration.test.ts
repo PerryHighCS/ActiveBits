@@ -146,6 +146,7 @@ void test('Learn waiting-room handoff retains local cookie attributes outside pr
       handoffResponse,
     )
     const waitCookie = handoffResponse.cookies.find((item) => item.name === 'learn_syncdeck_wait')
+    assert.equal(waitCookie?.options.maxAge, 10 * 60 * 1000)
     assert.equal(waitCookie?.options.sameSite, 'lax')
     assert.equal(waitCookie?.options.secure, false)
     assert.equal(waitCookie?.options.partitioned, false)
@@ -313,6 +314,7 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
     assert.equal(waitLaunchResponse.redirectTo, '/integrations/learn/syncdeck/wait')
     assert.equal(waitLaunchResponse.headers['Referrer-Policy'], 'no-referrer')
     const waitCookie = waitLaunchResponse.cookies.find((item) => item.name === 'learn_syncdeck_wait')
+    assert.equal(waitCookie?.options.maxAge, 10 * 60 * 1000)
     assert.equal(waitCookie?.options.path, '/')
     assert.equal(waitCookie?.options.sameSite, 'none')
     assert.equal(waitCookie?.options.secure, true)

@@ -964,6 +964,7 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
     // cookie so the waiting page can send the signed mapping handoff to its same-origin status poll.
     const isProduction = process.env.NODE_ENV === 'production'
     res.cookie?.('learn_syncdeck_wait', cookieValue(key.secret, token.mappingId), {
+      maxAge: WAITING_TTL_MS,
       path: '/',
       httpOnly: true,
       sameSite: isProduction ? 'none' : 'lax',
