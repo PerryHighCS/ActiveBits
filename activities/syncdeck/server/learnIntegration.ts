@@ -746,10 +746,10 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
           entry.session.data = nextData
           await sessions.set(id, entry.session)
           logLearnLifecycle(auth.key.secret, 'learn-instructor-session-started', provider, resourceLinkId, id, sessionId, { requestId, reused: false })
-        } catch (error) {
+        } catch {
           try {
             if (sessionId) await unlinkLiveSessionFromEntry(sessions, sessionId, id)
-          } catch (unlinkError) {
+          } catch {
             logLearnLifecycleError(auth.key.secret, 'learn-instructor-session-unlink-failed', provider, resourceLinkId, id, sessionId, requestId, 'unlink-failed')
           }
           try {
@@ -759,7 +759,7 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
             } else {
               await sessions.delete(id)
             }
-          } catch (cleanupError) {
+          } catch {
             logLearnLifecycleError(auth.key.secret, 'learn-instructor-session-start-cleanup-failed', provider, resourceLinkId, id, sessionId, requestId, 'entry-cleanup-failed')
           }
           logLearnLifecycleError(auth.key.secret, 'learn-instructor-session-start-failed', provider, resourceLinkId, id, sessionId, requestId, 'activation-failed')
