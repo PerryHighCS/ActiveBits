@@ -129,12 +129,14 @@ void test('Learn identity fingerprints match the documented cross-system vector'
 void test('Learn routes transition a one-time waiting-room entry into an active SyncDeck session', async () => {
   const previousSecret = process.env.LEARN_SYNCDECK_HMAC_SECRET
   const previousKeyId = process.env.LEARN_SYNCDECK_HMAC_KEY_ID
+  const previousNodeEnv = process.env.NODE_ENV
   const previousInfo = console.info
   const previousError = console.error
   const infoLogs: string[] = []
   const errorLogs: string[] = []
   process.env.LEARN_SYNCDECK_HMAC_SECRET = 'a test-only Learn integration secret that is long enough'
   process.env.LEARN_SYNCDECK_HMAC_KEY_ID = 'test-key'
+  process.env.NODE_ENV = 'production'
   console.info = (...args: unknown[]) => { infoLogs.push(args.map(String).join(' ')) }
   console.error = (...args: unknown[]) => { errorLogs.push(args.map(String).join(' ')) }
   previousInfo('[TEST] Expected Learn integration failure logs are captured by this test.')
@@ -263,6 +265,10 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
     assert.equal(waitLaunchResponse.headers['Referrer-Policy'], 'no-referrer')
     const waitCookie = waitLaunchResponse.cookies.find((item) => item.name === 'learn_syncdeck_wait')
     assert.equal(waitCookie?.options.path, '/')
+    assert.equal(waitCookie?.options.sameSite, 'none')
+    assert.equal(waitCookie?.options.secure, true)
+    assert.equal(waitCookie?.options.partitioned, true)
+    assert.equal(waitCookie?.options.httpOnly, true)
     const waitingCookie = waitCookie?.value
     assert.ok(waitingCookie)
 
@@ -761,5 +767,7 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
     else process.env.LEARN_SYNCDECK_HMAC_SECRET = previousSecret
     if (previousKeyId === undefined) delete process.env.LEARN_SYNCDECK_HMAC_KEY_ID
     else process.env.LEARN_SYNCDECK_HMAC_KEY_ID = previousKeyId
+    if (previousNodeEnv === undefined) delete process.env.NODE_ENV
+    else process.env.NODE_ENV = previousNodeEnv
   }
 })
