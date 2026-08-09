@@ -335,6 +335,32 @@ void test('Valkey-backed linked touches refresh cached and uncached records exac
   assert.equal(records.get(terminalSession.id)?.lastActivity, 1)
 })
 
+void test('a Valkey-backed cached touch observes a remote linked-session unlink', async (t) => {
+  const records = new Map<string, SessionRecord>()
+  const firstTouches: string[] = []
+  const secondTouches: string[] = []
+  const firstStore = createSessionStore('redis://first', 1_000, valkeyStoreForTest(records, firstTouches))
+  const secondStore = createSessionStore('redis://second', 1_000, valkeyStoreForTest(records, secondTouches))
+  t.after(async () => {
+    await firstStore.close()
+    await secondStore.close()
+  })
+
+  const linkedSession = await createSession(firstStore)
+  await firstStore.set(linkedSession.id, linkedSession)
+  const liveSession = await createSession(firstStore)
+  liveSession.data = { linkedSessionId: linkedSession.id }
+  await firstStore.set(liveSession.id, liveSession)
+  await secondStore.get(liveSession.id)
+
+  liveSession.data = {}
+  await firstStore.set(liveSession.id, liveSession)
+
+  assert.equal(await secondStore.touch(liveSession.id), true)
+  await secondStore.flushCache!()
+  assert.deepEqual(secondTouches, [liveSession.id], 'a cached touch must not use a link cleared by another Valkey-backed process')
+})
+
 void test('a linked session survives past its own ttl as long as the session pointing at it keeps getting touched', async (t) => {
   const sessions = createSessionStore(null, 200)
   t.after(async () => {

@@ -279,16 +279,16 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
     return await valkeyStore.delete(id)
   }
 
-  const touchDirect = async (id: string): Promise<{ touched: boolean; session: SessionRecord | null }> => {
+  const touchDirect = async (id: string): Promise<{ touched: boolean; session: SessionRecord | null; fromCache: boolean }> => {
     const cached = cache.getFresh(id)
     if (cached) {
       cache.touch(id)
-      return { touched: true, session: cached }
+      return { touched: true, session: cached, fromCache: true }
     }
 
     const touched = await valkeyStore.touch(id)
     if (!touched) {
-      return { touched: false, session: null }
+      return { touched: false, session: null, fromCache: false }
     }
 
     const session = await loadSessionRecord(id)
@@ -296,14 +296,22 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
       cache.set(id, session, false)
     }
 
-    return { touched: true, session }
+    return { touched: true, session, fromCache: false }
   }
 
   const touch = async (id: string): Promise<boolean> => {
-    const { touched, session } = await touchDirect(id)
+    const { touched, session, fromCache } = await touchDirect(id)
     if (!touched) return false
 
-    const linkedSessionId = getLinkedSessionId(session)
+    // A stop handled by another process may have removed linkedSessionId after this
+    // process cached the live session. Re-read before propagating so stale sockets
+    // cannot keep a recreated mapping alive indefinitely.
+    const authoritativeSession = fromCache ? await loadSessionRecord(id) : session
+    if (fromCache && !authoritativeSession) {
+      cache.invalidate(id)
+      return false
+    }
+    const linkedSessionId = getLinkedSessionId(authoritativeSession)
     if (linkedSessionId && linkedSessionId !== id) {
       await touchDirect(linkedSessionId)
     }

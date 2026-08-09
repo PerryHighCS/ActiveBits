@@ -330,6 +330,24 @@ function logLearnLifecycle(
   }))
 }
 
+function logLearnLifecycleError(
+  secret: string,
+  event: string,
+  provider: string,
+  resourceLinkId: string,
+  mapping: string,
+  sessionId: string | null,
+  context: Record<string, unknown> = {},
+): void {
+  console.error(JSON.stringify({
+    activity: ACTIVITY_ID,
+    event,
+    ...context,
+    ...identityFingerprints(secret, provider, resourceLinkId, mapping),
+    sessionFingerprint: sessionId ? identityFingerprint(secret, 'learn-session', sessionId) : null,
+  }))
+}
+
 // `sessions.ttlMs` is only populated on the in-memory store; the Valkey-backed store (production)
 // exposes its real configured TTL on `sessions.valkeyStore.ttlMs` instead, so an active entry's TTL
 // must check both before falling back to the (much shorter) waiting-room default.
@@ -716,7 +734,7 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
           try {
             if (sessionId) await unlinkLiveSessionFromEntry(sessions, sessionId, id)
           } catch (unlinkError) {
-            console.error(JSON.stringify({ activity: ACTIVITY_ID, event: 'learn-instructor-session-unlink-failed', requestId, error: unlinkError instanceof Error ? unlinkError.message : String(unlinkError) }))
+            logLearnLifecycleError(auth.key.secret, 'learn-instructor-session-unlink-failed', provider, resourceLinkId, id, sessionId, { requestId, error: unlinkError instanceof Error ? unlinkError.message : String(unlinkError) })
           }
           try {
             if (previousData && entry) {
@@ -726,9 +744,9 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
               await sessions.delete(id)
             }
           } catch (cleanupError) {
-            console.error(JSON.stringify({ activity: ACTIVITY_ID, event: 'learn-instructor-session-start-cleanup-failed', resourceLinkId, requestId, error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError) }))
+            logLearnLifecycleError(auth.key.secret, 'learn-instructor-session-start-cleanup-failed', provider, resourceLinkId, id, sessionId, { requestId, error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError) })
           }
-          console.error(JSON.stringify({ activity: ACTIVITY_ID, event: 'learn-instructor-session-start-failed', resourceLinkId, requestId, error: error instanceof Error ? error.message : String(error) }))
+          logLearnLifecycleError(auth.key.secret, 'learn-instructor-session-start-failed', provider, resourceLinkId, id, sessionId, { requestId, error: error instanceof Error ? error.message : String(error) })
           return void res.status(500).json({ error: 'Unable to start the Learn instructor session' })
         }
       }

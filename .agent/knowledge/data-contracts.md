@@ -749,3 +749,17 @@ Document API and data-shape assumptions that must stay compatible over time.
 - Contract: A Learn-created SyncDeck session carries `linkedSessionId` only while its entry mapping is active. Learn stop and either instructor-activation rollback clear the link, but only if it still matches that mapping, so a stale socket cannot refresh a recreated entry mapping.
 - Validation: `activities/syncdeck/server/learnIntegration.test.ts` verifies the link is absent from the live session after a Learn stop.
 - Owner: Codex
+
+## Cross-instance linked-session invalidation
+
+- Date: 2026-08-09
+- Contract: In the Valkey-backed store, a cached source record is re-read from Valkey before its `linkedSessionId` is propagated. This makes a remote stop/unlink authoritative even when a websocket remains connected to a different application instance.
+- Validation: `server/sessionStore.test.ts` uses two independent wrapped stores over one fake Valkey record map and verifies the second store does not refresh a target after the first store removes the link.
+- Owner: Codex
+
+## Learn lifecycle failure logging
+
+- Date: 2026-08-09
+- Contract: Instructor-start lifecycle errors use the same identity fingerprints and `sessionFingerprint` schema as success events; error logs never include raw Learn resource identifiers or internal session IDs.
+- Validation: `activities/syncdeck/server/learnIntegration.test.ts` scans both captured info and error lifecycle logs, including a forced instructor-start failure.
+- Owner: Codex

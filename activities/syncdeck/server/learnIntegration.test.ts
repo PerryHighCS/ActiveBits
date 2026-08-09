@@ -696,11 +696,12 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
     sessions.ttlMs = originalTtlMs
 
     console.info('[TEST] Verifying Learn lifecycle logs never leak raw resourceLinkId, sessionId, or handoff material.')
-    const learnLifecycleLogs = infoLogs.filter((message) => message.includes('"event":"learn-identity-resolved"') || message.includes('"event":"learn-instructor-session-') || message.includes('"event":"learn-integration-stop-noop"'))
+    const learnLifecycleLogs = [...infoLogs, ...errorLogs].filter((message) => message.includes('"event":"learn-identity-resolved"') || message.includes('"event":"learn-instructor-session-') || message.includes('"event":"learn-integration-stop-noop"'))
     assert.ok(learnLifecycleLogs.length >= 8)
     for (const message of learnLifecycleLogs) {
       assert.ok(!message.includes(resourceId))
       assert.ok(!message.includes(createdSessionId))
+      assert.ok(!message.includes(failedInstructorResourceId))
       assert.ok(!message.includes('waitingLaunchUrl'))
       assert.ok(!message.includes('instructorLaunchUrl'))
       assert.ok(!message.includes('browserToken'))
