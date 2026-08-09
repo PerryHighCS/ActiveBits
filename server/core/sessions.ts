@@ -228,6 +228,21 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
   const valkeyStore = providedValkeyStore ?? new ValkeySessionStore(valkeyUrl!, { ttlMs })
   const linkedSessionRevalidatedAt = new Map<string, number>()
   const LINKED_SESSION_REVALIDATION_MS = 5_000
+  const MAX_LINKED_SESSION_REVALIDATIONS = 1_000
+  const recordLinkedSessionRevalidation = (id: string, timestamp: number): void => {
+    linkedSessionRevalidatedAt.delete(id)
+    linkedSessionRevalidatedAt.set(id, timestamp)
+    while (linkedSessionRevalidatedAt.size > MAX_LINKED_SESSION_REVALIDATIONS) {
+      const oldestId = linkedSessionRevalidatedAt.keys().next().value
+      if (oldestId === undefined) break
+      linkedSessionRevalidatedAt.delete(oldestId)
+    }
+  }
+  const pruneLinkedSessionRevalidations = (): void => {
+    for (const id of linkedSessionRevalidatedAt.keys()) {
+      if (!cache.has(id)) linkedSessionRevalidatedAt.delete(id)
+    }
+  }
   const cache = new SessionCache<SessionRecord>({
     ttlMs: 30_000,
     maxSize: 1000,
@@ -278,6 +293,7 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
 
   const del = async (id: string): Promise<boolean> => {
     cache.invalidate(id)
+    linkedSessionRevalidatedAt.delete(id)
     return await valkeyStore.delete(id)
   }
 
@@ -311,7 +327,7 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
     const now = Date.now()
     const shouldRevalidate = fromCache && (now - (linkedSessionRevalidatedAt.get(id) ?? 0) >= LINKED_SESSION_REVALIDATION_MS)
     const authoritativeSession = shouldRevalidate ? await loadSessionRecord(id) : session
-    if (shouldRevalidate) linkedSessionRevalidatedAt.set(id, now)
+    if (shouldRevalidate) recordLinkedSessionRevalidation(id, now)
     if (shouldRevalidate && !authoritativeSession) {
       cache.invalidate(id)
       linkedSessionRevalidatedAt.delete(id)
@@ -352,6 +368,7 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
 
   const cleanup = (): void => {
     cache.cleanup()
+    pruneLinkedSessionRevalidations()
   }
 
   const flushCache = async (): Promise<void> => {
@@ -365,6 +382,7 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
       await valkeyStore.touch(id)
     })
     await valkeyStore.close()
+    linkedSessionRevalidatedAt.clear()
   }
 
   const subscribeToBroadcast = (channel: string, handler: (message: unknown) => void): void => {

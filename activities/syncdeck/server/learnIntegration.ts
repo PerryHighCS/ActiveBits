@@ -337,12 +337,15 @@ function logLearnLifecycleError(
   resourceLinkId: string,
   mapping: string,
   sessionId: string | null,
-  context: Record<string, unknown> = {},
+  requestId: string,
+  errorCode: 'activation-failed' | 'entry-cleanup-failed' | 'unlink-failed',
 ): void {
   console.error(JSON.stringify({
     activity: ACTIVITY_ID,
     event,
-    ...context,
+    operation: 'start',
+    requestId,
+    errorCode,
     ...identityFingerprints(secret, provider, resourceLinkId, mapping),
     sessionFingerprint: sessionId ? identityFingerprint(secret, 'learn-session', sessionId) : null,
   }))
@@ -747,7 +750,7 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
           try {
             if (sessionId) await unlinkLiveSessionFromEntry(sessions, sessionId, id)
           } catch (unlinkError) {
-            logLearnLifecycleError(auth.key.secret, 'learn-instructor-session-unlink-failed', provider, resourceLinkId, id, sessionId, { requestId, error: unlinkError instanceof Error ? unlinkError.message : String(unlinkError) })
+            logLearnLifecycleError(auth.key.secret, 'learn-instructor-session-unlink-failed', provider, resourceLinkId, id, sessionId, requestId, 'unlink-failed')
           }
           try {
             if (previousData && entry) {
@@ -757,9 +760,9 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
               await sessions.delete(id)
             }
           } catch (cleanupError) {
-            logLearnLifecycleError(auth.key.secret, 'learn-instructor-session-start-cleanup-failed', provider, resourceLinkId, id, sessionId, { requestId, error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError) })
+            logLearnLifecycleError(auth.key.secret, 'learn-instructor-session-start-cleanup-failed', provider, resourceLinkId, id, sessionId, requestId, 'entry-cleanup-failed')
           }
-          logLearnLifecycleError(auth.key.secret, 'learn-instructor-session-start-failed', provider, resourceLinkId, id, sessionId, { requestId, error: error instanceof Error ? error.message : String(error) })
+          logLearnLifecycleError(auth.key.secret, 'learn-instructor-session-start-failed', provider, resourceLinkId, id, sessionId, requestId, 'activation-failed')
           return void res.status(500).json({ error: 'Unable to start the Learn instructor session' })
         }
       }

@@ -150,6 +150,7 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
     let delayedInstructorSession: Promise<void> | null = null
     let notifyInstructorSessionStart: (() => void) | null = null
     let failInstructorSessionCreation = false
+    let instructorFailureMessage = 'test instructor-session creation failure'
     registerLearnSyncDeckRoutes({
       app: {
         get(path, handler) { getHandlers.set(path, handler) },
@@ -161,7 +162,7 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
         instructorSessionCreateCount += 1
         notifyInstructorSessionStart?.()
         if (delayedInstructorSession) await delayedInstructorSession
-        if (failInstructorSessionCreation) throw new Error('test instructor-session creation failure')
+        if (failInstructorSessionCreation) throw new Error(instructorFailureMessage)
         createdSessionId = 'syncdeck-live'
         await sessions.set(createdSessionId, {
           id: createdSessionId,
@@ -569,10 +570,15 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
     assert.equal(noopStopIdentityLog.state, 'inactive')
     assert.equal(noopStopIdentityLog.sessionFingerprint, null)
 
-    console.info('[TEST] Expected Learn instructor-session creation failure to return a safe server error.')
+    const failureSentinelResource = 'sentinel-resource-identifier'
+    const failureSentinelSession = 'sentinel-session-identifier'
+    const failureSentinelUrl = 'https://sentinel.example/private-launch'
+    const failureSentinelToken = 'sentinel-browser-token'
+    console.info('[TEST] Expected Learn instructor-session creation failure to return a safe server error without logging failure sentinels.')
     failInstructorSessionCreation = true
+    instructorFailureMessage = `${failureSentinelResource} ${failureSentinelSession} ${failureSentinelUrl} ${failureSentinelToken}`
     const failedInstructorStartResponse = response()
-    const failedInstructorResourceId = 'learn-resource-start-failure'
+    const failedInstructorResourceId = failureSentinelResource
     const failedInstructorStartPath = `/api/integrations/learn/v1/activities/syncdeck/resources/${failedInstructorResourceId}/start`
     await postHandlers.get('/api/integrations/learn/v1/activities/:activityId/resources/:resourceLinkId/start')!(
       { params: { activityId: 'syncdeck', resourceLinkId: failedInstructorResourceId }, ...signedRequest('POST', failedInstructorStartPath, { presentationUrl: 'https://slides.example/deck', requestId: 'start-creation-failure' }, 'start-creation-failure-nonce') },
@@ -582,6 +588,7 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
     assert.match(String((failedInstructorStartResponse.body as { error?: unknown }).error), /unable to start/i)
     assert.ok(errorLogs.some((message) => message.includes('learn-instructor-session-start-failed')))
     failInstructorSessionCreation = false
+    instructorFailureMessage = 'test instructor-session creation failure'
 
     console.info('[TEST] Expected Learn start to release its lock after a mapping-load failure.')
     const originalGet = sessions.get.bind(sessions)
@@ -702,6 +709,9 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
       assert.ok(!message.includes(resourceId))
       assert.ok(!message.includes(createdSessionId))
       assert.ok(!message.includes(failedInstructorResourceId))
+      assert.ok(!message.includes(failureSentinelSession))
+      assert.ok(!message.includes(failureSentinelUrl))
+      assert.ok(!message.includes(failureSentinelToken))
       assert.ok(!message.includes('waitingLaunchUrl'))
       assert.ok(!message.includes('instructorLaunchUrl'))
       assert.ok(!message.includes('browserToken'))

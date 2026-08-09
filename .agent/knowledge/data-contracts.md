@@ -752,14 +752,14 @@ Document API and data-shape assumptions that must stay compatible over time.
 
 ## Cross-instance linked-session invalidation
 
-- Date: 2026-08-09
+- Date: 2026-08-08
 - Contract: In the Valkey-backed store, a cached source record is re-read from Valkey at most once per five seconds before its `linkedSessionId` is propagated. This makes a remote stop/unlink authoritative within that bounded interval without a Valkey read for every websocket touch.
 - Validation: `server/sessionStore.test.ts` uses two independent wrapped stores over one fake Valkey record map and verifies the second store does not refresh a target after the first store removes the link, while an immediate subsequent touch performs no extra read.
 - Owner: Codex
 
 ## Learn lifecycle failure logging
 
-- Date: 2026-08-09
-- Contract: Instructor-start lifecycle errors use the same identity fingerprints and `sessionFingerprint` schema as success events; error logs never include raw Learn resource identifiers or internal session IDs.
-- Validation: `activities/syncdeck/server/learnIntegration.test.ts` scans both captured info and error lifecycle logs, including a forced instructor-start failure.
+- Date: 2026-08-08
+- Contract: Instructor-start lifecycle errors use an allowlisted schema of event, operation, requestId, stable errorCode, identity fingerprints, and `sessionFingerprint`; error messages and arbitrary context values are excluded. Error logs never include raw Learn resource identifiers or internal session IDs.
+- Validation: `activities/syncdeck/server/learnIntegration.test.ts` scans both captured info and error lifecycle logs, including a forced instructor-start failure containing sentinel resource, session, URL, and token values.
 - Owner: Codex
