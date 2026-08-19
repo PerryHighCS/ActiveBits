@@ -1,4 +1,6 @@
-### MobCode live-session defaults
+# Data Contracts
+
+## MobCode live-session defaults
 
 - Date: 2026-08-19
 - Area: activities | mobcode | session normalization
@@ -6,8 +8,6 @@
 - Why it matters: Standalone and embedded sessions should immediately mirror instructor edits by default without overwriting later instructor toggle choices during normalization or reload.
 - Evidence: `activities/mobcode/server/routes.ts`; `activities/mobcode/server/routes.test.ts`; `skills/syncdeck/references/ACTIVITY_PAYLOADS.md`
 - Owner: Codex
-
-# Data Contracts
 
 Document API and data-shape assumptions that must stay compatible over time.
 
