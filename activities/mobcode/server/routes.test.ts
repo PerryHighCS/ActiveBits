@@ -159,8 +159,31 @@ void test('normalizeMobCodeSessionData enables embedded Try it with an initial i
     embeddedLaunch: { selectedOptions: { files: { 'main.py': 'print(1)' }, activeFile: 'main.py', startTryItMode: true } },
   })
   assert.equal(data.studentCode?.tryItEnabled, true)
+  assert.equal(data.studentCode?.shareChangesEnabled, false)
   assert.deepEqual(data.studentCode?.starterVersion, data.groups.default)
   assert.notEqual(data.studentCode?.starterVersion, data.groups.default)
+})
+
+void test('normalizeMobCodeSessionData broadcasts instructor changes by default', () => {
+  const data = normalizeMobCodeSessionData({})
+
+  assert.equal(data.studentCode?.tryItEnabled, false)
+  assert.equal(data.studentCode?.shareChangesEnabled, true)
+})
+
+void test('normalizeMobCodeSessionData preserves an instructor choice to stop broadcasting', () => {
+  const data = normalizeMobCodeSessionData({
+    studentCode: {
+      tryItEnabled: false,
+      shareChangesEnabled: false,
+      publishedInstructorVersion: { files: {}, activeFile: '' },
+      starterVersion: null,
+      studentWorkspaces: {},
+      sharedExample: null,
+    },
+  })
+
+  assert.equal(data.studentCode?.shareChangesEnabled, false)
 })
 
 void test('normalizeMobCodeSessionData drops reserved participant keys and uses a prototype-free workspace map', () => {

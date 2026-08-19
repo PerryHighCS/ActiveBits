@@ -191,6 +191,7 @@ function normalizeStudentCodeState(value: unknown, defaultGroup: MobCodeGroupSta
   const startTryItMode = selectedOptions?.startTryItMode === true
   const tryItEnabled = raw.tryItEnabled === true || (startTryItMode && !isPlainObject(value))
   const shareChangesEnabled = raw.shareChangesEnabled === true
+    || (!startTryItMode && !isPlainObject(value))
   const publishedInstructorVersion = isPlainObject(raw.publishedInstructorVersion)
     ? normalizeGroupState(raw.publishedInstructorVersion)
     : cloneGroupState(defaultGroup)

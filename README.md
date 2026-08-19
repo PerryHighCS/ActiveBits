@@ -11,7 +11,7 @@ Current activity areas include:
 - Live response collection and class discussion activities
 - Java and Python practice activities
 - Standalone practice and utility flows for independent student work
-- MobCode live sessions, including instructor-controlled private student code workspaces
+- MobCode live sessions, including instructor-controlled private student code workspaces; newly initialized live sessions broadcast instructor changes by default unless they begin in Try it mode
 
 SyncDeck can embed supported activities inside a presentation; embedded instructor views are launched through the active SyncDeck session and do not require teachers to repeat child-activity setup. Activities with manager credentials receive them through a short-lived handoff; credentialless activities such as Raffle launch directly. The initiating manager applies the authenticated launch response locally, so first-load embedded activities do not wait for a websocket replay before mounting, and it performs a bounded refresh for an expired or consumed child bootstrap.
 SyncDeck also preserves a temporary-session instructor's control after a reload with a bounded, browser-session httpOnly recovery cookie; instructor passcodes are never stored in browser storage.

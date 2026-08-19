@@ -309,6 +309,7 @@ Field guidance:
 - `activeFile` is optional and should match one of the `files` keys when provided
 - `runnerId` is optional; use `brython-terminal` to preselect the Python popup runner for Python-focused launches
 - `startTryItMode` is optional and boolean-only. For a live embedded session, `true` enables students' private `My code` workspaces and publishes the initial instructor files as their reset baseline. It does not affect solo launches.
+- MobCode live sessions broadcast instructor changes by default. Setting `startTryItMode` to `true` starts the embedded child in Try it mode with instructor broadcasting disabled.
 - paths are normalized as safe relative virtual paths such as `src/Main.java`; traversal segments such as `../`, empty paths, oversized paths, and reserved JavaScript object segments such as `__proto__`, `constructor`, or `prototype` are rejected and will not load
 - MobCode currently keeps up to 250 starter files, truncates individual file content at 1 MB, and stops accepting starter content once the total workspace seed reaches 4 MiB
 - omit `files` to start with an empty MobCode workspace
