@@ -15,6 +15,15 @@ Capture reusable test setup patterns, common failure modes, and reliability guid
 
 ## Entries
 
+- Date: 2026-08-20
+- Scope: CI | GitHub Actions matrix
+- Pattern: Put a fixed-name gate job after a dynamically generated matrix job. Run it with `if: ${{ always() }}`, depend on the matrix job with `needs`, and fail unless `needs.<matrix-job>.result` is `success`. Configure the fixed gate name—not individual generated matrix checks—as the required GitHub status check.
+- Why it helps: Matrix check labels can vary with generated groups, while branch rules require a stable check name.
+- Example (file/path): `.github/workflows/ci.yml` (`activities-test-gate`)
+- Failure signal: A matrix shard fails or is cancelled and `activities-test-gate` fails, blocking a merge.
+- Follow-up action: In the GitHub `Protect Main` ruleset, require the stable `activities-test-gate` status check. Preserve the gate whenever activity-group matrix generation changes.
+- Owner: Codex
+
 - Date: 2026-07-27
 - Scope: e2e | MobCode Python runner | WebKit
 - Pattern: Use the runner suite's 15-second completion window when asserting the terminal popup reaches its `Done` state, including blank and comment-only source files.
