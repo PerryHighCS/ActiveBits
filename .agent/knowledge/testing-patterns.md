@@ -21,7 +21,7 @@ Capture reusable test setup patterns, common failure modes, and reliability guid
 - Why it helps: Matrix check labels can vary with generated groups, while branch rules require a stable check name.
 - Example (file/path): `.github/workflows/ci.yml` (`activities-test-gate`)
 - Failure signal: A matrix shard fails or is cancelled and `activities-test-gate` fails, blocking a merge.
-- Follow-up action: Preserve the gate whenever activity-group matrix generation changes.
+- Follow-up action: In the GitHub `Protect Main` ruleset, require the stable `activities-test-gate` status check. Preserve the gate whenever activity-group matrix generation changes.
 - Owner: Codex
 
 - Date: 2026-07-27
