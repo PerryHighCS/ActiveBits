@@ -429,6 +429,17 @@ export function isLatestStudentSnapshotRequest(requestId: number, latestRequestI
   return requestId === latestRequestId
 }
 
+export function selectStudentSessionSnapshot(
+  current: StudentSessionSnapshot | null,
+  candidate: StudentSessionSnapshot,
+): { snapshot: StudentSessionSnapshot | null; accepted: boolean } {
+  const accepted = shouldApplyStudentSessionSnapshot(current, candidate)
+  return {
+    snapshot: accepted ? candidate : current,
+    accepted,
+  }
+}
+
 /**
  * Connects to the Resonance WebSocket as a student for real-time session state.
  * Falls back to REST polling while the WebSocket is reconnecting.
@@ -443,6 +454,7 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
   const wsRef = useRef<WebSocket | null>(null)
   const mountedRef = useRef(true)
   const latestSnapshotRequestRef = useRef(0)
+  const snapshotRef = useRef<StudentSessionSnapshot | null>(null)
 
   const fetchSnapshot = useCallback(async () => {
     if (sessionId === null) return
@@ -464,7 +476,9 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
         setLoading(false)
         return
       }
-      setSnapshot((current) => shouldApplyStudentSessionSnapshot(current, data) ? data : current)
+      const selection = selectStudentSessionSnapshot(snapshotRef.current, data)
+      snapshotRef.current = selection.snapshot
+      setSnapshot(selection.snapshot)
       setError(null)
       setLoading(false)
     } catch {
@@ -521,8 +535,12 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
           if (msg.type === 'resonance:session-state' && msg.payload !== undefined) {
             const normalized = normalizeStudentSessionSnapshot(msg.payload as Partial<StudentSessionSnapshot>)
             if (normalized) {
-              latestSnapshotRequestRef.current += 1
-              setSnapshot((current) => shouldApplyStudentSessionSnapshot(current, normalized) ? normalized : current)
+              const selection = selectStudentSessionSnapshot(snapshotRef.current, normalized)
+              if (selection.accepted) {
+                latestSnapshotRequestRef.current += 1
+                snapshotRef.current = selection.snapshot
+                setSnapshot(selection.snapshot)
+              }
             }
             setLoading(false)
             setError(null)
