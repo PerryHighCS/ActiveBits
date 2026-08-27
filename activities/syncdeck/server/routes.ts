@@ -16,7 +16,11 @@ import {
   normalizePossiblyEncodedHttpUrl,
 } from 'activebits-server/core/httpUrlUtils.js'
 import { closeDuplicateParticipantSockets, closeParticipantSockets } from 'activebits-server/core/participantSockets.js'
-import { revokeAcceptedEntryParticipant } from 'activebits-server/core/acceptedEntryParticipants.js'
+import {
+  getSessionParticipantCookieName,
+  resolveAcceptedEntryParticipantToken,
+  revokeAcceptedEntryParticipant,
+} from 'activebits-server/core/acceptedEntryParticipants.js'
 import {
   createSession,
   EMBEDDED_CHILD_SESSION_PREFIX,
@@ -586,6 +590,9 @@ export function normalizeSyncDeckSessionData(data: unknown): SyncDeckSessionData
   const preservedAcceptedEntryParticipants = isPlainObject(source.acceptedEntryParticipants)
     ? source.acceptedEntryParticipants
     : undefined
+  const preservedParticipantAuthTokens = isPlainObject(source.participantAuthTokens)
+    ? source.participantAuthTokens
+    : undefined
   const preservedEntryParticipants = isPlainObject(source.entryParticipants)
     ? source.entryParticipants
     : undefined
@@ -595,6 +602,7 @@ export function normalizeSyncDeckSessionData(data: unknown): SyncDeckSessionData
       ? { linkedSessionId: source.linkedSessionId.trim() }
       : {}),
     ...(preservedAcceptedEntryParticipants ? { acceptedEntryParticipants: preservedAcceptedEntryParticipants } : {}),
+    ...(preservedParticipantAuthTokens ? { participantAuthTokens: preservedParticipantAuthTokens } : {}),
     ...(preservedEntryParticipants ? { entryParticipants: preservedEntryParticipants } : {}),
     presentationUrl: typeof source.presentationUrl === 'string' ? source.presentationUrl : null,
     standaloneMode: source.standaloneMode === true,
@@ -924,6 +932,40 @@ function readStringField(payload: unknown, key: string): string | null {
   if (!isPlainObject(payload)) return null
   const value = payload[key]
   return typeof value === 'string' ? value : null
+}
+
+function readCookieValue(cookieHeader: unknown, name: string): string | null {
+  if (Array.isArray(cookieHeader)) cookieHeader = cookieHeader[0]
+  if (typeof cookieHeader !== 'string') return null
+  const entry = cookieHeader.split(';').map((value) => value.trim()).find((value) => value.startsWith(`${name}=`))
+  if (!entry) return null
+  try {
+    return decodeURIComponent(entry.slice(name.length + 1))
+  } catch {
+    return null
+  }
+}
+
+function readRequestCookie(req: RouteRequest, name: string): string | null {
+  const parsed = req.cookies?.[name]
+  if (typeof parsed === 'string' && parsed.length > 0) return parsed
+  return readCookieValue(req.headers?.cookie, name)
+}
+
+function resolveAuthenticatedSyncDeckStudent(session: SyncDeckSession, req: RouteRequest): SyncDeckStudent | null {
+  const participantId = resolveAcceptedEntryParticipantToken(
+    session,
+    readRequestCookie(req, getSessionParticipantCookieName(session.id)),
+  )?.participantId
+  if (participantId) return findSyncDeckStudentById(session.data.students, participantId)
+
+  // Migration path for live sessions created before participant cookies were
+  // issued. New sessions acquire `participantAuthTokens` during waiting-room
+  // acceptance and therefore never use this claimed-ID fallback.
+  if (!Object.hasOwn(session.data, 'participantAuthTokens')) {
+    return findSyncDeckStudentById(session.data.students, normalizeStudentId(readStringField(req.body, 'studentId')))
+  }
+  return null
 }
 
 function readBooleanField(payload: unknown, key: string): boolean | null {
@@ -1961,8 +2003,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       return
     }
 
-    const studentId = normalizeStudentId(readStringField(req.body, 'studentId'))
-    const student = findSyncDeckStudentById(session.data.students, studentId)
+    const student = resolveAuthenticatedSyncDeckStudent(session, req)
     if (student) {
       const response = res as unknown as JsonResponse
       const payload: SyncDeckEmbeddedEntryContextResponse = {
@@ -2329,8 +2370,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       return
     }
 
-    const studentId = normalizeStudentId(readStringField(req.body, 'studentId'))
-    const student = findSyncDeckStudentById(session.data.students, studentId)
+    const student = resolveAuthenticatedSyncDeckStudent(session, req)
     if (!student) {
       res.status(403).json({ error: 'forbidden' })
       return
@@ -2372,9 +2412,8 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
 
     const instanceKey = normalizeInstanceKey(readStringField(req.body, 'instanceKey'))
     const requestedChildSessionId = normalizeInstanceKey(readStringField(req.body, 'childSessionId'))
-    const studentId = normalizeStudentId(readStringField(req.body, 'studentId'))
     const autoActivateAllQuestions = readBooleanField(req.body, 'autoActivateAllQuestions') === true
-    if (!instanceKey || !studentId || !autoActivateAllQuestions) {
+    if (!instanceKey || !autoActivateAllQuestions) {
       res.status(400).json({ error: 'invalid payload' })
       return
     }
@@ -2389,7 +2428,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       return
     }
 
-    const student = findSyncDeckStudentById(session.data.students, studentId)
+    const student = resolveAuthenticatedSyncDeckStudent(session, req)
     if (!student) {
       res.status(403).json({ error: 'forbidden' })
       return
@@ -2490,7 +2529,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
     const client = socket as SyncDeckSocket
     client.sessionId = query.get('sessionId')
     client.isInstructor = false
-    client.studentId = normalizeStudentId(query.get('studentId'))
+    client.studentId = null
 
     const sessionId = client.sessionId
     if (!sessionId) {
@@ -2553,8 +2592,18 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
         return
       }
 
+      const cookieParticipantId = resolveAcceptedEntryParticipantToken(
+        session,
+        readCookieValue(client.upgradeHeaders?.cookie, getSessionParticipantCookieName(session.id)),
+      )?.participantId ?? null
+      // Existing live sessions have no token map. Preserve their ID handoff only
+      // until expiry; all sessions that have issued a participant token require it.
+      client.studentId = cookieParticipantId
+        ?? (!Object.hasOwn(session.data, 'participantAuthTokens')
+          ? normalizeStudentId(query.get('studentId'))
+          : null)
       if (!client.studentId) {
-        socket.close(1008, 'missing studentId')
+        socket.close(1008, 'student authentication required')
         return
       }
 

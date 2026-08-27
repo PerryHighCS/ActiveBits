@@ -1,6 +1,6 @@
 import type { SessionRecord, SessionStore } from 'activebits-server/core/sessions.js'
 import { consumeSessionDataToken } from 'activebits-server/core/sessionTokenUtils.js'
-import { acceptEntryParticipant, findAcceptedEntryParticipant, issueAcceptedEntryParticipantToken, resolveAcceptedEntryParticipantToken } from 'activebits-server/core/acceptedEntryParticipants.js'
+import { acceptEntryParticipant, findAcceptedEntryParticipant, getSessionParticipantCookieName, issueAcceptedEntryParticipantToken, resolveAcceptedEntryParticipantToken } from 'activebits-server/core/acceptedEntryParticipants.js'
 import { storeSessionEntryParticipant } from 'activebits-server/core/sessionEntryParticipants.js'
 import {
   computePersistentLinkUrlHash,
@@ -2402,6 +2402,34 @@ void test('embedded-context route resolves student role from registered student 
     studentId: 'student-1',
     studentName: 'Ada Lovelace',
   })
+})
+
+void test('embedded-context route resolves student identity from the httpOnly participant cookie', async () => {
+  const session = createSyncDeckSession('s1')
+  session.data.students = [
+    { studentId: 'student-1', name: 'Ada', joinedAt: 1, lastSeenAt: 1, lastIndices: null, lastStudentStateAt: null },
+    { studentId: 'student-2', name: 'Grace', joinedAt: 1, lastSeenAt: 1, lastIndices: null, lastStudentStateAt: null },
+  ]
+  acceptEntryParticipant(session, { participantId: 'student-1', displayName: 'Ada' })
+  const token = issueAcceptedEntryParticipantToken(session, 'student-1')
+  if (!token) throw new Error('Expected participant token')
+
+  const app = createMockApp()
+  const ws = createMockWs()
+  const storeState = createSessionStore({ [session.id]: session })
+  setupSyncDeckRoutes(app, storeState.sessions, ws)
+  const handler = app.handlers.post['/api/syncdeck/:sessionId/embedded-context']
+  assert.ok(handler)
+
+  const response = createResponse()
+  await handler(createRequest(
+    { sessionId: session.id },
+    { studentId: 'student-2' },
+    { [getSessionParticipantCookieName(session.id)]: token },
+  ), response)
+
+  assert.equal(response.statusCode, 200)
+  assert.deepEqual(response.body, { resolvedRole: 'student', studentId: 'student-1', studentName: 'Ada' })
 })
 
 void test('embedded-context route rejects unknown parent identity', async () => {
