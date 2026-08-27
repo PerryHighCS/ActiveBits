@@ -282,6 +282,52 @@ void test('QuestionView preserves a student draft when a same-run session update
   }
 })
 
+void test('QuestionView syncs a same-run session answer when the local draft is unchanged', async () => {
+  const restoreDomEnvironment = installDomEnvironment()
+  const { render, waitFor } = await import('@testing-library/react')
+
+  try {
+    const question = {
+      id: 'q1',
+      type: 'free-response' as const,
+      text: 'Explain your reasoning.',
+      order: 0,
+    }
+    const rendered = render(
+      React.createElement(QuestionView, {
+        question,
+        sessionId: 'session-1',
+        studentId: 'student-1',
+        activeQuestionRunStartedAt: 2_000,
+        initialAnswer: null,
+        sendMessage: () => true,
+      }),
+    )
+
+    rendered.rerender(
+      React.createElement(QuestionView, {
+        question,
+        sessionId: 'session-1',
+        studentId: 'student-1',
+        activeQuestionRunStartedAt: 2_000,
+        initialAnswer: { type: 'free-response', text: 'Submitted from another device' },
+        sendMessage: () => true,
+      }),
+    )
+
+    await waitFor(() => {
+      assert.equal(
+        (rendered.getByLabelText(/your answer/i) as HTMLTextAreaElement).value,
+        'Submitted from another device',
+      )
+    })
+
+    rendered.unmount()
+  } finally {
+    restoreDomEnvironment()
+  }
+})
+
 void test('QuestionView does not flush an unsent draft after the question run changes', async () => {
   const restoreDomEnvironment = installDomEnvironment()
   const { fireEvent, render, waitFor } = await import('@testing-library/react')

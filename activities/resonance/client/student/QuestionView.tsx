@@ -49,6 +49,7 @@ export default function QuestionView({
   const [draftAnswer, setDraftAnswer] = useState<AnswerPayload | null>(initialAnswer)
   const lastSentDraftRef = useRef<AnswerPayload | null>(null)
   const initialAnswerRef = useRef(initialAnswer)
+  const synchronizedInitialAnswerRef = useRef(initialAnswer)
   const activeQuestionRunStartedAtRef = useRef(activeQuestionRunStartedAt)
   const draftAnswerRunStartedAtRef = useRef(activeQuestionRunStartedAt)
   initialAnswerRef.current = initialAnswer
@@ -59,7 +60,16 @@ export default function QuestionView({
   useEffect(() => {
     setDraftAnswer(initialAnswerRef.current)
     lastSentDraftRef.current = initialAnswerRef.current
+    synchronizedInitialAnswerRef.current = initialAnswerRef.current
   }, [question.id, activeQuestionRunStartedAt, isSubmitted])
+
+  useEffect(() => {
+    if (isSameAnswer(draftAnswer, synchronizedInitialAnswerRef.current)) {
+      setDraftAnswer(initialAnswer)
+      lastSentDraftRef.current = initialAnswer
+      synchronizedInitialAnswerRef.current = initialAnswer
+    }
+  }, [draftAnswer, initialAnswer])
 
   useEffect(() => {
     const draftAnswerRunStartedAt = draftAnswerRunStartedAtRef.current
