@@ -26,6 +26,7 @@ void test('stats require the participant cookie for token-backed Python List Pra
   const handler = handlers['/api/python-list-practice/:sessionId/stats']
   assert.ok(handler)
   const payload = { studentId: 'student-1', stats: { total: 1, correct: 1, streak: 1, longestStreak: 1 } }
+  console.log('[TEST] expecting 400 for a stats request without the participant cookie')
   const denied = response()
   await handler({ params: { sessionId: session.id }, body: payload }, denied)
   assert.equal(denied.statusCode, 400)

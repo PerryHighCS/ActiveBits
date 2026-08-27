@@ -127,6 +127,7 @@ void test('new Resonance student registrations issue an httpOnly cookie and reje
     options: { httpOnly: true, sameSite: 'lax', secure: false, path: '/' },
   }])
 
+  console.log('[TEST] expecting 403 for a claimed studentId submitted without the participant cookie')
   const rejectedSubmission = createResponse()
   await app.handlers.post['/api/resonance/:sessionId/submit-answer']?.(
     { params: { sessionId }, body: { studentId, questionId: 'not-active', answer: {} } },

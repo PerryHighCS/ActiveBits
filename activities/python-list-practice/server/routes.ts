@@ -1,7 +1,7 @@
 import { createSession, type SessionRecord, type SessionStore } from 'activebits-server/core/sessions.js'
 import { createBroadcastSubscriptionHelper } from 'activebits-server/core/broadcastUtils.js'
 import { registerSessionNormalizer } from 'activebits-server/core/sessionNormalization.js'
-import { getSessionParticipantCookieName, resolveAcceptedEntryParticipantToken } from 'activebits-server/core/acceptedEntryParticipants.js'
+import { readAcceptedEntryParticipantCookie, resolveAcceptedEntryParticipantToken } from 'activebits-server/core/acceptedEntryParticipants.js'
 import type { ActiveBitsWebSocket, WsRouter } from '../../../types/websocket.js'
 import type {
   PythonListPracticeSessionData,
@@ -83,19 +83,8 @@ function normalizeSessionData(data: unknown): PythonListPracticeSessionData {
   }
 }
 
-function readParticipantToken(cookies: Record<string, unknown> | undefined, cookieHeader: unknown, sessionId: string): string | null {
-  const name = getSessionParticipantCookieName(sessionId)
-  const parsed = cookies?.[name]
-  if (typeof parsed === 'string' && parsed.length > 0) return parsed
-  if (Array.isArray(cookieHeader)) cookieHeader = cookieHeader[0]
-  if (typeof cookieHeader !== 'string') return null
-  const entry = cookieHeader.split(';').map((value) => value.trim()).find((value) => value.startsWith(`${name}=`))
-  if (!entry) return null
-  try { return decodeURIComponent(entry.slice(name.length + 1)) } catch { return null }
-}
-
 function resolveCookieStudent(session: PythonListPracticeSession, cookies: Record<string, unknown> | undefined, cookieHeader: unknown) {
-  return resolveAcceptedEntryParticipantToken(session, readParticipantToken(cookies, cookieHeader, session.id))
+  return resolveAcceptedEntryParticipantToken(session, readAcceptedEntryParticipantCookie(cookies, cookieHeader, session.id))
 }
 
 function asPythonListPracticeSession(

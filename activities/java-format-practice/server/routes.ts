@@ -1,7 +1,7 @@
 import { createSession, type SessionRecord, type SessionStore } from 'activebits-server/core/sessions.js'
 import { createBroadcastSubscriptionHelper } from 'activebits-server/core/broadcastUtils.js'
 import { connectAcceptedSessionParticipant } from 'activebits-server/core/acceptedSessionParticipants.js'
-import { getSessionParticipantCookieName, resolveAcceptedEntryParticipantToken } from 'activebits-server/core/acceptedEntryParticipants.js'
+import { readAcceptedEntryParticipantCookie, resolveAcceptedEntryParticipantToken } from 'activebits-server/core/acceptedEntryParticipants.js'
 import { generateParticipantId } from 'activebits-server/core/participantIds.js'
 import { closeDuplicateParticipantSockets } from 'activebits-server/core/participantSockets.js'
 import { disconnectSessionParticipant, updateSessionParticipant } from 'activebits-server/core/sessionParticipants.js'
@@ -53,19 +53,8 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
 
-function readParticipantToken(cookies: Record<string, unknown> | undefined, cookieHeader: unknown, sessionId: string): string | null {
-  const cookieName = getSessionParticipantCookieName(sessionId)
-  const parsed = cookies?.[cookieName]
-  if (typeof parsed === 'string' && parsed.length > 0) return parsed
-  if (Array.isArray(cookieHeader)) cookieHeader = cookieHeader[0]
-  if (typeof cookieHeader !== 'string') return null
-  const entry = cookieHeader.split(';').map((value) => value.trim()).find((value) => value.startsWith(`${cookieName}=`))
-  if (!entry) return null
-  try { return decodeURIComponent(entry.slice(cookieName.length + 1)) } catch { return null }
-}
-
 function resolveCookieStudent(session: JavaFormatSession, cookies: Record<string, unknown> | undefined, cookieHeader: unknown) {
-  return resolveAcceptedEntryParticipantToken(session, readParticipantToken(cookies, cookieHeader, session.id))
+  return resolveAcceptedEntryParticipantToken(session, readAcceptedEntryParticipantCookie(cookies, cookieHeader, session.id))
 }
 
 function normalizeStudentRecord(value: unknown): JavaFormatStudentRecord | null {
@@ -155,9 +144,10 @@ export default function setupJavaFormatPracticeRoutes(
     const claimedStudentName = validateStudentName(query.get('studentName'))
     client.studentName = claimedStudentName
 
-    console.log(
-      `WebSocket connection: sessionId=${client.sessionId}, studentName=${client.studentName}, studentId=${claimedStudentId}`,
-    )
+    // studentName/studentId are unverified client claims at this point; log only
+    // the connection event here and let the post-authentication logs below
+    // record the resolved identity.
+    console.log(`WebSocket connection: sessionId=${client.sessionId}`)
 
     if (client.sessionId) {
       const activeSessionId = client.sessionId
@@ -255,6 +245,11 @@ export default function setupJavaFormatPracticeRoutes(
     const session = await createSession(sessions, { data: {} })
     session.type = 'java-format-practice'
     session.data = normalizeSessionData(session.data)
+    // Every session created here is cookie-auth-native; initializing these maps
+    // up front closes the unauthenticated claimed-identity fallback from the
+    // start instead of leaving it open until the first participant is accepted.
+    session.data.acceptedEntryParticipants = {}
+    session.data.participantAuthTokens = {}
 
     await sessions.set(session.id, session)
     ensureBroadcastSubscription(session.id)

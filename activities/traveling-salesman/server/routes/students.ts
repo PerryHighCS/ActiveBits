@@ -6,21 +6,10 @@ import type {
 } from '../../travelingSalesmanTypes.js'
 import { asTravelingSalesmanSession } from '../../travelingSalesmanTypes.js'
 import { connectAcceptedSessionParticipant } from 'activebits-server/core/acceptedSessionParticipants.js'
-import { getSessionParticipantCookieName, resolveAcceptedEntryParticipantToken } from 'activebits-server/core/acceptedEntryParticipants.js'
+import { readAcceptedEntryParticipantCookie, resolveAcceptedEntryParticipantToken } from 'activebits-server/core/acceptedEntryParticipants.js'
 import { disconnectSessionParticipant, updateSessionParticipant } from 'activebits-server/core/sessionParticipants.js'
 import { isFiniteNumber, isRouteArray } from '../validation.js'
 import { createBroadcastHelpers, closeDuplicateStudentSockets, generateStudentId } from './shared.js'
-
-function readParticipantToken(cookies: Record<string, unknown> | undefined, cookieHeader: unknown, sessionId: string): string | null {
-  const name = getSessionParticipantCookieName(sessionId)
-  const parsed = cookies?.[name]
-  if (typeof parsed === 'string' && parsed.length > 0) return parsed
-  if (Array.isArray(cookieHeader)) cookieHeader = cookieHeader[0]
-  if (typeof cookieHeader !== 'string') return null
-  const entry = cookieHeader.split(';').map((value) => value.trim()).find((value) => value.startsWith(`${name}=`))
-  if (!entry) return null
-  try { return decodeURIComponent(entry.slice(name.length + 1)) } catch { return null }
-}
 
 export default function registerStudentRoutes(
   app: TravelingSalesmanRouteApp,
@@ -46,7 +35,7 @@ export default function registerStudentRoutes(
         if (session) {
           const authenticated = resolveAcceptedEntryParticipantToken(
             session,
-            readParticipantToken(undefined, client.upgradeHeaders?.cookie, session.id),
+            readAcceptedEntryParticipantCookie(undefined, client.upgradeHeaders?.cookie, session.id),
           )
           const legacySession = !Object.hasOwn(session.data, 'participantAuthTokens')
           if (!authenticated && !legacySession) {
@@ -184,7 +173,7 @@ export default function registerStudentRoutes(
     const body = (req.body ?? {}) as Record<string, unknown>
     const authenticated = resolveAcceptedEntryParticipantToken(
       session,
-      readParticipantToken(req.cookies, req.headers?.cookie, session.id),
+      readAcceptedEntryParticipantCookie(req.cookies, req.headers?.cookie, session.id),
     )
     const legacySession = !Object.hasOwn(session.data, 'participantAuthTokens')
     const studentId = authenticated?.participantId ?? (legacySession ? body.studentId : null)

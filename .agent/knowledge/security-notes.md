@@ -25,6 +25,23 @@ Track security-relevant boundaries, risks, and mitigation decisions.
 - Owner: Codex
 
 - Date: 2026-08-27
+- Area: java-format-practice / java-string-practice `/create` — accepted-entry auth-token bypass (CodeRabbit CWE-862, PR #342)
+- Threat or risk: Both activities' `/create` handlers left `session.data.participantAuthTokens` absent, so `legacySession` (`!Object.hasOwn(session.data, 'participantAuthTokens')`) stayed `true` from creation until the first real participant was accepted. During that window, unauthenticated REST/WebSocket requests with an arbitrary claimed `studentId`+`studentName` were accepted as a new student — unlike Postboard's equivalent legacy fallback, these two activities' fallback never checked the claim against `findAcceptedEntryParticipant`, so no prior acceptance was required at all. Confirmed empirically with a standalone repro (create session -> real accept -> attacker claimed-ID request) before fixing.
+- Control or mitigation: Both `/create` handlers now initialize `session.data.acceptedEntryParticipants = {}` and `session.data.participantAuthTokens = {}` before persisting, so `legacySession` is `false` from the first request onward — there is no pre-#341 population of these two activities to migrate, since this PR is the first time they use accepted-entry tracking at all.
+- Residual risk: None specific to this path; the general accepted-entry legacy-fallback pattern (`!Object.hasOwn(session.data, 'participantAuthTokens')`) remains intentional elsewhere for sessions that predate the cookie mechanism (see the entry above this one).
+- Validation (test/review/path): `activities/java-format-practice/server/routes.test.ts` ("newly created ... sessions reject an unauthenticated claimed studentId immediately"); `activities/java-string-practice/server/routes.test.ts` (same).
+- Follow-up action: Any new activity adopting accepted-entry-participant tracking for the first time should initialize both maps at `/create`, not just rely on the legacy fallback to eventually close itself.
+- Owner: Claude (fix/resonance-student-cookie-auth, PR #342, from a CodeRabbit finding)
+
+- Date: 2026-08-27
+- Area: Resonance `/state` and Postboard `/student-state` — cacheable participant-private responses (CodeRabbit CWE-524, PR #342)
+- Threat or risk: Both GET routes return participant-specific state (Resonance's per-student snapshot; Postboard's per-student board view) without `Cache-Control: no-store`, so a shared cache, browser back/forward cache, or proxy could serve one participant's private response to another.
+- Control or mitigation: Both routes now set `Cache-Control: no-store` before `res.json(...)`.
+- Validation (test/review/path): `activities/resonance/server/routes.ts` (`GET /api/resonance/:sessionId/state`); `activities/postboard/server/routes.ts` (`GET /api/postboard/:sessionId/student-state`).
+- Follow-up action: Any new per-participant GET snapshot route should set `Cache-Control: no-store` the same way.
+- Owner: Claude (fix/resonance-student-cookie-auth, PR #342, from a CodeRabbit finding)
+
+- Date: 2026-08-27
 - Area: shared `activebits_participant_*` cookie (`server/core/sessions.ts`, entry-participant/consume)
 - Threat or risk: The cookie's `Secure` attribute was `process.env.NODE_ENV === 'production'`. Behind a TLS-terminating proxy in real deployment this is correct, but it does not reflect the actual connection: a plain-HTTP `NODE_ENV=production` environment (as used by this repo's own Playwright e2e harness) still marks the cookie `Secure`, and WebKit (unlike Chromium's loopback exception) drops `Secure` cookies on insecure origins outright, silently deauthenticating every student request. Postboard, SyncDeck, and the other activities that started depending on this cookie in this change surfaced the gap as WebKit-only e2e failures.
 - Control or mitigation: The `entry-participant/consume` route now sets `secure: req.secure === true`, which reflects the live connection (respecting `app.set('trust proxy', 1)`, already configured in `server/server.ts`) instead of the build-mode env var.

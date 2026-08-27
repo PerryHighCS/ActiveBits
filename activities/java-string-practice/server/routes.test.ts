@@ -30,6 +30,7 @@ void test('progress requires the participant cookie for token-backed Java String
   assert.ok(handler)
   const payload = { studentId: 'student-1', stats: { total: 1, correct: 1, streak: 1, longestStreak: 1 } }
 
+  console.log('[TEST] expecting 403 for a progress request without the participant cookie')
   const rejected = response()
   await handler({ params: { sessionId: session.id }, body: payload }, rejected)
   assert.equal(rejected.statusCode, 403)
@@ -38,5 +39,30 @@ void test('progress requires the participant cookie for token-backed Java String
   await handler({ params: { sessionId: session.id }, body: { ...payload, studentId: 'other' }, cookies: { [getSessionParticipantCookieName(session.id)]: token } }, accepted)
   assert.equal(accepted.statusCode, 200)
   assert.equal(((await sessions.get(session.id))?.data as { students: Array<{ stats: { correct: number } }> }).students[0]?.stats.correct, 1)
+  await sessions.close()
+})
+
+void test('newly created Java String sessions reject an unauthenticated claimed studentId immediately', async () => {
+  const sessions = createSessionStore(null)
+  const handlers: Record<string, Handler> = {}
+  const app = { get() {}, post(path: string, handler: Handler) { handlers[path] = handler } }
+  const ws: WsRouter = { wss: { clients: new Set(), close() {} }, register() {} }
+  setupJavaStringPracticeRoutes(app, sessions, ws)
+
+  const createHandler = handlers['/api/java-string-practice/create']
+  assert.ok(createHandler)
+  const createRes = response()
+  await createHandler({ params: {} }, createRes)
+  const sessionId = (createRes.body as { id: string }).id
+  console.log('[TEST] created session should reject unauthenticated claimed identity without going through waiting-room acceptance')
+
+  const progressHandler = handlers['/api/java-string-practice/:sessionId/progress']
+  assert.ok(progressHandler)
+  const rejected = response()
+  await progressHandler({
+    params: { sessionId },
+    body: { studentId: 'attacker-claimed-id', stats: { total: 1, correct: 1, streak: 1, longestStreak: 1 } },
+  }, rejected)
+  assert.equal(rejected.statusCode, 403)
   await sessions.close()
 })

@@ -98,6 +98,32 @@ export function getSessionParticipantCookieName(sessionId: string): string {
   return `activebits_participant_${Buffer.from(sessionId, 'utf8').toString('base64url')}`
 }
 
+/**
+ * Reads the opaque participant-auth token for `sessionId` out of a request's
+ * parsed cookie map (when the framework already parsed one) or, failing that,
+ * out of a raw `Cookie` header. Shared so every activity's cookie parsing
+ * (name lookup, header-array handling, URI decoding) stays in lockstep rather
+ * than drifting copy to copy.
+ */
+export function readAcceptedEntryParticipantCookie(
+  cookies: Record<string, unknown> | undefined,
+  cookieHeader: unknown,
+  sessionId: string,
+): string | null {
+  const cookieName = getSessionParticipantCookieName(sessionId)
+  const parsed = cookies?.[cookieName]
+  if (typeof parsed === 'string' && parsed.length > 0) return parsed
+  if (Array.isArray(cookieHeader)) cookieHeader = cookieHeader[0]
+  if (typeof cookieHeader !== 'string') return null
+  const entry = cookieHeader.split(';').map((value) => value.trim()).find((value) => value.startsWith(`${cookieName}=`))
+  if (!entry) return null
+  try {
+    return decodeURIComponent(entry.slice(cookieName.length + 1))
+  } catch {
+    return null
+  }
+}
+
 /** Issues an opaque, httpOnly-cookie token for an already accepted participant. */
 export function issueAcceptedEntryParticipantToken(
   session: AcceptedEntryParticipantSessionLike,

@@ -579,6 +579,7 @@ export default function setupPostboardRoutes(app: PostboardRouteApp, sessions: S
   app.get('/api/postboard/:sessionId/student-state', routeHandler('student-state', async (req, res) => {
     const session = await getPostboardSession(req, res, sessions)
     if (!session) return
+    res.setHeader?.('Cache-Control', 'no-store')
     res.json(buildStudentSnapshot(session, readAcceptedStudentId(session, req)))
   }))
 

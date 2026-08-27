@@ -5,6 +5,7 @@ import {
   acceptEntryParticipant,
   getSessionParticipantCookieName,
   issueAcceptedEntryParticipantToken,
+  readAcceptedEntryParticipantCookie,
   resolveAcceptedEntryParticipantToken,
 } from 'activebits-server/core/acceptedEntryParticipants.js'
 import { registerSessionNormalizer } from 'activebits-server/core/sessionNormalization.js'
@@ -79,19 +80,8 @@ function normalizeSessionData(data: unknown): BinaryBreachSessionData {
   }
 }
 
-function readParticipantToken(cookies: Record<string, unknown> | undefined, cookieHeader: unknown, sessionId: string): string | null {
-  const cookieName = getSessionParticipantCookieName(sessionId)
-  const parsed = cookies?.[cookieName]
-  if (typeof parsed === 'string' && parsed.length > 0) return parsed
-  if (Array.isArray(cookieHeader)) cookieHeader = cookieHeader[0]
-  if (typeof cookieHeader !== 'string') return null
-  const entry = cookieHeader.split(';').map((value) => value.trim()).find((value) => value.startsWith(`${cookieName}=`))
-  if (!entry) return null
-  try { return decodeURIComponent(entry.slice(cookieName.length + 1)) } catch { return null }
-}
-
 function resolveCookieStudent(session: BinaryBreachSession, cookies: Record<string, unknown> | undefined, cookieHeader: unknown) {
-  return resolveAcceptedEntryParticipantToken(session, readParticipantToken(cookies, cookieHeader, session.id))
+  return resolveAcceptedEntryParticipantToken(session, readAcceptedEntryParticipantCookie(cookies, cookieHeader, session.id))
 }
 
 function asBinaryBreachSession(session: SessionRecord | null): BinaryBreachSession | null {

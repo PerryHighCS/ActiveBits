@@ -1733,6 +1733,7 @@ export default function setupResonanceRoutes(
       req.query?.studentId,
     )
     const selfPacedMode = await resolveSelfPacedMode(session, sessions)
+    res.setHeader?.('Cache-Control', 'no-store')
     res.json(buildStudentSnapshotWithMode(session, requestedStudentId, selfPacedMode))
   })
 
