@@ -84,7 +84,19 @@ export function resolveQuestionStatusBadge(selfPacedMode: boolean): {
     : {
         label: 'Live Question',
         dotClassName: 'w-2 h-2 rounded-full bg-indigo-500 dark:bg-indigo-400 animate-pulse motion-reduce:animate-none inline-block',
-      }
+  }
+}
+
+export function hasActiveQuestionRunRestart(params: {
+  activeQuestionIds: string[]
+  activeQuestionRunStartedAt: number | null
+  previousActiveQuestionRunStartedAt: number | null
+}): boolean {
+  return (
+    params.activeQuestionIds.length > 0 &&
+    params.activeQuestionRunStartedAt !== null &&
+    params.activeQuestionRunStartedAt !== params.previousActiveQuestionRunStartedAt
+  )
 }
 
 function formatRemainingTime(deadlineAt: number | null, now: number): string | null {
@@ -240,11 +252,11 @@ export default function ResonanceStudent() {
     const activeIds = snapshot.activeQuestions.map((question) => question.id)
     const previousActiveIds = previousActiveQuestionIdsRef.current
     const reactivatedIds = activeIds.filter((questionId) => !previousActiveIds.includes(questionId))
-    const didRunRestart =
-      activeIds.length > 0 &&
-      activeRunStartedAt !== null &&
-      previousActiveQuestionRunStartedAtRef.current !== null &&
-      activeRunStartedAt !== previousActiveQuestionRunStartedAtRef.current
+    const didRunRestart = hasActiveQuestionRunRestart({
+      activeQuestionIds: activeIds,
+      activeQuestionRunStartedAt: activeRunStartedAt,
+      previousActiveQuestionRunStartedAt: previousActiveQuestionRunStartedAtRef.current,
+    })
 
     if (reactivatedIds.length > 0 || didRunRestart) {
       setSubmittedAnswers((current) => {

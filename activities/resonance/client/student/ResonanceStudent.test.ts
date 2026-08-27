@@ -4,6 +4,7 @@ import { resolveNextSelfPacedQuestionId } from './ResonanceStudent.js'
 import { resolveQuestionStatusBadge } from './ResonanceStudent.js'
 import { resolveSubmissionAnnouncement } from './ResonanceStudent.js'
 import { resolveSelfPacedSubmittedMessage } from './ResonanceStudent.js'
+import { hasActiveQuestionRunRestart } from './ResonanceStudent.js'
 
 void test('resolveNextSelfPacedQuestionId advances to the next unanswered question', () => {
   assert.equal(
@@ -104,4 +105,15 @@ void test('resolveQuestionStatusBadge avoids live copy for self-paced questions'
   assert.equal(liveBadge.label, 'Live Question')
   assert.match(liveBadge.dotClassName, /animate-pulse/)
   assert.match(liveBadge.dotClassName, /motion-reduce:animate-none/)
+})
+
+void test('hasActiveQuestionRunRestart treats an idle-to-live transition as a new run', () => {
+  assert.equal(
+    hasActiveQuestionRunRestart({
+      activeQuestionIds: ['q1'],
+      activeQuestionRunStartedAt: 2_000,
+      previousActiveQuestionRunStartedAt: null,
+    }),
+    true,
+  )
 })

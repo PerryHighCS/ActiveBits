@@ -90,6 +90,23 @@ void test('shouldApplyStudentSessionSnapshot accepts a legitimate no-active-ques
   assert.equal(shouldApplyStudentSessionSnapshot(current, noActiveQuestion), true)
 })
 
+void test('shouldApplyStudentSessionSnapshot accepts a new session with an earlier run timestamp', () => {
+  const current = normalizeStudentSessionSnapshot({
+    sessionId: 'session-1',
+    activeQuestionIds: ['q1'],
+    activeQuestionRunStartedAt: 2_000,
+  })
+  const nextSession = normalizeStudentSessionSnapshot({
+    sessionId: 'session-2',
+    activeQuestionIds: ['q1'],
+    activeQuestionRunStartedAt: 1_000,
+  })
+
+  assert.ok(current)
+  assert.ok(nextSession)
+  assert.equal(shouldApplyStudentSessionSnapshot(current, nextSession), true)
+})
+
 void test('isLatestStudentSnapshotRequest accepts only the most recent fetch', () => {
   assert.equal(isLatestStudentSnapshotRequest(2, 2), true)
   assert.equal(isLatestStudentSnapshotRequest(1, 2), false)

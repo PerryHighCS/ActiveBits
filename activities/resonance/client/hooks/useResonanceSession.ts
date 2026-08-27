@@ -417,7 +417,11 @@ export function shouldApplyStudentSessionSnapshot(
   current: StudentSessionSnapshot | null,
   candidate: StudentSessionSnapshot,
 ): boolean {
-  if (current === null || current.activeQuestionRunStartedAt === null) {
+  if (
+    current === null ||
+    current.sessionId !== candidate.sessionId ||
+    current.activeQuestionRunStartedAt === null
+  ) {
     return true
   }
 
@@ -455,6 +459,14 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
   const mountedRef = useRef(true)
   const latestSnapshotRequestRef = useRef(0)
   const snapshotRef = useRef<StudentSessionSnapshot | null>(null)
+
+  useEffect(() => {
+    latestSnapshotRequestRef.current += 1
+    snapshotRef.current = null
+    setSnapshot(null)
+    setLoading(sessionId !== null)
+    setError(null)
+  }, [sessionId])
 
   const fetchSnapshot = useCallback(async () => {
     if (sessionId === null) return
