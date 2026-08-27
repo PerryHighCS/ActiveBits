@@ -24,6 +24,15 @@ Track security-relevant boundaries, risks, and mitigation decisions.
 - Follow-up action: Keep Video Sync's student ID telemetry-only. If it ever affects student-visible state or server-side decisions, use `resolveAcceptedEntryParticipantToken`; Embedded Test remains development-only.
 - Owner: Codex
 
+- Date: 2026-08-27
+- Area: shared `activebits_participant_*` cookie (`server/core/sessions.ts`, entry-participant/consume)
+- Threat or risk: The cookie's `Secure` attribute was `process.env.NODE_ENV === 'production'`. Behind a TLS-terminating proxy in real deployment this is correct, but it does not reflect the actual connection: a plain-HTTP `NODE_ENV=production` environment (as used by this repo's own Playwright e2e harness) still marks the cookie `Secure`, and WebKit (unlike Chromium's loopback exception) drops `Secure` cookies on insecure origins outright, silently deauthenticating every student request. Postboard, SyncDeck, and the other activities that started depending on this cookie in this change surfaced the gap as WebKit-only e2e failures.
+- Control or mitigation: The `entry-participant/consume` route now sets `secure: req.secure === true`, which reflects the live connection (respecting `app.set('trust proxy', 1)`, already configured in `server/server.ts`) instead of the build-mode env var.
+- Residual risk: Other cookies in the repo still use the `NODE_ENV === 'production'` pattern (`server/routes/persistentSessionRoutes.ts`, `server/core/persistentSessions.ts`); they carry the same latent WebKit gap if a WebKit-run Playwright spec ever depends on one of them. None currently do.
+- Validation (test/review/path): `server/sessionEntryRoutes.test.ts`; `activities/postboard/playwright/flow.spec.ts`; `activities/syncdeck/playwright/student-return.spec.ts` (both projects, chromium + webkit).
+- Follow-up action: If a future WebKit e2e spec starts depending on one of the other `NODE_ENV`-gated `Secure` cookies, apply the same `req.secure`-based fix there rather than reintroducing the env-var check.
+- Owner: Claude (fix/resonance-student-cookie-auth, PR #342)
+
 - Date: 2026-07-26
 - Area: Learn SyncDeck substitute instructor link
 - Threat or risk: A direct substitute link is a bearer capability that can start or reuse

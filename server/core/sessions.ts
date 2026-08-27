@@ -456,7 +456,7 @@ function setNoStore(response: ResponseLike): void {
 
 export function setupSessionRoutes(app: {
   get(path: string, handler: (req: { params: { sessionId: string } }, res: ResponseLike) => void | Promise<void>): void
-  post(path: string, handler: (req: { params: { sessionId: string }; body?: unknown }, res: ResponseLike) => void | Promise<void>): void
+  post(path: string, handler: (req: { params: { sessionId: string }; body?: unknown; secure?: boolean }, res: ResponseLike) => void | Promise<void>): void
   delete(path: string, handler: (req: { params: { sessionId: string } }, res: ResponseLike) => void | Promise<void>): void
 }, sessions: SessionStore, wss: WsServerLike | null = null): void {
   app.get('/api/session/:sessionId/entry', async (req, res) => {
@@ -573,7 +573,11 @@ export function setupSessionRoutes(app: {
         res.cookie?.(getSessionParticipantCookieName(sessionId), participantToken, {
           httpOnly: true,
           sameSite: 'lax',
-          secure: process.env.NODE_ENV === 'production',
+          // Reflect the actual connection (TLS termination included, via
+          // app.set('trust proxy', 1)) rather than NODE_ENV, so the Secure
+          // attribute matches reality behind proxies and in non-HTTPS test
+          // environments alike.
+          secure: req.secure === true,
           path: '/',
         })
       }

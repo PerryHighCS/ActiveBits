@@ -124,7 +124,7 @@ test('student pending note is visible to its author and can be approved by the i
     prompt: 'Share one debugging move',
     autoApprove: false,
   })
-  const ada = await acceptStudent(instructorPage, session.id, 'Ada Lovelace')
+  const ada = await acceptStudent(studentPage, session.id, 'Ada Lovelace')
 
   await openPostboardStudent(studentPage, session.id, ada)
   await expect(studentPage.getByRole('heading', { name: 'Share one debugging move' })).toBeVisible()
@@ -168,7 +168,7 @@ test('student reactions require accepted identity and expose current reaction ac
   )
   await expect(anonymousPage.getByRole('button', { name: 'Choose reaction' })).toHaveCount(0)
 
-  const grace = await acceptStudent(seedPage, session.id, 'Grace Hopper')
+  const grace = await acceptStudent(studentPage, session.id, 'Grace Hopper')
   await openPostboardStudent(studentPage, session.id, grace)
   const pickerButton = studentPage.getByRole('button', { name: 'Choose reaction' })
   await expect(pickerButton).toBeVisible()
@@ -193,7 +193,7 @@ test('student can edit or dismiss returned notes while instructor sees deleted s
     prompt: 'Revise notes when needed',
     autoApprove: false,
   })
-  const ada = await acceptStudent(instructorPage, session.id, 'Ada Lovelace')
+  const ada = await acceptStudent(studentPage, session.id, 'Ada Lovelace')
 
   await openPostboardStudent(studentPage, session.id, ada)
   await chooseNoteStyle(studentPage, 'Peach')
