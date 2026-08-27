@@ -90,6 +90,23 @@ void test('shouldApplyStudentSessionSnapshot accepts a legitimate no-active-ques
   assert.equal(shouldApplyStudentSessionSnapshot(current, noActiveQuestion), true)
 })
 
+void test('shouldApplyStudentSessionSnapshot rejects an older live run after an idle snapshot', () => {
+  const idle = normalizeStudentSessionSnapshot({
+    sessionId: 'session-1',
+    activeQuestionIds: [],
+    activeQuestionRunStartedAt: null,
+  })
+  const delayedLiveRun = normalizeStudentSessionSnapshot({
+    sessionId: 'session-1',
+    activeQuestionIds: ['q1'],
+    activeQuestionRunStartedAt: 1_000,
+  })
+
+  assert.ok(idle)
+  assert.ok(delayedLiveRun)
+  assert.equal(shouldApplyStudentSessionSnapshot(idle, delayedLiveRun, 2_000), false)
+})
+
 void test('shouldApplyStudentSessionSnapshot accepts a new session with an earlier run timestamp', () => {
   const current = normalizeStudentSessionSnapshot({
     sessionId: 'session-1',
