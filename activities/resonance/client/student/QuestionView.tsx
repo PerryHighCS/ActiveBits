@@ -48,18 +48,28 @@ export default function QuestionView({
   const [error, setError] = useState<string | null>(null)
   const [draftAnswer, setDraftAnswer] = useState<AnswerPayload | null>(initialAnswer)
   const lastSentDraftRef = useRef<AnswerPayload | null>(null)
+  const initialAnswerRef = useRef(initialAnswer)
   const activeQuestionRunStartedAtRef = useRef(activeQuestionRunStartedAt)
+  const draftAnswerRunStartedAtRef = useRef(activeQuestionRunStartedAt)
+  initialAnswerRef.current = initialAnswer
   activeQuestionRunStartedAtRef.current = activeQuestionRunStartedAt
   const isWaitingForChoices =
     question.type === 'multiple-choice' && question.choicesRevealed === false
 
   useEffect(() => {
-    setDraftAnswer(initialAnswer)
-    lastSentDraftRef.current = initialAnswer
+    setDraftAnswer(initialAnswerRef.current)
+    lastSentDraftRef.current = initialAnswerRef.current
   }, [question.id, activeQuestionRunStartedAt, isSubmitted])
 
   useEffect(() => {
-    if (isWaitingForChoices || isSubmitted || !sendMessage || isSameAnswer(draftAnswer, lastSentDraftRef.current)) {
+    const draftAnswerRunStartedAt = draftAnswerRunStartedAtRef.current
+    if (
+      draftAnswerRunStartedAt !== activeQuestionRunStartedAt ||
+      isWaitingForChoices ||
+      isSubmitted ||
+      !sendMessage ||
+      isSameAnswer(draftAnswer, lastSentDraftRef.current)
+    ) {
       return
     }
 
@@ -83,12 +93,13 @@ export default function QuestionView({
       window.clearTimeout(timeoutId)
       if (
         activeQuestionRunStartedAtRef.current === activeQuestionRunStartedAt &&
+        draftAnswerRunStartedAt === activeQuestionRunStartedAt &&
         !isSameAnswer(pendingDraft, lastSentDraftRef.current)
       ) {
         sendDraft()
       }
     }
-  }, [draftAnswer, isSubmitted, isWaitingForChoices, question.id, sendMessage, studentId])
+  }, [activeQuestionRunStartedAt, draftAnswer, isSubmitted, isWaitingForChoices, question.id, sendMessage, studentId])
 
   async function submitAnswer(answer: { type: 'free-response'; text: string } | { type: 'multiple-choice'; selectedOptionIds: string[] }) {
     if (disabled || isSubmitted || isWaitingForChoices) {
@@ -108,6 +119,7 @@ export default function QuestionView({
       onSubmitted?.(question.id, answer)
       setDraftAnswer(answer)
       lastSentDraftRef.current = answer
+      draftAnswerRunStartedAtRef.current = activeQuestionRunStartedAt
       setSubmitting(false)
       return
     }
@@ -130,6 +142,7 @@ export default function QuestionView({
       onSubmitted?.(question.id, answer)
       setDraftAnswer(answer)
       lastSentDraftRef.current = answer
+      draftAnswerRunStartedAtRef.current = activeQuestionRunStartedAt
     } catch {
       setError('Network error — please try again')
     } finally {
@@ -151,6 +164,7 @@ export default function QuestionView({
           value={draftAnswer?.type === 'free-response' ? draftAnswer.text : ''}
           onDraftChange={(text) => {
             const trimmed = text.trim()
+            draftAnswerRunStartedAtRef.current = activeQuestionRunStartedAt
             setDraftAnswer(trimmed.length > 0 ? { type: 'free-response', text: trimmed } : null)
           }}
           onSubmit={(text) => submitAnswer({ type: 'free-response', text })}
@@ -165,6 +179,7 @@ export default function QuestionView({
           selectionMode={question.selectionMode}
           value={draftAnswer?.type === 'multiple-choice' ? draftAnswer.selectedOptionIds : []}
           onDraftChange={(selectedOptionIds) => {
+            draftAnswerRunStartedAtRef.current = activeQuestionRunStartedAt
             setDraftAnswer(selectedOptionIds.length > 0 ? { type: 'multiple-choice', selectedOptionIds } : null)
           }}
           onSubmit={(selectedOptionIds) => submitAnswer({ type: 'multiple-choice', selectedOptionIds })}

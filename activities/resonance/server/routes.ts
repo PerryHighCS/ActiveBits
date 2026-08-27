@@ -1034,7 +1034,7 @@ function buildStudentSnapshotWithMode(
           session.data.responses
             .filter((response) =>
               response.studentId === viewerStudentId &&
-              !isStaleActiveResponse(session.data, response),
+              !isStaleActiveResponse(session.data, response, liveActiveQuestionIdSet),
             )
             .map((response) => [response.questionId, response.answer] satisfies [string, Response['answer']]),
         )
