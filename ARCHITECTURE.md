@@ -80,6 +80,7 @@ session.
 2. Navigate to `/{session-id}` or enter ID at `/` or use permanent link ( `/activity/{activityName}/{hash}` )
 3. System fetches session data and determines activity type
 4. In waiting rooms, the entered `displayName` is remembered in a same-site, one-year browser cookie and used as the default on later visits; no participant IDs, credentials, or other waiting-room fields are stored there. After the server accepts an entry participant, it issues a separate opaque, httpOnly session-scoped token so activity APIs can resolve that participant server-side without trusting a client-supplied ID.
+   Activities that expose participant-private state, including Resonance and Postboard, resolve the student from this token for REST and WebSocket authorization rather than accepting a `studentId` query parameter or request field as proof of identity.
 5. Student is shown the appropriate activity component
 6. Student interacts with the activity
 

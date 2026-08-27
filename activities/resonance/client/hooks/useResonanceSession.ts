@@ -451,7 +451,7 @@ export function selectStudentSessionSnapshot(
  * Falls back to REST polling while the WebSocket is reconnecting.
  *
  * @param sessionId  - The session to connect to, or null to defer.
- * @param studentId  - The registered student ID, forwarded to the WS for identity.
+ * @param studentId  - The local ID used only to reset client state after registration.
  */
 export function useResonanceSession(sessionId: string | null, studentId?: string | null) {
   const [snapshot, setSnapshot] = useState<StudentSessionSnapshot | null>(null)
@@ -477,8 +477,7 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
     const requestId = latestSnapshotRequestRef.current + 1
     latestSnapshotRequestRef.current = requestId
     try {
-      const query = studentId ? `?studentId=${encodeURIComponent(studentId)}` : ''
-      const resp = await fetch(`/api/resonance/${sessionId}/state${query}`)
+      const resp = await fetch(`/api/resonance/${sessionId}/state`)
       if (!mountedRef.current || !isLatestStudentSnapshotRequest(requestId, latestSnapshotRequestRef.current)) return
       if (!resp.ok) {
         setError('Could not load session state')
@@ -519,7 +518,6 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
     void fetchSnapshot()
 
     const params = new URLSearchParams({ sessionId, role: 'student' })
-    if (studentId) params.set('studentId', studentId)
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const wsUrl = `${protocol}//${window.location.host}/ws/resonance?${params.toString()}`
 
