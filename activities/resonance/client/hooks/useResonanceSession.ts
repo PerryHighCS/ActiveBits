@@ -421,8 +421,12 @@ export function shouldApplyStudentSessionSnapshot(
     return true
   }
 
-  return candidate.activeQuestionRunStartedAt !== null &&
+  return candidate.activeQuestionRunStartedAt === null ||
     candidate.activeQuestionRunStartedAt >= current.activeQuestionRunStartedAt
+}
+
+export function isLatestStudentSnapshotRequest(requestId: number, latestRequestId: number): boolean {
+  return requestId === latestRequestId
 }
 
 /**
@@ -438,20 +442,23 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
   const [error, setError] = useState<string | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
   const mountedRef = useRef(true)
+  const latestSnapshotRequestRef = useRef(0)
 
   const fetchSnapshot = useCallback(async () => {
     if (sessionId === null) return
+    const requestId = latestSnapshotRequestRef.current + 1
+    latestSnapshotRequestRef.current = requestId
     try {
       const query = studentId ? `?studentId=${encodeURIComponent(studentId)}` : ''
       const resp = await fetch(`/api/resonance/${sessionId}/state${query}`)
-      if (!mountedRef.current) return
+      if (!mountedRef.current || !isLatestStudentSnapshotRequest(requestId, latestSnapshotRequestRef.current)) return
       if (!resp.ok) {
         setError('Could not load session state')
         setLoading(false)
         return
       }
       const data = normalizeStudentSessionSnapshot((await resp.json()) as Partial<StudentSessionSnapshot>)
-      if (!mountedRef.current) return
+      if (!mountedRef.current || !isLatestStudentSnapshotRequest(requestId, latestSnapshotRequestRef.current)) return
       if (data === null) {
         setError('Could not load session state')
         setLoading(false)
@@ -461,7 +468,9 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
       setError(null)
       setLoading(false)
     } catch {
-      if (mountedRef.current) setError('Network error — retrying…')
+      if (mountedRef.current && isLatestStudentSnapshotRequest(requestId, latestSnapshotRequestRef.current)) {
+        setError('Network error — retrying…')
+      }
     }
   }, [sessionId, studentId])
 
@@ -512,6 +521,7 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
           if (msg.type === 'resonance:session-state' && msg.payload !== undefined) {
             const normalized = normalizeStudentSessionSnapshot(msg.payload as Partial<StudentSessionSnapshot>)
             if (normalized) {
+              latestSnapshotRequestRef.current += 1
               setSnapshot((current) => shouldApplyStudentSessionSnapshot(current, normalized) ? normalized : current)
             }
             setLoading(false)

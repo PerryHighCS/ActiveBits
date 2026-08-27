@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { normalizeStudentSessionSnapshot, shouldApplyStudentSessionSnapshot } from './useResonanceSession.js'
+import {
+  isLatestStudentSnapshotRequest,
+  normalizeStudentSessionSnapshot,
+  shouldApplyStudentSessionSnapshot,
+} from './useResonanceSession.js'
 import type { StudentSessionSnapshot } from '../../shared/types.js'
 
 void test('normalizeStudentSessionSnapshot rejects array submittedAnswers payloads', () => {
@@ -68,21 +72,26 @@ void test('shouldApplyStudentSessionSnapshot rejects a delayed older run even wh
   assert.equal(shouldApplyStudentSessionSnapshot(current, newer), true)
 })
 
-void test('shouldApplyStudentSessionSnapshot rejects a delayed pre-run snapshot after a live run starts', () => {
+void test('shouldApplyStudentSessionSnapshot accepts a legitimate no-active-question state after a live run', () => {
   const current = normalizeStudentSessionSnapshot({
     sessionId: 'session-1',
     activeQuestionIds: ['q1'],
     activeQuestionRunStartedAt: 2_000,
   })
-  const delayedPreRun = normalizeStudentSessionSnapshot({
+  const noActiveQuestion = normalizeStudentSessionSnapshot({
     sessionId: 'session-1',
     activeQuestionIds: [],
     activeQuestionRunStartedAt: null,
   })
 
   assert.ok(current)
-  assert.ok(delayedPreRun)
-  assert.equal(shouldApplyStudentSessionSnapshot(current, delayedPreRun), false)
+  assert.ok(noActiveQuestion)
+  assert.equal(shouldApplyStudentSessionSnapshot(current, noActiveQuestion), true)
+})
+
+void test('isLatestStudentSnapshotRequest accepts only the most recent fetch', () => {
+  assert.equal(isLatestStudentSnapshotRequest(2, 2), true)
+  assert.equal(isLatestStudentSnapshotRequest(1, 2), false)
 })
 
 void test('normalizeStudentSessionSnapshot preserves staged run state and hidden MCQ choices', () => {
