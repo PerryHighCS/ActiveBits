@@ -466,7 +466,7 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
     setSnapshot(null)
     setLoading(sessionId !== null)
     setError(null)
-  }, [sessionId])
+  }, [sessionId, studentId])
 
   const fetchSnapshot = useCallback(async () => {
     if (sessionId === null) return
