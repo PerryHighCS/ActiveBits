@@ -107,9 +107,19 @@ void test('resolveQuestionStatusBadge avoids live copy for self-paced questions'
   assert.match(liveBadge.dotClassName, /motion-reduce:animate-none/)
 })
 
-void test('hasActiveQuestionRunRestart treats an idle-to-live transition as a new run', () => {
+void test('hasActiveQuestionRunRestart ignores the initial live snapshot but detects a later idle-to-live transition', () => {
   assert.equal(
     hasActiveQuestionRunRestart({
+      hasObservedSnapshot: false,
+      activeQuestionIds: ['q1'],
+      activeQuestionRunStartedAt: 2_000,
+      previousActiveQuestionRunStartedAt: null,
+    }),
+    false,
+  )
+  assert.equal(
+    hasActiveQuestionRunRestart({
+      hasObservedSnapshot: true,
       activeQuestionIds: ['q1'],
       activeQuestionRunStartedAt: 2_000,
       previousActiveQuestionRunStartedAt: null,

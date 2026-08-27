@@ -333,6 +333,59 @@ void test('QuestionView does not flush an unsent draft after the question run ch
   }
 })
 
+void test('QuestionView keeps an unsent draft associated with its original question when switching questions', async () => {
+  const restoreDomEnvironment = installDomEnvironment()
+  const { fireEvent, render, waitFor } = await import('@testing-library/react')
+
+  try {
+    const sentDrafts: Array<{ questionId: string; answer: unknown }> = []
+    const firstQuestion = {
+      id: 'q1',
+      type: 'free-response' as const,
+      text: 'First question',
+      order: 0,
+    }
+    const secondQuestion = {
+      id: 'q2',
+      type: 'free-response' as const,
+      text: 'Second question',
+      order: 1,
+    }
+    const sendMessage = (type: string, payload: unknown) => {
+      if (type === 'resonance:update-draft') {
+        sentDrafts.push(payload as { questionId: string; answer: unknown })
+      }
+      return true
+    }
+    const renderQuestion = (question: typeof firstQuestion) => React.createElement(QuestionView, {
+      key: question.id,
+      question,
+      sessionId: 'session-1',
+      studentId: 'student-1',
+      activeQuestionRunStartedAt: 1_000,
+      sendMessage,
+    })
+    const rendered = render(renderQuestion(firstQuestion))
+
+    fireEvent.change(rendered.getByLabelText(/your answer/i), {
+      target: { value: 'Draft for the first question' },
+    })
+    rendered.rerender(renderQuestion(secondQuestion))
+
+    await waitFor(() => {
+      assert.deepEqual(sentDrafts, [{
+        studentId: 'student-1',
+        questionId: 'q1',
+        answer: { type: 'free-response', text: 'Draft for the first question' },
+      }])
+    })
+
+    rendered.unmount()
+  } finally {
+    restoreDomEnvironment()
+  }
+})
+
 void test('QuestionView shows only the stem for staged MCQs before choices are revealed', async () => {
   const restoreDomEnvironment = installDomEnvironment()
   const { render } = await import('@testing-library/react')

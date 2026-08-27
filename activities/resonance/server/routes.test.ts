@@ -8,7 +8,11 @@ import {
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import type { WsRouter } from '../../../types/websocket.js'
-import setupResonanceRoutes, { generateImportedQuestionId, resolveAnswerabilityErrorMessage } from './routes.js'
+import setupResonanceRoutes, {
+  generateImportedQuestionId,
+  resolveAnswerabilityErrorMessage,
+  resolveDraftStudentId,
+} from './routes.js'
 
 interface RouteRequest {
   params: Record<string, string | undefined>
@@ -83,6 +87,11 @@ void test('generateImportedQuestionId falls back when Math.random produces an em
     ),
     'q_imported_loyw3v28',
   )
+})
+
+void test('resolveDraftStudentId rejects a draft update that claims another student identity', () => {
+  assert.equal(resolveDraftStudentId('student2', 'student1'), null)
+  assert.equal(resolveDraftStudentId('student1', 'student1'), 'student1')
 })
 
 function createEmbeddedResonanceSession(): SessionRecord {

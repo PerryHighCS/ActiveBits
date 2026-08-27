@@ -88,11 +88,13 @@ export function resolveQuestionStatusBadge(selfPacedMode: boolean): {
 }
 
 export function hasActiveQuestionRunRestart(params: {
+  hasObservedSnapshot: boolean
   activeQuestionIds: string[]
   activeQuestionRunStartedAt: number | null
   previousActiveQuestionRunStartedAt: number | null
 }): boolean {
   return (
+    params.hasObservedSnapshot &&
     params.activeQuestionIds.length > 0 &&
     params.activeQuestionRunStartedAt !== null &&
     params.activeQuestionRunStartedAt !== params.previousActiveQuestionRunStartedAt
@@ -138,6 +140,7 @@ export default function ResonanceStudent() {
   const mountedRef = useRef(true)
   const previousActiveQuestionIdsRef = useRef<string[]>([])
   const previousActiveQuestionRunStartedAtRef = useRef<number | null>(null)
+  const hasObservedSnapshotRef = useRef(false)
 
   useEffect(() => {
     if (!sessionId) return
@@ -238,6 +241,7 @@ export default function ResonanceStudent() {
       const availableIds = snapshot.activeQuestions.map((question) => question.id)
       previousActiveQuestionIdsRef.current = availableIds
       previousActiveQuestionRunStartedAtRef.current = snapshot.activeQuestionRunStartedAt
+      hasObservedSnapshotRef.current = true
 
       if (availableIds.length === 0) {
         setSelectedQuestionId(null)
@@ -248,11 +252,15 @@ export default function ResonanceStudent() {
       return
     }
 
+    const hasObservedSnapshot = hasObservedSnapshotRef.current
     const activeRunStartedAt = snapshot.activeQuestionRunStartedAt
     const activeIds = snapshot.activeQuestions.map((question) => question.id)
     const previousActiveIds = previousActiveQuestionIdsRef.current
-    const reactivatedIds = activeIds.filter((questionId) => !previousActiveIds.includes(questionId))
+    const reactivatedIds = hasObservedSnapshot
+      ? activeIds.filter((questionId) => !previousActiveIds.includes(questionId))
+      : []
     const didRunRestart = hasActiveQuestionRunRestart({
+      hasObservedSnapshot,
       activeQuestionIds: activeIds,
       activeQuestionRunStartedAt: activeRunStartedAt,
       previousActiveQuestionRunStartedAt: previousActiveQuestionRunStartedAtRef.current,
@@ -274,6 +282,7 @@ export default function ResonanceStudent() {
         return next
       })
     }
+    hasObservedSnapshotRef.current = true
     previousActiveQuestionIdsRef.current = activeIds
     previousActiveQuestionRunStartedAtRef.current = activeRunStartedAt
 
@@ -418,6 +427,7 @@ export default function ResonanceStudent() {
             {/* Question card */}
             <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm px-6 py-6">
               <QuestionView
+                key={activeQuestion.id}
                 question={activeQuestion}
                 sessionId={sessionId}
                 studentId={studentId}

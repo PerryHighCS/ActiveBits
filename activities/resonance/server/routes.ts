@@ -525,6 +525,14 @@ function buildDraftKey(questionId: string, studentId: string): string {
   return `${questionId}:${studentId}`
 }
 
+export function resolveDraftStudentId(payloadStudentId: unknown, clientStudentId: string | null | undefined): string | null {
+  const studentId = clientStudentId ?? null
+  if (!studentId || (typeof payloadStudentId === 'string' && payloadStudentId !== studentId)) {
+    return null
+  }
+  return studentId
+}
+
 function normalizeDraftAnswerPayload(
   value: unknown,
   questionsById: Map<string, Question>,
@@ -2545,8 +2553,7 @@ export default function setupResonanceRoutes(
       }
 
       case 'resonance:update-draft': {
-        const studentId =
-          typeof payload.studentId === 'string' ? payload.studentId : (clientStudentId ?? null)
+        const studentId = resolveDraftStudentId(payload.studentId, clientStudentId)
         if (!studentId || !session.data.students[studentId]) return
         const selfPacedMode = await resolveSelfPacedMode(session, sessions)
         const availableQuestionIds = resolveStudentAvailableQuestionIds(session, selfPacedMode)
