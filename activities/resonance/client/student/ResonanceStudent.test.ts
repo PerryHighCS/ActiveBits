@@ -4,6 +4,8 @@ import { resolveNextSelfPacedQuestionId } from './ResonanceStudent.js'
 import { resolveQuestionStatusBadge } from './ResonanceStudent.js'
 import { resolveSubmissionAnnouncement } from './ResonanceStudent.js'
 import { resolveSelfPacedSubmittedMessage } from './ResonanceStudent.js'
+import { hasActiveQuestionRunRestart } from './ResonanceStudent.js'
+import { shouldUseLocalSubmittedAnswer } from './ResonanceStudent.js'
 
 void test('resolveNextSelfPacedQuestionId advances to the next unanswered question', () => {
   assert.equal(
@@ -104,4 +106,40 @@ void test('resolveQuestionStatusBadge avoids live copy for self-paced questions'
   assert.equal(liveBadge.label, 'Live Question')
   assert.match(liveBadge.dotClassName, /animate-pulse/)
   assert.match(liveBadge.dotClassName, /motion-reduce:animate-none/)
+})
+
+void test('hasActiveQuestionRunRestart ignores the initial live snapshot but detects a later idle-to-live transition', () => {
+  assert.equal(
+    hasActiveQuestionRunRestart({
+      hasObservedSnapshot: false,
+      activeQuestionIds: ['q1'],
+      activeQuestionRunStartedAt: 2_000,
+      previousActiveQuestionRunStartedAt: null,
+    }),
+    false,
+  )
+  assert.equal(
+    hasActiveQuestionRunRestart({
+      hasObservedSnapshot: true,
+      activeQuestionIds: ['q1'],
+      activeQuestionRunStartedAt: 2_000,
+      previousActiveQuestionRunStartedAt: null,
+    }),
+    true,
+  )
+})
+
+void test('shouldUseLocalSubmittedAnswer excludes previous-run answers before the cleanup effect runs', () => {
+  assert.equal(
+    shouldUseLocalSubmittedAnswer({
+      questionId: 'q1',
+      selfPacedMode: false,
+      hasObservedSnapshot: true,
+      activeQuestionIds: ['q1'],
+      activeQuestionRunStartedAt: 2_000,
+      previousActiveQuestionIds: ['q1'],
+      previousActiveQuestionRunStartedAt: 1_000,
+    }),
+    false,
+  )
 })

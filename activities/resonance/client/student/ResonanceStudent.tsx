@@ -84,7 +84,40 @@ export function resolveQuestionStatusBadge(selfPacedMode: boolean): {
     : {
         label: 'Live Question',
         dotClassName: 'w-2 h-2 rounded-full bg-indigo-500 dark:bg-indigo-400 animate-pulse motion-reduce:animate-none inline-block',
-      }
+  }
+}
+
+export function hasActiveQuestionRunRestart(params: {
+  hasObservedSnapshot: boolean
+  activeQuestionIds: string[]
+  activeQuestionRunStartedAt: number | null
+  previousActiveQuestionRunStartedAt: number | null
+}): boolean {
+  return (
+    params.hasObservedSnapshot &&
+    params.activeQuestionIds.length > 0 &&
+    params.activeQuestionRunStartedAt !== null &&
+    params.activeQuestionRunStartedAt !== params.previousActiveQuestionRunStartedAt
+  )
+}
+
+export function shouldUseLocalSubmittedAnswer(params: {
+  questionId: string
+  selfPacedMode: boolean
+  hasObservedSnapshot: boolean
+  activeQuestionIds: string[]
+  activeQuestionRunStartedAt: number | null
+  previousActiveQuestionIds: string[]
+  previousActiveQuestionRunStartedAt: number | null
+}): boolean {
+  if (params.selfPacedMode || !params.hasObservedSnapshot) {
+    return true
+  }
+
+  return (
+    params.previousActiveQuestionIds.includes(params.questionId) &&
+    !hasActiveQuestionRunRestart(params)
+  )
 }
 
 function formatRemainingTime(deadlineAt: number | null, now: number): string | null {
@@ -126,6 +159,7 @@ export default function ResonanceStudent() {
   const mountedRef = useRef(true)
   const previousActiveQuestionIdsRef = useRef<string[]>([])
   const previousActiveQuestionRunStartedAtRef = useRef<number | null>(null)
+  const hasObservedSnapshotRef = useRef(false)
 
   useEffect(() => {
     if (!sessionId) return
@@ -226,6 +260,7 @@ export default function ResonanceStudent() {
       const availableIds = snapshot.activeQuestions.map((question) => question.id)
       previousActiveQuestionIdsRef.current = availableIds
       previousActiveQuestionRunStartedAtRef.current = snapshot.activeQuestionRunStartedAt
+      hasObservedSnapshotRef.current = true
 
       if (availableIds.length === 0) {
         setSelectedQuestionId(null)
@@ -236,17 +271,28 @@ export default function ResonanceStudent() {
       return
     }
 
+    const hasObservedSnapshot = hasObservedSnapshotRef.current
     const activeRunStartedAt = snapshot.activeQuestionRunStartedAt
     const activeIds = snapshot.activeQuestions.map((question) => question.id)
     const previousActiveIds = previousActiveQuestionIdsRef.current
-    const reactivatedIds = activeIds.filter((questionId) => !previousActiveIds.includes(questionId))
-    const didRunRestart =
-      activeIds.length > 0 &&
-      activeRunStartedAt !== null &&
-      previousActiveQuestionRunStartedAtRef.current !== null &&
-      activeRunStartedAt !== previousActiveQuestionRunStartedAtRef.current
+    const reactivatedIds = hasObservedSnapshot
+      ? activeIds.filter((questionId) => !previousActiveIds.includes(questionId))
+      : []
+    const didRunRestart = hasActiveQuestionRunRestart({
+      hasObservedSnapshot,
+      activeQuestionIds: activeIds,
+      activeQuestionRunStartedAt: activeRunStartedAt,
+      previousActiveQuestionRunStartedAt: previousActiveQuestionRunStartedAtRef.current,
+    })
 
     if (reactivatedIds.length > 0 || didRunRestart) {
+      setSubmittedAnswers((current) => {
+        const next = { ...current }
+        for (const questionId of didRunRestart ? activeIds : reactivatedIds) {
+          delete next[questionId]
+        }
+        return next
+      })
       setSubmittedQuestionIds((current) => {
         const next = new Set(current)
         for (const questionId of didRunRestart ? activeIds : reactivatedIds) {
@@ -255,6 +301,7 @@ export default function ResonanceStudent() {
         return next
       })
     }
+    hasObservedSnapshotRef.current = true
     previousActiveQuestionIdsRef.current = activeIds
     previousActiveQuestionRunStartedAtRef.current = activeRunStartedAt
 
@@ -314,6 +361,15 @@ export default function ResonanceStudent() {
 
   const activeQuestions = snapshot?.activeQuestions ?? []
   const activeQuestion = activeQuestions.find((question) => question.id === selectedQuestionId) ?? activeQuestions[0] ?? null
+  const useLocalSubmittedAnswer = snapshot !== null && activeQuestion !== null && shouldUseLocalSubmittedAnswer({
+    questionId: activeQuestion.id,
+    selfPacedMode: snapshot.selfPacedMode,
+    hasObservedSnapshot: hasObservedSnapshotRef.current,
+    activeQuestionIds: activeQuestions.map((question) => question.id),
+    activeQuestionRunStartedAt: snapshot.activeQuestionRunStartedAt,
+    previousActiveQuestionIds: previousActiveQuestionIdsRef.current,
+    previousActiveQuestionRunStartedAt: previousActiveQuestionRunStartedAtRef.current,
+  })
   const activeDeadlineAt = snapshot?.activeQuestionDeadlineAt ?? null
   const hasExpired = activeDeadlineAt !== null && activeDeadlineAt <= countdownNow
   const liveCountdown = formatRemainingTime(activeDeadlineAt, countdownNow)
@@ -399,10 +455,16 @@ export default function ResonanceStudent() {
             {/* Question card */}
             <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm px-6 py-6">
               <QuestionView
+                key={activeQuestion.id}
                 question={activeQuestion}
                 sessionId={sessionId}
                 studentId={studentId}
-                initialAnswer={snapshot.submittedAnswers[activeQuestion.id] ?? submittedAnswers[activeQuestion.id] ?? null}
+                initialAnswer={
+                  snapshot.submittedAnswers[activeQuestion.id] ??
+                  (useLocalSubmittedAnswer ? submittedAnswers[activeQuestion.id] : null) ??
+                  null
+                }
+                activeQuestionRunStartedAt={snapshot.activeQuestionRunStartedAt}
                 disabled={hasExpired}
                 isSubmitted={submittedQuestionIds.has(activeQuestion.id)}
                 submittedMessage={submittedMessage}

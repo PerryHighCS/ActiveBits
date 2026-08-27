@@ -525,6 +525,14 @@ function buildDraftKey(questionId: string, studentId: string): string {
   return `${questionId}:${studentId}`
 }
 
+export function resolveSocketStudentId(payloadStudentId: unknown, clientStudentId: string | null | undefined): string | null {
+  const studentId = clientStudentId ?? null
+  if (!studentId || (typeof payloadStudentId === 'string' && payloadStudentId !== studentId)) {
+    return null
+  }
+  return studentId
+}
+
 function normalizeDraftAnswerPayload(
   value: unknown,
   questionsById: Map<string, Question>,
@@ -1032,7 +1040,10 @@ function buildStudentSnapshotWithMode(
       ? {}
       : Object.fromEntries(
           session.data.responses
-            .filter((response) => response.studentId === viewerStudentId)
+            .filter((response) =>
+              response.studentId === viewerStudentId &&
+              !isStaleActiveResponse(session.data, response, liveActiveQuestionIdSet),
+            )
             .map((response) => [response.questionId, response.answer] satisfies [string, Response['answer']]),
         )
   const reviewedResponses =
@@ -1077,6 +1088,18 @@ function buildStudentSnapshotWithMode(
   }
 }
 
+function isStaleActiveResponse(
+  sessionData: ResonanceSessionData,
+  response: Response,
+  activeQuestionIdSet?: ReadonlySet<string>,
+): boolean {
+  return (
+    (activeQuestionIdSet?.has(response.questionId) ?? sessionData.activeQuestionIds.includes(response.questionId)) &&
+    sessionData.activeQuestionRunStartedAt !== null &&
+    response.submittedAt < sessionData.activeQuestionRunStartedAt
+  )
+}
+
 function buildInstructorSnapshot(session: ResonanceSession) {
   const {
     presentationMode,
@@ -1100,12 +1123,9 @@ function buildInstructorSnapshot(session: ResonanceSession) {
 
   for (const response of responses) {
     const key = buildDraftKey(response.questionId, response.studentId)
-    const isStaleActiveResponse =
-      activeQuestionIdSet.has(response.questionId) &&
-      activeQuestionRunStartedAt !== null &&
-      response.submittedAt < activeQuestionRunStartedAt
+    const staleActiveResponse = isStaleActiveResponse(session.data, response, activeQuestionIdSet)
 
-    if (!isStaleActiveResponse) {
+    if (!staleActiveResponse) {
       currentRunSubmittedKeys.add(key)
     }
 
@@ -1114,7 +1134,7 @@ function buildInstructorSnapshot(session: ResonanceSession) {
       studentId: response.studentId,
       studentName: students[response.studentId]?.name ?? 'Unknown',
       updatedAt: response.submittedAt,
-      status: isStaleActiveResponse ? 'working' : 'submitted',
+      status: staleActiveResponse ? 'working' : 'submitted',
       answer: response.answer,
       responseId: response.id,
     })
@@ -2498,8 +2518,7 @@ export default function setupResonanceRoutes(
   ): Promise<void> {
     switch (type) {
       case 'resonance:submit-answer': {
-        const studentId =
-          typeof payload.studentId === 'string' ? payload.studentId : (clientStudentId ?? null)
+        const studentId = resolveSocketStudentId(payload.studentId, clientStudentId)
         if (!studentId || !session.data.students[studentId]) return
         const requestedQuestionId = typeof payload.questionId === 'string' ? payload.questionId : null
         const selfPacedMode = await resolveSelfPacedMode(session, sessions)
@@ -2533,8 +2552,7 @@ export default function setupResonanceRoutes(
       }
 
       case 'resonance:update-draft': {
-        const studentId =
-          typeof payload.studentId === 'string' ? payload.studentId : (clientStudentId ?? null)
+        const studentId = resolveSocketStudentId(payload.studentId, clientStudentId)
         if (!studentId || !session.data.students[studentId]) return
         const selfPacedMode = await resolveSelfPacedMode(session, sessions)
         const availableQuestionIds = resolveStudentAvailableQuestionIds(session, selfPacedMode)
@@ -2551,7 +2569,10 @@ export default function setupResonanceRoutes(
         if (!isCurrentStagedQuestionAnswerable(session.data, questionId)) return
 
         const alreadyAnswered = session.data.responses.some(
-          (response) => response.questionId === questionId && response.studentId === studentId,
+          (response) =>
+            response.questionId === questionId &&
+            response.studentId === studentId &&
+            !isStaleActiveResponse(session.data, response),
         )
         if (alreadyAnswered) return
 

@@ -8,7 +8,11 @@ import {
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import type { WsRouter } from '../../../types/websocket.js'
-import setupResonanceRoutes, { generateImportedQuestionId, resolveAnswerabilityErrorMessage } from './routes.js'
+import setupResonanceRoutes, {
+  generateImportedQuestionId,
+  resolveAnswerabilityErrorMessage,
+  resolveSocketStudentId,
+} from './routes.js'
 
 interface RouteRequest {
   params: Record<string, string | undefined>
@@ -83,6 +87,11 @@ void test('generateImportedQuestionId falls back when Math.random produces an em
     ),
     'q_imported_loyw3v28',
   )
+})
+
+void test('resolveSocketStudentId rejects student messages that claim another identity', () => {
+  assert.equal(resolveSocketStudentId('student2', 'student1'), null)
+  assert.equal(resolveSocketStudentId('student1', 'student1'), 'student1')
 })
 
 function createEmbeddedResonanceSession(): SessionRecord {
@@ -2336,9 +2345,11 @@ void test('reactivating a question marks prior answers as working instead of sub
   const activateHandler = app.handlers.post['/api/resonance/:sessionId/activate-question']
   const submitHandler = app.handlers.post['/api/resonance/:sessionId/submit-answer']
   const responsesHandler = app.handlers.get['/api/resonance/:sessionId/responses']
+  const stateHandler = app.handlers.get['/api/resonance/:sessionId/state']
   assert.equal(typeof activateHandler, 'function')
   assert.equal(typeof submitHandler, 'function')
   assert.equal(typeof responsesHandler, 'function')
+  assert.equal(typeof stateHandler, 'function')
 
   const firstActivateRes = createResponse()
   await activateHandler?.(
@@ -2387,6 +2398,20 @@ void test('reactivating a question marks prior answers as working instead of sub
     secondActivateRes,
   )
   assert.equal(secondActivateRes.statusCode, 200)
+
+  const studentStateRes = createResponse()
+  await stateHandler?.(
+    {
+      params: { sessionId: session.id },
+      query: { studentId: 'student1' },
+    },
+    studentStateRes,
+  )
+  assert.equal(studentStateRes.statusCode, 200)
+  assert.deepEqual(
+    (studentStateRes.body as { submittedAnswers?: Record<string, unknown> }).submittedAnswers,
+    {},
+  )
 
   const responsesRes = createResponse()
   await responsesHandler?.(

@@ -412,6 +412,40 @@ export function normalizeStudentSessionSnapshot(
   }
 }
 
+/** Reject delayed session snapshots that would move a student back to an earlier live run. */
+export function shouldApplyStudentSessionSnapshot(
+  current: StudentSessionSnapshot | null,
+  candidate: StudentSessionSnapshot,
+  latestActiveQuestionRunStartedAt: number | null = current?.activeQuestionRunStartedAt ?? null,
+): boolean {
+  if (
+    current === null ||
+    current.sessionId !== candidate.sessionId ||
+    candidate.activeQuestionRunStartedAt === null ||
+    latestActiveQuestionRunStartedAt === null
+  ) {
+    return true
+  }
+
+  return candidate.activeQuestionRunStartedAt >= latestActiveQuestionRunStartedAt
+}
+
+export function isLatestStudentSnapshotRequest(requestId: number, latestRequestId: number): boolean {
+  return requestId === latestRequestId
+}
+
+export function selectStudentSessionSnapshot(
+  current: StudentSessionSnapshot | null,
+  candidate: StudentSessionSnapshot,
+  latestActiveQuestionRunStartedAt?: number | null,
+): { snapshot: StudentSessionSnapshot | null; accepted: boolean } {
+  const accepted = shouldApplyStudentSessionSnapshot(current, candidate, latestActiveQuestionRunStartedAt)
+  return {
+    snapshot: accepted ? candidate : current,
+    accepted,
+  }
+}
+
 /**
  * Connects to the Resonance WebSocket as a student for real-time session state.
  * Falls back to REST polling while the WebSocket is reconnecting.
@@ -425,30 +459,55 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
   const [error, setError] = useState<string | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
   const mountedRef = useRef(true)
+  const latestSnapshotRequestRef = useRef(0)
+  const snapshotRef = useRef<StudentSessionSnapshot | null>(null)
+  const latestActiveQuestionRunStartedAtRef = useRef<number | null>(null)
+
+  useEffect(() => {
+    latestSnapshotRequestRef.current += 1
+    snapshotRef.current = null
+    latestActiveQuestionRunStartedAtRef.current = null
+    setSnapshot(null)
+    setLoading(sessionId !== null)
+    setError(null)
+  }, [sessionId, studentId])
 
   const fetchSnapshot = useCallback(async () => {
     if (sessionId === null) return
+    const requestId = latestSnapshotRequestRef.current + 1
+    latestSnapshotRequestRef.current = requestId
     try {
       const query = studentId ? `?studentId=${encodeURIComponent(studentId)}` : ''
       const resp = await fetch(`/api/resonance/${sessionId}/state${query}`)
-      if (!mountedRef.current) return
+      if (!mountedRef.current || !isLatestStudentSnapshotRequest(requestId, latestSnapshotRequestRef.current)) return
       if (!resp.ok) {
         setError('Could not load session state')
         setLoading(false)
         return
       }
       const data = normalizeStudentSessionSnapshot((await resp.json()) as Partial<StudentSessionSnapshot>)
-      if (!mountedRef.current) return
+      if (!mountedRef.current || !isLatestStudentSnapshotRequest(requestId, latestSnapshotRequestRef.current)) return
       if (data === null) {
         setError('Could not load session state')
         setLoading(false)
         return
       }
-      setSnapshot(data)
+      const selection = selectStudentSessionSnapshot(
+        snapshotRef.current,
+        data,
+        latestActiveQuestionRunStartedAtRef.current,
+      )
+      snapshotRef.current = selection.snapshot
+      if (selection.accepted && data.activeQuestionRunStartedAt !== null) {
+        latestActiveQuestionRunStartedAtRef.current = data.activeQuestionRunStartedAt
+      }
+      setSnapshot(selection.snapshot)
       setError(null)
       setLoading(false)
     } catch {
-      if (mountedRef.current) setError('Network error — retrying…')
+      if (mountedRef.current && isLatestStudentSnapshotRequest(requestId, latestSnapshotRequestRef.current)) {
+        setError('Network error — retrying…')
+      }
     }
   }, [sessionId, studentId])
 
@@ -499,10 +558,22 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
           if (msg.type === 'resonance:session-state' && msg.payload !== undefined) {
             const normalized = normalizeStudentSessionSnapshot(msg.payload as Partial<StudentSessionSnapshot>)
             if (normalized) {
-              setSnapshot(normalized)
+              const selection = selectStudentSessionSnapshot(
+                snapshotRef.current,
+                normalized,
+                latestActiveQuestionRunStartedAtRef.current,
+              )
+              if (selection.accepted) {
+                latestSnapshotRequestRef.current += 1
+                snapshotRef.current = selection.snapshot
+                if (normalized.activeQuestionRunStartedAt !== null) {
+                  latestActiveQuestionRunStartedAtRef.current = normalized.activeQuestionRunStartedAt
+                }
+                setSnapshot(selection.snapshot)
+                setLoading(false)
+                setError(null)
+              }
             }
-            setLoading(false)
-            setError(null)
           } else if (
             msg.type === 'resonance:results-shared' ||
             msg.type === 'resonance:sharing-stopped' ||

@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { normalizeStudentSessionSnapshot } from './useResonanceSession.js'
+import {
+  isLatestStudentSnapshotRequest,
+  normalizeStudentSessionSnapshot,
+  selectStudentSessionSnapshot,
+  shouldApplyStudentSessionSnapshot,
+} from './useResonanceSession.js'
 import type { StudentSessionSnapshot } from '../../shared/types.js'
 
 void test('normalizeStudentSessionSnapshot rejects array submittedAnswers payloads', () => {
@@ -42,6 +47,122 @@ void test('normalizeStudentSessionSnapshot keeps selfPacedMode when provided', (
 
   assert.ok(result)
   assert.equal(result.selfPacedMode, true)
+})
+
+void test('shouldApplyStudentSessionSnapshot rejects a delayed older run even when active questions differ', () => {
+  const current = normalizeStudentSessionSnapshot({
+    sessionId: 'session-1',
+    activeQuestionIds: ['q1'],
+    activeQuestionRunStartedAt: 2_000,
+  })
+  const delayed = normalizeStudentSessionSnapshot({
+    sessionId: 'session-1',
+    activeQuestionIds: ['q2'],
+    activeQuestionRunStartedAt: 1_000,
+  })
+  const newer = normalizeStudentSessionSnapshot({
+    sessionId: 'session-1',
+    activeQuestionIds: ['q1'],
+    activeQuestionRunStartedAt: 3_000,
+  })
+
+  assert.ok(current)
+  assert.ok(delayed)
+  assert.ok(newer)
+  assert.equal(shouldApplyStudentSessionSnapshot(current, delayed), false)
+  assert.equal(shouldApplyStudentSessionSnapshot(current, newer), true)
+})
+
+void test('shouldApplyStudentSessionSnapshot accepts a legitimate no-active-question state after a live run', () => {
+  const current = normalizeStudentSessionSnapshot({
+    sessionId: 'session-1',
+    activeQuestionIds: ['q1'],
+    activeQuestionRunStartedAt: 2_000,
+  })
+  const noActiveQuestion = normalizeStudentSessionSnapshot({
+    sessionId: 'session-1',
+    activeQuestionIds: [],
+    activeQuestionRunStartedAt: null,
+  })
+
+  assert.ok(current)
+  assert.ok(noActiveQuestion)
+  assert.equal(shouldApplyStudentSessionSnapshot(current, noActiveQuestion), true)
+})
+
+void test('shouldApplyStudentSessionSnapshot rejects an older live run after an idle snapshot', () => {
+  const idle = normalizeStudentSessionSnapshot({
+    sessionId: 'session-1',
+    activeQuestionIds: [],
+    activeQuestionRunStartedAt: null,
+  })
+  const delayedLiveRun = normalizeStudentSessionSnapshot({
+    sessionId: 'session-1',
+    activeQuestionIds: ['q1'],
+    activeQuestionRunStartedAt: 1_000,
+  })
+
+  assert.ok(idle)
+  assert.ok(delayedLiveRun)
+  assert.equal(shouldApplyStudentSessionSnapshot(idle, delayedLiveRun, 2_000), false)
+})
+
+void test('shouldApplyStudentSessionSnapshot accepts a new session with an earlier run timestamp', () => {
+  const current = normalizeStudentSessionSnapshot({
+    sessionId: 'session-1',
+    activeQuestionIds: ['q1'],
+    activeQuestionRunStartedAt: 2_000,
+  })
+  const nextSession = normalizeStudentSessionSnapshot({
+    sessionId: 'session-2',
+    activeQuestionIds: ['q1'],
+    activeQuestionRunStartedAt: 1_000,
+  })
+
+  assert.ok(current)
+  assert.ok(nextSession)
+  assert.equal(shouldApplyStudentSessionSnapshot(current, nextSession), true)
+})
+
+void test('isLatestStudentSnapshotRequest accepts only the most recent fetch', () => {
+  assert.equal(isLatestStudentSnapshotRequest(2, 2), true)
+  assert.equal(isLatestStudentSnapshotRequest(1, 2), false)
+})
+
+void test('a rejected stale WebSocket snapshot does not invalidate a newer deferred REST response', () => {
+  const current = normalizeStudentSessionSnapshot({
+    sessionId: 'session-1',
+    activeQuestionIds: ['q1'],
+    activeQuestionRunStartedAt: 2_000,
+  })
+  const staleWebSocketSnapshot = normalizeStudentSessionSnapshot({
+    sessionId: 'session-1',
+    activeQuestionIds: ['q2'],
+    activeQuestionRunStartedAt: 1_000,
+  })
+  const newerRestSnapshot = normalizeStudentSessionSnapshot({
+    sessionId: 'session-1',
+    activeQuestionIds: ['q3'],
+    activeQuestionRunStartedAt: 3_000,
+  })
+
+  assert.ok(current)
+  assert.ok(staleWebSocketSnapshot)
+  assert.ok(newerRestSnapshot)
+
+  let latestRequestId = 1
+  const deferredRestRequestId = latestRequestId
+  const staleSelection = selectStudentSessionSnapshot(current, staleWebSocketSnapshot)
+  if (staleSelection.accepted) {
+    latestRequestId += 1
+  }
+
+  assert.equal(staleSelection.accepted, false)
+  assert.equal(isLatestStudentSnapshotRequest(deferredRestRequestId, latestRequestId), true)
+
+  const restSelection = selectStudentSessionSnapshot(staleSelection.snapshot, newerRestSnapshot)
+  assert.equal(restSelection.accepted, true)
+  assert.equal(restSelection.snapshot, newerRestSnapshot)
 })
 
 void test('normalizeStudentSessionSnapshot preserves staged run state and hidden MCQ choices', () => {
