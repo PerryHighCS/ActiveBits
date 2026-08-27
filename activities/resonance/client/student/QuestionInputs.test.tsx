@@ -211,7 +211,6 @@ void test('QuestionView submits over websocket first when sendMessage is availab
     assert.deepEqual(wsMessages[0], {
       type: 'resonance:submit-answer',
       payload: {
-        studentId: 'student-1',
         questionId: 'q1',
         answer: {
           type: 'free-response',
@@ -420,7 +419,6 @@ void test('QuestionView keeps an unsent draft associated with its original quest
 
     await waitFor(() => {
       assert.deepEqual(sentDrafts, [{
-        studentId: 'student-1',
         questionId: 'q1',
         answer: { type: 'free-response', text: 'Draft for the first question' },
       }])
