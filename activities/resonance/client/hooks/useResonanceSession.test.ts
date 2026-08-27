@@ -68,6 +68,23 @@ void test('shouldApplyStudentSessionSnapshot rejects a delayed older run even wh
   assert.equal(shouldApplyStudentSessionSnapshot(current, newer), true)
 })
 
+void test('shouldApplyStudentSessionSnapshot rejects a delayed pre-run snapshot after a live run starts', () => {
+  const current = normalizeStudentSessionSnapshot({
+    sessionId: 'session-1',
+    activeQuestionIds: ['q1'],
+    activeQuestionRunStartedAt: 2_000,
+  })
+  const delayedPreRun = normalizeStudentSessionSnapshot({
+    sessionId: 'session-1',
+    activeQuestionIds: [],
+    activeQuestionRunStartedAt: null,
+  })
+
+  assert.ok(current)
+  assert.ok(delayedPreRun)
+  assert.equal(shouldApplyStudentSessionSnapshot(current, delayedPreRun), false)
+})
+
 void test('normalizeStudentSessionSnapshot preserves staged run state and hidden MCQ choices', () => {
   const result = normalizeStudentSessionSnapshot({
     sessionId: 'session-1',

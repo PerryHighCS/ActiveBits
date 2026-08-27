@@ -417,15 +417,12 @@ export function shouldApplyStudentSessionSnapshot(
   current: StudentSessionSnapshot | null,
   candidate: StudentSessionSnapshot,
 ): boolean {
-  if (
-    current === null ||
-    current.activeQuestionRunStartedAt === null ||
-    candidate.activeQuestionRunStartedAt === null
-  ) {
+  if (current === null || current.activeQuestionRunStartedAt === null) {
     return true
   }
 
-  return candidate.activeQuestionRunStartedAt >= current.activeQuestionRunStartedAt
+  return candidate.activeQuestionRunStartedAt !== null &&
+    candidate.activeQuestionRunStartedAt >= current.activeQuestionRunStartedAt
 }
 
 /**
