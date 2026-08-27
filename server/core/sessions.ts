@@ -454,6 +454,19 @@ function setNoStore(response: ResponseLike): void {
   response.set?.('Cache-Control', 'no-store')
 }
 
+// participantAuthTokens maps bearer tokens directly to participant ids. This
+// route is unauthenticated and keyed only by session id, so the map must
+// never reach the response — a caller who merely knows the session id
+// (routinely shared for classroom join links) could otherwise replay any
+// participant's token against the cookie-authenticated activity routes.
+function toPublicSession(session: SessionRecord): SessionRecord {
+  if (!Object.hasOwn(session.data, 'participantAuthTokens')) {
+    return session
+  }
+  const { participantAuthTokens: _participantAuthTokens, ...publicData } = session.data
+  return { ...session, data: publicData }
+}
+
 export function setupSessionRoutes(app: {
   get(path: string, handler: (req: { params: { sessionId: string } }, res: ResponseLike) => void | Promise<void>): void
   post(path: string, handler: (req: { params: { sessionId: string }; body?: unknown; secure?: boolean }, res: ResponseLike) => void | Promise<void>): void
@@ -488,7 +501,7 @@ export function setupSessionRoutes(app: {
       res.status(404).json({ error: 'invalid session' })
       return
     }
-    res.json({ session })
+    res.json({ session: toPublicSession(session) })
   })
 
   app.get('/api/session/:sessionId/embedded-launch', async (req, res) => {

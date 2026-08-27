@@ -3,7 +3,7 @@ import { createSession, type SessionRecord, type SessionStore } from 'activebits
 import { registerSessionNormalizer } from 'activebits-server/core/sessionNormalization.js'
 import {
   findAcceptedEntryParticipant,
-  getSessionParticipantCookieName,
+  readAcceptedEntryParticipantCookie,
   resolveAcceptedEntryParticipantToken,
 } from 'activebits-server/core/acceptedEntryParticipants.js'
 import { registerActivityReportBuilder } from '../../../server/activities/activityReportRegistry.js'
@@ -428,24 +428,10 @@ export function buildStudentSnapshot(session: PostboardSession, viewerStudentId:
   }
 }
 
-function readCookieValue(req: RouteRequest, name: string): string | null {
-  const parsedValue = req.cookies?.[name]
-  if (typeof parsedValue === 'string' && parsedValue.length > 0) return parsedValue
-  const cookieHeader = req.headers?.cookie
-  if (typeof cookieHeader !== 'string') return null
-  const entry = cookieHeader.split(';').map((value) => value.trim()).find((value) => value.startsWith(`${name}=`))
-  if (!entry) return null
-  try {
-    return decodeURIComponent(entry.slice(name.length + 1))
-  } catch {
-    return null
-  }
-}
-
 function readAcceptedStudentId(session: PostboardSession, req: RouteRequest): string | null {
   const authenticatedId = resolveAcceptedEntryParticipantToken(
     session,
-    readCookieValue(req, getSessionParticipantCookieName(session.id)),
+    readAcceptedEntryParticipantCookie(req.cookies, req.headers?.cookie, session.id),
   )?.participantId
   if (authenticatedId) return authenticatedId
 

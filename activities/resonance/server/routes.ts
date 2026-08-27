@@ -11,6 +11,7 @@ import {
   acceptEntryParticipant,
   getSessionParticipantCookieName,
   issueAcceptedEntryParticipantToken,
+  readAcceptedEntryParticipantCookie,
   resolveAcceptedEntryParticipantToken,
 } from 'activebits-server/core/acceptedEntryParticipants.js'
 import type { ActiveBitsWebSocket, WsRouter } from '../../../types/websocket.js'
@@ -53,6 +54,7 @@ interface RouteRequest {
   cookies?: Record<string, unknown>
   headers?: Record<string, string | undefined>
   query?: Record<string, unknown>
+  secure?: boolean
 }
 
 interface ResonanceRouteApp {
@@ -115,25 +117,6 @@ interface PersistentSessionsCookieEntry {
   selectedOptions?: Record<string, string>
   entryPolicy?: string
   urlHash?: string
-}
-
-function readCookieValue(
-  cookies: Record<string, unknown> | undefined,
-  cookieHeader: string | string[] | undefined,
-  name: string,
-): string | null {
-  const parsedValue = cookies?.[name]
-  if (typeof parsedValue === 'string' && parsedValue.length > 0) return parsedValue
-
-  const header = Array.isArray(cookieHeader) ? cookieHeader[0] : cookieHeader
-  if (typeof header !== 'string') return null
-  const entry = header.split(';').map((value) => value.trim()).find((value) => value.startsWith(`${name}=`))
-  if (!entry) return null
-  try {
-    return decodeURIComponent(entry.slice(name.length + 1))
-  } catch {
-    return null
-  }
 }
 
 function resolveAuthenticatedStudentId(
@@ -1604,14 +1587,14 @@ export default function setupResonanceRoutes(
     const body = isPlainObject(req.body) ? req.body : {}
     const authenticatedStudentId = resolveAuthenticatedStudentId(
       session,
-      readCookieValue(req.cookies, req.headers?.cookie, getSessionParticipantCookieName(sessionId)),
+      readAcceptedEntryParticipantCookie(req.cookies, req.headers?.cookie, sessionId),
       typeof body.studentId === 'string' ? body.studentId : null,
     )
     const studentId = authenticatedStudentId ?? `s_${Math.random().toString(36).slice(2, 12)}`
     const authenticatedParticipant = authenticatedStudentId
       ? resolveAcceptedEntryParticipantToken(
         session,
-        readCookieValue(req.cookies, req.headers?.cookie, getSessionParticipantCookieName(sessionId)),
+        readAcceptedEntryParticipantCookie(req.cookies, req.headers?.cookie, sessionId),
       )
       : null
     const studentName = authenticatedParticipant?.displayName ?? validated.name
@@ -1630,7 +1613,7 @@ export default function setupResonanceRoutes(
         res.cookie?.(getSessionParticipantCookieName(sessionId), participantToken, {
           httpOnly: true,
           sameSite: 'lax',
-          secure: process.env.NODE_ENV === 'production',
+          secure: req.secure === true,
           path: '/',
         })
       }
@@ -1659,7 +1642,7 @@ export default function setupResonanceRoutes(
     const body = isPlainObject(req.body) ? req.body : {}
     const studentId = resolveAuthenticatedStudentId(
       session,
-      readCookieValue(req.cookies, req.headers?.cookie, getSessionParticipantCookieName(sessionId)),
+      readAcceptedEntryParticipantCookie(req.cookies, req.headers?.cookie, sessionId),
       typeof body.studentId === 'string' ? body.studentId : null,
     )
     if (!studentId || !session.data.students[studentId]) {
@@ -1729,7 +1712,7 @@ export default function setupResonanceRoutes(
 
     const requestedStudentId = resolveAuthenticatedStudentId(
       session,
-      readCookieValue(req.cookies, req.headers?.cookie, getSessionParticipantCookieName(sessionId)),
+      readAcceptedEntryParticipantCookie(req.cookies, req.headers?.cookie, sessionId),
       req.query?.studentId,
     )
     const selfPacedMode = await resolveSelfPacedMode(session, sessions)
@@ -2807,11 +2790,7 @@ export default function setupResonanceRoutes(
       } else {
         client.studentId = resolveAuthenticatedStudentId(
           session,
-          readCookieValue(
-            undefined,
-            client.upgradeHeaders?.cookie,
-            getSessionParticipantCookieName(sessionId),
-          ),
+          readAcceptedEntryParticipantCookie(undefined, client.upgradeHeaders?.cookie, sessionId),
           queryParams.get('studentId'),
         )
         if (!client.studentId || !session.data.students[client.studentId]) {

@@ -17,7 +17,7 @@ import {
 } from 'activebits-server/core/httpUrlUtils.js'
 import { closeDuplicateParticipantSockets, closeParticipantSockets } from 'activebits-server/core/participantSockets.js'
 import {
-  getSessionParticipantCookieName,
+  readAcceptedEntryParticipantCookie,
   resolveAcceptedEntryParticipantToken,
   revokeAcceptedEntryParticipant,
 } from 'activebits-server/core/acceptedEntryParticipants.js'
@@ -934,28 +934,10 @@ function readStringField(payload: unknown, key: string): string | null {
   return typeof value === 'string' ? value : null
 }
 
-function readCookieValue(cookieHeader: unknown, name: string): string | null {
-  if (Array.isArray(cookieHeader)) cookieHeader = cookieHeader[0]
-  if (typeof cookieHeader !== 'string') return null
-  const entry = cookieHeader.split(';').map((value) => value.trim()).find((value) => value.startsWith(`${name}=`))
-  if (!entry) return null
-  try {
-    return decodeURIComponent(entry.slice(name.length + 1))
-  } catch {
-    return null
-  }
-}
-
-function readRequestCookie(req: RouteRequest, name: string): string | null {
-  const parsed = req.cookies?.[name]
-  if (typeof parsed === 'string' && parsed.length > 0) return parsed
-  return readCookieValue(req.headers?.cookie, name)
-}
-
 function resolveAuthenticatedSyncDeckStudent(session: SyncDeckSession, req: RouteRequest): SyncDeckStudent | null {
   const participantId = resolveAcceptedEntryParticipantToken(
     session,
-    readRequestCookie(req, getSessionParticipantCookieName(session.id)),
+    readAcceptedEntryParticipantCookie(req.cookies, req.headers?.cookie, session.id),
   )?.participantId
   if (participantId) return findSyncDeckStudentById(session.data.students, participantId)
 
@@ -2594,7 +2576,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
 
       const cookieParticipantId = resolveAcceptedEntryParticipantToken(
         session,
-        readCookieValue(client.upgradeHeaders?.cookie, getSessionParticipantCookieName(session.id)),
+        readAcceptedEntryParticipantCookie(undefined, client.upgradeHeaders?.cookie, session.id),
       )?.participantId ?? null
       // Existing live sessions have no token map. Preserve their ID handoff only
       // until expiry; all sessions that have issued a participant token require it.

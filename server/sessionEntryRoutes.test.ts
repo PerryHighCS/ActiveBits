@@ -112,6 +112,37 @@ function createSessionRecord(id: string, type: string): SessionRecord {
   }
 }
 
+void test('unauthenticated session read redacts participant bearer tokens', async () => {
+  const session = createSessionRecord('session-tokens', 'java-string-practice')
+  session.data = {
+    students: [{ id: 'student-1', name: 'Ada' }],
+    acceptedEntryParticipants: { 'student-1': { participantId: 'student-1', displayName: 'Ada', acceptedAt: 1 } },
+    participantAuthTokens: { 'secret-token': 'student-1' },
+  }
+  const sessions = {
+    get: async (id: string) => id === session.id ? session : null,
+    set: async () => {},
+    delete: async () => true,
+    touch: async () => true,
+    getAll: async () => [],
+    getAllIds: async () => [],
+    cleanup: () => {},
+    close: async () => {},
+  }
+  const app = createMockApp()
+  setupSessionRoutes(app as unknown as Parameters<typeof setupSessionRoutes>[0], sessions)
+
+  console.log('[TEST] confirming the unauthenticated session-read route never exposes participantAuthTokens')
+  const res = createMockResponse()
+  await getRoute(app, 'get', '/api/session/:sessionId')({ params: { sessionId: session.id } }, res)
+
+  assert.equal(res.statusCode, 200)
+  const body = res.jsonBody as { session: SessionRecord }
+  assert.equal(Object.hasOwn(body.session.data, 'participantAuthTokens'), false)
+  assert.deepEqual(body.session.data.acceptedEntryParticipants, session.data.acceptedEntryParticipants)
+  assert.deepEqual(body.session.data.students, session.data.students)
+})
+
 void test('session entry route returns render-ui for activities with waiting-room fields', async () => {
   await initializeActivityRegistry()
   const sessions = {

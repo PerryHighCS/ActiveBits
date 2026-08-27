@@ -43,6 +43,7 @@ interface RouteRequest {
   body?: unknown
   cookies?: Record<string, unknown>
   headers?: Record<string, unknown>
+  secure?: boolean
 }
 
 interface BinaryBreachRouteApp {
@@ -323,7 +324,7 @@ export default function setupBinaryBreachRoutes(
       const participantToken = issueAcceptedEntryParticipantToken(session, student.id)
       if (participantToken) {
         res.cookie?.(getSessionParticipantCookieName(session.id), participantToken, {
-          httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production', path: '/',
+          httpOnly: true, sameSite: 'lax', secure: req.secure === true, path: '/',
         })
       }
     }
