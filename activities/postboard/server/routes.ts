@@ -1,7 +1,11 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { createSession, type SessionRecord, type SessionStore } from 'activebits-server/core/sessions.js'
 import { registerSessionNormalizer } from 'activebits-server/core/sessionNormalization.js'
-import { findAcceptedEntryParticipant } from 'activebits-server/core/acceptedEntryParticipants.js'
+import {
+  findAcceptedEntryParticipant,
+  getSessionParticipantCookieName,
+  resolveAcceptedEntryParticipantToken,
+} from 'activebits-server/core/acceptedEntryParticipants.js'
 import { registerActivityReportBuilder } from '../../../server/activities/activityReportRegistry.js'
 import type { WsRouter } from '../../../types/websocket.js'
 import {
@@ -32,6 +36,7 @@ interface RouteRequest {
   body?: unknown
   query?: Record<string, unknown>
   headers?: Record<string, unknown>
+  cookies?: Record<string, unknown>
 }
 
 interface JsonResponse {
@@ -423,27 +428,43 @@ export function buildStudentSnapshot(session: PostboardSession, viewerStudentId:
   }
 }
 
-function readStudentId(req: RouteRequest): string | null {
-  const body = getBody(req)
-  const value = body.studentId ?? req.query?.studentId
-  const studentId = sanitizeText(value, 160)
-  return studentId || null
+function readCookieValue(req: RouteRequest, name: string): string | null {
+  const parsedValue = req.cookies?.[name]
+  if (typeof parsedValue === 'string' && parsedValue.length > 0) return parsedValue
+  const cookieHeader = req.headers?.cookie
+  if (typeof cookieHeader !== 'string') return null
+  const entry = cookieHeader.split(';').map((value) => value.trim()).find((value) => value.startsWith(`${name}=`))
+  if (!entry) return null
+  try {
+    return decodeURIComponent(entry.slice(name.length + 1))
+  } catch {
+    return null
+  }
 }
 
 function readAcceptedStudentId(session: PostboardSession, req: RouteRequest): string | null {
-  const studentId = readStudentId(req)
-  if (!studentId) return null
-  return findAcceptedEntryParticipant(session, studentId) ? studentId : null
+  const authenticatedId = resolveAcceptedEntryParticipantToken(
+    session,
+    readCookieValue(req, getSessionParticipantCookieName(session.id)),
+  )?.participantId
+  if (authenticatedId) return authenticatedId
+
+  // Existing live sessions created before #341 did not issue participant
+  // cookies. Retain their accepted-entry handoff until they expire naturally.
+  if (!Object.hasOwn(session.data, 'participantAuthTokens')) {
+    const claimedId = sanitizeText(getBody(req).studentId ?? req.query?.studentId, 160)
+    return findAcceptedEntryParticipant(session, claimedId || null)?.participantId ?? null
+  }
+  return null
 }
 
 function requireAcceptedStudentId(session: PostboardSession, req: RouteRequest, res: JsonResponse): string | null {
-  const studentId = readStudentId(req)
+  const studentId = readAcceptedStudentId(session, req)
   if (!studentId) {
-    res.status(400).json({ error: 'studentId is required' })
-    return null
-  }
-  if (!findAcceptedEntryParticipant(session, studentId)) {
-    res.status(403).json({ error: 'invalid studentId' })
+    const claimedId = sanitizeText(getBody(req).studentId ?? req.query?.studentId, 160)
+    res.status(claimedId ? 403 : 400).json({
+      error: claimedId ? 'waiting-room identity required' : 'student identity is required',
+    })
     return null
   }
   return studentId

@@ -86,7 +86,6 @@ export default function QuestionView({
     const pendingDraft = draftAnswer
     const sendDraft = () => {
       const sent = sendMessage('resonance:update-draft', {
-        studentId,
         questionId: question.id,
         answer: pendingDraft,
       })
@@ -120,7 +119,6 @@ export default function QuestionView({
     setError(null)
 
     const sentViaWs = sendMessage?.('resonance:submit-answer', {
-      studentId,
       questionId: question.id,
       answer,
     }) ?? false
@@ -138,7 +136,7 @@ export default function QuestionView({
       const resp = await fetch(`/api/resonance/${sessionId}/submit-answer`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ studentId, questionId: question.id, answer }),
+        body: JSON.stringify({ questionId: question.id, answer }),
       })
 
       const data = (await resp.json()) as { ok?: boolean; error?: string }
