@@ -1,6 +1,7 @@
 import { createSession, type SessionRecord, type SessionStore } from 'activebits-server/core/sessions.js'
 import { createBroadcastSubscriptionHelper } from 'activebits-server/core/broadcastUtils.js'
 import { registerSessionNormalizer } from 'activebits-server/core/sessionNormalization.js'
+import { getSessionParticipantCookieName, resolveAcceptedEntryParticipantToken } from 'activebits-server/core/acceptedEntryParticipants.js'
 import type { ActiveBitsWebSocket, WsRouter } from '../../../types/websocket.js'
 import type {
   PythonListPracticeSessionData,
@@ -23,6 +24,8 @@ interface JsonResponse {
 interface RouteRequest {
   params: Record<string, string | undefined>
   body?: unknown
+  cookies?: Record<string, unknown>
+  headers?: Record<string, unknown>
 }
 
 interface PythonListPracticeRouteApp {
@@ -73,9 +76,26 @@ function normalizeSessionData(data: unknown): PythonListPracticeSessionData {
     : []
 
   return {
+    ...(isPlainObject(source.acceptedEntryParticipants) ? { acceptedEntryParticipants: source.acceptedEntryParticipants } : {}),
+    ...(isPlainObject(source.participantAuthTokens) ? { participantAuthTokens: source.participantAuthTokens } : {}),
     students,
     selectedQuestionTypes: sanitizeQuestionTypes(source.selectedQuestionTypes),
   }
+}
+
+function readParticipantToken(cookies: Record<string, unknown> | undefined, cookieHeader: unknown, sessionId: string): string | null {
+  const name = getSessionParticipantCookieName(sessionId)
+  const parsed = cookies?.[name]
+  if (typeof parsed === 'string' && parsed.length > 0) return parsed
+  if (Array.isArray(cookieHeader)) cookieHeader = cookieHeader[0]
+  if (typeof cookieHeader !== 'string') return null
+  const entry = cookieHeader.split(';').map((value) => value.trim()).find((value) => value.startsWith(`${name}=`))
+  if (!entry) return null
+  try { return decodeURIComponent(entry.slice(name.length + 1)) } catch { return null }
+}
+
+function resolveCookieStudent(session: PythonListPracticeSession, cookies: Record<string, unknown> | undefined, cookieHeader: unknown) {
+  return resolveAcceptedEntryParticipantToken(session, readParticipantToken(cookies, cookieHeader, session.id))
 }
 
 function asPythonListPracticeSession(
@@ -126,6 +146,8 @@ export default function setupPythonListPracticeRoutes(
     const session = await createSession(sessions, { data: {} })
     session.type = 'python-list-practice'
     session.data = {
+      acceptedEntryParticipants: {},
+      participantAuthTokens: {},
       students: [],
       selectedQuestionTypes: ['all'],
     }
@@ -195,8 +217,10 @@ export default function setupPythonListPracticeRoutes(
     }
 
     const reqBody = isPlainObject(req.body) ? req.body : {}
-    const studentName = validateName(reqBody.studentName)
-    const studentId = validateStudentId(reqBody.studentId)
+    const authenticated = resolveCookieStudent(session, req.cookies, req.headers?.cookie)
+    const legacySession = !Object.hasOwn(session.data, 'participantAuthTokens')
+    const studentName = authenticated?.displayName ?? (legacySession ? validateName(reqBody.studentName) : null)
+    const studentId = authenticated?.participantId ?? (legacySession ? validateStudentId(reqBody.studentId) : null)
     const stats = validateStats(reqBody.stats)
 
     if ((studentName == null && studentId == null) || stats == null) {
@@ -251,8 +275,10 @@ export default function setupPythonListPracticeRoutes(
       ensureBroadcastSubscription(client.sessionId)
     }
 
-    client.studentName = validateName(qp.get('studentName') || '')
-    client.studentId = validateStudentId(qp.get('studentId') || '')
+    const claimedStudentName = validateName(qp.get('studentName') || '')
+    const claimedStudentId = validateStudentId(qp.get('studentId') || '')
+    client.studentName = claimedStudentName
+    client.studentId = null
 
     const sendQuestionTypesSnapshot = async (): Promise<void> => {
       if (!client.sessionId) return
@@ -275,16 +301,22 @@ export default function setupPythonListPracticeRoutes(
       })
     }
 
-    if (client.sessionId && client.studentName) {
+    if (client.sessionId) {
       ;(async (): Promise<void> => {
         const session = asPythonListPracticeSession(
           await sessions.get(client.sessionId!),
         )
         if (session) {
+          const authenticated = resolveCookieStudent(session, undefined, client.upgradeHeaders?.cookie)
+          const legacySession = !Object.hasOwn(session.data, 'participantAuthTokens')
+          if (!authenticated && !legacySession) {
+            client.close(1008, 'student authentication required')
+            return
+          }
           const result = connectPythonListPracticeStudent(
             session,
-            client.studentId ?? null,
-            client.studentName ?? null,
+            authenticated?.participantId ?? claimedStudentId,
+            authenticated?.displayName ?? claimedStudentName,
           )
           if (!result) {
             try {
