@@ -1083,9 +1083,10 @@ function buildStudentSnapshotWithMode(
 function isStaleActiveResponse(
   sessionData: ResonanceSessionData,
   response: Response,
+  activeQuestionIdSet?: ReadonlySet<string>,
 ): boolean {
   return (
-    sessionData.activeQuestionIds.includes(response.questionId) &&
+    (activeQuestionIdSet?.has(response.questionId) ?? sessionData.activeQuestionIds.includes(response.questionId)) &&
     sessionData.activeQuestionRunStartedAt !== null &&
     response.submittedAt < sessionData.activeQuestionRunStartedAt
   )
@@ -1108,12 +1109,13 @@ function buildInstructorSnapshot(session: ResonanceSession) {
     responseOrderOverrides,
   } =
     session.data
+  const activeQuestionIdSet = new Set(activeQuestionIds)
   const currentRunSubmittedKeys = new Set<string>()
   const progressByQuestionStudent = new Map<string, ResponseProgress>()
 
   for (const response of responses) {
     const key = buildDraftKey(response.questionId, response.studentId)
-    const staleActiveResponse = isStaleActiveResponse(session.data, response)
+    const staleActiveResponse = isStaleActiveResponse(session.data, response, activeQuestionIdSet)
 
     if (!staleActiveResponse) {
       currentRunSubmittedKeys.add(key)
