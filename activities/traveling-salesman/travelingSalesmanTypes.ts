@@ -91,6 +91,8 @@ export interface JsonResponse {
 export interface RouteRequest {
   params: Record<string, string | undefined>
   body?: unknown
+  cookies?: Record<string, unknown>
+  headers?: Record<string, unknown>
 }
 
 export interface TravelingSalesmanRouteApp {

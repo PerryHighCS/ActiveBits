@@ -6,9 +6,21 @@ import type {
 } from '../../travelingSalesmanTypes.js'
 import { asTravelingSalesmanSession } from '../../travelingSalesmanTypes.js'
 import { connectAcceptedSessionParticipant } from 'activebits-server/core/acceptedSessionParticipants.js'
+import { getSessionParticipantCookieName, resolveAcceptedEntryParticipantToken } from 'activebits-server/core/acceptedEntryParticipants.js'
 import { disconnectSessionParticipant, updateSessionParticipant } from 'activebits-server/core/sessionParticipants.js'
 import { isFiniteNumber, isRouteArray } from '../validation.js'
 import { createBroadcastHelpers, closeDuplicateStudentSockets, generateStudentId } from './shared.js'
+
+function readParticipantToken(cookies: Record<string, unknown> | undefined, cookieHeader: unknown, sessionId: string): string | null {
+  const name = getSessionParticipantCookieName(sessionId)
+  const parsed = cookies?.[name]
+  if (typeof parsed === 'string' && parsed.length > 0) return parsed
+  if (Array.isArray(cookieHeader)) cookieHeader = cookieHeader[0]
+  if (typeof cookieHeader !== 'string') return null
+  const entry = cookieHeader.split(';').map((value) => value.trim()).find((value) => value.startsWith(`${name}=`))
+  if (!entry) return null
+  try { return decodeURIComponent(entry.slice(name.length + 1)) } catch { return null }
+}
 
 export default function registerStudentRoutes(
   app: TravelingSalesmanRouteApp,
@@ -25,18 +37,27 @@ export default function registerStudentRoutes(
     const client = socket as TravelingSalesmanSocket
     client.sessionId = qp.get('sessionId') || null
     ensureBroadcastSubscription(client.sessionId)
-    const studentName = qp.get('studentName') || null
-    const studentId = qp.get('studentId') || null
+    const claimedStudentName = qp.get('studentName') || null
+    const claimedStudentId = qp.get('studentId') || null
 
     if (client.sessionId) {
       ;(async () => {
         const session = asTravelingSalesmanSession(await sessions.get(client.sessionId || ''))
         if (session) {
+          const authenticated = resolveAcceptedEntryParticipantToken(
+            session,
+            readParticipantToken(undefined, client.upgradeHeaders?.cookie, session.id),
+          )
+          const legacySession = !Object.hasOwn(session.data, 'participantAuthTokens')
+          if (!authenticated && !legacySession) {
+            client.close(1008, 'student authentication required')
+            return
+          }
           const result = connectAcceptedSessionParticipant({
             session,
             participants: session.data.students,
-            participantId: studentId,
-            participantName: studentName ?? null,
+            participantId: authenticated?.participantId ?? claimedStudentId,
+            participantName: authenticated?.displayName ?? claimedStudentName,
             createParticipant: (participantId, participantName, now) => ({
               id: participantId,
               name: participantName,
@@ -51,7 +72,7 @@ export default function registerStudentRoutes(
               routeCompleteTime: null,
               timeToComplete: null,
             }),
-            generateParticipantId: () => generateStudentId(studentName ?? 'student'),
+            generateParticipantId: () => generateStudentId((authenticated?.displayName ?? claimedStudentName) ?? 'student'),
           })
           if (!result) {
             try {
@@ -161,13 +182,18 @@ export default function registerStudentRoutes(
     }
 
     const body = (req.body ?? {}) as Record<string, unknown>
-    const studentId = body.studentId
+    const authenticated = resolveAcceptedEntryParticipantToken(
+      session,
+      readParticipantToken(req.cookies, req.headers?.cookie, session.id),
+    )
+    const legacySession = !Object.hasOwn(session.data, 'participantAuthTokens')
+    const studentId = authenticated?.participantId ?? (legacySession ? body.studentId : null)
     const route = body.route
     const distance = body.distance
     const timeToComplete = body.timeToComplete
 
     if (typeof studentId !== 'string' || !studentId.trim()) {
-      res.status(400).json({ error: 'Invalid studentId' })
+      res.status(legacySession ? 400 : 403).json({ error: legacySession ? 'Invalid studentId' : 'student authentication required' })
       return
     }
     if (!isRouteArray(route)) {

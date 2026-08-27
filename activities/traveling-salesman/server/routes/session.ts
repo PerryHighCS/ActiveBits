@@ -43,6 +43,8 @@ export default function registerSessionRoutes(
     const session = await createSession(sessions, { data: {} })
     session.type = 'traveling-salesman'
     session.data = normalizeTravelingSalesmanSessionData(session.data)
+    session.data.acceptedEntryParticipants = {}
+    session.data.participantAuthTokens = {}
     session.data.problem = {}
     session.data.students = []
     session.data.algorithms = { bruteForce: {}, heuristic: {} }
