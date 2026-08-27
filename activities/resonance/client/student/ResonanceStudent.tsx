@@ -101,6 +101,25 @@ export function hasActiveQuestionRunRestart(params: {
   )
 }
 
+export function shouldUseLocalSubmittedAnswer(params: {
+  questionId: string
+  selfPacedMode: boolean
+  hasObservedSnapshot: boolean
+  activeQuestionIds: string[]
+  activeQuestionRunStartedAt: number | null
+  previousActiveQuestionIds: string[]
+  previousActiveQuestionRunStartedAt: number | null
+}): boolean {
+  if (params.selfPacedMode || !params.hasObservedSnapshot) {
+    return true
+  }
+
+  return (
+    params.previousActiveQuestionIds.includes(params.questionId) &&
+    !hasActiveQuestionRunRestart(params)
+  )
+}
+
 function formatRemainingTime(deadlineAt: number | null, now: number): string | null {
   if (deadlineAt === null) {
     return null
@@ -342,6 +361,15 @@ export default function ResonanceStudent() {
 
   const activeQuestions = snapshot?.activeQuestions ?? []
   const activeQuestion = activeQuestions.find((question) => question.id === selectedQuestionId) ?? activeQuestions[0] ?? null
+  const useLocalSubmittedAnswer = snapshot !== null && activeQuestion !== null && shouldUseLocalSubmittedAnswer({
+    questionId: activeQuestion.id,
+    selfPacedMode: snapshot.selfPacedMode,
+    hasObservedSnapshot: hasObservedSnapshotRef.current,
+    activeQuestionIds: activeQuestions.map((question) => question.id),
+    activeQuestionRunStartedAt: snapshot.activeQuestionRunStartedAt,
+    previousActiveQuestionIds: previousActiveQuestionIdsRef.current,
+    previousActiveQuestionRunStartedAt: previousActiveQuestionRunStartedAtRef.current,
+  })
   const activeDeadlineAt = snapshot?.activeQuestionDeadlineAt ?? null
   const hasExpired = activeDeadlineAt !== null && activeDeadlineAt <= countdownNow
   const liveCountdown = formatRemainingTime(activeDeadlineAt, countdownNow)
@@ -431,7 +459,11 @@ export default function ResonanceStudent() {
                 question={activeQuestion}
                 sessionId={sessionId}
                 studentId={studentId}
-                initialAnswer={snapshot.submittedAnswers[activeQuestion.id] ?? submittedAnswers[activeQuestion.id] ?? null}
+                initialAnswer={
+                  snapshot.submittedAnswers[activeQuestion.id] ??
+                  (useLocalSubmittedAnswer ? submittedAnswers[activeQuestion.id] : null) ??
+                  null
+                }
                 activeQuestionRunStartedAt={snapshot.activeQuestionRunStartedAt}
                 disabled={hasExpired}
                 isSubmitted={submittedQuestionIds.has(activeQuestion.id)}

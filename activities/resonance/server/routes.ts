@@ -525,7 +525,7 @@ function buildDraftKey(questionId: string, studentId: string): string {
   return `${questionId}:${studentId}`
 }
 
-export function resolveDraftStudentId(payloadStudentId: unknown, clientStudentId: string | null | undefined): string | null {
+export function resolveSocketStudentId(payloadStudentId: unknown, clientStudentId: string | null | undefined): string | null {
   const studentId = clientStudentId ?? null
   if (!studentId || (typeof payloadStudentId === 'string' && payloadStudentId !== studentId)) {
     return null
@@ -2518,8 +2518,7 @@ export default function setupResonanceRoutes(
   ): Promise<void> {
     switch (type) {
       case 'resonance:submit-answer': {
-        const studentId =
-          typeof payload.studentId === 'string' ? payload.studentId : (clientStudentId ?? null)
+        const studentId = resolveSocketStudentId(payload.studentId, clientStudentId)
         if (!studentId || !session.data.students[studentId]) return
         const requestedQuestionId = typeof payload.questionId === 'string' ? payload.questionId : null
         const selfPacedMode = await resolveSelfPacedMode(session, sessions)
@@ -2553,7 +2552,7 @@ export default function setupResonanceRoutes(
       }
 
       case 'resonance:update-draft': {
-        const studentId = resolveDraftStudentId(payload.studentId, clientStudentId)
+        const studentId = resolveSocketStudentId(payload.studentId, clientStudentId)
         if (!studentId || !session.data.students[studentId]) return
         const selfPacedMode = await resolveSelfPacedMode(session, sessions)
         const availableQuestionIds = resolveStudentAvailableQuestionIds(session, selfPacedMode)

@@ -11,7 +11,7 @@ import type { WsRouter } from '../../../types/websocket.js'
 import setupResonanceRoutes, {
   generateImportedQuestionId,
   resolveAnswerabilityErrorMessage,
-  resolveDraftStudentId,
+  resolveSocketStudentId,
 } from './routes.js'
 
 interface RouteRequest {
@@ -89,9 +89,9 @@ void test('generateImportedQuestionId falls back when Math.random produces an em
   )
 })
 
-void test('resolveDraftStudentId rejects a draft update that claims another student identity', () => {
-  assert.equal(resolveDraftStudentId('student2', 'student1'), null)
-  assert.equal(resolveDraftStudentId('student1', 'student1'), 'student1')
+void test('resolveSocketStudentId rejects student messages that claim another identity', () => {
+  assert.equal(resolveSocketStudentId('student2', 'student1'), null)
+  assert.equal(resolveSocketStudentId('student1', 'student1'), 'student1')
 })
 
 function createEmbeddedResonanceSession(): SessionRecord {
