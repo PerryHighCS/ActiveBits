@@ -412,6 +412,7 @@ export function normalizeStudentSessionSnapshot(
   }
 }
 
+/** Reject delayed session snapshots that would move a student back to an earlier live run. */
 export function shouldApplyStudentSessionSnapshot(
   current: StudentSessionSnapshot | null,
   candidate: StudentSessionSnapshot,
@@ -424,9 +425,7 @@ export function shouldApplyStudentSessionSnapshot(
     return true
   }
 
-  const currentIds = current.activeQuestionIds.join('\u0000')
-  const candidateIds = candidate.activeQuestionIds.join('\u0000')
-  return currentIds !== candidateIds || candidate.activeQuestionRunStartedAt >= current.activeQuestionRunStartedAt
+  return candidate.activeQuestionRunStartedAt >= current.activeQuestionRunStartedAt
 }
 
 /**

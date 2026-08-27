@@ -44,7 +44,7 @@ void test('normalizeStudentSessionSnapshot keeps selfPacedMode when provided', (
   assert.equal(result.selfPacedMode, true)
 })
 
-void test('shouldApplyStudentSessionSnapshot rejects a delayed older run for the same active questions', () => {
+void test('shouldApplyStudentSessionSnapshot rejects a delayed older run even when active questions differ', () => {
   const current = normalizeStudentSessionSnapshot({
     sessionId: 'session-1',
     activeQuestionIds: ['q1'],
@@ -52,7 +52,7 @@ void test('shouldApplyStudentSessionSnapshot rejects a delayed older run for the
   })
   const delayed = normalizeStudentSessionSnapshot({
     sessionId: 'session-1',
-    activeQuestionIds: ['q1'],
+    activeQuestionIds: ['q2'],
     activeQuestionRunStartedAt: 1_000,
   })
   const newer = normalizeStudentSessionSnapshot({

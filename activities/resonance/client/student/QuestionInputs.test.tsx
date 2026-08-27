@@ -282,6 +282,57 @@ void test('QuestionView preserves a student draft when a same-run session update
   }
 })
 
+void test('QuestionView does not flush an unsent draft after the question run changes', async () => {
+  const restoreDomEnvironment = installDomEnvironment()
+  const { fireEvent, render, waitFor } = await import('@testing-library/react')
+
+  try {
+    const sentDrafts: unknown[] = []
+    const question = {
+      id: 'q1',
+      type: 'free-response' as const,
+      text: 'Explain your reasoning.',
+      order: 0,
+    }
+    const sendMessage = (type: string, payload: unknown) => {
+      if (type === 'resonance:update-draft') {
+        sentDrafts.push(payload)
+      }
+      return true
+    }
+    const rendered = render(
+      React.createElement(QuestionView, {
+        question,
+        sessionId: 'session-1',
+        studentId: 'student-1',
+        activeQuestionRunStartedAt: 1_000,
+        sendMessage,
+      }),
+    )
+
+    fireEvent.change(rendered.getByLabelText(/your answer/i), {
+      target: { value: 'Draft from the earlier run' },
+    })
+    rendered.rerender(
+      React.createElement(QuestionView, {
+        question,
+        sessionId: 'session-1',
+        studentId: 'student-1',
+        activeQuestionRunStartedAt: 2_000,
+        sendMessage,
+      }),
+    )
+
+    await waitFor(() => {
+      assert.deepEqual(sentDrafts, [])
+    })
+
+    rendered.unmount()
+  } finally {
+    restoreDomEnvironment()
+  }
+})
+
 void test('QuestionView shows only the stem for staged MCQs before choices are revealed', async () => {
   const restoreDomEnvironment = installDomEnvironment()
   const { render } = await import('@testing-library/react')

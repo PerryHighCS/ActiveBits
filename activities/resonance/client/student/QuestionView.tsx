@@ -48,6 +48,8 @@ export default function QuestionView({
   const [error, setError] = useState<string | null>(null)
   const [draftAnswer, setDraftAnswer] = useState<AnswerPayload | null>(initialAnswer)
   const lastSentDraftRef = useRef<AnswerPayload | null>(null)
+  const activeQuestionRunStartedAtRef = useRef(activeQuestionRunStartedAt)
+  activeQuestionRunStartedAtRef.current = activeQuestionRunStartedAt
   const isWaitingForChoices =
     question.type === 'multiple-choice' && question.choicesRevealed === false
 
@@ -79,7 +81,10 @@ export default function QuestionView({
 
     return () => {
       window.clearTimeout(timeoutId)
-      if (!isSameAnswer(pendingDraft, lastSentDraftRef.current)) {
+      if (
+        activeQuestionRunStartedAtRef.current === activeQuestionRunStartedAt &&
+        !isSameAnswer(pendingDraft, lastSentDraftRef.current)
+      ) {
         sendDraft()
       }
     }
