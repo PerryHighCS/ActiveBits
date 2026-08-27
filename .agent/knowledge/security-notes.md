@@ -18,10 +18,10 @@ Track security-relevant boundaries, risks, and mitigation decisions.
 - Date: 2026-08-27
 - Area: Resonance and Postboard student identity
 - Threat or risk: Client-supplied student IDs in request/query/WebSocket data could be claimed by another participant, exposing private Resonance responses or Postboard moderation state and allowing attributed mutations.
-- Control or mitigation: New Resonance sessions issue and require the existing server-backed, session-scoped `activebits_participant_*` httpOnly token; REST and WebSocket identity is resolved from that cookie and client IDs are no longer sent by the Resonance runtime. Postboard now resolves the same cookie before returning student-private state or accepting student mutations.
+- Control or mitigation: New Resonance sessions issue and require the existing server-backed, session-scoped `activebits_participant_*` httpOnly token; REST and WebSocket identity is resolved from that cookie and client IDs are no longer sent by the Resonance runtime. Postboard, SyncDeck, Binary Breach, Java String Practice, Java Format Practice, Python List Practice, and Traveling Salesman also resolve that cookie before student-private state or mutations. Their session normalizers preserve the server-side token mapping.
 - Residual risk: Live sessions created before this change have no token container, so their accepted legacy ID handoff remains valid only until the normal session TTL expires. New sessions must never add a client-ID fallback.
-- Validation (test/review/path): `activities/resonance/server/routes.test.ts`; `activities/postboard/server/routes.test.ts`.
-- Follow-up action: When modernizing activities that still accept a claimed student ID (Java practice, Embedded Test, SyncDeck, and TSP), use `resolveAcceptedEntryParticipantToken` rather than adding another identity transport.
+- Validation (test/review/path): activity route tests for Resonance, Postboard, SyncDeck, Binary Breach, Java String Practice, Java Format Practice, Python List Practice, and Traveling Salesman.
+- Follow-up action: Keep Video Sync's student ID telemetry-only. If it ever affects student-visible state or server-side decisions, use `resolveAcceptedEntryParticipantToken`; Embedded Test remains development-only.
 - Owner: Codex
 
 - Date: 2026-07-26
