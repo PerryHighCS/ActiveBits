@@ -552,10 +552,10 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
                 latestSnapshotRequestRef.current += 1
                 snapshotRef.current = selection.snapshot
                 setSnapshot(selection.snapshot)
+                setLoading(false)
+                setError(null)
               }
             }
-            setLoading(false)
-            setError(null)
           } else if (
             msg.type === 'resonance:results-shared' ||
             msg.type === 'resonance:sharing-stopped' ||
