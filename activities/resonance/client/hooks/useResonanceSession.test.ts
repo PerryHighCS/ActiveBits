@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { normalizeStudentSessionSnapshot } from './useResonanceSession.js'
+import { normalizeStudentSessionSnapshot, shouldApplyStudentSessionSnapshot } from './useResonanceSession.js'
 import type { StudentSessionSnapshot } from '../../shared/types.js'
 
 void test('normalizeStudentSessionSnapshot rejects array submittedAnswers payloads', () => {
@@ -42,6 +42,30 @@ void test('normalizeStudentSessionSnapshot keeps selfPacedMode when provided', (
 
   assert.ok(result)
   assert.equal(result.selfPacedMode, true)
+})
+
+void test('shouldApplyStudentSessionSnapshot rejects a delayed older run for the same active questions', () => {
+  const current = normalizeStudentSessionSnapshot({
+    sessionId: 'session-1',
+    activeQuestionIds: ['q1'],
+    activeQuestionRunStartedAt: 2_000,
+  })
+  const delayed = normalizeStudentSessionSnapshot({
+    sessionId: 'session-1',
+    activeQuestionIds: ['q1'],
+    activeQuestionRunStartedAt: 1_000,
+  })
+  const newer = normalizeStudentSessionSnapshot({
+    sessionId: 'session-1',
+    activeQuestionIds: ['q1'],
+    activeQuestionRunStartedAt: 3_000,
+  })
+
+  assert.ok(current)
+  assert.ok(delayed)
+  assert.ok(newer)
+  assert.equal(shouldApplyStudentSessionSnapshot(current, delayed), false)
+  assert.equal(shouldApplyStudentSessionSnapshot(current, newer), true)
 })
 
 void test('normalizeStudentSessionSnapshot preserves staged run state and hidden MCQ choices', () => {

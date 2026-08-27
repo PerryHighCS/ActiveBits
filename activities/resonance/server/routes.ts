@@ -1032,7 +1032,10 @@ function buildStudentSnapshotWithMode(
       ? {}
       : Object.fromEntries(
           session.data.responses
-            .filter((response) => response.studentId === viewerStudentId)
+            .filter((response) =>
+              response.studentId === viewerStudentId &&
+              !isStaleActiveResponse(session.data, response),
+            )
             .map((response) => [response.questionId, response.answer] satisfies [string, Response['answer']]),
         )
   const reviewedResponses =
@@ -1077,6 +1080,17 @@ function buildStudentSnapshotWithMode(
   }
 }
 
+function isStaleActiveResponse(
+  sessionData: ResonanceSessionData,
+  response: Response,
+): boolean {
+  return (
+    sessionData.activeQuestionIds.includes(response.questionId) &&
+    sessionData.activeQuestionRunStartedAt !== null &&
+    response.submittedAt < sessionData.activeQuestionRunStartedAt
+  )
+}
+
 function buildInstructorSnapshot(session: ResonanceSession) {
   const {
     presentationMode,
@@ -1094,18 +1108,14 @@ function buildInstructorSnapshot(session: ResonanceSession) {
     responseOrderOverrides,
   } =
     session.data
-  const activeQuestionIdSet = new Set(activeQuestionIds)
   const currentRunSubmittedKeys = new Set<string>()
   const progressByQuestionStudent = new Map<string, ResponseProgress>()
 
   for (const response of responses) {
     const key = buildDraftKey(response.questionId, response.studentId)
-    const isStaleActiveResponse =
-      activeQuestionIdSet.has(response.questionId) &&
-      activeQuestionRunStartedAt !== null &&
-      response.submittedAt < activeQuestionRunStartedAt
+    const staleActiveResponse = isStaleActiveResponse(session.data, response)
 
-    if (!isStaleActiveResponse) {
+    if (!staleActiveResponse) {
       currentRunSubmittedKeys.add(key)
     }
 
@@ -1114,7 +1124,7 @@ function buildInstructorSnapshot(session: ResonanceSession) {
       studentId: response.studentId,
       studentName: students[response.studentId]?.name ?? 'Unknown',
       updatedAt: response.submittedAt,
-      status: isStaleActiveResponse ? 'working' : 'submitted',
+      status: staleActiveResponse ? 'working' : 'submitted',
       answer: response.answer,
       responseId: response.id,
     })
@@ -2551,7 +2561,10 @@ export default function setupResonanceRoutes(
         if (!isCurrentStagedQuestionAnswerable(session.data, questionId)) return
 
         const alreadyAnswered = session.data.responses.some(
-          (response) => response.questionId === questionId && response.studentId === studentId,
+          (response) =>
+            response.questionId === questionId &&
+            response.studentId === studentId &&
+            !isStaleActiveResponse(session.data, response),
         )
         if (alreadyAnswered) return
 

@@ -236,6 +236,52 @@ void test('QuestionView submits over websocket first when sendMessage is availab
   }
 })
 
+void test('QuestionView preserves a student draft when a same-run session update contains an older answer', async () => {
+  const restoreDomEnvironment = installDomEnvironment()
+  const { fireEvent, render, waitFor } = await import('@testing-library/react')
+
+  try {
+    const question = {
+      id: 'q1',
+      type: 'free-response' as const,
+      text: 'Explain your reasoning.',
+      order: 0,
+    }
+    const rendered = render(
+      React.createElement(QuestionView, {
+        question,
+        sessionId: 'session-1',
+        studentId: 'student-1',
+        activeQuestionRunStartedAt: 2_000,
+        initialAnswer: null,
+        sendMessage: () => true,
+      }),
+    )
+
+    const textarea = rendered.getByLabelText(/your answer/i) as HTMLTextAreaElement
+    fireEvent.change(textarea, { target: { value: 'New work that must remain' } })
+
+    rendered.rerender(
+      React.createElement(QuestionView, {
+        question,
+        sessionId: 'session-1',
+        studentId: 'student-1',
+        activeQuestionRunStartedAt: 2_000,
+        initialAnswer: { type: 'free-response', text: 'Earlier run answer' },
+        sendMessage: () => true,
+      }),
+    )
+
+    await waitFor(() => {
+      assert.equal(textarea.value, 'New work that must remain')
+    })
+
+    rendered.unmount()
+  } finally {
+    restoreDomEnvironment()
+  }
+})
+
 void test('QuestionView shows only the stem for staged MCQs before choices are revealed', async () => {
   const restoreDomEnvironment = installDomEnvironment()
   const { render } = await import('@testing-library/react')

@@ -247,6 +247,13 @@ export default function ResonanceStudent() {
       activeRunStartedAt !== previousActiveQuestionRunStartedAtRef.current
 
     if (reactivatedIds.length > 0 || didRunRestart) {
+      setSubmittedAnswers((current) => {
+        const next = { ...current }
+        for (const questionId of didRunRestart ? activeIds : reactivatedIds) {
+          delete next[questionId]
+        }
+        return next
+      })
       setSubmittedQuestionIds((current) => {
         const next = new Set(current)
         for (const questionId of didRunRestart ? activeIds : reactivatedIds) {
@@ -403,6 +410,7 @@ export default function ResonanceStudent() {
                 sessionId={sessionId}
                 studentId={studentId}
                 initialAnswer={snapshot.submittedAnswers[activeQuestion.id] ?? submittedAnswers[activeQuestion.id] ?? null}
+                activeQuestionRunStartedAt={snapshot.activeQuestionRunStartedAt}
                 disabled={hasExpired}
                 isSubmitted={submittedQuestionIds.has(activeQuestion.id)}
                 submittedMessage={submittedMessage}

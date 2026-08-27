@@ -2336,9 +2336,11 @@ void test('reactivating a question marks prior answers as working instead of sub
   const activateHandler = app.handlers.post['/api/resonance/:sessionId/activate-question']
   const submitHandler = app.handlers.post['/api/resonance/:sessionId/submit-answer']
   const responsesHandler = app.handlers.get['/api/resonance/:sessionId/responses']
+  const stateHandler = app.handlers.get['/api/resonance/:sessionId/state']
   assert.equal(typeof activateHandler, 'function')
   assert.equal(typeof submitHandler, 'function')
   assert.equal(typeof responsesHandler, 'function')
+  assert.equal(typeof stateHandler, 'function')
 
   const firstActivateRes = createResponse()
   await activateHandler?.(
@@ -2387,6 +2389,20 @@ void test('reactivating a question marks prior answers as working instead of sub
     secondActivateRes,
   )
   assert.equal(secondActivateRes.statusCode, 200)
+
+  const studentStateRes = createResponse()
+  await stateHandler?.(
+    {
+      params: { sessionId: session.id },
+      query: { studentId: 'student1' },
+    },
+    studentStateRes,
+  )
+  assert.equal(studentStateRes.statusCode, 200)
+  assert.deepEqual(
+    (studentStateRes.body as { submittedAnswers?: Record<string, unknown> }).submittedAnswers,
+    {},
+  )
 
   const responsesRes = createResponse()
   await responsesHandler?.(

@@ -412,6 +412,23 @@ export function normalizeStudentSessionSnapshot(
   }
 }
 
+export function shouldApplyStudentSessionSnapshot(
+  current: StudentSessionSnapshot | null,
+  candidate: StudentSessionSnapshot,
+): boolean {
+  if (
+    current === null ||
+    current.activeQuestionRunStartedAt === null ||
+    candidate.activeQuestionRunStartedAt === null
+  ) {
+    return true
+  }
+
+  const currentIds = current.activeQuestionIds.join('\u0000')
+  const candidateIds = candidate.activeQuestionIds.join('\u0000')
+  return currentIds !== candidateIds || candidate.activeQuestionRunStartedAt >= current.activeQuestionRunStartedAt
+}
+
 /**
  * Connects to the Resonance WebSocket as a student for real-time session state.
  * Falls back to REST polling while the WebSocket is reconnecting.
@@ -444,7 +461,7 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
         setLoading(false)
         return
       }
-      setSnapshot(data)
+      setSnapshot((current) => shouldApplyStudentSessionSnapshot(current, data) ? data : current)
       setError(null)
       setLoading(false)
     } catch {
@@ -499,7 +516,7 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
           if (msg.type === 'resonance:session-state' && msg.payload !== undefined) {
             const normalized = normalizeStudentSessionSnapshot(msg.payload as Partial<StudentSessionSnapshot>)
             if (normalized) {
-              setSnapshot(normalized)
+              setSnapshot((current) => shouldApplyStudentSessionSnapshot(current, normalized) ? normalized : current)
             }
             setLoading(false)
             setError(null)

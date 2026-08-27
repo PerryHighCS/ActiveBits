@@ -10,6 +10,7 @@ interface Props {
   sessionId: string
   studentId: string
   initialAnswer?: AnswerPayload | null
+  activeQuestionRunStartedAt?: number | null
   disabled?: boolean
   isSubmitted?: boolean
   submittedMessage?: string
@@ -35,6 +36,7 @@ export default function QuestionView({
   sessionId,
   studentId,
   initialAnswer = null,
+  activeQuestionRunStartedAt = null,
   disabled = false,
   isSubmitted = false,
   submittedMessage = 'Answer submitted.',
@@ -52,7 +54,7 @@ export default function QuestionView({
   useEffect(() => {
     setDraftAnswer(initialAnswer)
     lastSentDraftRef.current = initialAnswer
-  }, [question.id, initialAnswer, isSubmitted])
+  }, [question.id, activeQuestionRunStartedAt, isSubmitted])
 
   useEffect(() => {
     if (isWaitingForChoices || isSubmitted || !sendMessage || isSameAnswer(draftAnswer, lastSentDraftRef.current)) {
