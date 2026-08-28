@@ -315,9 +315,10 @@ export default function setupBinaryBreachRoutes(
     }
     const body = isPlainObject(req.body) ? req.body : {}
     const authenticated = resolveCookieStudent(session, req.cookies, req.headers?.cookie)
+    const legacySession = !requiresParticipantCookieAuthentication(session)
     const student = ensureStudent(
       session,
-      authenticated?.participantId ?? null,
+      authenticated?.participantId ?? (legacySession ? body.studentId : null),
       authenticated?.displayName ?? body.studentName,
     )
     if (!student) {

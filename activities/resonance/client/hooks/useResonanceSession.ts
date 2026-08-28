@@ -477,7 +477,10 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
     const requestId = latestSnapshotRequestRef.current + 1
     latestSnapshotRequestRef.current = requestId
     try {
-      const resp = await fetch(`/api/resonance/${sessionId}/state`)
+      const legacyHint = typeof studentId === 'string' && studentId.length > 0
+        ? `?${new URLSearchParams({ studentId }).toString()}`
+        : ''
+      const resp = await fetch(`/api/resonance/${sessionId}/state${legacyHint}`)
       if (!mountedRef.current || !isLatestStudentSnapshotRequest(requestId, latestSnapshotRequestRef.current)) return
       if (!resp.ok) {
         setError('Could not load session state')
@@ -517,7 +520,11 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
     // Initial REST fetch for immediate state
     void fetchSnapshot()
 
-    const params = new URLSearchParams({ sessionId, role: 'student' })
+    const params = new URLSearchParams({
+      sessionId,
+      role: 'student',
+      ...(typeof studentId === 'string' && studentId.length > 0 ? { studentId } : {}),
+    })
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const wsUrl = `${protocol}//${window.location.host}/ws/resonance?${params.toString()}`
 

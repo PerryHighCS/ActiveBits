@@ -136,7 +136,7 @@ export default function QuestionView({
       const resp = await fetch(`/api/resonance/${sessionId}/submit-answer`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ questionId: question.id, answer }),
+        body: JSON.stringify({ studentId, questionId: question.id, answer }),
       })
 
       const data = (await resp.json()) as { ok?: boolean; error?: string }
