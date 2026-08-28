@@ -562,7 +562,7 @@ export async function storePersistentSessionEntryParticipant(
   values: unknown,
 ): Promise<{ token: string; values: Record<string, WaitingRoomSerializableValue> }> {
   const session = await getOrCreateActivePersistentSession(activityName, hash)
-  const storedEntryParticipant = storeEntryParticipant(session, values)
+  const storedEntryParticipant = storeEntryParticipant(session, values, { trustParticipantId: false })
 
   const valuesBytes = Buffer.byteLength(JSON.stringify(storedEntryParticipant.values), 'utf8')
   if (valuesBytes > MAX_PERSISTENT_ENTRY_PARTICIPANT_VALUES_BYTES) {

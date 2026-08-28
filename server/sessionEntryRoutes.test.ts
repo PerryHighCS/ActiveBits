@@ -442,6 +442,35 @@ void test('session entry participant routes store and consume waiting-room value
   assert.deepEqual(missingRes.jsonBody, { error: 'entry participant not found' })
 })
 
+void test('public session handoffs replace a forged participant ID before issuing a cookie', async () => {
+  await initializeActivityRegistry()
+  const session = createSessionRecord('forgery-session', 'java-string-practice')
+  const sessionMap = new Map<string, SessionRecord>([[session.id, session]])
+  const sessions = {
+    get: async (id: string) => sessionMap.get(id) ?? null,
+    set: async (id: string, nextSession: SessionRecord) => { sessionMap.set(id, nextSession) },
+    delete: async () => true, touch: async () => true, getAll: async () => [], getAllIds: async () => [], cleanup: () => {}, close: async () => {},
+  }
+  const app = createMockApp()
+  setupSessionRoutes(app as unknown as Parameters<typeof setupSessionRoutes>[0], sessions)
+  const storeRes = createMockResponse()
+  await getRoute(app, 'post', '/api/session/:sessionId/entry-participant')({
+    params: { sessionId: session.id }, body: { values: { participantId: 'victim-id', displayName: 'Attacker' } },
+  }, storeRes)
+  const values = storeRes.jsonBody?.values as Record<string, unknown>
+  const participantId = values.participantId
+  assert.equal(typeof participantId, 'string')
+  assert.notEqual(participantId, 'victim-id')
+  const token = storeRes.jsonBody?.entryParticipantToken
+  assert.equal(typeof token, 'string')
+  const consumeRes = createMockResponse()
+  await getRoute(app, 'post', '/api/session/:sessionId/entry-participant/consume')({
+    params: { sessionId: session.id }, body: { token },
+  }, consumeRes)
+  assert.equal(consumeRes.statusCode, 200)
+  assert.equal((sessionMap.get(session.id)?.data as { acceptedEntryParticipants?: Record<string, unknown> }).acceptedEntryParticipants?.['victim-id'], undefined)
+})
+
 void test('session entry participant consume route trims tokens and rejects blank token requests', async () => {
   await initializeActivityRegistry()
   const session = createSessionRecord('session-4', 'java-string-practice')
