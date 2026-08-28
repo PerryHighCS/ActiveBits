@@ -3,7 +3,9 @@ import { createSession, type SessionRecord, type SessionStore } from 'activebits
 import { registerSessionNormalizer } from 'activebits-server/core/sessionNormalization.js'
 import {
   findAcceptedEntryParticipant,
+  enableParticipantCookieAuthentication,
   readAcceptedEntryParticipantCookie,
+  requiresParticipantCookieAuthentication,
   resolveAcceptedEntryParticipantToken,
 } from 'activebits-server/core/acceptedEntryParticipants.js'
 import { registerActivityReportBuilder } from '../../../server/activities/activityReportRegistry.js'
@@ -437,7 +439,7 @@ function readAcceptedStudentId(session: PostboardSession, req: RouteRequest): st
 
   // Existing live sessions created before #341 did not issue participant
   // cookies. Retain their accepted-entry handoff until they expire naturally.
-  if (!Object.hasOwn(session.data, 'participantAuthTokens')) {
+  if (!requiresParticipantCookieAuthentication(session)) {
     const claimedId = sanitizeText(getBody(req).studentId ?? req.query?.studentId, 160)
     return findAcceptedEntryParticipant(session, claimedId || null)?.participantId ?? null
   }
@@ -531,6 +533,7 @@ export default function setupPostboardRoutes(app: PostboardRouteApp, sessions: S
     const session = await createSession(sessions, { data })
     session.type = ACTIVITY_ID
     session.data = data
+    enableParticipantCookieAuthentication(session)
     await sessions.set(session.id, session)
     res.json({ id: session.id, instructorPasscode: data.instructorPasscode })
   }))

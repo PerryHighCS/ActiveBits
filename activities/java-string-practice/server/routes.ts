@@ -1,7 +1,7 @@
 import { createSession, type SessionRecord, type SessionStore } from 'activebits-server/core/sessions.js'
 import { createBroadcastSubscriptionHelper } from 'activebits-server/core/broadcastUtils.js'
 import { connectAcceptedSessionParticipant } from 'activebits-server/core/acceptedSessionParticipants.js'
-import { readAcceptedEntryParticipantCookie, resolveAcceptedEntryParticipantToken } from 'activebits-server/core/acceptedEntryParticipants.js'
+import { enableParticipantCookieAuthentication, readAcceptedEntryParticipantCookie, requiresParticipantCookieAuthentication, resolveAcceptedEntryParticipantToken } from 'activebits-server/core/acceptedEntryParticipants.js'
 import { generateParticipantId } from 'activebits-server/core/participantIds.js'
 import { closeDuplicateParticipantSockets } from 'activebits-server/core/participantSockets.js'
 import { disconnectSessionParticipant, updateSessionParticipant } from 'activebits-server/core/sessionParticipants.js'
@@ -152,7 +152,7 @@ export default function setupJavaStringPracticeRoutes(
         if (!session) return
 
         const authenticated = resolveCookieStudent(session, undefined, client.upgradeHeaders?.cookie)
-        const legacySession = !Object.hasOwn(session.data, 'participantAuthTokens')
+        const legacySession = !requiresParticipantCookieAuthentication(session)
         if (!authenticated && !legacySession) {
           client.close(1008, 'student authentication required')
           return
@@ -230,6 +230,7 @@ export default function setupJavaStringPracticeRoutes(
     const session = await createSession(sessions, { data: {} })
     session.type = 'java-string-practice'
     session.data = normalizeSessionData(session.data)
+    enableParticipantCookieAuthentication(session)
     // Every session created here is cookie-auth-native; initializing these maps
     // up front closes the unauthenticated claimed-identity fallback from the
     // start instead of leaving it open until the first participant is accepted.
@@ -307,7 +308,7 @@ export default function setupJavaStringPracticeRoutes(
     }
 
     const authenticated = resolveCookieStudent(session, req.cookies, req.headers?.cookie)
-    const legacySession = !Object.hasOwn(session.data, 'participantAuthTokens')
+    const legacySession = !requiresParticipantCookieAuthentication(session)
     if (!authenticated && !legacySession) {
       res.status(403).json({ error: 'student authentication required' })
       return

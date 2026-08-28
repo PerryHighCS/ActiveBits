@@ -2,10 +2,12 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   acceptEntryParticipant,
+  enableParticipantCookieAuthentication,
   findAcceptedEntryParticipant,
   getSessionParticipantCookieName,
   issueAcceptedEntryParticipantToken,
   revokeAcceptedEntryParticipant,
+  requiresParticipantCookieAuthentication,
   resolveAcceptedEntryParticipantToken,
   resolveAcceptedEntryParticipantName,
 } from './core/acceptedEntryParticipants.js'
@@ -88,6 +90,16 @@ void test('accepted participant tokens are opaque, session-scoped, and resolve o
   const otherSession = createSessionRecord('session-6')
   acceptEntryParticipant(otherSession, { participantId: 'participant-1', displayName: 'Ada' })
   assert.equal(resolveAcceptedEntryParticipantToken(otherSession, token), null)
+})
+
+void test('issuing a participant token does not change a legacy session cookie-auth requirement', () => {
+  const session = createSessionRecord('legacy-session')
+  acceptEntryParticipant(session, { participantId: 'participant-1', displayName: 'Ada' })
+  assert.ok(issueAcceptedEntryParticipantToken(session, 'participant-1'))
+  assert.equal(requiresParticipantCookieAuthentication(session), false)
+
+  enableParticipantCookieAuthentication(session)
+  assert.equal(requiresParticipantCookieAuthentication(session), true)
 })
 
 void test('accepted participant token resolution ignores malformed rehydrated token maps', () => {

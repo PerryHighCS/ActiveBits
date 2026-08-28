@@ -18,6 +18,7 @@ export interface AcceptedEntryParticipantSessionLike {
 
 const MAX_ACCEPTED_ENTRY_PARTICIPANTS = 100
 const MAX_PARTICIPANT_AUTH_TOKENS = 200
+const PARTICIPANT_COOKIE_AUTH_VERSION = 1
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value != null && typeof value === 'object' && !Array.isArray(value)
@@ -35,6 +36,22 @@ function getAcceptedEntryParticipantContainer(session: AcceptedEntryParticipantS
   }
 
   return data as AcceptedEntryParticipantContainer
+}
+
+/**
+ * Marks a newly created session as requiring opaque participant cookies. This
+ * is intentionally distinct from the mutable token map so accepting a new
+ * participant cannot change the authentication policy of a legacy session.
+ */
+export function enableParticipantCookieAuthentication(session: AcceptedEntryParticipantSessionLike): void {
+  if (!isRecord(session.data)) session.data = {}
+  const data = session.data as Record<string, unknown>
+  data.participantCookieAuthVersion = PARTICIPANT_COOKIE_AUTH_VERSION
+}
+
+export function requiresParticipantCookieAuthentication(session: AcceptedEntryParticipantSessionLike): boolean {
+  return isRecord(session.data)
+    && session.data.participantCookieAuthVersion === PARTICIPANT_COOKIE_AUTH_VERSION
 }
 
 function normalizeDisplayName(value: unknown): string | null {

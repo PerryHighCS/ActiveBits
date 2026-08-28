@@ -1,4 +1,5 @@
 import { createSession } from 'activebits-server/core/sessions.js'
+import { enableParticipantCookieAuthentication } from 'activebits-server/core/acceptedEntryParticipants.js'
 import { registerSessionNormalizer } from 'activebits-server/core/sessionNormalization.js'
 import type { WsRouter } from '../../../../types/websocket.js'
 import type {
@@ -51,6 +52,7 @@ export default function registerSessionRoutes(
     session.data.instructor = null
     session.data.broadcasts = []
     session.data.sharedState = { phase: 'setup' }
+    enableParticipantCookieAuthentication(session)
     await sessions.set(session.id, session)
     res.json({ id: session.id })
   })

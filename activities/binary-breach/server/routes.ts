@@ -3,9 +3,11 @@ import { createBroadcastSubscriptionHelper } from 'activebits-server/core/broadc
 import { generateParticipantId } from 'activebits-server/core/participantIds.js'
 import {
   acceptEntryParticipant,
+  enableParticipantCookieAuthentication,
   getSessionParticipantCookieName,
   issueAcceptedEntryParticipantToken,
   readAcceptedEntryParticipantCookie,
+  requiresParticipantCookieAuthentication,
   resolveAcceptedEntryParticipantToken,
 } from 'activebits-server/core/acceptedEntryParticipants.js'
 import { registerSessionNormalizer } from 'activebits-server/core/sessionNormalization.js'
@@ -72,6 +74,7 @@ function normalizeSessionData(data: unknown): BinaryBreachSessionData {
   return {
     ...(isPlainObject(source.acceptedEntryParticipants) ? { acceptedEntryParticipants: source.acceptedEntryParticipants } : {}),
     ...(isPlainObject(source.participantAuthTokens) ? { participantAuthTokens: source.participantAuthTokens } : {}),
+    ...(source.participantCookieAuthVersion === 1 ? { participantCookieAuthVersion: 1 } : {}),
     settings,
     students,
     missionSeed: typeof source.missionSeed === 'string' && source.missionSeed.length > 0
@@ -256,6 +259,7 @@ export default function setupBinaryBreachRoutes(
       missionSeed: createMissionSeed(),
       active: true,
     }
+    enableParticipantCookieAuthentication(session)
     await sessions.set(session.id, session)
     ensureBroadcastSubscription(session.id)
     res.json({ id: session.id })
@@ -347,7 +351,7 @@ export default function setupBinaryBreachRoutes(
     }
     const body = isPlainObject(req.body) ? req.body : {}
     const authenticated = resolveCookieStudent(session, req.cookies, req.headers?.cookie)
-    const legacySession = !Object.hasOwn(session.data, 'participantAuthTokens')
+    const legacySession = !requiresParticipantCookieAuthentication(session)
     const student = ensureStudent(session, authenticated?.participantId ?? (legacySession ? body.studentId : null), authenticated?.displayName ?? (legacySession ? body.studentName : null))
     if (!student || !student.currentChallenge) {
       res.status(400).json({ error: 'invalid student' })
@@ -398,7 +402,7 @@ export default function setupBinaryBreachRoutes(
     }
     const body = isPlainObject(req.body) ? req.body : {}
     const authenticated = resolveCookieStudent(session, req.cookies, req.headers?.cookie)
-    const legacySession = !Object.hasOwn(session.data, 'participantAuthTokens')
+    const legacySession = !requiresParticipantCookieAuthentication(session)
     const student = ensureStudent(session, authenticated?.participantId ?? (legacySession ? body.studentId : null), authenticated?.displayName ?? (legacySession ? body.studentName : null))
     if (!student) {
       res.status(400).json({ error: 'invalid student' })
@@ -424,7 +428,7 @@ export default function setupBinaryBreachRoutes(
     }
     const body = isPlainObject(req.body) ? req.body : {}
     const authenticated = resolveCookieStudent(session, req.cookies, req.headers?.cookie)
-    const legacySession = !Object.hasOwn(session.data, 'participantAuthTokens')
+    const legacySession = !requiresParticipantCookieAuthentication(session)
     const student = ensureStudent(session, authenticated?.participantId ?? (legacySession ? body.studentId : null), authenticated?.displayName ?? (legacySession ? body.studentName : null))
     if (!student || !student.currentChallenge || !session.data.settings.hintsEnabled) {
       res.status(400).json({ error: 'hint unavailable' })
@@ -458,7 +462,7 @@ export default function setupBinaryBreachRoutes(
         const session = asBinaryBreachSession(await sessions.get(client.sessionId ?? ''))
         if (!session) return
         const authenticated = resolveCookieStudent(session, undefined, client.upgradeHeaders?.cookie)
-        const legacySession = !Object.hasOwn(session.data, 'participantAuthTokens')
+        const legacySession = !requiresParticipantCookieAuthentication(session)
         const student = ensureStudent(
           session,
           authenticated?.participantId ?? (legacySession ? claimedStudentId : null),

@@ -17,7 +17,9 @@ import {
 } from 'activebits-server/core/httpUrlUtils.js'
 import { closeDuplicateParticipantSockets, closeParticipantSockets } from 'activebits-server/core/participantSockets.js'
 import {
+  enableParticipantCookieAuthentication,
   readAcceptedEntryParticipantCookie,
+  requiresParticipantCookieAuthentication,
   resolveAcceptedEntryParticipantToken,
   revokeAcceptedEntryParticipant,
 } from 'activebits-server/core/acceptedEntryParticipants.js'
@@ -941,10 +943,9 @@ function resolveAuthenticatedSyncDeckStudent(session: SyncDeckSession, req: Rout
   )?.participantId
   if (participantId) return findSyncDeckStudentById(session.data.students, participantId)
 
-  // Migration path for live sessions created before participant cookies were
-  // issued. New sessions acquire `participantAuthTokens` during waiting-room
-  // acceptance and therefore never use this claimed-ID fallback.
-  if (!Object.hasOwn(session.data, 'participantAuthTokens')) {
+  // Sessions created before participant cookies retain their claimed-ID
+  // handoff until expiry, even if a new participant later receives a cookie.
+  if (!requiresParticipantCookieAuthentication(session)) {
     return findSyncDeckStudentById(session.data.students, normalizeStudentId(readStringField(req.body, 'studentId')))
   }
   return null
@@ -1524,6 +1525,7 @@ async function createSyncDeckInstructorSession(
     ...session.data,
     ...(presentationUrl ? { presentationUrl, standaloneMode: false } : {}),
   })
+  enableParticipantCookieAuthentication(session)
   const instructorRecoveryToken = randomBytes(32).toString('hex')
   session.data.instructorRecoveryToken = instructorRecoveryToken
   await sessions.set(session.id, session)
@@ -2578,10 +2580,10 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
         session,
         readAcceptedEntryParticipantCookie(undefined, client.upgradeHeaders?.cookie, session.id),
       )?.participantId ?? null
-      // Existing live sessions have no token map. Preserve their ID handoff only
-      // until expiry; all sessions that have issued a participant token require it.
+      // Existing live sessions retain their ID handoff until expiry; cookie-auth
+      // sessions require a server-issued participant token.
       client.studentId = cookieParticipantId
-        ?? (!Object.hasOwn(session.data, 'participantAuthTokens')
+        ?? (!requiresParticipantCookieAuthentication(session)
           ? normalizeStudentId(query.get('studentId'))
           : null)
       if (!client.studentId) {

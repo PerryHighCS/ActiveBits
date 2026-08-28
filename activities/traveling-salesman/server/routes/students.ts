@@ -6,7 +6,7 @@ import type {
 } from '../../travelingSalesmanTypes.js'
 import { asTravelingSalesmanSession } from '../../travelingSalesmanTypes.js'
 import { connectAcceptedSessionParticipant } from 'activebits-server/core/acceptedSessionParticipants.js'
-import { readAcceptedEntryParticipantCookie, resolveAcceptedEntryParticipantToken } from 'activebits-server/core/acceptedEntryParticipants.js'
+import { readAcceptedEntryParticipantCookie, requiresParticipantCookieAuthentication, resolveAcceptedEntryParticipantToken } from 'activebits-server/core/acceptedEntryParticipants.js'
 import { disconnectSessionParticipant, updateSessionParticipant } from 'activebits-server/core/sessionParticipants.js'
 import { isFiniteNumber, isRouteArray } from '../validation.js'
 import { createBroadcastHelpers, closeDuplicateStudentSockets, generateStudentId } from './shared.js'
@@ -37,7 +37,7 @@ export default function registerStudentRoutes(
             session,
             readAcceptedEntryParticipantCookie(undefined, client.upgradeHeaders?.cookie, session.id),
           )
-          const legacySession = !Object.hasOwn(session.data, 'participantAuthTokens')
+          const legacySession = !requiresParticipantCookieAuthentication(session)
           if (!authenticated && !legacySession) {
             client.close(1008, 'student authentication required')
             return
@@ -175,7 +175,7 @@ export default function registerStudentRoutes(
       session,
       readAcceptedEntryParticipantCookie(req.cookies, req.headers?.cookie, session.id),
     )
-    const legacySession = !Object.hasOwn(session.data, 'participantAuthTokens')
+    const legacySession = !requiresParticipantCookieAuthentication(session)
     const studentId = authenticated?.participantId ?? (legacySession ? body.studentId : null)
     const route = body.route
     const distance = body.distance

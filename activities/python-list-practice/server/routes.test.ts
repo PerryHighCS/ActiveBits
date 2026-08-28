@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createSessionStore, type SessionRecord } from 'activebits-server/core/sessions.js'
-import { acceptEntryParticipant, getSessionParticipantCookieName, issueAcceptedEntryParticipantToken } from 'activebits-server/core/acceptedEntryParticipants.js'
+import { acceptEntryParticipant, enableParticipantCookieAuthentication, getSessionParticipantCookieName, issueAcceptedEntryParticipantToken } from 'activebits-server/core/acceptedEntryParticipants.js'
 import type { WsRouter } from '../../../types/websocket.js'
 import setupPythonListPracticeRoutes from './routes.js'
 
@@ -14,6 +14,7 @@ void test('stats require the participant cookie for token-backed Python List Pra
     id: 's1', type: 'python-list-practice', created: 1, lastActivity: 1,
     data: { selectedQuestionTypes: ['all'], students: [{ id: 'student-1', name: 'Ada', connected: true, lastSeen: 1, stats: { total: 0, correct: 0, streak: 0, longestStreak: 0 } }] },
   }
+  enableParticipantCookieAuthentication(session)
   acceptEntryParticipant(session, { participantId: 'student-1', displayName: 'Ada' })
   const token = issueAcceptedEntryParticipantToken(session, 'student-1')
   if (!token) throw new Error('Expected participant token')

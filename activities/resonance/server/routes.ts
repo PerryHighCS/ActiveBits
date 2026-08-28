@@ -9,9 +9,11 @@ import {
 } from 'activebits-server/core/persistentSessions.js'
 import {
   acceptEntryParticipant,
+  enableParticipantCookieAuthentication,
   getSessionParticipantCookieName,
   issueAcceptedEntryParticipantToken,
   readAcceptedEntryParticipantCookie,
+  requiresParticipantCookieAuthentication,
   resolveAcceptedEntryParticipantToken,
 } from 'activebits-server/core/acceptedEntryParticipants.js'
 import type { ActiveBitsWebSocket, WsRouter } from '../../../types/websocket.js'
@@ -127,12 +129,9 @@ function resolveAuthenticatedStudentId(
   const authenticatedId = resolveAcceptedEntryParticipantToken(session, participantToken)?.participantId
   if (authenticatedId) return authenticatedId
 
-  // Sessions created before #341 have no token container. Keep their existing
-  // registrations working until their normal TTL expires; newly created sessions
-  // initialize the container and require cookie-backed identity immediately.
-  const hasAuthContract = Object.hasOwn(session.data, 'acceptedEntryParticipants')
-    || Object.hasOwn(session.data, 'participantAuthTokens')
-  if (!hasAuthContract && typeof legacyStudentId === 'string' && session.data.students[legacyStudentId]) {
+  // Sessions created before #341 retain their existing registrations until their
+  // normal TTL expires; newly created sessions require cookie-backed identity.
+  if (!requiresParticipantCookieAuthentication(session) && typeof legacyStudentId === 'string' && session.data.students[legacyStudentId]) {
     return legacyStudentId
   }
   return null
@@ -1479,6 +1478,7 @@ export default function setupResonanceRoutes(
       }),
     })
     session.type = 'resonance'
+    enableParticipantCookieAuthentication(session)
     await sessions.set(session.id, session)
 
     console.info('[resonance] Session created', {

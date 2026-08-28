@@ -1,7 +1,7 @@
 import { createSession, type SessionRecord, type SessionStore } from 'activebits-server/core/sessions.js'
 import { createBroadcastSubscriptionHelper } from 'activebits-server/core/broadcastUtils.js'
 import { registerSessionNormalizer } from 'activebits-server/core/sessionNormalization.js'
-import { readAcceptedEntryParticipantCookie, resolveAcceptedEntryParticipantToken } from 'activebits-server/core/acceptedEntryParticipants.js'
+import { enableParticipantCookieAuthentication, readAcceptedEntryParticipantCookie, requiresParticipantCookieAuthentication, resolveAcceptedEntryParticipantToken } from 'activebits-server/core/acceptedEntryParticipants.js'
 import type { ActiveBitsWebSocket, WsRouter } from '../../../types/websocket.js'
 import type {
   PythonListPracticeSessionData,
@@ -78,6 +78,7 @@ function normalizeSessionData(data: unknown): PythonListPracticeSessionData {
   return {
     ...(isPlainObject(source.acceptedEntryParticipants) ? { acceptedEntryParticipants: source.acceptedEntryParticipants } : {}),
     ...(isPlainObject(source.participantAuthTokens) ? { participantAuthTokens: source.participantAuthTokens } : {}),
+    ...(source.participantCookieAuthVersion === 1 ? { participantCookieAuthVersion: 1 } : {}),
     students,
     selectedQuestionTypes: sanitizeQuestionTypes(source.selectedQuestionTypes),
   }
@@ -140,6 +141,7 @@ export default function setupPythonListPracticeRoutes(
       students: [],
       selectedQuestionTypes: ['all'],
     }
+    enableParticipantCookieAuthentication(session)
     await sessions.set(session.id, session)
     ensureBroadcastSubscription(session.id)
     const response = res as unknown as JsonResponse
@@ -207,7 +209,7 @@ export default function setupPythonListPracticeRoutes(
 
     const reqBody = isPlainObject(req.body) ? req.body : {}
     const authenticated = resolveCookieStudent(session, req.cookies, req.headers?.cookie)
-    const legacySession = !Object.hasOwn(session.data, 'participantAuthTokens')
+    const legacySession = !requiresParticipantCookieAuthentication(session)
     const studentName = authenticated?.displayName ?? (legacySession ? validateName(reqBody.studentName) : null)
     const studentId = authenticated?.participantId ?? (legacySession ? validateStudentId(reqBody.studentId) : null)
     const stats = validateStats(reqBody.stats)
@@ -297,7 +299,7 @@ export default function setupPythonListPracticeRoutes(
         )
         if (session) {
           const authenticated = resolveCookieStudent(session, undefined, client.upgradeHeaders?.cookie)
-          const legacySession = !Object.hasOwn(session.data, 'participantAuthTokens')
+          const legacySession = !requiresParticipantCookieAuthentication(session)
           if (!authenticated && !legacySession) {
             client.close(1008, 'student authentication required')
             return

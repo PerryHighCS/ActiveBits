@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createSessionStore, type SessionRecord } from 'activebits-server/core/sessions.js'
-import { acceptEntryParticipant, getSessionParticipantCookieName, issueAcceptedEntryParticipantToken } from 'activebits-server/core/acceptedEntryParticipants.js'
+import { acceptEntryParticipant, enableParticipantCookieAuthentication, getSessionParticipantCookieName, issueAcceptedEntryParticipantToken } from 'activebits-server/core/acceptedEntryParticipants.js'
 import type { WsRouter } from '../../../types/websocket.js'
 import setupJavaStringPracticeRoutes from './routes.js'
 
@@ -17,6 +17,7 @@ void test('progress requires the participant cookie for token-backed Java String
     id: 's1', type: 'java-string-practice', created: 1, lastActivity: 1,
     data: { students: [{ id: 'student-1', name: 'Ada', connected: true, joined: 1, lastSeen: 1, stats: { total: 0, correct: 0, streak: 0, longestStreak: 0 } }] },
   }
+  enableParticipantCookieAuthentication(session)
   acceptEntryParticipant(session, { participantId: 'student-1', displayName: 'Ada' })
   const token = issueAcceptedEntryParticipantToken(session, 'student-1')
   if (!token) throw new Error('Expected participant token')
