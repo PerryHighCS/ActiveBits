@@ -136,6 +136,7 @@ export default function setupJavaStringPracticeRoutes(
   ws.register('/ws/java-string-practice', (socket, query) => {
     const client = socket as JavaStringSocket
     client.sessionId = query.get('sessionId') || null
+    const isManagerSocket = query.get('role') === 'manager'
     if (client.sessionId) {
       ensureBroadcastSubscription(client.sessionId)
     }
@@ -145,7 +146,7 @@ export default function setupJavaStringPracticeRoutes(
     client.studentName = claimedStudentName
     client.studentId = null
 
-    if (client.sessionId) {
+    if (client.sessionId && !isManagerSocket) {
       const activeSessionId = client.sessionId
       ;(async () => {
         const session = asJavaStringSession(await sessions.get(activeSessionId))

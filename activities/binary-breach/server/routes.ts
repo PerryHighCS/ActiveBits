@@ -454,12 +454,15 @@ export default function setupBinaryBreachRoutes(
   ws.register('/ws/binary-breach', (socket, qp) => {
     const client = socket as BinaryBreachSocket
     client.sessionId = qp.get('sessionId') || null
+    const isManagerSocket = qp.get('role') === 'manager'
     const claimedStudentId = validateStudentId(qp.get('studentId'))
     const claimedStudentName = validateStudentName(qp.get('studentName'))
     client.studentId = null
     client.studentName = null
     if (client.sessionId) {
       ensureBroadcastSubscription(client.sessionId)
+    }
+    if (client.sessionId && !isManagerSocket) {
       ;(async () => {
         const session = asBinaryBreachSession(await sessions.get(client.sessionId ?? ''))
         if (!session) return

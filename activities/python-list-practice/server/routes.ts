@@ -263,6 +263,7 @@ export default function setupPythonListPracticeRoutes(
   ws.register('/ws/python-list-practice', (socket, qp) => {
     const client = socket as PythonListPracticeSocket
     client.sessionId = qp.get('sessionId') || null
+    const isManagerSocket = qp.get('role') === 'manager'
     if (client.sessionId) {
       ensureBroadcastSubscription(client.sessionId)
     }
@@ -298,7 +299,7 @@ export default function setupPythonListPracticeRoutes(
         const session = asPythonListPracticeSession(
           await sessions.get(client.sessionId!),
         )
-        if (session) {
+        if (session && !isManagerSocket) {
           const authenticated = resolveCookieStudent(session, undefined, client.upgradeHeaders?.cookie)
           const legacySession = !requiresParticipantCookieAuthentication(session)
           if (!authenticated && !legacySession) {

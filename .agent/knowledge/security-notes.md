@@ -15,6 +15,15 @@ Track security-relevant boundaries, risks, and mitigation decisions.
 
 ## Notes
 
+- Date: 2026-08-28
+- Area: participant-cookie WebSocket recovery and manager observers (PR #342)
+- Threat or risk: A marked session closes an unauthenticated student WebSocket with `1008 student authentication required`. Shared student/manager endpoints were applying that rule to instructor manager sockets too, while student clients retaining only stale browser routing hints could reconnect forever or keep presenting controls after cookie expiry.
+- Control or mitigation: Python List Practice, Binary Breach, Java String Practice, Java Format Practice, and Traveling Salesman now identify their existing manager WebSocket connection with `role=manager` and apply participant identity resolution only to student sockets. Cookie-authenticated student clients redirect to the ordinary session-entry route after that explicit close; Postboard does the same after a 403 mutation. The shared participant-context helper clears all stored routing hints before rejoin.
+- Residual risk: The manager role only preserves the pre-existing manager observer transport behavior; it is not authorization. Manager-only REST mutations continue to require their existing instructor credentials.
+- Validation (test/review/path): focused route suites for all five shared socket activities; `client/src/components/common/sessionParticipantContext.test.ts`; targeted ESLint.
+- Follow-up action: Any future activity that shares a WebSocket namespace between student and manager clients must declare the role explicitly and keep student cookie checks inside the student branch.
+- Owner: Codex
+
 - Date: 2026-08-27
 - Area: Resonance and Postboard student identity
 - Threat or risk: Client-supplied student IDs in request/query/WebSocket data could be claimed by another participant, exposing private Resonance responses or Postboard moderation state and allowing attributed mutations.

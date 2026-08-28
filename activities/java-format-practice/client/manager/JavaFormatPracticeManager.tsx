@@ -126,7 +126,7 @@ export default function JavaFormatPracticeManager() {
     if (sessionId == null) return null;
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const host = window.location.host;
-    return `${protocol}//${host}/ws/java-format-practice?sessionId=${sessionId}`;
+    return `${protocol}//${host}/ws/java-format-practice?sessionId=${sessionId}&role=manager`;
   }, [sessionId]);
 
   const { connect, disconnect } = useResilientWebSocket({

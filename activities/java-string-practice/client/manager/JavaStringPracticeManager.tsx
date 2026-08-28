@@ -103,7 +103,7 @@ export default function JavaStringPracticeManager() {
   const buildWsUrl = useCallback((): string | null => {
     if (!sessionId || typeof window === 'undefined') return null
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    return `${protocol}//${window.location.host}/ws/java-string-practice?sessionId=${sessionId}`
+    return `${protocol}//${window.location.host}/ws/java-string-practice?sessionId=${sessionId}&role=manager`
   }, [sessionId])
 
   const { connect, disconnect } = useResilientWebSocket({

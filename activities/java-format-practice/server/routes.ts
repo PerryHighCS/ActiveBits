@@ -138,6 +138,7 @@ export default function setupJavaFormatPracticeRoutes(
   ws.register('/ws/java-format-practice', (socket, query) => {
     const client = socket as JavaFormatSocket
     client.sessionId = query.get('sessionId') || null
+    const isManagerSocket = query.get('role') === 'manager'
     ensureBroadcastSubscription(client.sessionId)
 
     const claimedStudentId = query.get('studentId') || null
@@ -149,7 +150,7 @@ export default function setupJavaFormatPracticeRoutes(
     // record the resolved identity.
     console.log(`WebSocket connection: sessionId=${client.sessionId}`)
 
-    if (client.sessionId) {
+    if (client.sessionId && !isManagerSocket) {
       const activeSessionId = client.sessionId
 
       ;(async () => {

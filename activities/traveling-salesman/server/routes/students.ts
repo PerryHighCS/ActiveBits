@@ -25,11 +25,12 @@ export default function registerStudentRoutes(
   ws.register('/ws/traveling-salesman', (socket, qp) => {
     const client = socket as TravelingSalesmanSocket
     client.sessionId = qp.get('sessionId') || null
+    const isManagerSocket = qp.get('role') === 'manager'
     ensureBroadcastSubscription(client.sessionId)
     const claimedStudentName = qp.get('studentName') || null
     const claimedStudentId = qp.get('studentId') || null
 
-    if (client.sessionId) {
+    if (client.sessionId && !isManagerSocket) {
       ;(async () => {
         const session = asTravelingSalesmanSession(await sessions.get(client.sessionId || ''))
         if (session) {

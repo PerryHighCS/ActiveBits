@@ -87,7 +87,7 @@ const PythonListPracticeManager: FC = () => {
   const buildWsUrl = useCallback(() => {
     if (sessionId == null) return null
     const proto = typeof window !== 'undefined' && window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    return `${proto}//${window.location.host}/ws/python-list-practice?sessionId=${encodeURIComponent(sessionId)}`
+    return `${proto}//${window.location.host}/ws/python-list-practice?sessionId=${encodeURIComponent(sessionId)}&role=manager`
   }, [sessionId])
 
   const { connect, disconnect } = useResilientWebSocket({

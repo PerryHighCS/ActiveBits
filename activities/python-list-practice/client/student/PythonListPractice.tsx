@@ -1,6 +1,7 @@
 import type { FC } from 'react'
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler'
+import { clearSessionParticipantContext } from '@src/components/common/sessionParticipantContext'
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
 import {
   persistSessionParticipantIdentity,
@@ -290,6 +291,12 @@ const PythonListPractice: FC<StudentProps> = ({ sessionData }) => {
     }
   }, [submittedName, sendStats])
 
+  const handleStudentClose = useCallback((event: CloseEvent) => {
+    if (event.code !== 1008 || event.reason !== 'student authentication required' || !sessionId || isSolo) return
+    clearSessionParticipantContext(window.localStorage, sessionId)
+    window.location.assign(`/${sessionId}`)
+  }, [isSolo, sessionId])
+
   const buildStudentWsUrl = useCallback(() => {
     if (sessionId == null || isSolo === true) return null
     const proto = typeof window !== 'undefined' && window.location.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -305,6 +312,7 @@ const PythonListPractice: FC<StudentProps> = ({ sessionData }) => {
     onOpen: handleStudentOpen,
     onMessage: handleStudentMessage,
     onError: () => console.error('WS error'),
+    onClose: handleStudentClose,
     attachSessionEndedHandler,
   })
 
