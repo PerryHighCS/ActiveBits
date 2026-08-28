@@ -454,16 +454,23 @@ function setNoStore(response: ResponseLike): void {
   response.set?.('Cache-Control', 'no-store')
 }
 
-// participantAuthTokens maps bearer tokens directly to participant ids. This
-// route is unauthenticated and keyed only by session id, so the map must
-// never reach the response — a caller who merely knows the session id
-// (routinely shared for classroom join links) could otherwise replay any
-// participant's token against the cookie-authenticated activity routes.
+// Both maps are keyed by a bearer/handoff token, not a participant id, and
+// this route is unauthenticated and keyed only by session id (routinely
+// shared for classroom join links). participantAuthTokens maps straight to
+// an accepted participant's id; entryParticipants maps a pending waiting-room
+// submission's one-time consume token to that student's values, and reading
+// it would let a caller redeem another student's pending entry themselves via
+// /entry-participant/consume. Neither may reach this response.
+const REDACTED_PUBLIC_SESSION_DATA_KEYS = ['participantAuthTokens', 'entryParticipants'] as const
+
 function toPublicSession(session: SessionRecord): SessionRecord {
-  if (!Object.hasOwn(session.data, 'participantAuthTokens')) {
+  if (!REDACTED_PUBLIC_SESSION_DATA_KEYS.some((key) => Object.hasOwn(session.data, key))) {
     return session
   }
-  const { participantAuthTokens: _participantAuthTokens, ...publicData } = session.data
+  const publicData = { ...session.data }
+  for (const key of REDACTED_PUBLIC_SESSION_DATA_KEYS) {
+    delete publicData[key]
+  }
   return { ...session, data: publicData }
 }
 
