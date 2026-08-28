@@ -107,7 +107,7 @@ void test('Binary Breach preserves pending entry handoffs during session normali
   await sessions.set(session.id, session)
 
   const storedData = (await sessions.get(session.id))?.data as { entryParticipants?: Record<string, unknown> }
-  assert.ok(storedData.entryParticipants?.[token])
+  assert.notEqual(storedData.entryParticipants?.[token], undefined)
   await sessions.close()
 })
 

@@ -17,7 +17,7 @@ void test('Python List Practice preserves pending entry handoffs during session 
   await sessions.set(session.id, session)
 
   const storedData = (await sessions.get(session.id))?.data as { entryParticipants?: Record<string, unknown> }
-  assert.ok(storedData.entryParticipants?.[token])
+  assert.notEqual(storedData.entryParticipants?.[token], undefined)
   await sessions.close()
 })
 
