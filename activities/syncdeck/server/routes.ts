@@ -598,6 +598,7 @@ export function normalizeSyncDeckSessionData(data: unknown): SyncDeckSessionData
   const preservedEntryParticipants = isPlainObject(source.entryParticipants)
     ? source.entryParticipants
     : undefined
+  const preservedParticipantCookieAuthVersion = source.participantCookieAuthVersion === 1
 
   return {
     ...(typeof source.linkedSessionId === 'string' && source.linkedSessionId.trim().length > 0
@@ -606,6 +607,7 @@ export function normalizeSyncDeckSessionData(data: unknown): SyncDeckSessionData
     ...(preservedAcceptedEntryParticipants ? { acceptedEntryParticipants: preservedAcceptedEntryParticipants } : {}),
     ...(preservedParticipantAuthTokens ? { participantAuthTokens: preservedParticipantAuthTokens } : {}),
     ...(preservedEntryParticipants ? { entryParticipants: preservedEntryParticipants } : {}),
+    ...(preservedParticipantCookieAuthVersion ? { participantCookieAuthVersion: 1 } : {}),
     presentationUrl: typeof source.presentationUrl === 'string' ? source.presentationUrl : null,
     standaloneMode: source.standaloneMode === true,
     instructorPasscode:
@@ -1346,6 +1348,7 @@ async function createEmbeddedChildSession(
       } satisfies SyncDeckEmbeddedLaunchPayload,
     },
   }
+  enableParticipantCookieAuthentication(session)
   await sessions.set(sessionId, normalizeSessionRecord(session))
   return session
 }

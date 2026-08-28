@@ -102,6 +102,7 @@ void test('persistent session websocket bootstraps started sessions with canonic
   const startedSession = Array.from(sessionStore.values())[0]
   assert.ok(startedSession)
   assert.deepEqual(startedSession.data, {
+    participantCookieAuthVersion: 1,
     embeddedLaunch: {
       selectedOptions: {
         algorithm: 'merge-sort',
@@ -167,6 +168,7 @@ void test('persistent session websocket hydrates syncdeck presentationUrl onto l
   const startedSession = Array.from(sessionStore.values())[0]
   assert.ok(startedSession)
   assert.deepEqual(startedSession.data, {
+    participantCookieAuthVersion: 1,
     presentationUrl,
     embeddedLaunch: {
       selectedOptions: {
@@ -229,6 +231,7 @@ void test('persistent session websocket decodes syncdeck presentationUrl before 
   const startedSession = Array.from(sessionStore.values())[0]
   assert.ok(startedSession)
   assert.deepEqual(startedSession.data, {
+    participantCookieAuthVersion: 1,
     presentationUrl,
     embeddedLaunch: {
       selectedOptions: {

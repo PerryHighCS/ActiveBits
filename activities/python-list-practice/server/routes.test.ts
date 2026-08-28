@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createSessionStore, type SessionRecord } from 'activebits-server/core/sessions.js'
+import { storeSessionEntryParticipant } from 'activebits-server/core/sessionEntryParticipants.js'
 import { acceptEntryParticipant, enableParticipantCookieAuthentication, getSessionParticipantCookieName, issueAcceptedEntryParticipantToken } from 'activebits-server/core/acceptedEntryParticipants.js'
 import type { WsRouter } from '../../../types/websocket.js'
 import setupPythonListPracticeRoutes from './routes.js'
@@ -8,6 +9,17 @@ import setupPythonListPracticeRoutes from './routes.js'
 type Handler = (req: { params: Record<string, string>; body?: unknown; cookies?: Record<string, unknown> }, res: Response) => Promise<void> | void
 interface Response { statusCode: number; body: unknown; status(code: number): Response; json(value: unknown): Response }
 function response(): Response { return { statusCode: 200, body: null, status(code) { this.statusCode = code; return this }, json(value) { this.body = value; return this } } }
+
+void test('Python List Practice preserves pending entry handoffs during session normalization', async () => {
+  const session: SessionRecord = { id: 'pending-entry', type: 'python-list-practice', created: 1, lastActivity: 1, data: {} }
+  const { token } = storeSessionEntryParticipant(session, { participantId: 'student-1', displayName: 'Ada' })
+  const sessions = createSessionStore(null)
+  await sessions.set(session.id, session)
+
+  const storedData = (await sessions.get(session.id))?.data as { entryParticipants?: Record<string, unknown> }
+  assert.ok(storedData.entryParticipants?.[token])
+  await sessions.close()
+})
 
 void test('stats require the participant cookie for token-backed Python List Practice sessions', async () => {
   const session: SessionRecord = {

@@ -2673,6 +2673,7 @@ void test('embedded-activity start route bootstraps Postboard prompt and approva
   assert.equal(childSession?.type, 'postboard')
   const childData = asRecord(childSession?.data)
   assert.ok(childData)
+  assert.equal(childData.participantCookieAuthVersion, 1)
   assert.deepEqual(childData.embeddedLaunch, {
     parentSessionId: 's1',
     instanceKey: 'postboard:5:0',

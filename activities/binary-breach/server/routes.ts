@@ -74,6 +74,7 @@ function normalizeSessionData(data: unknown): BinaryBreachSessionData {
   return {
     ...(isPlainObject(source.acceptedEntryParticipants) ? { acceptedEntryParticipants: source.acceptedEntryParticipants } : {}),
     ...(isPlainObject(source.participantAuthTokens) ? { participantAuthTokens: source.participantAuthTokens } : {}),
+    ...(isPlainObject(source.entryParticipants) ? { entryParticipants: source.entryParticipants } : {}),
     ...(source.participantCookieAuthVersion === 1 ? { participantCookieAuthVersion: 1 } : {}),
     settings,
     students,

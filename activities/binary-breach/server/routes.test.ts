@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import type { SessionRecord, SessionStore } from 'activebits-server/core/sessions.js'
+import { createSessionStore as createCoreSessionStore, type SessionRecord, type SessionStore } from 'activebits-server/core/sessions.js'
+import { storeSessionEntryParticipant } from 'activebits-server/core/sessionEntryParticipants.js'
 import type { ActiveBitsWebSocket, WsRouter } from '../../../types/websocket.js'
 import setupBinaryBreachRoutes from './routes.js'
 
@@ -98,6 +99,17 @@ function createWsRouter(): WsRouter {
     register() {},
   }
 }
+
+void test('Binary Breach preserves pending entry handoffs during session normalization', async () => {
+  const session: SessionRecord = { id: 'pending-entry', type: 'binary-breach', created: 1, lastActivity: 1, data: {} }
+  const { token } = storeSessionEntryParticipant(session, { participantId: 'student-1', displayName: 'Ada' })
+  const sessions = createCoreSessionStore(null)
+  await sessions.set(session.id, session)
+
+  const storedData = (await sessions.get(session.id))?.data as { entryParticipants?: Record<string, unknown> }
+  assert.ok(storedData.entryParticipants?.[token])
+  await sessions.close()
+})
 
 void test('creates a Binary Breach session and returns manager-visible state', async () => {
   const app = new TestApp()

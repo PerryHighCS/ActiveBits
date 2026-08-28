@@ -12,6 +12,7 @@ import {
   getSessionId,
 } from './persistentSessions.js'
 import { createSession } from './sessions.js'
+import { enableParticipantCookieAuthentication } from './acceptedEntryParticipants.js'
 import type { SessionStore as CoreSessionStore } from './sessions.js'
 import { buildCreateSessionBootstrapPayload } from './createSessionBootstrapPayload.js'
 import { buildSoloOnlyPolicyRejection } from './persistentSessionPolicyUtils.js'
@@ -265,6 +266,7 @@ async function handleTeacherCodeVerification(
     data: newSessionData,
   })
   newSession.type = persistentSession.activityName
+  enableParticipantCookieAuthentication(newSession)
   await sessions.set(newSession.id, newSession)
   const createSessionPayload = buildCreateSessionBootstrapPayload(persistentSession.activityName, newSession.data)
 
