@@ -1661,7 +1661,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       const stored = storeSessionEntryParticipant(childSession, {
         participantId: student.studentId,
         displayName: student.name,
-      })
+      }, { trustParticipantId: true })
       tokensByStudentId.set(student.studentId, stored.token)
     }
     await sessions.set(childSession.id, childSession)
@@ -1709,7 +1709,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
         const stored = storeSessionEntryParticipant(childSession, {
           participantId: student.studentId,
           displayName: student.name,
-        })
+        }, { trustParticipantId: true })
         entryParticipantToken = stored.token
         await sessions.set(childSession.id, childSession)
       }
@@ -2372,7 +2372,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
     const stored = storeSessionEntryParticipant(childSession, {
       participantId: student.studentId,
       displayName: student.name,
-    })
+    }, { trustParticipantId: true })
     await sessions.set(childSession.id, childSession)
 
     res.json({

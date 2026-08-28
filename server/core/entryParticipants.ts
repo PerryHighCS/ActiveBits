@@ -49,7 +49,7 @@ function generateEntryParticipantToken(): string {
 export function storeEntryParticipant(
   container: EntryParticipantContainer,
   values: unknown,
-  { trustParticipantId = true }: { trustParticipantId?: boolean } = {},
+  { trustParticipantId = false }: { trustParticipantId?: boolean } = {},
 ): { token: string; values: EntryParticipantValues } {
   const normalizedValues = normalizeEntryParticipantValues(values)
   const participantId = trustParticipantId && typeof normalizedValues.participantId === 'string' && normalizedValues.participantId.trim().length > 0

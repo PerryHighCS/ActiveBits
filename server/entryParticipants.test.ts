@@ -27,7 +27,7 @@ void test('storeEntryParticipant trims participantId or mints one when missing',
   const explicit = storeEntryParticipant(explicitContainer, {
     displayName: 'Grace',
     participantId: '  participant-1  ',
-  })
+  }, { trustParticipantId: true })
 
   assert.match(explicit.token, /^[a-f0-9]{16}$/)
   assert.deepEqual(explicit.values, {

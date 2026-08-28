@@ -241,7 +241,7 @@ void test('SyncDeck instructor can return an accepted student to the waiting roo
   const child = createSyncDeckSession('CHILD:return-session:resonance')
   acceptEntryParticipant(child, { participantId: 'student-1', displayName: 'Ada' })
   const childToken = issueAcceptedEntryParticipantToken(child, 'student-1')
-  const childEntryToken = storeSessionEntryParticipant(child, { participantId: 'student-1', displayName: 'Ada' }).token
+  const childEntryToken = storeSessionEntryParticipant(child, { participantId: 'student-1', displayName: 'Ada' }, { trustParticipantId: true }).token
   ;(session.data as { embeddedActivities: Record<string, unknown> }).embeddedActivities['resonance:0:0'] = { childSessionId: child.id, activityId: 'resonance', startedAt: 1, owner: 'syncdeck-instructor' }
   const state = createSessionStore({ [session.id]: session, [child.id]: child })
   const app = createMockApp()
