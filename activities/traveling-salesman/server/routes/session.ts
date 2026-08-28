@@ -70,7 +70,14 @@ export default function registerSessionRoutes(
       res.status(404).json({ error: 'Session not found' })
       return
     }
-    res.json(session.data)
+    const {
+      acceptedEntryParticipants: _acceptedEntryParticipants,
+      participantAuthTokens: _participantAuthTokens,
+      entryParticipants: _entryParticipants,
+      participantCookieAuthVersion: _participantCookieAuthVersion,
+      ...publicSessionData
+    } = session.data
+    res.json(publicSessionData)
   })
 
   // Set problem (map generation)

@@ -59,6 +59,7 @@ void test('newly created Java String sessions reject an unauthenticated claimed 
 
   const progressHandler = handlers['/api/java-string-practice/:sessionId/progress']
   assert.ok(progressHandler)
+  console.log('[TEST] expecting unauthenticated progress request to be rejected with 403')
   const rejected = response()
   await progressHandler({
     params: { sessionId },

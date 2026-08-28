@@ -120,6 +120,27 @@ void test('set-problem rejects invalid cities payload', async () => {
   assert.equal(res.statusCode, 400)
 })
 
+void test('session state omits participant authentication records', async () => {
+  const { app, store } = setup()
+  const session = store.s1
+  if (!session) throw new Error('missing session')
+  acceptEntryParticipant(session, { participantId: 'student-1', displayName: 'Ada' })
+  const token = issueAcceptedEntryParticipantToken(session, 'student-1')
+  if (!token) throw new Error('Expected participant token')
+  ;(session.data as Record<string, unknown>).entryParticipants = { pending: { participantId: 'student-2' } }
+
+  const handler = app.handlers.get['/api/traveling-salesman/:sessionId/session']
+  if (!handler) throw new Error('missing session handler')
+  const res = createRes()
+  await handler({ params: { sessionId: 's1' } }, res)
+
+  const body = res.body as Record<string, unknown>
+  assert.equal(body.participantAuthTokens, undefined)
+  assert.equal(body.acceptedEntryParticipants, undefined)
+  assert.equal(body.entryParticipants, undefined)
+  assert.equal(body.participantCookieAuthVersion, undefined)
+})
+
 void test('submit-route rejects missing student', async () => {
   const { app } = setup()
   const handler = app.handlers.post['/api/traveling-salesman/:sessionId/submit-route']
