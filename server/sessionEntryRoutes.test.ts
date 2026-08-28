@@ -470,7 +470,7 @@ void test('public session handoffs replace a forged participant ID before issuin
   assert.equal(consumeRes.statusCode, 200)
   assert.equal(consumeRes.cookies.length, 1)
   assert.equal(typeof consumeRes.cookies[0]?.value, 'string')
-  assert.ok(consumeRes.cookies[0]?.value.length)
+  assert.ok((consumeRes.cookies[0]?.value.length ?? 0) > 0)
   assert.equal(consumeRes.cookies[0]?.options.httpOnly, true)
   assert.equal((sessionMap.get(session.id)?.data as { acceptedEntryParticipants?: Record<string, unknown> }).acceptedEntryParticipants?.['victim-id'], undefined)
 })
