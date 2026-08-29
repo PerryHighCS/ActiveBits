@@ -8,6 +8,7 @@ export interface ActivityCapabilityRecord {
   principalKind: ActivityPrincipalKind
   subjectId?: string
   issuedAt: number
+  expiresAt: number
 }
 
 interface ActivityCapabilityContainer {
@@ -26,6 +27,8 @@ export interface ActivityPrincipal {
 }
 
 const MAX_CAPABILITIES_PER_SESSION = 200
+/** Bounded capability lifetime; a captured token cannot be replayed past this. */
+export const DEFAULT_ACTIVITY_CAPABILITY_TTL_MS = 7 * 24 * 60 * 60 * 1000
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value != null && typeof value === 'object' && !Array.isArray(value)
@@ -56,6 +59,7 @@ export function issueActivityCapability(
   principalKind: ActivityPrincipalKind,
   subjectId?: string,
   now = Date.now(),
+  ttlMs: number = DEFAULT_ACTIVITY_CAPABILITY_TTL_MS,
 ): { id: string; token: string } {
   const container = getContainer(session)
   const id = randomBytes(12).toString('base64url')
@@ -67,6 +71,7 @@ export function issueActivityCapability(
     principalKind,
     ...(subjectId ? { subjectId } : {}),
     issuedAt: now,
+    expiresAt: now + Math.max(0, ttlMs),
   }
 
   const entries = Object.values(container.activityCapabilities).sort((left, right) => left.issuedAt - right.issuedAt)
@@ -81,6 +86,7 @@ export function resolveActivityCapability(
   sessionId: string,
   principalKind: ActivityPrincipalKind,
   token: unknown,
+  now = Date.now(),
 ): ActivityPrincipal | null {
   if (typeof token !== 'string' || !isRecord(session.data)) return null
   const capabilities = (session.data as ActivityCapabilityContainer).activityCapabilities
@@ -88,6 +94,7 @@ export function resolveActivityCapability(
   const tokenHash = hashCapability(token)
   for (const value of Object.values(capabilities)) {
     if (!isRecord(value) || value.tokenHash !== tokenHash || value.principalKind !== principalKind || typeof value.id !== 'string') continue
+    if (typeof value.expiresAt === 'number' && value.expiresAt <= now) return null
     return {
       kind: principalKind,
       sessionId,

@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { createBroadcastSubscriptionHelper } from 'activebits-server/core/broadcastUtils.js'
 import { connectAcceptedSessionParticipant } from 'activebits-server/core/acceptedSessionParticipants.js'
 import { getSessionParticipantCookieName, resolveAcceptedEntryParticipantToken } from 'activebits-server/core/acceptedEntryParticipants.js'
-import { getActivityCapabilityCookieName, issueActivityCapability, readCookieValue, resolveActivityPrincipalFromCookies } from 'activebits-server/core/activityCapabilities.js'
+import { DEFAULT_ACTIVITY_CAPABILITY_TTL_MS, getActivityCapabilityCookieName, issueActivityCapability, readCookieValue, resolveActivityPrincipalFromCookies } from 'activebits-server/core/activityCapabilities.js'
 import { generateParticipantId } from 'activebits-server/core/participantIds.js'
 import { closeDuplicateParticipantSockets } from 'activebits-server/core/participantSockets.js'
 import { disconnectSessionParticipant, updateSessionParticipant } from 'activebits-server/core/sessionParticipants.js'
@@ -147,6 +147,14 @@ export default function setupJavaFormatPracticeRoutes(
     const requestedSessionId = query.get('sessionId') || null
     const requestedPrincipal = query.get('principal')
 
+    if (!requestedSessionId) {
+      // wsRouter has already upgraded and retained this socket; a request with no
+      // session can never be admitted, so close it instead of leaving it idle.
+      console.info(JSON.stringify({ event: 'java-format.websocket-denied', reason: 'missing-session-id' }))
+      client.close(1008, 'activity-auth-required')
+      return
+    }
+
     if (requestedSessionId) {
       const activeSessionId = requestedSessionId
 
@@ -272,7 +280,7 @@ export default function setupJavaFormatPracticeRoutes(
     await sessions.set(session.id, session)
     ensureBroadcastSubscription(session.id)
     res.cookie?.(getActivityCapabilityCookieName('manager', session.id), managerCapability.token, {
-      httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production', path: '/', maxAge: 7 * 24 * 60 * 60 * 1000,
+      httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production', path: '/', maxAge: DEFAULT_ACTIVITY_CAPABILITY_TTL_MS,
     })
     res.json({ id: session.id })
   })
@@ -380,7 +388,7 @@ export default function setupJavaFormatPracticeRoutes(
       return
     }
 
-    const student = updateSessionParticipant({
+    let student = updateSessionParticipant({
       participants: session.data.students,
       participantId: acceptedParticipant.participantId,
       participantName: null,
@@ -389,6 +397,31 @@ export default function setupJavaFormatPracticeRoutes(
         participant.stats = stats
       },
     })
+    if (!student) {
+      // The participant socket normally creates the roster record on admission,
+      // but the client can POST stats before the socket connects (e.g. on
+      // reload). Establish the record here so restored progress is not dropped.
+      const established = connectAcceptedSessionParticipant({
+        session,
+        participants: session.data.students,
+        participantId: acceptedParticipant.participantId,
+        participantName: null,
+        allowLegacyUnnamedMatch: false,
+        createParticipant: (participantId, participantName, now) => ({
+          id: participantId,
+          name: participantName,
+          connected: false,
+          joined: now,
+          lastSeen: now,
+          stats: { ...defaultStats },
+        }),
+        generateParticipantId,
+      })
+      if (established) {
+        established.participant.stats = stats
+        student = established.participant
+      }
+    }
     if (student) {
       await sessions.set(session.id, session)
       await broadcast('studentsUpdate', { students: session.data.students }, session.id, 'manager')

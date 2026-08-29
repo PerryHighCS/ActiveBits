@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useParams } from 'react-router';
 import { arrayToCsv, downloadCsv } from '@src/utils/csvUtils';
 import Button from '@src/components/ui/Button';
@@ -32,6 +32,8 @@ export default function JavaFormatPracticeManager() {
   const { sessionId } = useParams<{ sessionId?: string }>();
 
   const [students, setStudents] = useState<JavaFormatStudentRecord[]>([])
+  const [managerAuthLost, setManagerAuthLost] = useState(false)
+  const managerAuthLostRef = useRef(false)
   const [selectedDifficulty, setSelectedDifficulty] = useState<JavaFormatDifficulty>('beginner')
   const [selectedTheme, setSelectedTheme] = useState<JavaFormatTheme>('all')
   const [sortBy, setSortBy] = useState<SortBy>('name') // 'name', 'total', 'correct', 'accuracy', 'streak'
@@ -82,10 +84,21 @@ export default function JavaFormatPracticeManager() {
     });
   };
 
+  const markManagerAuthLost = useCallback(() => {
+    if (managerAuthLostRef.current) return;
+    managerAuthLostRef.current = true;
+    setManagerAuthLost(true);
+  }, []);
+
   const fetchStudents = useCallback(async (signal?: AbortSignal) => {
-    if (sessionId == null) return;
+    if (sessionId == null || managerAuthLostRef.current) return;
     try {
       const res = await fetch(`/api/java-format-practice/${sessionId}/students`, { signal });
+      if (res.status === 403) {
+        // The manager capability is gone; stop polling a request that can only 403.
+        markManagerAuthLost();
+        return;
+      }
       if (!res.ok) throw new Error(`Failed to fetch students: ${res.status}`);
       const data = (await res.json()) as StudentsResponse
       const list = Array.isArray(data.students) ? data.students : [];
@@ -96,7 +109,7 @@ export default function JavaFormatPracticeManager() {
       if (err instanceof DOMException && err.name === 'AbortError') return;
       console.error('Failed to fetch students:', err);
     }
-  }, [sessionId]);
+  }, [sessionId, markManagerAuthLost]);
 
   const handleWsMessage = useCallback((event: MessageEvent<string>) => {
     try {
@@ -125,12 +138,19 @@ export default function JavaFormatPracticeManager() {
     return `${protocol}//${host}/ws/java-format-practice?sessionId=${sessionId}&principal=manager`;
   }, [sessionId]);
 
+  const isTerminalManagerSocketClose = useCallback((event: CloseEvent) => {
+    const terminal = event.code === 1008 && event.reason === 'activity-auth-required';
+    if (terminal) markManagerAuthLost();
+    return terminal;
+  }, [markManagerAuthLost]);
+
   const { connect, disconnect } = useResilientWebSocket({
     buildUrl: buildWsUrl,
     shouldReconnect: sessionId != null,
     onOpen: handleWsOpen,
     onMessage: handleWsMessage,
     onError: handleWsError,
+    isTerminalClose: isTerminalManagerSocketClose,
   });
 
   useEffect(() => {
@@ -226,6 +246,16 @@ export default function JavaFormatPracticeManager() {
         activityName="Java Format Practice"
         sessionId={sessionId}
       />
+
+      {managerAuthLost && (
+        <div role="alert" style={styles.authLostBanner}>
+          <span>
+            This manager session is no longer authenticated. Reload the page to
+            reconnect, or start a new session if the problem persists.
+          </span>
+          <Button onClick={() => window.location.reload()}>Reload</Button>
+        </div>
+      )}
 
       <div style={styles.content}>
         {/* Difficulty Selector */}
@@ -362,6 +392,18 @@ const styles: Record<string, CSSProperties> = {
   },
   content: {
     padding: '30px',
+  },
+  authLostBanner: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: '16px',
+    margin: '20px 30px 0',
+    padding: '12px 16px',
+    background: '#fff5f5',
+    border: '1px solid #feb2b2',
+    borderRadius: '8px',
+    color: '#742a2a',
   },
   controlSection: {
     marginBottom: '30px',

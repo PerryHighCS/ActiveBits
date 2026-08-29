@@ -243,6 +243,16 @@ Migration implications:
 
 ### java-format-practice
 
+> **Pre-migration snapshot.** This section records the trust model that motivated
+> the plan. Java Format was migrated to the shared cookie/capability model in
+> PR #349 (Slice A): `POST /create` now issues an httpOnly manager capability,
+> manager REST/socket routes require it, `POST /stats` requires the participant
+> cookie, and the sockets authenticate before subscription. The permalink /
+> persistent-teacher path does **not** yet issue a manager capability (tracked
+> separately) and remains a known gap. See
+> `.agent/knowledge/activity-runtime-threat-model.md` and the plan's Slice A for
+> the migrated contract.
+
 - Configuration: standalone entry, direct path, permalink, home-card visibility, and a required waiting-room `displayName`. Solo clients use a synthetic `solo-*` session ID and do not call the activity server.
 - Session creation: `POST /create` creates one activity session, initializes normalized defaults, and returns only `{ id }`. It issues no manager capability. The same endpoint is the activity factory used by the shared creation flow; no second activity-local factory was found.
 - Stored activity fields: `students`, `selectedDifficulty`, and `selectedTheme`. The normalizer spreads unknown fields before replacing these fields, so platform-owned accepted-entry and participant-token metadata survives normalization.

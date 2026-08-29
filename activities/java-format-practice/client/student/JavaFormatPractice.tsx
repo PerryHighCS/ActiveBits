@@ -344,10 +344,13 @@ export default function JavaFormatPractice({ sessionData }: JavaFormatPracticePr
   }, []);
 
   const handleWsClose = useCallback((event: CloseEvent) => {
-    if (event.code === 1008 && event.reason === 'activity-auth-required' && sessionId) {
-      void navigate(`/${sessionId}`, { replace: true });
+    if (event.code === 1008 && event.reason === 'activity-auth-required' && sessionId && !authRecoveryStartedRef.current) {
+      // Full document navigation so SessionRouter re-runs entry resolution; a
+      // same-URL SPA navigate would leave the student on a dead activity view.
+      authRecoveryStartedRef.current = true;
+      window.location.assign(`/${sessionId}`);
     }
-  }, [navigate, sessionId]);
+  }, [sessionId]);
 
   const isTerminalStudentSocketClose = useCallback(
     (event: CloseEvent) => event.code === 1008 && event.reason === 'activity-auth-required',

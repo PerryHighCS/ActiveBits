@@ -69,7 +69,56 @@ function installDomEnvironment(): () => void {
   }
 }
 
-void test('a terminal close does not reconnect and a changed isTerminalClose identity does not re-open the socket', () => {
+const RECONNECT_BASE_MS = 20
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+void test('a non-terminal close reconnects after the backoff delay (control)', async () => {
+  const restoreDom = installDomEnvironment()
+  FakeWebSocket.instances.length = 0
+  const container = document.getElementById('root')
+  assert.ok(container)
+  const root = createRoot(container)
+
+  function Probe(): null {
+    useResilientWebSocket({
+      buildUrl: 'wss://example.test/socket',
+      connectOnMount: true,
+      shouldReconnect: true,
+      reconnectDelayBase: RECONNECT_BASE_MS,
+      reconnectDelayMax: RECONNECT_BASE_MS,
+      isTerminalClose: (event) => (event as { code?: number }).code === 1008,
+    })
+    return null
+  }
+
+  try {
+    await act(async () => {
+      root.render(createElement(Probe))
+    })
+    assert.equal(FakeWebSocket.instances.length, 1, 'exactly one socket opens on mount')
+
+    await act(async () => {
+      FakeWebSocket.instances[0]!.emitClose(1006)
+      await sleep(RECONNECT_BASE_MS * 4)
+    })
+    assert.equal(
+      FakeWebSocket.instances.length,
+      2,
+      'a non-terminal close must reconnect once the backoff timer fires',
+    )
+
+    await act(async () => {
+      root.unmount()
+    })
+  } finally {
+    restoreDom()
+  }
+})
+
+void test('a terminal close does not reconnect and a changed isTerminalClose identity does not re-open the socket', async () => {
   const restoreDom = installDomEnvironment()
   FakeWebSocket.instances.length = 0
   const container = document.getElementById('root')
@@ -87,24 +136,29 @@ void test('a terminal close does not reconnect and a changed isTerminalClose ide
       buildUrl: 'wss://example.test/socket',
       connectOnMount: true,
       shouldReconnect: true,
+      reconnectDelayBase: RECONNECT_BASE_MS,
+      reconnectDelayMax: RECONNECT_BASE_MS,
       isTerminalClose: (event) => (event as { code?: number }).code === 1008,
     })
     return null
   }
 
   try {
-    act(() => {
+    await act(async () => {
       root.render(createElement(Probe))
     })
     assert.equal(FakeWebSocket.instances.length, 1, 'exactly one socket opens on mount')
 
-    act(() => {
+    await act(async () => {
       FakeWebSocket.instances[0]!.emitClose(1008)
+      // Wait well past the reconnect backoff so a missed terminal check would surface.
+      await sleep(RECONNECT_BASE_MS * 4)
     })
     assert.equal(FakeWebSocket.instances.length, 1, 'a terminal 1008 close must not schedule a reconnect')
 
-    act(() => {
+    await act(async () => {
       forceRerender?.()
+      await sleep(RECONNECT_BASE_MS * 4)
     })
     assert.equal(
       FakeWebSocket.instances.length,
@@ -112,7 +166,7 @@ void test('a terminal close does not reconnect and a changed isTerminalClose ide
       'an unrelated rerender (new isTerminalClose identity) must not open another socket',
     )
 
-    act(() => {
+    await act(async () => {
       root.unmount()
     })
   } finally {

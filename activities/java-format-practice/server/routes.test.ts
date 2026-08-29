@@ -117,6 +117,12 @@ void test('Java Format websocket admits only cookie principals and keeps roster 
   await new Promise((resolve) => setTimeout(resolve, 0))
   assert.deepEqual(unknownSession.closed, { code: 1008, reason: 'activity-auth-required' })
 
+  const missingSession = makeSocket()
+  console.info('[TEST] java-format websocket denial: connecting without a sessionId is expected to close 1008')
+  registeredSocketHandler(missingSession, new URLSearchParams('principal=participant'))
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  assert.deepEqual(missingSession.closed, { code: 1008, reason: 'activity-auth-required' })
+
   const managerSocket = makeSocket(`${getActivityCapabilityCookieName('manager', session.id)}=${manager.token}`)
   registeredSocketHandler(managerSocket, new URLSearchParams(`sessionId=${session.id}&principal=manager`))
   const studentSocket = makeSocket([
@@ -201,4 +207,53 @@ void test('Java Format stats route authorizes the participant cookie and broadca
   await roster({ params: { sessionId: session.id }, cookies: { [getActivityCapabilityCookieName('manager', session.id)]: issueActivityCapability(session, 'manager').token } }, rosterRes)
   assert.equal(rosterRes.statusCode, 200)
   assert.equal(rosterRes.headers['cache-control'], 'no-store')
+})
+
+void test('Java Format stats route establishes the roster record when the socket has not connected yet', async () => {
+  const routes = new Map<string, Handler>()
+  const records = new Map<string, SessionRecord>()
+  const session: SessionRecord = {
+    id: 'session-stats-preconnect',
+    type: 'java-format-practice',
+    created: 1,
+    lastActivity: 1,
+    data: { students: [] },
+  }
+  acceptEntryParticipant(session, { participantId: 'student-z', displayName: 'Zoe' })
+  const participantToken = issueAcceptedEntryParticipantToken(session, 'student-z')
+  assert.ok(participantToken)
+  records.set(session.id, session)
+
+  const managerBroadcasts: string[] = []
+  const clients = new Set<{ readyState: number; sessionId: string; principalKind: string; send: (value: string) => void }>([
+    { readyState: 1, sessionId: session.id, principalKind: 'manager', send: (value) => managerBroadcasts.push(value) },
+  ])
+  const app = {
+    post(path: string, handler: Handler) { routes.set(`POST ${path}`, handler) },
+    get(path: string, handler: Handler) { routes.set(`GET ${path}`, handler) },
+  }
+  const sessions = {
+    get: async (id: string) => records.get(id) ?? null,
+    set: async (id: string, record: SessionRecord) => { records.set(id, record) },
+  }
+  setupJavaFormatPracticeRoutes(app as never, sessions as never, { wss: { clients, close() {} }, register() {} } as never)
+
+  const stats = routes.get('POST /api/java-format-practice/:sessionId/stats')
+  assert.ok(stats)
+  const nextStats = { total: 7, correct: 4, streak: 3, longestStreak: 5 }
+
+  const res = new MockResponse()
+  await stats({
+    params: { sessionId: session.id },
+    body: { stats: nextStats },
+    cookies: { [getSessionParticipantCookieName(session.id)]: participantToken },
+  }, res)
+  assert.equal(res.statusCode, 200)
+
+  const persisted = records.get(session.id)?.data as { students: Array<{ id: string; name: string; stats: unknown }> }
+  assert.equal(persisted.students.length, 1)
+  assert.equal(persisted.students[0]?.id, 'student-z')
+  assert.equal(persisted.students[0]?.name, 'Zoe')
+  assert.deepEqual(persisted.students[0]?.stats, nextStats)
+  assert.ok(managerBroadcasts.some((value) => JSON.parse(value).type === 'studentsUpdate'))
 })
