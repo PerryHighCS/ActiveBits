@@ -5,7 +5,7 @@
 - [x] Recognize the repository-wide architecture problem exposed by issue #341 and PR #342.
 - [x] Inventory registered activities at a coarse level for sessions, WebSockets, entry configuration, and existing identity/authentication code.
 - [x] Start the durable audit matrix in `.agent/knowledge/activity-runtime-audit.md` with all registered activities represented.
-- [ ] Complete a route-by-route and message-by-message audit before defining the final shared contract.
+- [x] Complete a route-by-route and message-by-message audit before defining the final shared contract.
 - [ ] Implement in small, independently reviewable PRs rather than another repository-wide rollout PR.
 
 ## Purpose
@@ -157,24 +157,24 @@ This initial inventory is deliberately conservative. Each row must be expanded d
 
 For every activity, record the following in a single audit matrix:
 
-- [ ] All session creation paths: dashboard, direct create, persistent, solo, embedded, Learn/integration, and test factories.
-- [ ] Every REST route, required role, sensitive inputs, and response projection.
-- [ ] Every WebSocket namespace, connection role, inbound messages, outbound messages, and broadcast audience.
-- [ ] All client-persisted identity, session, recovery, and credential data.
-- [ ] All server-stored shared metadata and activity normalizers.
-- [ ] Manager reload/rejoin/recovery behavior.
-- [ ] Student reload/rejoin/recovery behavior.
-- [ ] Duplicate-socket and disconnect semantics.
-- [ ] Report/export authorization.
-- [ ] Public display, observer, reviewer, runner-popup, or other non-student/non-manager roles.
-- [ ] Existing tests and missing boundary coverage.
+- [x] All session creation paths: dashboard, direct create, persistent, solo, embedded, Learn/integration, and test factories.
+- [x] Every REST route, required role, sensitive inputs, and response projection.
+- [x] Every WebSocket namespace, connection role, inbound messages, outbound messages, and broadcast audience.
+- [x] All client-persisted identity, session, recovery, and credential data.
+- [x] All server-stored shared metadata and activity normalizers.
+- [x] Manager reload/rejoin/recovery behavior.
+- [x] Student reload/rejoin/recovery behavior.
+- [x] Duplicate-socket and disconnect semantics.
+- [x] Report/export authorization.
+- [x] Public display, observer, reviewer, runner-popup, or other non-student/non-manager roles.
+- [x] Existing tests and missing boundary coverage.
 
 Deliverables:
 
 - [x] Add an activity runtime audit matrix under `.agent/knowledge/activity-runtime-audit.md`.
-- [ ] Assign each route/message one explicit principal requirement.
-- [ ] Identify existing vulnerabilities separately from migration regressions.
-- [ ] Identify activity behavior that should remain intentionally public.
+- [x] Assign each route/message one explicit principal requirement.
+- [x] Identify existing vulnerabilities separately from migration regressions.
+- [x] Identify activity behavior that should remain intentionally public.
 
 ## Phase 2: Define Shared Principal and Capability Contracts
 
@@ -359,4 +359,5 @@ For every migration:
 
 ## Immediate Next Step
 
-- [ ] Complete Phase 1 as a read-only audit and review the resulting matrix before implementing issue #344. This prevents the manager-capability design from solving only the five activities discovered in PR #342 while missing other role shapes already present elsewhere.
+- [x] Complete Phase 1 as a read-only audit before implementing issue #344.
+- [ ] Review the completed matrix and extract the versioned principal, capability, projection, and transport threat model before implementation begins.

@@ -37,7 +37,7 @@ Treat entries as observations, not desired behavior. Update each activity sectio
 | `python-list-practice` | 5 | `/ws/python-list-practice` | student + manager | Fully classified |
 | `raffle` | 3 | `/ws/raffle` | anonymous entrant + manager | Fully classified |
 | `resonance` | 18 | `/ws/resonance` | student + manager | Fully classified |
-| `syncdeck` | 16 activity routes plus integration routes | `/ws/syncdeck` | student + manager + embedded + integration | Inventory captured |
+| `syncdeck` | 14 activity routes plus 9 Learn routes | `/ws/syncdeck` | student + manager + embedded + integration | Fully classified |
 | `traveling-salesman` | 15 | `/ws/traveling-salesman` | student + manager | Fully classified |
 | `video-sync` | 6 | `/ws/video-sync` | student + instructor + embedded | Fully classified |
 | `www-sim` | 9 | `/ws/www-sim` | scoped host + manager | Fully classified |
@@ -48,19 +48,19 @@ Counts are structural aids, not security assertions. Route registration wrappers
 
 Each activity must document:
 
-- [ ] Session creation and all alternate factories.
-- [ ] Public HTTP routes and exact projection.
-- [ ] Student HTTP routes and principal source.
-- [ ] Manager HTTP routes and principal source.
-- [ ] Specialized HTTP roles.
-- [ ] WebSocket admission and principal source.
-- [ ] Inbound message authorization.
-- [ ] Outbound message/broadcast audiences.
-- [ ] Sensitive session fields and normalization behavior.
-- [ ] Browser-persisted state and credentials.
-- [ ] Student and manager reload/recovery behavior.
-- [ ] Solo, persistent, embedded, and integration differences.
-- [ ] Existing boundary tests and missing cases.
+- [x] Session creation and all alternate factories.
+- [x] Public HTTP routes and exact projection.
+- [x] Student HTTP routes and principal source.
+- [x] Manager HTTP routes and principal source.
+- [x] Specialized HTTP roles.
+- [x] WebSocket admission and principal source.
+- [x] Inbound message authorization.
+- [x] Outbound message/broadcast audiences.
+- [x] Sensitive session fields and normalization behavior.
+- [x] Browser-persisted state and credentials.
+- [x] Student and manager reload/recovery behavior.
+- [x] Solo, persistent, embedded, and integration differences.
+- [x] Existing boundary tests and missing cases.
 
 ## Activities
 
@@ -485,12 +485,41 @@ Migration implication: keep Resonance's activity-owned viewer-specific snapshots
 
 ### syncdeck
 
-- HTTP: create/configure; instructor recovery; student return; embedded context/start/end/entry/activation; reports; deletion; manager passcode exchange; Learn integration and browser handoffs.
-- WebSocket: `/ws/syncdeck` with student, manager, and embedded orchestration behavior.
-- Specialized roles: Learn service, substitute instructor, embedded manager, parent manager, student.
-- Sensitive state: presentation configuration, child credentials/handoffs, instructor recovery, student mappings, reports.
-- Initial concern: migrate last; define explicit adapters for each authority source and preserve child/parent lifecycle semantics.
-- [ ] Complete classification.
+- SyncDeck is the orchestration superset: temporary and persistent instructors, standalone sessions, HMAC-authenticated Learn service calls, signed substitute-instructor links, one-time browser handoffs, waiting-room students, and parent-managed embedded child sessions.
+- Stored state includes presentation URL/mode, passcode and recovery token, Learn lifecycle/linkage, last Reveal payload/state, chalkboard buffer/tool mode, named student presence/state, and embedded child registry. Its normalizer reconstructs this shape and manually preserves only `linkedSessionId`, `acceptedEntryParticipants`, and `entryParticipants`; it drops `participantAuthTokens` and other unlisted platform metadata. This is direct evidence for a platform-owned session envelope.
+
+#### HTTP principal families
+
+| Route family | Intended principal | Current principal source | Boundary |
+| --- | --- | --- | --- |
+| `/create`, `/generate-url` | public creation/link tooling | none; link generation accepts teacher code and writes its httpOnly persistent cookie | Temporary creation issues a bounded httpOnly recovery cookie but also returns the passcode in JSON. |
+| `/instructor-passcode`, `/configure`, student return, report manifest/report, delete | manager | recovery/persistent cookie exchanges to passcode; mutations/reads then send passcode in body/header | Manager protection is consistent, including child cascade deletion and report aggregation, but authority is repeatedly converted back into a browser-readable credential. |
+| `/embedded-activity/start`, `/end` | parent manager | body passcode | Creates/deletes child sessions and role-tailored lifecycle messages; start returns a short-lived manager entry token and currently may also include child passcode bootstrap data. |
+| `/embedded-manager-passcode` | child embedded manager handoff | single-use child token | Atomically consumes the URL token and returns the child passcode. Replace with a generic child-scoped principal/cookie exchange. |
+| `/embedded-context`, `/embedded-activity/entry`, `/auto-activate` | parent manager or authenticated parent student | passcode for teacher; otherwise body `studentId` checked only against roster | A forged current roster ID can resolve student context, mint fresh child entry tokens, or trigger allowed child auto-activation as that student. |
+| Learn status/student-entry/start/stop | Learn integration service | timestamped HMAC request with configured provider key | Uses mapping fingerprints, replay/coordination locks, bounded state, and no-store responses; this is a specialized service principal, not a manager cookie. |
+| Learn substitute/browser wait/instructor handoffs | signed substitute or single-use browser principal | signed expiring link; consumed opaque token; signed httpOnly waiting/recovery cookie | Establishes browser authority then redirects without placing the durable recovery secret in the destination URL. |
+
+The shared `GET /api/session/:sessionId` route used during client routing returns the raw session record by session ID. For SyncDeck this includes instructor/recovery material, student data, and orchestration metadata; the same cross-cutting exposure applies to other activity sessions according to their stored data. The instructor-passcode leak is being handled separately through the draft advisory and must not be folded into an unrelated migration PR. The runtime design must nevertheless replace raw session serialization with registered entry/public projections.
+
+#### WebSocket and child delivery boundary
+
+- `/ws/syncdeck` validates the session and stopped-Learn state first. Instructors must send a valid first authentication message within five seconds before any replay; this is the same strong authenticate-before-snapshot lifecycle as Video Sync.
+- Students present query `studentId`. A new record requires accepted-entry metadata, but any existing roster ID reconnects without the participant cookie. Thus knowing a current ID is sufficient to receive presentation/chalkboard state and child-entry tokens for that participant.
+- Only authenticated instructors may send `syncdeck-state-update`. The server serializes instructor updates, persists replay/chalkboard/tool state, and relays the extensible Reveal payload to every other local session socket. Protocol incompatibility is logged but not rejected.
+- Student roster/presence is instructor-only. Presentation, chalkboard/tool, and embedded start/end lifecycle are class-wide after admission. Embedded-start payloads are personalized: instructors receive no student entry token; each student receives a freshly stored child handoff token for its claimed parent ID.
+- Duplicate participant sockets are closed by claimed ID. Disconnect presence is recomputed from open local sockets. Ordinary state and embedded lifecycle delivery are process-local; unlike session-ended signaling, they have no pub/sub fanout, so multi-instance clients may diverge.
+
+#### Recovery, tests, and migration
+
+- Temporary manager reload works through the bounded httpOnly recovery cookie; persistent, Learn, and substitute modes establish the same recovery path. The client then stores/uses the recovered passcode in memory/bootstrap flow. Embedded manager tokens are cached in parent memory and placed briefly in same-origin iframe URLs.
+- Students persist identity hints in both local and session storage, replay child handoff tokens through session storage, and can request replacement child tokens using the claimed parent ID. Return-to-waiting-room revokes parent/child accepted entries and tokens and closes matching sockets, but does not make initial ID claims authentic.
+- Route and Learn suites are extensive: manager recovery/denial, HMAC/browser/substitute flows, WebSocket auth/replay/cleanup, duplicate students, child lifecycle/concurrency/rollback, reports, keepalive, return/revocation, and normalization. The happy paths still encode roster ID as student authority and do not contract-test preservation of the participant-token map.
+- Missing boundaries include cookie-derived parent student admission on HTTP/WebSocket, forged roster-ID denial, platform metadata preservation, passcode-free manager context, child-scoped generic manager grants, role-preserving multi-instance delivery, raw shared-session projection denial, terminal expiry recovery, and end-to-end Learn/embedded principal propagation.
+
+Migration implication: SyncDeck should remain the final adapter. Preserve its service/signed-handoff principals, authenticate-before-replay lifecycle, child lifecycle locks, personalized entry handoffs, revocation cascade, and report registry. Replace every passcode/claimed-ID conversion with shared principals and move platform metadata/projection/fanout below the activity boundary.
+
+- [x] Complete route, message, persistence, recovery, and test classification.
 
 ### traveling-salesman
 
@@ -634,16 +663,16 @@ Migration implications:
 
 ## Cross-Cutting Findings to Verify
 
-- [ ] Which create routes are reachable only through the manager dashboard versus directly callable by any browser.
-- [ ] Which create responses can establish automatic httpOnly manager capability without changing client UX.
-- [ ] Which manager views are recoverable after reload and which rely only on URL/session ID possession.
-- [ ] Which WebSocket broadcasts contain full session or roster objects.
-- [ ] Which REST reads return raw activity session data.
-- [ ] Which role query parameters are routing hints versus current authority.
-- [ ] Which activities have intentional anonymous/public displays.
-- [ ] Which normalizers spread unknown fields and which reconstruct data narrowly.
-- [ ] Which persistent/embedded factories bypass normal activity create routes.
-- [ ] Which clients persist participant IDs, names, passcodes, or manager context in browser storage.
+- [x] Which create routes are reachable only through the manager dashboard versus directly callable by any browser.
+- [x] Which create responses can establish automatic httpOnly manager capability without changing client UX.
+- [x] Which manager views are recoverable after reload and which rely only on URL/session ID possession.
+- [x] Which WebSocket broadcasts contain full session or roster objects.
+- [x] Which REST reads return raw activity session data.
+- [x] Which role query parameters are routing hints versus current authority.
+- [x] Which activities have intentional anonymous/public displays.
+- [x] Which normalizers spread unknown fields and which reconstruct data narrowly.
+- [x] Which persistent/embedded factories bypass normal activity create routes.
+- [x] Which clients persist participant IDs, names, passcodes, or manager context in browser storage.
 
 ## Next Audit Slice
 
@@ -671,7 +700,8 @@ Migration implications:
 - [x] Audit `video-sync` and preserve its authenticate-before-snapshot lifecycle and embedded/persistent adapter pattern.
 - [x] Audit `postboard` as the REST-only private-projection reference.
 - [x] Audit `resonance` as the private answer/draft and bidirectional WebSocket reference.
-- [ ] Audit `syncdeck` last, including temporary/persistent/Learn/substitute instructor, student return, and embedded child orchestration.
+- [x] Audit `syncdeck`, including temporary/persistent/Learn/substitute instructor, student return, and embedded child orchestration.
+- [x] Complete detailed route/message classification for all 15 registered activities.
 
 ## Pilot Comparison: Java Format, MobCode, and Video Sync
 
