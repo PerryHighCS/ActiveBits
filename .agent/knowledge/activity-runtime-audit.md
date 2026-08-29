@@ -32,7 +32,7 @@ Treat entries as observations, not desired behavior. Update each activity sectio
 | `gallery-walk` | 11 | `/ws/gallery-walk` | manager + reviewer/reviewee | Fully classified |
 | `java-format-practice` | 6 | `/ws/java-format-practice` | student + manager | Fully classified |
 | `java-string-practice` | 5 | `/ws/java-string-practice` | student + manager | Fully classified |
-| `mobcode` | 10 | `/ws/mobcode` | student + manager + solo | Inventory captured |
+| `mobcode` | 10 | `/ws/mobcode` | student + manager + solo | Fully classified |
 | `postboard` | 15 | none | student + manager | Inventory captured |
 | `python-list-practice` | 5 | `/ws/python-list-practice` | student + manager | Fully classified |
 | `raffle` | 3 | `/ws/raffle` | anonymous entrant + manager | Fully classified |
@@ -322,11 +322,35 @@ Existing activity tests cover route validators and client/domain utilities only.
 
 ### mobcode
 
-- HTTP: create/create-solo; session; student workspace; manager session; workspace state/reset; student-code actions; shared workspace; manager state.
-- WebSocket: `/ws/mobcode` with an explicit manager-auth message protocol.
-- Sensitive state: private student source code, named workspaces, instructor state, shared workspace.
-- Initial concern: preserve its stronger role model and use it as evidence for the shared principal contract rather than flattening its domain protocol.
-- [ ] Complete classification.
+- Modes include temporary live sessions, SyncDeck embedded children, and server-backed persistent solo workspaces. Live creation returns an instructor passcode in JSON; the dashboard copies it into router state and `sessionStorage`. Embedded managers exchange a one-time URL token for that same passcode. Solo creation returns its edit token in JSON and in the URL fragment while also issuing a long-lived httpOnly, route-scoped cookie.
+- Stored state includes the instructor passcode, instructor file tree/content, student-mode settings, private named student workspaces, an optionally shared anonymous example, solo edit token/mode, runner selection, and embedded/platform metadata. Its normalizer spreads unknown fields and preserves platform metadata.
+
+| Route group | Intended principal | Current principal source | Boundary |
+| --- | --- | --- | --- |
+| `POST /create`, `/create-solo` | public factories | none | Live creation exposes manager credential in JSON. Solo returns the edit token despite also setting it httpOnly. |
+| `GET /:sessionId/session` | admitted student, or solo viewer/editor projection | session ID; solo edit cookie only affects `canEditSolo` | Excludes passcodes/tokens and student workspaces, but exposes the complete instructor workspace to anyone knowing the ID. The student client uses it as a read-only fallback after participant denial. |
+| `POST /:sessionId/student-workspace`, `/student-workspace/state`, `/student-workspace/reset` | student | session-scoped httpOnly participant cookie | Correctly derives identity from the accepted-entry token; returns only the caller's workspace plus public instructor/shared state. |
+| `POST /:sessionId/manager-session`, `/student-code/:action`, `/shared-workspace/state` | manager | body instructor passcode | Returns/mutates named private student code and manager settings after constant-time passcode verification. |
+| `POST /:sessionId/state` | manager or solo editor | body instructor/solo token, with solo cookie fallback | Persists instructor/solo files; request-visible solo token remains accepted for URL-fragment compatibility. |
+
+#### WebSocket and projections
+
+- `/ws/mobcode` initially trusts query `sessionId` and uses query `role` only to select the authentication path. It retains/subscribes every socket before checking session existence, a participant cookie, or manager credentials.
+- Managers must send `manager-auth`; later content, active-file, and presence mutations re-load the session and re-verify the passcode. Failed auth does not close the socket, so an unauthenticated manager remains subscribed as a student-shaped receiver.
+- Student sockets have no authentication at all. They can receive all-audience instructor files, shared-example/settings changes, and live editor presence when sharing is enabled. Participant-private workspaces stay on authenticated HTTP and are not broadcast.
+- `student-code-updated` is manager-only and local/pub-sub delivery filters on `isAuthenticatedManager`. Durable state is manager-only when sharing is disabled and all-socket when enabled. Live relay applies the same local audience rule, but is not published cross-instance.
+- There is no initial socket snapshot. HTTP establishes state; sockets carry later changes. In-memory live edits are process-local and cleaned up after the last local session socket closes.
+
+#### Recovery and tests
+
+- Temporary manager reload depends on `sessionStorage`; browser restart loses authority. Embedded recovery can mint a new one-time exchange token from the authenticated parent. Solo authority survives through its one-year cookie, while its URL-fragment/router-state token is also client-readable.
+- Students consume the waiting-room handoff to establish the cookie. On denial, embedded students retry once, then every student falls back to the session-ID-only instructor projection rather than terminal re-entry.
+- Tests provide strong normalization/size/path validation, student-versus-manager snapshots, cookie-derived student route denial, manager/solo denial, passcode/token exclusion, WebSocket mutation validation, and manager passcode verification. Playwright covers runner and student UI modes.
+- Missing boundaries include authenticate-before-subscribe, participant-authenticated socket admission, failed-manager terminal close, unauthorized sockets receiving no later broadcasts, cross-instance live relay, cookie expiry/re-entry, manager browser-restart recovery, and eliminating request-visible manager/solo credentials.
+
+Migration implication: retain MobCode's activity-owned projections, cookie-derived student REST identity, constant-time verification during transition, and explicit audience metadata. Replace passcodes with shared manager principals, authenticate every socket before subscription, and decide whether instructor code is an explicit public projection; current product entry requires waiting-room admission, so the safe initial classification is authenticated student plus manager, not anonymous observer.
+
+- [x] Complete route, message, persistence, recovery, and test classification.
 
 ### postboard
 
@@ -571,6 +595,8 @@ Migration implications:
 - [x] Add immutable scoped-subject identity with mutable activity addressing to the proposed contract requirements.
 - [x] Audit `embedded-test` as the smallest explicit embedded-manager adapter.
 - [x] Require parent-derived, child-scoped embedded-manager authority even when the child activity has no activity-local passcode.
+- [x] Fully audit `mobcode` as the mature role/audience reference and identify its pre-authentication subscription gap.
+- [ ] Audit `video-sync` next to compare its authenticate-before-snapshot lifecycle and embedded/persistent adapters.
 
 ## Pilot Comparison: Java Format, MobCode, and Video Sync
 
