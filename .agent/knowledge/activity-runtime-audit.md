@@ -36,7 +36,7 @@ Treat entries as observations, not desired behavior. Update each activity sectio
 | `postboard` | 15 | none | student + manager | Fully classified |
 | `python-list-practice` | 5 | `/ws/python-list-practice` | student + manager | Fully classified |
 | `raffle` | 3 | `/ws/raffle` | anonymous entrant + manager | Fully classified |
-| `resonance` | 18 | `/ws/resonance` | student + manager | Inventory captured |
+| `resonance` | 18 | `/ws/resonance` | student + manager | Fully classified |
 | `syncdeck` | 16 activity routes plus integration routes | `/ws/syncdeck` | student + manager + embedded + integration | Inventory captured |
 | `traveling-salesman` | 15 | `/ws/traveling-salesman` | student + manager | Fully classified |
 | `video-sync` | 6 | `/ws/video-sync` | student + instructor + embedded | Fully classified |
@@ -452,11 +452,36 @@ Missing tests: manager capability creation and socket admission, unauthorized so
 
 ### resonance
 
-- HTTP: create; link preparation; instructor recovery; registration; student state/submission; instructor responses and question controls; report.
-- WebSocket: `/ws/resonance` shared across roles.
-- Sensitive state: private answers/drafts, names, annotations, instructor controls, passcode/recovery data.
-- Initial concern: issue #341 demonstrates required student isolation, but current activity-local implementation is evidence rather than the final shared API.
-- [ ] Complete classification.
+- Modes include temporary live, encrypted persistent-question links, explicit self-paced standalone sessions, and SyncDeck children. Creation returns a passcode except for self-paced mode; persistent/embedded managers can recover the child passcode through verified parent authority.
+- Stored state includes passcode, full authored questions/correctness, roster, private submitted answers and live drafts, annotations, reveals/reactions, ordering, timers/staged-run state, encrypted-link metadata, and embedded/platform metadata. The normalizer spreads unknown fields and preserves platform metadata.
+
+| Route group | Intended principal | Current principal source | Boundary |
+| --- | --- | --- | --- |
+| `/create`, `/prepare-link-options` | public factories/tooling | none | Creates live/self-paced sessions or encrypts validated link options; live creation returns manager credential. |
+| `/instructor-passcode` | persistent/embedded manager adapter | verified persistent parent cookie | Returns the activity passcode rather than resolving a principal. |
+| `/register-student` | public enrollment after waiting-room acceptance | body name and optional ID | Does not inspect accepted-entry records/cookie; arbitrary IDs can create or overwrite roster entries. |
+| `/state`, `/submit-answer` | student | query/body `studentId` | Student projection is viewer-specific, but a forged ID reads another student's submitted answers, reviewed annotations, reveal ownership/reaction state, and can submit as them. |
+| `/responses`, question/annotation/share/reorder/timer controls, `/report` | manager | passcode header | Manager routes consistently verify the passcode and expose/mutate full questions, names, drafts, responses, annotations, and reports. The registered report builder is a separate trusted internal path. |
+
+#### WebSocket messages and audiences
+
+- Session existence and instructor query passcode are checked before the initial snapshot. The passcode itself is placed in the WebSocket URL. Student sockets require only session ID and optional claimed student ID; there is no participant-cookie validation.
+- Instructor inbound messages cover activation/staging, add question, result sharing, annotations, timers, and response ordering. They are accepted only on the passcode-authenticated instructor socket and revalidate activity domain payloads.
+- Student inbound `submit-answer` and `update-draft` are bound to the socket's claimed ID; payload ID cannot switch identity, but the connection claim itself is untrusted. `react-to-shared` likewise uses that claimed socket ID.
+- Instructor snapshots and response/draft events are role-filtered locally. Student session-state broadcasts are individually projected using each socket's claimed viewer ID, so forging the connection ID selects another student's private projection.
+- `question-added` broadcasts the raw instructor `Question` to every socket, potentially leaking multiple-choice correctness fields that normal student snapshots deliberately remove. Results sharing does apply a student-safe question projection.
+- Other all-role events contain intended shared activation/timer/reveal/reaction state. Delivery is process-local only; there is no pub/sub fanout, so manager/student state can diverge across instances.
+
+#### Recovery and tests
+
+- Temporary managers store the passcode in `sessionStorage`; persistent and embedded managers recover through server-verified parent authority, then also cache the passcode there. Students persist request-visible name/ID in `localStorage` and consume `sessionStorage` handoff, but no activity transport resolves the participant cookie.
+- Student clients fall back from WebSocket to REST polling with the same claimed ID and reconnect indefinitely on authorization failures. Instructor clients similarly poll and reconnect using the browser-readable passcode.
+- Tests provide extensive domain, normalization, staged/self-paced, projection, report, recovery, and broadcast behavior coverage, including rejecting a message payload ID that differs from the socket ID. They do not prove that the socket ID itself or REST identity comes from a server principal.
+- Missing boundaries include accepted-entry/cookie-derived registration and identity, forged-ID denial across REST/WebSocket, private draft/answer projection isolation, passcode-free manager capability and reload, credential-free WebSocket URL, terminal expiry recovery, projected `question-added`, role-preserving pub/sub, and internal-versus-HTTP report contracts.
+
+Migration implication: keep Resonance's activity-owned viewer-specific snapshots and domain validation, but supply the viewer ID exclusively from the shared principal. Shared delivery must support per-participant projections as well as role audiences, and every event carrying question data must pass through the same student-safe projection used by snapshots.
+
+- [x] Complete route, message, persistence, recovery, and test classification.
 
 ### syncdeck
 
@@ -645,7 +670,8 @@ Migration implications:
 - [x] Fully audit `mobcode` as the mature role/audience reference and identify its pre-authentication subscription gap.
 - [x] Audit `video-sync` and preserve its authenticate-before-snapshot lifecycle and embedded/persistent adapter pattern.
 - [x] Audit `postboard` as the REST-only private-projection reference.
-- [ ] Audit `resonance` next as the private answer/draft and bidirectional WebSocket reference.
+- [x] Audit `resonance` as the private answer/draft and bidirectional WebSocket reference.
+- [ ] Audit `syncdeck` last, including temporary/persistent/Learn/substitute instructor, student return, and embedded child orchestration.
 
 ## Pilot Comparison: Java Format, MobCode, and Video Sync
 
