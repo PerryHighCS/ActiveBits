@@ -380,6 +380,7 @@ export default function setupJavaFormatPracticeRoutes(
     }
 
     if (!resolveActivityPrincipalFromCookies(session, sessionId, 'manager', req.cookies)) {
+      console.warn(JSON.stringify({ event: 'java-format.manager-difficulty-denied', sessionId }))
       res.status(403).json({ error: 'manager authentication required' })
       return
     }
@@ -407,6 +408,7 @@ export default function setupJavaFormatPracticeRoutes(
     }
 
     if (!resolveActivityPrincipalFromCookies(session, sessionId, 'manager', req.cookies)) {
+      console.warn(JSON.stringify({ event: 'java-format.manager-theme-denied', sessionId }))
       res.status(403).json({ error: 'manager authentication required' })
       return
     }

@@ -58,6 +58,7 @@ void test('Java Format creation issues a manager cookie and manager routes rejec
   assert.equal(created.headers['cache-control'], 'no-store')
 
   const denied = new MockResponse()
+  console.info('[TEST] java-format difficulty route without a manager cookie is expected to log a denial and return 403')
   await difficulty({ params: { sessionId }, body: { difficulty: 'advanced' } }, denied)
   assert.equal(denied.statusCode, 403)
 
@@ -142,7 +143,7 @@ void test('Java Format manager socket is closed once its capability reaches expi
   console.info('[TEST] java-format websocket: manager capability expiry is expected to close 1008')
   const registration: { socketHandler?: (socket: TestSocket, query: URLSearchParams) => void } = {}
   const session: SessionRecord = { id: 'session-exp', type: 'java-format-practice', created: 1, lastActivity: 1, data: { students: [] } }
-  const manager = issueActivityCapability(session, 'manager', undefined, Date.now(), 40)
+  const manager = issueActivityCapability(session, 'manager', undefined, Date.now(), 300)
   const sessions = { get: async (id: string) => (id === session.id ? session : null), set: async () => {} }
   const clients = new Set<TestSocket>()
   const ws = { wss: { clients, close() {} }, register(_p: string, handler: (socket: TestSocket, query: URLSearchParams) => void) { registration.socketHandler = handler } }
@@ -163,10 +164,12 @@ void test('Java Format manager socket is closed once its capability reaches expi
   clients.add(socket as unknown as TestSocket)
 
   socketHandler(socket as unknown as TestSocket, new URLSearchParams(`sessionId=${session.id}&principal=manager`))
-  await new Promise((resolve) => setTimeout(resolve, 5))
+  // TTL is 300ms; keep the "still open" checkpoint well below it and the expiry
+  // wait well above it so a loaded CI runner cannot flake the assertion.
+  await new Promise((resolve) => setTimeout(resolve, 20))
   assert.equal(socket.closed, null, 'admitted and still open while the capability is valid')
 
-  await new Promise((resolve) => setTimeout(resolve, 90))
+  await new Promise((resolve) => setTimeout(resolve, 400))
   assert.deepEqual(socket.closed, { code: 1008, reason: 'activity-auth-required' })
 })
 
