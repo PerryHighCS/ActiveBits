@@ -28,7 +28,7 @@ Treat entries as observations, not desired behavior. Update each activity sectio
 | --- | ---: | --- | --- | --- |
 | `algorithm-demo` | 5 | `/ws/algorithm-demo` | public observer + manager | Fully classified |
 | `binary-breach` | 8 | `/ws/binary-breach` | student + manager | Fully classified |
-| `embedded-test` | 2 | `/ws/embedded-test` | student + embedded manager | Inventory captured |
+| `embedded-test` | 2 | `/ws/embedded-test` | student + embedded manager | Fully classified |
 | `gallery-walk` | 11 | `/ws/gallery-walk` | manager + reviewer/reviewee | Fully classified |
 | `java-format-practice` | 6 | `/ws/java-format-practice` | student + manager | Fully classified |
 | `java-string-practice` | 5 | `/ws/java-string-practice` | student + manager | Fully classified |
@@ -150,10 +150,36 @@ Migration implication: the practice pilot principal/projection contract generali
 
 ### embedded-test
 
-- HTTP: create; session read.
-- WebSocket: `/ws/embedded-test`.
-- Initial concern: accepted-entry student identity and embedded-parent manager trust must use explicit platform adapters even though this activity is development-facing.
-- [ ] Complete classification.
+- This is a development-only SyncDeck contract harness. Standalone entry, direct paths, permalinks, and home surfacing are disabled, but its activity-local create and manager URLs remain directly callable.
+- SyncDeck normally creates it as a child session with `embeddedParentSessionId`, instance/location data, and `embeddedLaunch`. The activity create route is a second, unauthenticated factory that returns only `{ id }` and establishes no manager authority.
+- Stored activity fields are `students` and the last 100 chat `messages`. The normalizer spreads unknown data, so accepted-entry records, participant token maps, embedded launch metadata, and manager bootstrap metadata survive normalization.
+
+| Route | Intended principal | Current principal source | Boundary |
+| --- | --- | --- | --- |
+| `POST /api/embedded-test/create` | public development factory | none | Creates a standalone session despite the activity's disabled standalone UI; issues no manager capability. |
+| `GET /api/embedded-test/:sessionId/session` | manager, if retained | session ID only | Returns the raw `SessionRecord`, including the named roster, chat history, accepted-entry/token metadata, and embedded launch/bootstrap fields. Neither current activity client calls it. |
+
+#### WebSocket and embedded-manager boundary
+
+- Both clients use `/ws/embedded-test`. The manager adds `role=instructor`; the server immediately treats that query value as authority. Any caller knowing a session ID can join as manager, receive the full state, send manager-attributed chat, and remain subscribed.
+- SyncDeck creates a short-lived embedded-manager entry token and places it in the manager iframe URL even for this credentialless child. `EmbeddedTestManager` neither consumes nor removes it. Because the child has no instructor passcode, the generic passcode exchange cannot establish authority for it; the token is currently unused while `role=instructor` remains the bypass.
+- Student query claims are `sessionId`, `studentId`, and `studentName`. The activity calls `connectAcceptedSessionParticipant`, but a supplied non-empty name bypasses accepted-entry lookup and an unknown supplied ID is inserted. It never resolves the httpOnly participant cookie.
+- Student reload consumes waiting-room handoff when present, then falls back to request-visible name/ID in `localStorage`; it generates an ID client-side when none is available. Cookie loss is not detected.
+- The sole inbound message, `chat-message`, is allowed for either claimed role. Attribution comes from the socket's manager flag or claimed student ID; text is trimmed and limited to 500 characters.
+- The sole outbound message, `embedded-test-state`, contains the complete participant roster (IDs, names, timestamps, connection state), complete shared chat history, and connected count. It is sent identically to every manager and student socket. Shared chat visibility is intentional for this harness, but students need a student projection without platform metadata or future manager-only fields.
+- Delivery is process-local only. There is no pub/sub fanout, so embedded manager/student overlays attached to different instances can diverge.
+- Multiple sockets for one student are allowed. Connected state is derived from all open sockets, which avoids a stale close marking an active participant offline, but `lastSeenAt` is updated only on connection and close merely rebroadcasts.
+
+#### Recovery and tests
+
+- The embedded manager has no activity credential or recovery logic. SyncDeck can remount the iframe with a fresh bootstrap token, but the child ignores it; direct manager reload continues to work only because the role query is accepted.
+- The manager hides its end-session control for child IDs and relies on SyncDeck to end the child. A manually opened non-child manager can call the shared session-delete endpoint, whose authorization is outside this activity adapter.
+- Server tests cover creation, accepted-entry connection/chat broadcast, and name length. The manager/student unit tests cover only button visibility and socket-ready placeholders. The happy-path socket test explicitly codifies `role=instructor` and a query `studentId` as sufficient authority.
+- Missing cases include parent-to-child manager grant validation, unauthorized role-query denial before retention/snapshot, cookie-derived participant identity, forged ID/name rejection, raw-session projection exclusion, manager/student message attribution, cross-role projection isolation, multi-instance fanout, bootstrap token consumption/removal, expiry/recovery, and embedded child teardown behavior.
+
+Migration implication: `embedded-manager` must be a first-class platform principal derived from authenticated parent orchestration and scoped to one child session. Credentialless activity domain design must not mean credentialless manager transport. The parent-to-child handoff should establish a generic httpOnly child-manager capability (or equivalent server-resolved grant), not return an activity passcode or require each child to implement a passcode exchange.
+
+- [x] Complete route, message, persistence, recovery, and test classification.
 
 ### gallery-walk
 
@@ -530,21 +556,21 @@ Migration implications:
 - [x] Compare its manager boundary with `mobcode` and `video-sync` before proposing the shared manager-capability contract.
 - [x] Audit `java-string-practice` to determine how much of Java Format's behavior is copied and how much differs.
 - [x] Audit `python-list-practice` to test whether the same contract covers a third practice activity without activity-specific exceptions.
-- [ ] Consolidate the three practice audits into pilot requirements and decide whether anonymous observer access is needed by any of them.
+- [x] Consolidate the three practice audits into pilot requirements and decide whether anonymous observer access is needed by any of them.
 - [x] Audit `binary-breach` as the next distinct student-progress activity.
 - [x] Add targeted participant delivery to the proposed WebSocket contract requirements.
 - [x] Audit `traveling-salesman` because its split route modules test shared HTTP middleware composition and its leaderboard tests public-versus-manager projection decisions.
-- [ ] Add module-composable authorization and post-auth activity-domain validation to the proposed contract requirements.
+- [x] Add module-composable authorization and post-auth activity-domain validation to the proposed contract requirements.
 - [x] Audit `gallery-walk` to model reviewer/reviewee resource-scoped principals and feedback projections.
-- [ ] Add activity-declared scoped student grants and address-versus-authority separation to the proposed contract.
+- [x] Add activity-declared scoped student grants and address-versus-authority separation to the proposed contract.
 - [x] Audit `raffle` to distinguish entrant, manager, and any intentional display/observer projection.
 - [x] Add anonymous no-name participant principals and idempotent resource claiming to the proposed contract requirements.
-- [ ] Audit `algorithm-demo` next to determine whether its observer/controller split is intentionally public.
 - [x] Audit `algorithm-demo` and confirm its observer/controller split is intentionally public.
 - [x] Resolve the shared observer decision as an activity-declared public projection and require domain-specific projection of opaque activity state.
 - [x] Audit `www-sim` and distinguish simulated host addressing from authenticated resource authority.
 - [x] Add immutable scoped-subject identity with mutable activity addressing to the proposed contract requirements.
-- [ ] Audit `embedded-test` next as the smallest explicit embedded-manager adapter.
+- [x] Audit `embedded-test` as the smallest explicit embedded-manager adapter.
+- [x] Require parent-derived, child-scoped embedded-manager authority even when the child activity has no activity-local passcode.
 
 ## Pilot Comparison: Java Format, MobCode, and Video Sync
 
@@ -577,6 +603,7 @@ The completed Java Format, Java String, and Python List audits establish the min
 - [ ] Separate public resource addresses, such as QR target IDs, from principals/capabilities that authorize mutation or private reads.
 - [ ] Keep scoped principal subject IDs immutable while allowing activity-owned public addresses (for example hostnames) to be renamed or reassigned under domain rules.
 - [ ] A capability must be scoped to one session and role; credentials from another session or activity must fail closed.
+- [ ] Parent orchestration must mint or exchange a child-session-scoped `embedded-manager` grant; a credentialless child activity may omit an activity passcode but may not accept an unverified manager role hint.
 - [ ] Clean cutover is acceptable: no fallback to legacy claimed identities or credentialless manager access is required for sessions created before deployment.
 
 ### HTTP requirements

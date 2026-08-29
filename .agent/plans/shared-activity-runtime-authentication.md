@@ -137,6 +137,7 @@ This initial inventory is deliberately conservative. Each row must be expanded d
 - [x] Treat request-controlled role and participant fields as hints only.
 - [x] Protect manager REST and WebSocket surfaces together; do not fix only one transport.
 - [x] Use explicit adapters for persistent, embedded, Learn, and solo modes.
+- [x] Treat credentialless embedded activity managers as authenticated parent-derived principals, not public managers; the child need not invent or receive an activity passcode.
 - [x] Prefer replacement PRs and staged migrations over a single repository-wide rollout.
 - [x] Use a clean deployment cutover; preserving sessions that were live before deployment is not required.
 - [x] Represent intentional anonymous observers with the `public` principal and activity-declared projections; reject anonymous sockets for activities without that declaration.
@@ -187,6 +188,7 @@ Deliverables:
 - [ ] Define bounded expiry, revocation, rotation, session-end cleanup, and store normalization.
 - [ ] Define persistent teacher-cookie to manager-principal resolution.
 - [ ] Define embedded-parent and Learn instructor handoff to manager-principal resolution.
+- [ ] Make the embedded-parent handoff child-session-scoped and activity-agnostic so credentialless children consume authority without implementing a passcode exchange.
 - [ ] Define student accepted-entry token to student-principal resolution.
 - [ ] Define anonymous no-name participant issuance for activities such as Raffle that do not use waiting-room identity.
 - [ ] Define an idempotent, principal-bound resource claim pattern for ticket-like enrollment results.
