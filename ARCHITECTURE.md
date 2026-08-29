@@ -628,9 +628,11 @@ Located within each activity's `components/` folder and imported with relative p
 ## Security Considerations
 
 ### Authentication
-This is not for true authentication - there are no users, no persistent storage. Activities are not gated, but
-to allow for convenience teachers can create persistent links that will get them and their students into an activity
-that contain a hash that allows teachers to use a code to enter the management dashboard.
+This is not for true authentication - there are no users, no persistent storage. Historically activities performed
+no platform-level request gating (see **Shared Activity Runtime Auth** below for the in-progress change that gates
+migrated activities such as Java Format Practice), but to allow for convenience teachers can create persistent links
+that will get them and their students into an activity that contain a hash that allows teachers to use a code to
+enter the management dashboard.
 
 - **Teacher Codes**: User-created codes (minimum 6 characters) stored in httpOnly cookies for convenience
 - **HMAC Hashing**: SHA-256 with 8-character salt prevents URL tampering

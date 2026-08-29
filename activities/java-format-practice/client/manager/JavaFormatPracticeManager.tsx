@@ -39,6 +39,11 @@ export default function JavaFormatPracticeManager() {
   // landed while the request was outstanding, so a slow HTTP response can never
   // overwrite a fresher roster.
   const rosterUpdateGenRef = useRef(0)
+  // The socket for the *current* sessionId. `disconnect()` closes the previous
+  // session's socket but leaves its `onmessage` bound, so a message already
+  // queued on it can still fire after a route swap; roster updates are only
+  // applied when they come from this socket.
+  const activeSocketRef = useRef<WebSocket | null>(null)
   const [selectedDifficulty, setSelectedDifficulty] = useState<JavaFormatDifficulty>('beginner')
   const [selectedTheme, setSelectedTheme] = useState<JavaFormatTheme>('all')
   const [sortBy, setSortBy] = useState<SortBy>('name') // 'name', 'total', 'correct', 'accuracy', 'streak'
@@ -129,7 +134,10 @@ export default function JavaFormatPracticeManager() {
     }
   }, [sessionId, markManagerAuthLost]);
 
-  const handleWsMessage = useCallback((event: MessageEvent<string>) => {
+  const handleWsMessage = useCallback((event: MessageEvent<string>, ws?: WebSocket) => {
+    // Drop anything that is not from the socket bound to the current sessionId
+    // (e.g. a message queued on a prior session's socket before disconnect()).
+    if (ws !== activeSocketRef.current) return;
     try {
       const message = JSON.parse(event.data) as ManagerWsMessage
       if (message.type === 'studentsUpdate') {
@@ -142,9 +150,14 @@ export default function JavaFormatPracticeManager() {
     }
   }, []);
 
-  const handleWsOpen = useCallback(() => {
+  const handleWsOpen = useCallback((_event: Event, ws: WebSocket) => {
+    activeSocketRef.current = ws;
     void fetchStudents();
   }, [fetchStudents]);
+
+  const handleWsClose = useCallback((_event: CloseEvent, ws: WebSocket) => {
+    if (activeSocketRef.current === ws) activeSocketRef.current = null;
+  }, []);
 
   const handleWsError = useCallback((error: unknown) => {
     console.error('WebSocket error:', error);
@@ -168,6 +181,7 @@ export default function JavaFormatPracticeManager() {
     shouldReconnect: sessionId != null,
     onOpen: handleWsOpen,
     onMessage: handleWsMessage,
+    onClose: handleWsClose,
     onError: handleWsError,
     isTerminalClose: isTerminalManagerSocketClose,
   });
@@ -189,6 +203,9 @@ export default function JavaFormatPracticeManager() {
       disposed = true;
       controller.abort();
       window.clearInterval(refreshInterval);
+      // Stop trusting the outgoing socket immediately so a message it has already
+      // queued cannot land on the next session's roster.
+      activeSocketRef.current = null;
       disconnect();
     };
   }, [sessionId, fetchStudents, connect, disconnect]);

@@ -61,6 +61,7 @@ void test('activity capabilities have a bounded lifetime and are rejected once e
   assert.equal(badTtlRecord?.expiresAt, issuedAt + DEFAULT_ACTIVITY_CAPABILITY_TTL_MS)
 
   // A stored record whose expiry was lost or corrupted is not a valid principal.
+  console.info('[TEST] activity capability resolution: a stored record with no expiresAt is expected to be rejected')
   const caps = session.data.activityCapabilities as Record<string, { expiresAt?: number }>
   delete caps[issued.id]!.expiresAt
   assert.equal(resolveActivityCapability(session, 'session-a', 'manager', issued.token, issuedAt + 1), null)

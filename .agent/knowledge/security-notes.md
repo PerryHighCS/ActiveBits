@@ -28,8 +28,10 @@ Track security-relevant boundaries, risks, and mitigation decisions.
 - Implemented so far (Slice A, PR #349): shared hashed capability + accepted-entry
   primitives (`server/core/activityCapabilities.ts`, bounded server-side expiry;
   `server/core/acceptedEntryParticipants.ts`, hashed tokens). Java Format Practice
-  creation issues the manager capability cookie; its manager REST + WebSocket
-  surfaces and `POST /stats` require the cookie; sockets authenticate before
+  creation issues the manager capability cookie; its manager REST routes
+  (`/difficulty`, `/theme`, `/students`) and the manager WebSocket require that
+  manager capability cookie, while `POST /stats` and the participant WebSocket
+  require the accepted-participant cookie; sockets authenticate before
   subscription/snapshot. Clean cutover: pre-deployment sessions are rejected on
   migrated surfaces with no fallback.
 - Residual risk: Most activities are still activity-local until migrated in focused
