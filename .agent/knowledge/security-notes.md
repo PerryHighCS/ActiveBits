@@ -25,13 +25,27 @@ Track security-relevant boundaries, risks, and mitigation decisions.
   `.agent/knowledge/activity-runtime-threat-model.md`. It requires opaque httpOnly
   capabilities, server-resolved principals before handler or socket admission,
   activity-owned projections, and audience-preserving delivery.
-- Residual risk: This is a reviewed design checkpoint, not an implementation. Existing
-  activity-local authorization remains until migrated in focused PRs. The separately
-  tracked raw shared-session disclosure advisory is out of scope.
+- Implemented so far (Slice A, PR #349): shared hashed capability + accepted-entry
+  primitives (`server/core/activityCapabilities.ts`, bounded server-side expiry;
+  `server/core/acceptedEntryParticipants.ts`, hashed tokens). The waiting-room
+  store now always mints the participant id and ignores a request-supplied one.
+  Java Format Practice creation issues the manager capability cookie; its manager
+  REST + WebSocket surfaces and `POST /stats` require the cookie; sockets
+  authenticate before subscription/snapshot. Clean cutover: pre-deployment
+  sessions are rejected on migrated surfaces with no fallback.
+- Residual risk: Most activities are still activity-local until migrated in focused
+  PRs (Slices B/C, Phase 7 waves). Java Format's permalink / persistent-teacher
+  entry does not yet issue a manager capability (needs the Slice C persistent
+  adapter; tracked in #351). The separately tracked raw shared-session disclosure
+  advisory is out of scope.
 - Validation (test/review/path): `.agent/knowledge/activity-runtime-audit.md`;
-  `.agent/plans/shared-activity-runtime-authentication.md`.
-- Follow-up action: Implement and test the shared primitives with Java Format Practice
-  as the first clean-cutover migration.
+  `.agent/knowledge/activity-runtime-threat-model.md`;
+  `.agent/plans/shared-activity-runtime-authentication.md`;
+  `activities/java-format-practice/server/routes.test.ts`;
+  `server/core/activityCapabilities.test.ts`.
+- Follow-up action: Prove the REST-only (Slice B) and multi-mode / persistent
+  adapter (Slice C) contracts, then retrofit Java Format permalink auth (#351)
+  before Phase 7.
 - Owner: Codex
 
 - Date: 2026-07-26

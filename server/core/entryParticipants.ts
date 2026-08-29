@@ -51,14 +51,19 @@ export function storeEntryParticipant(
   values: unknown,
 ): { token: string; values: EntryParticipantValues } {
   const normalizedValues = normalizeEntryParticipantValues(values)
-  const participantId = typeof normalizedValues.participantId === 'string' && normalizedValues.participantId.trim().length > 0
-    ? normalizedValues.participantId.trim()
-    : generateParticipantId()
+  // Participant identity is always server-issued. A request-supplied
+  // `participantId` is ignored: trusting it lets a caller mint a waiting-room
+  // token (and, after consume, an accepted-participant cookie) for someone
+  // else's id. Pre-assigned ids for trusted flows (e.g. embedded handoffs)
+  // must not travel through this public path.
+  const { participantId: _ignoredRequestParticipantId, ...safeValues } = normalizedValues
+  void _ignoredRequestParticipantId
+  const participantId = generateParticipantId()
   const token = generateEntryParticipantToken()
 
   container.entryParticipants ??= {}
   const storedValues = {
-    ...normalizedValues,
+    ...safeValues,
     participantId,
   }
   container.entryParticipants[token] = storedValues

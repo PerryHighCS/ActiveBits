@@ -50,7 +50,10 @@ function cookieScope(sessionId: string): string {
 }
 
 export function getActivityCapabilityCookieName(kind: ActivityPrincipalKind, sessionId: string): string {
-  return `activebits_${kind}_${cookieScope(sessionId)}`
+  // `cap_` namespaces these so a `participant` capability cookie can never
+  // collide with the accepted-entry participant cookie
+  // (`activebits_participant_<scope>`), whose token is backed by a different map.
+  return `activebits_cap_${kind}_${cookieScope(sessionId)}`
 }
 
 /** Issue an opaque capability. Only its SHA-256 digest is retained in session data. */

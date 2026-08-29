@@ -637,6 +637,33 @@ that contain a hash that allows teachers to use a code to enter the management d
 - **Cookie Security**: httpOnly flag prevents XSS, secure flag for HTTPS in production
 - **Secret Management**: Production deployments must set `PERSISTENT_SESSION_SECRET` environment variable
 
+### Shared Activity Runtime Auth (in progress)
+
+A shared, activity-agnostic runtime boundary is being introduced so activities no
+longer make their own trust decisions about client-supplied `role` / `studentId`
+/ `participantId`. See `.agent/plans/shared-activity-runtime-authentication.md`
+and `.agent/knowledge/activity-runtime-threat-model.md` for the full contract.
+
+- **Platform owns**: session-scoped principal issuance and resolution. Manager
+  authority is an opaque **capability** — only its SHA-256 hash is stored on the
+  session record (`server/core/activityCapabilities.ts`), it carries a bounded
+  server-side expiry, and the token travels only in an httpOnly cookie
+  (`activebits_cap_<kind>_<base64url(sessionId)>`). Student authority is a
+  server-issued **accepted-entry** token (`server/core/acceptedEntryParticipants.ts`),
+  also hashed at rest, in `activebits_participant_<base64url(sessionId)>`.
+  Participant identity is always minted server-side by the waiting-room store; a
+  request-supplied `participantId` is ignored.
+- **Activities own**: domain state, projections, and handlers, invoked only
+  after the platform has resolved a principal.
+- **Java Format Practice** is the first migrated activity (Slice A): `POST
+  /create` issues the manager capability cookie, manager REST + WebSocket
+  surfaces require it, `POST /stats` requires the participant cookie, and both
+  sockets authenticate before any subscription or snapshot. The permalink /
+  persistent-teacher entry path is not yet adapted and is tracked separately.
+- **Rollout** is a clean cutover: sessions created before deployment have no
+  capability records and are rejected on the migrated surfaces (403 / WebSocket
+  `1008 activity-auth-required`); there is no legacy fallback.
+
 ### Input Validation
 - Activity names validated against centralized registry (`activityRegistry.ts`)
 - Teacher code length validated (6-100 characters) to prevent DoS attacks

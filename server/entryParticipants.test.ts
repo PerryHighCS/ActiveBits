@@ -22,18 +22,18 @@ void test('normalizeEntryParticipantValues keeps only serializable values', () =
   })
 })
 
-void test('storeEntryParticipant trims participantId or mints one when missing', () => {
-  const explicitContainer = createContainer()
-  const explicit = storeEntryParticipant(explicitContainer, {
+void test('storeEntryParticipant always mints a server-issued participantId and ignores a request-supplied one', () => {
+  const forgedContainer = createContainer()
+  const forged = storeEntryParticipant(forgedContainer, {
     displayName: 'Grace',
-    participantId: '  participant-1  ',
+    // A caller trying to claim another participant's identity.
+    participantId: 'victim-participant-id',
   })
 
-  assert.match(explicit.token, /^[a-f0-9]{16}$/)
-  assert.deepEqual(explicit.values, {
-    displayName: 'Grace',
-    participantId: 'participant-1',
-  })
+  assert.match(forged.token, /^[a-f0-9]{16}$/)
+  assert.equal(forged.values.displayName, 'Grace')
+  assert.notEqual(forged.values.participantId, 'victim-participant-id')
+  assert.match(String(forged.values.participantId), /^[a-f0-9]{16}$/)
 
   const generated = storeEntryParticipant(createContainer(), {
     displayName: 'Lin',

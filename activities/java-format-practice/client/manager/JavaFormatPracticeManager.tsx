@@ -54,41 +54,43 @@ export default function JavaFormatPracticeManager() {
     { id: 'spy-badge', label: 'Spy Badge' },
   ];
 
-  const handleDifficultyChange = (difficulty: JavaFormatDifficulty) => {
-    setSelectedDifficulty(difficulty);
+  const markManagerAuthLost = useCallback(() => {
+    if (managerAuthLostRef.current) return;
+    managerAuthLostRef.current = true;
+    setManagerAuthLost(true);
+  }, []);
 
-    if (sessionId == null) return;
+  const handleDifficultyChange = (difficulty: JavaFormatDifficulty) => {
+    if (sessionId == null || managerAuthLostRef.current) return;
+    setSelectedDifficulty(difficulty);
 
     // Send selected difficulty to server
     fetch(`/api/java-format-practice/${sessionId}/difficulty`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ difficulty }),
+    }).then((res) => {
+      if (res.status === 403) markManagerAuthLost();
     }).catch((err) => {
       console.error('Failed to update difficulty:', err);
     });
   };
 
   const handleThemeChange = (theme: JavaFormatTheme) => {
+    if (sessionId == null || managerAuthLostRef.current) return;
     setSelectedTheme(theme);
-
-    if (sessionId == null) return;
 
     // Send selected theme to server
     fetch(`/api/java-format-practice/${sessionId}/theme`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ theme }),
+    }).then((res) => {
+      if (res.status === 403) markManagerAuthLost();
     }).catch((err) => {
       console.error('Failed to update theme:', err);
     });
   };
-
-  const markManagerAuthLost = useCallback(() => {
-    if (managerAuthLostRef.current) return;
-    managerAuthLostRef.current = true;
-    setManagerAuthLost(true);
-  }, []);
 
   // If the route swaps sessions without unmounting, the auth-loss latch would
   // otherwise stick and suppress the new session's roster fetches.
@@ -279,6 +281,7 @@ export default function JavaFormatPracticeManager() {
                     : {}),
                 }}
                 onClick={() => handleDifficultyChange(level.id)}
+                disabled={managerAuthLost}
               >
                 {level.label}
               </button>
@@ -300,6 +303,7 @@ export default function JavaFormatPracticeManager() {
                     : {}),
                 }}
                 onClick={() => handleThemeChange(theme.id)}
+                disabled={managerAuthLost}
               >
                 {theme.label}
               </button>
