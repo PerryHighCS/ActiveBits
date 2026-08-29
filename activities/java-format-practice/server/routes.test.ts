@@ -69,24 +69,37 @@ void test('Java Format creation issues a manager cookie and manager routes rejec
 })
 
 void test('Java Format websocket admits only cookie principals and keeps roster updates manager-only', async () => {
-  let socketHandler: ((socket: TestSocket, query: URLSearchParams) => void) | null = null
+  const registration: { socketHandler?: (socket: TestSocket, query: URLSearchParams) => void } = {}
   const records = new Map<string, SessionRecord>()
   const session: SessionRecord = { id: 'session-a', type: 'java-format-practice', created: 1, lastActivity: 1, data: { students: [] } }
   const manager = issueActivityCapability(session, 'manager')
   acceptEntryParticipant(session, { participantId: 'student-a', displayName: 'Ada' })
   const participantToken = issueAcceptedEntryParticipantToken(session, 'student-a')
   records.set(session.id, session)
-  const clients = new Set<any>()
-  const ws = { wss: { clients, close() {} }, register(_path: string, handler: (socket: TestSocket, query: URLSearchParams) => void) { socketHandler = handler } }
+  const clients = new Set<TestSocket>()
+  const ws = { wss: { clients, close() {} }, register(_path: string, handler: (socket: TestSocket, query: URLSearchParams) => void) { registration.socketHandler = handler } }
   const app = { post() {}, get() {} }
   const sessions = { get: async (id: string) => records.get(id) ?? null, set: async (id: string, record: SessionRecord) => { records.set(id, record) } }
   setupJavaFormatPracticeRoutes(app as never, sessions as never, ws as never)
-  assert.ok(socketHandler)
-  const registeredSocketHandler = socketHandler as unknown as (socket: TestSocket, query: URLSearchParams) => void
+  const registeredSocketHandler = registration.socketHandler
+  if (registeredSocketHandler === undefined) {
+    throw new Error('Java Format socket handler was not registered')
+  }
 
   const makeSocket = (cookie = ''): TestSocket => {
     const sent: string[] = []
-    const socket = { readyState: 1, upgradeHeaders: { cookie }, send: (value: string) => sent.push(value), close: (code?: number, reason?: string) => { socket.closed = { code, reason } }, on() {}, once() {}, terminate() {}, ping() {}, sent, closed: null as any }
+    const socket: TestSocket = {
+      readyState: 1,
+      upgradeHeaders: { cookie },
+      send: (value: string) => sent.push(value),
+      close(code?: number, reason?: string) { socket.closed = { code, reason } },
+      on() {},
+      once() {},
+      terminate() {},
+      ping() {},
+      sent,
+      closed: null,
+    }
     clients.add(socket)
     return socket
   }
