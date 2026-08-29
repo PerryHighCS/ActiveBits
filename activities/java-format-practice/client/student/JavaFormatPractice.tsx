@@ -372,8 +372,14 @@ export default function JavaFormatPractice({ sessionData }: JavaFormatPracticePr
       disconnectStudentWs();
       return undefined;
     }
-    connectStudentWs();
+    let disposed = false;
+    queueMicrotask(() => {
+      if (!disposed) {
+        void connectStudentWs();
+      }
+    });
     return () => {
+      disposed = true;
       disconnectStudentWs();
     };
   }, [nameSubmitted, sessionId, isSoloSession, connectStudentWs, disconnectStudentWs]);

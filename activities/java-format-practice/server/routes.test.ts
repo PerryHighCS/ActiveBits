@@ -6,6 +6,19 @@ import { acceptEntryParticipant, getSessionParticipantCookieName, issueAcceptedE
 import { getActivityCapabilityCookieName, issueActivityCapability } from 'activebits-server/core/activityCapabilities.js'
 
 type Handler = (req: { params: Record<string, string>; body?: unknown; cookies?: Record<string, unknown> }, res: MockResponse) => void | Promise<void>
+type TestSocket = {
+  readyState: number
+  upgradeHeaders: { cookie: string }
+  principalKind?: 'manager' | 'participant'
+  send: (value: string) => number
+  close: (code?: number, reason?: string) => void
+  on(): void
+  once(): void
+  terminate(): void
+  ping(): void
+  sent: string[]
+  closed: { code?: number; reason?: string } | null
+}
 
 class MockResponse {
   statusCode = 200
@@ -56,7 +69,7 @@ void test('Java Format creation issues a manager cookie and manager routes rejec
 })
 
 void test('Java Format websocket admits only cookie principals and keeps roster updates manager-only', async () => {
-  let socketHandler: ((socket: any, query: URLSearchParams) => void) | null = null
+  let socketHandler: ((socket: TestSocket, query: URLSearchParams) => void) | null = null
   const records = new Map<string, SessionRecord>()
   const session: SessionRecord = { id: 'session-a', type: 'java-format-practice', created: 1, lastActivity: 1, data: { students: [] } }
   const manager = issueActivityCapability(session, 'manager')
@@ -64,27 +77,28 @@ void test('Java Format websocket admits only cookie principals and keeps roster 
   const participantToken = issueAcceptedEntryParticipantToken(session, 'student-a')
   records.set(session.id, session)
   const clients = new Set<any>()
-  const ws = { wss: { clients, close() {} }, register(_path: string, handler: any) { socketHandler = handler } }
+  const ws = { wss: { clients, close() {} }, register(_path: string, handler: (socket: TestSocket, query: URLSearchParams) => void) { socketHandler = handler } }
   const app = { post() {}, get() {} }
   const sessions = { get: async (id: string) => records.get(id) ?? null, set: async (id: string, record: SessionRecord) => { records.set(id, record) } }
   setupJavaFormatPracticeRoutes(app as never, sessions as never, ws as never)
   assert.ok(socketHandler)
+  const registeredSocketHandler = socketHandler as unknown as (socket: TestSocket, query: URLSearchParams) => void
 
-  const makeSocket = (cookie = '') => {
+  const makeSocket = (cookie = ''): TestSocket => {
     const sent: string[] = []
     const socket = { readyState: 1, upgradeHeaders: { cookie }, send: (value: string) => sent.push(value), close: (code?: number, reason?: string) => { socket.closed = { code, reason } }, on() {}, once() {}, terminate() {}, ping() {}, sent, closed: null as any }
     clients.add(socket)
     return socket
   }
   const denied = makeSocket()
-  socketHandler(denied, new URLSearchParams(`sessionId=${session.id}`))
+  registeredSocketHandler(denied, new URLSearchParams(`sessionId=${session.id}`))
   await new Promise((resolve) => setTimeout(resolve, 0))
   assert.deepEqual(denied.closed, { code: 1008, reason: 'activity-auth-required' })
 
   const managerSocket = makeSocket(`${getActivityCapabilityCookieName('manager', session.id)}=${manager.token}`)
-  socketHandler(managerSocket, new URLSearchParams(`sessionId=${session.id}`))
+  registeredSocketHandler(managerSocket, new URLSearchParams(`sessionId=${session.id}`))
   const studentSocket = makeSocket(`${getSessionParticipantCookieName(session.id)}=${participantToken}`)
-  socketHandler(studentSocket, new URLSearchParams(`sessionId=${session.id}`))
+  registeredSocketHandler(studentSocket, new URLSearchParams(`sessionId=${session.id}`))
   await new Promise((resolve) => setTimeout(resolve, 0))
   assert.equal(managerSocket.principalKind, 'manager')
   assert.equal(studentSocket.principalKind, 'participant')

@@ -144,8 +144,14 @@ export default function JavaFormatPracticeManager() {
     const refreshInterval = window.setInterval(() => {
       void fetchStudents();
     }, 2_000);
-    void connect();
+    let disposed = false;
+    queueMicrotask(() => {
+      if (!disposed) {
+        void connect();
+      }
+    });
     return () => {
+      disposed = true;
       window.clearInterval(refreshInterval);
       disconnect();
     };

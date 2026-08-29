@@ -249,6 +249,7 @@ Do not begin with all activities at once.
 - [x] Migrate create, manager REST, student REST, manager socket, and student socket together (Java Format; commits `0d52082b` and `0c5bfcf4`).
 - [x] Verify zero-prompt instructor creation and manager cookie recovery (Java Format Playwright coverage).
 - [x] Verify student waiting-room entry, reload, capability loss, and recovery to normal entry (Java Format Playwright coverage). Cookie-backed reload retains a non-sensitive local display-name hint; a fresh-browser cookie-only identity bootstrap remains a deliberate follow-up decision.
+- [x] Make Java Format socket startup Strict-Mode-safe: cancel the throwaway effect before it starts a browser WebSocket, then open only the retained manager or student connection (browser coverage rerun).
 - [ ] Review the contract before migrating a sibling activity.
 
 ### Slice B: REST-only/private projection activity
