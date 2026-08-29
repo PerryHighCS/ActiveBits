@@ -179,6 +179,7 @@ Deliverables:
 
 - [ ] Define `ActivityRole` and discriminated `ActivityPrincipal` types.
 - [ ] Define an activity-agnostic scoped-grant shape for specialized student-like subjects/resources; keep activity-specific role meaning and lifecycle in the activity.
+- [ ] Keep scoped subject IDs immutable and separate from mutable activity-owned addresses such as simulated hostnames.
 - [ ] Define public resource addresses separately from authentication capabilities so QR/link target identifiers never implicitly grant private reads.
 - [ ] Define temporary-session manager capability issuance during session creation.
 - [ ] Store only hashed manager capability tokens server-side.

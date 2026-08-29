@@ -40,7 +40,7 @@ Treat entries as observations, not desired behavior. Update each activity sectio
 | `syncdeck` | 16 activity routes plus integration routes | `/ws/syncdeck` | student + manager + embedded + integration | Inventory captured |
 | `traveling-salesman` | 15 | `/ws/traveling-salesman` | student + manager | Fully classified |
 | `video-sync` | 6 | `/ws/video-sync` | student + instructor + embedded | Inventory captured |
-| `www-sim` | 9 | `/ws/www-sim` | student/simulation host + manager | Inventory captured |
+| `www-sim` | 9 | `/ws/www-sim` | scoped host + manager | Fully classified |
 
 Counts are structural aids, not security assertions. Route registration wrappers and parameterized actions must be inspected individually.
 
@@ -452,12 +452,63 @@ Migration implications:
 
 ### www-sim
 
-- HTTP: public passages; create/session; join; student update/delete; assignment create/update; per-host fragments.
-- WebSocket: `/ws/www-sim`.
-- Specialized roles: simulated host/student identity may require scoped resource authority beyond a generic participant ID.
-- Sensitive state: host assignments, per-host fragments, topology/control mutations.
-- Initial concern: distinguish simulation addressing from authentication identity and authorize per-host resources explicitly.
-- [ ] Complete classification.
+- Configuration: dashboard/live activity only with no standalone or waiting-room entry. Students choose a simulated hostname inside the activity, based on an external classroom exercise.
+- Stored state: host roster, per-host request templates, distributed passage fragments/assignments, and selected passage. The normalizer spreads unknown fields and preserves platform metadata.
+- Creation is unauthenticated, returns `{ id }`, and establishes no manager capability.
+
+#### Addressing versus authority
+
+The hostname is domain state, not authentication identity:
+
+- It is public inside the simulated network and embedded in template URLs.
+- The instructor can rename it, rewriting assignments/templates and live socket labels.
+- It must be unique at a point in time but need not be a permanent identity.
+
+The target host principal therefore needs an immutable server-issued subject/resource ID with a mutable activity-owned hostname. Renaming the hostname changes addressing without rotating or transferring authority. A hostname in a URL, body, or socket query only selects a simulated address and cannot prove ownership.
+
+#### HTTP principal table
+
+| Route | Intended principal | Current principal source | Boundary |
+| --- | --- | --- | --- |
+| `GET /api/www-sim/passages` | public | none | Returns built-in curriculum passages; intentionally public application content. |
+| `POST /api/www-sim/create` | public creation adapter | none | Creates session without manager authority. |
+| `GET /api/www-sim/:id` | manager | session ID only | Returns full roster, every host template, complete hosting map/fragments, and passage. |
+| `POST /api/www-sim/:id/join` | public host enrollment, then host | body hostname | Creates a host or silently takes over an existing hostname by refreshing its join time; establishes no server principal. |
+| `PATCH /api/www-sim/:id/students/:hostname` | manager | session/path hostname only | Renames a host and rewrites every dependent template/assignment/socket label. |
+| `DELETE /api/www-sim/:id/students/:hostname` | manager | session/path hostname only | Removes any host but leaves related templates/fragment assignments in stored state. |
+| `POST /api/www-sim/:id/assign` | manager | session ID only | Generates all fragment placement and templates from a supplied passage, then broadcasts them. |
+| `PUT /api/www-sim/:id/assign` | manager/integration only if retained | session ID plus body hostname | Inserts an arbitrary template for a host. No current client call was found; classify as manager until its integration purpose is demonstrated. |
+| `GET /api/www-sim/:id/fragments/:hostname` | matching host | path hostname | Returns the selected host's raw assigned passage fragments and request template to anyone naming it. |
+
+Joining an occupied hostname must return a conflict unless the request carries the already-bound host principal. Host-private fragment reads derive the host resource from that principal, not the path. Manager rename/remove/assignment operations require manager authority. The activity owns hostname validation, uniqueness, dependency rewrites, and cleanup semantics.
+
+#### WebSocket messages and audiences
+
+- `/ws/www-sim` accepts `sessionId` and optional hostname, subscribes before validating either the session or host, and stores the claimed hostname on the socket.
+- The manager connects without a hostname. Students may attempt connection before joining and later reconnect with the locally stored hostname.
+- There are no activity inbound messages; clients send keepalive `ping` frames handled outside this activity path.
+- `student-joined` is primarily manager roster state. If students need topology discovery, expose a narrower public hostname event without join timestamps.
+- `student-updated` is legitimately relevant to all authenticated hosts because templates contain simulated URLs, but it should expose address changes only.
+- `student-removed` is manager plus the affected host; a broader topology notification can be separately declared if required.
+- `fragments-assigned` currently broadcasts every template, hosting assignment, fragment hash, and raw passage fragment to all session sockets/pub-sub clients. It must be manager-only.
+- `template-assigned` currently broadcasts one host's private request template to everyone. It must be manager plus that authenticated host.
+- `assigned-fragments` contains raw fragments hosted by one student and its request template. Local delivery targets the request-controlled socket hostname; forged sockets can receive another host's content, and cross-instance targeted delivery is absent. It must use authenticated participant-targeted delivery through the shared fanout layer.
+
+#### Browser state, recovery, and tests
+
+- Students store hostname, recovered fragment contents, and DNS worksheet mappings in `localStorage`. These are appropriate non-secret activity state once hostname is no longer treated as authority.
+- There is no participant capability. Reload begins as unjoined client state even when a hostname is stored, and the socket/query plus join route replay the claim.
+- Managers hold no credential and use complete REST/socket state based only on session ID.
+- Tests cover hostname syntax, passage splitting/hashing, hosting-map generation, collision-safe generated filenames, template generation, and client exports. No route, socket, projection, auth, join collision/takeover, rename/delete consistency, or recovery tests exist.
+
+Migration implications:
+
+- Use the generic scoped participant grant introduced by Gallery Walk, with an immutable host subject ID; hostname remains activity data/address.
+- Add shared participant-targeted pub/sub delivery for private fragments/templates.
+- Define narrow manager, host-private, and optional topology projections instead of broadcasting raw assignment structures.
+- Add activity-owned referential-integrity tests for rename/remove after assignment.
+
+- [x] Complete route, message, persistence, recovery, and test classification.
 
 ## Cross-Cutting Findings to Verify
 
@@ -491,7 +542,9 @@ Migration implications:
 - [ ] Audit `algorithm-demo` next to determine whether its observer/controller split is intentionally public.
 - [x] Audit `algorithm-demo` and confirm its observer/controller split is intentionally public.
 - [x] Resolve the shared observer decision as an activity-declared public projection and require domain-specific projection of opaque activity state.
-- [ ] Audit `www-sim` next to distinguish simulated host addressing from authenticated resource authority.
+- [x] Audit `www-sim` and distinguish simulated host addressing from authenticated resource authority.
+- [x] Add immutable scoped-subject identity with mutable activity addressing to the proposed contract requirements.
+- [ ] Audit `embedded-test` next as the smallest explicit embedded-manager adapter.
 
 ## Pilot Comparison: Java Format, MobCode, and Video Sync
 
@@ -522,6 +575,7 @@ The completed Java Format, Java String, and Python List audits establish the min
 - [ ] Support anonymous, no-name participant principals for activities whose participant role does not require a waiting-room identity.
 - [ ] Provide an idempotent claim primitive for activity resources bound to a principal, so retries recover the same resource rather than creating duplicates.
 - [ ] Separate public resource addresses, such as QR target IDs, from principals/capabilities that authorize mutation or private reads.
+- [ ] Keep scoped principal subject IDs immutable while allowing activity-owned public addresses (for example hostnames) to be renamed or reassigned under domain rules.
 - [ ] A capability must be scoped to one session and role; credentials from another session or activity must fail closed.
 - [ ] Clean cutover is acceptable: no fallback to legacy claimed identities or credentialless manager access is required for sessions created before deployment.
 
