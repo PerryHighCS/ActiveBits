@@ -39,7 +39,7 @@ Treat entries as observations, not desired behavior. Update each activity sectio
 | `resonance` | 18 | `/ws/resonance` | student + manager | Inventory captured |
 | `syncdeck` | 16 activity routes plus integration routes | `/ws/syncdeck` | student + manager + embedded + integration | Inventory captured |
 | `traveling-salesman` | 15 | `/ws/traveling-salesman` | student + manager | Fully classified |
-| `video-sync` | 6 | `/ws/video-sync` | student + instructor + embedded | Inventory captured |
+| `video-sync` | 6 | `/ws/video-sync` | student + instructor + embedded | Fully classified |
 | `www-sim` | 9 | `/ws/www-sim` | scoped host + manager | Fully classified |
 
 Counts are structural aids, not security assertions. Route registration wrappers and parameterized actions must be inspected individually.
@@ -493,12 +493,36 @@ Migration implications:
 
 ### video-sync
 
-- HTTP: create; instructor recovery; session read/update; command; event.
-- WebSocket: `/ws/video-sync` with normalized instructor/manager roles.
-- Specialized modes: temporary, persistent, embedded, student.
-- Sensitive state: instructor passcode/recovery, playback control authority, event telemetry.
-- Initial concern: use as reference for instructor adapters and role normalization; verify that student identity remains telemetry-only where intended.
-- [ ] Complete classification.
+- Modes are temporary live, persistent permalink, SyncDeck child, and standalone persistent launch. Live creation returns the instructor passcode in JSON/router bootstrap state; persistent managers recover it through a verified teacher cookie, and embedded managers exchange a one-time parent-issued URL token for it.
+- Stored state includes the instructor passcode, standalone flag, synchronized YouTube state, aggregate connection/autoplay/sync/error telemetry, and embedded/platform metadata. The normalizer spreads unknown fields and preserves platform metadata.
+
+| Route | Intended principal | Current principal source | Boundary |
+| --- | --- | --- | --- |
+| `POST /api/video-sync/create` | public factory | none | Creates the session and returns its manager credential in JSON. |
+| `GET /:sessionId/instructor-passcode` | persistent or embedded manager adapter | verified persistent teacher cookie for the session or SyncDeck parent | Returns the child/activity passcode and optionally signed persistent source URL. This is a sound adapter shape but should resolve a manager principal instead of exposing another credential. |
+| `GET /:sessionId/session` | admitted student/manager; public only for declared standalone mode | session ID | Returns a deliberate passcode-free playback/telemetry projection. Live waiting-room sessions are nevertheless readable anonymously. |
+| `PATCH /:sessionId/session` | manager | body passcode | One-time video configuration and standalone flag. |
+| `POST /:sessionId/command` | manager | body passcode | Play, pause, and seek mutations. |
+| `POST /:sessionId/event` | student telemetry | no principal; optional body `studentId` | Mutates and broadcasts aggregate telemetry. Claimed IDs affect unsynced cardinality and can be forged; load-failure text can overwrite the session error projection. |
+
+#### WebSocket and projection boundary
+
+- `/ws/video-sync` normalizes query `manager` to `instructor`. Instructor sockets must provide a valid first `authenticate` message within five seconds. Session lookup and authentication both complete before subscription, retention, heartbeat creation, or initial snapshot; this is the repository's strongest admission lifecycle reference.
+- Student sockets require only a valid session ID. They do not resolve the accepted-participant cookie, so bypassing the waiting room still yields the complete live playback and telemetry stream.
+- After admission, instructor and student sockets receive the same `state-snapshot`, `state-update`, `heartbeat`, and `telemetry-update` projections, with role added only to the initial snapshot. No inbound domain messages follow authentication; mutations use HTTP.
+- Pub/sub broadcasts have no role audience because the projected playback/aggregate telemetry is common to both admitted roles. Connection counts are local-process subscriber counts, while unsynced counts use Valkey when available, so aggregate telemetry can differ across instances.
+- Close/error cleanup is guarded against double execution. A disappeared backing session closes retained sockets; heartbeats avoid overlapping ticks.
+
+#### Persistence, recovery, and tests
+
+- Temporary manager authority is in router/bootstrap memory only and is not persisted in browser storage; reload/browser restart cannot recover it. Persistent and embedded modes recover through server-verified parent cookies/token exchange. The manager does not open a socket until a passcode is resolved.
+- Students store request-visible name/ID in `localStorage` and consume handoff through `sessionStorage`, but neither the socket nor event route uses the participant cookie. Generated/stored IDs are telemetry labels, not current authority.
+- Tests thoroughly cover projection redaction/normalization, manager route denial, persistent/embedded recovery, auth timeout and authenticate-before-subscribe behavior, invalid sessions, cleanup/heartbeat races, telemetry bounds, and Valkey unsynced counts. Client tests cover bootstrap/recovery, protocol, sync math, player hosts, and student telemetry helpers.
+- Missing boundaries include authenticated student socket/event admission, forged telemetry identity and aggregate abuse, anonymous live-session projection denial, temporary manager reload under the new capability, manager capability rather than passcode recovery, cross-instance connection counts, and browser-level expiry/re-entry.
+
+Migration implication: preserve the authenticate-before-subscribe lifecycle, explicit public projection builder, normalized role hint, and persistent/embedded authority adapters. Replace passcode exchange with shared manager-principal resolution, require a student principal for live sockets/events, and declare the playback projection public only for genuine standalone sessions.
+
+- [x] Complete route, message, persistence, recovery, and test classification.
 
 ### www-sim
 
@@ -596,7 +620,8 @@ Migration implications:
 - [x] Audit `embedded-test` as the smallest explicit embedded-manager adapter.
 - [x] Require parent-derived, child-scoped embedded-manager authority even when the child activity has no activity-local passcode.
 - [x] Fully audit `mobcode` as the mature role/audience reference and identify its pre-authentication subscription gap.
-- [ ] Audit `video-sync` next to compare its authenticate-before-snapshot lifecycle and embedded/persistent adapters.
+- [x] Audit `video-sync` and preserve its authenticate-before-snapshot lifecycle and embedded/persistent adapter pattern.
+- [ ] Audit `postboard` next as the REST-only private-projection reference.
 
 ## Pilot Comparison: Java Format, MobCode, and Video Sync
 
