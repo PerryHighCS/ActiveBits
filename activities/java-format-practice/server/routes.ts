@@ -148,7 +148,10 @@ export default function setupJavaFormatPracticeRoutes(
     // studentName/studentId are unverified client claims at this point; log only
     // the connection event here and let the post-authentication logs below
     // record the resolved identity.
-    console.log(`WebSocket connection: sessionId=${client.sessionId}`)
+    console.info('[java-format-practice] websocket connection', {
+      event: 'websocket-connected',
+      sessionId: client.sessionId,
+    })
 
     if (client.sessionId && !isManagerSocket) {
       const activeSessionId = client.sessionId
