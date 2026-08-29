@@ -139,7 +139,7 @@ This initial inventory is deliberately conservative. Each row must be expanded d
 - [x] Use explicit adapters for persistent, embedded, Learn, and solo modes.
 - [x] Prefer replacement PRs and staged migrations over a single repository-wide rollout.
 - [x] Use a clean deployment cutover; preserving sessions that were live before deployment is not required.
-- [ ] Decide whether public observer/display roles are first-class principals or activity-declared anonymous projections.
+- [x] Represent intentional anonymous observers with the `public` principal and activity-declared projections; reject anonymous sockets for activities without that declaration.
 - [ ] Decide capability recovery behavior after browser restart for temporary-session instructors.
 - [ ] Decide whether temporary manager capabilities are per session, bounded collections in one cookie, or exchanged from a short-lived handoff.
 
@@ -191,6 +191,7 @@ Deliverables:
 - [ ] Define an idempotent, principal-bound resource claim pattern for ticket-like enrollment results.
 - [ ] Define solo-mode principals without weakening live-session authorization.
 - [ ] Define public/observer projection rules.
+- [ ] Require activity-owned projections for opaque domain state so secrets embedded inside an activity state object are not exposed by generic serialization.
 - [ ] Document threat model and trust boundaries before implementation.
 
 ## Phase 3: Build Shared HTTP Authorization and Projection Primitives

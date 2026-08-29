@@ -26,7 +26,7 @@ Treat entries as observations, not desired behavior. Update each activity sectio
 
 | Activity | HTTP routes | Activity WebSocket | Initial role shapes | Audit status |
 | --- | ---: | --- | --- | --- |
-| `algorithm-demo` | 5 | `/ws/algorithm-demo` | public/student/manager unknown | Inventory captured |
+| `algorithm-demo` | 5 | `/ws/algorithm-demo` | public observer + manager | Fully classified |
 | `binary-breach` | 8 | `/ws/binary-breach` | student + manager | Fully classified |
 | `embedded-test` | 2 | `/ws/embedded-test` | student + embedded manager | Inventory captured |
 | `gallery-walk` | 11 | `/ws/gallery-walk` | manager + reviewer/reviewee | Fully classified |
@@ -66,10 +66,45 @@ Each activity must document:
 
 ### algorithm-demo
 
-- HTTP: create; session read; select; state; event.
-- WebSocket: `/ws/algorithm-demo`.
-- Initial concern: determine whether state is intentionally public presentation data, whether control mutations are manager-only, and how the socket distinguishes controller from observers.
-- [ ] Complete classification.
+- Product intent is explicit in the activity documentation: live students anonymously watch an instructor-controlled synchronized visualization and do not interact; solo students control a client-only copy. This is a genuine public observer projection.
+- Configuration supports standalone/direct/permalink/home solo entry and embedded/persistent algorithm preselection, with no waiting-room identity fields.
+- Stored fields are algorithm ID, arbitrary algorithm state, and server history. The normalizer spreads unknown fields, preserving platform metadata.
+- Creation is unauthenticated, returns only `{ id }`, and establishes no manager authority.
+
+| Route | Intended principal | Current principal source | Boundary |
+| --- | --- | --- | --- |
+| `POST /api/algorithm-demo/create` | public creation adapter | none | Creates session without manager capability. |
+| `GET /api/algorithm-demo/:sessionId/session` | public observer projection or manager projection | session ID only | Returns the entire raw `SessionRecord`, including history, unknown platform metadata, embedded launch fields, and unprojected algorithm state. |
+| `POST /api/algorithm-demo/:sessionId/select` | manager | session ID only | Replaces algorithm ID/state, records history, broadcasts selection. |
+| `POST /api/algorithm-demo/:sessionId/state` | manager | session ID only | Replaces arbitrary algorithm state, records history keys, broadcasts state. |
+| `POST /api/algorithm-demo/:sessionId/event` | manager | session ID only | Accepts arbitrary event type/payload, records type, and broadcasts payload. Current clients ignore these events, but the extensible protocol makes unauthenticated injection unsafe. |
+
+The public observer cannot receive the same raw algorithm state as the manager in all cases. The guessing-game state contains the instructor's secret number; the student UI deliberately does not display it, but the raw HTTP response and socket state still expose it to browser developer tools. Each algorithm therefore needs an activity-owned observer projection (for example omitting `secret` until reveal), not just a generic shallow session projection.
+
+#### WebSocket role decision
+
+- Manager and student clients both connect with only `sessionId`; the server immediately subscribes them without first verifying the session exists.
+- The socket is outbound-only on the server. The manager client attempts to send selection/state messages over it, but no server message handler consumes them; REST performs the actual mutations.
+- `algorithm-selected`, `state-sync`, and `event` are broadcast identically to every local/pub-sub socket. The first two are intentionally observer-visible only after the activity applies its observer projection. Arbitrary manager events need an explicit declared public projection before delivery.
+- There is no initial socket snapshot; both clients load HTTP state first. Students additionally poll the raw session every three seconds.
+
+Target roles:
+
+- `manager`: automatic capability; complete state and all controls.
+- `public`: activity-declared anonymous observer; validated session admission and read-only projected state/messages, with no credential or participant identity.
+- solo: local client mode outside live-session authorization.
+
+This resolves the cross-cutting observer decision: support public/anonymous sockets only when the activity explicitly declares a public projection. A session ID can locate that projection but never inherits manager state or mutations.
+
+#### Persistence, recovery, and tests
+
+- Live observers store no identity or credential. Reload fetches and resubscribes to the public projection.
+- Solo state is saved in `localStorage` under the synthetic solo session ID.
+- Managers hold no credential and rely on session-ID-only REST/socket access.
+- Server tests cover namespace registration, creation, selection persistence/broadcasting, invalid session/state normalization, and pub/sub failure tolerance. Client tests cover message parsing, embedded option reading, solo rendering, and algorithm domain behavior.
+- Missing tests cover manager authorization, public projection/secret exclusion, raw platform metadata exclusion, session validation before socket subscription, unauthorized mutations, message projection, reload, and public-versus-manager pub/sub isolation.
+
+- [x] Complete route, message, persistence, recovery, and test classification.
 
 ### binary-breach
 
@@ -454,6 +489,9 @@ Migration implications:
 - [x] Audit `raffle` to distinguish entrant, manager, and any intentional display/observer projection.
 - [x] Add anonymous no-name participant principals and idempotent resource claiming to the proposed contract requirements.
 - [ ] Audit `algorithm-demo` next to determine whether its observer/controller split is intentionally public.
+- [x] Audit `algorithm-demo` and confirm its observer/controller split is intentionally public.
+- [x] Resolve the shared observer decision as an activity-declared public projection and require domain-specific projection of opaque activity state.
+- [ ] Audit `www-sim` next to distinguish simulated host addressing from authenticated resource authority.
 
 ## Pilot Comparison: Java Format, MobCode, and Video Sync
 
@@ -515,6 +553,13 @@ None of the three practice activities has a user-facing observer/display client.
 - [x] The practice pilot will not admit anonymous observer sockets.
 - [ ] The future shared contract may support an explicitly declared public-display principal/projection for activities that demonstrate a real display use case.
 - [ ] Anonymous/public access must never inherit manager messages merely because it knows a session ID.
+
+Repository-wide observer decision after auditing Algorithm Demo:
+
+- [x] Model intentional anonymous observers as the existing `public` principal plus an activity-declared HTTP/WebSocket projection, not as a credential-bearing student or manager role.
+- [x] Validate session/activity existence before retaining or subscribing a public socket.
+- [ ] Require activity-owned projection of opaque domain state; generic wrappers cannot know that fields such as a guessing-game secret must be withheld.
+- [ ] Activities without an explicit public projection reject anonymous sockets.
 
 ### Session metadata and client recovery requirements
 
