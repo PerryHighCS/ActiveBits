@@ -379,6 +379,7 @@ export default function setupJavaFormatPracticeRoutes(
     }
 
     if (!resolveActivityPrincipalFromCookies(session, sessionId, 'manager', req.cookies)) {
+      console.warn('Java Format manager roster request denied', { sessionId })
       res.status(403).json({ error: 'manager authentication required' })
       return
     }

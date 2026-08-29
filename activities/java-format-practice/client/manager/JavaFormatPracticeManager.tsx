@@ -86,7 +86,7 @@ export default function JavaFormatPracticeManager() {
     if (sessionId == null) return;
     try {
       const res = await fetch(`/api/java-format-practice/${sessionId}/students`);
-      if (!res.ok) throw new Error('Failed to fetch students');
+      if (!res.ok) throw new Error(`Failed to fetch students: ${res.status}`);
       const data = (await res.json()) as StudentsResponse
       const list = Array.isArray(data.students) ? data.students : [];
       setStudents(list);

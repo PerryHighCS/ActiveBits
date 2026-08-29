@@ -104,8 +104,6 @@ if (!env.startsWith('dev')) {
     changeOrigin: true,
     ws: true,
     xfwd: true,
-    proxyTimeout: 30_000,
-    timeout: 30_000,
     pathFilter: (pathname) => {
       if (pathname.startsWith('/api')) return false
       if (pathname.startsWith('/ws')) return false
