@@ -15,6 +15,25 @@ Track security-relevant boundaries, risks, and mitigation decisions.
 
 ## Notes
 
+- Date: 2026-08-29
+- Area: shared activity runtime authority boundary
+- Threat or risk: Activities independently treated session IDs, request participant IDs,
+  display names, and WebSocket roles as authority, exposing inconsistent manager,
+  participant, and projection boundaries across HTTP and socket transports.
+- Control or mitigation: The completed repository audit defines a versioned shared
+  principal/capability/projection contract in
+  `.agent/knowledge/activity-runtime-threat-model.md`. It requires opaque httpOnly
+  capabilities, server-resolved principals before handler or socket admission,
+  activity-owned projections, and audience-preserving delivery.
+- Residual risk: This is a reviewed design checkpoint, not an implementation. Existing
+  activity-local authorization remains until migrated in focused PRs. The separately
+  tracked raw shared-session disclosure advisory is out of scope.
+- Validation (test/review/path): `.agent/knowledge/activity-runtime-audit.md`;
+  `.agent/plans/shared-activity-runtime-authentication.md`.
+- Follow-up action: Implement and test the shared primitives with Java Format Practice
+  as the first clean-cutover migration.
+- Owner: Codex
+
 - Date: 2026-07-26
 - Area: Learn SyncDeck substitute instructor link
 - Threat or risk: A direct substitute link is a bearer capability that can start or reuse

@@ -65,7 +65,9 @@ The current design creates several recurring risks:
 
 ## Proposed Runtime Contract
 
-The exact API is intentionally deferred until the audit is complete. The contract should provide activity handlers with an already-resolved context similar to:
+The audit is complete. The versioned authority, capability, projection, and transport
+contract now lives in `.agent/knowledge/activity-runtime-threat-model.md`. The eventual
+handler API should provide activity code with an already-resolved context similar to:
 
 ```ts
 interface ActivityRequestContext<TSession, TRole extends ActivityRole> {
@@ -103,7 +105,9 @@ registerActivityRuntime({
 })
 ```
 
-This is a design direction, not a requirement to adopt this exact syntax.
+This is a design direction, not a requirement to adopt this exact syntax. The threat
+model is authoritative for its security properties; implementation API naming remains
+open until the first shared primitive PR.
 
 ## Current Activity Inventory
 
@@ -178,24 +182,24 @@ Deliverables:
 
 ## Phase 2: Define Shared Principal and Capability Contracts
 
-- [ ] Define `ActivityRole` and discriminated `ActivityPrincipal` types.
-- [ ] Define an activity-agnostic scoped-grant shape for specialized student-like subjects/resources; keep activity-specific role meaning and lifecycle in the activity.
-- [ ] Keep scoped subject IDs immutable and separate from mutable activity-owned addresses such as simulated hostnames.
-- [ ] Define public resource addresses separately from authentication capabilities so QR/link target identifiers never implicitly grant private reads.
-- [ ] Define temporary-session manager capability issuance during session creation.
-- [ ] Store only hashed manager capability tokens server-side.
-- [ ] Issue opaque tokens only in httpOnly, same-site cookies with live-connection-aware `Secure` handling.
-- [ ] Define bounded expiry, revocation, rotation, session-end cleanup, and store normalization.
-- [ ] Define persistent teacher-cookie to manager-principal resolution.
-- [ ] Define embedded-parent and Learn instructor handoff to manager-principal resolution.
-- [ ] Make the embedded-parent handoff child-session-scoped and activity-agnostic so credentialless children consume authority without implementing a passcode exchange.
-- [ ] Define student accepted-entry token to student-principal resolution.
-- [ ] Define anonymous no-name participant issuance for activities such as Raffle that do not use waiting-room identity.
-- [ ] Define an idempotent, principal-bound resource claim pattern for ticket-like enrollment results.
-- [ ] Define solo-mode principals without weakening live-session authorization.
-- [ ] Define public/observer projection rules.
-- [ ] Require activity-owned projections for opaque domain state so secrets embedded inside an activity state object are not exposed by generic serialization.
-- [ ] Document threat model and trust boundaries before implementation.
+- [x] Define `ActivityRole` and discriminated `ActivityPrincipal` types.
+- [x] Define an activity-agnostic scoped-grant shape for specialized student-like subjects/resources; keep activity-specific role meaning and lifecycle in the activity.
+- [x] Keep scoped subject IDs immutable and separate from mutable activity-owned addresses such as simulated hostnames.
+- [x] Define public resource addresses separately from authentication capabilities so QR/link target identifiers never implicitly grant private reads.
+- [x] Define temporary-session manager capability issuance during session creation.
+- [x] Store only hashed manager capability tokens server-side.
+- [x] Issue opaque tokens only in httpOnly, same-site cookies with live-connection-aware `Secure` handling.
+- [x] Define bounded expiry, revocation, rotation, session-end cleanup, and store normalization.
+- [x] Define persistent teacher-cookie to manager-principal resolution.
+- [x] Define embedded-parent and Learn instructor handoff to manager-principal resolution.
+- [x] Make the embedded-parent handoff child-session-scoped and activity-agnostic so credentialless children consume authority without implementing a passcode exchange.
+- [x] Define student accepted-entry token to student-principal resolution.
+- [x] Define anonymous no-name participant issuance for activities such as Raffle that do not use waiting-room identity.
+- [x] Define an idempotent, principal-bound resource claim pattern for ticket-like enrollment results.
+- [x] Define solo-mode principals without weakening live-session authorization.
+- [x] Define public/observer projection rules.
+- [x] Require activity-owned projections for opaque domain state so secrets embedded inside an activity state object are not exposed by generic serialization.
+- [x] Document threat model and trust boundaries before implementation.
 
 ## Phase 3: Build Shared HTTP Authorization and Projection Primitives
 
@@ -360,4 +364,5 @@ For every migration:
 ## Immediate Next Step
 
 - [x] Complete Phase 1 as a read-only audit before implementing issue #344.
-- [ ] Review the completed matrix and extract the versioned principal, capability, projection, and transport threat model before implementation begins.
+- [x] Review the completed matrix and extract the versioned principal, capability, projection, and transport threat model before implementation begins.
+- [ ] Review the contract for cookie-record layout and temporary-manager browser-restart behavior, then open the first shared-primitives implementation PR.
