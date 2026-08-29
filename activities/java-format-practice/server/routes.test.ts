@@ -257,3 +257,55 @@ void test('Java Format stats route establishes the roster record when the socket
   assert.deepEqual(persisted.students[0]?.stats, nextStats)
   assert.ok(managerBroadcasts.some((value) => JSON.parse(value).type === 'studentsUpdate'))
 })
+
+void test('Java Format participant admission aborts if the socket closes during the session lookup', async () => {
+  const registration: { socketHandler?: (socket: TestSocket, query: URLSearchParams) => void } = {}
+  const session: SessionRecord = { id: 'session-race', type: 'java-format-practice', created: 1, lastActivity: 1, data: { students: [] } }
+  acceptEntryParticipant(session, { participantId: 'student-a', displayName: 'Ada' })
+  const participantToken = issueAcceptedEntryParticipantToken(session, 'student-a')
+  assert.ok(participantToken)
+
+  let releaseGet: () => void = () => {}
+  const getGate = new Promise<void>((resolve) => { releaseGet = resolve })
+  let setCalls = 0
+  const sessions = {
+    get: async (id: string) => {
+      if (id !== session.id) return null
+      await getGate
+      return session
+    },
+    set: async () => { setCalls += 1 },
+  }
+  const clients = new Set<TestSocket>()
+  const broadcasts: string[] = []
+  clients.add({
+    readyState: 1, upgradeHeaders: { cookie: '' }, principalKind: 'manager',
+    send: (value: string) => broadcasts.push(value), close() {}, on() {}, once() {}, terminate() {}, ping() {},
+    sent: [], closed: null,
+  } as unknown as TestSocket)
+  const ws = { wss: { clients, close() {} }, register(_p: string, handler: (socket: TestSocket, query: URLSearchParams) => void) { registration.socketHandler = handler } }
+  setupJavaFormatPracticeRoutes({ post() {}, get() {} } as never, sessions as never, ws as never)
+  const socketHandler = registration.socketHandler
+  assert.ok(socketHandler)
+
+  const sent: string[] = []
+  const socket: TestSocket = {
+    readyState: 1,
+    upgradeHeaders: { cookie: `${getSessionParticipantCookieName(session.id)}=${participantToken}` },
+    send: (value: string) => sent.push(value), close() {}, on() {}, once() {}, terminate() {}, ping() {},
+    sent, closed: null,
+  }
+  clients.add(socket)
+
+  socketHandler(socket, new URLSearchParams(`sessionId=${session.id}&principal=participant`))
+  // Close the socket before the deferred session lookup resolves.
+  socket.readyState = 3
+  releaseGet()
+  await new Promise((resolve) => setTimeout(resolve, 0))
+
+  const roster = (session.data as { students: unknown[] }).students
+  assert.equal(socket.principalKind, undefined)
+  assert.equal(roster.length, 0, 'no roster record is created for a closed socket')
+  assert.equal(setCalls, 0)
+  assert.equal(broadcasts.length, 0)
+})

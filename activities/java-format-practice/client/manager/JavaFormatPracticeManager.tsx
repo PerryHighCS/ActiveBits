@@ -90,6 +90,13 @@ export default function JavaFormatPracticeManager() {
     setManagerAuthLost(true);
   }, []);
 
+  // If the route swaps sessions without unmounting, the auth-loss latch would
+  // otherwise stick and suppress the new session's roster fetches.
+  useEffect(() => {
+    managerAuthLostRef.current = false;
+    setManagerAuthLost(false);
+  }, [sessionId]);
+
   const fetchStudents = useCallback(async (signal?: AbortSignal) => {
     if (sessionId == null || managerAuthLostRef.current) return;
     try {

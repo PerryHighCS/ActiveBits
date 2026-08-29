@@ -252,6 +252,11 @@ Migration implications:
 > separately) and remains a known gap. See
 > `.agent/knowledge/activity-runtime-threat-model.md` and the plan's Slice A for
 > the migrated contract.
+>
+> **Everything below in this section — the prose bullets, the HTTP principal
+> table, the WebSocket admission notes, and the recovery notes — describes the
+> pre-migration implementation.** It is retained as audit evidence; it is not a
+> description of live behavior after PR #349.
 
 - Configuration: standalone entry, direct path, permalink, home-card visibility, and a required waiting-room `displayName`. Solo clients use a synthetic `solo-*` session ID and do not call the activity server.
 - Session creation: `POST /create` creates one activity session, initializes normalized defaults, and returns only `{ id }`. It issues no manager capability. The same endpoint is the activity factory used by the shared creation flow; no second activity-local factory was found.

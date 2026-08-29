@@ -101,6 +101,7 @@ void test('a non-terminal close reconnects after the backoff delay (control)', a
     assert.equal(FakeWebSocket.instances.length, 1, 'exactly one socket opens on mount')
 
     await act(async () => {
+      console.info('[TEST] simulating a non-terminal 1006 close; a reconnect is expected')
       FakeWebSocket.instances[0]!.emitClose(1006)
       await sleep(RECONNECT_BASE_MS * 4)
     })
@@ -150,6 +151,7 @@ void test('a terminal close does not reconnect and a changed isTerminalClose ide
     assert.equal(FakeWebSocket.instances.length, 1, 'exactly one socket opens on mount')
 
     await act(async () => {
+      console.info('[TEST] simulating a terminal 1008 close; no reconnect is expected')
       FakeWebSocket.instances[0]!.emitClose(1008)
       // Wait well past the reconnect backoff so a missed terminal check would surface.
       await sleep(RECONNECT_BASE_MS * 4)

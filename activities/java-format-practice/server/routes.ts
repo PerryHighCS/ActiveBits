@@ -170,6 +170,11 @@ export default function setupJavaFormatPracticeRoutes(
           return
         }
 
+        // The socket may have closed while the session lookup was in flight; the
+        // close handler already ran (with no sessionId/studentId set), so bail
+        // before retaining, subscribing, or writing a roster record for it.
+        if (client.readyState !== 1) return
+
         const cookieHeader = client.upgradeHeaders?.cookie
         const manager = requestedPrincipal !== 'participant'
           ? resolveActivityPrincipalFromCookies(session, activeSessionId, 'manager', {

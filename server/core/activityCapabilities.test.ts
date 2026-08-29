@@ -54,4 +54,14 @@ void test('activity capabilities have a bounded lifetime and are rejected once e
   const defaulted = issueActivityCapability(session, 'manager', undefined, issuedAt)
   const defaultRecord = (session.data.activityCapabilities as Record<string, { expiresAt: number }>)[defaulted.id]
   assert.equal(defaultRecord?.expiresAt, issuedAt + DEFAULT_ACTIVITY_CAPABILITY_TTL_MS)
+
+  // A non-finite ttl falls back to the default rather than storing NaN.
+  const badTtl = issueActivityCapability(session, 'manager', undefined, issuedAt, Number.NaN)
+  const badTtlRecord = (session.data.activityCapabilities as Record<string, { expiresAt: number }>)[badTtl.id]
+  assert.equal(badTtlRecord?.expiresAt, issuedAt + DEFAULT_ACTIVITY_CAPABILITY_TTL_MS)
+
+  // A stored record whose expiry was lost or corrupted is not a valid principal.
+  const caps = session.data.activityCapabilities as Record<string, { expiresAt?: number }>
+  delete caps[issued.id]!.expiresAt
+  assert.equal(resolveActivityCapability(session, 'session-a', 'manager', issued.token, issuedAt + 1), null)
 })

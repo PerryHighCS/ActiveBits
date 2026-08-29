@@ -71,7 +71,7 @@ export function issueActivityCapability(
     principalKind,
     ...(subjectId ? { subjectId } : {}),
     issuedAt: now,
-    expiresAt: now + Math.max(0, ttlMs),
+    expiresAt: now + (Number.isFinite(ttlMs) ? Math.max(0, ttlMs) : DEFAULT_ACTIVITY_CAPABILITY_TTL_MS),
   }
 
   const entries = Object.values(container.activityCapabilities).sort((left, right) => left.issuedAt - right.issuedAt)
@@ -94,7 +94,8 @@ export function resolveActivityCapability(
   const tokenHash = hashCapability(token)
   for (const value of Object.values(capabilities)) {
     if (!isRecord(value) || value.tokenHash !== tokenHash || value.principalKind !== principalKind || typeof value.id !== 'string') continue
-    if (typeof value.expiresAt === 'number' && value.expiresAt <= now) return null
+    // A capability without a finite, unreached expiry is not a valid principal.
+    if (typeof value.expiresAt !== 'number' || !Number.isFinite(value.expiresAt) || value.expiresAt <= now) return null
     return {
       kind: principalKind,
       sessionId,
