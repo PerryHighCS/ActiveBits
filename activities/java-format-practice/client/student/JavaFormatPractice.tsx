@@ -184,6 +184,7 @@ export default function JavaFormatPractice({ sessionData }: JavaFormatPracticePr
   });
   const [focusToken, setFocusToken] = useState(0);
   const [hasSubmitted, setHasSubmitted] = useState(false);
+  const authRecoveryStartedRef = useRef(false);
 
   // Cycling feature: for advanced mode after correct answer
   const [isCyclingMode, setIsCyclingMode] = useState(false);
@@ -390,9 +391,18 @@ export default function JavaFormatPractice({ sessionData }: JavaFormatPracticePr
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ stats }),
+      }).then((response) => {
+        if (response.status === 403 && !authRecoveryStartedRef.current) {
+          authRecoveryStartedRef.current = true;
+          void navigate(`/${sessionId}`, { replace: true });
+          return;
+        }
+        if (!response.ok) {
+          console.error('Failed to sync stats:', response.status);
+        }
       }).catch((err) => console.error('Failed to sync stats:', err));
     }
-  }, [stats, sessionId, studentId, isSoloSession]);
+  }, [stats, sessionId, studentId, isSoloSession, navigate]);
 
   const getCurrentFormatCall = (): JavaFormatFormatCall | null => {
     if (!currentChallenge) return null;
