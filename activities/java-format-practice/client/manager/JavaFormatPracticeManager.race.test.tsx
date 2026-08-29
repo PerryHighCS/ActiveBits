@@ -233,3 +233,51 @@ void test('JavaFormatPracticeManager ignores a studentsUpdate queued on a previo
     restoreDom()
   }
 })
+
+void test('JavaFormatPracticeManager serializes /students polls and still renders a slow response', { concurrency: false }, async () => {
+  TestWebSocket.instances = []
+  const restoreDom = installDomEnvironment('https://bits.example/manage/java-format-practice/session-9')
+  const previousFetch = globalThis.fetch
+
+  let resolveRoster: ((response: Response) => void) | null = null
+  const roster = new Promise<Response>((resolve) => { resolveRoster = resolve })
+  let studentsCalls = 0
+
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    if (String(input).includes('/students')) {
+      studentsCalls += 1
+      return roster
+    }
+    throw new Error(`Unexpected fetch: ${String(input)}`)
+  }) as typeof fetch
+
+  let teardown: (() => Promise<void>) | null = null
+  try {
+    const { testingLibrary, router, JavaFormatPracticeManager, act } = await loadHarness()
+    const rendered = testingLibrary.render(
+      <router.MemoryRouter initialEntries={['/manage/java-format-practice/session-9']}>
+        <router.Routes>
+          <router.Route path="/manage/java-format-practice/:sessionId" element={<JavaFormatPracticeManager />} />
+        </router.Routes>
+      </router.MemoryRouter>,
+    )
+    teardown = async () => { await act(async () => { rendered.unmount(); testingLibrary.cleanup(); await Promise.resolve() }) }
+
+    await testingLibrary.waitFor(() => { assert.ok(TestWebSocket.instances.length >= 1) })
+    // The mount poll is still in flight; the on-open poll must not stack on it.
+    await act(async () => { TestWebSocket.instances[0]?.emitOpen(); await Promise.resolve(); await Promise.resolve() })
+    assert.equal(studentsCalls, 1, 'a second poll is not started while one is in flight')
+
+    // The slow response still gets to render once it resolves.
+    await act(async () => {
+      resolveRoster?.(new Response(JSON.stringify({ students: [studentRecord('s', 'Sol')] }), { status: 200 }))
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    await testingLibrary.waitFor(() => { assert.ok(rendered.queryByText('Sol')) })
+  } finally {
+    await teardown?.()
+    globalThis.fetch = previousFetch
+    restoreDom()
+  }
+})

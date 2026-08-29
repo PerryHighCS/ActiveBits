@@ -39,10 +39,10 @@ export default function JavaFormatPracticeManager() {
   // landed while the request was outstanding, so a slow HTTP response can never
   // overwrite a fresher roster.
   const rosterUpdateGenRef = useRef(0)
-  // Bumped at the start of every `/students` poll. A poll drops its response if a
-  // later poll has started since, so out-of-order HTTP responses (mount / on-open
-  // / interval polls overlapping) can only ever settle on the most recent one.
-  const pollRequestGenRef = useRef(0)
+  // Serializes `/students` polls: the mount, on-open, and interval callers skip
+  // starting a new request while one is in flight, so responses cannot pile up or
+  // arrive out of order and a slow (>interval) request still gets to render.
+  const pollInFlightRef = useRef(false)
   // The socket for the *current* sessionId. `disconnect()` closes the previous
   // session's socket but leaves its `onmessage` bound, so a message already
   // queued on it can still fire after a route swap; roster updates are only
@@ -115,19 +115,19 @@ export default function JavaFormatPracticeManager() {
     setManagerAuthLost(false);
     setStudents([]);
     rosterUpdateGenRef.current += 1;
-    pollRequestGenRef.current += 1;
+    pollInFlightRef.current = false;
     activeSocketRef.current = null;
   }, [sessionId]);
 
   const fetchStudents = useCallback(async (signal?: AbortSignal) => {
-    if (sessionId == null || managerAuthLostRef.current) return;
+    if (sessionId == null || managerAuthLostRef.current || pollInFlightRef.current) return;
+    pollInFlightRef.current = true;
     try {
       const rosterGenAtStart = rosterUpdateGenRef.current;
-      const pollGen = (pollRequestGenRef.current += 1);
       const res = await fetch(`/api/java-format-practice/${sessionId}/students`, { signal });
-      // A poll superseded by a newer poll or a session swap is ignored entirely,
-      // including its status — a stale 403 must not latch auth-loss on the new session.
-      if (signal?.aborted || pollRequestGenRef.current !== pollGen) return;
+      // A poll invalidated by a session swap is ignored entirely, including its
+      // status — a stale 403 must not latch auth-loss on the new session.
+      if (signal?.aborted) return;
       if (res.status === 403) {
         // The manager capability is gone; stop polling a request that can only 403.
         markManagerAuthLost();
@@ -136,7 +136,7 @@ export default function JavaFormatPracticeManager() {
       if (!res.ok) throw new Error(`Failed to fetch students: ${res.status}`);
       const data = (await res.json()) as StudentsResponse
       const list = Array.isArray(data.students) ? data.students : [];
-      if (signal?.aborted || pollRequestGenRef.current !== pollGen) return;
+      if (signal?.aborted) return;
       // A live `studentsUpdate` that arrived while this poll was in flight is
       // authoritative; discard this now-stale HTTP snapshot.
       if (rosterUpdateGenRef.current !== rosterGenAtStart) return;
@@ -144,6 +144,8 @@ export default function JavaFormatPracticeManager() {
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') return;
       console.error('Failed to fetch students:', err);
+    } finally {
+      pollInFlightRef.current = false;
     }
   }, [sessionId, markManagerAuthLost]);
 

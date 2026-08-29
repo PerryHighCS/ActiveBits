@@ -204,6 +204,7 @@ Deliverables:
 ## Phase 3: Build Shared HTTP Authorization and Projection Primitives
 
 - [ ] Add generic middleware/wrappers for public, student, manager, and specialized-role routes.
+- [ ] Extend the manager principal requirement to session **lifecycle** routes (`DELETE /api/session/:sessionId` / end-session), with a per-activity principal contract, so a migrated activity's End Session is gated like the rest of its surface ([#353](https://github.com/PerryHighCS/ActiveBits/issues/353)).
 - [ ] Support route-group composition so split activity modules can apply a principal requirement once without reimplementing credential parsing.
 - [ ] Invoke activity-owned domain validation only after shared session/principal resolution; authentication must not imply that domain payloads are trustworthy.
 - [ ] Ensure wrappers validate session existence and activity type before invoking activity code.
@@ -254,6 +255,7 @@ Do not begin with all activities at once.
 - [x] Verify that a student tab sharing the instructor browser context selects its participant capability and cannot be misclassified as the manager (Java Format browser coverage).
 - [ ] Review the contract before migrating a sibling activity.
 - [ ] Known gap from Slice A: Java Format's permalink / persistent-teacher entry (`activity.config.ts` `supportsPermalink: true`) bypasses `POST /create`, so no manager capability is issued and that flow 403s / closes `1008`. Tracked in [#351](https://github.com/PerryHighCS/ActiveBits/issues/351). It is blocked on the shared persistent-teacher to manager-principal adapter proven in Slice C, so it lands as a Slice A completion / Phase 6 wrap-up item after Slice C and before Phase 7 (Wave 1 practice activities share this permalink config and should inherit the settled pattern). Optional interim stopgap: set `supportsPermalink: false` for `java-format-practice` until the adapter exists.
+- [ ] Known gap from Slice A: the manager UI's **End Session** control hits the activity-agnostic `DELETE /api/session/:sessionId` (`server/core/sessions.ts`), which is still authorized by session ID only, so the session-termination lever is unprotected even though the rest of the Java Format manager surface now requires the capability. Tracked in [#353](https://github.com/PerryHighCS/ActiveBits/issues/353). The fix belongs in the Phase 3 shared HTTP authorization primitive extended to session **lifecycle** routes, then adopted per activity; it is not fixed in shared code as a one-off because every unmigrated activity shares that route.
 
 ### Slice B: REST-only/private projection activity
 
