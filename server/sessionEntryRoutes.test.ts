@@ -132,6 +132,7 @@ void test('session entry route returns render-ui for activities with waiting-roo
   await getRoute(app, 'get', '/api/session/:sessionId/entry')({ params: { sessionId: 'session-1' } }, res)
 
   assert.equal(res.statusCode, 200)
+  assert.equal(res.headers['cache-control'], 'no-store')
   assert.deepEqual(res.jsonBody, {
     sessionId: 'session-1',
     activityName: 'java-string-practice',
@@ -384,6 +385,7 @@ void test('session entry participant routes store and consume waiting-room value
     params: { sessionId: 'session-3' },
     cookies: { [consumeRes.cookies[0]!.name]: consumeRes.cookies[0]!.value },
   }, entryRes)
+  assert.equal(entryRes.headers['cache-control'], 'no-store')
   assert.equal(entryRes.jsonBody?.participantAuthenticated, true)
   assert.deepEqual(
     consumeRes.jsonBody,

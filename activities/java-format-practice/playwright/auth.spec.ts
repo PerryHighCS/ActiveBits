@@ -52,6 +52,9 @@ test('Java Format returns a participant with a lost capability to normal entry',
   })
   const cookieName = `activebits_participant_${Buffer.from(sessionId).toString('base64url')}`
   await page.context().clearCookies({ name: cookieName })
+  // [TEST] The participant capability is intentionally cleared here; the server
+  // is expected to log a websocket denial and return this browser to entry.
+  console.info('[TEST] java-format: navigating with a cleared participant cookie; a websocket auth denial is expected')
   await page.goto(`/${encodeURIComponent(sessionId)}`)
   await expect(page.getByRole('button', { name: 'Join Session' })).toBeVisible()
   await page.close()

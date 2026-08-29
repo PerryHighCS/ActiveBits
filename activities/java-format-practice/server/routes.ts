@@ -19,6 +19,7 @@ import { validateDifficulty, validateStats, validateStudentName, validateTheme }
 interface JsonResponse {
   status(code: number): JsonResponse
   cookie?(name: string, value: string, options: Record<string, unknown>): void
+  setHeader?(name: string, value: string): void
   json(payload: unknown): void
 }
 
@@ -151,7 +152,15 @@ export default function setupJavaFormatPracticeRoutes(
 
       ;(async () => {
         const session = asJavaFormatSession(await sessions.get(activeSessionId))
-        if (!session) return
+        if (!session) {
+          console.info(JSON.stringify({
+            event: 'java-format.websocket-denied',
+            sessionId: activeSessionId,
+            reason: 'unknown-session',
+          }))
+          client.close(1008, 'activity-auth-required')
+          return
+        }
 
         const cookieHeader = client.upgradeHeaders?.cookie
         const manager = requestedPrincipal !== 'participant'
@@ -167,7 +176,11 @@ export default function setupJavaFormatPracticeRoutes(
         }
 
         if (requestedPrincipal === 'manager') {
-          console.info('Java Format websocket denied', { sessionId: activeSessionId, reason: 'missing-manager-principal' })
+          console.info(JSON.stringify({
+            event: 'java-format.websocket-denied',
+            sessionId: activeSessionId,
+            reason: 'missing-manager-principal',
+          }))
           client.close(1008, 'activity-auth-required')
           return
         }
@@ -175,7 +188,11 @@ export default function setupJavaFormatPracticeRoutes(
         const participantToken = readCookieValue(cookieHeader, getSessionParticipantCookieName(activeSessionId))
         const acceptedParticipant = resolveAcceptedEntryParticipantToken(session, participantToken)
         if (!acceptedParticipant) {
-          console.info('Java Format websocket denied', { sessionId: activeSessionId, reason: 'missing-or-invalid-principal' })
+          console.info(JSON.stringify({
+            event: 'java-format.websocket-denied',
+            sessionId: activeSessionId,
+            reason: 'missing-or-invalid-principal',
+          }))
           client.close(1008, 'activity-auth-required')
           return
         }
@@ -398,6 +415,7 @@ export default function setupJavaFormatPracticeRoutes(
       res.status(403).json({ error: 'manager authentication required' })
       return
     }
+    res.setHeader?.('Cache-Control', 'no-store')
     res.json({ students: session.data.students })
   })
 }

@@ -24,8 +24,10 @@ class MockResponse {
   statusCode = 200
   body: unknown = null
   cookies: Array<{ name: string; value: string; options: Record<string, unknown> }> = []
+  headers: Record<string, string> = {}
   status(code: number): this { this.statusCode = code; return this }
   cookie(name: string, value: string, options: Record<string, unknown>): void { this.cookies.push({ name, value, options }) }
+  setHeader(name: string, value: string): void { this.headers[name.toLowerCase()] = value }
   json(body: unknown): void { this.body = body }
 }
 
@@ -104,9 +106,16 @@ void test('Java Format websocket admits only cookie principals and keeps roster 
     return socket
   }
   const denied = makeSocket()
+  console.info('[TEST] java-format websocket denial: manager socket without a capability cookie is expected to close 1008')
   registeredSocketHandler(denied, new URLSearchParams(`sessionId=${session.id}&principal=manager`))
   await new Promise((resolve) => setTimeout(resolve, 0))
   assert.deepEqual(denied.closed, { code: 1008, reason: 'activity-auth-required' })
+
+  const unknownSession = makeSocket()
+  console.info('[TEST] java-format websocket denial: connecting to an unknown session is expected to close 1008')
+  registeredSocketHandler(unknownSession, new URLSearchParams('sessionId=does-not-exist&principal=participant'))
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  assert.deepEqual(unknownSession.closed, { code: 1008, reason: 'activity-auth-required' })
 
   const managerSocket = makeSocket(`${getActivityCapabilityCookieName('manager', session.id)}=${manager.token}`)
   registeredSocketHandler(managerSocket, new URLSearchParams(`sessionId=${session.id}&principal=manager`))
@@ -120,4 +129,76 @@ void test('Java Format websocket admits only cookie principals and keeps roster 
   assert.equal(studentSocket.principalKind, 'participant')
   assert.ok(managerSocket.sent.some((value) => JSON.parse(value).type === 'studentsUpdate'))
   assert.equal(studentSocket.sent.some((value) => JSON.parse(value).type === 'studentsUpdate'), false)
+})
+
+void test('Java Format stats route authorizes the participant cookie and broadcasts roster changes to managers only', async () => {
+  const routes = new Map<string, Handler>()
+  const records = new Map<string, SessionRecord>()
+  const session: SessionRecord = {
+    id: 'session-stats',
+    type: 'java-format-practice',
+    created: 1,
+    lastActivity: 1,
+    data: {
+      students: [
+        { id: 'student-a', name: 'Ada', connected: true, joined: 1, lastSeen: 1, stats: { total: 1, correct: 1, streak: 1, longestStreak: 1 } },
+        { id: 'student-b', name: 'Bob', connected: true, joined: 1, lastSeen: 1, stats: { total: 2, correct: 2, streak: 2, longestStreak: 2 } },
+      ],
+    },
+  }
+  acceptEntryParticipant(session, { participantId: 'student-a', displayName: 'Ada' })
+  const participantToken = issueAcceptedEntryParticipantToken(session, 'student-a')
+  assert.ok(participantToken)
+  records.set(session.id, session)
+
+  const managerBroadcasts: string[] = []
+  const allBroadcasts: string[] = []
+  const clients = new Set<{ readyState: number; sessionId: string; principalKind: string; send: (value: string) => void }>([
+    { readyState: 1, sessionId: session.id, principalKind: 'manager', send: (value) => managerBroadcasts.push(value) },
+    { readyState: 1, sessionId: session.id, principalKind: 'participant', send: (value) => allBroadcasts.push(value) },
+  ])
+  const app = {
+    post(path: string, handler: Handler) { routes.set(`POST ${path}`, handler) },
+    get(path: string, handler: Handler) { routes.set(`GET ${path}`, handler) },
+  }
+  const sessions = {
+    get: async (id: string) => records.get(id) ?? null,
+    set: async (id: string, record: SessionRecord) => { records.set(id, record) },
+  }
+  const ws = { wss: { clients, close() {} }, register() {} }
+  setupJavaFormatPracticeRoutes(app as never, sessions as never, ws as never)
+
+  const stats = routes.get('POST /api/java-format-practice/:sessionId/stats')
+  const roster = routes.get('GET /api/java-format-practice/:sessionId/students')
+  assert.ok(stats)
+  assert.ok(roster)
+  const cookieName = getSessionParticipantCookieName(session.id)
+  const nextStats = { total: 5, correct: 3, streak: 2, longestStreak: 4 }
+
+  const denied = new MockResponse()
+  console.info('[TEST] java-format stats: request without a participant cookie is expected to be rejected 403')
+  await stats({ params: { sessionId: session.id }, body: { stats: nextStats } }, denied)
+  assert.equal(denied.statusCode, 403)
+
+  const invalid = new MockResponse()
+  console.info('[TEST] java-format stats: non-object stats payload is expected to be rejected 400')
+  await stats({ params: { sessionId: session.id }, body: { stats: 'not-an-object' }, cookies: { [cookieName]: participantToken } }, invalid)
+  assert.equal(invalid.statusCode, 400)
+
+  const accepted = new MockResponse()
+  await stats({ params: { sessionId: session.id }, body: { stats: nextStats }, cookies: { [cookieName]: participantToken } }, accepted)
+  assert.equal(accepted.statusCode, 200)
+  assert.deepEqual(accepted.body, { success: true })
+
+  const persisted = records.get(session.id)?.data as { students: Array<{ id: string; stats: unknown }> }
+  assert.deepEqual(persisted.students.find((student) => student.id === 'student-a')?.stats, nextStats)
+  assert.deepEqual(persisted.students.find((student) => student.id === 'student-b')?.stats, { total: 2, correct: 2, streak: 2, longestStreak: 2 })
+
+  assert.ok(managerBroadcasts.some((value) => JSON.parse(value).type === 'studentsUpdate'))
+  assert.equal(allBroadcasts.some((value) => JSON.parse(value).type === 'studentsUpdate'), false)
+
+  const rosterRes = new MockResponse()
+  await roster({ params: { sessionId: session.id }, cookies: { [getActivityCapabilityCookieName('manager', session.id)]: issueActivityCapability(session, 'manager').token } }, rosterRes)
+  assert.equal(rosterRes.statusCode, 200)
+  assert.equal(rosterRes.headers['cache-control'], 'no-store')
 })

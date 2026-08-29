@@ -62,6 +62,11 @@ export function useResilientWebSocket({
   const onMessageRef = useRef(onMessage)
   const onCloseRef = useRef(onClose)
   const onErrorRef = useRef(onError)
+  const isTerminalCloseRef = useRef(isTerminalClose)
+
+  useEffect(() => {
+    isTerminalCloseRef.current = isTerminalClose
+  }, [isTerminalClose])
 
   useEffect(() => {
     onOpenRef.current = onOpen
@@ -142,7 +147,7 @@ export function useResilientWebSocket({
       if (isLatestSocket) {
         socketRef.current = null
       }
-      if (!manualCloseRef.current && shouldReconnect && isLatestSocket && !isTerminalClose?.(event)) {
+      if (!manualCloseRef.current && shouldReconnect && isLatestSocket && !isTerminalCloseRef.current?.(event)) {
         const delay = getReconnectDelay(
           reconnectAttemptsRef.current,
           reconnectDelayBase,
@@ -164,7 +169,6 @@ export function useResilientWebSocket({
     reconnectDelayBase,
     reconnectDelayMax,
     clearReconnectTimeout,
-    isTerminalClose,
   ])
 
   useEffect(() => {

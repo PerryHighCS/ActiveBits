@@ -705,7 +705,7 @@ Migration implications:
 
 ## Pilot Comparison: Java Format, MobCode, and Video Sync
 
-This comparison is limited to evidence needed to choose the pilot contract; it is not a completed audit of MobCode or Video Sync.
+The full MobCode and Video Sync audits are their dedicated sections above (both are `Fully classified` in the route summary). This section does not repeat them; it only extracts the subset of that evidence needed to choose the pilot contract.
 
 | Concern | Java Format | MobCode | Video Sync | Contract implication |
 | --- | --- | --- | --- | --- |

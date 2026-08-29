@@ -82,15 +82,18 @@ export default function JavaFormatPracticeManager() {
     });
   };
 
-  const fetchStudents = useCallback(async () => {
+  const fetchStudents = useCallback(async (signal?: AbortSignal) => {
     if (sessionId == null) return;
     try {
-      const res = await fetch(`/api/java-format-practice/${sessionId}/students`);
+      const res = await fetch(`/api/java-format-practice/${sessionId}/students`, { signal });
       if (!res.ok) throw new Error(`Failed to fetch students: ${res.status}`);
       const data = (await res.json()) as StudentsResponse
       const list = Array.isArray(data.students) ? data.students : [];
+      // A response for a superseded session must never overwrite the roster.
+      if (signal?.aborted) return;
       setStudents(list);
     } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') return;
       console.error('Failed to fetch students:', err);
     }
   }, [sessionId]);
@@ -132,9 +135,10 @@ export default function JavaFormatPracticeManager() {
 
   useEffect(() => {
     if (sessionId == null) return undefined;
-    void fetchStudents();
+    const controller = new AbortController();
+    void fetchStudents(controller.signal);
     const refreshInterval = window.setInterval(() => {
-      void fetchStudents();
+      void fetchStudents(controller.signal);
     }, 2_000);
     let disposed = false;
     queueMicrotask(() => {
@@ -144,6 +148,7 @@ export default function JavaFormatPracticeManager() {
     });
     return () => {
       disposed = true;
+      controller.abort();
       window.clearInterval(refreshInterval);
       disconnect();
     };

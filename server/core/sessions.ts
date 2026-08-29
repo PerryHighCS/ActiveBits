@@ -461,6 +461,7 @@ export function setupSessionRoutes(app: {
   delete(path: string, handler: (req: { params: { sessionId: string } }, res: ResponseLike) => void | Promise<void>): void
 }, sessions: SessionStore, wss: WsServerLike | null = null): void {
   app.get('/api/session/:sessionId/entry', async (req, res) => {
+    setNoStore(res)
     const { sessionId } = req.params
     const session = await sessions.get(sessionId)
     if (!session) {
