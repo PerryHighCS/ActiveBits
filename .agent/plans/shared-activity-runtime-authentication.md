@@ -226,6 +226,7 @@ Deliverables:
 - [ ] Ensure pub/sub fanout retains audience boundaries across instances.
 - [ ] Add tests proving unauthorized sockets receive no initial snapshot and no later broadcast.
 - [ ] Add tests for authenticated manager/student sockets and cross-role message isolation.
+- [x] Keep development-tool WebSocket upgrades outside the activity router so Vite HMR cannot be destroyed before its proxy handler runs (Java Format lifecycle validation).
 
 ## Phase 5: Standardize Client Recovery
 

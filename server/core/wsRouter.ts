@@ -4,6 +4,10 @@ import type { ActiveBitsWebSocket, WsConnectionHandler, WsRouter } from '../../t
 const SESSION_CLEANUP_GRACE_PERIOD_MS = 5_000
 const WS_OPEN_READY_STATE = 1
 
+export function isActivityWebSocketPath(pathname: string): boolean {
+  return pathname === '/ws' || pathname.startsWith('/ws/')
+}
+
 interface UpgradeRequest {
   url?: string | null
   headers: Record<string, string | string[] | undefined>
@@ -139,6 +143,9 @@ export function createWsRouter(server: UpgradeCapableServer, sessions: SessionSt
       const url = new URL(req.url || '', 'http://x')
       const onConnection = namespaces.get(url.pathname)
       if (!onConnection) {
+        // Other upgrade handlers (such as the development Vite HMR proxy) share
+        // this HTTP server. Only activity WebSocket paths belong to this router.
+        if (!isActivityWebSocketPath(url.pathname)) return
         socket.destroy()
         return
       }
