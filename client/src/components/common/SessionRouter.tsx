@@ -379,7 +379,7 @@ const SessionRouter = ({ onShellExpandChange }: SessionRouterProps = {}) => {
       sessionId: sessionEntryStatus.sessionId,
       presentationMode: sessionEntryStatus.presentationMode,
       completedJoinPreflightSessionId,
-      hasStoredParticipantContext: hasStoredSessionParticipantContext || sessionEntryStatus.participantAuthenticated === true,
+      hasStoredParticipantContext: sessionEntryStatus.participantAuthenticated === true,
       hasStoredEntryParticipantHandoff: hasStoredSessionEntryParticipantHandoff,
     })) {
       return
@@ -740,7 +740,7 @@ const SessionRouter = ({ onShellExpandChange }: SessionRouterProps = {}) => {
     sessionId: sessionEntryStatus.sessionId,
     presentationMode: sessionEntryStatus.presentationMode,
     completedJoinPreflightSessionId,
-    hasStoredParticipantContext: hasStoredSessionParticipantContext || sessionEntryStatus.participantAuthenticated === true,
+    hasStoredParticipantContext: sessionEntryStatus.participantAuthenticated === true,
     hasStoredEntryParticipantHandoff: hasStoredSessionEntryParticipantHandoff,
   })) {
     return (
