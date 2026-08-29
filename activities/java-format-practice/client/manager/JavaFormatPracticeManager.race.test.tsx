@@ -214,6 +214,8 @@ void test('JavaFormatPracticeManager ignores a studentsUpdate queued on a previo
 
     // Route to a different session; the manager effect tears down the first socket.
     await act(async () => { testingLibrary.fireEvent.click(rendered.getByRole('button', { name: 'go' })); await Promise.resolve() })
+    // The previous session's roster must not linger on the new URL.
+    assert.equal(rendered.queryByText('Ada'), null, 'the prior session roster is cleared on the session swap')
     await testingLibrary.waitFor(() => { assert.ok(TestWebSocket.instances.length >= 2) })
     const secondSocket = TestWebSocket.instances[1]!
     await act(async () => { secondSocket.emitOpen(); await Promise.resolve() })

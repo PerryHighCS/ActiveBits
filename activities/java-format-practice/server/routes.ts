@@ -93,6 +93,42 @@ function normalizeSessionData(data: unknown): JavaFormatSessionData {
   }
 }
 
+const MAX_SET_TIMEOUT_MS = 2_147_483_647
+
+/**
+ * Close an admitted manager socket once its capability reaches `expiresAt`. The
+ * handshake rejects an already-expired token, but without this a connection that
+ * stays open (kept alive by the shared heartbeat) would keep receiving private
+ * roster updates past the bounded capability lifetime.
+ */
+function scheduleCapabilityExpiryClose(
+  client: JavaFormatSocket,
+  session: JavaFormatSession,
+  capabilityId: string,
+): void {
+  const record = (session.data as { activityCapabilities?: Record<string, { expiresAt?: unknown }> })
+    .activityCapabilities?.[capabilityId]
+  const expiresAt = record?.expiresAt
+  if (typeof expiresAt !== 'number' || !Number.isFinite(expiresAt)) return
+
+  const closeExpired = (): void => {
+    try {
+      client.close(1008, 'activity-auth-required')
+    } catch {
+      // socket already tearing down
+    }
+  }
+
+  const ttl = expiresAt - Date.now()
+  if (ttl <= 0) {
+    closeExpired()
+    return
+  }
+  const timer = setTimeout(closeExpired, Math.min(ttl, MAX_SET_TIMEOUT_MS))
+  timer.unref?.()
+  client.on('close', () => clearTimeout(timer))
+}
+
 function asJavaFormatSession(session: SessionRecord | null): JavaFormatSession | null {
   if (!session || session.type !== 'java-format-practice') {
     return null
@@ -114,7 +150,11 @@ export default function setupJavaFormatPracticeRoutes(
   const broadcastOrigin = randomUUID()
   const ensureBroadcastSubscription = createBroadcastSubscriptionHelper(sessions, ws, (client, message) => {
     if (isPlainObject(message) && message.origin === broadcastOrigin) return false
-    const audience = isPlainObject(message) && message.audience === 'manager' ? 'manager' : 'all'
+    const audience = isPlainObject(message) ? message.audience : undefined
+    // Fail closed: a cross-instance message without an explicit recognized
+    // audience (e.g. from an older build during a rolling deploy) is not
+    // forwarded, so a private `studentsUpdate` can never reach participant sockets.
+    if (audience !== 'all' && audience !== 'manager') return false
     return audience === 'all' || (client as JavaFormatSocket).principalKind === 'manager'
   })
 
@@ -185,6 +225,7 @@ export default function setupJavaFormatPracticeRoutes(
           client.principalKind = 'manager'
           client.sessionId = activeSessionId
           ensureBroadcastSubscription(activeSessionId)
+          scheduleCapabilityExpiryClose(client, session, manager.capabilityId)
           return
         }
 

@@ -106,11 +106,17 @@ export default function JavaFormatPracticeManager() {
     });
   };
 
-  // If the route swaps sessions without unmounting, the auth-loss latch would
-  // otherwise stick and suppress the new session's roster fetches.
+  // A parameter-only route swap keeps this component mounted. Reset the auth-loss
+  // latch (so it can't suppress the new session's fetches), drop the previous
+  // session's roster from the screen, invalidate every in-flight poll, and stop
+  // trusting the outgoing socket so a late response cannot repaint the new URL.
   useEffect(() => {
     managerAuthLostRef.current = false;
     setManagerAuthLost(false);
+    setStudents([]);
+    rosterUpdateGenRef.current += 1;
+    pollRequestGenRef.current += 1;
+    activeSocketRef.current = null;
   }, [sessionId]);
 
   const fetchStudents = useCallback(async (signal?: AbortSignal) => {
@@ -119,6 +125,9 @@ export default function JavaFormatPracticeManager() {
       const rosterGenAtStart = rosterUpdateGenRef.current;
       const pollGen = (pollRequestGenRef.current += 1);
       const res = await fetch(`/api/java-format-practice/${sessionId}/students`, { signal });
+      // A poll superseded by a newer poll or a session swap is ignored entirely,
+      // including its status — a stale 403 must not latch auth-loss on the new session.
+      if (signal?.aborted || pollRequestGenRef.current !== pollGen) return;
       if (res.status === 403) {
         // The manager capability is gone; stop polling a request that can only 403.
         markManagerAuthLost();
@@ -127,13 +136,10 @@ export default function JavaFormatPracticeManager() {
       if (!res.ok) throw new Error(`Failed to fetch students: ${res.status}`);
       const data = (await res.json()) as StudentsResponse
       const list = Array.isArray(data.students) ? data.students : [];
-      // A response for a superseded session must never overwrite the roster.
-      if (signal?.aborted) return;
+      if (signal?.aborted || pollRequestGenRef.current !== pollGen) return;
       // A live `studentsUpdate` that arrived while this poll was in flight is
       // authoritative; discard this now-stale HTTP snapshot.
       if (rosterUpdateGenRef.current !== rosterGenAtStart) return;
-      // A newer poll started while this one was in flight; only the latest applies.
-      if (pollRequestGenRef.current !== pollGen) return;
       setStudents(list);
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') return;

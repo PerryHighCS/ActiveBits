@@ -138,6 +138,91 @@ void test('Java Format websocket admits only cookie principals and keeps roster 
   assert.equal(studentSocket.sent.some((value) => JSON.parse(value).type === 'studentsUpdate'), false)
 })
 
+void test('Java Format manager socket is closed once its capability reaches expiry', async () => {
+  console.info('[TEST] java-format websocket: manager capability expiry is expected to close 1008')
+  const registration: { socketHandler?: (socket: TestSocket, query: URLSearchParams) => void } = {}
+  const session: SessionRecord = { id: 'session-exp', type: 'java-format-practice', created: 1, lastActivity: 1, data: { students: [] } }
+  const manager = issueActivityCapability(session, 'manager', undefined, Date.now(), 40)
+  const sessions = { get: async (id: string) => (id === session.id ? session : null), set: async () => {} }
+  const clients = new Set<TestSocket>()
+  const ws = { wss: { clients, close() {} }, register(_p: string, handler: (socket: TestSocket, query: URLSearchParams) => void) { registration.socketHandler = handler } }
+  setupJavaFormatPracticeRoutes({ post() {}, get() {} } as never, sessions as never, ws as never)
+  const socketHandler = registration.socketHandler
+  assert.ok(socketHandler)
+
+  const closeListeners: Array<() => void> = []
+  const socket = {
+    readyState: 1,
+    upgradeHeaders: { cookie: `${getActivityCapabilityCookieName('manager', session.id)}=${manager.token}` },
+    send: () => 0,
+    close(code?: number, reason?: string) { socket.closed = { code, reason }; socket.readyState = 3; closeListeners.forEach((fn) => fn()) },
+    on(event: string, fn: () => void) { if (event === 'close') closeListeners.push(fn) },
+    once() {}, terminate() {}, ping() {},
+    sent: [] as string[], closed: null as { code?: number; reason?: string } | null,
+  }
+  clients.add(socket as unknown as TestSocket)
+
+  socketHandler(socket as unknown as TestSocket, new URLSearchParams(`sessionId=${session.id}&principal=manager`))
+  await new Promise((resolve) => setTimeout(resolve, 5))
+  assert.equal(socket.closed, null, 'admitted and still open while the capability is valid')
+
+  await new Promise((resolve) => setTimeout(resolve, 90))
+  assert.deepEqual(socket.closed, { code: 1008, reason: 'activity-auth-required' })
+})
+
+void test('Java Format broadcast subscription drops cross-instance messages without a recognized audience', async () => {
+  const registration: { socketHandler?: (socket: TestSocket, query: URLSearchParams) => void } = {}
+  const session: SessionRecord = { id: 'session-aud', type: 'java-format-practice', created: 1, lastActivity: 1, data: { students: [] } }
+  const manager = issueActivityCapability(session, 'manager')
+  acceptEntryParticipant(session, { participantId: 'student-a', displayName: 'Ada' })
+  const participantToken = issueAcceptedEntryParticipantToken(session, 'student-a')
+  const captured: { forward: ((message: unknown) => void) | null } = { forward: null }
+  const sessions = {
+    get: async (id: string) => (id === session.id ? session : null),
+    set: async () => {},
+    subscribeToBroadcast: (_channel: string, handler: (message: unknown) => void) => { captured.forward = handler },
+  }
+  const clients = new Set<TestSocket>()
+  const ws = { wss: { clients, close() {} }, register(_p: string, handler: (socket: TestSocket, query: URLSearchParams) => void) { registration.socketHandler = handler } }
+  setupJavaFormatPracticeRoutes({ post() {}, get() {} } as never, sessions as never, ws as never)
+  const socketHandler = registration.socketHandler
+  assert.ok(socketHandler)
+
+  const makeSocket = (cookie: string): TestSocket => {
+    const sent: string[] = []
+    const socket: TestSocket = {
+      readyState: 1, upgradeHeaders: { cookie }, send: (value: string) => sent.push(value),
+      close() {}, on() {}, once() {}, terminate() {}, ping() {}, sent, closed: null,
+    }
+    clients.add(socket)
+    return socket
+  }
+  const managerSocket = makeSocket(`${getActivityCapabilityCookieName('manager', session.id)}=${manager.token}`)
+  socketHandler(managerSocket, new URLSearchParams(`sessionId=${session.id}&principal=manager`))
+  const studentSocket = makeSocket(`${getSessionParticipantCookieName(session.id)}=${participantToken}`)
+  socketHandler(studentSocket, new URLSearchParams(`sessionId=${session.id}&principal=participant`))
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  managerSocket.sent.length = 0
+  studentSocket.sent.length = 0
+  const forward = captured.forward
+  assert.ok(forward, 'the broadcast subscription registered a handler')
+
+  // No audience field (older publisher): fail closed — forwarded to nobody.
+  forward({ type: 'studentsUpdate', payload: { students: [] } })
+  assert.equal(managerSocket.sent.length, 0)
+  assert.equal(studentSocket.sent.length, 0)
+
+  // Explicit manager audience: managers only.
+  forward({ type: 'studentsUpdate', payload: { students: [] }, audience: 'manager' })
+  assert.equal(managerSocket.sent.length, 1)
+  assert.equal(studentSocket.sent.length, 0)
+
+  // Explicit all audience: everyone.
+  forward({ type: 'difficultyUpdate', payload: { difficulty: 'advanced' }, audience: 'all' })
+  assert.equal(managerSocket.sent.length, 2)
+  assert.equal(studentSocket.sent.length, 1)
+})
+
 void test('Java Format stats route authorizes the participant cookie and broadcasts roster changes to managers only', async () => {
   const routes = new Map<string, Handler>()
   const records = new Map<string, SessionRecord>()
