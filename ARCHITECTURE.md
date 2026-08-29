@@ -651,8 +651,10 @@ and `.agent/knowledge/activity-runtime-threat-model.md` for the full contract.
   (`activebits_cap_<kind>_<base64url(sessionId)>`). Student authority is a
   server-issued **accepted-entry** token (`server/core/acceptedEntryParticipants.ts`),
   also hashed at rest, in `activebits_participant_<base64url(sessionId)>`.
-  Participant identity is always minted server-side by the waiting-room store; a
-  request-supplied `participantId` is ignored.
+  Participant identity is normally minted server-side by the waiting-room store.
+  (A request-supplied `participantId` is still honored there for SyncDeck's
+  embedded-activity handoff; hardening that into a trusted-only path is tracked
+  for the Slice C adapter work.)
 - **Activities own**: domain state, projections, and handlers, invoked only
   after the platform has resolved a principal.
 - **Java Format Practice** is the first migrated activity (Slice A): `POST

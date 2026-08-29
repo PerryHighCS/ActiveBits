@@ -27,17 +27,21 @@ Track security-relevant boundaries, risks, and mitigation decisions.
   activity-owned projections, and audience-preserving delivery.
 - Implemented so far (Slice A, PR #349): shared hashed capability + accepted-entry
   primitives (`server/core/activityCapabilities.ts`, bounded server-side expiry;
-  `server/core/acceptedEntryParticipants.ts`, hashed tokens). The waiting-room
-  store now always mints the participant id and ignores a request-supplied one.
-  Java Format Practice creation issues the manager capability cookie; its manager
-  REST + WebSocket surfaces and `POST /stats` require the cookie; sockets
-  authenticate before subscription/snapshot. Clean cutover: pre-deployment
-  sessions are rejected on migrated surfaces with no fallback.
+  `server/core/acceptedEntryParticipants.ts`, hashed tokens). Java Format Practice
+  creation issues the manager capability cookie; its manager REST + WebSocket
+  surfaces and `POST /stats` require the cookie; sockets authenticate before
+  subscription/snapshot. Clean cutover: pre-deployment sessions are rejected on
+  migrated surfaces with no fallback.
 - Residual risk: Most activities are still activity-local until migrated in focused
   PRs (Slices B/C, Phase 7 waves). Java Format's permalink / persistent-teacher
   entry does not yet issue a manager capability (needs the Slice C persistent
-  adapter; tracked in #351). The separately tracked raw shared-session disclosure
-  advisory is out of scope.
+  adapter; tracked in #351). The public waiting-room store
+  (`server/core/entryParticipants.ts`) still accepts a request-supplied
+  `participantId`, so a caller who knows another participant's id can mint an
+  accepted-participant cookie for it; a blunt server-only mint breaks SyncDeck's
+  embedded-activity identity handoff, so the real fix is a trusted embedded
+  handoff path (Slice C / #352). The separately tracked raw shared-session
+  disclosure advisory is out of scope.
 - Validation (test/review/path): `.agent/knowledge/activity-runtime-audit.md`;
   `.agent/knowledge/activity-runtime-threat-model.md`;
   `.agent/plans/shared-activity-runtime-authentication.md`;

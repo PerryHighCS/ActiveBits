@@ -6,14 +6,10 @@ async function createInstructorSession(page: Page): Promise<{ id: string; instru
   return await response.json() as { id: string; instructorPasscode: string }
 }
 
-// Identity is server-issued: the waiting-room store mints the participantId and
-// ignores any request-supplied one, so return the minted id for the caller to
-// use on the student socket.
-async function acceptStudent(page: Page, sessionId: string, displayName: string): Promise<string> {
-  const stored = await page.request.post(`/api/session/${sessionId}/entry-participant`, { data: { values: { displayName } } })
-  const { entryParticipantToken, values } = await stored.json() as { entryParticipantToken: string; values: { participantId: string } }
+async function acceptStudent(page: Page, sessionId: string, participantId: string, displayName: string): Promise<void> {
+  const stored = await page.request.post(`/api/session/${sessionId}/entry-participant`, { data: { values: { participantId, displayName } } })
+  const { entryParticipantToken } = await stored.json() as { entryParticipantToken: string }
   await page.request.post(`/api/session/${sessionId}/entry-participant/consume`, { data: { token: entryParticipantToken } })
-  return values.participantId
 }
 
 // Open the student sockets one at a time. The SyncDeck join handler does an
@@ -39,8 +35,8 @@ test('SyncDeck manager boots a roster student through the rendered panel action'
     data: { instructorPasscode: session.instructorPasscode, presentationUrl: 'https://slides.example/deck' },
   })
   expect(configured.ok()).toBeTruthy()
-  const adaId = await acceptStudent(page, session.id, 'Ada')
-  const linId = await acceptStudent(page, session.id, 'Lin')
+  await acceptStudent(page, session.id, 'student-1', 'Ada')
+  await acceptStudent(page, session.id, 'student-2', 'Lin')
   await page.addInitScript(({ instructorPasscode }) => {
     window.history.replaceState(
       {
@@ -54,9 +50,9 @@ test('SyncDeck manager boots a roster student through the rendered panel action'
   }, { instructorPasscode: session.instructorPasscode })
   await page.goto(`/manage/syncdeck/${session.id}`)
   await expect(page.getByRole('button', { name: 'Students: 0' })).toBeVisible()
-  await connectSyncDeckStudentSocket(page, session.id, adaId)
+  await connectSyncDeckStudentSocket(page, session.id, 'student-1')
   await expect(page.getByRole('button', { name: 'Students: 1' })).toBeVisible()
-  await connectSyncDeckStudentSocket(page, session.id, linId)
+  await connectSyncDeckStudentSocket(page, session.id, 'student-2')
   await expect(page.getByRole('button', { name: 'Students: 2' })).toBeVisible()
   await page.getByRole('button', { name: /Students:/ }).click()
   await expect(page.getByRole('button', { name: 'Return Ada to the waiting room' })).toBeVisible()
@@ -67,7 +63,7 @@ test('SyncDeck manager boots a roster student through the rendered panel action'
   await expect(page.getByRole('button', { name: 'Return Ada to the waiting room' })).toBeEnabled()
 
   let pendingRoute: Route | null = null
-  await page.route(`**/students/${adaId}/return-to-waiting-room`, async (route) => {
+  await page.route(`**/students/student-1/return-to-waiting-room`, async (route) => {
     pendingRoute = route
   })
   page.once('dialog', (dialog) => dialog.accept())

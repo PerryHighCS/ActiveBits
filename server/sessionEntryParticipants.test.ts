@@ -13,21 +13,22 @@ function createSession(): SessionRecord {
   }
 }
 
-void test('storeSessionEntryParticipant filters unsupported values and mints a server-issued participantId', () => {
+void test('storeSessionEntryParticipant filters unsupported values and normalizes participantId', () => {
   const session = createSession()
 
   const { token, values } = storeSessionEntryParticipant(session, {
     displayName: 'Ada',
-    participantId: 'forged-participant-1',
+    participantId: '  participant-1  ',
     nested: { team: 'red' },
     ignored: () => 'not-serializable',
   })
 
   assert.match(token, /^[a-f0-9]{16}$/)
-  assert.equal(values.displayName, 'Ada')
-  assert.deepEqual(values.nested, { team: 'red' })
-  assert.notEqual(values.participantId, 'forged-participant-1')
-  assert.match(String(values.participantId), /^[a-f0-9]{16}$/)
+  assert.deepEqual(values, {
+    displayName: 'Ada',
+    participantId: 'participant-1',
+    nested: { team: 'red' },
+  })
 })
 
 void test('consumeSessionEntryParticipant trims tokens and only allows one successful consume', () => {
