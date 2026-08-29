@@ -192,11 +192,34 @@ Existing activity tests cover route validators and client/domain utilities only.
 
 ### python-list-practice
 
-- HTTP: create; session read; students; stats; question types.
-- WebSocket: `/ws/python-list-practice` shared by student and manager clients.
-- Sensitive state: named roster and attributed stats.
-- Initial concern: manager/student socket admission and terminal auth-recovery behavior.
-- [ ] Complete classification.
+- Configuration/creation matches the other practice activities: standalone/direct/permalink/home entry, required display name, a synthetic client-only solo mode, and one unauthenticated create route that returns only `{ id }`.
+- Stored activity fields are `students` and `selectedQuestionTypes`.
+- Critical normalization difference: `normalizeSessionData` reconstructs only those two fields instead of spreading unknown fields. Every normalization can therefore discard platform-owned accepted-entry and participant-token metadata. This must be corrected as part of the platform metadata boundary, not copied into a compatibility layer.
+
+| Route | Intended principal | Current principal source | Projection/mutation |
+| --- | --- | --- | --- |
+| `POST /api/python-list-practice/create` | public creation adapter | none | Creates session; returns ID; issues no manager capability. |
+| `GET /api/python-list-practice/:sessionId` | public/session member plus manager data | session ID only | Returns full named roster/statistics and selected question types. |
+| `GET /api/python-list-practice/:sessionId/students` | manager | session ID only | Returns full named roster/statistics. |
+| `POST /api/python-list-practice/:sessionId/stats` | student | body `studentId` and/or `studentName` | Updates an existing participant or creates a named participant, then broadcasts the roster. |
+| `POST /api/python-list-practice/:sessionId/question-types` | manager | session ID only | Changes question types and broadcasts them. |
+
+The shared WebSocket namespace differs materially from the Java activities:
+
+- Any socket with a session ID is retained and receives an immediate `questionTypesUpdate` before identity checks.
+- A socket with no student name is treated as an observer in practice. This is how the manager receives broadcasts, but there is no authenticated role or explicit public-display declaration; any anonymous session-ID holder gets the same access.
+- Named sockets use the same accepted-participant helper weakness as the Java activities: a request-supplied name is enough and a request-supplied ID can be adopted. The client itself generates an ID before server admission.
+- `studentsUpdate` containing the full roster/statistics and `questionTypesUpdate` go to every session socket, including unfiltered pub/sub. `studentId` goes to the admitted student socket.
+- There are no inbound domain messages. Manager mutation remains on unprotected HTTP.
+- Unlike the Java helpers, this socket does not close duplicate participant sockets. Multiple connections can independently mark the same participant disconnected when either closes.
+
+Student request-visible identity and participant-scoped stats are stored in `localStorage`; waiting-room handoff uses `sessionStorage`. Neither REST nor WebSocket validates the participant cookie. The manager holds no credential and relies entirely on session-ID access.
+
+Activity tests cover client/domain utilities and exports, but there are no activity server route/socket tests. Shared status/registry tests use the activity as a fixture without enforcing its trust boundaries.
+
+Missing cases include platform metadata preservation, explicit observer policy, narrow public projection, manager REST/socket authentication, pre-admission snapshot denial, claimed-ID/name rejection, cookie-derived stats attribution, roster audience filtering across local/pub-sub delivery, duplicate socket semantics, expiry recovery, and handler error/logging behavior.
+
+- [x] Complete route, message, persistence, recovery, and test classification.
 
 ### raffle
 
@@ -267,7 +290,9 @@ Existing activity tests cover route validators and client/domain utilities only.
 - [x] Produce its exact route principal table, WebSocket message audience table, session fields, client persistence, and missing tests.
 - [x] Compare its manager boundary with `mobcode` and `video-sync` before proposing the shared manager-capability contract.
 - [x] Audit `java-string-practice` to determine how much of Java Format's behavior is copied and how much differs.
-- [ ] Audit `python-list-practice` to test whether the same contract covers a third practice activity without activity-specific exceptions.
+- [x] Audit `python-list-practice` to test whether the same contract covers a third practice activity without activity-specific exceptions.
+- [ ] Consolidate the three practice audits into pilot requirements and decide whether anonymous observer access is needed by any of them.
+- [ ] Audit `binary-breach` as the next distinct student-progress activity.
 
 ## Pilot Comparison: Java Format, MobCode, and Video Sync
 
