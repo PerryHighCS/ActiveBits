@@ -33,7 +33,7 @@ Treat entries as observations, not desired behavior. Update each activity sectio
 | `java-format-practice` | 6 | `/ws/java-format-practice` | student + manager | Fully classified |
 | `java-string-practice` | 5 | `/ws/java-string-practice` | student + manager | Fully classified |
 | `mobcode` | 10 | `/ws/mobcode` | student + manager + solo | Fully classified |
-| `postboard` | 15 | none | student + manager | Inventory captured |
+| `postboard` | 15 | none | student + manager | Fully classified |
 | `python-list-practice` | 5 | `/ws/python-list-practice` | student + manager | Fully classified |
 | `raffle` | 3 | `/ws/raffle` | anonymous entrant + manager | Fully classified |
 | `resonance` | 18 | `/ws/resonance` | student + manager | Inventory captured |
@@ -354,11 +354,34 @@ Migration implication: retain MobCode's activity-owned projections, cookie-deriv
 
 ### postboard
 
-- HTTP: create; instructor/student state; report; setup; post creation; moderation; delete; reorder; flag; reactions.
-- WebSocket: none; student state uses polling.
-- Sensitive state: post ownership, rejected/pending content, flags, names, raw reactions, instructor settings.
-- Initial concern: explicit public/student/manager projections and consistent manager authorization for all moderation/report routes.
-- [ ] Complete classification.
+- This is the REST-only reference: managers and students poll every 2.5 seconds. Modes are temporary live, persistent permalink, and SyncDeck child; waiting-room display name is required. Creation returns an instructor passcode in JSON/router state, and embedded managers exchange a one-time parent token for that passcode. There is no persistent-manager recovery in the activity.
+- Stored state includes passcode, prompt/settings, named attributed posts and moderation status, per-user raw reactions, flags/reasons, and embedded/platform metadata. The normalizer spreads unknown fields and preserves platform metadata.
+
+#### Principal and projection table
+
+| Route group | Intended principal | Current principal source | Boundary |
+| --- | --- | --- | --- |
+| `POST /create` | public factory | none | Returns manager credential in JSON. |
+| `GET /instructor-state`, `/report` | manager | passcode header/body | Snapshot/report include names, ownership, pending/rejected/deleted/hidden content, flags, and aggregate reactions. HTTP report is protected; the registered internal report builder is a separate trusted orchestration path. |
+| `POST /setup`, moderation actions, `/reorder`, `/flag` | manager | passcode header/body | All manager mutations consistently call the same activity-local verifier. |
+| `GET /student-state` | student | query `studentId`, checked only for membership in accepted-entry records | Projection correctly hides peer identity, pending/rejected peer posts, hidden posts, flags, and raw reactions, but a forged accepted ID reveals that student's private pending/rejected posts and ownership markers. With no/invalid ID it still returns the approved public-looking board. |
+| `POST /posts` | student or manager | manager passcode, otherwise body `studentId` checked only for accepted-entry membership | Student attribution can be forged; accepted display name overrides the body name. |
+| `POST /posts/:postId/delete` | owning student | body `studentId` plus accepted-entry membership | Allows deletion only for that ID's rejected post, but the ID is not authenticated. |
+| `POST /posts/:postId/react` | student or manager | manager passcode, otherwise body `studentId` plus accepted-entry membership | Students cannot react to hidden, unapproved, or their own posts; another accepted identity can nevertheless be forged. |
+
+The student snapshot is a strong activity-owned projection and should be retained. Approved-note visibility is not evidence of an intentional anonymous display: the configured live flow requires waiting-room admission and has no separate public viewer. Require a student principal for live polling, while any future standalone/public board must be explicitly declared as its own projection.
+
+#### Recovery and tests
+
+- Manager credentials are intentionally limited to same-tab router state or the short-lived embedded exchange; no Web Storage fallback exists. Temporary reload/browser restart loses manager authority. Polling and every mutation repeatedly send the passcode in a header.
+- Students persist request-visible name/ID in `localStorage` and use `sessionStorage` for entry handoff. Postboard never reads the httpOnly participant cookie; loss of it is invisible and stored IDs continue to select private state.
+- Responses do not consistently set `Cache-Control: no-store`, including manager/student private snapshots and reports.
+- Server tests cover normalization, projection exclusion, manager denial, report auth/rendering, creation/setup, post limits, moderation, reorder, reactions, and own rejected deletion. Playwright covers manager/student flow, pending/approval/return behavior, reorder, and layout.
+- Existing happy-path tests encode request `studentId` as authority. Missing cases include cookie-derived attribution, forged accepted-ID denial across every student route, wrong-session/expired token denial, anonymous live-state denial, manager capability reload, private cache headers, and internal-versus-HTTP report authorization contracts.
+
+Migration implication: Postboard proves that shared HTTP authorization can wrap activity-owned projections without a WebSocket abstraction. Replace passcode handling with the manager principal, resolve student identity from the participant cookie once, pass its ID into the existing projection/domain rules, and protect report and polling responses with the same shared route-group middleware.
+
+- [x] Complete route, message, persistence, recovery, and test classification.
 
 ### python-list-practice
 
@@ -621,7 +644,8 @@ Migration implications:
 - [x] Require parent-derived, child-scoped embedded-manager authority even when the child activity has no activity-local passcode.
 - [x] Fully audit `mobcode` as the mature role/audience reference and identify its pre-authentication subscription gap.
 - [x] Audit `video-sync` and preserve its authenticate-before-snapshot lifecycle and embedded/persistent adapter pattern.
-- [ ] Audit `postboard` next as the REST-only private-projection reference.
+- [x] Audit `postboard` as the REST-only private-projection reference.
+- [ ] Audit `resonance` next as the private answer/draft and bidirectional WebSocket reference.
 
 ## Pilot Comparison: Java Format, MobCode, and Video Sync
 
