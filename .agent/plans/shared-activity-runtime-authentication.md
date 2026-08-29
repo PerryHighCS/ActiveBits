@@ -192,6 +192,8 @@ Deliverables:
 ## Phase 3: Build Shared HTTP Authorization and Projection Primitives
 
 - [ ] Add generic middleware/wrappers for public, student, manager, and specialized-role routes.
+- [ ] Support route-group composition so split activity modules can apply a principal requirement once without reimplementing credential parsing.
+- [ ] Invoke activity-owned domain validation only after shared session/principal resolution; authentication must not imply that domain payloads are trustworthy.
 - [ ] Ensure wrappers validate session existence and activity type before invoking activity code.
 - [ ] Pass authenticated principals to handlers; do not expose raw tokens.
 - [ ] Add explicit public/student/manager projection helpers or registration contracts.

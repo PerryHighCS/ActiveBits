@@ -281,11 +281,50 @@ Missing cases include platform metadata preservation, explicit observer policy, 
 
 ### traveling-salesman
 
-- HTTP: create/session; problem/reset/broadcast controls; algorithms; instructor route controls; leaderboard; student route submission.
-- WebSocket: `/ws/traveling-salesman` shared by student and manager clients.
-- Sensitive state: named routes, leaderboard, instructor controls, solution broadcasts.
-- Initial concern: route modules need composable shared middleware so authorization is not repeated across files.
-- [ ] Complete classification.
+- Configuration: standalone/direct/permalink/home entry with a required waiting-room display name and client-only solo mode.
+- Server organization: one activity entry registers four modules (`session`, `students`, `instructor`, and `algorithms`). This is the first audited activity that requires shared principal middleware to compose across independently registered route groups.
+- Stored state: problem/cities/distance matrix, full student identities/routes/timing, algorithm results/progress, instructor route, broadcast selections, and shared phase state. Its normalizer spreads unknown fields, preserving platform metadata.
+- Creation is unauthenticated, returns only `{ id }`, and issues no manager authority.
+
+#### HTTP principal table
+
+| Route group | Routes | Intended principal | Current principal source and exposure |
+| --- | --- | --- | --- |
+| Session read | `GET /:sessionId/session` | split public/student/manager projections | Session ID only; returns the complete raw activity data, including participant IDs, names, routes/timing, algorithm and instructor state. Students use this leak to restore their own route by claimed ID. |
+| Manager problem controls | `POST /set-problem`, `/reset-routes`, `/set-broadcasts` | manager | Session ID only; replace the class problem, clear routes, or select broadcast overlays. Broadcast IDs are only type-checked strings and need activity-level referential validation. |
+| Leaderboard | `GET /leaderboard` | manager under current UI | Session ID only; returns named student progress/routes metrics plus instructor/algorithm results. No student client consumes it, so there is no current evidence for an intentionally public class leaderboard. |
+| Student route | `POST /submit-route` | student | Body `studentId`; selects and mutates that record. Route, distance, and completion time are client claims. |
+| Instructor route controls | `POST /update-instructor-route`, `/reset-instructor-route`, `/broadcast-route`, `/broadcast-clear` | manager | Session ID only; create/reset/publish instructor route state. |
+| Algorithm controls | `POST /compute-algorithms`, `/algorithm-progress`, `/reset-heuristic`, `/broadcast-solution` | manager | Session ID only; store client-computed algorithm results/progress and publish any stored student/algorithm solution. |
+
+The student submission route validates shapes and non-negative numbers but does not verify that route city IDs belong to the current problem, are unique/complete as claimed, or that `distance` matches the authoritative distance matrix. A forged student ID can overwrite another student's route, and any student can submit an arbitrarily favorable leaderboard distance. Authentication belongs in the shared runtime; route/distance verification remains an activity-owned domain validator executed after principal resolution.
+
+#### WebSocket and projection boundary
+
+- The shared namespace has only student-shaped admission. It subscribes by session ID before calling `connectAcceptedSessionParticipant` with query ID/name claims.
+- As in Java Format/String, a supplied name is sufficient and an unknown supplied ID may be adopted. The manager connects with only a session ID, receives `waiting-room-required`, and is closed, so manager live refresh does not work reliably.
+- On admission the student receives its ID, the current problem, and selected broadcast routes. Duplicate student sockets are closed by ID.
+- `studentsUpdate` broadcasts full raw student records—including IDs, names, routes, timestamps, and progress—to every session socket and through unfiltered pub/sub. The student UI ignores it, but still receives the data.
+- `problemUpdate`, `broadcastUpdate`, and `clearBroadcast` are legitimate class-wide projections for authenticated students and managers.
+- `algorithmsComputed` is also broadcast to all sockets using the request payload, although current student UI does not consume it; it should be manager-only unless an explicit student projection is demonstrated.
+- There are no inbound activity socket messages. All commands use HTTP.
+- Close/error both run disconnect handling. The shared duplicate-socket helper's ignore flag limits the replacement race, but the activity still needs shared, tested connection ownership semantics.
+
+#### Persistence, recovery, and tests
+
+- Students persist request-visible participant name/ID in `localStorage` and resolve handoff through `sessionStorage`. On reload they read the raw session projection and select a route using the stored ID, then reconnect with query claims.
+- Managers hold no credential. They depend on raw REST reads and a student-shaped socket that rejects them.
+- Server tests cover only selected input validation (`set-problem`, missing student, zero completion time, instructor timing, and validation helpers). They do not cover route groups comprehensively, WebSockets, projections, auth, broadcast audiences, normalizer metadata, or route/distance integrity.
+- Client tests cover domain helpers and component behavior, not transport authorization or browser recovery.
+
+Migration implications:
+
+- Shared wrappers must be composable at module registration time, for example manager/student route registrars receiving an authenticated context factory instead of individually parsing credentials.
+- Replace the raw session response with public problem/broadcast state, student-private route state, and manager-complete state.
+- Keep leaderboard visibility manager-only for the first migration; making it public later should be an explicit product choice with a name/privacy projection.
+- Add an activity validator that recomputes route distance and completion from authoritative problem data before persisting an authenticated student's submission.
+
+- [x] Complete route, message, persistence, recovery, and test classification.
 
 ### video-sync
 
@@ -328,7 +367,9 @@ Missing cases include platform metadata preservation, explicit observer policy, 
 - [ ] Consolidate the three practice audits into pilot requirements and decide whether anonymous observer access is needed by any of them.
 - [x] Audit `binary-breach` as the next distinct student-progress activity.
 - [x] Add targeted participant delivery to the proposed WebSocket contract requirements.
-- [ ] Audit `traveling-salesman` next because its split route modules test shared HTTP middleware composition and its leaderboard tests public-versus-manager projection decisions.
+- [x] Audit `traveling-salesman` because its split route modules test shared HTTP middleware composition and its leaderboard tests public-versus-manager projection decisions.
+- [ ] Add module-composable authorization and post-auth activity-domain validation to the proposed contract requirements.
+- [ ] Audit `gallery-walk` next to model reviewer/reviewee resource-scoped principals and feedback projections.
 
 ## Pilot Comparison: Java Format, MobCode, and Video Sync
 
@@ -366,6 +407,8 @@ The completed Java Format, Java String, and Python List audits establish the min
 - [ ] Student progress/statistics mutations derive attribution only from the student principal.
 - [ ] Student-private and manager-private responses use `Cache-Control: no-store`.
 - [ ] Shared wrappers provide activity/session validation, consistent status codes, structured denial/error logging, and top-level exception handling.
+- [ ] Route-group registrars can apply shared principal requirements once while keeping split activity modules independent.
+- [ ] Shared wrappers authenticate and resolve the principal before invoking activity-owned domain validation; the platform must not treat authentication as validation of route contents, scores, distances, or other activity claims.
 
 ### WebSocket requirements
 
