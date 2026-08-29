@@ -27,18 +27,18 @@ Treat entries as observations, not desired behavior. Update each activity sectio
 | Activity | HTTP routes | Activity WebSocket | Initial role shapes | Audit status |
 | --- | ---: | --- | --- | --- |
 | `algorithm-demo` | 5 | `/ws/algorithm-demo` | public/student/manager unknown | Inventory captured |
-| `binary-breach` | 8 | `/ws/binary-breach` | student + manager | Inventory captured |
+| `binary-breach` | 8 | `/ws/binary-breach` | student + manager | Fully classified |
 | `embedded-test` | 2 | `/ws/embedded-test` | student + embedded manager | Inventory captured |
-| `gallery-walk` | 10 | `/ws/gallery-walk` | manager + reviewer/reviewee | Inventory captured |
-| `java-format-practice` | 6 | `/ws/java-format-practice` | student + manager | Inventory captured |
-| `java-string-practice` | 6 | `/ws/java-string-practice` | student + manager | Inventory captured |
+| `gallery-walk` | 11 | `/ws/gallery-walk` | manager + reviewer/reviewee | Fully classified |
+| `java-format-practice` | 6 | `/ws/java-format-practice` | student + manager | Fully classified |
+| `java-string-practice` | 5 | `/ws/java-string-practice` | student + manager | Fully classified |
 | `mobcode` | 10 | `/ws/mobcode` | student + manager + solo | Inventory captured |
 | `postboard` | 15 | none | student + manager | Inventory captured |
-| `python-list-practice` | 5 | `/ws/python-list-practice` | student + manager | Inventory captured |
+| `python-list-practice` | 5 | `/ws/python-list-practice` | student + manager | Fully classified |
 | `raffle` | 3 | `/ws/raffle` | entrant + manager/display unknown | Inventory captured |
 | `resonance` | 18 | `/ws/resonance` | student + manager | Inventory captured |
 | `syncdeck` | 16 activity routes plus integration routes | `/ws/syncdeck` | student + manager + embedded + integration | Inventory captured |
-| `traveling-salesman` | 15 | `/ws/traveling-salesman` | student + manager | Inventory captured |
+| `traveling-salesman` | 15 | `/ws/traveling-salesman` | student + manager | Fully classified |
 | `video-sync` | 6 | `/ws/video-sync` | student + instructor + embedded | Inventory captured |
 | `www-sim` | 9 | `/ws/www-sim` | student/simulation host + manager | Inventory captured |
 
@@ -122,12 +122,63 @@ Migration implication: the practice pilot principal/projection contract generali
 
 ### gallery-walk
 
-- HTTP: create; stage; reviewee; reviewer; feedback submit/read; export/report; title.
-- WebSocket: `/ws/gallery-walk`.
-- Specialized roles: reviewer and reviewee may not map cleanly to a single generic student role.
-- Sensitive state: attributed feedback, QR/reviewer assignment, report/export data.
-- Initial concern: model scoped reviewer/reviewee authority without leaking peer feedback or treating IDs as credentials.
-- [ ] Complete classification.
+- Configuration: no waiting-room fields and no persistent live-session permalink. Participants self-register inside the activity as project stations (`reviewee`) or feedback authors (`reviewer`). A separate solo utility imports an exported `.gw` file locally and has no live authority.
+- Stored fields: stage, title/config, reviewees, reviewers, feedback, aggregate counts, and embedded launch metadata. The normalizer spreads unknown fields and preserves platform metadata.
+- Creation is unauthenticated, returns `{ id, sessionId }`, and issues no manager capability.
+- Corrected inventory: 11 HTTP routes, not 10.
+
+#### Principal and route table
+
+| Route | Intended principal | Current principal source | Boundary |
+| --- | --- | --- | --- |
+| `POST /create` | public creation adapter | none | Creates session without manager authority. |
+| `POST /:sessionId/stage` | manager | session ID only | Switches between gallery/review stages. |
+| `POST /:sessionId/title` | manager | session ID only | Mutates display/report title. |
+| `POST /:sessionId/reviewee` | public enrollment, then reviewee/station | body `revieweeId`, name, project | Caller may request a six-character ID; collisions generate a replacement. No server-issued authority is established. |
+| `POST /:sessionId/reviewer` | public enrollment, then reviewer | body `reviewerId` and name | Arbitrary ID overwrites that reviewer's name. No server-issued authority is established. |
+| `POST /:sessionId/feedback` | reviewer, targeted to public station address | body `revieweeId` and `reviewerId` | Does not require either record to exist and does not enforce gallery stage. Caller chooses attribution and target. |
+| `GET /:sessionId/feedback` | manager | session ID only | Returns every feedback message, both identity maps, statistics, stage, and config. The shared student hook also calls this route, so every student downloads the manager dataset. |
+| `GET /:sessionId/feedback/:revieweeId` | matching reviewee after reveal | path reviewee ID | Returns that project's feedback plus the complete reviewer-name map in either stage. The short QR address acts as a read credential. |
+| `GET /:sessionId/export` | manager | session ID only | Returns raw complete export bundle. |
+| `GET /:sessionId/report-data` | manager/embedded report service | session ID only over HTTP | Returns aggregate and per-student structured report data. Internal report-builder invocation is a separate trusted platform path. |
+| `GET /:sessionId/report` | manager | session ID only | Downloads self-contained full-session HTML report. |
+
+The product rule that participants cannot see feedback until review mode is currently client presentation only. The full-feedback GET route, per-reviewee GET route, initial shared hook state, and socket payloads all expose feedback during gallery mode. Feedback can also still be submitted after the stage changes because the server never checks stage.
+
+#### Specialized principal model
+
+One generic student principal is insufficient. The clean-cutover model should distinguish:
+
+- `manager`: full session, stage/title, export/report, all identities and feedback.
+- `reviewee` or `station`: authority scoped to one project record and its revealed feedback.
+- `reviewer`: authority to submit feedback under one server-established reviewer identity.
+- public station address: the QR `revieweeId` selects a target but grants no right to read that target's feedback.
+
+Public reviewee/reviewer registration should issue scoped server capabilities. Feedback submission then derives `from` from the reviewer principal, validates that the target exists, and enforces the activity stage. Reading project feedback derives the project ID from the reviewee principal rather than a path claim and is unavailable until the server-authoritative reveal stage.
+
+#### WebSocket audiences
+
+- `/ws/gallery-walk` accepts and subscribes every socket with only a session ID. It has no role, identity, admission, initial snapshot, or inbound messages.
+- `stage-changed` is legitimate session-wide state for admitted manager/reviewer/reviewee principals.
+- `reviewees-updated` currently sends the full named project directory to every socket. No current reviewer flow needs the full directory because the QR supplies its target; restrict this to managers unless a deliberate gallery-directory projection is added.
+- `feedback-added` sends the complete message, target, reviewer ID/name snapshot, timestamp, and style to every socket and pub/sub subscriber. It must become manager-only during collection; after reveal, the target reviewee needs at most a scoped notification or its own feedback projection.
+- The same explicit audiences must apply locally and through pub/sub.
+
+#### Browser state, recovery, and tests
+
+- Project stations store `revieweeId` in `localStorage`. Reviewers store their ID, name, and note style there. These are currently replayed as credentials and attribution claims.
+- QR links put the target reviewee ID in the URL. This is appropriate as an address only; it must not remain authorization to read feedback.
+- Manager recovery has no credential. Reviewee/reviewer recovery depends entirely on local claimed IDs.
+- Tests cover report rendering/routes, message parsing, UI helpers, sorting, and scanner validation. There are no server tests for enrollment, feedback submission, stage enforcement, scoped reads, WebSocket audiences, identity overwrite, or authorization/recovery.
+
+Migration implications:
+
+- Extend the principal contract with activity-declared scoped grants rather than adding Gallery Walk knowledge to shared code. A student-like principal may carry `subject: reviewer` or `subject: reviewee` plus an opaque activity resource ID.
+- Keep authentication generic while Gallery Walk owns stage rules, target existence, reviewer/reviewee lifecycle, and feedback projections.
+- Split the shared client hook: manager full-state loading cannot be reused by student pages.
+- Protect HTTP report/export routes with manager authority while retaining the internal registered report builder for authenticated parent orchestration.
+
+- [x] Complete route, message, persistence, recovery, and test classification.
 
 ### java-format-practice
 
@@ -369,7 +420,9 @@ Migration implications:
 - [x] Add targeted participant delivery to the proposed WebSocket contract requirements.
 - [x] Audit `traveling-salesman` because its split route modules test shared HTTP middleware composition and its leaderboard tests public-versus-manager projection decisions.
 - [ ] Add module-composable authorization and post-auth activity-domain validation to the proposed contract requirements.
-- [ ] Audit `gallery-walk` next to model reviewer/reviewee resource-scoped principals and feedback projections.
+- [x] Audit `gallery-walk` to model reviewer/reviewee resource-scoped principals and feedback projections.
+- [ ] Add activity-declared scoped student grants and address-versus-authority separation to the proposed contract.
+- [ ] Audit `raffle` next to distinguish entrant, manager, and any intentional display/observer projection.
 
 ## Pilot Comparison: Java Format, MobCode, and Video Sync
 
@@ -396,6 +449,8 @@ The completed Java Format, Java String, and Python List audits establish the min
 - [ ] Activity creation must establish a temporary manager capability for the creating browser without returning the credential in JSON or requiring an instructor prompt.
 - [ ] Session IDs remain routing identifiers and cannot authorize manager or student operations.
 - [ ] Student identity must resolve from the server-issued participant cookie. Request `studentId`, `studentName`, and similar fields may be retained temporarily as display/routing hints but cannot select the record being mutated.
+- [ ] Activities may declare scoped student-like grants (for example reviewer or reviewee resource ownership) without teaching shared authentication code activity-specific semantics.
+- [ ] Separate public resource addresses, such as QR target IDs, from principals/capabilities that authorize mutation or private reads.
 - [ ] A capability must be scoped to one session and role; credentials from another session or activity must fail closed.
 - [ ] Clean cutover is acceptable: no fallback to legacy claimed identities or credentialless manager access is required for sessions created before deployment.
 

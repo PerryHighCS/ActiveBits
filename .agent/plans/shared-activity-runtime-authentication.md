@@ -178,6 +178,8 @@ Deliverables:
 ## Phase 2: Define Shared Principal and Capability Contracts
 
 - [ ] Define `ActivityRole` and discriminated `ActivityPrincipal` types.
+- [ ] Define an activity-agnostic scoped-grant shape for specialized student-like subjects/resources; keep activity-specific role meaning and lifecycle in the activity.
+- [ ] Define public resource addresses separately from authentication capabilities so QR/link target identifiers never implicitly grant private reads.
 - [ ] Define temporary-session manager capability issuance during session creation.
 - [ ] Store only hashed manager capability tokens server-side.
 - [ ] Issue opaque tokens only in httpOnly, same-site cookies with live-connection-aware `Secure` handling.
