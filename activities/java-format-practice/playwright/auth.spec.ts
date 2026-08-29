@@ -33,3 +33,21 @@ test('Java Format manager and accepted participant recover from httpOnly cookies
   await managerPage.close()
   await studentPage.close()
 })
+
+test('Java Format returns a participant with a lost capability to normal entry', async ({ browser }) => {
+  const page = await browser.newPage()
+  const created = await page.request.post('/api/java-format-practice/create')
+  const { id: sessionId } = await created.json() as { id: string }
+  const stored = await page.request.post(`/api/session/${encodeURIComponent(sessionId)}/entry-participant`, {
+    data: { values: { displayName: 'Ada' } },
+  })
+  const entry = await stored.json() as { entryParticipantToken: string }
+  await page.request.post(`/api/session/${encodeURIComponent(sessionId)}/entry-participant/consume`, {
+    data: { token: entry.entryParticipantToken },
+  })
+  const cookieName = `activebits_participant_${Buffer.from(sessionId).toString('base64url')}`
+  await page.context().clearCookies({ name: cookieName })
+  await page.goto(`/${encodeURIComponent(sessionId)}`)
+  await expect(page.getByRole('button', { name: 'Join Session' })).toBeVisible()
+  await page.close()
+})
