@@ -289,6 +289,13 @@ Do not begin with all activities at once.
 
 - [ ] `video-sync`
 - [ ] `syncdeck`
+  - Pre-existing roster race to fix during this migration: independent
+    `/ws/syncdeck` handlers each read-modify-write the whole `session.data`
+    with no per-session serialization, so a concurrent student join and
+    instructor state message can clobber the roster (instructor panel then
+    under-reports connected students). Tracked in
+    https://github.com/PerryHighCS/ActiveBits/issues/350. A per-session write
+    lock around the socket handlers fits naturally with this migration.
 
 For every migration:
 
