@@ -187,6 +187,8 @@ Deliverables:
 - [ ] Define persistent teacher-cookie to manager-principal resolution.
 - [ ] Define embedded-parent and Learn instructor handoff to manager-principal resolution.
 - [ ] Define student accepted-entry token to student-principal resolution.
+- [ ] Define anonymous no-name participant issuance for activities such as Raffle that do not use waiting-room identity.
+- [ ] Define an idempotent, principal-bound resource claim pattern for ticket-like enrollment results.
 - [ ] Define solo-mode principals without weakening live-session authorization.
 - [ ] Define public/observer projection rules.
 - [ ] Document threat model and trust boundaries before implementation.

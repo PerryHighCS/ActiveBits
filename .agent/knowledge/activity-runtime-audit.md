@@ -35,7 +35,7 @@ Treat entries as observations, not desired behavior. Update each activity sectio
 | `mobcode` | 10 | `/ws/mobcode` | student + manager + solo | Inventory captured |
 | `postboard` | 15 | none | student + manager | Inventory captured |
 | `python-list-practice` | 5 | `/ws/python-list-practice` | student + manager | Fully classified |
-| `raffle` | 3 | `/ws/raffle` | entrant + manager/display unknown | Inventory captured |
+| `raffle` | 3 | `/ws/raffle` | anonymous entrant + manager | Fully classified |
 | `resonance` | 18 | `/ws/resonance` | student + manager | Inventory captured |
 | `syncdeck` | 16 activity routes plus integration routes | `/ws/syncdeck` | student + manager + embedded + integration | Inventory captured |
 | `traveling-salesman` | 15 | `/ws/traveling-salesman` | student + manager | Fully classified |
@@ -308,10 +308,39 @@ Missing cases include platform metadata preservation, explicit observer policy, 
 
 ### raffle
 
-- HTTP: create; generate ticket; list tickets.
-- WebSocket: `/ws/raffle`.
-- Initial concern: distinguish entrant, manager, and any public display/observer behavior; determine whether ticket lists are intentionally public to session members.
-- [ ] Complete classification.
+- Configuration: dashboard/live activity only; no standalone entry, direct path, standalone permalink, or waiting-room fields.
+- Stored activity state is only the ticket-number array. The normalizer mutates the existing data object and therefore preserves platform metadata.
+- Creation is unauthenticated, returns only `{ id }`, and establishes no manager authority.
+
+| Route | Intended principal | Current principal source | Boundary |
+| --- | --- | --- | --- |
+| `POST /api/raffle/create` | public creation adapter | none | Creates session without manager capability. |
+| `GET /api/raffle/generateTicket/:raffleId` | anonymous entrant | session ID only | Mutating GET creates and appends a random ticket on every request. There is no server idempotency, entrant identity, uniqueness check, or replay protection. |
+| `GET /api/raffle/listTickets/:raffleId` | manager | session ID only | Returns the complete ticket pool. The current manager client does not call it because the socket supplies its snapshot. |
+
+The student client persists its visible ticket in `localStorage` under the generic session key and avoids requesting another while that value remains. Clearing storage, using another browser context, retrying a lost response, prefetching, or directly replaying the GET creates additional entries. Although the activity description says tickets are unique, random values are not checked for collision.
+
+#### WebSocket and role decision
+
+- Only the manager client opens `/ws/raffle`; the student ticket page has no socket.
+- Admission requires only `raffleId`, immediately retains the socket, then sends the entire ticket list.
+- `tickets-update` always contains the full pool and is delivered to all subscribers in a process. There is no role/auth check and no Valkey pub/sub integration, so an unauthorized socket can observe tickets while managers on other instances can miss updates.
+- There are no inbound messages. Winner selection happens entirely in manager browser state and is neither persisted nor broadcast by the server.
+- There is no separate public display/observer component or product flow. The manager's QR code is an entrant link, not a display client.
+
+The target model is:
+
+- `manager`: authenticated socket access to the full ticket pool and any future manager mutations.
+- anonymous `entrant`: a server-issued session-scoped principal requiring no name/account, authorized only to claim or recover its own ticket.
+- no public observer/display socket for this activity.
+
+Ticket claiming should be an idempotent `POST`. On first claim the server binds one collision-checked ticket to the anonymous entrant principal; retries return the same ticket. The ticket number may remain in local storage because it is display state and currently authorizes no API, while the opaque entrant capability remains httpOnly.
+
+Existing activity tests cover only winner-count/random-selection utilities and ticket-list accessibility semantics. Shared registry/status tests exercise activity discovery/session fixtures, not Raffle routes, WebSocket admission, ticket issuance, collision handling, retries, multi-instance delivery, or recovery.
+
+Missing tests: manager capability creation and socket admission, unauthorized socket receives no snapshot/update, entrant capability issuance, idempotent retry, collision retry, mutating-GET removal, cross-session capability denial, local-display recovery, and pub/sub fanout.
+
+- [x] Complete route, message, persistence, recovery, and test classification.
 
 ### resonance
 
@@ -422,7 +451,9 @@ Migration implications:
 - [ ] Add module-composable authorization and post-auth activity-domain validation to the proposed contract requirements.
 - [x] Audit `gallery-walk` to model reviewer/reviewee resource-scoped principals and feedback projections.
 - [ ] Add activity-declared scoped student grants and address-versus-authority separation to the proposed contract.
-- [ ] Audit `raffle` next to distinguish entrant, manager, and any intentional display/observer projection.
+- [x] Audit `raffle` to distinguish entrant, manager, and any intentional display/observer projection.
+- [x] Add anonymous no-name participant principals and idempotent resource claiming to the proposed contract requirements.
+- [ ] Audit `algorithm-demo` next to determine whether its observer/controller split is intentionally public.
 
 ## Pilot Comparison: Java Format, MobCode, and Video Sync
 
@@ -450,6 +481,8 @@ The completed Java Format, Java String, and Python List audits establish the min
 - [ ] Session IDs remain routing identifiers and cannot authorize manager or student operations.
 - [ ] Student identity must resolve from the server-issued participant cookie. Request `studentId`, `studentName`, and similar fields may be retained temporarily as display/routing hints but cannot select the record being mutated.
 - [ ] Activities may declare scoped student-like grants (for example reviewer or reviewee resource ownership) without teaching shared authentication code activity-specific semantics.
+- [ ] Support anonymous, no-name participant principals for activities whose participant role does not require a waiting-room identity.
+- [ ] Provide an idempotent claim primitive for activity resources bound to a principal, so retries recover the same resource rather than creating duplicates.
 - [ ] Separate public resource addresses, such as QR target IDs, from principals/capabilities that authorize mutation or private reads.
 - [ ] A capability must be scoped to one session and role; credentials from another session or activity must fail closed.
 - [ ] Clean cutover is acceptable: no fallback to legacy claimed identities or credentialless manager access is required for sessions created before deployment.
