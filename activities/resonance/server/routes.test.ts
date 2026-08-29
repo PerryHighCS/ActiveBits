@@ -7,6 +7,7 @@ import {
 } from 'activebits-server/core/persistentSessions.js'
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { getSessionParticipantCookieName } from 'activebits-server/core/acceptedEntryParticipants.js'
 import type { WsRouter } from '../../../types/websocket.js'
 import setupResonanceRoutes, {
   generateImportedQuestionId,
@@ -32,20 +33,27 @@ type RouteHandler = (req: RouteRequest, res: JsonResponse) => Promise<void> | vo
 interface MockResponse {
   statusCode: number
   body: unknown
+  cookies: Array<{ name: string; value: string; options: Record<string, unknown> }>
   status(code: number): MockResponse
   json(payload: unknown): MockResponse
+  cookie(name: string, value: string, options: Record<string, unknown>): MockResponse
 }
 
 function createResponse(): MockResponse {
   return {
     statusCode: 200,
     body: null,
+    cookies: [],
     status(code: number) {
       this.statusCode = code
       return this
     },
     json(payload: unknown) {
       this.body = payload
+      return this
+    },
+    cookie(name, value, options) {
+      this.cookies.push({ name, value, options })
       return this
     },
   }
@@ -92,6 +100,42 @@ void test('generateImportedQuestionId falls back when Math.random produces an em
 void test('resolveSocketStudentId rejects student messages that claim another identity', () => {
   assert.equal(resolveSocketStudentId('student2', 'student1'), null)
   assert.equal(resolveSocketStudentId('student1', 'student1'), 'student1')
+})
+
+void test('new Resonance student registrations issue an httpOnly cookie and reject claimed IDs without it', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const sessions = createSessionStore(null)
+  setupResonanceRoutes(app, sessions, ws)
+
+  const sessionCreateResponse = createResponse()
+  await app.handlers.post['/api/resonance/create']?.({ params: {}, body: {} }, sessionCreateResponse)
+  const sessionId = (sessionCreateResponse.body as { id?: string }).id
+  assert.equal(typeof sessionId, 'string')
+  if (!sessionId) throw new Error('Expected a created Resonance session')
+
+  const registrationResponse = createResponse()
+  await app.handlers.post['/api/resonance/:sessionId/register-student']?.(
+    { params: { sessionId }, body: { name: 'Ada' } },
+    registrationResponse,
+  )
+  const studentId = (registrationResponse.body as { studentId?: string }).studentId
+  assert.equal(typeof studentId, 'string')
+  assert.deepEqual(registrationResponse.cookies, [{
+    name: getSessionParticipantCookieName(sessionId),
+    value: registrationResponse.cookies[0]?.value,
+    options: { httpOnly: true, sameSite: 'lax', secure: false, path: '/' },
+  }])
+
+  console.log('[TEST] expecting 403 for a claimed studentId submitted without the participant cookie')
+  const rejectedSubmission = createResponse()
+  await app.handlers.post['/api/resonance/:sessionId/submit-answer']?.(
+    { params: { sessionId }, body: { studentId, questionId: 'not-active', answer: {} } },
+    rejectedSubmission,
+  )
+  assert.equal(rejectedSubmission.statusCode, 403)
+
+  await sessions.close()
 })
 
 function createEmbeddedResonanceSession(): SessionRecord {

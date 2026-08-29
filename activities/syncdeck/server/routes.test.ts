@@ -1,6 +1,6 @@
 import type { SessionRecord, SessionStore } from 'activebits-server/core/sessions.js'
 import { consumeSessionDataToken } from 'activebits-server/core/sessionTokenUtils.js'
-import { acceptEntryParticipant, findAcceptedEntryParticipant, issueAcceptedEntryParticipantToken, resolveAcceptedEntryParticipantToken } from 'activebits-server/core/acceptedEntryParticipants.js'
+import { acceptEntryParticipant, findAcceptedEntryParticipant, getSessionParticipantCookieName, issueAcceptedEntryParticipantToken, resolveAcceptedEntryParticipantToken } from 'activebits-server/core/acceptedEntryParticipants.js'
 import { storeSessionEntryParticipant } from 'activebits-server/core/sessionEntryParticipants.js'
 import {
   computePersistentLinkUrlHash,
@@ -241,7 +241,7 @@ void test('SyncDeck instructor can return an accepted student to the waiting roo
   const child = createSyncDeckSession('CHILD:return-session:resonance')
   acceptEntryParticipant(child, { participantId: 'student-1', displayName: 'Ada' })
   const childToken = issueAcceptedEntryParticipantToken(child, 'student-1')
-  const childEntryToken = storeSessionEntryParticipant(child, { participantId: 'student-1', displayName: 'Ada' }).token
+  const childEntryToken = storeSessionEntryParticipant(child, { participantId: 'student-1', displayName: 'Ada' }, { trustParticipantId: true }).token
   ;(session.data as { embeddedActivities: Record<string, unknown> }).embeddedActivities['resonance:0:0'] = { childSessionId: child.id, activityId: 'resonance', startedAt: 1, owner: 'syncdeck-instructor' }
   const state = createSessionStore({ [session.id]: session, [child.id]: child })
   const app = createMockApp()
@@ -2404,6 +2404,34 @@ void test('embedded-context route resolves student role from registered student 
   })
 })
 
+void test('embedded-context route resolves student identity from the httpOnly participant cookie', async () => {
+  const session = createSyncDeckSession('s1')
+  session.data.students = [
+    { studentId: 'student-1', name: 'Ada', joinedAt: 1, lastSeenAt: 1, lastIndices: null, lastStudentStateAt: null },
+    { studentId: 'student-2', name: 'Grace', joinedAt: 1, lastSeenAt: 1, lastIndices: null, lastStudentStateAt: null },
+  ]
+  acceptEntryParticipant(session, { participantId: 'student-1', displayName: 'Ada' })
+  const token = issueAcceptedEntryParticipantToken(session, 'student-1')
+  if (!token) throw new Error('Expected participant token')
+
+  const app = createMockApp()
+  const ws = createMockWs()
+  const storeState = createSessionStore({ [session.id]: session })
+  setupSyncDeckRoutes(app, storeState.sessions, ws)
+  const handler = app.handlers.post['/api/syncdeck/:sessionId/embedded-context']
+  assert.ok(handler)
+
+  const response = createResponse()
+  await handler(createRequest(
+    { sessionId: session.id },
+    { studentId: 'student-2' },
+    { [getSessionParticipantCookieName(session.id)]: token },
+  ), response)
+
+  assert.equal(response.statusCode, 200)
+  assert.deepEqual(response.body, { resolvedRole: 'student', studentId: 'student-1', studentName: 'Ada' })
+})
+
 void test('embedded-context route rejects unknown parent identity', async () => {
   const app = createMockApp()
   const ws = createMockWs()
@@ -2645,6 +2673,7 @@ void test('embedded-activity start route bootstraps Postboard prompt and approva
   assert.equal(childSession?.type, 'postboard')
   const childData = asRecord(childSession?.data)
   assert.ok(childData)
+  assert.equal(childData.participantCookieAuthVersion, 1)
   assert.deepEqual(childData.embeddedLaunch, {
     parentSessionId: 's1',
     instanceKey: 'postboard:5:0',

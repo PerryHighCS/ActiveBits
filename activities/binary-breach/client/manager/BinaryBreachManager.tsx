@@ -114,7 +114,7 @@ export default function BinaryBreachManager() {
   useEffect(() => {
     if (!sessionId) return undefined
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const socket = new WebSocket(`${wsProtocol}//${window.location.host}/ws/binary-breach?sessionId=${encodeURIComponent(sessionId)}`)
+    const socket = new WebSocket(`${wsProtocol}//${window.location.host}/ws/binary-breach?sessionId=${encodeURIComponent(sessionId)}&role=manager`)
     socket.onmessage = (event) => {
       try {
         const message = JSON.parse(String(event.data)) as { type?: string; payload?: StateResponse }

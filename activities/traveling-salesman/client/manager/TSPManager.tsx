@@ -83,7 +83,7 @@ export default function TSPManager() {
     if (sessionId == null) return null;
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const host = window.location.host;
-    return `${protocol}//${host}/ws/traveling-salesman?sessionId=${sessionId}`;
+    return `${protocol}//${host}/ws/traveling-salesman?sessionId=${sessionId}&role=manager`;
   }, [sessionId]);
 
   const {

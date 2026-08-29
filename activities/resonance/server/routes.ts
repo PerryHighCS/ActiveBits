@@ -7,6 +7,15 @@ import {
   generatePersistentHash,
   verifyTeacherCodeWithHash,
 } from 'activebits-server/core/persistentSessions.js'
+import {
+  acceptEntryParticipant,
+  enableParticipantCookieAuthentication,
+  getSessionParticipantCookieName,
+  issueAcceptedEntryParticipantToken,
+  readAcceptedEntryParticipantCookie,
+  requiresParticipantCookieAuthentication,
+  resolveAcceptedEntryParticipantToken,
+} from 'activebits-server/core/acceptedEntryParticipants.js'
 import type { ActiveBitsWebSocket, WsRouter } from '../../../types/websocket.js'
 import type {
   InstructorAnnotation,
@@ -47,6 +56,7 @@ interface RouteRequest {
   cookies?: Record<string, unknown>
   headers?: Record<string, string | undefined>
   query?: Record<string, unknown>
+  secure?: boolean
 }
 
 interface ResonanceRouteApp {
@@ -109,6 +119,22 @@ interface PersistentSessionsCookieEntry {
   selectedOptions?: Record<string, string>
   entryPolicy?: string
   urlHash?: string
+}
+
+function resolveAuthenticatedStudentId(
+  session: ResonanceSession,
+  participantToken: unknown,
+  legacyStudentId: unknown = null,
+): string | null {
+  const authenticatedId = resolveAcceptedEntryParticipantToken(session, participantToken)?.participantId
+  if (authenticatedId) return authenticatedId
+
+  // Sessions created before #341 retain their existing registrations until their
+  // normal TTL expires; newly created sessions require cookie-backed identity.
+  if (!requiresParticipantCookieAuthentication(session) && typeof legacyStudentId === 'string' && session.data.students[legacyStudentId]) {
+    return legacyStudentId
+  }
+  return null
 }
 
 function prepareResonanceLinkOptions(body: Record<string, unknown>):
@@ -1443,6 +1469,8 @@ export default function setupResonanceRoutes(
     const session = await createSession(sessions, {
       data: normalizeSessionData({
         instructorPasscode,
+        acceptedEntryParticipants: {},
+        participantAuthTokens: {},
         questions,
         persistentHash,
         presentationMode,
@@ -1450,6 +1478,7 @@ export default function setupResonanceRoutes(
       }),
     })
     session.type = 'resonance'
+    enableParticipantCookieAuthentication(session)
     await sessions.set(session.id, session)
 
     console.info('[resonance] Session created', {
@@ -1553,24 +1582,46 @@ export default function setupResonanceRoutes(
       return
     }
 
-    // Accept a client-provided studentId (from entry participant handoff) or generate one.
+    // A waiting-room acceptance already issued an opaque participant cookie. Do not
+    // trust the handoff ID itself: it is readable browser state and can be forged.
     const body = isPlainObject(req.body) ? req.body : {}
-    const requestedId = typeof body.studentId === 'string' && /^[\w-]+$/.test(body.studentId)
-      ? body.studentId
+    const authenticatedStudentId = resolveAuthenticatedStudentId(
+      session,
+      readAcceptedEntryParticipantCookie(req.cookies, req.headers?.cookie, sessionId),
+      typeof body.studentId === 'string' ? body.studentId : null,
+    )
+    const studentId = authenticatedStudentId ?? `s_${Math.random().toString(36).slice(2, 12)}`
+    const authenticatedParticipant = authenticatedStudentId
+      ? resolveAcceptedEntryParticipantToken(
+        session,
+        readAcceptedEntryParticipantCookie(req.cookies, req.headers?.cookie, sessionId),
+      )
       : null
-    const studentId = requestedId ?? `s_${Math.random().toString(36).slice(2, 12)}`
+    const studentName = authenticatedParticipant?.displayName ?? validated.name
 
     const student: Student = {
       studentId,
-      name: validated.name,
+      name: studentName,
       joinedAt: Date.now(),
     }
 
     session.data.students[studentId] = student
+    if (!authenticatedStudentId) {
+      acceptEntryParticipant(session, { participantId: studentId, displayName: studentName })
+      const participantToken = issueAcceptedEntryParticipantToken(session, studentId)
+      if (participantToken) {
+        res.cookie?.(getSessionParticipantCookieName(sessionId), participantToken, {
+          httpOnly: true,
+          sameSite: 'lax',
+          secure: req.secure === true,
+          path: '/',
+        })
+      }
+    }
     await sessions.set(sessionId, session)
 
-    console.info('[resonance] Student registered', { sessionId, studentId, name: validated.name })
-    res.json({ studentId, name: validated.name })
+    console.info('[resonance] Student registered', { sessionId, studentId, name: studentName })
+    res.json({ studentId, name: studentName })
   })
 
   // POST /api/resonance/:sessionId/submit-answer
@@ -1589,9 +1640,13 @@ export default function setupResonanceRoutes(
     }
 
     const body = isPlainObject(req.body) ? req.body : {}
-    const studentId = typeof body.studentId === 'string' ? body.studentId : null
+    const studentId = resolveAuthenticatedStudentId(
+      session,
+      readAcceptedEntryParticipantCookie(req.cookies, req.headers?.cookie, sessionId),
+      typeof body.studentId === 'string' ? body.studentId : null,
+    )
     if (!studentId || !session.data.students[studentId]) {
-      res.status(400).json({ error: 'invalid studentId' })
+      res.status(403).json({ error: 'student authentication required' })
       return
     }
 
@@ -1655,8 +1710,13 @@ export default function setupResonanceRoutes(
       return
     }
 
-    const requestedStudentId = typeof req.query?.studentId === 'string' ? req.query.studentId : null
+    const requestedStudentId = resolveAuthenticatedStudentId(
+      session,
+      readAcceptedEntryParticipantCookie(req.cookies, req.headers?.cookie, sessionId),
+      req.query?.studentId,
+    )
     const selfPacedMode = await resolveSelfPacedMode(session, sessions)
+    res.setHeader?.('Cache-Control', 'no-store')
     res.json(buildStudentSnapshotWithMode(session, requestedStudentId, selfPacedMode))
   })
 
@@ -2699,7 +2759,7 @@ export default function setupResonanceRoutes(
     const client = socket as ResonanceSocket
     client.sessionId = queryParams.get('sessionId') ?? null
     client.isInstructor = false
-    client.studentId = queryParams.get('studentId') ?? null
+    client.studentId = null
 
     const sessionId = client.sessionId
     if (!sessionId) {
@@ -2728,6 +2788,15 @@ export default function setupResonanceRoutes(
         client.isInstructor = true
         sendToSocket(client, 'resonance:instructor-state', buildInstructorSnapshot(session), sessionId)
       } else {
+        client.studentId = resolveAuthenticatedStudentId(
+          session,
+          readAcceptedEntryParticipantCookie(undefined, client.upgradeHeaders?.cookie, sessionId),
+          queryParams.get('studentId'),
+        )
+        if (!client.studentId || !session.data.students[client.studentId]) {
+          socket.close(1008, 'student authentication required')
+          return
+        }
         const selfPacedMode = await resolveSelfPacedMode(session, sessions)
         sendToSocket(
           client,

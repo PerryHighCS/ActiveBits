@@ -4,6 +4,7 @@ import {
   readStoredSessionParticipantIdentity,
   resolveInitialEntryParticipantIdentity,
 } from '@src/components/common/entryParticipantIdentityUtils'
+import { clearSessionParticipantContext } from '@src/components/common/sessionParticipantContext'
 import type {
   BinaryBreachChallenge,
   BinaryBreachFeedback,
@@ -303,6 +304,11 @@ export default function BinaryBreachStudent({ sessionData }: BinaryBreachStudent
       } catch (err) {
         console.error('Failed to parse Binary Breach student websocket message:', err)
       }
+    }
+    socket.onclose = (event) => {
+      if (event.code !== 1008 || event.reason !== 'student authentication required') return
+      clearSessionParticipantContext(window.localStorage, sessionId)
+      window.location.assign(`/${sessionId}`)
     }
     return () => socket.close()
   }, [applyMissionState, sessionId, solo, studentId, studentName])

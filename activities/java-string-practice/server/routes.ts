@@ -1,6 +1,7 @@
 import { createSession, type SessionRecord, type SessionStore } from 'activebits-server/core/sessions.js'
 import { createBroadcastSubscriptionHelper } from 'activebits-server/core/broadcastUtils.js'
 import { connectAcceptedSessionParticipant } from 'activebits-server/core/acceptedSessionParticipants.js'
+import { enableParticipantCookieAuthentication, readAcceptedEntryParticipantCookie, requiresParticipantCookieAuthentication, resolveAcceptedEntryParticipantToken } from 'activebits-server/core/acceptedEntryParticipants.js'
 import { generateParticipantId } from 'activebits-server/core/participantIds.js'
 import { closeDuplicateParticipantSockets } from 'activebits-server/core/participantSockets.js'
 import { disconnectSessionParticipant, updateSessionParticipant } from 'activebits-server/core/sessionParticipants.js'
@@ -22,6 +23,8 @@ interface JsonResponse {
 interface RouteRequest {
   params: Record<string, string | undefined>
   body?: unknown
+  cookies?: Record<string, unknown>
+  headers?: Record<string, unknown>
 }
 
 interface JavaStringRouteApp {
@@ -49,6 +52,10 @@ const defaultStats: JavaStringStats = {
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function resolveCookieStudent(session: JavaStringSession, cookies: Record<string, unknown> | undefined, cookieHeader: unknown) {
+  return resolveAcceptedEntryParticipantToken(session, readAcceptedEntryParticipantCookie(cookies, cookieHeader, session.id))
 }
 
 function normalizeMethods(value: unknown): JavaStringMethodId[] {
@@ -129,24 +136,34 @@ export default function setupJavaStringPracticeRoutes(
   ws.register('/ws/java-string-practice', (socket, query) => {
     const client = socket as JavaStringSocket
     client.sessionId = query.get('sessionId') || null
+    const isManagerSocket = query.get('role') === 'manager'
     if (client.sessionId) {
       ensureBroadcastSubscription(client.sessionId)
     }
 
-    client.studentName = validateStudentName(query.get('studentName'))
-    client.studentId = query.get('studentId') || null
+    const claimedStudentName = validateStudentName(query.get('studentName'))
+    const claimedStudentId = query.get('studentId') || null
+    client.studentName = claimedStudentName
+    client.studentId = null
 
-    if (client.sessionId) {
+    if (client.sessionId && !isManagerSocket) {
       const activeSessionId = client.sessionId
       ;(async () => {
         const session = asJavaStringSession(await sessions.get(activeSessionId))
         if (!session) return
 
+        const authenticated = resolveCookieStudent(session, undefined, client.upgradeHeaders?.cookie)
+        const legacySession = !requiresParticipantCookieAuthentication(session)
+        if (!authenticated && !legacySession) {
+          client.close(1008, 'student authentication required')
+          return
+        }
+
         const result = connectAcceptedSessionParticipant({
           session,
           participants: session.data.students,
-          participantId: client.studentId ?? null,
-          participantName: client.studentName ?? null,
+          participantId: authenticated?.participantId ?? claimedStudentId,
+          participantName: authenticated?.displayName ?? claimedStudentName,
           allowLegacyUnnamedMatch: true,
           createParticipant: (participantId, participantName, now) => ({
             id: participantId,
@@ -214,6 +231,12 @@ export default function setupJavaStringPracticeRoutes(
     const session = await createSession(sessions, { data: {} })
     session.type = 'java-string-practice'
     session.data = normalizeSessionData(session.data)
+    enableParticipantCookieAuthentication(session)
+    // Every session created here is cookie-auth-native; initializing these maps
+    // up front closes the unauthenticated claimed-identity fallback from the
+    // start instead of leaving it open until the first participant is accepted.
+    session.data.acceptedEntryParticipants = {}
+    session.data.participantAuthTokens = {}
     await sessions.set(session.id, session)
     ensureBroadcastSubscription(session.id)
     res.json({ id: session.id })
@@ -285,8 +308,14 @@ export default function setupJavaStringPracticeRoutes(
       return
     }
 
-    const bodyStudentId = typeof body.studentId === 'string' ? body.studentId : null
-    const bodyStudentName = validateStudentName(body.studentName)
+    const authenticated = resolveCookieStudent(session, req.cookies, req.headers?.cookie)
+    const legacySession = !requiresParticipantCookieAuthentication(session)
+    if (!authenticated && !legacySession) {
+      res.status(403).json({ error: 'student authentication required' })
+      return
+    }
+    const bodyStudentId = authenticated?.participantId ?? (typeof body.studentId === 'string' ? body.studentId : null)
+    const bodyStudentName = authenticated?.displayName ?? validateStudentName(body.studentName)
 
     const student = updateSessionParticipant({
       participants: session.data.students,

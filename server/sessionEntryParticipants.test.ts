@@ -21,7 +21,7 @@ void test('storeSessionEntryParticipant filters unsupported values and normalize
     participantId: '  participant-1  ',
     nested: { team: 'red' },
     ignored: () => 'not-serializable',
-  })
+  }, { trustParticipantId: true })
 
   assert.match(token, /^[a-f0-9]{16}$/)
   assert.deepEqual(values, {

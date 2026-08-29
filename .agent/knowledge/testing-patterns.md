@@ -15,6 +15,22 @@ Capture reusable test setup patterns, common failure modes, and reliability guid
 
 ## Entries
 
+- Date: 2026-08-27
+- Scope: e2e | Playwright | participant-cookie auth (postboard, syncdeck)
+- Pattern: The shared `entry-participant/consume` route (`server/core/sessions.ts`) issues the accepted-student auth token as an httpOnly cookie scoped by session id only (`activebits_participant_<base64(sessionId)>`), not by participant. In Playwright, `page.request.post(...)` stores response cookies in that page's own browser context, so (1) the accept call for a student must run on the same `page`/context that will later act as that student, not on the instructor's page, and (2) simulating two students that need independent identities in one test requires two separate `browser.newPage()` contexts — accepting both in one context just overwrites the same cookie with the second student's token.
+- Why it helps: Explains a whole class of `toBeVisible failed: element(s) not found` / 403 failures on activities that switched from a body/query `studentId` to the cookie-based accepted-entry token in the fix/resonance-student-cookie-auth work.
+- Example (file/path): `activities/postboard/playwright/flow.spec.ts` (`acceptStudent` now called with `studentPage`, not `instructorPage`/`seedPage`); `activities/syncdeck/playwright/student-return.spec.ts` (`connectStudentSocket` opens each simulated student's WebSocket from its own `browser.newPage()` context after accepting on that same page).
+- Follow-up action: Any new activity Playwright spec that simulates an accepted student must accept-then-act from the same page/context, and must use one browser context per simulated student when more than one student's identity needs to coexist.
+- Owner: Claude (fix/resonance-student-cookie-auth, PR #342)
+
+- Date: 2026-08-27
+- Scope: e2e | Playwright | WebKit vs Secure cookies on loopback
+- Pattern: `res.cookie(..., { secure: process.env.NODE_ENV === 'production' })` combined with `playwright.config.ts` running the e2e webServer with `NODE_ENV=production` over plain `http://127.0.0.1:3100` produces a `Secure` cookie on an insecure origin. Chromium has a `localhost`/loopback exception and keeps such cookies; WebKit does not and silently drops them, so every subsequent request in WebKit runs unauthenticated while Chromium passes.
+- Why it helps: Explains WebKit-only failures (including single-browser-context tests) wherever a feature newly depends on a cookie gated by this exact `NODE_ENV` check — no WebKit-specific bug in application code needed.
+- Example (file/path): `server/core/sessions.ts` `entry-participant/consume` route — fixed by deriving `secure` from `req.secure` (which already respects `app.set('trust proxy', 1)`) instead of `NODE_ENV`. Other call sites use the same `NODE_ENV`-based pattern (`server/routes/persistentSessionRoutes.ts`, `server/core/persistentSessions.ts`) and would show the same WebKit gap if a WebKit-run Playwright spec ever exercised them.
+- Follow-up action: Prefer `req.secure` (or an equivalent live TLS check) over `NODE_ENV === 'production'` for any new `Secure` cookie, so behavior matches the actual connection in every environment, including the e2e harness.
+- Owner: Claude (fix/resonance-student-cookie-auth, PR #342)
+
 - Date: 2026-08-20
 - Scope: CI | GitHub Actions matrix
 - Pattern: Put a fixed-name gate job after a dynamically generated matrix job. Run it with `if: ${{ always() }}`, depend on the matrix job with `needs`, and fail unless `needs.<matrix-job>.result` is `success`. Configure the fixed gate name—not individual generated matrix checks—as the required GitHub status check.

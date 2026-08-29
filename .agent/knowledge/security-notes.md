@@ -15,6 +15,67 @@ Track security-relevant boundaries, risks, and mitigation decisions.
 
 ## Notes
 
+- Date: 2026-08-28
+- Area: participant-cookie WebSocket recovery and manager observers (PR #342)
+- Threat or risk: A marked session closes an unauthenticated student WebSocket with `1008 student authentication required`. Shared student/manager endpoints were applying that rule to instructor manager sockets too, while student clients retaining only stale browser routing hints could reconnect forever or keep presenting controls after cookie expiry.
+- Control or mitigation: Python List Practice, Binary Breach, Java String Practice, Java Format Practice, and Traveling Salesman now identify their existing manager WebSocket connection with `role=manager` and apply participant identity resolution only to student sockets. Cookie-authenticated student clients redirect to the ordinary session-entry route after that explicit close; Postboard does the same after a 403 mutation. The shared participant-context helper clears all stored routing hints before rejoin.
+- Residual risk: The manager role only preserves the pre-existing manager observer transport behavior; it is not authorization. Manager-only REST mutations continue to require their existing instructor credentials.
+- Validation (test/review/path): focused route suites for all five shared socket activities; `client/src/components/common/sessionParticipantContext.test.ts`; targeted ESLint.
+- Follow-up action: Any future activity that shares a WebSocket namespace between student and manager clients must declare the role explicitly and keep student cookie checks inside the student branch.
+- Owner: Codex
+
+- Date: 2026-08-27
+- Area: Resonance and Postboard student identity
+- Threat or risk: Client-supplied student IDs in request/query/WebSocket data could be claimed by another participant, exposing private Resonance responses or Postboard moderation state and allowing attributed mutations.
+- Control or mitigation: New sessions set a stable `participantCookieAuthVersion` marker and require the server-backed, session-scoped `activebits_participant_*` httpOnly token; public waiting-room handoff routes replace any supplied `participantId` with a server-generated value before issuing that cookie. REST and WebSocket identity is resolved from the cookie and client IDs are no longer sent by the Resonance runtime. Postboard, SyncDeck, Binary Breach, Java String Practice, Java Format Practice, Python List Practice, and Traveling Salesman also resolve that cookie before student-private state or mutations. Their session normalizers preserve the marker and server-side token mapping.
+- Residual risk: Live sessions created before this change lack the immutable marker, so their accepted legacy ID handoff remains valid only until the normal session TTL expires—even if a newly accepted participant receives a cookie. New sessions must never add a client-ID fallback.
+- Validation (test/review/path): activity route tests for Resonance, Postboard, SyncDeck, Binary Breach, Java String Practice, Java Format Practice, Python List Practice, and Traveling Salesman.
+- Follow-up action: Keep Video Sync's student ID telemetry-only. If it ever affects student-visible state or server-side decisions, use `resolveAcceptedEntryParticipantToken`; Embedded Test remains development-only.
+- Owner: Codex
+
+- Date: 2026-08-27
+- Area: `GET /api/session/:sessionId` — participant bearer-token exposure (Copilot finding, PR #342)
+- Threat or risk: This route is unauthenticated (keyed only by session id, which is routinely shared as a classroom join link) and returned the entire `session.data` verbatim, including `participantAuthTokens` once activities started populating it in this PR. Any caller who knew a session id could read every currently-valid participant's bearer token and its owner's participant id, then replay any of them against the newly cookie-protected REST/WebSocket routes — fully defeating the auth model this PR introduces.
+- Control or mitigation: Added `toPublicSession()` in `server/core/sessions.ts`, which returns the session unchanged unless `session.data` has any key in `REDACTED_PUBLIC_SESSION_DATA_KEYS` (`participantAuthTokens`, `entryParticipants`), in which case it returns a shallow copy with those keys omitted (the underlying stored record and every other field, including `acceptedEntryParticipants`, are untouched). `entryParticipants` was added after a follow-up CodeRabbit finding: it maps a pending waiting-room submission's one-time consume token to that student's values, and reading it would let a caller redeem another student's pending entry themselves via `/entry-participant/consume` before the real student does. `GET /api/session/:sessionId` now returns `toPublicSession(session)`. It is the only route in this file that returns a raw session object.
+- Residual risk: `session.data.instructorPasscode`, stored directly by several activities (confirmed for mobcode, postboard, resonance, syncdeck, video-sync), is still returned by this same unredacted route today — a pre-existing exposure that predates this PR, was not flagged by either reviewer's actual bundled findings distinguished separately, and is intentionally left unfixed in this PR: tracked privately in draft GitHub security advisory GHSA-x3ph-9335-xx45 per explicit maintainer decision (2026-08-27), since it is exploitable in production today across five widely used activities and a rushed public fix without a coordinated release was judged riskier than a short, deliberate delay. A second CodeRabbit pass (2026-08-27) independently found and publicly described the same instructorPasscode issue on the PR thread; the maintainer was informed the private-disclosure premise was undermined by that and re-confirmed keeping it out of this PR regardless.
+- Validation (test/review/path): `server/sessionEntryRoutes.test.ts` ("unauthenticated session read redacts participant bearer tokens and pending entry handoff tokens").
+- Follow-up action: If another durable secret is ever added to any activity's `session.data`, add its key to `REDACTED_PUBLIC_SESSION_DATA_KEYS` in `server/core/sessions.ts` (or replace the denylist with an explicit per-activity allowlist) rather than assuming this route is safe by default. Separately: fix the `instructorPasscode` exposure per GHSA-x3ph-9335-xx45 (see the advisory for the same suggested fix shape).
+- Owner: Claude (fix/resonance-student-cookie-auth, PR #342, from a Copilot finding)
+
+- Date: 2026-08-27
+- Area: Resonance / Binary Breach direct participant-cookie issuers — same `NODE_ENV`-based Secure flag gap (Copilot finding, PR #342)
+- Threat or risk: Both activities issue the `activebits_participant_*` cookie themselves (self-service registration, not through the shared `entry-participant/consume` route) using `secure: process.env.NODE_ENV === 'production'` — the exact pattern already fixed in `server/core/sessions.ts` earlier in this PR for the same reason: the e2e harness runs `NODE_ENV=production` over plain HTTP, so the cookie is marked `Secure` on an insecure origin and WebKit drops it, leaving the just-registered participant unauthenticated for every subsequent request.
+- Control or mitigation: Both routes now derive `secure` from `req.secure === true` instead, matching the shared-route fix (see the `server/core/sessions.ts` entry above). `RouteRequest` in both files gained an optional `secure?: boolean` field.
+- Residual risk: `activities/syncdeck/server/routes.ts` (x2), `activities/mobcode/server/routes.ts`, and `server/routes/persistentSessionRoutes.ts` still use the `NODE_ENV`-based check for their own cookies (instructor recovery / persistent-sessions cookies, not the participant-auth cookie) — left untouched here since neither reviewer flagged them and no current e2e spec exercises them under WebKit. Apply the same `req.secure` fix if that ever changes.
+- Validation (test/review/path): No dedicated e2e spec currently exercises Resonance's or Binary Breach's self-service registration cookie under WebKit; fixed proactively based on the reviewer's pattern-match to the already-confirmed `server/core/sessions.ts` bug.
+- Owner: Claude (fix/resonance-student-cookie-auth, PR #342, from a Copilot finding)
+
+- Date: 2026-08-27
+- Area: java-format-practice / java-string-practice `/create` — accepted-entry auth-token bypass (CodeRabbit CWE-862, PR #342)
+- Threat or risk: Both activities' `/create` handlers left `session.data.participantAuthTokens` absent, so `legacySession` (`!Object.hasOwn(session.data, 'participantAuthTokens')`) stayed `true` from creation until the first real participant was accepted. During that window, unauthenticated REST/WebSocket requests with an arbitrary claimed `studentId`+`studentName` were accepted as a new student — unlike Postboard's equivalent legacy fallback, these two activities' fallback never checked the claim against `findAcceptedEntryParticipant`, so no prior acceptance was required at all. Confirmed empirically with a standalone repro (create session -> real accept -> attacker claimed-ID request) before fixing.
+- Control or mitigation: Both `/create` handlers now initialize `session.data.acceptedEntryParticipants = {}` and `session.data.participantAuthTokens = {}` before persisting, so `legacySession` is `false` from the first request onward — there is no pre-#341 population of these two activities to migrate, since this PR is the first time they use accepted-entry tracking at all.
+- Residual risk: None specific to this path; the general accepted-entry legacy-fallback pattern (`!Object.hasOwn(session.data, 'participantAuthTokens')`) remains intentional elsewhere for sessions that predate the cookie mechanism (see the entry above this one).
+- Validation (test/review/path): `activities/java-format-practice/server/routes.test.ts` ("newly created ... sessions reject an unauthenticated claimed studentId immediately"); `activities/java-string-practice/server/routes.test.ts` (same).
+- Follow-up action: Any new activity adopting accepted-entry-participant tracking for the first time should initialize both maps at `/create`, not just rely on the legacy fallback to eventually close itself.
+- Owner: Claude (fix/resonance-student-cookie-auth, PR #342, from a CodeRabbit finding)
+
+- Date: 2026-08-27
+- Area: Resonance `/state` and Postboard `/student-state` — cacheable participant-private responses (CodeRabbit CWE-524, PR #342)
+- Threat or risk: Both GET routes return participant-specific state (Resonance's per-student snapshot; Postboard's per-student board view) without `Cache-Control: no-store`, so a shared cache, browser back/forward cache, or proxy could serve one participant's private response to another.
+- Control or mitigation: Both routes now set `Cache-Control: no-store` before `res.json(...)`.
+- Validation (test/review/path): `activities/resonance/server/routes.ts` (`GET /api/resonance/:sessionId/state`); `activities/postboard/server/routes.ts` (`GET /api/postboard/:sessionId/student-state`).
+- Follow-up action: Any new per-participant GET snapshot route should set `Cache-Control: no-store` the same way.
+- Owner: Claude (fix/resonance-student-cookie-auth, PR #342, from a CodeRabbit finding)
+
+- Date: 2026-08-27
+- Area: shared `activebits_participant_*` cookie (`server/core/sessions.ts`, entry-participant/consume)
+- Threat or risk: The cookie's `Secure` attribute was `process.env.NODE_ENV === 'production'`. Behind a TLS-terminating proxy in real deployment this is correct, but it does not reflect the actual connection: a plain-HTTP `NODE_ENV=production` environment (as used by this repo's own Playwright e2e harness) still marks the cookie `Secure`, and WebKit (unlike Chromium's loopback exception) drops `Secure` cookies on insecure origins outright, silently deauthenticating every student request. Postboard, SyncDeck, and the other activities that started depending on this cookie in this change surfaced the gap as WebKit-only e2e failures.
+- Control or mitigation: The `entry-participant/consume` route now sets `secure: req.secure === true`, which reflects the live connection (respecting `app.set('trust proxy', 1)`, already configured in `server/server.ts`) instead of the build-mode env var.
+- Residual risk: Other cookies in the repo still use the `NODE_ENV === 'production'` pattern (`server/routes/persistentSessionRoutes.ts`, `server/core/persistentSessions.ts`); they carry the same latent WebKit gap if a WebKit-run Playwright spec ever depends on one of them. None currently do.
+- Validation (test/review/path): `server/sessionEntryRoutes.test.ts`; `activities/postboard/playwright/flow.spec.ts`; `activities/syncdeck/playwright/student-return.spec.ts` (both projects, chromium + webkit).
+- Follow-up action: If a future WebKit e2e spec starts depending on one of the other `NODE_ENV`-gated `Secure` cookies, apply the same `req.secure`-based fix there rather than reintroducing the env-var check.
+- Owner: Claude (fix/resonance-student-cookie-auth, PR #342)
+
 - Date: 2026-07-26
 - Area: Learn SyncDeck substitute instructor link
 - Threat or risk: A direct substitute link is a bearer capability that can start or reuse

@@ -1,6 +1,15 @@
 import { createSession, type SessionRecord, type SessionStore } from 'activebits-server/core/sessions.js'
 import { createBroadcastSubscriptionHelper } from 'activebits-server/core/broadcastUtils.js'
 import { generateParticipantId } from 'activebits-server/core/participantIds.js'
+import {
+  acceptEntryParticipant,
+  enableParticipantCookieAuthentication,
+  getSessionParticipantCookieName,
+  issueAcceptedEntryParticipantToken,
+  readAcceptedEntryParticipantCookie,
+  requiresParticipantCookieAuthentication,
+  resolveAcceptedEntryParticipantToken,
+} from 'activebits-server/core/acceptedEntryParticipants.js'
 import { registerSessionNormalizer } from 'activebits-server/core/sessionNormalization.js'
 import type { ActiveBitsWebSocket, WsRouter } from '../../../types/websocket.js'
 import type {
@@ -28,11 +37,15 @@ import {
 interface JsonResponse {
   status(code: number): JsonResponse
   json(payload: unknown): void
+  cookie?(name: string, value: string, options: Record<string, unknown>): void
 }
 
 interface RouteRequest {
   params: Record<string, string | undefined>
   body?: unknown
+  cookies?: Record<string, unknown>
+  headers?: Record<string, unknown>
+  secure?: boolean
 }
 
 interface BinaryBreachRouteApp {
@@ -59,6 +72,10 @@ function normalizeSessionData(data: unknown): BinaryBreachSessionData {
         .filter((student): student is BinaryBreachStudentRecord => Boolean(student))
     : []
   return {
+    ...(isPlainObject(source.acceptedEntryParticipants) ? { acceptedEntryParticipants: source.acceptedEntryParticipants } : {}),
+    ...(isPlainObject(source.participantAuthTokens) ? { participantAuthTokens: source.participantAuthTokens } : {}),
+    ...(isPlainObject(source.entryParticipants) ? { entryParticipants: source.entryParticipants } : {}),
+    ...(source.participantCookieAuthVersion === 1 ? { participantCookieAuthVersion: 1 } : {}),
     settings,
     students,
     missionSeed: typeof source.missionSeed === 'string' && source.missionSeed.length > 0
@@ -66,6 +83,10 @@ function normalizeSessionData(data: unknown): BinaryBreachSessionData {
       : createMissionSeed(),
     active: source.active !== false,
   }
+}
+
+function resolveCookieStudent(session: BinaryBreachSession, cookies: Record<string, unknown> | undefined, cookieHeader: unknown) {
+  return resolveAcceptedEntryParticipantToken(session, readAcceptedEntryParticipantCookie(cookies, cookieHeader, session.id))
 }
 
 function asBinaryBreachSession(session: SessionRecord | null): BinaryBreachSession | null {
@@ -232,11 +253,14 @@ export default function setupBinaryBreachRoutes(
     const session = await createSession(sessions, { data: {} })
     session.type = 'binary-breach'
     session.data = {
+      acceptedEntryParticipants: {},
+      participantAuthTokens: {},
       settings: { ...DEFAULT_BINARY_BREACH_SETTINGS },
       students: [],
       missionSeed: createMissionSeed(),
       active: true,
     }
+    enableParticipantCookieAuthentication(session)
     await sessions.set(session.id, session)
     ensureBroadcastSubscription(session.id)
     res.json({ id: session.id })
@@ -290,10 +314,25 @@ export default function setupBinaryBreachRoutes(
       return
     }
     const body = isPlainObject(req.body) ? req.body : {}
-    const student = ensureStudent(session, body.studentId, body.studentName)
+    const authenticated = resolveCookieStudent(session, req.cookies, req.headers?.cookie)
+    const legacySession = !requiresParticipantCookieAuthentication(session)
+    const student = ensureStudent(
+      session,
+      authenticated?.participantId ?? (legacySession ? body.studentId : null),
+      authenticated?.displayName ?? body.studentName,
+    )
     if (!student) {
       res.status(400).json({ error: 'invalid student' })
       return
+    }
+    if (!authenticated) {
+      acceptEntryParticipant(session, { participantId: student.id, displayName: student.name })
+      const participantToken = issueAcceptedEntryParticipantToken(session, student.id)
+      if (participantToken) {
+        res.cookie?.(getSessionParticipantCookieName(session.id), participantToken, {
+          httpOnly: true, sameSite: 'lax', secure: req.secure === true, path: '/',
+        })
+      }
     }
     await sessions.set(session.id, session)
     await broadcastRoster(session)
@@ -313,7 +352,9 @@ export default function setupBinaryBreachRoutes(
       return
     }
     const body = isPlainObject(req.body) ? req.body : {}
-    const student = ensureStudent(session, body.studentId, body.studentName)
+    const authenticated = resolveCookieStudent(session, req.cookies, req.headers?.cookie)
+    const legacySession = !requiresParticipantCookieAuthentication(session)
+    const student = ensureStudent(session, authenticated?.participantId ?? (legacySession ? body.studentId : null), authenticated?.displayName ?? (legacySession ? body.studentName : null))
     if (!student || !student.currentChallenge) {
       res.status(400).json({ error: 'invalid student' })
       return
@@ -362,7 +403,9 @@ export default function setupBinaryBreachRoutes(
       return
     }
     const body = isPlainObject(req.body) ? req.body : {}
-    const student = ensureStudent(session, body.studentId, body.studentName)
+    const authenticated = resolveCookieStudent(session, req.cookies, req.headers?.cookie)
+    const legacySession = !requiresParticipantCookieAuthentication(session)
+    const student = ensureStudent(session, authenticated?.participantId ?? (legacySession ? body.studentId : null), authenticated?.displayName ?? (legacySession ? body.studentName : null))
     if (!student) {
       res.status(400).json({ error: 'invalid student' })
       return
@@ -386,7 +429,9 @@ export default function setupBinaryBreachRoutes(
       return
     }
     const body = isPlainObject(req.body) ? req.body : {}
-    const student = ensureStudent(session, body.studentId, body.studentName)
+    const authenticated = resolveCookieStudent(session, req.cookies, req.headers?.cookie)
+    const legacySession = !requiresParticipantCookieAuthentication(session)
+    const student = ensureStudent(session, authenticated?.participantId ?? (legacySession ? body.studentId : null), authenticated?.displayName ?? (legacySession ? body.studentName : null))
     if (!student || !student.currentChallenge || !session.data.settings.hintsEnabled) {
       res.status(400).json({ error: 'hint unavailable' })
       return
@@ -409,15 +454,32 @@ export default function setupBinaryBreachRoutes(
   ws.register('/ws/binary-breach', (socket, qp) => {
     const client = socket as BinaryBreachSocket
     client.sessionId = qp.get('sessionId') || null
-    client.studentId = validateStudentId(qp.get('studentId'))
-    client.studentName = validateStudentName(qp.get('studentName'))
+    const isManagerSocket = qp.get('role') === 'manager'
+    const claimedStudentId = validateStudentId(qp.get('studentId'))
+    const claimedStudentName = validateStudentName(qp.get('studentName'))
+    client.studentId = null
+    client.studentName = null
     if (client.sessionId) {
       ensureBroadcastSubscription(client.sessionId)
+    }
+    if (client.sessionId && !isManagerSocket) {
       ;(async () => {
         const session = asBinaryBreachSession(await sessions.get(client.sessionId ?? ''))
         if (!session) return
-        if (client.studentName || client.studentId) {
-          ensureStudent(session, client.studentId, client.studentName)
+        const authenticated = resolveCookieStudent(session, undefined, client.upgradeHeaders?.cookie)
+        const legacySession = !requiresParticipantCookieAuthentication(session)
+        const student = ensureStudent(
+          session,
+          authenticated?.participantId ?? (legacySession ? claimedStudentId : null),
+          authenticated?.displayName ?? (legacySession ? claimedStudentName : null),
+        )
+        if (!student && !legacySession) {
+          client.close(1008, 'student authentication required')
+          return
+        }
+        if (student) {
+          client.studentId = student.id
+          client.studentName = student.name
           await sessions.set(session.id, session)
         }
         await broadcastRoster(session)

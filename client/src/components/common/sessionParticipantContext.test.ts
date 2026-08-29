@@ -3,6 +3,7 @@ import test from 'node:test'
 import type { EntryParticipantStorageLike } from './entryParticipantStorage'
 import {
   buildSessionParticipantContextStorageKey,
+  clearSessionParticipantContext,
   hasCompleteSessionParticipantContext,
   persistSessionParticipantContext,
   readSessionParticipantContext,
@@ -69,4 +70,17 @@ void test('readSessionParticipantContext removes invalid stored payloads', () =>
 
   assert.equal(readSessionParticipantContext(storage, 'session-1'), null)
   assert.equal(storage.getItem(buildSessionParticipantContextStorageKey('session-1')), null)
+})
+
+void test('clearSessionParticipantContext removes shared and legacy participant routing hints', () => {
+  const storage = createStorage()
+  persistSessionParticipantContext(storage, 'session-1', { studentName: 'Ada', studentId: 'participant-1' })
+  storage.setItem('student-name-session-1', 'Ada')
+  storage.setItem('student-id-session-1', 'participant-1')
+
+  clearSessionParticipantContext(storage, 'session-1')
+
+  assert.equal(readSessionParticipantContext(storage, 'session-1'), null)
+  assert.equal(storage.getItem('student-name-session-1'), null)
+  assert.equal(storage.getItem('student-id-session-1'), null)
 })

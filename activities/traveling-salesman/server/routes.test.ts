@@ -8,6 +8,7 @@ import type {
   TravelingSalesmanSessionStore,
 } from '../travelingSalesmanTypes.js'
 import type { SessionRecord } from 'activebits-server/core/sessions.js'
+import { acceptEntryParticipant, getSessionParticipantCookieName, issueAcceptedEntryParticipantToken } from 'activebits-server/core/acceptedEntryParticipants.js'
 import setupTravelingSalesmanRoutes from './routes'
 import { isCitiesArray, isDistanceMatrix, isRouteArray } from './validation'
 
@@ -119,6 +120,27 @@ void test('set-problem rejects invalid cities payload', async () => {
   assert.equal(res.statusCode, 400)
 })
 
+void test('session state omits participant authentication records', async () => {
+  const { app, store } = setup()
+  const session = store.s1
+  if (!session) throw new Error('missing session')
+  acceptEntryParticipant(session, { participantId: 'student-1', displayName: 'Ada' })
+  const token = issueAcceptedEntryParticipantToken(session, 'student-1')
+  if (!token) throw new Error('Expected participant token')
+  ;(session.data as Record<string, unknown>).entryParticipants = { pending: { participantId: 'student-2' } }
+
+  const handler = app.handlers.get['/api/traveling-salesman/:sessionId/session']
+  if (!handler) throw new Error('missing session handler')
+  const res = createRes()
+  await handler({ params: { sessionId: 's1' } }, res)
+
+  const body = res.body as Record<string, unknown>
+  assert.equal(body.participantAuthTokens, undefined)
+  assert.equal(body.acceptedEntryParticipants, undefined)
+  assert.equal(body.entryParticipants, undefined)
+  assert.equal(body.participantCookieAuthVersion, undefined)
+})
+
 void test('submit-route rejects missing student', async () => {
   const { app } = setup()
   const handler = app.handlers.post['/api/traveling-salesman/:sessionId/submit-route']
@@ -155,6 +177,28 @@ void test('submit-route accepts timeToComplete=0', async () => {
   assert.equal(res.statusCode, 200)
   const students = (store.s1?.data as Record<string, unknown>).students as Array<Record<string, unknown>>
   assert.equal(students[0]?.timeToComplete, 0)
+})
+
+void test('submit-route uses the participant cookie instead of a claimed student ID', async () => {
+  const { app, store } = setup()
+  ;((store.s1?.data as Record<string, unknown>).problem as { numCities: number }).numCities = 1
+  ;((store.s1?.data as Record<string, unknown>).students as Array<Record<string, unknown>>).push({
+    id: 'student-1', name: 'Ada', currentRoute: [], routeDistance: 0, complete: false,
+  })
+  const session = store.s1
+  if (!session) throw new Error('missing session')
+  acceptEntryParticipant(session, { participantId: 'student-1', displayName: 'Ada' })
+  const token = issueAcceptedEntryParticipantToken(session, 'student-1')
+  if (!token) throw new Error('Expected participant token')
+  const handler = app.handlers.post['/api/traveling-salesman/:sessionId/submit-route']
+  if (!handler) throw new Error('missing submit-route handler')
+  const res = createRes()
+  await handler({
+    params: { sessionId: 's1' },
+    cookies: { [getSessionParticipantCookieName('s1')]: token },
+    body: { studentId: 'forged', route: ['city-0'], distance: 0, timeToComplete: 0 },
+  }, res)
+  assert.equal(res.statusCode, 200)
 })
 
 void test('update-instructor-route rejects invalid timeToComplete', async () => {

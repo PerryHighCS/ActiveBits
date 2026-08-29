@@ -7,7 +7,7 @@ import {
   readStoredSessionParticipantIdentity,
   resolveInitialEntryParticipantIdentity,
 } from '@src/components/common/entryParticipantIdentityUtils';
-import { persistSessionParticipantContext } from '@src/components/common/sessionParticipantContext';
+import { clearSessionParticipantContext, persistSessionParticipantContext } from '@src/components/common/sessionParticipantContext';
 import '../components/styles.css';
 import ChallengeSelector from '../components/ChallengeSelector';
 import CharacterGrid from '../components/CharacterGrid';
@@ -342,6 +342,15 @@ export default function JavaFormatPractice({ sessionData }: JavaFormatPracticePr
   const handleWsOpen = useCallback(() => {
   }, []);
 
+  const handleWsClose = useCallback((event: CloseEvent) => {
+    if (event.code !== 1008 || event.reason !== 'student authentication required' || !sessionId) return;
+    clearSessionParticipantContext(window.localStorage, sessionId);
+    setStudentId(null);
+    setStudentName('');
+    setNameSubmitted(false);
+    void navigate(`/${sessionId}`);
+  }, [navigate, sessionId]);
+
   const buildWsUrl = useCallback(() => {
     if (!nameSubmitted || isSoloSession) return null;
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -360,7 +369,7 @@ export default function JavaFormatPractice({ sessionData }: JavaFormatPracticePr
     onOpen: handleWsOpen,
     onMessage: handleWsMessage,
     onError: undefined,
-    onClose: undefined,
+    onClose: handleWsClose,
     attachSessionEndedHandler,
   });
 

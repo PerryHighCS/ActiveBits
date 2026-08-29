@@ -86,7 +86,6 @@ export default function QuestionView({
     const pendingDraft = draftAnswer
     const sendDraft = () => {
       const sent = sendMessage('resonance:update-draft', {
-        studentId,
         questionId: question.id,
         answer: pendingDraft,
       })
@@ -120,7 +119,6 @@ export default function QuestionView({
     setError(null)
 
     const sentViaWs = sendMessage?.('resonance:submit-answer', {
-      studentId,
       questionId: question.id,
       answer,
     }) ?? false

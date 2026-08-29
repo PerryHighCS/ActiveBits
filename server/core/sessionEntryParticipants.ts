@@ -63,9 +63,10 @@ function pruneSessionEntryParticipants(
 export function storeSessionEntryParticipant(
   session: SessionRecord,
   values: unknown,
+  options?: { trustParticipantId?: boolean },
 ): { token: string; values: SessionEntryParticipantValues } {
   const container = getSessionEntryParticipantContainer(session)
-  const stored = storeEntryParticipant(container, values)
+  const stored = storeEntryParticipant(container, values, options)
   const valuesBytes = Buffer.byteLength(JSON.stringify(stored.values), 'utf8')
 
   if (valuesBytes > MAX_SESSION_ENTRY_PARTICIPANT_VALUES_BYTES) {

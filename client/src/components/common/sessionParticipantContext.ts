@@ -93,3 +93,13 @@ export function persistSessionParticipantContext(
     onWarn('[SessionParticipantContext] Failed to persist session participant context:', error)
   }
 }
+
+/** Removes routing hints after the server rejects the participant cookie. */
+export function clearSessionParticipantContext(
+  storage: EntryParticipantStorageLike,
+  sessionId: string,
+): void {
+  storage.removeItem(buildSessionParticipantContextStorageKey(sessionId))
+  storage.removeItem(`student-name-${sessionId}`)
+  storage.removeItem(`student-id-${sessionId}`)
+}

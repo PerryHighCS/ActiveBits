@@ -1,4 +1,5 @@
 import { createSession } from 'activebits-server/core/sessions.js'
+import { enableParticipantCookieAuthentication } from 'activebits-server/core/acceptedEntryParticipants.js'
 import { registerSessionNormalizer } from 'activebits-server/core/sessionNormalization.js'
 import type { WsRouter } from '../../../../types/websocket.js'
 import type {
@@ -43,12 +44,15 @@ export default function registerSessionRoutes(
     const session = await createSession(sessions, { data: {} })
     session.type = 'traveling-salesman'
     session.data = normalizeTravelingSalesmanSessionData(session.data)
+    session.data.acceptedEntryParticipants = {}
+    session.data.participantAuthTokens = {}
     session.data.problem = {}
     session.data.students = []
     session.data.algorithms = { bruteForce: {}, heuristic: {} }
     session.data.instructor = null
     session.data.broadcasts = []
     session.data.sharedState = { phase: 'setup' }
+    enableParticipantCookieAuthentication(session)
     await sessions.set(session.id, session)
     res.json({ id: session.id })
   })
@@ -66,7 +70,14 @@ export default function registerSessionRoutes(
       res.status(404).json({ error: 'Session not found' })
       return
     }
-    res.json(session.data)
+    const {
+      acceptedEntryParticipants: _acceptedEntryParticipants,
+      participantAuthTokens: _participantAuthTokens,
+      entryParticipants: _entryParticipants,
+      participantCookieAuthVersion: _participantCookieAuthVersion,
+      ...publicSessionData
+    } = session.data
+    res.json(publicSessionData)
   })
 
   // Set problem (map generation)

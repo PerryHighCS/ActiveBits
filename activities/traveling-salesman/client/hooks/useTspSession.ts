@@ -19,6 +19,7 @@ interface UseTspSessionOptions {
   onMessage?: (message: TspSessionMessage) => void
   onOpen?: () => void
   onSession?: (session: TspSessionData) => void
+  onClose?: UseResilientWebSocketOptions['onClose']
   attachSessionEndedHandler?: (ws: WebSocket) => void
 }
 
@@ -49,6 +50,7 @@ export function useTspSession({
   onOpen,
   onSession,
   attachSessionEndedHandler,
+  onClose,
 }: UseTspSessionOptions): UseTspSessionResult {
   const [session, setSession] = useState<TspSessionData | null>(null)
   const [leaderboard, setLeaderboard] = useState<ManagerLeaderboardEntry[]>([])
@@ -112,6 +114,7 @@ export function useTspSession({
       onOpen?.()
     },
     onMessage: handleWsMessage,
+    onClose,
     attachSessionEndedHandler,
   })
 

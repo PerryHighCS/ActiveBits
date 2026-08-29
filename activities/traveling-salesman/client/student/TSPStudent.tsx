@@ -8,6 +8,7 @@ import {
   resolveInitialEntryParticipantIdentity,
 } from '@src/components/common/entryParticipantIdentityUtils';
 import { useTspSession } from '../hooks/useTspSession';
+import { clearSessionParticipantContext } from '@src/components/common/sessionParticipantContext';
 import { useRouteBuilder } from '../hooks/useRouteBuilder';
 import Button from '@src/components/ui/Button';
 import CityMap from '../components/CityMap';
@@ -303,12 +304,22 @@ export default function TSPStudent({ sessionData }: TSPStudentProps) {
     }
   }, []);
 
+  const handleWsClose = useCallback((event: CloseEvent) => {
+    if (event.code !== 1008 || event.reason !== 'student authentication required' || !sessionId) return;
+    clearSessionParticipantContext(window.localStorage, sessionId);
+    setStudentId(null);
+    setStudentName('');
+    setNameSubmitted(false);
+    void navigate(`/${sessionId}`);
+  }, [navigate, sessionId]);
+
   const { connect, disconnect } = useTspSession({
     sessionId,
     buildWsUrl,
     shouldReconnect: Boolean(nameSubmitted && !isSoloSession),
     onMessage: handleWsMessage,
     onSession: handleSessionUpdate,
+    onClose: handleWsClose,
     attachSessionEndedHandler
   });
 

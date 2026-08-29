@@ -18,6 +18,7 @@ export interface AcceptedEntryParticipantSessionLike {
 
 const MAX_ACCEPTED_ENTRY_PARTICIPANTS = 100
 const MAX_PARTICIPANT_AUTH_TOKENS = 200
+const PARTICIPANT_COOKIE_AUTH_VERSION = 1
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value != null && typeof value === 'object' && !Array.isArray(value)
@@ -35,6 +36,22 @@ function getAcceptedEntryParticipantContainer(session: AcceptedEntryParticipantS
   }
 
   return data as AcceptedEntryParticipantContainer
+}
+
+/**
+ * Marks a newly created session as requiring opaque participant cookies. This
+ * is intentionally distinct from the mutable token map so accepting a new
+ * participant cannot change the authentication policy of a legacy session.
+ */
+export function enableParticipantCookieAuthentication(session: AcceptedEntryParticipantSessionLike): void {
+  if (!isRecord(session.data)) session.data = {}
+  const data = session.data as Record<string, unknown>
+  data.participantCookieAuthVersion = PARTICIPANT_COOKIE_AUTH_VERSION
+}
+
+export function requiresParticipantCookieAuthentication(session: AcceptedEntryParticipantSessionLike): boolean {
+  return isRecord(session.data)
+    && session.data.participantCookieAuthVersion === PARTICIPANT_COOKIE_AUTH_VERSION
 }
 
 function normalizeDisplayName(value: unknown): string | null {
@@ -96,6 +113,32 @@ export function findAcceptedEntryParticipant(
 
 export function getSessionParticipantCookieName(sessionId: string): string {
   return `activebits_participant_${Buffer.from(sessionId, 'utf8').toString('base64url')}`
+}
+
+/**
+ * Reads the opaque participant-auth token for `sessionId` out of a request's
+ * parsed cookie map (when the framework already parsed one) or, failing that,
+ * out of a raw `Cookie` header. Shared so every activity's cookie parsing
+ * (name lookup, header-array handling, URI decoding) stays in lockstep rather
+ * than drifting copy to copy.
+ */
+export function readAcceptedEntryParticipantCookie(
+  cookies: Record<string, unknown> | undefined,
+  cookieHeader: unknown,
+  sessionId: string,
+): string | null {
+  const cookieName = getSessionParticipantCookieName(sessionId)
+  const parsed = cookies?.[cookieName]
+  if (typeof parsed === 'string' && parsed.length > 0) return parsed
+  if (Array.isArray(cookieHeader)) cookieHeader = cookieHeader[0]
+  if (typeof cookieHeader !== 'string') return null
+  const entry = cookieHeader.split(';').map((value) => value.trim()).find((value) => value.startsWith(`${cookieName}=`))
+  if (!entry) return null
+  try {
+    return decodeURIComponent(entry.slice(cookieName.length + 1))
+  } catch {
+    return null
+  }
 }
 
 /** Issues an opaque, httpOnly-cookie token for an already accepted participant. */

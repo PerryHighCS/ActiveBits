@@ -6,6 +6,7 @@ import type {
 } from '../../travelingSalesmanTypes.js'
 import { asTravelingSalesmanSession } from '../../travelingSalesmanTypes.js'
 import { connectAcceptedSessionParticipant } from 'activebits-server/core/acceptedSessionParticipants.js'
+import { readAcceptedEntryParticipantCookie, requiresParticipantCookieAuthentication, resolveAcceptedEntryParticipantToken } from 'activebits-server/core/acceptedEntryParticipants.js'
 import { disconnectSessionParticipant, updateSessionParticipant } from 'activebits-server/core/sessionParticipants.js'
 import { isFiniteNumber, isRouteArray } from '../validation.js'
 import { createBroadcastHelpers, closeDuplicateStudentSockets, generateStudentId } from './shared.js'
@@ -24,19 +25,29 @@ export default function registerStudentRoutes(
   ws.register('/ws/traveling-salesman', (socket, qp) => {
     const client = socket as TravelingSalesmanSocket
     client.sessionId = qp.get('sessionId') || null
+    const isManagerSocket = qp.get('role') === 'manager'
     ensureBroadcastSubscription(client.sessionId)
-    const studentName = qp.get('studentName') || null
-    const studentId = qp.get('studentId') || null
+    const claimedStudentName = qp.get('studentName') || null
+    const claimedStudentId = qp.get('studentId') || null
 
-    if (client.sessionId) {
+    if (client.sessionId && !isManagerSocket) {
       ;(async () => {
         const session = asTravelingSalesmanSession(await sessions.get(client.sessionId || ''))
         if (session) {
+          const authenticated = resolveAcceptedEntryParticipantToken(
+            session,
+            readAcceptedEntryParticipantCookie(undefined, client.upgradeHeaders?.cookie, session.id),
+          )
+          const legacySession = !requiresParticipantCookieAuthentication(session)
+          if (!authenticated && !legacySession) {
+            client.close(1008, 'student authentication required')
+            return
+          }
           const result = connectAcceptedSessionParticipant({
             session,
             participants: session.data.students,
-            participantId: studentId,
-            participantName: studentName ?? null,
+            participantId: authenticated?.participantId ?? claimedStudentId,
+            participantName: authenticated?.displayName ?? claimedStudentName,
             createParticipant: (participantId, participantName, now) => ({
               id: participantId,
               name: participantName,
@@ -51,7 +62,7 @@ export default function registerStudentRoutes(
               routeCompleteTime: null,
               timeToComplete: null,
             }),
-            generateParticipantId: () => generateStudentId(studentName ?? 'student'),
+            generateParticipantId: () => generateStudentId((authenticated?.displayName ?? claimedStudentName) ?? 'student'),
           })
           if (!result) {
             try {
@@ -161,13 +172,18 @@ export default function registerStudentRoutes(
     }
 
     const body = (req.body ?? {}) as Record<string, unknown>
-    const studentId = body.studentId
+    const authenticated = resolveAcceptedEntryParticipantToken(
+      session,
+      readAcceptedEntryParticipantCookie(req.cookies, req.headers?.cookie, session.id),
+    )
+    const legacySession = !requiresParticipantCookieAuthentication(session)
+    const studentId = authenticated?.participantId ?? (legacySession ? body.studentId : null)
     const route = body.route
     const distance = body.distance
     const timeToComplete = body.timeToComplete
 
     if (typeof studentId !== 'string' || !studentId.trim()) {
-      res.status(400).json({ error: 'Invalid studentId' })
+      res.status(legacySession ? 400 : 403).json({ error: legacySession ? 'Invalid studentId' : 'student authentication required' })
       return
     }
     if (!isRouteArray(route)) {

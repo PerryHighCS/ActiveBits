@@ -1,19 +1,23 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import type { SessionRecord, SessionStore } from 'activebits-server/core/sessions.js'
+import { createSessionStore as createCoreSessionStore, type SessionRecord, type SessionStore } from 'activebits-server/core/sessions.js'
+import { storeSessionEntryParticipant } from 'activebits-server/core/sessionEntryParticipants.js'
 import type { ActiveBitsWebSocket, WsRouter } from '../../../types/websocket.js'
 import setupBinaryBreachRoutes from './routes.js'
 
 interface TestResponse {
   statusCode: number
   payload: unknown
+  cookies: Array<{ name: string; value: string }>
   status(code: number): TestResponse
   json(payload: unknown): void
+  cookie(name: string, value: string, options: Record<string, unknown>): void
 }
 
 interface TestRequest {
   params: Record<string, string | undefined>
   body?: unknown
+  cookies?: Record<string, unknown>
 }
 
 type RouteHandler = (req: TestRequest, res: TestResponse) => void | Promise<void>
@@ -35,6 +39,7 @@ function createResponse(): TestResponse {
   return {
     statusCode: 200,
     payload: null,
+    cookies: [],
     status(code: number) {
       this.statusCode = code
       return this
@@ -42,7 +47,14 @@ function createResponse(): TestResponse {
     json(payload: unknown) {
       this.payload = payload
     },
+    cookie(name, value) {
+      this.cookies.push({ name, value })
+    },
   }
+}
+
+function cookieJar(response: TestResponse): Record<string, string> {
+  return Object.fromEntries(response.cookies.map((cookie) => [cookie.name, cookie.value]))
 }
 
 function cloneSession(session: SessionRecord): SessionRecord {
@@ -87,6 +99,17 @@ function createWsRouter(): WsRouter {
     register() {},
   }
 }
+
+void test('Binary Breach preserves pending entry handoffs during session normalization', async () => {
+  const session: SessionRecord = { id: 'pending-entry', type: 'binary-breach', created: 1, lastActivity: 1, data: {} }
+  const { token } = storeSessionEntryParticipant(session, { participantId: 'student-1', displayName: 'Ada' })
+  const sessions = createCoreSessionStore(null)
+  await sessions.set(session.id, session)
+
+  const storedData = (await sessions.get(session.id))?.data as { entryParticipants?: Record<string, unknown> }
+  assert.notEqual(storedData.entryParticipants?.[token], undefined)
+  await sessions.close()
+})
 
 void test('creates a Binary Breach session and returns manager-visible state', async () => {
   const app = new TestApp()
@@ -182,9 +205,10 @@ void test('registers a student and validates an answer against the stored challe
   const answerResponse = createResponse()
   await app.postRoutes.get('/api/binary-breach/:sessionId/student/answer')?.({
     params: { sessionId },
+    cookies: cookieJar(registerResponse),
     body: {
       studentName: 'Ada',
-      studentId: registered.studentId,
+      studentId: 'forged-student-id',
       answer,
     },
   }, answerResponse)
@@ -369,6 +393,7 @@ void test('student retry resets only that student against the active mission', a
   const answerResponse = createResponse()
   await app.postRoutes.get('/api/binary-breach/:sessionId/student/answer')?.({
     params: { sessionId },
+    cookies: cookieJar(firstRegisterResponse),
     body: {
       studentName: 'Ada',
       studentId: firstStudent.studentId,
@@ -382,6 +407,7 @@ void test('student retry resets only that student against the active mission', a
   const retryResponse = createResponse()
   await app.postRoutes.get('/api/binary-breach/:sessionId/student/retry')?.({
     params: { sessionId },
+    cookies: cookieJar(firstRegisterResponse),
     body: { studentName: 'Ada', studentId: firstStudent.studentId },
   }, retryResponse)
 
@@ -521,6 +547,7 @@ void test('keeps a current student challenge answerable after manager settings c
   const answerResponse = createResponse()
   await app.postRoutes.get('/api/binary-breach/:sessionId/student/answer')?.({
     params: { sessionId },
+    cookies: cookieJar(registerResponse),
     body: {
       studentName: 'Katherine',
       studentId: registered.studentId,

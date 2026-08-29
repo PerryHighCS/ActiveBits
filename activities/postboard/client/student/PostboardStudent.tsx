@@ -3,6 +3,7 @@ import {
   persistSessionParticipantIdentity,
   resolveInitialEntryParticipantIdentity,
 } from '@src/components/common/entryParticipantIdentityUtils'
+import { clearSessionParticipantContext } from '@src/components/common/sessionParticipantContext'
 import Button from '@src/components/ui/Button'
 import NoteStyleSelect from '../../../shared/client/components/NoteStyleSelect.js'
 import ReactionSummary from '../../../shared/client/components/ReactionSummary.js'
@@ -46,6 +47,15 @@ export default function PostboardStudent({ sessionData }: PostboardStudentProps)
   const [error, setError] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const fetchRequestIdRef = useRef(0)
+
+  const requireRejoin = useCallback(() => {
+    if (!sessionId || isSoloSession) return
+    clearSessionParticipantContext(window.localStorage, sessionId)
+    setIdentity({ studentId: null, studentName: null })
+    setSnapshot(null)
+    setError('Your session has expired. Please re-enter your name to rejoin.')
+    window.location.assign(`/${sessionId}`)
+  }, [isSoloSession, sessionId])
 
   useEffect(() => {
     if (!sessionId || typeof window === 'undefined') {
@@ -155,6 +165,10 @@ export default function PostboardStudent({ sessionData }: PostboardStudentProps)
       })
       if (!response.ok) {
         const payload = await response.json().catch(() => ({})) as { error?: string }
+        if (response.status === 403) {
+          requireRejoin()
+          return
+        }
         throw new Error(payload.error || 'Could not submit note')
       }
       setDraft('')
@@ -190,6 +204,10 @@ export default function PostboardStudent({ sessionData }: PostboardStudentProps)
       })
       if (!response.ok) {
         const payload = await response.json().catch(() => ({})) as { error?: string }
+        if (response.status === 403) {
+          requireRejoin()
+          return
+        }
         throw new Error(payload.error || 'Could not react to note')
       }
       await fetchState()
@@ -212,6 +230,10 @@ export default function PostboardStudent({ sessionData }: PostboardStudentProps)
       })
       if (!response.ok) {
         const payload = await response.json().catch(() => ({})) as { error?: string }
+        if (response.status === 403) {
+          requireRejoin()
+          return
+        }
         throw new Error(payload.error || 'Could not delete returned note')
       }
       setDismissedOwnPostIds((current) => new Set(current).add(postId))

@@ -112,6 +112,39 @@ function createSessionRecord(id: string, type: string): SessionRecord {
   }
 }
 
+void test('unauthenticated session read redacts participant bearer tokens and pending entry handoff tokens', async () => {
+  const session = createSessionRecord('session-tokens', 'java-string-practice')
+  session.data = {
+    students: [{ id: 'student-1', name: 'Ada' }],
+    acceptedEntryParticipants: { 'student-1': { participantId: 'student-1', displayName: 'Ada', acceptedAt: 1 } },
+    participantAuthTokens: { 'secret-token': 'student-1' },
+    entryParticipants: { 'pending-token': { displayName: 'Grace' } },
+  }
+  const sessions = {
+    get: async (id: string) => id === session.id ? session : null,
+    set: async () => {},
+    delete: async () => true,
+    touch: async () => true,
+    getAll: async () => [],
+    getAllIds: async () => [],
+    cleanup: () => {},
+    close: async () => {},
+  }
+  const app = createMockApp()
+  setupSessionRoutes(app as unknown as Parameters<typeof setupSessionRoutes>[0], sessions)
+
+  console.log('[TEST] confirming the unauthenticated session-read route never exposes participantAuthTokens or entryParticipants')
+  const res = createMockResponse()
+  await getRoute(app, 'get', '/api/session/:sessionId')({ params: { sessionId: session.id } }, res)
+
+  assert.equal(res.statusCode, 200)
+  const body = res.jsonBody as { session: SessionRecord }
+  assert.equal(Object.hasOwn(body.session.data, 'participantAuthTokens'), false)
+  assert.equal(Object.hasOwn(body.session.data, 'entryParticipants'), false)
+  assert.deepEqual(body.session.data.acceptedEntryParticipants, session.data.acceptedEntryParticipants)
+  assert.deepEqual(body.session.data.students, session.data.students)
+})
+
 void test('session entry route returns render-ui for activities with waiting-room fields', async () => {
   await initializeActivityRegistry()
   const sessions = {
@@ -407,6 +440,39 @@ void test('session entry participant routes store and consume waiting-room value
 
   assert.equal(missingRes.statusCode, 404)
   assert.deepEqual(missingRes.jsonBody, { error: 'entry participant not found' })
+})
+
+void test('public session handoffs replace a forged participant ID before issuing a cookie', async () => {
+  await initializeActivityRegistry()
+  const session = createSessionRecord('forgery-session', 'java-string-practice')
+  const sessionMap = new Map<string, SessionRecord>([[session.id, session]])
+  const sessions = {
+    get: async (id: string) => sessionMap.get(id) ?? null,
+    set: async (id: string, nextSession: SessionRecord) => { sessionMap.set(id, nextSession) },
+    delete: async () => true, touch: async () => true, getAll: async () => [], getAllIds: async () => [], cleanup: () => {}, close: async () => {},
+  }
+  const app = createMockApp()
+  setupSessionRoutes(app as unknown as Parameters<typeof setupSessionRoutes>[0], sessions)
+  const storeRes = createMockResponse()
+  await getRoute(app, 'post', '/api/session/:sessionId/entry-participant')({
+    params: { sessionId: session.id }, body: { values: { participantId: 'victim-id', displayName: 'Attacker' } },
+  }, storeRes)
+  const values = storeRes.jsonBody?.values as Record<string, unknown>
+  const participantId = values.participantId
+  assert.equal(typeof participantId, 'string')
+  assert.notEqual(participantId, 'victim-id')
+  const token = storeRes.jsonBody?.entryParticipantToken
+  assert.equal(typeof token, 'string')
+  const consumeRes = createMockResponse()
+  await getRoute(app, 'post', '/api/session/:sessionId/entry-participant/consume')({
+    params: { sessionId: session.id }, body: { token },
+  }, consumeRes)
+  assert.equal(consumeRes.statusCode, 200)
+  assert.equal(consumeRes.cookies.length, 1)
+  assert.equal(typeof consumeRes.cookies[0]?.value, 'string')
+  assert.ok((consumeRes.cookies[0]?.value.length ?? 0) > 0)
+  assert.equal(consumeRes.cookies[0]?.options.httpOnly, true)
+  assert.equal((sessionMap.get(session.id)?.data as { acceptedEntryParticipants?: Record<string, unknown> }).acceptedEntryParticipants?.['victim-id'], undefined)
 })
 
 void test('session entry participant consume route trims tokens and rejects blank token requests', async () => {

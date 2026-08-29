@@ -454,9 +454,29 @@ function setNoStore(response: ResponseLike): void {
   response.set?.('Cache-Control', 'no-store')
 }
 
+// Both maps are keyed by a bearer/handoff token, not a participant id, and
+// this route is unauthenticated and keyed only by session id (routinely
+// shared for classroom join links). participantAuthTokens maps straight to
+// an accepted participant's id; entryParticipants maps a pending waiting-room
+// submission's one-time consume token to that student's values, and reading
+// it would let a caller redeem another student's pending entry themselves via
+// /entry-participant/consume. Neither may reach this response.
+const REDACTED_PUBLIC_SESSION_DATA_KEYS = ['participantAuthTokens', 'entryParticipants'] as const
+
+function toPublicSession(session: SessionRecord): SessionRecord {
+  if (!REDACTED_PUBLIC_SESSION_DATA_KEYS.some((key) => Object.hasOwn(session.data, key))) {
+    return session
+  }
+  const publicData = { ...session.data }
+  for (const key of REDACTED_PUBLIC_SESSION_DATA_KEYS) {
+    delete publicData[key]
+  }
+  return { ...session, data: publicData }
+}
+
 export function setupSessionRoutes(app: {
   get(path: string, handler: (req: { params: { sessionId: string } }, res: ResponseLike) => void | Promise<void>): void
-  post(path: string, handler: (req: { params: { sessionId: string }; body?: unknown }, res: ResponseLike) => void | Promise<void>): void
+  post(path: string, handler: (req: { params: { sessionId: string }; body?: unknown; secure?: boolean }, res: ResponseLike) => void | Promise<void>): void
   delete(path: string, handler: (req: { params: { sessionId: string } }, res: ResponseLike) => void | Promise<void>): void
 }, sessions: SessionStore, wss: WsServerLike | null = null): void {
   app.get('/api/session/:sessionId/entry', async (req, res) => {
@@ -488,7 +508,7 @@ export function setupSessionRoutes(app: {
       res.status(404).json({ error: 'invalid session' })
       return
     }
-    res.json({ session })
+    res.json({ session: toPublicSession(session) })
   })
 
   app.get('/api/session/:sessionId/embedded-launch', async (req, res) => {
@@ -533,7 +553,7 @@ export function setupSessionRoutes(app: {
 
     try {
       const body = req.body != null && typeof req.body === 'object' ? (req.body as Record<string, unknown>) : {}
-      const { token, values } = storeSessionEntryParticipant(session, body.values)
+      const { token, values } = storeSessionEntryParticipant(session, body.values, { trustParticipantId: false })
       await sessions.set(sessionId, session)
       res.json({ entryParticipantToken: token, values })
     } catch (error) {
@@ -573,7 +593,11 @@ export function setupSessionRoutes(app: {
         res.cookie?.(getSessionParticipantCookieName(sessionId), participantToken, {
           httpOnly: true,
           sameSite: 'lax',
-          secure: process.env.NODE_ENV === 'production',
+          // Reflect the actual connection (TLS termination included, via
+          // app.set('trust proxy', 1)) rather than NODE_ENV, so the Secure
+          // attribute matches reality behind proxies and in non-HTTPS test
+          // environments alike.
+          secure: req.secure === true,
           path: '/',
         })
       }

@@ -11,7 +11,7 @@ const DEFAULT_DISCONNECTED_STATUS = 'Reconnecting to instructor sync…'
 export function resolveSyncDeckStudentCloseDecision(event: { code?: number; reason?: string }): SyncDeckReconnectCloseDecision {
   if (
     event.code === 1008
-    && (event.reason === 'missing studentId' || event.reason === 'unregistered student')
+    && (event.reason === 'missing studentId' || event.reason === 'unregistered student' || event.reason === 'student authentication required')
   ) {
     return {
       clearCachedIdentity: true,

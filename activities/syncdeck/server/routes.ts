@@ -16,7 +16,13 @@ import {
   normalizePossiblyEncodedHttpUrl,
 } from 'activebits-server/core/httpUrlUtils.js'
 import { closeDuplicateParticipantSockets, closeParticipantSockets } from 'activebits-server/core/participantSockets.js'
-import { revokeAcceptedEntryParticipant } from 'activebits-server/core/acceptedEntryParticipants.js'
+import {
+  enableParticipantCookieAuthentication,
+  readAcceptedEntryParticipantCookie,
+  requiresParticipantCookieAuthentication,
+  resolveAcceptedEntryParticipantToken,
+  revokeAcceptedEntryParticipant,
+} from 'activebits-server/core/acceptedEntryParticipants.js'
 import {
   createSession,
   EMBEDDED_CHILD_SESSION_PREFIX,
@@ -586,16 +592,22 @@ export function normalizeSyncDeckSessionData(data: unknown): SyncDeckSessionData
   const preservedAcceptedEntryParticipants = isPlainObject(source.acceptedEntryParticipants)
     ? source.acceptedEntryParticipants
     : undefined
+  const preservedParticipantAuthTokens = isPlainObject(source.participantAuthTokens)
+    ? source.participantAuthTokens
+    : undefined
   const preservedEntryParticipants = isPlainObject(source.entryParticipants)
     ? source.entryParticipants
     : undefined
+  const preservedParticipantCookieAuthVersion = source.participantCookieAuthVersion === 1
 
   return {
     ...(typeof source.linkedSessionId === 'string' && source.linkedSessionId.trim().length > 0
       ? { linkedSessionId: source.linkedSessionId.trim() }
       : {}),
     ...(preservedAcceptedEntryParticipants ? { acceptedEntryParticipants: preservedAcceptedEntryParticipants } : {}),
+    ...(preservedParticipantAuthTokens ? { participantAuthTokens: preservedParticipantAuthTokens } : {}),
     ...(preservedEntryParticipants ? { entryParticipants: preservedEntryParticipants } : {}),
+    ...(preservedParticipantCookieAuthVersion ? { participantCookieAuthVersion: 1 } : {}),
     presentationUrl: typeof source.presentationUrl === 'string' ? source.presentationUrl : null,
     standaloneMode: source.standaloneMode === true,
     instructorPasscode:
@@ -924,6 +936,21 @@ function readStringField(payload: unknown, key: string): string | null {
   if (!isPlainObject(payload)) return null
   const value = payload[key]
   return typeof value === 'string' ? value : null
+}
+
+function resolveAuthenticatedSyncDeckStudent(session: SyncDeckSession, req: RouteRequest): SyncDeckStudent | null {
+  const participantId = resolveAcceptedEntryParticipantToken(
+    session,
+    readAcceptedEntryParticipantCookie(req.cookies, req.headers?.cookie, session.id),
+  )?.participantId
+  if (participantId) return findSyncDeckStudentById(session.data.students, participantId)
+
+  // Sessions created before participant cookies retain their claimed-ID
+  // handoff until expiry, even if a new participant later receives a cookie.
+  if (!requiresParticipantCookieAuthentication(session)) {
+    return findSyncDeckStudentById(session.data.students, normalizeStudentId(readStringField(req.body, 'studentId')))
+  }
+  return null
 }
 
 function readBooleanField(payload: unknown, key: string): boolean | null {
@@ -1321,6 +1348,7 @@ async function createEmbeddedChildSession(
       } satisfies SyncDeckEmbeddedLaunchPayload,
     },
   }
+  enableParticipantCookieAuthentication(session)
   await sessions.set(sessionId, normalizeSessionRecord(session))
   return session
 }
@@ -1500,6 +1528,7 @@ async function createSyncDeckInstructorSession(
     ...session.data,
     ...(presentationUrl ? { presentationUrl, standaloneMode: false } : {}),
   })
+  enableParticipantCookieAuthentication(session)
   const instructorRecoveryToken = randomBytes(32).toString('hex')
   session.data.instructorRecoveryToken = instructorRecoveryToken
   await sessions.set(session.id, session)
@@ -1632,7 +1661,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       const stored = storeSessionEntryParticipant(childSession, {
         participantId: student.studentId,
         displayName: student.name,
-      })
+      }, { trustParticipantId: true })
       tokensByStudentId.set(student.studentId, stored.token)
     }
     await sessions.set(childSession.id, childSession)
@@ -1680,7 +1709,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
         const stored = storeSessionEntryParticipant(childSession, {
           participantId: student.studentId,
           displayName: student.name,
-        })
+        }, { trustParticipantId: true })
         entryParticipantToken = stored.token
         await sessions.set(childSession.id, childSession)
       }
@@ -1961,8 +1990,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       return
     }
 
-    const studentId = normalizeStudentId(readStringField(req.body, 'studentId'))
-    const student = findSyncDeckStudentById(session.data.students, studentId)
+    const student = resolveAuthenticatedSyncDeckStudent(session, req)
     if (student) {
       const response = res as unknown as JsonResponse
       const payload: SyncDeckEmbeddedEntryContextResponse = {
@@ -2329,8 +2357,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       return
     }
 
-    const studentId = normalizeStudentId(readStringField(req.body, 'studentId'))
-    const student = findSyncDeckStudentById(session.data.students, studentId)
+    const student = resolveAuthenticatedSyncDeckStudent(session, req)
     if (!student) {
       res.status(403).json({ error: 'forbidden' })
       return
@@ -2345,7 +2372,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
     const stored = storeSessionEntryParticipant(childSession, {
       participantId: student.studentId,
       displayName: student.name,
-    })
+    }, { trustParticipantId: true })
     await sessions.set(childSession.id, childSession)
 
     res.json({
@@ -2372,9 +2399,8 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
 
     const instanceKey = normalizeInstanceKey(readStringField(req.body, 'instanceKey'))
     const requestedChildSessionId = normalizeInstanceKey(readStringField(req.body, 'childSessionId'))
-    const studentId = normalizeStudentId(readStringField(req.body, 'studentId'))
     const autoActivateAllQuestions = readBooleanField(req.body, 'autoActivateAllQuestions') === true
-    if (!instanceKey || !studentId || !autoActivateAllQuestions) {
+    if (!instanceKey || !autoActivateAllQuestions) {
       res.status(400).json({ error: 'invalid payload' })
       return
     }
@@ -2389,7 +2415,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       return
     }
 
-    const student = findSyncDeckStudentById(session.data.students, studentId)
+    const student = resolveAuthenticatedSyncDeckStudent(session, req)
     if (!student) {
       res.status(403).json({ error: 'forbidden' })
       return
@@ -2490,7 +2516,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
     const client = socket as SyncDeckSocket
     client.sessionId = query.get('sessionId')
     client.isInstructor = false
-    client.studentId = normalizeStudentId(query.get('studentId'))
+    client.studentId = null
 
     const sessionId = client.sessionId
     if (!sessionId) {
@@ -2553,8 +2579,18 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
         return
       }
 
+      const cookieParticipantId = resolveAcceptedEntryParticipantToken(
+        session,
+        readAcceptedEntryParticipantCookie(undefined, client.upgradeHeaders?.cookie, session.id),
+      )?.participantId ?? null
+      // Existing live sessions retain their ID handoff until expiry; cookie-auth
+      // sessions require a server-issued participant token.
+      client.studentId = cookieParticipantId
+        ?? (!requiresParticipantCookieAuthentication(session)
+          ? normalizeStudentId(query.get('studentId'))
+          : null)
       if (!client.studentId) {
-        socket.close(1008, 'missing studentId')
+        socket.close(1008, 'student authentication required')
         return
       }
 

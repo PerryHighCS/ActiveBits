@@ -22,6 +22,13 @@ void test('resolveSyncDeckStudentCloseDecision requires rejoin for unknown stude
   })
 })
 
+void test('resolveSyncDeckStudentCloseDecision requires rejoin when participant authentication is missing', () => {
+  const decision = resolveSyncDeckStudentCloseDecision({ code: 1008, reason: 'student authentication required' })
+
+  assert.equal(decision.clearCachedIdentity, true)
+  assert.equal(decision.joinError, 'Please re-enter your name to rejoin this presentation.')
+})
+
 void test('resolveSyncDeckStudentCloseDecision keeps default reconnect behavior for other closes', () => {
   const decision = resolveSyncDeckStudentCloseDecision({ code: 1006, reason: 'socket lost' })
 

@@ -8,7 +8,7 @@ import {
   readStoredSessionParticipantIdentity,
   resolveInitialEntryParticipantIdentity,
 } from '@src/components/common/entryParticipantIdentityUtils'
-import { persistSessionParticipantContext } from '@src/components/common/sessionParticipantContext'
+import { clearSessionParticipantContext, persistSessionParticipantContext } from '@src/components/common/sessionParticipantContext'
 import type {
   FeedbackState,
   JavaStringAnswer,
@@ -187,6 +187,15 @@ export default function JavaStringPractice({ sessionData }: JavaStringPracticePr
     void fetchAllowedMethods()
   }, [fetchAllowedMethods])
 
+  const handleWsClose = useCallback((event: CloseEvent) => {
+    if (event.code !== 1008 || event.reason !== 'student authentication required' || !sessionId) return
+    clearSessionParticipantContext(window.localStorage, sessionId)
+    setStudentId(null)
+    setStudentName('')
+    setNameSubmitted(false)
+    void navigate(`/${sessionId}`)
+  }, [navigate, sessionId])
+
   const buildWsUrl = useCallback((): string | null => {
     if (nameSubmitted !== true || isSoloSession === true || sessionId == null || typeof window === 'undefined') return null
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -204,7 +213,7 @@ export default function JavaStringPractice({ sessionData }: JavaStringPracticePr
     onOpen: handleWsOpen,
     onMessage: handleWsMessage,
     onError: (error) => console.error('WebSocket error:', error),
-    onClose: () => console.log('WebSocket disconnected for session:', sessionId),
+    onClose: handleWsClose,
     attachSessionEndedHandler,
   })
 
