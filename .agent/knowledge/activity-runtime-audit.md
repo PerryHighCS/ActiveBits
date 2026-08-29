@@ -73,11 +73,45 @@ Each activity must document:
 
 ### binary-breach
 
-- HTTP: create; state; settings; new mission; student register/answer/retry/hint.
-- WebSocket: `/ws/binary-breach` shared by student and manager clients.
-- Sensitive state: named roster, per-student progress, current challenge/mission state.
-- Initial concern: student attribution and manager authority are activity-local; manager REST and socket access must migrate together.
-- [ ] Complete classification.
+- Configuration: standalone/direct/permalink/home entry, required waiting-room display name, client-only solo play, and persistent/embedded launch options for mission settings.
+- Session creation: the unauthenticated activity create route returns only `{ id }`; embedded/persistent sessions may instead arrive with `embeddedLaunch.selectedOptions`, which the normalizer reads to hydrate settings.
+- Stored fields: settings, students, mission seed, and active flag. Student records contain identity, connection timestamps, progress, challenge index, and the current private challenge.
+- Critical normalization issue: the normalizer reconstructs only activity fields and drops unknown platform metadata. It also consumes then drops `embeddedLaunch`, so subsequent normalization retains hydrated settings but loses the launch envelope and any accepted-entry/token data.
+
+| Route | Intended principal | Current principal source | Projection/mutation |
+| --- | --- | --- | --- |
+| `POST /api/binary-breach/create` | public creation adapter | none | Creates session and returns ID; issues no manager capability. |
+| `GET /api/binary-breach/:sessionId/state` | manager | session ID only | Returns mission settings and named roster with connection state, progress, and challenge index. |
+| `POST /api/binary-breach/:sessionId/settings` | manager | session ID only | Replaces settings and broadcasts roster/settings. |
+| `POST /api/binary-breach/:sessionId/mission/new` | manager | session ID only | Resets every student and broadcasts manager roster plus per-student mission state. |
+| `POST /api/binary-breach/:sessionId/student/register` | student | body `studentId`/`studentName` | Finds or creates a student and returns that student's challenge/progress. |
+| `POST /api/binary-breach/:sessionId/student/answer` | student | body `studentId`/`studentName` | Validates against and advances the selected student's stored challenge. |
+| `POST /api/binary-breach/:sessionId/student/retry` | student | body `studentId`/`studentName` | Resets the selected student's mission. |
+| `POST /api/binary-breach/:sessionId/student/hint` | student | body `studentId`/`studentName` | Mutates hint/progress state and returns the selected student's challenge/hint. |
+
+`ensureStudent` trusts valid request IDs. A caller can select an existing student by ID, rename that record using a supplied name, and answer, retry, or request hints as that student. An unknown supplied ID creates a record with that server-accepted ID. Registration is therefore not merely public enrollment; it is also the identity resolver for every protected student mutation.
+
+#### WebSocket boundary
+
+- The shared namespace reads `sessionId`, `studentId`, and `studentName` from query parameters and subscribes before resolving any role or identity.
+- An anonymous session-ID-only socket is retained as the manager/observer path. On every connection the server broadcasts the manager roster to all session sockets.
+- A claimed student ID/name is passed to the same permissive `ensureStudent` resolver, with no accepted-entry or participant-cookie check.
+- `binary-breach:roster` includes every student's name, connected status, progress, and challenge index and is delivered to managers, students, and anonymous sockets through both local and unfiltered pub/sub delivery.
+- `binary-breach:mission-reset` contains one student's private current challenge/progress/settings and is targeted locally by matching request-controlled socket ID/name. It is not published, but a forged student socket can match another student and receive their reset state.
+- There are no inbound socket messages. Student answer/hint/retry traffic is HTTP.
+- Duplicate sockets are not closed or reference-counted; closing any socket carrying an ID marks that participant disconnected even if another connection remains active.
+
+#### Persistence, recovery, and tests
+
+- Students persist request-visible identity in `localStorage` and resolve waiting-room handoff via `sessionStorage`; there is no separate local stats store because progress is server-owned.
+- Student reload immediately calls the claimed-identity registration route, then opens a claimed-identity socket. Cookie loss is not detected.
+- The manager stores no credential. It polls the unprotected manager state every 2.5 seconds and uses an anonymous socket for roster updates.
+- Server tests provide useful domain coverage for creation, embedded setting hydration, duplicate display names, answer validation, settings, hints, retry, mission reset, stale challenge behavior, and pub/sub failure tolerance. Manager component tests cover query-setting races and roster updates.
+- Missing tests cover every auth boundary: capability issuance/reload, manager route/socket denial, cookie-derived student selection, forged IDs/renames, cross-student mission reset delivery, roster audience isolation, pre-auth subscription, duplicate disconnect behavior, metadata preservation, and terminal recovery.
+
+Migration implication: the practice pilot principal/projection contract generalizes without a new role. Binary Breach adds private per-student command responses and targeted socket delivery, so shared runtime APIs must support `sendToParticipant(principalId, ...)` in addition to role-audience broadcasts.
+
+- [x] Complete route, message, persistence, recovery, and test classification.
 
 ### embedded-test
 
@@ -292,7 +326,9 @@ Missing cases include platform metadata preservation, explicit observer policy, 
 - [x] Audit `java-string-practice` to determine how much of Java Format's behavior is copied and how much differs.
 - [x] Audit `python-list-practice` to test whether the same contract covers a third practice activity without activity-specific exceptions.
 - [ ] Consolidate the three practice audits into pilot requirements and decide whether anonymous observer access is needed by any of them.
-- [ ] Audit `binary-breach` as the next distinct student-progress activity.
+- [x] Audit `binary-breach` as the next distinct student-progress activity.
+- [x] Add targeted participant delivery to the proposed WebSocket contract requirements.
+- [ ] Audit `traveling-salesman` next because its split route modules test shared HTTP middleware composition and its leaderboard tests public-versus-manager projection decisions.
 
 ## Pilot Comparison: Java Format, MobCode, and Video Sync
 
@@ -336,6 +372,7 @@ The completed Java Format, Java String, and Python List audits establish the min
 - [ ] Resolve and authenticate the role before subscribing the socket, retaining it as an activity client, or sending an initial snapshot.
 - [ ] Store the resolved principal on the server-side socket; query `role` is at most an admission hint.
 - [ ] Deliver roster/progress messages only to managers and configuration messages only to authenticated students/managers.
+- [ ] Provide participant-targeted delivery keyed by the authenticated principal ID for private challenge/state resets; never target using socket query claims.
 - [ ] Apply the same audience rules to local delivery and cross-instance pub/sub.
 - [ ] Standardize duplicate student connection/disconnect behavior so one stale socket cannot mark an active participant disconnected.
 - [ ] Use a shared terminal authentication failure code/reason that stops reconnect loops and sends students through normal waiting-room re-entry.

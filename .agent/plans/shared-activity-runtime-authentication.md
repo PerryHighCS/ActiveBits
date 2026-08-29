@@ -205,6 +205,7 @@ Deliverables:
 - [ ] Resolve principal before retaining an activity socket or subscribing it to broadcasts.
 - [ ] Store authenticated role and principal ID on the server-side socket object.
 - [ ] Route outbound messages by authenticated audience, not client query parameters.
+- [ ] Provide participant-targeted delivery keyed by the authenticated student principal for private activity state.
 - [ ] Standardize manager, student, public-display, and specialized-role registration.
 - [ ] Standardize duplicate participant socket handling and disconnect lifecycle callbacks.
 - [ ] Define one versioned authentication-close/error protocol.
