@@ -533,7 +533,7 @@ export function setupSessionRoutes(app: {
 
     try {
       const body = req.body != null && typeof req.body === 'object' ? (req.body as Record<string, unknown>) : {}
-      const { token, values } = storeSessionEntryParticipant(session, body.values)
+      const { token, values } = storeSessionEntryParticipant(session, body.values, { trustParticipantId: false })
       await sessions.set(sessionId, session)
       res.json({ entryParticipantToken: token, values })
     } catch (error) {
