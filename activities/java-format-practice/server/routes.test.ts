@@ -2,6 +2,8 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import setupJavaFormatPracticeRoutes from './routes.js'
 import type { SessionRecord } from 'activebits-server/core/sessions.js'
+import { acceptEntryParticipant, getSessionParticipantCookieName, issueAcceptedEntryParticipantToken } from 'activebits-server/core/acceptedEntryParticipants.js'
+import { getActivityCapabilityCookieName, issueActivityCapability } from 'activebits-server/core/activityCapabilities.js'
 
 type Handler = (req: { params: Record<string, string>; body?: unknown; cookies?: Record<string, unknown> }, res: MockResponse) => void | Promise<void>
 
@@ -51,4 +53,41 @@ void test('Java Format creation issues a manager cookie and manager routes rejec
   const wrongSession = new MockResponse()
   await difficulty({ params: { sessionId: 'wrong-session' }, body: { difficulty: 'advanced' }, cookies: { [managerCookie.name]: managerCookie.value } }, wrongSession)
   assert.equal(wrongSession.statusCode, 404)
+})
+
+void test('Java Format websocket admits only cookie principals and keeps roster updates manager-only', async () => {
+  let socketHandler: ((socket: any, query: URLSearchParams) => void) | null = null
+  const records = new Map<string, SessionRecord>()
+  const session: SessionRecord = { id: 'session-a', type: 'java-format-practice', created: 1, lastActivity: 1, data: { students: [] } }
+  const manager = issueActivityCapability(session, 'manager')
+  acceptEntryParticipant(session, { participantId: 'student-a', displayName: 'Ada' })
+  const participantToken = issueAcceptedEntryParticipantToken(session, 'student-a')
+  records.set(session.id, session)
+  const clients = new Set<any>()
+  const ws = { wss: { clients, close() {} }, register(_path: string, handler: any) { socketHandler = handler } }
+  const app = { post() {}, get() {} }
+  const sessions = { get: async (id: string) => records.get(id) ?? null, set: async (id: string, record: SessionRecord) => { records.set(id, record) } }
+  setupJavaFormatPracticeRoutes(app as never, sessions as never, ws as never)
+  assert.ok(socketHandler)
+
+  const makeSocket = (cookie = '') => {
+    const sent: string[] = []
+    const socket = { readyState: 1, upgradeHeaders: { cookie }, send: (value: string) => sent.push(value), close: (code?: number, reason?: string) => { socket.closed = { code, reason } }, on() {}, once() {}, terminate() {}, ping() {}, sent, closed: null as any }
+    clients.add(socket)
+    return socket
+  }
+  const denied = makeSocket()
+  socketHandler(denied, new URLSearchParams(`sessionId=${session.id}`))
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  assert.deepEqual(denied.closed, { code: 1008, reason: 'activity-auth-required' })
+
+  const managerSocket = makeSocket(`${getActivityCapabilityCookieName('manager', session.id)}=${manager.token}`)
+  socketHandler(managerSocket, new URLSearchParams(`sessionId=${session.id}`))
+  const studentSocket = makeSocket(`${getSessionParticipantCookieName(session.id)}=${participantToken}`)
+  socketHandler(studentSocket, new URLSearchParams(`sessionId=${session.id}`))
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  assert.equal(managerSocket.principalKind, 'manager')
+  assert.equal(studentSocket.principalKind, 'participant')
+  assert.ok(managerSocket.sent.some((value) => JSON.parse(value).type === 'studentsUpdate'))
+  assert.equal(studentSocket.sent.some((value) => JSON.parse(value).type === 'studentsUpdate'), false)
 })
