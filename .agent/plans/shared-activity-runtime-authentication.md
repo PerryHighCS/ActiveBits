@@ -4,6 +4,7 @@
 
 - [x] Recognize the repository-wide architecture problem exposed by issue #341 and PR #342.
 - [x] Inventory registered activities at a coarse level for sessions, WebSockets, entry configuration, and existing identity/authentication code.
+- [x] Start the durable audit matrix in `.agent/knowledge/activity-runtime-audit.md` with all registered activities represented.
 - [ ] Complete a route-by-route and message-by-message audit before defining the final shared contract.
 - [ ] Implement in small, independently reviewable PRs rather than another repository-wide rollout PR.
 
@@ -169,7 +170,7 @@ For every activity, record the following in a single audit matrix:
 
 Deliverables:
 
-- [ ] Add an activity runtime audit matrix under `.agent/knowledge/data-contracts.md` or a dedicated durable knowledge file.
+- [x] Add an activity runtime audit matrix under `.agent/knowledge/activity-runtime-audit.md`.
 - [ ] Assign each route/message one explicit principal requirement.
 - [ ] Identify existing vulnerabilities separately from migration regressions.
 - [ ] Identify activity behavior that should remain intentionally public.
