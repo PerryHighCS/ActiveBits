@@ -138,11 +138,10 @@ export default function setupJavaFormatPracticeRoutes(
 
   ws.register('/ws/java-format-practice', (socket, query) => {
     const client = socket as JavaFormatSocket
-    client.sessionId = query.get('sessionId') || null
-    ensureBroadcastSubscription(client.sessionId)
+    const requestedSessionId = query.get('sessionId') || null
 
-    if (client.sessionId) {
-      const activeSessionId = client.sessionId
+    if (requestedSessionId) {
+      const activeSessionId = requestedSessionId
 
       ;(async () => {
         const session = asJavaFormatSession(await sessions.get(activeSessionId))
@@ -155,6 +154,8 @@ export default function setupJavaFormatPracticeRoutes(
         })
         if (manager) {
           client.principalKind = 'manager'
+          client.sessionId = activeSessionId
+          ensureBroadcastSubscription(activeSessionId)
           console.info('Java Format manager websocket admitted', { sessionId: activeSessionId, capabilityId: manager.capabilityId })
           return
         }
@@ -187,6 +188,8 @@ export default function setupJavaFormatPracticeRoutes(
           return
         }
         client.principalKind = 'participant'
+        client.sessionId = activeSessionId
+        ensureBroadcastSubscription(activeSessionId)
         client.studentName = result.participantName
         const { participantId, isNew } = result
         client.studentId = participantId
