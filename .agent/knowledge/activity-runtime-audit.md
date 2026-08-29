@@ -149,11 +149,30 @@ Missing boundary cases: manager capability issuance/reload, unauthorized manager
 
 ### java-string-practice
 
-- HTTP: create; session read; methods; progress; students.
-- WebSocket: `/ws/java-string-practice` shared by student and manager clients.
-- Sensitive state: named roster and attributed progress.
-- Initial concern: close sibling of Java Format; use it to verify the shared contract generalizes without copy/paste auth.
-- [ ] Complete classification.
+- Configuration and creation modes match Java Format: standalone/direct/permalink/home entry, required waiting-room display name, client-only synthetic solo sessions, and one unauthenticated activity create route returning only the session ID.
+- Stored fields are `students` and `selectedMethods`. Its normalizer also spreads unknown session fields, preserving platform metadata.
+- Browser state uses the shared participant identity/handoff helpers. Unlike Java Format, exercise stats are stored under `java-string-stats-${sessionId}` rather than a participant-scoped key, so two participants using the same browser/session can inherit one another's local stats.
+
+| Route | Intended principal | Current principal source | Projection/mutation |
+| --- | --- | --- | --- |
+| `POST /api/java-string-practice/create` | public creation adapter | none | Creates session; returns ID; issues no manager capability. |
+| `GET /api/java-string-practice/:sessionId` | public/session member | session ID only | Narrow projection of ID, type, and selected methods. |
+| `POST /api/java-string-practice/:sessionId/methods` | manager | session ID only | Changes allowed methods and broadcasts them. |
+| `POST /api/java-string-practice/:sessionId/progress` | student | body `studentId` and body `studentName` | Replaces attributed stats and broadcasts full roster. |
+| `GET /api/java-string-practice/:sessionId/students` | manager | session ID only | Returns named roster, connection timestamps, and stats. |
+
+The WebSocket implementation is structurally the same as Java Format:
+
+- Student query claims are `sessionId`, `studentId`, and `studentName`; a supplied name bypasses the accepted-entry-name lookup and an unknown supplied ID can become a new participant.
+- The manager supplies only `sessionId`, so student-shaped admission sends `waiting-room-required` and closes it. Live manager roster updates therefore do not work.
+- `studentId` is socket-private, while `studentsUpdate` (full roster) and `methodsUpdate` are broadcast to every socket in the session, including through unfiltered pub/sub.
+- There are no inbound domain socket messages. Duplicate-ID and disconnect behavior matches Java Format.
+
+Recovery also matches Java Format: local request-visible student hints are replayed without activity-level cookie enforcement, while the manager has no credential or credential recovery. All five handlers lack top-level error handling and structured logs.
+
+Existing activity tests cover route validators and client/domain utilities only. Shared entry and Playwright waiting-room tests exercise platform handoff behavior but do not test these activity routes, socket admission, role audiences, forged attribution, manager reload, or auth expiry.
+
+- [x] Complete route, message, persistence, recovery, and test classification.
 
 ### mobcode
 
@@ -247,8 +266,8 @@ Missing boundary cases: manager capability issuance/reload, unauthorized manager
 - [x] Fully audit `java-format-practice` as the representative simple shared student/manager WebSocket activity.
 - [x] Produce its exact route principal table, WebSocket message audience table, session fields, client persistence, and missing tests.
 - [x] Compare its manager boundary with `mobcode` and `video-sync` before proposing the shared manager-capability contract.
-- [ ] Audit `java-string-practice` next to determine how much of Java Format's behavior is copied and how much differs.
-- [ ] Then audit `python-list-practice` to test whether the same contract covers a third practice activity without activity-specific exceptions.
+- [x] Audit `java-string-practice` to determine how much of Java Format's behavior is copied and how much differs.
+- [ ] Audit `python-list-practice` to test whether the same contract covers a third practice activity without activity-specific exceptions.
 
 ## Pilot Comparison: Java Format, MobCode, and Video Sync
 
