@@ -97,11 +97,55 @@ Each activity must document:
 
 ### java-format-practice
 
-- HTTP: create; session read; difficulty; theme; stats; students.
-- WebSocket: `/ws/java-format-practice` shared by student and manager clients.
-- Sensitive state: named roster and attributed progress.
-- Initial concern: representative pilot for automatic manager capability plus student principal enforcement across both transports.
-- [ ] Complete classification.
+- Configuration: standalone entry, direct path, permalink, home-card visibility, and a required waiting-room `displayName`. Solo clients use a synthetic `solo-*` session ID and do not call the activity server.
+- Session creation: `POST /create` creates one activity session, initializes normalized defaults, and returns only `{ id }`. It issues no manager capability. The same endpoint is the activity factory used by the shared creation flow; no second activity-local factory was found.
+- Stored activity fields: `students`, `selectedDifficulty`, and `selectedTheme`. The normalizer spreads unknown fields before replacing these fields, so platform-owned accepted-entry and participant-token metadata survives normalization.
+- Browser state: students keep the display name and request-visible participant ID in `localStorage`; exercise statistics are also stored under the session and participant ID. Waiting-room handoff resolution reads `sessionStorage`. The manager stores no credential because none is issued.
+
+#### HTTP principal table
+
+| Route | Intended principal | Current principal source | Projection/mutation | Confirmed boundary |
+| --- | --- | --- | --- | --- |
+| `POST /api/java-format-practice/create` | public creation adapter | none | Creates session; returns ID | Creation is directly callable; automatic manager authority cannot currently be established. |
+| `GET /api/java-format-practice/:sessionId` | public/session member | none beyond session ID | Returns ID, type, difficulty, theme | Narrow public projection; roster is excluded. |
+| `POST /api/java-format-practice/:sessionId/difficulty` | manager | none beyond session ID | Mutates difficulty; broadcasts it | Anyone knowing the session ID can control it. |
+| `POST /api/java-format-practice/:sessionId/theme` | manager | none beyond session ID | Mutates theme; broadcasts it | Anyone knowing the session ID can control it. |
+| `POST /api/java-format-practice/:sessionId/stats` | student | body `studentId`, with optional body name fallback | Replaces one participant's attributed statistics; broadcasts the full roster | The route does not resolve the participant cookie and accepts a request-controlled participant ID. |
+| `GET /api/java-format-practice/:sessionId/students` | manager | none beyond session ID | Returns names, connection state, timestamps, and statistics | The full roster is readable to anyone knowing the session ID. |
+
+All six handlers lack a top-level error boundary and use a mix of unstructured console logging and no logging, so they also fall short of the shared route error/logging contract.
+
+#### WebSocket principal and message table
+
+The student and manager clients both connect to `/ws/java-format-practice`. Admission currently has one student-shaped path:
+
+- The server reads `sessionId`, `studentId`, and `studentName` from the query string.
+- It calls `connectAcceptedSessionParticipant`, but that helper uses an accepted entry only to recover a missing name. A supplied non-empty name is sufficient, and a supplied unknown participant ID is inserted as a new participant.
+- The manager connects with only `sessionId`. It therefore has neither an accepted participant nor a fallback name; the helper returns `null` and the server sends `waiting-room-required` before closing with code 1008. The current manager socket cannot receive live roster updates.
+- A successfully admitted socket receives `studentId`. Duplicate sockets are closed by participant ID, and close marks that participant disconnected.
+- The server accepts no inbound domain messages. All mutations use HTTP.
+
+| Outbound message | Current audience | Data | Intended audience |
+| --- | --- | --- | --- |
+| `studentId` | newly admitted socket | participant ID | authenticated student only |
+| `studentsUpdate` | every open socket with matching session ID | full named roster and statistics | manager only |
+| `difficultyUpdate` | every open socket with matching session ID | selected difficulty | authenticated student plus manager |
+| `themeUpdate` | every open socket with matching session ID | selected theme | authenticated student plus manager |
+| `error` / `waiting-room-required` | rejected socket | auth failure code/message | rejected socket only |
+| shared `session-ended` | matching session sockets through platform behavior | termination signal | all admitted roles |
+
+Pub/sub broadcast filtering is session-only, so the same missing audience boundary exists across instances.
+
+#### Recovery and test coverage
+
+- Student reload reconstructs request-visible identity from local storage and the shared handoff resolver, then reconnects with ID/name query claims. Cookie loss is not enforced by this activity socket or stats route.
+- Manager reload has no credential to recover. The page can still call manager REST endpoints, but its socket is rejected as a student without a name.
+- Existing activity tests cover domain formatting and validation utilities plus module exports. No activity route or socket boundary tests exist.
+- Shared persistent-entry tests mention the activity only as a configuration fixture; they do not cover these handlers.
+
+Missing boundary cases: manager capability issuance/reload, unauthorized manager REST reads and writes, cookie-derived student attribution, forged participant IDs/names, manager socket admission, unauthorized sockets receiving no snapshots or broadcasts, audience-filtered pub/sub, duplicate/reconnect behavior after cookie expiry, and structured handler failures.
+
+- [x] Complete route, message, persistence, recovery, and test classification.
 
 ### java-string-practice
 
@@ -200,6 +244,24 @@ Each activity must document:
 
 ## Next Audit Slice
 
-- [ ] Fully audit `java-format-practice` as the representative simple shared student/manager WebSocket activity.
-- [ ] Produce its exact route principal table, WebSocket message audience table, session fields, client persistence, and missing tests.
-- [ ] Compare it with `mobcode` and `video-sync` before proposing the shared manager-capability contract.
+- [x] Fully audit `java-format-practice` as the representative simple shared student/manager WebSocket activity.
+- [x] Produce its exact route principal table, WebSocket message audience table, session fields, client persistence, and missing tests.
+- [x] Compare its manager boundary with `mobcode` and `video-sync` before proposing the shared manager-capability contract.
+- [ ] Audit `java-string-practice` next to determine how much of Java Format's behavior is copied and how much differs.
+- [ ] Then audit `python-list-practice` to test whether the same contract covers a third practice activity without activity-specific exceptions.
+
+## Pilot Comparison: Java Format, MobCode, and Video Sync
+
+This comparison is limited to evidence needed to choose the pilot contract; it is not a completed audit of MobCode or Video Sync.
+
+| Concern | Java Format | MobCode | Video Sync | Contract implication |
+| --- | --- | --- | --- | --- |
+| Temporary creator authority | none | random passcode returned in JSON and stored in session | random passcode returned in JSON and stored in session | Replace client-readable temporary credentials with an automatically issued httpOnly manager capability. |
+| Manager REST | session ID only | passcode repeated in request bodies | passcode repeated in request bodies | Shared middleware should resolve the manager principal once from a cookie. |
+| Manager WebSocket | manager is rejected by student admission | query role is only a hint; `manager-auth` message is verified before manager mutations/audience | instructor query role triggers an auth-message challenge before subscription/snapshot | Preserve Video Sync's crucial ordering: authenticate before subscription or initial state, but source authority from the shared capability. |
+| Student REST identity | request body ID | accepted-entry httpOnly participant cookie | telemetry accepts optional body `studentId`; activity treats it as attribution, not authority | The shared student principal must replace claimed IDs for protected state; explicitly declare non-authoritative telemetry identifiers where needed. |
+| Outbound audience | session-only full-roster broadcast | explicit `all`/`managers` filtering, including pub/sub | common playback/telemetry projection after socket admission | Shared delivery needs authenticated audience filtering modeled after MobCode, not activity-local socket flags. |
+| Recovery | student local hints; no manager credential | location/router bootstrap, then `sessionStorage` fallback | location/router bootstrap plus persistent/embedded teacher-cookie recovery | Keep persistent/embedded authority adapters, but do not retain browser-stored passcodes in the new temporary-session design. |
+| Projection | narrow public state; separate unprotected roster | explicit student and manager snapshots | explicit public session projection excludes passcode | Make projections declared and role-specific; retain proven narrow projection builders. |
+
+The comparison supports Java Format as the first migration: it is small enough to expose the complete contract, while MobCode supplies audience/projection examples and Video Sync supplies the correct authenticate-before-subscribe lifecycle. Neither passcode implementation should be copied as the new temporary manager credential model.
