@@ -99,19 +99,13 @@ if (!env.startsWith('dev')) {
   })
 
   const { createProxyMiddleware } = await import('http-proxy-middleware')
-  const keepAliveAgent = new http.Agent({ keepAlive: true, maxSockets: 128, keepAliveMsecs: 30_000 })
-
   const viteProxy = createProxyMiddleware({
     target: 'http://127.0.0.1:5173',
     changeOrigin: true,
     ws: true,
     xfwd: true,
-    agent: keepAliveAgent,
     proxyTimeout: 30_000,
     timeout: 30_000,
-    headers: {
-      connection: 'keep-alive',
-    },
     pathFilter: (pathname) => {
       if (pathname.startsWith('/api')) return false
       if (pathname.startsWith('/ws')) return false
