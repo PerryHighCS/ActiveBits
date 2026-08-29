@@ -229,7 +229,8 @@ Do not begin with all activities at once.
 
 ### Slice A: simple student + manager WebSocket activity
 
-- [ ] Use `java-format-practice` as the initial candidate unless Phase 1 finds a better representative.
+- [x] Select `java-format-practice` as the initial candidate based on the three-practice-activity audit and comparison with MobCode/Video Sync.
+- [x] Decide that the practice pilot has no anonymous observer socket; future activities must explicitly declare a real public-display use case.
 - [ ] Migrate create, manager REST, student REST, manager socket, and student socket together.
 - [ ] Verify zero-prompt instructor creation and live updates.
 - [ ] Verify student waiting-room entry, reload, cookie expiry, and rejoin.

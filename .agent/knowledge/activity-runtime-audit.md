@@ -309,3 +309,59 @@ This comparison is limited to evidence needed to choose the pilot contract; it i
 | Projection | narrow public state; separate unprotected roster | explicit student and manager snapshots | explicit public session projection excludes passcode | Make projections declared and role-specific; retain proven narrow projection builders. |
 
 The comparison supports Java Format as the first migration: it is small enough to expose the complete contract, while MobCode supplies audience/projection examples and Video Sync supplies the correct authenticate-before-subscribe lifecycle. Neither passcode implementation should be copied as the new temporary manager credential model.
+
+## Practice-Activity Pilot Requirements
+
+The completed Java Format, Java String, and Python List audits establish the minimum pilot contract. These requirements are evidence-backed by all three activities unless a narrower scope is stated.
+
+### Principal and creation requirements
+
+- [ ] Activity creation must establish a temporary manager capability for the creating browser without returning the credential in JSON or requiring an instructor prompt.
+- [ ] Session IDs remain routing identifiers and cannot authorize manager or student operations.
+- [ ] Student identity must resolve from the server-issued participant cookie. Request `studentId`, `studentName`, and similar fields may be retained temporarily as display/routing hints but cannot select the record being mutated.
+- [ ] A capability must be scoped to one session and role; credentials from another session or activity must fail closed.
+- [ ] Clean cutover is acceptable: no fallback to legacy claimed identities or credentialless manager access is required for sessions created before deployment.
+
+### HTTP requirements
+
+- [ ] Declare three projections: public configuration, authenticated student state, and authenticated manager roster/state.
+- [ ] Public configuration may include Java Format difficulty/theme, Java String selected methods, and Python List selected question types. It must exclude named rosters, participant IDs, connection timestamps, and attributed statistics.
+- [ ] Manager configuration mutations and roster reads require the manager principal.
+- [ ] Student progress/statistics mutations derive attribution only from the student principal.
+- [ ] Student-private and manager-private responses use `Cache-Control: no-store`.
+- [ ] Shared wrappers provide activity/session validation, consistent status codes, structured denial/error logging, and top-level exception handling.
+
+### WebSocket requirements
+
+- [ ] Resolve and authenticate the role before subscribing the socket, retaining it as an activity client, or sending an initial snapshot.
+- [ ] Store the resolved principal on the server-side socket; query `role` is at most an admission hint.
+- [ ] Deliver roster/progress messages only to managers and configuration messages only to authenticated students/managers.
+- [ ] Apply the same audience rules to local delivery and cross-instance pub/sub.
+- [ ] Standardize duplicate student connection/disconnect behavior so one stale socket cannot mark an active participant disconnected.
+- [ ] Use a shared terminal authentication failure code/reason that stops reconnect loops and sends students through normal waiting-room re-entry.
+
+### Observer decision for the pilot
+
+None of the three practice activities has a user-facing observer/display client. Python List's anonymous socket is an implementation shortcut for its manager, not evidence of an intentional public role. Therefore:
+
+- [x] The practice pilot will not admit anonymous observer sockets.
+- [ ] The future shared contract may support an explicitly declared public-display principal/projection for activities that demonstrate a real display use case.
+- [ ] Anonymous/public access must never inherit manager messages merely because it knows a session ID.
+
+### Session metadata and client recovery requirements
+
+- [ ] Platform-owned authentication metadata must live outside activity-owned normalized data where feasible, or be preserved by construction through a shared session envelope.
+- [ ] Add a contract test that runs each activity normalizer and proves platform metadata survives; Python List is the known failing specimen.
+- [ ] Keep request-visible participant ID/name only as non-secret UI/recovery hints; loss of the httpOnly participant token requires waiting-room re-entry.
+- [ ] Manager reload succeeds automatically while the httpOnly manager capability remains valid and presents a clear recovery route when it does not.
+- [ ] Preserve non-sensitive local exercise progress, with participant-scoped keys for shared browsers.
+
+### Required pilot tests
+
+- [ ] Creation emits exactly one scoped, non-empty httpOnly manager cookie with the intended SameSite/Secure/path/expiry attributes.
+- [ ] Missing, forged, expired, and wrong-session manager capabilities cannot read rosters, mutate configuration, subscribe, or receive later broadcasts.
+- [ ] Missing, forged, expired, and wrong-session participant capabilities cannot mutate progress or subscribe as that participant.
+- [ ] Claimed participant IDs/names cannot overwrite or create another student's server record.
+- [ ] Authenticated managers receive roster updates; authenticated students receive configuration updates but never the roster.
+- [ ] Pub/sub delivery enforces the same role audiences as in-process delivery.
+- [ ] Reload, duplicate socket replacement, cookie loss, terminal close, and waiting-room re-entry are covered at unit/integration level, with one browser-level happy path plus expiry/recovery path.
