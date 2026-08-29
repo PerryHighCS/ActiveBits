@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { initializeActivityRegistry } from './activities/activityRegistry.js'
 import { EMBEDDED_CHILD_SESSION_PREFIX, setupSessionRoutes, type SessionRecord } from './core/sessions.js'
+import { resolveAcceptedEntryParticipantToken } from './core/acceptedEntryParticipants.js'
 
 interface MockResponse {
   statusCode: number
@@ -14,7 +15,7 @@ interface MockResponse {
   json(payload: Record<string, unknown>): void
 }
 
-type MockRequest = { params: Record<string, string>; body?: Record<string, unknown> }
+type MockRequest = { params: Record<string, string>; body?: Record<string, unknown>; cookies?: Record<string, unknown> }
 type RouteHandler = (req: MockRequest, res: MockResponse) => void | Promise<void>
 
 function createMockApp(): {
@@ -377,6 +378,13 @@ void test('session entry participant routes store and consume waiting-room value
   assert.equal(consumeRes.cookies[0]?.options.httpOnly, true)
   assert.equal(consumeRes.cookies[0]?.options.sameSite, 'lax')
   assert.equal(consumeRes.cookies[0]?.options.path, '/')
+  assert.ok(resolveAcceptedEntryParticipantToken(sessionMap.get('session-3')!, consumeRes.cookies[0]!.value))
+  const entryRes = createMockResponse()
+  await getRoute(app, 'get', '/api/session/:sessionId/entry')({
+    params: { sessionId: 'session-3' },
+    cookies: { [consumeRes.cookies[0]!.name]: consumeRes.cookies[0]!.value },
+  }, entryRes)
+  assert.equal(entryRes.jsonBody?.participantAuthenticated, true)
   assert.deepEqual(
     consumeRes.jsonBody,
     {

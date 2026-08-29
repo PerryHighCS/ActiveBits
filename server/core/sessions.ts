@@ -21,6 +21,7 @@ import {
   acceptEntryParticipant,
   getSessionParticipantCookieName,
   issueAcceptedEntryParticipantToken,
+  resolveAcceptedEntryParticipantToken,
 } from './acceptedEntryParticipants.js'
 import { consumeSessionDataToken } from './sessionTokenUtils.js'
 
@@ -455,7 +456,7 @@ function setNoStore(response: ResponseLike): void {
 }
 
 export function setupSessionRoutes(app: {
-  get(path: string, handler: (req: { params: { sessionId: string } }, res: ResponseLike) => void | Promise<void>): void
+  get(path: string, handler: (req: { params: { sessionId: string }; cookies?: Record<string, unknown> }, res: ResponseLike) => void | Promise<void>): void
   post(path: string, handler: (req: { params: { sessionId: string }; body?: unknown }, res: ResponseLike) => void | Promise<void>): void
   delete(path: string, handler: (req: { params: { sessionId: string } }, res: ResponseLike) => void | Promise<void>): void
 }, sessions: SessionStore, wss: WsServerLike | null = null): void {
@@ -469,6 +470,10 @@ export function setupSessionRoutes(app: {
 
     const activityName = typeof session.type === 'string' ? session.type : ''
     const waitingRoomFieldCount = activityName ? getActivityWaitingRoomFieldCount(activityName) : 0
+    const participantAuthenticated = Boolean(resolveAcceptedEntryParticipantToken(
+      session,
+      req.cookies?.[getSessionParticipantCookieName(sessionId)],
+    ))
     const payload = {
       ...buildSessionEntryStatus({
         sessionId,
@@ -477,6 +482,7 @@ export function setupSessionRoutes(app: {
         resolvedRole: 'student',
         entryOutcome: 'join-live',
       }),
+      ...(participantAuthenticated ? { participantAuthenticated: true } : {}),
     } satisfies SessionEntryStatus & Record<string, unknown>
     res.json(payload)
   })

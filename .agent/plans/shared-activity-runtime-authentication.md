@@ -246,9 +246,9 @@ Do not begin with all activities at once.
 
 - [x] Select `java-format-practice` as the initial candidate based on the three-practice-activity audit and comparison with MobCode/Video Sync.
 - [x] Decide that the practice pilot has no anonymous observer socket; future activities must explicitly declare a real public-display use case.
-- [ ] Migrate create, manager REST, student REST, manager socket, and student socket together.
-- [ ] Verify zero-prompt instructor creation and live updates.
-- [ ] Verify student waiting-room entry, reload, cookie expiry, and rejoin.
+- [x] Migrate create, manager REST, student REST, manager socket, and student socket together (Java Format; commits `0d52082b` and `0c5bfcf4`).
+- [x] Verify zero-prompt instructor creation and manager cookie recovery (Java Format Playwright coverage).
+- [ ] Verify student waiting-room entry, reload, cookie expiry, and rejoin. Accepted-entry cookie recovery is covered; expiry and terminal re-entry remain to be exercised explicitly. Cookie-backed reload retains a non-sensitive local display-name hint; a fresh-browser cookie-only identity bootstrap remains a deliberate follow-up decision.
 - [ ] Review the contract before migrating a sibling activity.
 
 ### Slice B: REST-only/private projection activity
