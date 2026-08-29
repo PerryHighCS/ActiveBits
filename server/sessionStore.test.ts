@@ -177,6 +177,61 @@ void test('SyncDeck normalization preserves linked-session keepalive records', a
   assert.ok((await sessions.get(linkedSession.id))!.lastActivity! > 1)
 })
 
+void test('normalization re-attaches platform-owned auth state a normalizer would drop', async (t) => {
+  const { normalizeSyncDeckSessionData } = await import('../activities/syncdeck/server/routes.js')
+  resetSessionNormalizersForTests()
+  registerSessionNormalizer('syncdeck', (session) => {
+    // The real SyncDeck normalizer rebuilds `data` from an explicit key list and
+    // does not carry `participantAuthTokens` / `activityCapabilities` forward.
+    session.data = normalizeSyncDeckSessionData(session.data)
+  })
+  const sessions = createSessionStore(null, 1_000)
+  t.after(async () => {
+    await sessions.close()
+    resetSessionNormalizersForTests()
+  })
+
+  const session = await createSession(sessions)
+  session.type = 'syncdeck'
+  session.data = {
+    participantAuthTokens: { 'hash-1': 'student-1' },
+    activityCapabilities: { 'cap-1': { id: 'cap-1', tokenHash: 'h', principalKind: 'manager', issuedAt: 1, expiresAt: 2 } },
+    acceptedEntryParticipants: { 'student-1': { participantId: 'student-1' } },
+  }
+  await sessions.set(session.id, session)
+
+  const loaded = await sessions.get(session.id)
+  assert.ok(loaded)
+  const data = loaded.data as {
+    participantAuthTokens?: Record<string, string>
+    activityCapabilities?: Record<string, { id?: string }>
+    acceptedEntryParticipants?: Record<string, unknown>
+  }
+  assert.deepEqual(data.participantAuthTokens, { 'hash-1': 'student-1' })
+  assert.equal(data.activityCapabilities?.['cap-1']?.id, 'cap-1')
+  assert.ok(data.acceptedEntryParticipants && 'student-1' in data.acceptedEntryParticipants)
+})
+
+void test('normalization keeps a normalizer-provided platform key (even emptied) rather than restoring the old one', async (t) => {
+  resetSessionNormalizersForTests()
+  registerSessionNormalizer('reset-activity', (session) => {
+    session.data = { acceptedEntryParticipants: {} }
+  })
+  const sessions = createSessionStore(null, 1_000)
+  t.after(async () => {
+    await sessions.close()
+    resetSessionNormalizersForTests()
+  })
+
+  const session = await createSession(sessions)
+  session.type = 'reset-activity'
+  session.data = { acceptedEntryParticipants: { 'student-1': { participantId: 'student-1' } } }
+  await sessions.set(session.id, session)
+
+  const data = (await sessions.get(session.id))?.data as { acceptedEntryParticipants?: Record<string, unknown> }
+  assert.deepEqual(data.acceptedEntryParticipants, {})
+})
+
 void test('embedded child session reads refresh the parent session activity timestamp', async (t) => {
   const sessions = createSessionStore(null, 1_000)
   t.after(async () => {

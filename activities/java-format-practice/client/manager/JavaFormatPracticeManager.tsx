@@ -42,7 +42,12 @@ export default function JavaFormatPracticeManager() {
   // Serializes `/students` polls: the mount, on-open, and interval callers skip
   // starting a new request while one is in flight, so responses cannot pile up or
   // arrive out of order and a slow (>interval) request still gets to render.
-  const pollInFlightRef = useRef(false)
+  // `pollInFlightRef` holds the token of the poll that currently owns the slot
+  // (0 = free); `pollTokenRef` is the monotonic token source. A poll only clears
+  // the slot if it still owns it, so an aborted poll from a previous session
+  // cannot free the slot out from under the new session's request.
+  const pollInFlightRef = useRef(0)
+  const pollTokenRef = useRef(0)
   // The socket for the *current* sessionId. `disconnect()` closes the previous
   // session's socket but leaves its `onmessage` bound, so a message already
   // queued on it can still fire after a route swap; roster updates are only
@@ -115,13 +120,16 @@ export default function JavaFormatPracticeManager() {
     setManagerAuthLost(false);
     setStudents([]);
     rosterUpdateGenRef.current += 1;
-    pollInFlightRef.current = false;
+    // Invalidate any outstanding poll's ownership and free the slot for the new session.
+    pollTokenRef.current += 1;
+    pollInFlightRef.current = 0;
     activeSocketRef.current = null;
   }, [sessionId]);
 
   const fetchStudents = useCallback(async (signal?: AbortSignal) => {
-    if (sessionId == null || managerAuthLostRef.current || pollInFlightRef.current) return;
-    pollInFlightRef.current = true;
+    if (sessionId == null || managerAuthLostRef.current || pollInFlightRef.current !== 0) return;
+    const pollToken = (pollTokenRef.current += 1);
+    pollInFlightRef.current = pollToken;
     try {
       const rosterGenAtStart = rosterUpdateGenRef.current;
       const res = await fetch(`/api/java-format-practice/${sessionId}/students`, { signal });
@@ -145,7 +153,9 @@ export default function JavaFormatPracticeManager() {
       if (err instanceof DOMException && err.name === 'AbortError') return;
       console.error('Failed to fetch students:', err);
     } finally {
-      pollInFlightRef.current = false;
+      // Only release the slot if this poll still owns it (a session swap or a
+      // superseding reset may have handed it to a newer request).
+      if (pollInFlightRef.current === pollToken) pollInFlightRef.current = 0;
     }
   }, [sessionId, markManagerAuthLost]);
 

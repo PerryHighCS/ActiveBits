@@ -68,7 +68,10 @@ if (valkeyUrl && sessions.valkeyStore) {
 const ws = createWsRouter(
   server,
   sessions,
-  env === 'production' ? {} : { deferUpgradePath: (pathname) => pathname.startsWith('/vite-hmr') },
+  // Only defer `/vite-hmr` when the dev Vite proxy (and its own 'upgrade'
+  // listener) is actually installed — the same `env.startsWith('dev')` gate used
+  // below. In any other env this router is the sole listener and must destroy it.
+  env.startsWith('dev') ? { deferUpgradePath: (pathname) => pathname.startsWith('/vite-hmr') } : {},
 )
 setupSessionRoutes(app, sessions, ws.wss)
 
