@@ -394,7 +394,7 @@ export default function JavaFormatPractice({ sessionData }: JavaFormatPracticePr
       }).then((response) => {
         if (response.status === 403 && !authRecoveryStartedRef.current) {
           authRecoveryStartedRef.current = true;
-          void navigate(`/${sessionId}`, { replace: true });
+          window.location.assign(`/${sessionId}`);
           return;
         }
         if (!response.ok) {
@@ -402,7 +402,7 @@ export default function JavaFormatPractice({ sessionData }: JavaFormatPracticePr
         }
       }).catch((err) => console.error('Failed to sync stats:', err));
     }
-  }, [stats, sessionId, studentId, isSoloSession, navigate]);
+  }, [stats, sessionId, studentId, isSoloSession]);
 
   const getCurrentFormatCall = (): JavaFormatFormatCall | null => {
     if (!currentChallenge) return null;
