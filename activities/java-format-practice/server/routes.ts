@@ -129,19 +129,16 @@ export default function setupJavaFormatPracticeRoutes(
       })
     }
 
-    let clientCount = 0
     for (const socket of ws.wss.clients as Set<JavaFormatSocket>) {
       if (socket.readyState === 1 && socket.sessionId === sessionId && (audience === 'all' || socket.principalKind === audience)) {
         try {
           socket.send(message)
-          clientCount += 1
         } catch (error) {
           console.error('Failed to send to client:', error)
         }
       }
     }
 
-    console.log(`Broadcast ${type} to ${clientCount} clients in session ${sessionId}`)
   }
 
   ws.register('/ws/java-format-practice', (socket, query) => {
@@ -154,7 +151,6 @@ export default function setupJavaFormatPracticeRoutes(
 
       ;(async () => {
         const session = asJavaFormatSession(await sessions.get(activeSessionId))
-        console.log('Found session:', session ? 'yes' : 'no')
         if (!session) return
 
         const cookieHeader = client.upgradeHeaders?.cookie
@@ -167,7 +163,6 @@ export default function setupJavaFormatPracticeRoutes(
           client.principalKind = 'manager'
           client.sessionId = activeSessionId
           ensureBroadcastSubscription(activeSessionId)
-          console.info('Java Format manager websocket admitted', { sessionId: activeSessionId, capabilityId: manager.capabilityId })
           return
         }
 
@@ -208,24 +203,22 @@ export default function setupJavaFormatPracticeRoutes(
         client.sessionId = activeSessionId
         ensureBroadcastSubscription(activeSessionId)
         client.studentName = result.participantName
-        const { participantId, isNew } = result
+        const { participantId } = result
         client.studentId = participantId
 
-        if (!isNew) {
-          console.log(`Reconnecting student: ${result.participantName} (${participantId})`)
-        } else {
-          console.log(`New student joining: ${result.participantName}`)
-        }
         closeDuplicateParticipantSockets(ws.wss.clients as Set<JavaFormatSocket>, client)
 
         await sessions.set(session.id, session)
-        console.log('Total students in session:', session.data.students.length)
         await broadcast('studentsUpdate', { students: session.data.students }, session.id, 'manager')
 
         if (client.studentId) {
           client.send(JSON.stringify({ type: 'studentId', payload: { studentId: client.studentId } }))
         }
-      })().catch((error) => console.error('Error in student join:', error))
+      })().catch((error) => console.error(JSON.stringify({
+        event: 'java-format.websocket-participant-join-failed',
+        sessionId: activeSessionId,
+        error: String(error),
+      })))
     }
 
     client.on('close', () => {
@@ -245,7 +238,11 @@ export default function setupJavaFormatPracticeRoutes(
 
         await sessions.set(session.id, session)
         await broadcast('studentsUpdate', { students: session.data.students }, session.id, 'manager')
-      })().catch((error) => console.error('Error in student disconnect:', error))
+      })().catch((error) => console.error(JSON.stringify({
+        event: 'java-format.websocket-participant-disconnect-failed',
+        sessionId: activeSessionId,
+        error: String(error),
+      })))
     })
   })
 
@@ -304,7 +301,6 @@ export default function setupJavaFormatPracticeRoutes(
     const body = isPlainObject(req.body) ? req.body : {}
     const difficulty = validateDifficulty(body.difficulty)
 
-    console.log(`Updating difficulty for session ${session.id}:`, difficulty)
     session.data.selectedDifficulty = difficulty
     await sessions.set(session.id, session)
     await broadcast('difficultyUpdate', { difficulty }, session.id)
@@ -332,7 +328,6 @@ export default function setupJavaFormatPracticeRoutes(
     const body = isPlainObject(req.body) ? req.body : {}
     const theme = validateTheme(body.theme)
 
-    console.log(`Updating theme for session ${session.id}:`, theme)
     session.data.selectedTheme = theme
     await sessions.set(session.id, session)
     await broadcast('themeUpdate', { theme }, session.id)
@@ -399,7 +394,7 @@ export default function setupJavaFormatPracticeRoutes(
     }
 
     if (!resolveActivityPrincipalFromCookies(session, sessionId, 'manager', req.cookies)) {
-      console.warn('Java Format manager roster request denied', { sessionId })
+      console.warn(JSON.stringify({ event: 'java-format.manager-roster-denied', sessionId }))
       res.status(403).json({ error: 'manager authentication required' })
       return
     }

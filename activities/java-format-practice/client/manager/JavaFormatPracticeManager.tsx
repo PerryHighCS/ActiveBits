@@ -98,9 +98,7 @@ export default function JavaFormatPracticeManager() {
   const handleWsMessage = useCallback((event: MessageEvent<string>) => {
     try {
       const message = JSON.parse(event.data) as ManagerWsMessage
-      console.log('Manager received message:', message);
       if (message.type === 'studentsUpdate') {
-        console.log('Updating students:', message.payload?.students);
         const list = Array.isArray(message.payload?.students) ? message.payload.students : [];
         setStudents(list);
       }
@@ -110,16 +108,11 @@ export default function JavaFormatPracticeManager() {
   }, []);
 
   const handleWsOpen = useCallback(() => {
-    console.log('Manager WebSocket connected');
     void fetchStudents();
   }, [fetchStudents]);
 
   const handleWsError = useCallback((error: unknown) => {
     console.error('WebSocket error:', error);
-  }, []);
-
-  const handleWsClose = useCallback(() => {
-    console.log('Manager WebSocket disconnected');
   }, []);
 
   const buildWsUrl = useCallback(() => {
@@ -135,7 +128,6 @@ export default function JavaFormatPracticeManager() {
     onOpen: handleWsOpen,
     onMessage: handleWsMessage,
     onError: handleWsError,
-    onClose: handleWsClose,
   });
 
   useEffect(() => {
