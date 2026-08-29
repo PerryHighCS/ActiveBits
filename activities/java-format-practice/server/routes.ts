@@ -1,6 +1,8 @@
 import { createSession, type SessionRecord, type SessionStore } from 'activebits-server/core/sessions.js'
 import { createBroadcastSubscriptionHelper } from 'activebits-server/core/broadcastUtils.js'
 import { connectAcceptedSessionParticipant } from 'activebits-server/core/acceptedSessionParticipants.js'
+import { getSessionParticipantCookieName, resolveAcceptedEntryParticipantToken } from 'activebits-server/core/acceptedEntryParticipants.js'
+import { getActivityCapabilityCookieName, issueActivityCapability, readCookieValue, resolveActivityPrincipalFromCookies } from 'activebits-server/core/activityCapabilities.js'
 import { generateParticipantId } from 'activebits-server/core/participantIds.js'
 import { closeDuplicateParticipantSockets } from 'activebits-server/core/participantSockets.js'
 import { disconnectSessionParticipant, updateSessionParticipant } from 'activebits-server/core/sessionParticipants.js'
@@ -15,12 +17,14 @@ import { validateDifficulty, validateStats, validateStudentName, validateTheme }
 
 interface JsonResponse {
   status(code: number): JsonResponse
+  cookie?(name: string, value: string, options: Record<string, unknown>): void
   json(payload: unknown): void
 }
 
 interface RouteRequest {
   params: Record<string, string | undefined>
   body?: unknown
+  cookies?: Record<string, unknown>
 }
 
 interface JavaFormatRouteApp {
@@ -29,6 +33,7 @@ interface JavaFormatRouteApp {
 }
 
 interface JavaFormatSocket extends ActiveBitsWebSocket {
+  principalKind?: 'manager' | 'participant'
   studentName?: string | null
   studentId?: string | null
   ignoreDisconnect?: boolean
@@ -104,18 +109,21 @@ export default function setupJavaFormatPracticeRoutes(
   sessions: SessionStore,
   ws: WsRouter,
 ): void {
-  const ensureBroadcastSubscription = createBroadcastSubscriptionHelper(sessions, ws)
+  const ensureBroadcastSubscription = createBroadcastSubscriptionHelper(sessions, ws, (client, message) => {
+    const audience = isPlainObject(message) && message.audience === 'manager' ? 'manager' : 'all'
+    return audience === 'all' || (client as JavaFormatSocket).principalKind === 'manager'
+  })
 
-  async function broadcast(type: string, payload: unknown, sessionId: string): Promise<void> {
+  async function broadcast(type: string, payload: unknown, sessionId: string, audience: 'all' | 'manager' = 'all'): Promise<void> {
     const message = JSON.stringify({ type, payload })
 
     if (sessions.publishBroadcast) {
-      await sessions.publishBroadcast(`session:${sessionId}:broadcast`, { type, payload } as Record<string, unknown>)
+      await sessions.publishBroadcast(`session:${sessionId}:broadcast`, { type, payload, audience } as Record<string, unknown>)
     }
 
     let clientCount = 0
     for (const socket of ws.wss.clients as Set<JavaFormatSocket>) {
-      if (socket.readyState === 1 && socket.sessionId === sessionId) {
+      if (socket.readyState === 1 && socket.sessionId === sessionId && (audience === 'all' || socket.principalKind === audience)) {
         try {
           socket.send(message)
           clientCount += 1
@@ -133,13 +141,6 @@ export default function setupJavaFormatPracticeRoutes(
     client.sessionId = query.get('sessionId') || null
     ensureBroadcastSubscription(client.sessionId)
 
-    const studentId = query.get('studentId') || null
-    client.studentName = validateStudentName(query.get('studentName'))
-
-    console.log(
-      `WebSocket connection: sessionId=${client.sessionId}, studentName=${client.studentName}, studentId=${studentId}`,
-    )
-
     if (client.sessionId) {
       const activeSessionId = client.sessionId
 
@@ -148,12 +149,29 @@ export default function setupJavaFormatPracticeRoutes(
         console.log('Found session:', session ? 'yes' : 'no')
         if (!session) return
 
+        const cookieHeader = client.upgradeHeaders?.cookie
+        const manager = resolveActivityPrincipalFromCookies(session, activeSessionId, 'manager', {
+          [getActivityCapabilityCookieName('manager', activeSessionId)]: readCookieValue(cookieHeader, getActivityCapabilityCookieName('manager', activeSessionId)),
+        })
+        if (manager) {
+          client.principalKind = 'manager'
+          console.info('Java Format manager websocket admitted', { sessionId: activeSessionId, capabilityId: manager.capabilityId })
+          return
+        }
+
+        const participantToken = readCookieValue(cookieHeader, getSessionParticipantCookieName(activeSessionId))
+        const acceptedParticipant = resolveAcceptedEntryParticipantToken(session, participantToken)
+        if (!acceptedParticipant) {
+          console.info('Java Format websocket denied', { sessionId: activeSessionId, reason: 'missing-or-invalid-principal' })
+          client.close(1008, 'activity-auth-required')
+          return
+        }
         const result = connectAcceptedSessionParticipant({
           session,
           participants: session.data.students,
-          participantId: studentId,
-          participantName: client.studentName ?? null,
-          allowLegacyUnnamedMatch: true,
+          participantId: acceptedParticipant.participantId,
+          participantName: null,
+          allowLegacyUnnamedMatch: false,
           createParticipant: (participantId, participantName, now) => ({
             id: participantId,
             name: participantName,
@@ -165,24 +183,10 @@ export default function setupJavaFormatPracticeRoutes(
           generateParticipantId,
         })
         if (!result) {
-          try {
-            if (client.readyState === 1) {
-              client.send(
-                JSON.stringify({
-                  type: 'error',
-                  payload: {
-                    code: 'waiting-room-required',
-                    message: 'Student identity not accepted. Rejoin from the waiting room.',
-                  },
-                }),
-              )
-            }
-          } catch (error) {
-            console.error('Failed to send waiting-room-required error:', error)
-          }
-          client.close(1008, 'waiting-room-required')
+          client.close(1008, 'activity-auth-required')
           return
         }
+        client.principalKind = 'participant'
         client.studentName = result.participantName
         const { participantId, isNew } = result
         client.studentId = participantId
@@ -196,7 +200,7 @@ export default function setupJavaFormatPracticeRoutes(
 
         await sessions.set(session.id, session)
         console.log('Total students in session:', session.data.students.length)
-        await broadcast('studentsUpdate', { students: session.data.students }, session.id)
+        await broadcast('studentsUpdate', { students: session.data.students }, session.id, 'manager')
 
         if (client.studentId) {
           client.send(JSON.stringify({ type: 'studentId', payload: { studentId: client.studentId } }))
@@ -220,7 +224,7 @@ export default function setupJavaFormatPracticeRoutes(
         if (!student) return
 
         await sessions.set(session.id, session)
-        await broadcast('studentsUpdate', { students: session.data.students }, session.id)
+        await broadcast('studentsUpdate', { students: session.data.students }, session.id, 'manager')
       })().catch((error) => console.error('Error in student disconnect:', error))
     })
   })
@@ -230,8 +234,12 @@ export default function setupJavaFormatPracticeRoutes(
     session.type = 'java-format-practice'
     session.data = normalizeSessionData(session.data)
 
+    const managerCapability = issueActivityCapability(session, 'manager')
     await sessions.set(session.id, session)
     ensureBroadcastSubscription(session.id)
+    res.cookie?.(getActivityCapabilityCookieName('manager', session.id), managerCapability.token, {
+      httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production', path: '/', maxAge: 7 * 24 * 60 * 60 * 1000,
+    })
     res.json({ id: session.id })
   })
 
@@ -269,6 +277,10 @@ export default function setupJavaFormatPracticeRoutes(
       return
     }
 
+    if (!resolveActivityPrincipalFromCookies(session, sessionId, 'manager', req.cookies)) {
+      res.status(403).json({ error: 'manager authentication required' })
+      return
+    }
     const body = isPlainObject(req.body) ? req.body : {}
     const difficulty = validateDifficulty(body.difficulty)
 
@@ -293,6 +305,10 @@ export default function setupJavaFormatPracticeRoutes(
       return
     }
 
+    if (!resolveActivityPrincipalFromCookies(session, sessionId, 'manager', req.cookies)) {
+      res.status(403).json({ error: 'manager authentication required' })
+      return
+    }
     const body = isPlainObject(req.body) ? req.body : {}
     const theme = validateTheme(body.theme)
 
@@ -317,6 +333,14 @@ export default function setupJavaFormatPracticeRoutes(
       return
     }
 
+    const acceptedParticipant = resolveAcceptedEntryParticipantToken(
+      session,
+      req.cookies?.[getSessionParticipantCookieName(sessionId)],
+    )
+    if (!acceptedParticipant) {
+      res.status(403).json({ error: 'participant authentication required' })
+      return
+    }
     const body = isPlainObject(req.body) ? req.body : {}
     const stats = validateStats(body.stats)
     if (!stats) {
@@ -324,20 +348,18 @@ export default function setupJavaFormatPracticeRoutes(
       return
     }
 
-    const studentId = typeof body.studentId === 'string' ? body.studentId : null
-    const studentName = validateStudentName(body.studentName)
     const student = updateSessionParticipant({
       participants: session.data.students,
-      participantId: studentId,
-      participantName: studentName,
-      allowLegacyUnnamedMatch: true,
+      participantId: acceptedParticipant.participantId,
+      participantName: null,
+      allowLegacyUnnamedMatch: false,
       update: (participant) => {
         participant.stats = stats
       },
     })
     if (student) {
       await sessions.set(session.id, session)
-      await broadcast('studentsUpdate', { students: session.data.students }, session.id)
+      await broadcast('studentsUpdate', { students: session.data.students }, session.id, 'manager')
     }
 
     res.json({ success: true })
@@ -356,6 +378,10 @@ export default function setupJavaFormatPracticeRoutes(
       return
     }
 
+    if (!resolveActivityPrincipalFromCookies(session, sessionId, 'manager', req.cookies)) {
+      res.status(403).json({ error: 'manager authentication required' })
+      return
+    }
     res.json({ students: session.data.students })
   })
 }

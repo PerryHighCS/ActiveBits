@@ -342,17 +342,18 @@ export default function JavaFormatPractice({ sessionData }: JavaFormatPracticePr
   const handleWsOpen = useCallback(() => {
   }, []);
 
+  const handleWsClose = useCallback((event: CloseEvent) => {
+    if (event.code === 1008 && event.reason === 'activity-auth-required' && sessionId) {
+      void navigate(`/${sessionId}`, { replace: true });
+    }
+  }, [navigate, sessionId]);
+
   const buildWsUrl = useCallback(() => {
     if (!nameSubmitted || isSoloSession) return null;
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const host = window.location.host;
-    const currentId = studentIdRef.current;
-    const studentIdParam = currentId ? `&studentId=${encodeURIComponent(currentId)}` : '';
-    const studentNameParam = studentName.trim().length > 0
-      ? `&studentName=${encodeURIComponent(studentName)}`
-      : '';
-    return `${protocol}//${host}/ws/java-format-practice?sessionId=${sessionId}${studentNameParam}${studentIdParam}`;
-  }, [nameSubmitted, isSoloSession, sessionId, studentName]);
+    return `${protocol}//${host}/ws/java-format-practice?sessionId=${sessionId}`;
+  }, [nameSubmitted, isSoloSession, sessionId]);
 
   const { connect: connectStudentWs, disconnect: disconnectStudentWs } = useResilientWebSocket({
     buildUrl: buildWsUrl,
@@ -360,7 +361,8 @@ export default function JavaFormatPractice({ sessionData }: JavaFormatPracticePr
     onOpen: handleWsOpen,
     onMessage: handleWsMessage,
     onError: undefined,
-    onClose: undefined,
+    onClose: handleWsClose,
+    isTerminalClose: (event) => event.code === 1008 && event.reason === 'activity-auth-required',
     attachSessionEndedHandler,
   });
 
@@ -387,10 +389,7 @@ export default function JavaFormatPractice({ sessionData }: JavaFormatPracticePr
       void fetch(`/api/java-format-practice/${sessionId}/stats`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          studentId,
-          stats,
-        }),
+        body: JSON.stringify({ stats }),
       }).catch((err) => console.error('Failed to sync stats:', err));
     }
   }, [stats, sessionId, studentId, isSoloSession]);
