@@ -253,6 +253,7 @@ Do not begin with all activities at once.
 - [x] Make Java Format socket startup Strict-Mode-safe: cancel the throwaway effect before it starts a browser WebSocket, then open only the retained manager or student connection (browser coverage rerun).
 - [x] Verify that a student tab sharing the instructor browser context selects its participant capability and cannot be misclassified as the manager (Java Format browser coverage).
 - [ ] Review the contract before migrating a sibling activity.
+- [ ] Known gap from Slice A: Java Format's permalink / persistent-teacher entry (`activity.config.ts` `supportsPermalink: true`) bypasses `POST /create`, so no manager capability is issued and that flow 403s / closes `1008`. Tracked in [#351](https://github.com/PerryHighCS/ActiveBits/issues/351). It is blocked on the shared persistent-teacher to manager-principal adapter proven in Slice C, so it lands as a Slice A completion / Phase 6 wrap-up item after Slice C and before Phase 7 (Wave 1 practice activities share this permalink config and should inherit the settled pattern). Optional interim stopgap: set `supportsPermalink: false` for `java-format-practice` until the adapter exists.
 
 ### Slice B: REST-only/private projection activity
 
@@ -262,6 +263,11 @@ Do not begin with all activities at once.
 ### Slice C: mature multi-mode activity
 
 - [ ] Use Video Sync or MobCode to prove persistent/embedded adapters without replacing their domain protocols prematurely.
+
+### Phase 6 wrap-up (after Slice C, before Phase 7)
+
+- [ ] Retrofit `java-format-practice` permalink / persistent-teacher manager auth onto the Slice C persistent adapter ([#351](https://github.com/PerryHighCS/ActiveBits/issues/351)); this closes the Slice A known gap so Wave 1's near-identical practice activities inherit a settled pattern.
+- [ ] Re-review the contract once a simple, a REST-only, and a multi-mode activity are all migrated.
 
 ## Phase 7: Migrate Remaining Activities in Risk-Based Waves
 
