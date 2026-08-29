@@ -282,7 +282,7 @@ Use this log for durable findings that future contributors and agents should reu
 - Area: activities
 - Discovery: The Resonance plan was updated to align with the current `ActivityConfig` schema and dashboard conventions: use `manageDashboard.customPersistentLinkBuilder`, `createSessionBootstrap.sessionStorage`, and activity-owned report/download flows instead of proposing a new shared `reporting` config or repo-wide report contract up front.
 - Why it matters: Future Resonance work should build on the existing activity extension points already implemented in shared code, which keeps dashboard and registry layers activity-agnostic and avoids speculative schema churn.
-- Evidence: `.agent/plans/resonance.md`; `types/activity.ts`; `types/activityConfigSchema.ts`; `client/src/components/common/ManageDashboard.tsx`; `activities/java-string-practice/client/manager/JavaStringPracticeManager.tsx`
+- Evidence: `.agent/plans/complete/resonance.md`; `types/activity.ts`; `types/activityConfigSchema.ts`; `client/src/components/common/ManageDashboard.tsx`; `activities/java-string-practice/client/manager/JavaStringPracticeManager.tsx`
 - Follow-up action: Only extract a shared reporting schema or report registration contract after a second activity demonstrates the same need.
 - Owner: Codex
 
@@ -290,7 +290,7 @@ Use this log for durable findings that future contributors and agents should reu
 - Area: activities
 - Discovery: The Resonance embedded-activity plan now targets the same versioned websocket envelope shape as `video-sync`: `version`, `activity`, `sessionId`, `type`, `timestamp`, and `payload`, while keeping activity-specific namespacing in the `type` field (for example `resonance:session-state`).
 - Why it matters: Future embeddable activities should converge on one outer message wrapper for shared-socket routing and forward compatibility instead of inventing per-activity envelope formats.
-- Evidence: `.agent/plans/resonance.md`; `activities/video-sync/client/protocol.ts`
+- Evidence: `.agent/plans/complete/resonance.md`; `activities/video-sync/client/protocol.ts`
 - Follow-up action: Reuse this outer envelope for future embedded-activity protocol plans unless a shared cross-activity transport spec supersedes it.
 - Owner: Codex
 
@@ -322,7 +322,7 @@ Use this log for durable findings that future contributors and agents should reu
 - Area: server | permalink | canonical-state
 - Discovery: Shared persistent permalink signing and verification now canonicalize `selectedOptions` from activity config `deepLinkOptions` keys, and ignore unsigned query params (for example `utm_source`) even when `urlHash` is present.
 - Why it matters: This removes ambiguity where arbitrary query params could influence signed-state verification or runtime behavior, and aligns create/edit/auth/launch on one canonical signed permalink state.
-- Evidence: `server/routes/persistentSessionRoutes.ts`; `server/persistentSessionRoutes.test.ts`; `.agent/plans/permalink-signing-plan.md`
+- Evidence: `server/routes/persistentSessionRoutes.ts`; `server/persistentSessionRoutes.test.ts`; `.agent/plans/complete/permalink-signing-plan.md`
 - Follow-up action: Canonical permalink signing is now the shared model. Future follow-up should focus only on keeping new activity-owned recovery/bootstrap paths aligned with canonical signed state instead of introducing parallel signers.
 - Owner: Codex
 
@@ -570,7 +570,7 @@ Use this log for durable findings that future contributors and agents should reu
 - Area: activities
 - Discovery: `video-sync` treats `stopSec` as a server-authoritative playback boundary, not an advisory client-only hint. Server command handling clamps play/pause/seek positions to `stopSec`, heartbeat projection caps playback at that boundary, and state persistence auto-pauses once the stop point is reached.
 - Why it matters: Planning/docs language that describes stop time as merely advisory is incorrect and can lead to regressions if future contributors remove the server-side enforcement that currently keeps manager and student playback bounded consistently.
-- Evidence: `activities/video-sync/server/routes.ts`; `activities/video-sync/server/routes.test.ts`; `.agent/plans/video-sync-activity-plan.md`
+- Evidence: `activities/video-sync/server/routes.ts`; `activities/video-sync/server/routes.test.ts`; `.agent/plans/complete/video-sync-activity-plan.md`
 - Follow-up action: Keep plan/docs/tests aligned with the enforced-stop behavior unless the product decision explicitly changes to allow seeking or playback beyond `stopSec`.
 - Owner: Codex
 
@@ -594,7 +594,7 @@ Use this log for durable findings that future contributors and agents should reu
 - Area: activities
 - Discovery: `video-sync` drift correction and telemetry are keyed to a `0.2s` tolerance and current sync-health state, not a cumulative unsync-event threshold. Student clients report `unsync` when drift first exceeds tolerance, throttle repeated unsync reports to once per 10 seconds while still unsynced, and the manager consumes `sync.unsyncedStudents`, `sync.lastDriftSec`, and `sync.lastCorrectionResult`.
 - Why it matters: Plan language that describes unsync reporting as a two-heartbeat `2.0s` threshold or expects `sync.unsyncEvents` no longer matches the shipped protocol and can mislead future telemetry or dashboard changes.
-- Evidence: `activities/video-sync/client/syncMath.ts`; `activities/video-sync/client/student/VideoSyncStudent.tsx`; `activities/video-sync/client/protocol.ts`; `activities/video-sync/server/routes.ts`; `.agent/plans/video-sync-activity-plan.md`
+- Evidence: `activities/video-sync/client/syncMath.ts`; `activities/video-sync/client/student/VideoSyncStudent.tsx`; `activities/video-sync/client/protocol.ts`; `activities/video-sync/server/routes.ts`; `.agent/plans/complete/video-sync-activity-plan.md`
 - Follow-up action: Keep plan/docs aligned with the opportunistic, throttled `unsync` reporting model unless the telemetry contract is intentionally redesigned.
 - Owner: Codex
 

@@ -1,6 +1,11 @@
 # SyncDeck Embedded Activities Plan
 
-## Status: Design / Pre-Implementation
+## Status: Implemented; follow-on work remaining
+
+Phases 0–3, 5, and most of 6 are implemented. Remaining work: Phase 3.5
+instructor-gating for embedded child sessions (`instructorGated` runtime /
+waiting-room modes + parent lock control), the Phase 4 slide-event activation
+integration test, and the Phase 6 multi-activity session-report manifest contract.
 
 This document is the primary design reference for SyncDeck embedded activities.
 Companion checklist items live in `syncdeck-checklist.md` under "Embedded activities".
