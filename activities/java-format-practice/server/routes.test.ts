@@ -55,6 +55,7 @@ void test('Java Format creation issues a manager cookie and manager routes rejec
   const managerCookie = created.cookies[0]
   assert.ok(managerCookie)
   assert.equal(managerCookie.options.httpOnly, true)
+  assert.equal(created.headers['cache-control'], 'no-store')
 
   const denied = new MockResponse()
   await difficulty({ params: { sessionId }, body: { difficulty: 'advanced' } }, denied)

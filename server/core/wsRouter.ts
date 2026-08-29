@@ -24,6 +24,7 @@ interface SessionStore {
 
 interface UpgradeCapableServer {
   on(event: 'upgrade', handler: (req: UpgradeRequest, socket: { destroy(): void }, head: Buffer) => void): void
+  listenerCount?(event: 'upgrade'): number
 }
 
 function getClientIp(req: UpgradeRequest): string {
@@ -143,9 +144,13 @@ export function createWsRouter(server: UpgradeCapableServer, sessions: SessionSt
       const url = new URL(req.url || '', 'http://x')
       const onConnection = namespaces.get(url.pathname)
       if (!onConnection) {
-        // Other upgrade handlers (such as the development Vite HMR proxy) share
-        // this HTTP server. Only activity WebSocket paths belong to this router.
-        if (!isActivityWebSocketPath(url.pathname)) return
+        // Other upgrade handlers (such as the development Vite HMR proxy) register
+        // their own 'upgrade' listener on this server and must get a chance to
+        // claim non-activity paths. When this router is the only listener
+        // (production), nobody else will, so destroy the socket instead of
+        // leaking it. Registered-but-unknown activity paths are always destroyed.
+        const hasOtherUpgradeListener = (server.listenerCount?.('upgrade') ?? 1) > 1
+        if (!isActivityWebSocketPath(url.pathname) && hasOtherUpgradeListener) return
         socket.destroy()
         return
       }

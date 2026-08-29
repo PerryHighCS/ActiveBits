@@ -284,6 +284,9 @@ export default function setupJavaFormatPracticeRoutes(
     const managerCapability = issueActivityCapability(session, 'manager')
     await sessions.set(session.id, session)
     ensureBroadcastSubscription(session.id)
+    // This response mints a credential-bearing cookie; keep it out of every
+    // cache the same way the participant-consume and private roster responses are.
+    res.setHeader?.('Cache-Control', 'no-store')
     res.cookie?.(getActivityCapabilityCookieName('manager', session.id), managerCapability.token, {
       httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production', path: '/', maxAge: DEFAULT_ACTIVITY_CAPABILITY_TTL_MS,
     })

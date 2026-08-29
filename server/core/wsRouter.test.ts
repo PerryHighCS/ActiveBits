@@ -23,27 +23,52 @@ function createFakeUpgradeSocket(): FakeUpgradeSocket {
   }
 }
 
-void test('createWsRouter upgrade handler leaves non-activity paths alone and destroys unknown activity paths', () => {
-  let upgradeHandler:
-    | ((req: { url?: string | null; headers: Record<string, string> }, socket: FakeUpgradeSocket, head: Buffer) => void)
-    | undefined
-  const server = {
-    on(event: string, handler: typeof upgradeHandler) {
-      if (event === 'upgrade') upgradeHandler = handler
+type FakeUpgradeHandler = (
+  req: { url?: string | null; headers: Record<string, string> },
+  socket: FakeUpgradeSocket,
+  head: Buffer,
+) => void
+
+function createFakeUpgradeServer() {
+  const upgradeListeners: FakeUpgradeHandler[] = []
+  return {
+    upgradeListeners,
+    on(event: string, handler: FakeUpgradeHandler) {
+      if (event === 'upgrade') upgradeListeners.push(handler)
+    },
+    listenerCount(event: string) {
+      return event === 'upgrade' ? upgradeListeners.length : 0
     },
   }
+}
 
+void test('createWsRouter upgrade handler defers non-activity paths only when another upgrade listener exists', () => {
+  const server = createFakeUpgradeServer()
   createWsRouter(server as never, {} as never)
+  const [upgradeHandler] = server.upgradeListeners
   assert.ok(upgradeHandler, 'createWsRouter must register an upgrade handler')
 
-  // A path this router does not own (e.g. the dev Vite HMR proxy) must be left
-  // open so another upgrade handler on the same server can claim it.
+  // Development: the Vite HMR proxy adds its own 'upgrade' listener, so a path
+  // this router does not own must be left open for that listener to claim.
+  server.on('upgrade', () => {})
   const hmrSocket = createFakeUpgradeSocket()
   upgradeHandler({ url: '/vite-hmr', headers: {} }, hmrSocket, Buffer.alloc(0))
   assert.equal(hmrSocket.destroyed, false)
+})
 
-  // An unclaimed activity WebSocket path is this router's responsibility and
-  // must not be left dangling.
+void test('createWsRouter upgrade handler destroys unknown paths when it is the only upgrade listener', () => {
+  const server = createFakeUpgradeServer()
+  createWsRouter(server as never, {} as never)
+  const [upgradeHandler] = server.upgradeListeners
+  assert.ok(upgradeHandler, 'createWsRouter must register an upgrade handler')
+
+  // Production: no other 'upgrade' listener is registered, so a stray non-activity
+  // upgrade (e.g. /socket.io) would leak if left open — destroy it.
+  const straySocket = createFakeUpgradeSocket()
+  upgradeHandler({ url: '/socket.io', headers: {} }, straySocket, Buffer.alloc(0))
+  assert.equal(straySocket.destroyed, true)
+
+  // An unclaimed activity WebSocket path is always this router's responsibility.
   const unknownActivitySocket = createFakeUpgradeSocket()
   upgradeHandler({ url: '/ws/not-registered', headers: {} }, unknownActivitySocket, Buffer.alloc(0))
   assert.equal(unknownActivitySocket.destroyed, true)

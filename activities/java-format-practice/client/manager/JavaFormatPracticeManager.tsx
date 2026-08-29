@@ -34,6 +34,11 @@ export default function JavaFormatPracticeManager() {
   const [students, setStudents] = useState<JavaFormatStudentRecord[]>([])
   const [managerAuthLost, setManagerAuthLost] = useState(false)
   const managerAuthLostRef = useRef(false)
+  // Bumped every time a live `studentsUpdate` is applied. An in-flight `/students`
+  // poll captures this value and drops its snapshot if a newer socket update
+  // landed while the request was outstanding, so a slow HTTP response can never
+  // overwrite a fresher roster.
+  const rosterUpdateGenRef = useRef(0)
   const [selectedDifficulty, setSelectedDifficulty] = useState<JavaFormatDifficulty>('beginner')
   const [selectedTheme, setSelectedTheme] = useState<JavaFormatTheme>('all')
   const [sortBy, setSortBy] = useState<SortBy>('name') // 'name', 'total', 'correct', 'accuracy', 'streak'
@@ -102,6 +107,7 @@ export default function JavaFormatPracticeManager() {
   const fetchStudents = useCallback(async (signal?: AbortSignal) => {
     if (sessionId == null || managerAuthLostRef.current) return;
     try {
+      const startedGen = rosterUpdateGenRef.current;
       const res = await fetch(`/api/java-format-practice/${sessionId}/students`, { signal });
       if (res.status === 403) {
         // The manager capability is gone; stop polling a request that can only 403.
@@ -113,6 +119,9 @@ export default function JavaFormatPracticeManager() {
       const list = Array.isArray(data.students) ? data.students : [];
       // A response for a superseded session must never overwrite the roster.
       if (signal?.aborted) return;
+      // A live `studentsUpdate` that arrived while this poll was in flight is
+      // authoritative; discard this now-stale HTTP snapshot.
+      if (rosterUpdateGenRef.current !== startedGen) return;
       setStudents(list);
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') return;
@@ -125,6 +134,7 @@ export default function JavaFormatPracticeManager() {
       const message = JSON.parse(event.data) as ManagerWsMessage
       if (message.type === 'studentsUpdate') {
         const list = Array.isArray(message.payload?.students) ? message.payload.students : [];
+        rosterUpdateGenRef.current += 1;
         setStudents(list);
       }
     } catch (err) {
