@@ -165,6 +165,13 @@ export default function JavaFormatPractice({ sessionData }: JavaFormatPracticePr
   const [studentId, setStudentId] = useState<string | null>(initialIdentity?.studentId ?? null);
   const [nameSubmitted, setNameSubmitted] = useState(initialIdentity?.nameSubmitted ?? false);
   const [identityResolved, setIdentityResolved] = useState(Boolean(initialIdentity));
+  // Non-solo entry mints/refreshes the `activebits_participant_<sessionId>` cookie
+  // via an awaited `/entry-participant/consume` in the identity effect below. A
+  // stored localStorage context can make `nameSubmitted` true on the first render
+  // (before that POST resolves), so socket startup and server stats sync are
+  // gated on this latch to avoid opening an unauthenticated socket that would
+  // terminal-close and bounce the student back to re-entry.
+  const [entryHandoffSettled, setEntryHandoffSettled] = useState(isSoloSession);
   const [currentChallenge, setCurrentChallenge] = useState<JavaFormatChallenge | null>(null);
   const [currentFormatCallIndex, setCurrentFormatCallIndex] = useState(0);
   const [selectedDifficulty, setSelectedDifficulty] = useState<JavaFormatDifficulty>('beginner');
@@ -247,6 +254,9 @@ export default function JavaFormatPractice({ sessionData }: JavaFormatPracticePr
       } finally {
         if (!isCancelled) {
           setIdentityResolved(true);
+          // The awaited consume (if any) has now settled and the participant
+          // cookie is in place; the socket and stats sync may proceed.
+          setEntryHandoffSettled(true);
         }
       }
     })();
@@ -376,7 +386,7 @@ export default function JavaFormatPractice({ sessionData }: JavaFormatPracticePr
   });
 
   useEffect(() => {
-    if (!nameSubmitted || isSoloSession) {
+    if (!nameSubmitted || isSoloSession || !entryHandoffSettled) {
       disconnectStudentWs();
       return undefined;
     }
@@ -390,7 +400,7 @@ export default function JavaFormatPractice({ sessionData }: JavaFormatPracticePr
       disposed = true;
       disconnectStudentWs();
     };
-  }, [nameSubmitted, sessionId, isSoloSession, connectStudentWs, disconnectStudentWs]);
+  }, [nameSubmitted, sessionId, isSoloSession, entryHandoffSettled, connectStudentWs, disconnectStudentWs]);
 
   // Save stats to localStorage when they change
   useEffect(() => {
@@ -399,8 +409,8 @@ export default function JavaFormatPractice({ sessionData }: JavaFormatPracticePr
     const key = `format-stats-${sessionId}-${studentId}`;
     localStorage.setItem(key, JSON.stringify(stats));
 
-    // Sync to server if in class mode
-    if (!isSoloSession) {
+    // Sync to server if in class mode, once the participant cookie is in place.
+    if (!isSoloSession && entryHandoffSettled) {
       void fetch(`/api/java-format-practice/${sessionId}/stats`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -416,7 +426,7 @@ export default function JavaFormatPractice({ sessionData }: JavaFormatPracticePr
         }
       }).catch((err) => console.error('Failed to sync stats:', err));
     }
-  }, [stats, sessionId, studentId, isSoloSession]);
+  }, [stats, sessionId, studentId, isSoloSession, entryHandoffSettled]);
 
   const getCurrentFormatCall = (): JavaFormatFormatCall | null => {
     if (!currentChallenge) return null;

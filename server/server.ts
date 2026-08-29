@@ -65,7 +65,11 @@ if (valkeyUrl && sessions.valkeyStore) {
   initializePersistentStorage(null)
 }
 
-const ws = createWsRouter(server, sessions)
+const ws = createWsRouter(
+  server,
+  sessions,
+  env === 'production' ? {} : { deferUpgradePath: (pathname) => pathname.startsWith('/vite-hmr') },
+)
 setupSessionRoutes(app, sessions, ws.wss)
 
 setupPersistentSessionWs(ws, sessions)

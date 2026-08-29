@@ -24,7 +24,17 @@ interface SessionStore {
 
 interface UpgradeCapableServer {
   on(event: 'upgrade', handler: (req: UpgradeRequest, socket: { destroy(): void }, head: Buffer) => void): void
-  listenerCount?(event: 'upgrade'): number
+}
+
+export interface WsRouterOptions {
+  /**
+   * Predicate identifying non-activity upgrade paths that another `'upgrade'`
+   * listener on the same server owns (e.g. the development Vite HMR proxy).
+   * Matching paths are left untouched; every other unregistered path — stray
+   * activity paths and unknown upgrades alike — is destroyed so it cannot leak.
+   * Omitted in production, where this router is the only upgrade listener.
+   */
+  deferUpgradePath?: (pathname: string) => boolean
 }
 
 function getClientIp(req: UpgradeRequest): string {
@@ -59,7 +69,12 @@ function getClientIp(req: UpgradeRequest): string {
 /**
  * Creates a WebSocket router for handling connections in all activity modules.
  */
-export function createWsRouter(server: UpgradeCapableServer, sessions: SessionStore): WsRouter {
+export function createWsRouter(
+  server: UpgradeCapableServer,
+  sessions: SessionStore,
+  options: WsRouterOptions = {},
+): WsRouter {
+  const { deferUpgradePath } = options
   const wss = new WebSocketServer({ noServer: true }) as unknown as WsRouter['wss'] & {
     handleUpgrade(
       req: UpgradeRequest,
@@ -144,13 +159,11 @@ export function createWsRouter(server: UpgradeCapableServer, sessions: SessionSt
       const url = new URL(req.url || '', 'http://x')
       const onConnection = namespaces.get(url.pathname)
       if (!onConnection) {
-        // Other upgrade handlers (such as the development Vite HMR proxy) register
-        // their own 'upgrade' listener on this server and must get a chance to
-        // claim non-activity paths. When this router is the only listener
-        // (production), nobody else will, so destroy the socket instead of
-        // leaking it. Registered-but-unknown activity paths are always destroyed.
-        const hasOtherUpgradeListener = (server.listenerCount?.('upgrade') ?? 1) > 1
-        if (!isActivityWebSocketPath(url.pathname) && hasOtherUpgradeListener) return
+        // Hand off only the non-activity paths an explicitly configured predicate
+        // claims (e.g. the development Vite HMR proxy's own 'upgrade' listener).
+        // Every other unregistered path — stray activity paths and unknown
+        // upgrades such as /socket.io alike — is destroyed so it cannot leak.
+        if (!isActivityWebSocketPath(url.pathname) && deferUpgradePath?.(url.pathname)) return
         socket.destroy()
         return
       }

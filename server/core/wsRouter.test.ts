@@ -36,34 +36,36 @@ function createFakeUpgradeServer() {
     on(event: string, handler: FakeUpgradeHandler) {
       if (event === 'upgrade') upgradeListeners.push(handler)
     },
-    listenerCount(event: string) {
-      return event === 'upgrade' ? upgradeListeners.length : 0
-    },
   }
 }
 
-void test('createWsRouter upgrade handler defers non-activity paths only when another upgrade listener exists', () => {
+void test('createWsRouter destroys every unregistered upgrade path in production (no defer predicate)', () => {
   const server = createFakeUpgradeServer()
   createWsRouter(server as never, {} as never)
   const [upgradeHandler] = server.upgradeListeners
   assert.ok(upgradeHandler, 'createWsRouter must register an upgrade handler')
 
-  // Development: the Vite HMR proxy adds its own 'upgrade' listener, so a path
-  // this router does not own must be left open for that listener to claim.
-  server.on('upgrade', () => {})
+  for (const path of ['/socket.io', '/vite-hmr', '/ws/not-registered', '/anything']) {
+    const socket = createFakeUpgradeSocket()
+    upgradeHandler({ url: path, headers: {} }, socket, Buffer.alloc(0))
+    assert.equal(socket.destroyed, true, `${path} must be destroyed`)
+  }
+})
+
+void test('createWsRouter defers only the paths the configured predicate claims', () => {
+  const server = createFakeUpgradeServer()
+  createWsRouter(server as never, {} as never, {
+    deferUpgradePath: (pathname) => pathname.startsWith('/vite-hmr'),
+  })
+  const [upgradeHandler] = server.upgradeListeners
+  assert.ok(upgradeHandler)
+
+  // The dev Vite HMR proxy owns this path via its own 'upgrade' listener.
   const hmrSocket = createFakeUpgradeSocket()
   upgradeHandler({ url: '/vite-hmr', headers: {} }, hmrSocket, Buffer.alloc(0))
   assert.equal(hmrSocket.destroyed, false)
-})
 
-void test('createWsRouter upgrade handler destroys unknown paths when it is the only upgrade listener', () => {
-  const server = createFakeUpgradeServer()
-  createWsRouter(server as never, {} as never)
-  const [upgradeHandler] = server.upgradeListeners
-  assert.ok(upgradeHandler, 'createWsRouter must register an upgrade handler')
-
-  // Production: no other 'upgrade' listener is registered, so a stray non-activity
-  // upgrade (e.g. /socket.io) would leak if left open — destroy it.
+  // A non-activity path the predicate does not claim still leaks nowhere.
   const straySocket = createFakeUpgradeSocket()
   upgradeHandler({ url: '/socket.io', headers: {} }, straySocket, Buffer.alloc(0))
   assert.equal(straySocket.destroyed, true)

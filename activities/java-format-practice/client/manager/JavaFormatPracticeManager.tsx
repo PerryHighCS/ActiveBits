@@ -39,6 +39,10 @@ export default function JavaFormatPracticeManager() {
   // landed while the request was outstanding, so a slow HTTP response can never
   // overwrite a fresher roster.
   const rosterUpdateGenRef = useRef(0)
+  // Bumped at the start of every `/students` poll. A poll drops its response if a
+  // later poll has started since, so out-of-order HTTP responses (mount / on-open
+  // / interval polls overlapping) can only ever settle on the most recent one.
+  const pollRequestGenRef = useRef(0)
   // The socket for the *current* sessionId. `disconnect()` closes the previous
   // session's socket but leaves its `onmessage` bound, so a message already
   // queued on it can still fire after a route swap; roster updates are only
@@ -112,7 +116,8 @@ export default function JavaFormatPracticeManager() {
   const fetchStudents = useCallback(async (signal?: AbortSignal) => {
     if (sessionId == null || managerAuthLostRef.current) return;
     try {
-      const startedGen = rosterUpdateGenRef.current;
+      const rosterGenAtStart = rosterUpdateGenRef.current;
+      const pollGen = (pollRequestGenRef.current += 1);
       const res = await fetch(`/api/java-format-practice/${sessionId}/students`, { signal });
       if (res.status === 403) {
         // The manager capability is gone; stop polling a request that can only 403.
@@ -126,7 +131,9 @@ export default function JavaFormatPracticeManager() {
       if (signal?.aborted) return;
       // A live `studentsUpdate` that arrived while this poll was in flight is
       // authoritative; discard this now-stale HTTP snapshot.
-      if (rosterUpdateGenRef.current !== startedGen) return;
+      if (rosterUpdateGenRef.current !== rosterGenAtStart) return;
+      // A newer poll started while this one was in flight; only the latest applies.
+      if (pollRequestGenRef.current !== pollGen) return;
       setStudents(list);
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') return;

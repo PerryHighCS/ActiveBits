@@ -310,3 +310,37 @@ void test('Java Format participant admission aborts if the socket closes during 
   assert.equal(setCalls, 0)
   assert.equal(broadcasts.length, 0)
 })
+
+void test('Java Format participant admission closes the socket with a retryable code if persistence fails', async () => {
+  console.info('[TEST] java-format websocket: participant persistence failure is expected to close 1011')
+  const registration: { socketHandler?: (socket: TestSocket, query: URLSearchParams) => void } = {}
+  const session: SessionRecord = { id: 'session-boom', type: 'java-format-practice', created: 1, lastActivity: 1, data: { students: [] } }
+  acceptEntryParticipant(session, { participantId: 'student-a', displayName: 'Ada' })
+  const participantToken = issueAcceptedEntryParticipantToken(session, 'student-a')
+  assert.ok(participantToken)
+
+  const sessions = {
+    get: async (id: string) => (id === session.id ? session : null),
+    set: async () => { throw new Error('[TEST] simulated persistence failure') },
+  }
+  const clients = new Set<TestSocket>()
+  const ws = { wss: { clients, close() {} }, register(_p: string, handler: (socket: TestSocket, query: URLSearchParams) => void) { registration.socketHandler = handler } }
+  setupJavaFormatPracticeRoutes({ post() {}, get() {} } as never, sessions as never, ws as never)
+  const socketHandler = registration.socketHandler
+  assert.ok(socketHandler)
+
+  const socket: TestSocket = {
+    readyState: 1,
+    upgradeHeaders: { cookie: `${getSessionParticipantCookieName(session.id)}=${participantToken}` },
+    send: () => 0,
+    close(code?: number, reason?: string) { socket.closed = { code, reason } },
+    on() {}, once() {}, terminate() {}, ping() {},
+    sent: [], closed: null,
+  }
+  clients.add(socket)
+
+  socketHandler(socket, new URLSearchParams(`sessionId=${session.id}&principal=participant`))
+  await new Promise((resolve) => setTimeout(resolve, 0))
+
+  assert.deepEqual(socket.closed, { code: 1011, reason: 'activity-join-failed' })
+})

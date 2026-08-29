@@ -244,11 +244,22 @@ export default function setupJavaFormatPracticeRoutes(
         if (client.studentId) {
           client.send(JSON.stringify({ type: 'studentId', payload: { studentId: client.studentId } }))
         }
-      })().catch((error) => console.error(JSON.stringify({
-        event: 'java-format.websocket-participant-join-failed',
-        sessionId: activeSessionId,
-        error: String(error),
-      })))
+      })().catch((error) => {
+        console.error(JSON.stringify({
+          event: 'java-format.websocket-participant-join-failed',
+          sessionId: activeSessionId,
+          error: String(error),
+        }))
+        // Admission threw after the upgrade; don't leave an idle unauthenticated
+        // socket open. A non-1008 close lets the resilient client retry.
+        if (client.readyState === 1) {
+          try {
+            client.close(1011, 'activity-join-failed')
+          } catch {
+            // socket already tearing down
+          }
+        }
+      })
     }
 
     client.on('close', () => {
