@@ -141,8 +141,12 @@ export default function JavaFormatPracticeManager() {
   useEffect(() => {
     if (sessionId == null) return undefined;
     void fetchStudents();
+    const refreshInterval = window.setInterval(() => {
+      void fetchStudents();
+    }, 2_000);
     void connect();
     return () => {
+      window.clearInterval(refreshInterval);
       disconnect();
     };
   }, [sessionId, fetchStudents, connect, disconnect]);
