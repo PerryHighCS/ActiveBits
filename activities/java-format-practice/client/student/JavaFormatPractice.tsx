@@ -349,11 +349,16 @@ export default function JavaFormatPractice({ sessionData }: JavaFormatPracticePr
     }
   }, [navigate, sessionId]);
 
+  const isTerminalStudentSocketClose = useCallback(
+    (event: CloseEvent) => event.code === 1008 && event.reason === 'activity-auth-required',
+    [],
+  )
+
   const buildWsUrl = useCallback(() => {
     if (!nameSubmitted || isSoloSession) return null;
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const host = window.location.host;
-    return `${protocol}//${host}/ws/java-format-practice?sessionId=${sessionId}`;
+    return `${protocol}//${host}/ws/java-format-practice?sessionId=${sessionId}&principal=participant`;
   }, [nameSubmitted, isSoloSession, sessionId]);
 
   const { connect: connectStudentWs, disconnect: disconnectStudentWs } = useResilientWebSocket({
@@ -363,7 +368,7 @@ export default function JavaFormatPractice({ sessionData }: JavaFormatPracticePr
     onMessage: handleWsMessage,
     onError: undefined,
     onClose: handleWsClose,
-    isTerminalClose: (event) => event.code === 1008 && event.reason === 'activity-auth-required',
+    isTerminalClose: isTerminalStudentSocketClose,
     attachSessionEndedHandler,
   });
 

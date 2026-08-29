@@ -376,3 +376,6 @@ Track security-relevant boundaries, risks, and mitigation decisions.
 - Expected denied student edits (missing accepted identity or Try it disabled) use structured MobCode event logs without source contents.
 - The generic entry-participant consume route now issues an opaque httpOnly token scoped to the accepted session. MobCode reads this token server-side and never accepts a participant ID in its student workspace API bodies.
 - SyncDeck embedded child sessions receive that one-time entry token asynchronously over the parent websocket, so MobCode waits briefly for the token and retries a denied child-workspace bootstrap once. The retry still redeems the opaque token through the generic consume route; it must not reintroduce a browser-supplied participant ID.
+# Shared socket paths with multiple authenticated principals
+
+- A browser can hold both a manager capability cookie and a participant cookie for one session. A shared activity WebSocket path must have the client select its intended view (`manager` or `participant`), but the server must resolve and require the corresponding httpOnly capability before assigning that principal. The selector is routing only; it must never grant authority. This keeps an instructor's student tab from being misclassified as a manager and omitted from the roster.

@@ -2,7 +2,8 @@ import { expect, test } from '@playwright/test'
 
 test('Java Format manager and accepted participant recover from httpOnly cookies', async ({ browser }) => {
   test.skip(test.info().project.name !== 'chromium', 'WebKit request contexts do not retain Set-Cookie responses in this harness.')
-  const managerPage = await browser.newPage()
+  const context = await browser.newContext()
+  const managerPage = await context.newPage()
   const created = await managerPage.request.post('/api/java-format-practice/create')
   expect(created.ok()).toBe(true)
   const { id: sessionId } = await created.json() as { id: string }
@@ -21,10 +22,10 @@ test('Java Format manager and accepted participant recover from httpOnly cookies
   const cookie = (await managerPage.context().cookies()).find((entryCookie) => entryCookie.name === cookieName)
   expect(cookie).toBeTruthy()
 
-  const studentPage = await browser.newPage()
-  await studentPage.goto('/')
-  const origin = new URL(studentPage.url())
-  await studentPage.context().addCookies([{ name: cookieName, value: cookie!.value, domain: origin.hostname, path: '/', httpOnly: true, sameSite: 'Lax' }])
+  // Use a second tab in the instructor context: it sends both the manager and
+  // participant cookies, so this proves the student socket selects its own
+  // valid participant principal rather than inheriting manager authority.
+  const studentPage = await context.newPage()
   await studentPage.addInitScript(({ id }) => {
     window.localStorage.setItem(`session-participant:${id}`, JSON.stringify({ studentId: 'hint-only', studentName: 'Ada' }))
   }, { id: sessionId })
@@ -34,6 +35,7 @@ test('Java Format manager and accepted participant recover from httpOnly cookies
 
   await managerPage.close()
   await studentPage.close()
+  await context.close()
 })
 
 test('Java Format returns a participant with a lost capability to normal entry', async ({ browser }) => {

@@ -251,6 +251,7 @@ Do not begin with all activities at once.
 - [x] Verify zero-prompt instructor creation and manager cookie recovery (Java Format Playwright coverage).
 - [x] Verify student waiting-room entry, reload, capability loss, and recovery to normal entry (Java Format Playwright coverage). Cookie-backed reload retains a non-sensitive local display-name hint; a fresh-browser cookie-only identity bootstrap remains a deliberate follow-up decision.
 - [x] Make Java Format socket startup Strict-Mode-safe: cancel the throwaway effect before it starts a browser WebSocket, then open only the retained manager or student connection (browser coverage rerun).
+- [x] Verify that a student tab sharing the instructor browser context selects its participant capability and cannot be misclassified as the manager (Java Format browser coverage).
 - [ ] Review the contract before migrating a sibling activity.
 
 ### Slice B: REST-only/private projection activity

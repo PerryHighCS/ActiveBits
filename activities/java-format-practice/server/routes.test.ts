@@ -91,14 +91,17 @@ void test('Java Format websocket admits only cookie principals and keeps roster 
     return socket
   }
   const denied = makeSocket()
-  registeredSocketHandler(denied, new URLSearchParams(`sessionId=${session.id}`))
+  registeredSocketHandler(denied, new URLSearchParams(`sessionId=${session.id}&principal=manager`))
   await new Promise((resolve) => setTimeout(resolve, 0))
   assert.deepEqual(denied.closed, { code: 1008, reason: 'activity-auth-required' })
 
   const managerSocket = makeSocket(`${getActivityCapabilityCookieName('manager', session.id)}=${manager.token}`)
-  registeredSocketHandler(managerSocket, new URLSearchParams(`sessionId=${session.id}`))
-  const studentSocket = makeSocket(`${getSessionParticipantCookieName(session.id)}=${participantToken}`)
-  registeredSocketHandler(studentSocket, new URLSearchParams(`sessionId=${session.id}`))
+  registeredSocketHandler(managerSocket, new URLSearchParams(`sessionId=${session.id}&principal=manager`))
+  const studentSocket = makeSocket([
+    `${getActivityCapabilityCookieName('manager', session.id)}=${manager.token}`,
+    `${getSessionParticipantCookieName(session.id)}=${participantToken}`,
+  ].join('; '))
+  registeredSocketHandler(studentSocket, new URLSearchParams(`sessionId=${session.id}&principal=participant`))
   await new Promise((resolve) => setTimeout(resolve, 0))
   assert.equal(managerSocket.principalKind, 'manager')
   assert.equal(studentSocket.principalKind, 'participant')

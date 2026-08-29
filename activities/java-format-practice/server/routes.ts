@@ -1,4 +1,5 @@
 import { createSession, type SessionRecord, type SessionStore } from 'activebits-server/core/sessions.js'
+import { randomUUID } from 'node:crypto'
 import { createBroadcastSubscriptionHelper } from 'activebits-server/core/broadcastUtils.js'
 import { connectAcceptedSessionParticipant } from 'activebits-server/core/acceptedSessionParticipants.js'
 import { getSessionParticipantCookieName, resolveAcceptedEntryParticipantToken } from 'activebits-server/core/acceptedEntryParticipants.js'
@@ -109,7 +110,9 @@ export default function setupJavaFormatPracticeRoutes(
   sessions: SessionStore,
   ws: WsRouter,
 ): void {
+  const broadcastOrigin = randomUUID()
   const ensureBroadcastSubscription = createBroadcastSubscriptionHelper(sessions, ws, (client, message) => {
+    if (isPlainObject(message) && message.origin === broadcastOrigin) return false
     const audience = isPlainObject(message) && message.audience === 'manager' ? 'manager' : 'all'
     return audience === 'all' || (client as JavaFormatSocket).principalKind === 'manager'
   })
@@ -118,7 +121,12 @@ export default function setupJavaFormatPracticeRoutes(
     const message = JSON.stringify({ type, payload })
 
     if (sessions.publishBroadcast) {
-      await sessions.publishBroadcast(`session:${sessionId}:broadcast`, { type, payload, audience } as Record<string, unknown>)
+      await sessions.publishBroadcast(`session:${sessionId}:broadcast`, {
+        type,
+        payload,
+        audience,
+        origin: broadcastOrigin,
+      })
     }
 
     let clientCount = 0
@@ -139,6 +147,7 @@ export default function setupJavaFormatPracticeRoutes(
   ws.register('/ws/java-format-practice', (socket, query) => {
     const client = socket as JavaFormatSocket
     const requestedSessionId = query.get('sessionId') || null
+    const requestedPrincipal = query.get('principal')
 
     if (requestedSessionId) {
       const activeSessionId = requestedSessionId
@@ -149,14 +158,22 @@ export default function setupJavaFormatPracticeRoutes(
         if (!session) return
 
         const cookieHeader = client.upgradeHeaders?.cookie
-        const manager = resolveActivityPrincipalFromCookies(session, activeSessionId, 'manager', {
-          [getActivityCapabilityCookieName('manager', activeSessionId)]: readCookieValue(cookieHeader, getActivityCapabilityCookieName('manager', activeSessionId)),
-        })
-        if (manager) {
+        const manager = requestedPrincipal !== 'participant'
+          ? resolveActivityPrincipalFromCookies(session, activeSessionId, 'manager', {
+            [getActivityCapabilityCookieName('manager', activeSessionId)]: readCookieValue(cookieHeader, getActivityCapabilityCookieName('manager', activeSessionId)),
+          })
+          : null
+        if (requestedPrincipal !== 'participant' && manager) {
           client.principalKind = 'manager'
           client.sessionId = activeSessionId
           ensureBroadcastSubscription(activeSessionId)
           console.info('Java Format manager websocket admitted', { sessionId: activeSessionId, capabilityId: manager.capabilityId })
+          return
+        }
+
+        if (requestedPrincipal === 'manager') {
+          console.info('Java Format websocket denied', { sessionId: activeSessionId, reason: 'missing-manager-principal' })
+          client.close(1008, 'activity-auth-required')
           return
         }
 
