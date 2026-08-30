@@ -1647,33 +1647,6 @@ void test('command route rejects requests without a manager capability', async (
   })
 })
 
-void test('command route rejects requests without a manager capability', async () => {
-  const app = createMockApp()
-  const ws = createMockWs() as unknown as WsRouter
-  const storeState = createSessionStore({ s1: createVideoSyncSession('s1') })
-
-  setupVideoSyncRoutes(app, storeState.sessions, ws)
-
-  const handler = app.handlers.post['/api/video-sync/:sessionId/command']
-  assert.equal(typeof handler, 'function')
-
-  const res = createResponse()
-  await handler?.(
-    {
-      params: { sessionId: 's1' },
-      cookies: {},
-      body: { type: 'play' },
-    },
-    res,
-  )
-
-  assert.equal(res.statusCode, 403)
-  assert.deepEqual(res.body, {
-    error: 'FORBIDDEN',
-    message: 'Manager capability is required',
-  })
-})
-
 void test('manager-access route returns manager access for persistent teacher cookie', async () => {
   initializePersistentStorage(null)
 

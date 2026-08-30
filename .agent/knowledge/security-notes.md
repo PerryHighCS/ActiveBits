@@ -396,6 +396,7 @@ Track security-relevant boundaries, risks, and mitigation decisions.
 - Expected denied student edits (missing accepted identity or Try it disabled) use structured MobCode event logs without source contents.
 - The generic entry-participant consume route now issues an opaque httpOnly token scoped to the accepted session. MobCode reads this token server-side and never accepts a participant ID in its student workspace API bodies.
 - SyncDeck embedded child sessions receive that one-time entry token asynchronously over the parent websocket, so MobCode waits briefly for the token and retries a denied child-workspace bootstrap once. The retry still redeems the opaque token through the generic consume route; it must not reintroduce a browser-supplied participant ID.
+
 # Video Sync manager capability cutover
 
 - Area: Video Sync manager authorization
