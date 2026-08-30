@@ -3020,6 +3020,33 @@ void test('embedded manager capability exchange consumes its token and issues an
   assert.equal((storeState.store['child-capability']?.data as { activityCapabilities?: unknown }).activityCapabilities != null, true)
 })
 
+void test('embedded manager capability exchange does not issue a cookie when persistence fails', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const now = Date.now()
+  const storeState = createSessionStore({
+    'child-capability': {
+      id: 'child-capability', type: 'video-sync', created: now, lastActivity: now,
+      data: { embeddedManagerEntryToken: { value: 'capability-entry-token', expiresAt: now + 60_000 } },
+    },
+  })
+  storeState.sessions.set = async () => { throw new Error('simulated session-store write failure') }
+  setupSyncDeckRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.get['/api/syncdeck/embedded-manager-capability']
+  assert.equal(typeof handler, 'function')
+  const response = createResponse()
+  console.info('[TEST] Expected embedded manager capability persistence failure.')
+  await handler?.(
+    createRequest({}, undefined, {}, {}, { sessionId: 'child-capability', token: 'capability-entry-token' }),
+    response,
+  )
+
+  assert.equal(response.statusCode, 500)
+  assert.deepEqual(response.body, { error: 'embedded manager capability unavailable' })
+  assert.equal(response.cookies.length, 0)
+})
+
 void test('embedded manager passcode exchange allows only one concurrent token redemption', async () => {
   const app = createMockApp()
   const ws = createMockWs()

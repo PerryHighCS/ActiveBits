@@ -31,6 +31,7 @@ test('Video Sync temporary manager becomes read-only after its capability cookie
   expect(typeof created.id).toBe('string')
   const sessionId = created.id as string
 
+  console.info('[TEST] clearing the manager capability cookie to verify read-only recovery')
   await context.clearCookies({ name: `activebits_cap_manager_${Buffer.from(sessionId, 'utf8').toString('base64url')}` })
   await page.goto(`/manage/video-sync/${encodeURIComponent(sessionId)}`)
 

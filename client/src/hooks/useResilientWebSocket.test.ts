@@ -216,6 +216,7 @@ void test('stale socket events cannot change the live connection state', async (
     assert.equal(closeCalls, 0)
 
     await act(async () => {
+      console.info('[TEST] closing the current socket with an intentional abnormal 1006 code')
       secondSocket.emitClose(1006)
     })
     assert.equal(closeCalls, 1)

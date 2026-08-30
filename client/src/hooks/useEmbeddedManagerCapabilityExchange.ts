@@ -60,7 +60,15 @@ export function useEmbeddedManagerCapabilityExchange(params: {
         }
         setState({ key: exchangeKey, isAuthorized, error: null, isResolving: false })
       } catch (error) {
-        if (!cancelled) setState({ key: exchangeKey, isAuthorized: false, error, isResolving: false })
+        if (cancelled) return
+        if (error instanceof EmbeddedManagerPasscodeExchangeUnavailableError) {
+          const nextAttempt = nextEmbeddedManagerBootstrapRefreshAttempt(refreshAttemptsBySessionIdRef.current.get(sessionId) ?? 0)
+          if (nextAttempt != null) {
+            refreshAttemptsBySessionIdRef.current.set(sessionId, nextAttempt)
+            requestEmbeddedManagerBootstrapRefresh(sessionId)
+          }
+        }
+        setState({ key: exchangeKey, isAuthorized: false, error, isResolving: false })
       }
     })()
     return () => { cancelled = true }

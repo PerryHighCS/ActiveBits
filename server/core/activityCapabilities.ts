@@ -100,14 +100,24 @@ export function issueActivityCapabilityCookie(
   subjectId?: string,
 ): { id: string; token: string } {
   const capability = issueActivityCapability(session, principalKind, subjectId)
-  res.cookie(getActivityCapabilityCookieName(principalKind, sessionId), capability.token, {
+  writeActivityCapabilityCookie(res, sessionId, principalKind, capability.token)
+  return capability
+}
+
+/** Delivers an already-persisted opaque capability as an httpOnly cookie. */
+export function writeActivityCapabilityCookie(
+  res: ActivityCapabilityCookieResponse,
+  sessionId: string,
+  principalKind: ActivityPrincipalKind,
+  token: string,
+): void {
+  res.cookie(getActivityCapabilityCookieName(principalKind, sessionId), token, {
     httpOnly: true,
     sameSite: 'lax',
     secure: process.env.NODE_ENV === 'production',
     path: '/',
     maxAge: DEFAULT_ACTIVITY_CAPABILITY_TTL_MS,
   })
-  return capability
 }
 
 export function resolveActivityCapability(

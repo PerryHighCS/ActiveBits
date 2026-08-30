@@ -26,7 +26,7 @@ import {
 } from 'activebits-server/core/sessions.js'
 import { storeSessionEntryParticipant } from 'activebits-server/core/sessionEntryParticipants.js'
 import { revokeSessionEntryParticipants } from 'activebits-server/core/sessionEntryParticipants.js'
-import { issueActivityCapabilityCookie } from 'activebits-server/core/activityCapabilities.js'
+import { issueActivityCapability, writeActivityCapabilityCookie } from 'activebits-server/core/activityCapabilities.js'
 import { randomBytes, timingSafeEqual } from 'node:crypto'
 import type { ActiveBitsWebSocket, WsRouter } from '../../../types/websocket.js'
 import {
@@ -2225,8 +2225,20 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       res.status(404).json({ error: 'embedded activity session not found' })
       return
     }
-    issueActivityCapabilityCookie({ cookie: res.cookie.bind(res) }, consumedSession, sessionId, 'manager')
-    await sessions.set(sessionId, consumedSession)
+    try {
+      const capability = issueActivityCapability(consumedSession, 'manager')
+      await sessions.set(sessionId, consumedSession)
+      writeActivityCapabilityCookie({ cookie: res.cookie.bind(res) }, sessionId, 'manager', capability.token)
+    } catch (error) {
+      console.error(JSON.stringify({
+        activity: 'syncdeck',
+        event: 'embedded-manager-capability-persistence-failed',
+        sessionId,
+        errorName: error instanceof Error ? error.name : 'unknown',
+      }))
+      res.status(500).json({ error: 'embedded manager capability unavailable' })
+      return
+    }
 
     console.info(JSON.stringify({
       activity: 'syncdeck',

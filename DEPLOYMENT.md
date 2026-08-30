@@ -272,7 +272,7 @@ When a new deployment is triggered:
 
 **Symptoms**: A YouTube player embedded through a SyncDeck manager reports error 153 (client identity/referrer error)
 - **Cause**: The nested YouTube iframe must receive either a referrer or the player origin. A `no-referrer` policy on the SyncDeck manager iframe prevents both in Safari.
-- **Fix**: Keep SyncDeck's embedded-manager iframe policy at `strict-origin-when-cross-origin`. It sends only the ActiveBits origin to YouTube—never the child manager URL or its one-time entry token. If the browser has a content blocker, allow YouTube resources for the ActiveBits site as well.
+- **Fix**: Keep SyncDeck's embedded-manager iframe policy at `strict-origin-when-cross-origin` and the client document policy at `strict-origin`. Together they send only the ActiveBits origin to YouTube—never the child manager URL or its one-time entry token. If the browser has a content blocker, allow YouTube resources for the ActiveBits site as well.
 
 **Symptoms**: High Valkey latency
 - **Cause**: Valkey instance in different region or overloaded

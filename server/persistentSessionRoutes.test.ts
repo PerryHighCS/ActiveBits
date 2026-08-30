@@ -186,8 +186,11 @@ void test('persistent session route keeps valid backing session', async (t) => {
   initializePersistentStorage(null)
   const sessionMap = new Map<string, unknown>()
   const sessions = {
-    get: async (id: string) => sessionMap.get(id) ?? null,
-    set: async (id: string, session: unknown) => { sessionMap.set(id, session) },
+    get: async (id: string) => {
+      const session = sessionMap.get(id)
+      return session == null ? null : structuredClone(session)
+    },
+    set: async (id: string, session: unknown) => { sessionMap.set(id, structuredClone(session)) },
   }
   const app = createMockApp()
   registerPersistentSessionRoutes({ app, sessions })
@@ -216,6 +219,40 @@ void test('persistent session route keeps valid backing session', async (t) => {
 
   const stored = await getPersistentSession(hash)
   assert.equal(stored?.entryPolicy, 'instructor-required')
+})
+
+void test('session teacher authenticate does not issue a capability cookie when persistence fails', async (t) => {
+  initializePersistentStorage(null)
+  await initializeActivityRegistry()
+  const sessionMap = new Map<string, unknown>()
+  const sessions = {
+    get: async (id: string) => {
+      const session = sessionMap.get(id)
+      return session == null ? null : structuredClone(session)
+    },
+    set: async () => { throw new Error('simulated session-store write failure') },
+  }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+  const handler = getRoute(app, 'POST', '/api/session/:sessionId/teacher-authenticate')
+
+  const activityName = 'syncdeck'
+  const teacherCode = 'teacher-secret'
+  const { hash, hashedTeacherCode } = generatePersistentHash(activityName, teacherCode)
+  t.after(async () => cleanupPersistentSession(hash))
+  sessionMap.set('live-session', {
+    id: 'live-session', type: activityName, data: { instructorPasscode: 'syncdeck-instructor-passcode' },
+  })
+  await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode, 'solo-allowed')
+  await startPersistentSession(hash, 'live-session', { id: 'teacher-ws', readyState: 1, send() {} })
+
+  const res = createMockRes()
+  console.info('[TEST] Expected manager capability persistence failure during teacher authentication.')
+  await handler(createMockReq({ params: { sessionId: 'live-session' }, body: { teacherCode } }), res)
+
+  assert.equal(res.statusCode, 500)
+  assert.deepEqual(res.jsonBody, { error: 'manager capability unavailable' })
+  assert.equal(Array.from(res.cookies.keys()).some((name) => name.startsWith('activebits_cap_manager_')), false)
 })
 
 void test('persistent session route resets when backing session missing', async (t) => {

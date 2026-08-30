@@ -35,7 +35,7 @@ import {
 } from '../core/persistentSessionEntryGateway.js'
 import { buildCreateSessionBootstrapPayload } from '../core/createSessionBootstrapPayload.js'
 import { boundPersistentSessionCookieEntries } from '../core/persistentSessionCookie.js'
-import { issueActivityCapabilityCookie } from '../core/activityCapabilities.js'
+import { issueActivityCapability, writeActivityCapabilityCookie } from '../core/activityCapabilities.js'
 
 const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000
 const MAX_TEACHER_CODE_LENGTH = 100
@@ -749,8 +749,19 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
     const createSessionPayload = buildCreateSessionBootstrapPayload(activityName, activeSessionData)
 
     if (sessions.set && isPlainObject(activeSession)) {
-      issueActivityCapabilityCookie(res, activeSession as { data: unknown }, sessionId, 'manager')
-      await sessions.set(sessionId, activeSession)
+      try {
+        const capability = issueActivityCapability(activeSession as { data: unknown }, 'manager')
+        await sessions.set(sessionId, activeSession)
+        writeActivityCapabilityCookie(res, sessionId, 'manager', capability.token)
+      } catch (error) {
+        console.error(JSON.stringify({
+          event: 'persistent-manager-capability-persistence-failed',
+          sessionId,
+          errorName: error instanceof Error ? error.name : 'unknown',
+        }))
+        res.status(500).json({ error: 'manager capability unavailable' })
+        return
+      }
     }
 
     res.json({
