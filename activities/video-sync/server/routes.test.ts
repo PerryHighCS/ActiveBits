@@ -8,6 +8,7 @@ import {
   startPersistentSession,
 } from 'activebits-server/core/persistentSessions.js'
 import { computePersistentLinkUrlHash } from 'activebits-server/core/persistentLinkUrlState.js'
+import { getActivityCapabilityCookieName, issueActivityCapability } from 'activebits-server/core/activityCapabilities.js'
 import type { SessionRecord } from 'activebits-server/core/sessions.js'
 import type { WsRouter } from '../../../types/websocket.js'
 import setupVideoSyncRoutes, { waitForInstructorAuthMessage } from './routes.js'
@@ -89,7 +90,7 @@ function createMockWs() {
   }
 }
 
-function createMockSocket() {
+function createMockSocket(options: { cookie?: string } = {}) {
   const sent: string[] = []
   const handlers: Record<string, Array<{ listener: (...args: unknown[]) => void; once: boolean }>> = {
     close: [],
@@ -119,6 +120,7 @@ function createMockSocket() {
       readyState: 1,
       sessionId: null,
       videoSyncRole: null,
+      ...(options.cookie ? { upgradeHeaders: { cookie: options.cookie } } : {}),
       on(event: 'close' | 'error' | 'message', handler: (...args: unknown[]) => void) {
         const listeners = handlers[event]
         if (!listeners) {
@@ -2027,6 +2029,36 @@ void test('instructor websocket accepts connections with a valid instructor pass
   const telemetryEnvelope = JSON.parse(recorder.sent[1] ?? '{}') as { type?: string; payload?: { reason?: string } }
   assert.equal(telemetryEnvelope.type, 'telemetry-update')
   assert.equal(telemetryEnvelope.payload?.reason, 'connection-change')
+  recorder.emit('close')
+  await new Promise((resolve) => setTimeout(resolve, 0))
+})
+
+void test('instructor websocket admits a valid manager capability without a passcode message', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const storeState = createSessionStore({ s1: createVideoSyncSession('s1', TEST_INSTRUCTOR_PASSCODE) })
+  const session = storeState.store.s1
+  assert.ok(session)
+  const capability = issueActivityCapability(session, 'manager')
+  const cookieName = getActivityCapabilityCookieName('manager', session.id)
+
+  setupVideoSyncRoutes(app, storeState.sessions, ws as unknown as WsRouter)
+
+  const handler = ws.registered['/ws/video-sync']
+  assert.equal(typeof handler, 'function')
+
+  const recorder = createMockSocket({ cookie: `${cookieName}=${capability.token}` })
+  handler?.(recorder.socket, new URLSearchParams({
+    sessionId: 's1',
+    role: 'instructor',
+  }))
+
+  await waitForCondition(() => recorder.sent.length === 2, 1000)
+
+  assert.equal(recorder.closed, null)
+  const payload = JSON.parse(recorder.sent[0] ?? '{}') as { type?: string; payload?: { role?: string } }
+  assert.equal(payload.type, 'state-snapshot')
+  assert.equal(payload.payload?.role, 'instructor')
   recorder.emit('close')
   await new Promise((resolve) => setTimeout(resolve, 0))
 })

@@ -272,7 +272,8 @@ Do not begin with all activities at once.
 - [x] Select Video Sync because its persistent-teacher and SyncDeck-parent recovery paths are already server-verified and its manager surface is narrower than MobCode's private-workspace model.
 - [x] Audit the existing adapter: verified persistent/parent authority currently reaches the manager by returning `instructorPasscode` from `GET /api/video-sync/:sessionId/instructor-passcode`.
 - [ ] Extract or add a shared persistent/embedded manager-capability issuance adapter that verifies the existing parent authority without exposing an activity credential.
-- [ ] Issue the httpOnly manager capability on Video Sync persistent and embedded recovery, then migrate manager REST routes and WebSocket admission to that capability.
+- [x] Issue the httpOnly manager capability on Video Sync persistent/parent recovery and accept it on manager REST routes.
+- [x] Admit Video Sync manager WebSockets from that capability while preserving the early auth-message listener and temporary passcode fallback.
 - [ ] Remove client passcode recovery and authenticate manager WebSockets directly from the capability cookie while preserving Video Sync's authenticate-before-subscribe ordering for participant sockets.
 - [x] Stabilize the existing SyncDeck student-return browser regression test: wait for each rendered roster row, rather than only its early connected-count update, before opening the next student socket (the underlying atomic-mutation race remains tracked in [#350](https://github.com/PerryHighCS/ActiveBits/issues/350)).
 - [ ] Add persistent, embedded, temporary-manager, capability-loss, and cross-role browser/route/socket coverage.

@@ -1,5 +1,10 @@
 import { createSession, type SessionRecord, type SessionStore } from 'activebits-server/core/sessions.js'
-import { issueActivityCapabilityCookie, resolveActivityPrincipalFromCookies } from 'activebits-server/core/activityCapabilities.js'
+import {
+  getActivityCapabilityCookieName,
+  issueActivityCapabilityCookie,
+  readCookieValue,
+  resolveActivityPrincipalFromCookies,
+} from 'activebits-server/core/activityCapabilities.js'
 import { registerSessionNormalizer } from 'activebits-server/core/sessionNormalization.js'
 import { createBroadcastSubscriptionHelper } from 'activebits-server/core/broadcastUtils.js'
 import {
@@ -599,13 +604,26 @@ export function waitForInstructorAuthMessage(
   socket: ActiveBitsWebSocket,
   timeoutMs = getInstructorAuthTimeoutMs(),
 ): Promise<unknown | null> {
-  return new Promise<unknown | null>((resolve) => {
-    let settled = false
-    let timeoutId: ReturnType<typeof setTimeout> | null = setTimeout(() => {
-      settle(null)
-      socket.close(1008, 'Auth timeout')
-    }, timeoutMs)
+  const waiter = createInstructorAuthMessageWaiter(socket)
+  waiter.startTimeout(timeoutMs)
+  return waiter.promise
+}
 
+interface InstructorAuthMessageWaiter {
+  promise: Promise<unknown | null>
+  startTimeout(timeoutMs: number): void
+}
+
+/**
+ * Listens before session lookup so an instructor's first authentication message
+ * cannot be missed. Cookie-authenticated managers never need the timeout, but
+ * the passcode compatibility path arms it once fallback is required.
+ */
+function createInstructorAuthMessageWaiter(socket: ActiveBitsWebSocket): InstructorAuthMessageWaiter {
+  let startTimeout: (timeoutMs: number) => void = () => {}
+  const promise = new Promise<unknown | null>((resolve) => {
+    let settled = false
+    let timeoutId: ReturnType<typeof setTimeout> | null = null
     const settle = (value: unknown | null) => {
       if (settled) {
         return
@@ -618,6 +636,16 @@ export function waitForInstructorAuthMessage(
       resolve(value)
     }
 
+    startTimeout = (timeoutMs) => {
+      if (settled || timeoutId != null) {
+        return
+      }
+      timeoutId = setTimeout(() => {
+        settle(null)
+        socket.close(1008, 'Auth timeout')
+      }, timeoutMs)
+    }
+
     socket.once('message', (raw: unknown) => {
       settle(raw)
     })
@@ -627,6 +655,16 @@ export function waitForInstructorAuthMessage(
     socket.once('error', () => {
       settle(null)
     })
+  })
+
+  return { promise, startTimeout: (timeoutMs) => startTimeout(timeoutMs) }
+}
+
+function resolveManagerSocketPrincipal(session: VideoSyncSession, sessionId: string, socket: VideoSyncSocket) {
+  const cookieName = getActivityCapabilityCookieName('manager', sessionId)
+  const cookieHeader = socket.upgradeHeaders?.cookie
+  return resolveActivityPrincipalFromCookies(session, sessionId, 'manager', {
+    [cookieName]: readCookieValue(cookieHeader, cookieName),
   })
 }
 
@@ -1707,8 +1745,8 @@ export default function setupVideoSyncRoutes(
     }
 
     const typedSocket = socket as VideoSyncSocket
-    const instructorAuthMessagePromise = isInstructorRoleParam(roleParam)
-      ? waitForInstructorAuthMessage(typedSocket)
+    const instructorAuthMessageWaiter = isInstructorRoleParam(roleParam)
+      ? createInstructorAuthMessageWaiter(typedSocket)
       : null
     let cleanedUp = false
     let isSubscribed = false
@@ -1770,16 +1808,22 @@ export default function setupVideoSyncRoutes(
       }
 
       if (isInstructorRoleParam(roleParam)) {
-        const rawAuthMessage = await instructorAuthMessagePromise
-        if (cleanedUp || typedSocket.readyState !== WS_OPEN_READY_STATE) {
-          handleSocketClosed()
-          return
-        }
+        const managerPrincipal = resolveManagerSocketPrincipal(session, sessionId, typedSocket)
+        if (!managerPrincipal) {
+          // Temporary compatibility path; owner: Codex; cleanup: remove after
+          // the Video Sync manager client authenticates solely with its cookie.
+          instructorAuthMessageWaiter?.startTimeout(getInstructorAuthTimeoutMs())
+          const rawAuthMessage = await instructorAuthMessageWaiter?.promise
+          if (cleanedUp || typedSocket.readyState !== WS_OPEN_READY_STATE) {
+            handleSocketClosed()
+            return
+          }
 
-        const authMessage = parseInstructorAuthMessage(rawAuthMessage)
-        if (!authMessage || !verifyInstructorPasscode(session.data.instructorPasscode, authMessage.instructorPasscode)) {
-          typedSocket.close(1008, 'Forbidden')
-          return
+          const authMessage = parseInstructorAuthMessage(rawAuthMessage)
+          if (!authMessage || !verifyInstructorPasscode(session.data.instructorPasscode, authMessage.instructorPasscode)) {
+            typedSocket.close(1008, 'Forbidden')
+            return
+          }
         }
       }
 
