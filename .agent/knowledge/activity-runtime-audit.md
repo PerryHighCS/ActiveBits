@@ -249,7 +249,9 @@ Migration implications:
 > manager REST/socket routes require it, `POST /stats` requires the participant
 > cookie, and the sockets authenticate before subscription. The permalink /
 > persistent-teacher path does **not** yet issue a manager capability (tracked
-> separately) and remains a known gap. See
+> in [#351](https://github.com/PerryHighCS/ActiveBits/issues/351)); PR #349
+> sets `supportsPermalink: false` for this activity as an interim stopgap until
+> the Slice C persistent-teacher adapter lands. See
 > `.agent/knowledge/activity-runtime-threat-model.md` and the plan's Slice A for
 > the migrated contract.
 >
