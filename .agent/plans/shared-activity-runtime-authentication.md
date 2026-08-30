@@ -271,7 +271,7 @@ Do not begin with all activities at once.
 
 - [x] Select Video Sync because its persistent-teacher and SyncDeck-parent recovery paths are already server-verified and its manager surface is narrower than MobCode's private-workspace model.
 - [x] Audit the existing adapter: verified persistent/parent authority currently reaches the manager by returning `instructorPasscode` from `GET /api/video-sync/:sessionId/instructor-passcode`.
-- [ ] Extract or add a shared persistent/embedded manager-capability issuance adapter that verifies the existing parent authority without exposing an activity credential.
+- [x] Add the shared `issueActivityCapabilityCookie` issuance adapter, used only after an activity's existing server-side parent/persistent authority has been verified and without exposing an activity credential.
 - [x] Issue the httpOnly manager capability on Video Sync persistent/parent recovery and accept it on manager REST routes.
 - [x] Admit Video Sync manager WebSockets from that capability while preserving the early auth-message listener and temporary passcode fallback.
 - [x] Add a parallel, generic SyncDeck embedded-manager exchange that consumes the one-time child token and issues only the child manager capability; retain the existing passcode exchange until its other activity clients migrate.
@@ -282,8 +282,9 @@ Do not begin with all activities at once.
 - [x] Stabilize the existing SyncDeck student-return browser regression test: wait for each rendered roster row, rather than only its early connected-count update, before opening the next student socket (the underlying atomic-mutation race remains tracked in [#350](https://github.com/PerryHighCS/ActiveBits/issues/350)).
 - [x] Preserve an origin-only cross-origin referrer for SyncDeck embedded managers and explicitly pass the ActiveBits origin to Video Sync's YouTube players, so Safari can satisfy YouTube's client-identification requirement without leaking the child manager's one-time entry token.
 - [x] Harden the shared resilient WebSocket hook so events from a replaced socket cannot overwrite the state of the current manager connection (including React Strict Mode's discarded development connection).
+- [x] Add Chromium Video Sync browser coverage that clears a temporary manager's capability cookie and verifies the manager becomes read-only without a passcode fallback.
 - [ ] Add persistent, embedded, temporary-manager, capability-loss, and cross-role browser/route/socket coverage.
-- [ ] Restore Java Format permalink support only in the Phase 6 retrofit after this adapter is proven.
+- [x] Restore Java Format permalink support in the Phase 6 retrofit after the adapter was proven ([#351](https://github.com/PerryHighCS/ActiveBits/issues/351)).
 
 ### Phase 6 wrap-up (after Slice C, before Phase 7)
 
