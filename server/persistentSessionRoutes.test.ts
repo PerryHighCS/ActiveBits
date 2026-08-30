@@ -322,7 +322,7 @@ void test('persistent manager capability recovery issues a manager cookie for an
   }), res)
 
   assert.equal(res.statusCode, 200)
-  assert.deepEqual(res.jsonBody, { success: true })
+  assert.deepEqual(res.jsonBody, { success: true, persistentRecoveryAvailable: true })
   assert.equal(Array.from(res.cookies.keys()).filter((name) => name.startsWith('activebits_cap_manager_')).length, 1)
 
   // The mutation must survive the store boundary: a no-op set would pass the
@@ -376,7 +376,7 @@ void test('persistent manager capability recovery issues the capability onto the
   assert.equal(persisted?.data?.concurrentMarker, 'landed-mid-flight', 'the concurrent update is not clobbered by a stale snapshot write')
 })
 
-void test('persistent manager capability recovery fast-paths an already-authorized caller without a persistent-store lookup', async () => {
+void test('persistent manager capability recovery fast-paths an already-authorized caller without re-issuing', async () => {
   initializePersistentStorage(null)
   const sessionMap = new Map<string, unknown>()
   let setCalls = 0
@@ -393,7 +393,7 @@ void test('persistent manager capability recovery fast-paths an already-authoriz
 
   // A live session that carries a valid manager capability already (as /create
   // would leave it). No persistent session is registered and no
-  // persistent_sessions cookie is sent, so the non-fast path would 404.
+  // persistent_sessions cookie is sent, so recovery is not persistently backed.
   const liveSession = { id: 'live-session', type: 'java-format-practice', data: { students: [] } }
   const capability = issueActivityCapability(liveSession, 'manager')
   sessionMap.set('live-session', liveSession)
@@ -405,10 +405,86 @@ void test('persistent manager capability recovery fast-paths an already-authoriz
   }), res)
 
   assert.equal(res.statusCode, 200)
-  assert.deepEqual(res.jsonBody, { success: true, alreadyAuthorized: true })
+  assert.deepEqual(res.jsonBody, { success: true, alreadyAuthorized: true, persistentRecoveryAvailable: false })
   // Fast path: no re-issue, no session write, no capability cookie set.
   assert.equal(setCalls, 0)
   assert.equal(res.cookies.has(getActivityCapabilityCookieName('manager', 'live-session')), false)
+})
+
+void test('persistent manager capability recovery fast path reports persistent recoverability when a teacher cookie backs it', async (t) => {
+  initializePersistentStorage(null)
+  const sessionMap = new Map<string, unknown>()
+  let setCalls = 0
+  const sessions = {
+    get: async (id: string) => {
+      const session = sessionMap.get(id)
+      return session == null ? null : structuredClone(session)
+    },
+    set: async (id: string, session: unknown) => { setCalls += 1; sessionMap.set(id, structuredClone(session)) },
+  }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+  const handler = getRoute(app, 'POST', '/api/session/:sessionId/persistent-manager-capability')
+
+  const activityName = 'java-format-practice'
+  const teacherCode = 'teacher-secret'
+  const { hash, hashedTeacherCode } = generatePersistentHash(activityName, teacherCode)
+  t.after(async () => cleanupPersistentSession(hash))
+  // The permalink flow: teacher-authenticate already issued the manager
+  // capability, so this call hits the fast path - but it must still report
+  // that a later capability loss is recoverable by reload.
+  const liveSession = { id: 'live-session', type: activityName, data: { students: [] } }
+  const capability = issueActivityCapability(liveSession, 'manager')
+  sessionMap.set('live-session', liveSession)
+  await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode)
+  await startPersistentSession(hash, 'live-session', { id: 'teacher-ws', readyState: 1, send() {} })
+
+  const res = createMockRes()
+  await handler(createMockReq({
+    params: { sessionId: 'live-session' },
+    cookies: {
+      [getActivityCapabilityCookieName('manager', 'live-session')]: capability.token,
+      persistent_sessions: buildCookieValue(activityName, hash, teacherCode),
+    },
+  }), res)
+
+  assert.equal(res.statusCode, 200)
+  assert.deepEqual(res.jsonBody, { success: true, alreadyAuthorized: true, persistentRecoveryAvailable: true })
+  assert.equal(setCalls, 0, 'fast path still does not re-issue')
+})
+
+void test('persistent manager capability recovery returns a retryable 500 when the reverse-index read fails', async (t) => {
+  const valkeyClient = createFakePersistentValkeyClient()
+  const originalGet = valkeyClient.get
+  valkeyClient.get = async (key: string) => {
+    if (key.startsWith('persistent-session-by-session:')) {
+      throw new Error('[TEST] reverse-index read failed')
+    }
+    return originalGet(key)
+  }
+  initializePersistentStorage(valkeyClient as never)
+  await initializeActivityRegistry()
+
+  const sessionMap = new Map<string, unknown>()
+  const sessions = {
+    get: async (id: string) => sessionMap.get(id) ?? null,
+    set: async (id: string, session: unknown) => { sessionMap.set(id, session) },
+  }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+  const handler = getRoute(app, 'POST', '/api/session/:sessionId/persistent-manager-capability')
+  t.after(() => { initializePersistentStorage(null) })
+
+  sessionMap.set('live-session', { id: 'live-session', type: 'java-format-practice', data: { students: [] } })
+
+  const res = createMockRes()
+  console.info('[TEST] Expected reverse-index read failure during persistent manager capability recovery.')
+  await handler(createMockReq({ params: { sessionId: 'live-session' }, cookies: {} }), res)
+
+  // Not 404: a transient outage must surface as retryable, so the Java manager
+  // uses its 5xx retry path instead of latching auth loss.
+  assert.equal(res.statusCode, 500)
+  assert.deepEqual(res.jsonBody, { error: 'Manager capability is temporarily unavailable' })
 })
 
 void test('persistent session route resets when backing session missing', async (t) => {
@@ -1355,6 +1431,25 @@ void test('indexed-only session id reverse lookup never scans the persistent-ses
   // for an id with no reverse-index entry.
   await findHashBySessionId('temp-session')
   assert.ok(persistentScanCount > 0, 'findHashBySessionId still falls back to a full scan')
+})
+
+void test('indexed-only session id reverse lookup rejects a reverse-index read failure instead of returning null', async () => {
+  const valkeyClient = createFakePersistentValkeyClient()
+  const originalGet = valkeyClient.get
+  valkeyClient.get = async (key: string) => {
+    if (key.startsWith('persistent-session-by-session:')) {
+      throw new Error('[TEST] reverse-index read failed')
+    }
+    return originalGet(key)
+  }
+  initializePersistentStorage(valkeyClient as never)
+
+  // A storage failure must not be indistinguishable from "no such session":
+  // the recovery routes wrap this and turn a rejection into a retryable 500.
+  await assert.rejects(findIndexedHashBySessionId('some-session'), /reverse-index read failed/)
+  // findHashBySessionId keeps its swallow-to-null behaviour for its other
+  // callers that tolerate it.
+  assert.equal(await findHashBySessionId('some-session'), null)
 })
 
 void test('authenticate persists selectedOptions from request body when cookie entry is missing', async (t) => {

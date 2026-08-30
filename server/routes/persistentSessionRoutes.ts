@@ -814,32 +814,44 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
         return
       }
 
-      // Fast path: the caller already holds a valid manager capability for this
-      // session (issued by /create or a prior recovery). There is nothing to
-      // re-issue, and skipping the persistent-store lookup below keeps the
-      // common case - the manager mounts this adapter on every load - O(1).
-      if (resolveActivityPrincipalFromCookies(activeSession as { data: unknown }, sessionId, 'manager', req.cookies)) {
-        res.json({ success: true, alreadyAuthorized: true })
-        return
-      }
-
-      // Index-only lookup: this branch runs before the persistent teacher
-      // cookie is checked, so an uncredentialed caller must not be able to
-      // drive the O(n) `getAllHashes()` scan that `findHashBySessionId` falls
-      // back to for a session id with no reverse-index entry (every temporary
-      // session). A live persistent session always has an index entry.
+      // Resolve the persistent recovery context up front. It gates issuance
+      // below, and the fast path needs it too: `teacher-authenticate` issues
+      // the capability before the manager mounts, so a permalink manager
+      // reaches the fast path yet still needs to be told that a later
+      // capability loss is recoverable by reload (the persistent teacher
+      // cookie outlives the 7-day capability).
+      //
+      // Index-only lookup: this runs before the persistent teacher cookie is
+      // checked, so an uncredentialed caller must not be able to drive the
+      // O(n) `getAllHashes()` scan. It rejects (-> outer catch -> 500) rather
+      // than returning `null` if the index read itself fails.
       const hash = await findIndexedHashBySessionId(sessionId)
       const persistentSession = hash ? await getPersistentSession(hash) : null
-      if (!hash || !persistentSession || persistentSession.sessionId !== sessionId || persistentSession.activityName !== activeSession.type) {
-        res.status(404).json({ error: 'Persistent manager recovery is unavailable for this session' })
-        return
-      }
-
+      const isPersistentSession = Boolean(
+        hash
+        && persistentSession
+        && persistentSession.sessionId === sessionId
+        && persistentSession.activityName === activeSession.type,
+      )
       const { sessions: sessionEntries } = parsePersistentSessionsCookie(
         req.cookies?.persistent_sessions,
         'persistent_sessions (/api/session/:sessionId/persistent-manager-capability)',
       )
-      if (!getValidatedPersistentSessionCookieEntry(sessionEntries, persistentSession.activityName, hash)) {
+      const persistentRecoveryAvailable = isPersistentSession
+        && getValidatedPersistentSessionCookieEntry(sessionEntries, persistentSession!.activityName, hash!) != null
+
+      // Fast path: the caller already holds a valid manager capability. Nothing
+      // to re-issue; still report whether recovery is persistently backed.
+      if (resolveActivityPrincipalFromCookies(activeSession as { data: unknown }, sessionId, 'manager', req.cookies)) {
+        res.json({ success: true, alreadyAuthorized: true, persistentRecoveryAvailable })
+        return
+      }
+
+      if (!isPersistentSession) {
+        res.status(404).json({ error: 'Persistent manager recovery is unavailable for this session' })
+        return
+      }
+      if (!persistentRecoveryAvailable) {
         res.status(403).json({ error: 'Persistent teacher authentication is required' })
         return
       }
@@ -861,7 +873,7 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
       const capability = issueActivityCapability(freshSession as { data: unknown }, 'manager')
       await sessions.set(sessionId, freshSession)
       writeActivityCapabilityCookie(res, sessionId, 'manager', capability.token)
-      res.json({ success: true })
+      res.json({ success: true, persistentRecoveryAvailable: true })
     } catch (error) {
       console.error(JSON.stringify({
         event: 'persistent-manager-capability-failed',

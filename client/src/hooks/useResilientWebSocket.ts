@@ -58,10 +58,6 @@ export function useResilientWebSocket({
   const reconnectFnRef = useRef<() => WebSocket | null>(() => null)
   const reconnectAttemptsRef = useRef(0)
   const manualCloseRef = useRef(false)
-  // Sockets abandoned because a newer connect() replaced them. Their trailing
-  // close event is not meaningful to the consumer and must stay suppressed
-  // regardless of any later disconnect() on the hook.
-  const replacedSocketsRef = useRef<WeakSet<WebSocket>>(new WeakSet())
   const onOpenRef = useRef(onOpen)
   const onMessageRef = useRef(onMessage)
   const onCloseRef = useRef(onClose)
@@ -120,7 +116,6 @@ export function useResilientWebSocket({
     const ws = new WebSocket(url)
 
     if (socketRef.current && socketRef.current !== ws) {
-      replacedSocketsRef.current.add(socketRef.current)
       try {
         socketRef.current.close()
       } catch {
@@ -161,17 +156,18 @@ export function useResilientWebSocket({
     }
 
     ws.onclose = (event) => {
-      // Suppress only a socket a newer connect() abandoned. A `disconnect()`
-      // nulls socketRef synchronously, so an intentional close also arrives as
-      // "not the latest socket" - but consumers still need it (e.g. WwwSim
-      // clears its heartbeat/keepalive intervals only in onClose). Keying on a
-      // per-socket replaced set instead of the hook-wide manualCloseRef means a
-      // stale replaced socket stays suppressed even if a disconnect() lands
-      // between its replacement and its delayed close.
-      if (replacedSocketsRef.current.has(ws)) {
+      const currentSocket = socketRef.current
+      // Deliver this close only if it concerns the consumer's connection: this
+      // socket is still the current one, or nothing has taken its slot (a
+      // standalone disconnect(), which WwwSim relies on to clear its
+      // heartbeat/keepalive intervals). Suppress it whenever a *different*
+      // socket now owns the slot - it was replaced by a later connect(),
+      // whether or not a disconnect() happened in between - so a stale close
+      // can never mark the live replacement disconnected.
+      if (currentSocket !== null && currentSocket !== ws) {
         return
       }
-      const isLatestSocket = socketRef.current === ws
+      const isLatestSocket = currentSocket === ws
       onCloseRef.current?.(event, ws)
       if (isLatestSocket) {
         socketRef.current = null

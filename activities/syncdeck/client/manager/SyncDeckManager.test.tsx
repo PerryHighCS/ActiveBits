@@ -34,6 +34,7 @@ import { applySyncDeckEmbeddedLifecyclePayload } from './SyncDeckManager.js'
 import { isExpectedEmbeddedActivityStartResponseInstance } from './SyncDeckManager.js'
 import { resolveLocalEmbeddedActivityStartLifecyclePayload } from './SyncDeckManager.js'
 import { resolveManagerActiveEmbeddedInstanceKey } from './SyncDeckManager.js'
+import { shouldReactivateEmbeddedManager } from './SyncDeckManager.js'
 import { resolveManagerEmbeddedInstanceStatus } from './SyncDeckManager.js'
 import { buildManagerOverlayNavigationCommand } from './SyncDeckManager.js'
 import { buildManagerOverlaySetStateCommand } from './SyncDeckManager.js'
@@ -823,6 +824,17 @@ void test('resolveManagerEmbeddedInstanceStatus marks only selected instance as 
   assert.equal(resolveManagerEmbeddedInstanceStatus('video-sync:3:0', 'video-sync:3:0'), 'active')
   assert.equal(resolveManagerEmbeddedInstanceStatus('video-sync:3:0', 'embedded-test:3:0'), 'idle')
   assert.equal(resolveManagerEmbeddedInstanceStatus('video-sync:3:0', null), 'idle')
+})
+
+void test('shouldReactivateEmbeddedManager fires only on an actual active-instance transition', () => {
+  // First activation once an instance becomes active.
+  assert.equal(shouldReactivateEmbeddedManager(null, 'video-sync:3:0'), true)
+  // Same instance still active (e.g. a fragment/state update on the same slide).
+  assert.equal(shouldReactivateEmbeddedManager('video-sync:3:0', 'video-sync:3:0'), false)
+  // Active instance changed.
+  assert.equal(shouldReactivateEmbeddedManager('video-sync:3:0', 'embedded-test:4:0'), true)
+  // Nothing active.
+  assert.equal(shouldReactivateEmbeddedManager('video-sync:3:0', null), false)
 })
 
 void test('resolveEmbeddedBootstrapBackfillRequests only returns child sessions that still need bootstrap hydration', () => {

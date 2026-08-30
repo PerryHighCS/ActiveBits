@@ -356,10 +356,11 @@ void test('JavaFormatPracticeManager auth-lost banner offers a reload path for a
 
   globalThis.fetch = (async (input: RequestInfo | URL, _init?: RequestInit) => {
     const url = String(input)
-    // Full persistent success: a valid teacher cookie was redeemed (no
-    // `alreadyAuthorized`), so a later capability expiry is recoverable by reload.
+    // The endpoint reports this session as persistently recoverable (persistent
+    // record + valid teacher cookie), so a later capability expiry is
+    // recoverable by reload.
     if (url.includes('/persistent-manager-capability')) {
-      return new Response(JSON.stringify({ success: true }), { status: 200 })
+      return new Response(JSON.stringify({ success: true, persistentRecoveryAvailable: true }), { status: 200 })
     }
     // The capability then lapses and the roster poll 403s, latching auth-loss.
     if (url.includes('/api/java-format-practice/perma-session/students')) {

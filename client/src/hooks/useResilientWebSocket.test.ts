@@ -311,7 +311,7 @@ void test('an intentional disconnect still delivers onClose so consumers can cle
   }
 })
 
-void test('a replaced socket stays suppressed even if a disconnect lands before its delayed close', async () => {
+void test('a disconnected socket cannot deliver onClose once a reconnect owns the slot', async () => {
   const restoreDom = installDomEnvironment()
   FakeWebSocket.instances.length = 0
   const container = document.getElementById('root')
@@ -340,22 +340,26 @@ void test('a replaced socket stays suppressed even if a disconnect lands before 
     const firstSocket = FakeWebSocket.instances[0]
     assert.ok(firstSocket)
 
-    await act(async () => {
-      reconnect?.()
-    })
+    // disconnect() the first socket, then reconnect before its async close
+    // arrives: a new live socket now owns the slot.
+    await act(async () => { disconnect?.() })
+    await act(async () => { reconnect?.() })
     const secondSocket = FakeWebSocket.instances[1]
     assert.ok(secondSocket)
+    await act(async () => { secondSocket.emitOpen() })
 
     await act(async () => {
-      // Intentionally close the live (second) socket...
-      disconnect?.()
-      secondSocket.emitClose(1000)
-      // ...then the long-replaced first socket finally emits its close. It must
-      // not be mistaken for the intentional one just because the hook-wide
-      // manual-close flag is now set.
+      // The long-dead first socket finally emits its close. It must not reach
+      // onClose - that would mark the live replacement disconnected.
       firstSocket.emitClose(1006)
     })
-    assert.equal(closeCalls, 1, 'only the intentional close of the live socket reaches onClose')
+    assert.equal(closeCalls, 0, 'a close from a socket the slot no longer holds is suppressed')
+
+    await act(async () => {
+      // The live socket's own close still reaches the consumer.
+      secondSocket.emitClose(1000)
+    })
+    assert.equal(closeCalls, 1)
 
     await act(async () => {
       root.unmount()

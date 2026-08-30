@@ -40,11 +40,12 @@ export default function JavaFormatPracticeManager() {
   // never leave a stale `true` in the window before the passive effect re-runs.
   const [managerAccessReadySessionId, setManagerAccessReadySessionId] = useState<string | null>(null)
   const managerAccessReady = sessionId != null && managerAccessReadySessionId === sessionId
-  // The sessionId whose capability exchange returned a full persistent success
-  // (a valid persistent teacher cookie was redeemed, not just a pre-existing
-  // capability). For those managers a later capability expiry IS recoverable by
-  // reloading - the reload redeems the longer-lived teacher cookie again - so
-  // the auth-lost banner offers a reload path instead of new-session-only.
+  // The sessionId the capability exchange reported as persistently recoverable
+  // (`persistentRecoveryAvailable` - a persistent record plus a still-valid
+  // persistent teacher cookie). For those managers a later capability expiry IS
+  // recoverable by reloading - the reload redeems the longer-lived teacher
+  // cookie again - so the auth-lost banner offers a reload path instead of
+  // new-session-only.
   const [persistentRecoverySessionId, setPersistentRecoverySessionId] = useState<string | null>(null)
   const persistentRecoveryAvailable = sessionId != null && persistentRecoverySessionId === sessionId
   const managerAuthLostRef = useRef(false)
@@ -193,14 +194,15 @@ export default function JavaFormatPracticeManager() {
       // 403  -> no persistent teacher cookie; retrying will not help, so release
       //         and let the first protected request surface the recovery banner.
       if (response.ok) {
-        // A full persistent success (`success` without `alreadyAuthorized`)
-        // means a valid teacher cookie was redeemed - a later capability expiry
-        // is then recoverable by reloading. `alreadyAuthorized` is ambiguous
-        // (also returned for a /create-issued temporary capability), so it does
-        // not mark this manager as persistently recoverable.
+        // The endpoint reports `persistentRecoveryAvailable` when this session
+        // has a persistent record and a still-valid persistent teacher cookie -
+        // including on its fast path, where the capability was already issued by
+        // `teacher-authenticate` before this component mounted. When true, a
+        // later capability expiry is recoverable by reloading (the teacher
+        // cookie outlives the 7-day capability), so the banner offers reload.
         try {
-          const body = await response.clone().json() as { success?: unknown; alreadyAuthorized?: unknown }
-          if (body?.success === true && body.alreadyAuthorized !== true) {
+          const body = await response.clone().json() as { persistentRecoveryAvailable?: unknown }
+          if (body?.persistentRecoveryAvailable === true) {
             setPersistentRecoverySessionId(sessionId)
           }
         } catch {

@@ -26,6 +26,11 @@ interface PersistentSessionStore {
   delete(hash: string): Promise<void>
   getAllHashes(): Promise<string[]>
   getHashBySessionId(sessionId: string): Promise<string | null>
+  // Like getHashBySessionId, but a backend failure propagates instead of being
+  // mapped to `null` (which is indistinguishable from "no such session").
+  // Optional: only the Valkey-backed store needs it; the in-memory store never
+  // fails a read.
+  getHashBySessionIdStrict?(sessionId: string): Promise<string | null>
   setHashBySessionId(sessionId: string, hash: string): Promise<void>
   deleteHashBySessionId(sessionId: string): Promise<void>
   incrementAttempts(key: string): Promise<number>
@@ -139,6 +144,9 @@ export function initializePersistentStorage(valkeyClient: ValkeyStoreClient | nu
       },
       async getHashBySessionId(sessionId: string): Promise<string | null> {
         return await valkeyStore.getHashBySessionId(sessionId)
+      },
+      async getHashBySessionIdStrict(sessionId: string): Promise<string | null> {
+        return await valkeyStore.getHashBySessionIdStrict(sessionId)
       },
       async setHashBySessionId(sessionId: string, hash: string): Promise<void> {
         await valkeyStore.setHashBySessionId(sessionId, hash)
@@ -517,16 +525,19 @@ export async function resetPersistentSession(hash: string): Promise<void> {
  * must not let an uncredentialed caller trigger a full persistent-store scan -
  * e.g. the manager-capability recovery routes, which run before any auth check.
  *
- * A live persistent session normally has an index entry (written by
- * `persistPersistentSession` alongside the record). The caveat: the underlying
- * `ValkeyPersistentStore` swallows `setHashBySessionId` write failures and maps
- * `getHashBySessionId` read failures to `null`, so a Valkey outage or a lost
- * index write is indistinguishable from "no such session" here and surfaces as
- * a non-recoverable 404/403. A strict index API that separates a real miss from
- * storage failure is tracked in #357.
+ * The index read uses `getHashBySessionIdStrict` when the store provides it, so
+ * a Valkey outage *rejects* here rather than being mapped to a `null` that the
+ * recovery routes would mistake for "no such session". The routes wrap this
+ * call and turn a rejection into a retryable 500. A live persistent session
+ * normally has an index entry (written by `persistPersistentSession` alongside
+ * the record); propagating `setHashBySessionId` write failures where later
+ * reads depend on the index is the remaining part, tracked in #357.
  */
 export async function findIndexedHashBySessionId(sessionId: string): Promise<string | null> {
-  const indexedHash = await persistentStore.getHashBySessionId(sessionId)
+  const readIndex = persistentStore.getHashBySessionIdStrict
+    ? persistentStore.getHashBySessionIdStrict.bind(persistentStore)
+    : persistentStore.getHashBySessionId.bind(persistentStore)
+  const indexedHash = await readIndex(sessionId)
   if (!indexedHash) {
     return null
   }

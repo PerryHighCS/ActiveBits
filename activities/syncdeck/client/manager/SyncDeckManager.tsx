@@ -1100,6 +1100,20 @@ export function resolveManagerActiveEmbeddedInstanceKey(
   return selected
 }
 
+/**
+ * Whether the manager should re-post EMBEDDED_MANAGER_ACTIVATED to the active
+ * embedded child. True only on an actual transition of the active instance -
+ * `instructorIndicesState` also changes for fragment/state updates on the same
+ * slide, and re-posting there makes the child (Video Sync) needlessly churn its
+ * manager socket and re-run /manager-access.
+ */
+export function shouldReactivateEmbeddedManager(
+  previousActiveInstanceKey: string | null,
+  activeInstanceKey: string | null,
+): boolean {
+  return activeInstanceKey != null && activeInstanceKey !== previousActiveInstanceKey
+}
+
 export function resolveManagerEmbeddedInstanceStatus(
   instanceKey: string,
   activeInstanceKey: string | null,
@@ -2285,6 +2299,11 @@ const SyncDeckManager: FC = () => {
   const [failedEmbeddedBootstrapChildSessionIds, setFailedEmbeddedBootstrapChildSessionIds] = useState<string[]>([])
   const presentationIframeRef = useRef<HTMLIFrameElement | null>(null)
   const embeddedManagerIframeRefs = useRef<Record<string, HTMLIFrameElement | null>>({})
+  // The embedded instance key we last posted EMBEDDED_MANAGER_ACTIVATED for, so
+  // a re-activation is sent only on an actual change of the active instance -
+  // not on every `instructorIndicesState` update (fragment/state changes on the
+  // same slide), which would make the child manager churn its socket.
+  const lastActivatedEmbeddedInstanceKeyRef = useRef<string | null>(null)
   const reportPreviewTriggerRef = useRef<HTMLButtonElement | null>(null)
   const reportPreviewDialogRef = useRef<HTMLDivElement | null>(null)
   const restoreDocumentTitleRef = useRef<string | null>(null)
@@ -2563,6 +2582,14 @@ const SyncDeckManager: FC = () => {
 
     const activeInstanceKey = resolveManagerActiveEmbeddedInstanceKey(embeddedActivities, instructorIndicesState)
     if (!activeInstanceKey) {
+      lastActivatedEmbeddedInstanceKeyRef.current = null
+      return
+    }
+
+    // Only re-activate on a real transition of the active embedded instance.
+    // First delivery for a freshly loaded iframe is still handled by its onLoad
+    // handler.
+    if (!shouldReactivateEmbeddedManager(lastActivatedEmbeddedInstanceKeyRef.current, activeInstanceKey)) {
       return
     }
 
@@ -2572,6 +2599,7 @@ const SyncDeckManager: FC = () => {
       return
     }
 
+    lastActivatedEmbeddedInstanceKeyRef.current = activeInstanceKey
     iframe.contentWindow.postMessage({
       type: EMBEDDED_MANAGER_ACTIVATED,
       childSessionId: record.childSessionId,

@@ -378,6 +378,26 @@ export class ValkeyPersistentStore {
     }
   }
 
+  /**
+   * Strict reverse-index read: a backend failure is logged and rethrown rather
+   * than mapped to `null`. Manager-capability recovery uses this so a transient
+   * Valkey outage becomes a retryable 500 instead of a "no such persistent
+   * session" 404/403 the client would treat as terminal.
+   */
+  async getHashBySessionIdStrict(sessionId: string): Promise<string | null> {
+    try {
+      return await this.client.get(`persistent-session-by-session:${sessionId}`)
+    } catch (err) {
+      console.error(JSON.stringify({
+        event: 'valkey.persistent-session-hash-lookup-failed',
+        sessionId,
+        strict: true,
+        error: err instanceof Error ? err.message : String(err),
+      }))
+      throw err
+    }
+  }
+
   async setHashBySessionId(sessionId: string, hash: string): Promise<void> {
     try {
       await this.client.set(`persistent-session-by-session:${sessionId}`, hash, 'PX', this.ttlMs)
