@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
-import { useParams } from 'react-router';
+import { useNavigate, useParams } from 'react-router';
 import { arrayToCsv, downloadCsv } from '@src/utils/csvUtils';
 import Button from '@src/components/ui/Button';
 import SessionHeader from '@src/components/common/SessionHeader';
@@ -30,8 +30,10 @@ interface ManagerWsMessage {
  */
 export default function JavaFormatPracticeManager() {
   const { sessionId } = useParams<{ sessionId?: string }>();
+  const navigate = useNavigate();
 
   const [students, setStudents] = useState<JavaFormatStudentRecord[]>([])
+  const [startingNewSession, setStartingNewSession] = useState(false)
   const [managerAuthLost, setManagerAuthLost] = useState(false)
   const managerAuthLostRef = useRef(false)
   // Bumped every time a live `studentsUpdate` is applied. An in-flight `/students`
@@ -79,6 +81,27 @@ export default function JavaFormatPracticeManager() {
     setManagerAuthLost(true);
   }, []);
 
+  // A lost manager capability cannot be recovered by reloading (the same cookie
+  // is re-sent and `POST /create` is the only issuance path). Mint a fresh
+  // session instead; the sessionId change re-initializes this view with the new
+  // capability cookie.
+  const handleStartNewSession = useCallback(async () => {
+    setStartingNewSession(true);
+    try {
+      const res = await fetch('/api/java-format-practice/create', { method: 'POST' });
+      if (!res.ok) throw new Error(`Failed to create session: ${res.status}`);
+      const data = (await res.json()) as { id?: string };
+      if (data.id) {
+        void navigate(`/manage/java-format-practice/${data.id}`);
+      } else {
+        throw new Error('create response missing session id');
+      }
+    } catch (err) {
+      console.error('Failed to start a new Java Format session:', err);
+      setStartingNewSession(false);
+    }
+  }, [navigate]);
+
   const handleDifficultyChange = (difficulty: JavaFormatDifficulty) => {
     if (sessionId == null || managerAuthLostRef.current) return;
     setSelectedDifficulty(difficulty);
@@ -118,6 +141,7 @@ export default function JavaFormatPracticeManager() {
   useEffect(() => {
     managerAuthLostRef.current = false;
     setManagerAuthLost(false);
+    setStartingNewSession(false);
     setStudents([]);
     rosterUpdateGenRef.current += 1;
     // Invalidate any outstanding poll's ownership and free the slot for the new session.
@@ -311,10 +335,13 @@ export default function JavaFormatPracticeManager() {
       {managerAuthLost && (
         <div role="alert" style={styles.authLostBanner}>
           <span>
-            This manager session is no longer authenticated. Reload the page to
-            reconnect, or start a new session if the problem persists.
+            This manager session&rsquo;s authentication has expired or is no longer
+            valid. Reloading won&rsquo;t restore it &mdash; start a new session to
+            continue managing students.
           </span>
-          <Button onClick={() => window.location.reload()}>Reload</Button>
+          <Button onClick={() => { void handleStartNewSession(); }} disabled={startingNewSession}>
+            {startingNewSession ? 'Starting…' : 'Start new session'}
+          </Button>
         </div>
       )}
 

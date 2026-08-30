@@ -281,3 +281,59 @@ void test('JavaFormatPracticeManager serializes /students polls and still render
     restoreDom()
   }
 })
+
+void test('JavaFormatPracticeManager auth-lost banner starts a fresh session instead of reloading', { concurrency: false }, async () => {
+  TestWebSocket.instances = []
+  const restoreDom = installDomEnvironment('https://bits.example/manage/java-format-practice/dead-session')
+  const previousFetch = globalThis.fetch
+  let createCalls = 0
+
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    if (url.includes('/api/java-format-practice/create') && init?.method === 'POST') {
+      createCalls += 1
+      return new Response(JSON.stringify({ id: 'fresh-session' }), { status: 200 })
+    }
+    if (url.includes('/api/java-format-practice/dead-session/students')) {
+      return new Response(JSON.stringify({ error: 'manager authentication required' }), { status: 403 })
+    }
+    if (url.includes('/api/java-format-practice/fresh-session/students')) {
+      return new Response(JSON.stringify({ students: [] }), { status: 200 })
+    }
+    throw new Error(`Unexpected fetch: ${url}`)
+  }) as typeof fetch
+
+  let teardown: (() => Promise<void>) | null = null
+  try {
+    const { testingLibrary, router, JavaFormatPracticeManager, act } = await loadHarness()
+
+    function LocationProbe(): React.JSX.Element {
+      return <span data-testid="loc">{router.useLocation().pathname}</span>
+    }
+
+    const rendered = testingLibrary.render(
+      <router.MemoryRouter initialEntries={['/manage/java-format-practice/dead-session']}>
+        <LocationProbe />
+        <router.Routes>
+          <router.Route path="/manage/java-format-practice/:sessionId" element={<JavaFormatPracticeManager />} />
+        </router.Routes>
+      </router.MemoryRouter>,
+    )
+    teardown = async () => { await act(async () => { rendered.unmount(); testingLibrary.cleanup(); await Promise.resolve() }) }
+
+    // The 403 roster poll latches auth-loss and surfaces the recovery banner.
+    const startButton = await testingLibrary.waitFor(() => rendered.getByRole('button', { name: 'Start new session' }))
+    assert.equal(rendered.queryByRole('button', { name: /reload/i }), null, 'no misleading Reload affordance')
+
+    await act(async () => { testingLibrary.fireEvent.click(startButton); await Promise.resolve(); await Promise.resolve() })
+
+    assert.equal(createCalls, 1, 'a fresh session was minted via POST /create')
+    await testingLibrary.waitFor(() => {
+      assert.equal(rendered.getByTestId('loc').textContent, '/manage/java-format-practice/fresh-session')
+    })
+  } finally {
+    await teardown?.()
+    globalThis.fetch = previousFetch
+    restoreDom()
+  }
+})
