@@ -1757,6 +1757,9 @@ void test('instructor-passcode route ignores unsigned persistent sourceUrl from 
 
   assert.equal(res.statusCode, 200)
   assert.deepEqual(res.body, { instructorPasscode: ALT_TEST_INSTRUCTOR_PASSCODE })
+  assert.equal(res.cookies.length, 1)
+  assert.equal(res.cookies[0]?.value.length > 0, true)
+  assert.equal(res.cookies[0]?.options.httpOnly, true)
   await cleanupPersistentSession(hash)
 })
 
@@ -1876,6 +1879,9 @@ void test('instructor-passcode route returns passcode for embedded child session
 
   assert.equal(res.statusCode, 200)
   assert.deepEqual(res.body, { instructorPasscode: ALT_TEST_INSTRUCTOR_PASSCODE })
+  assert.equal(res.cookies.length, 1)
+  assert.equal(res.cookies[0]?.value.length > 0, true)
+  assert.equal(res.cookies[0]?.options.httpOnly, true)
   await cleanupPersistentSession(hash)
 })
 
