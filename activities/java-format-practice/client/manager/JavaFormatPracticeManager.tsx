@@ -40,6 +40,13 @@ export default function JavaFormatPracticeManager() {
   // never leave a stale `true` in the window before the passive effect re-runs.
   const [managerAccessReadySessionId, setManagerAccessReadySessionId] = useState<string | null>(null)
   const managerAccessReady = sessionId != null && managerAccessReadySessionId === sessionId
+  // The sessionId whose capability exchange returned a full persistent success
+  // (a valid persistent teacher cookie was redeemed, not just a pre-existing
+  // capability). For those managers a later capability expiry IS recoverable by
+  // reloading - the reload redeems the longer-lived teacher cookie again - so
+  // the auth-lost banner offers a reload path instead of new-session-only.
+  const [persistentRecoverySessionId, setPersistentRecoverySessionId] = useState<string | null>(null)
+  const persistentRecoveryAvailable = sessionId != null && persistentRecoverySessionId === sessionId
   const managerAuthLostRef = useRef(false)
   // Bumped every time a live `studentsUpdate` is applied. An in-flight `/students`
   // poll captures this value and drops its snapshot if a newer socket update
@@ -86,10 +93,11 @@ export default function JavaFormatPracticeManager() {
     setManagerAuthLost(true);
   }, []);
 
-  // A lost manager capability cannot be recovered by reloading (the same cookie
-  // is re-sent and `POST /create` is the only issuance path). Mint a fresh
-  // session instead; the sessionId change re-initializes this view with the new
-  // capability cookie.
+  // For a temporary session a lost manager capability cannot be recovered by
+  // reloading (the same cookie is re-sent and `POST /create` is the only
+  // issuance path), so minting a fresh session is the only way forward. A
+  // permalink manager backed by a persistent teacher cookie is different - see
+  // `persistentRecoverySessionId` - and the banner offers reload there.
   const handleStartNewSession = useCallback(async () => {
     setStartingNewSession(true);
     try {
@@ -180,11 +188,28 @@ export default function JavaFormatPracticeManager() {
         return
       }
       if (cancelled) return
-      // 2xx  -> capability cookie issued.
+      // 2xx  -> capability cookie issued (or already present).
       // 404  -> temporary session; POST /create already issued the capability.
       // 403  -> no persistent teacher cookie; retrying will not help, so release
       //         and let the first protected request surface the recovery banner.
-      if (response.ok || response.status === 404 || response.status === 403) {
+      if (response.ok) {
+        // A full persistent success (`success` without `alreadyAuthorized`)
+        // means a valid teacher cookie was redeemed - a later capability expiry
+        // is then recoverable by reloading. `alreadyAuthorized` is ambiguous
+        // (also returned for a /create-issued temporary capability), so it does
+        // not mark this manager as persistently recoverable.
+        try {
+          const body = await response.clone().json() as { success?: unknown; alreadyAuthorized?: unknown }
+          if (body?.success === true && body.alreadyAuthorized !== true) {
+            setPersistentRecoverySessionId(sessionId)
+          }
+        } catch {
+          // Body parse failure is non-fatal; readiness still releases below.
+        }
+        setManagerAccessReadySessionId(sessionId)
+        return
+      }
+      if (response.status === 404 || response.status === 403) {
         setManagerAccessReadySessionId(sessionId)
         return
       }
@@ -395,14 +420,31 @@ export default function JavaFormatPracticeManager() {
 
       {managerAuthLost && (
         <div role="alert" style={styles.authLostBanner}>
-          <span>
-            This manager session&rsquo;s authentication has expired or is no longer
-            valid. Reloading won&rsquo;t restore it &mdash; start a new session to
-            continue managing students.
-          </span>
-          <Button onClick={() => { void handleStartNewSession(); }} disabled={startingNewSession}>
-            {startingNewSession ? 'Starting…' : 'Start new session'}
-          </Button>
+          {persistentRecoveryAvailable ? (
+            <>
+              <span>
+                This manager session&rsquo;s capability has expired. Reload the page
+                to restore it from your instructor sign-in, or start a new session.
+              </span>
+              <Button onClick={() => { window.location.reload(); }}>
+                Reload
+              </Button>
+              <Button onClick={() => { void handleStartNewSession(); }} disabled={startingNewSession}>
+                {startingNewSession ? 'Starting…' : 'Start new session'}
+              </Button>
+            </>
+          ) : (
+            <>
+              <span>
+                This manager session&rsquo;s authentication has expired or is no
+                longer valid. Reloading won&rsquo;t restore it &mdash; start a new
+                session to continue managing students.
+              </span>
+              <Button onClick={() => { void handleStartNewSession(); }} disabled={startingNewSession}>
+                {startingNewSession ? 'Starting…' : 'Start new session'}
+              </Button>
+            </>
+          )}
         </div>
       )}
 

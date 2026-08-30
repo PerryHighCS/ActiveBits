@@ -58,6 +58,10 @@ export function useResilientWebSocket({
   const reconnectFnRef = useRef<() => WebSocket | null>(() => null)
   const reconnectAttemptsRef = useRef(0)
   const manualCloseRef = useRef(false)
+  // Sockets abandoned because a newer connect() replaced them. Their trailing
+  // close event is not meaningful to the consumer and must stay suppressed
+  // regardless of any later disconnect() on the hook.
+  const replacedSocketsRef = useRef<WeakSet<WebSocket>>(new WeakSet())
   const onOpenRef = useRef(onOpen)
   const onMessageRef = useRef(onMessage)
   const onCloseRef = useRef(onClose)
@@ -116,6 +120,7 @@ export function useResilientWebSocket({
     const ws = new WebSocket(url)
 
     if (socketRef.current && socketRef.current !== ws) {
+      replacedSocketsRef.current.add(socketRef.current)
       try {
         socketRef.current.close()
       } catch {
@@ -156,15 +161,17 @@ export function useResilientWebSocket({
     }
 
     ws.onclose = (event) => {
-      const isLatestSocket = socketRef.current === ws
-      // `disconnect()` nulls socketRef synchronously, so an intentional close
-      // arrives here as "not the latest socket". Consumers still need that
-      // close (e.g. WwwSim clears its heartbeat/keepalive intervals only in
-      // onClose), so suppress only a socket that a newer connect() replaced -
-      // never a manual disconnect.
-      if (!isLatestSocket && !manualCloseRef.current) {
+      // Suppress only a socket a newer connect() abandoned. A `disconnect()`
+      // nulls socketRef synchronously, so an intentional close also arrives as
+      // "not the latest socket" - but consumers still need it (e.g. WwwSim
+      // clears its heartbeat/keepalive intervals only in onClose). Keying on a
+      // per-socket replaced set instead of the hook-wide manualCloseRef means a
+      // stale replaced socket stays suppressed even if a disconnect() lands
+      // between its replacement and its delayed close.
+      if (replacedSocketsRef.current.has(ws)) {
         return
       }
+      const isLatestSocket = socketRef.current === ws
       onCloseRef.current?.(event, ws)
       if (isLatestSocket) {
         socketRef.current = null

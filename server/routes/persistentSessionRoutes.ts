@@ -771,10 +771,15 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
       // Re-read: `activeSession` was fetched before the rate-limit and
       // persistent-store awaits above. Issue the capability onto the latest
       // record so a participant/socket mutation in that window is not lost.
+      // If the session ended in that window, fail rather than resurrect the
+      // stale snapshot and grant a manager cookie for a dead session.
       const freshSession = await sessions.get(sessionId)
-      const capabilityTarget = isPlainObject(freshSession) ? freshSession : activeSession
-      const capability = issueActivityCapability(capabilityTarget as { data: unknown }, 'manager')
-      await sessions.set(sessionId, capabilityTarget)
+      if (!isPlainObject(freshSession) || freshSession.type !== activityName) {
+        res.status(404).json({ error: 'Teacher join is unavailable for this session' })
+        return
+      }
+      const capability = issueActivityCapability(freshSession as { data: unknown }, 'manager')
+      await sessions.set(sessionId, freshSession)
       writeActivityCapabilityCookie(res, sessionId, 'manager', capability.token)
     } catch (error) {
       console.error(JSON.stringify({

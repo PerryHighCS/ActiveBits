@@ -2194,6 +2194,46 @@ void test('session teacher authenticate restores teacher cookie from active sess
   })
 })
 
+void test('session teacher authenticate does not resurrect a session that ended during the request', async (t) => {
+  initializePersistentStorage(null)
+  await initializeActivityRegistry()
+  const sessionMap = new Map<string, unknown>()
+  let getCalls = 0
+  const setCalls: string[] = []
+  const sessions = {
+    get: async (id: string) => {
+      getCalls += 1
+      // The initial read succeeds; by the time the handler re-reads to issue the
+      // capability the session has ended (e.g. the class was closed).
+      if (id === 'live-session' && getCalls >= 2) return null
+      const session = sessionMap.get(id)
+      return session == null ? null : structuredClone(session)
+    },
+    set: async (id: string, session: unknown) => { setCalls.push(id); sessionMap.set(id, structuredClone(session)) },
+  }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+  const handler = getRoute(app, 'POST', '/api/session/:sessionId/teacher-authenticate')
+
+  const activityName = 'syncdeck'
+  const teacherCode = 'teacher-secret'
+  const { hash, hashedTeacherCode } = generatePersistentHash(activityName, teacherCode)
+  t.after(async () => cleanupPersistentSession(hash))
+  sessionMap.set('live-session', {
+    id: 'live-session', type: activityName, data: { instructorPasscode: 'syncdeck-instructor-passcode' },
+  })
+  await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode, 'solo-allowed')
+  await startPersistentSession(hash, 'live-session', { id: 'teacher-ws', readyState: 1, send() {} })
+
+  const res = createMockRes()
+  await handler(createMockReq({ params: { sessionId: 'live-session' }, body: { teacherCode } }), res)
+
+  assert.equal(res.statusCode, 404)
+  assert.deepEqual(res.jsonBody, { error: 'Teacher join is unavailable for this session' })
+  assert.equal(setCalls.length, 0, 'no whole-session write recreated the ended session')
+  assert.equal(Array.from(res.cookies.keys()).some((name) => name.startsWith('activebits_cap_manager_')), false)
+})
+
 void test('session teacher authenticate rejects invalid teacher code', async (t) => {
   initializePersistentStorage(null)
   await initializeActivityRegistry()

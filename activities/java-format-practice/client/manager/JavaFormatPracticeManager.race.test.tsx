@@ -348,6 +348,50 @@ void test('JavaFormatPracticeManager auth-lost banner starts a fresh session ins
   }
 })
 
+void test('JavaFormatPracticeManager auth-lost banner offers a reload path for a persistently recoverable manager', { concurrency: false }, async () => {
+  console.info('[TEST] java-format manager: a 403 roster response is expected below to latch the auth-lost banner after a full persistent capability success')
+  TestWebSocket.instances = []
+  const restoreDom = installDomEnvironment('https://bits.example/manage/java-format-practice/perma-session')
+  const previousFetch = globalThis.fetch
+
+  globalThis.fetch = (async (input: RequestInfo | URL, _init?: RequestInit) => {
+    const url = String(input)
+    // Full persistent success: a valid teacher cookie was redeemed (no
+    // `alreadyAuthorized`), so a later capability expiry is recoverable by reload.
+    if (url.includes('/persistent-manager-capability')) {
+      return new Response(JSON.stringify({ success: true }), { status: 200 })
+    }
+    // The capability then lapses and the roster poll 403s, latching auth-loss.
+    if (url.includes('/api/java-format-practice/perma-session/students')) {
+      return new Response(JSON.stringify({ error: 'manager authentication required' }), { status: 403 })
+    }
+    throw new Error(`Unexpected fetch: ${url}`)
+  }) as typeof fetch
+
+  let teardown: (() => Promise<void>) | null = null
+  try {
+    const { testingLibrary, router, JavaFormatPracticeManager, act } = await loadHarness()
+    const rendered = testingLibrary.render(
+      <router.MemoryRouter initialEntries={['/manage/java-format-practice/perma-session']}>
+        <router.Routes>
+          <router.Route path="/manage/java-format-practice/:sessionId" element={<JavaFormatPracticeManager />} />
+        </router.Routes>
+      </router.MemoryRouter>,
+    )
+    teardown = async () => { await act(async () => { rendered.unmount(); testingLibrary.cleanup(); await Promise.resolve() }) }
+
+    // getByRole throws if the reload affordance is absent, so this resolving is the assertion.
+    await testingLibrary.waitFor(() => rendered.getByRole('button', { name: /reload/i }))
+    assert.ok(rendered.queryByText(/reload the page to restore it/i), 'banner text points at reload recovery')
+    assert.equal(rendered.queryByText(/reloading won.t restore it/i), null, 'the temporary-session message is not shown')
+    assert.ok(rendered.queryByRole('button', { name: 'Start new session' }), 'start-new-session remains available as a fallback')
+  } finally {
+    await teardown?.()
+    globalThis.fetch = previousFetch
+    restoreDom()
+  }
+})
+
 void test('JavaFormatPracticeManager gates difficulty/theme controls until the persistent capability exchange settles', { concurrency: false }, async () => {
   TestWebSocket.instances = []
   const restoreDom = installDomEnvironment('https://bits.example/manage/java-format-practice/perma-session')

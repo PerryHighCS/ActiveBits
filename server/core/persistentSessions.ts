@@ -513,11 +513,17 @@ export async function resetPersistentSession(hash: string): Promise<void> {
 /**
  * Index-only reverse lookup: resolve a session id to its persistent hash using
  * only the O(1) reverse index, never the O(n) `getAllHashes()` scan that
- * {@link findHashBySessionId} falls back to. A live persistent session always
- * has an index entry (written by `persistPersistentSession` alongside the
- * record), so this is sufficient for request paths that must not let an
- * uncredentialed caller trigger a full persistent-store scan - e.g. the
- * manager-capability recovery routes, which run before any auth check.
+ * {@link findHashBySessionId} falls back to. This exists for request paths that
+ * must not let an uncredentialed caller trigger a full persistent-store scan -
+ * e.g. the manager-capability recovery routes, which run before any auth check.
+ *
+ * A live persistent session normally has an index entry (written by
+ * `persistPersistentSession` alongside the record). The caveat: the underlying
+ * `ValkeyPersistentStore` swallows `setHashBySessionId` write failures and maps
+ * `getHashBySessionId` read failures to `null`, so a Valkey outage or a lost
+ * index write is indistinguishable from "no such session" here and surfaces as
+ * a non-recoverable 404/403. A strict index API that separates a real miss from
+ * storage failure is tracked in #357.
  */
 export async function findIndexedHashBySessionId(sessionId: string): Promise<string | null> {
   const indexedHash = await persistentStore.getHashBySessionId(sessionId)
