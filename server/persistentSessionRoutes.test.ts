@@ -254,7 +254,7 @@ void test('session teacher authenticate does not issue a capability cookie when 
 
   assert.equal(res.statusCode, 500)
   assert.deepEqual(res.jsonBody, { error: 'manager capability unavailable' })
-  assert.equal(Array.from(res.cookies.keys()).some((name) => name.startsWith('activebits_cap_manager_')), false)
+  assert.equal(res.cookies.has(getActivityCapabilityCookieName('manager', 'live-session')), false)
 })
 
 void test('session teacher authenticate fails closed when the store cannot persist a capability', async (t) => {
@@ -290,7 +290,7 @@ void test('session teacher authenticate fails closed when the store cannot persi
 
   assert.equal(res.statusCode, 500)
   assert.deepEqual(res.jsonBody, { error: 'manager capability unavailable' })
-  assert.equal(Array.from(res.cookies.keys()).some((name) => name.startsWith('activebits_cap_manager_')), false)
+  assert.equal(res.cookies.has(getActivityCapabilityCookieName('manager', 'live-session')), false)
 })
 
 void test('persistent manager capability recovery issues a manager cookie for an authenticated live permalink', async (t) => {
@@ -1452,6 +1452,39 @@ void test('indexed-only session id reverse lookup rejects a reverse-index read f
   assert.equal(await findHashBySessionId('some-session'), null)
 })
 
+void test('indexed-only session id reverse lookup keeps the reverse index when the record read fails', async (t) => {
+  const valkeyClient = createFakePersistentValkeyClient()
+  initializePersistentStorage(valkeyClient as never)
+
+  const activityName = 'syncdeck'
+  const { hash, hashedTeacherCode } = generatePersistentHash(activityName, 'record-read-fail-code')
+  t.after(async () => cleanupPersistentSession(hash))
+
+  await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode, 'solo-allowed')
+  await startPersistentSession(hash, 'record-fail-session', { id: 'teacher-ws', readyState: 1, send() {} })
+
+  const originalGet = valkeyClient.get
+  valkeyClient.get = async (key: string) => {
+    if (key.startsWith('persistent:')) {
+      throw new Error('[TEST] persistent record read failed')
+    }
+    return originalGet(key)
+  }
+
+  console.info('[TEST] Expected persistent record read failure while validating an indexed reverse-lookup hash.')
+  // A transient failure validating the indexed hash must propagate (the
+  // recovery routes turn it into a retryable 500), not fall through to the
+  // stale-index cleanup that would delete a still-valid reverse index.
+  await assert.rejects(findIndexedHashBySessionId('record-fail-session'), /persistent record read failed/)
+
+  valkeyClient.get = originalGet
+  assert.equal(
+    await valkeyClient.get('persistent-session-by-session:record-fail-session'),
+    hash,
+    'a failed record read must not delete the reverse index',
+  )
+})
+
 void test('authenticate persists selectedOptions from request body when cookie entry is missing', async (t) => {
   initializePersistentStorage(null)
   await initializeActivityRegistry()
@@ -2326,7 +2359,7 @@ void test('session teacher authenticate does not resurrect a session that ended 
   assert.equal(res.statusCode, 404)
   assert.deepEqual(res.jsonBody, { error: 'Teacher join is unavailable for this session' })
   assert.equal(setCalls.length, 0, 'no whole-session write recreated the ended session')
-  assert.equal(Array.from(res.cookies.keys()).some((name) => name.startsWith('activebits_cap_manager_')), false)
+  assert.equal(res.cookies.has(getActivityCapabilityCookieName('manager', 'live-session')), false)
 })
 
 void test('session teacher authenticate rejects invalid teacher code', async (t) => {

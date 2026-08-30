@@ -1543,6 +1543,33 @@ void test('command route updates playback and emits extensible envelope', async 
   assert.equal(message.type, 'state-update')
 })
 
+void test('command route answers with a structured 500 when the session write rejects', async () => {
+  console.info('[TEST] video-sync command: the session-store write below rejects on purpose; the handler is expected to log command-failed and answer 500 rather than let the rejection escape the mutation')
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  const storeState = createSessionStore({ s1: createVideoSyncSession('s1') })
+  const sessionsWithFailingSet = {
+    ...storeState.sessions,
+    async set(): Promise<never> {
+      throw new Error('[TEST] session store write unavailable')
+    },
+  }
+
+  setupVideoSyncRoutes(app, sessionsWithFailingSet, ws)
+
+  const handler = app.handlers.post['/api/video-sync/:sessionId/command']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.({ params: { sessionId: 's1' }, body: { type: 'play' } }, res)
+
+  assert.equal(res.statusCode, 500)
+  assert.deepEqual(res.body, {
+    error: 'INTERNAL_ERROR',
+    message: 'This action is temporarily unavailable',
+  })
+})
+
 void test('manager commands are not overwritten by an overlapping telemetry mutation', async () => {
   const app = createMockApp()
   const ws = createMockWs() as unknown as WsRouter

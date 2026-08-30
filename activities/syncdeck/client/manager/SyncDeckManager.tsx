@@ -5318,6 +5318,11 @@ const SyncDeckManager: FC = () => {
                                   current[instanceKey] ? current : { ...current, [instanceKey]: true }
                                 ))
                                 if (isActive) {
+                                  // Keep the activation ref in step with this
+                                  // first delivery so the activation effect does
+                                  // not treat the same instance as a new
+                                  // transition and post a duplicate.
+                                  lastActivatedEmbeddedInstanceKeyRef.current = instanceKey
                                   event.currentTarget.contentWindow?.postMessage({
                                     type: EMBEDDED_MANAGER_ACTIVATED,
                                     childSessionId: record.childSessionId,

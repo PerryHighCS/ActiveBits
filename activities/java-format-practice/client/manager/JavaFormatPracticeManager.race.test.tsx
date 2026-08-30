@@ -393,6 +393,89 @@ void test('JavaFormatPracticeManager auth-lost banner offers a reload path for a
   }
 })
 
+void test('JavaFormatPracticeManager drops stale reload recovery when a returned-to session loses its persistent credential', { concurrency: false }, async () => {
+  console.info('[TEST] java-format manager: a 403 persistent-capability response and a 403 roster response are expected on the second visit to session-A after its persistent teacher credential lapses')
+  TestWebSocket.instances = []
+  const restoreDom = installDomEnvironment('https://bits.example/manage/java-format-practice/session-A')
+  const previousFetch = globalThis.fetch
+
+  let capabilityCallsA = 0
+
+  globalThis.fetch = (async (input: RequestInfo | URL, _init?: RequestInit) => {
+    const url = String(input)
+    if (url.includes('/session-A/persistent-manager-capability')) {
+      capabilityCallsA += 1
+      // First visit: a persistent teacher cookie backs the session, so the
+      // endpoint reports it as reload-recoverable. Second visit: that credential
+      // is gone, so the exchange 403s.
+      if (capabilityCallsA === 1) {
+        return new Response(JSON.stringify({ success: true, persistentRecoveryAvailable: true }), { status: 200 })
+      }
+      return new Response(JSON.stringify({ error: 'Persistent teacher authentication is required' }), { status: 403 })
+    }
+    if (url.includes('/session-B/persistent-manager-capability')) {
+      return new Response('{}', { status: 200 })
+    }
+    if (url.includes('/api/java-format-practice/session-A/students')) {
+      // Healthy while the capability is valid; 403 once the credential lapses.
+      return capabilityCallsA >= 2
+        ? new Response(JSON.stringify({ error: 'manager authentication required' }), { status: 403 })
+        : new Response(JSON.stringify({ students: [] }), { status: 200 })
+    }
+    if (url.includes('/api/java-format-practice/session-B/students')) {
+      return new Response(JSON.stringify({ students: [] }), { status: 200 })
+    }
+    throw new Error(`Unexpected fetch: ${url}`)
+  }) as typeof fetch
+
+  let teardown: (() => Promise<void>) | null = null
+  try {
+    const { testingLibrary, router, JavaFormatPracticeManager, act } = await loadHarness()
+
+    function NavProbe(): React.JSX.Element {
+      const navigate = router.useNavigate()
+      return (
+        <>
+          <JavaFormatPracticeManager />
+          <button type="button" onClick={() => navigate('/manage/java-format-practice/session-B')}>to-b</button>
+          <button type="button" onClick={() => navigate('/manage/java-format-practice/session-A')}>to-a</button>
+        </>
+      )
+    }
+
+    const rendered = testingLibrary.render(
+      <router.MemoryRouter initialEntries={['/manage/java-format-practice/session-A']}>
+        <router.Routes>
+          <router.Route path="/manage/java-format-practice/:sessionId" element={<NavProbe />} />
+        </router.Routes>
+      </router.MemoryRouter>,
+    )
+    teardown = async () => { await act(async () => { rendered.unmount(); testingLibrary.cleanup(); await Promise.resolve() }) }
+
+    // First visit: session A resolves as reload-recoverable and its controls go live.
+    await testingLibrary.waitFor(() => {
+      assert.equal((rendered.getByRole('button', { name: 'Beginner' }) as HTMLButtonElement).disabled, false)
+    })
+
+    // Leave to session B, then return to session A - the component stays mounted,
+    // so `persistentRecoverySessionId` still holds 'session-A' from the first visit.
+    await act(async () => { testingLibrary.fireEvent.click(rendered.getByRole('button', { name: 'to-b' })); await Promise.resolve() })
+    await act(async () => { testingLibrary.fireEvent.click(rendered.getByRole('button', { name: 'to-a' })); await Promise.resolve(); await Promise.resolve() })
+
+    // Session A's persistent credential is now gone: the exchange 403s and the
+    // roster poll's 403 latches auth-loss. The banner must not advertise reload,
+    // because reloading cannot mint a capability without the teacher cookie.
+    await testingLibrary.waitFor(() => rendered.getByText(/reloading won.t restore it/i))
+    assert.equal(rendered.queryByRole('button', { name: /reload/i }), null, 'stale reload affordance is cleared on return')
+    assert.equal(rendered.queryByText(/reload the page to restore it/i), null, 'the reload-recovery message is not shown')
+    assert.ok(rendered.queryByRole('button', { name: 'Start new session' }), 'start-new-session remains available')
+  } finally {
+    await teardown?.()
+    globalThis.fetch = previousFetch
+    restoreDom()
+  }
+})
+
 void test('JavaFormatPracticeManager gates difficulty/theme controls until the persistent capability exchange settles', { concurrency: false }, async () => {
   TestWebSocket.instances = []
   const restoreDom = installDomEnvironment('https://bits.example/manage/java-format-practice/perma-session')

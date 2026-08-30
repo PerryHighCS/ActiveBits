@@ -215,6 +215,34 @@ async function withSessionMutation<T>(sessionId: string, mutate: () => Promise<T
   }
 }
 
+/**
+ * Run a serialized session mutation for a REST route, converting a rejected
+ * session-store or broadcast operation into a structured log plus a controlled
+ * 500 instead of letting the rejection escape the handler (Express 5 would
+ * otherwise forward it to the default error handler with no structured log).
+ * Mirrors the route-level guard already used by `/manager-access`.
+ */
+async function withSessionMutationRoute(
+  res: JsonResponse,
+  sessionId: string,
+  event: string,
+  mutate: () => Promise<void>,
+): Promise<void> {
+  try {
+    await withSessionMutation(sessionId, mutate)
+  } catch (mutationError) {
+    console.error(JSON.stringify({
+      activity: 'video-sync',
+      event,
+      sessionId,
+      errorName: mutationError instanceof Error ? mutationError.name : 'unknown',
+    }))
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'INTERNAL_ERROR', message: 'This action is temporarily unavailable' })
+    }
+  }
+}
+
 function toFiniteNumber(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback
 }
@@ -1318,7 +1346,7 @@ export default function setupVideoSyncRoutes(
       return
     }
 
-    await withSessionMutation(sessionId, async () => {
+    await withSessionMutationRoute(res, sessionId, 'session-read-failed', async () => {
     const {
       session,
       data,
@@ -1370,7 +1398,7 @@ export default function setupVideoSyncRoutes(
       return
     }
 
-    await withSessionMutation(sessionId, async () => {
+    await withSessionMutationRoute(res, sessionId, 'session-configure-failed', async () => {
     const session = await getVideoSyncSession(sessions, sessionId)
     if (!session) {
       res.status(404).json({ error: 'NOT_FOUND', message: 'Session not found' })
@@ -1494,7 +1522,7 @@ export default function setupVideoSyncRoutes(
       return
     }
 
-    await withSessionMutation(sessionId, async () => {
+    await withSessionMutationRoute(res, sessionId, 'command-failed', async () => {
     const session = await getVideoSyncSession(sessions, sessionId)
     if (!session) {
       res.status(404).json({ error: 'NOT_FOUND', message: 'Session not found' })
@@ -1576,7 +1604,7 @@ export default function setupVideoSyncRoutes(
       return
     }
 
-    await withSessionMutation(sessionId, async () => {
+    await withSessionMutationRoute(res, sessionId, 'event-failed', async () => {
     const session = await getVideoSyncSession(sessions, sessionId)
     if (!session) {
       res.status(404).json({ error: 'NOT_FOUND', message: 'Session not found' })

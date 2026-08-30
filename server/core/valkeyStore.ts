@@ -345,6 +345,28 @@ export class ValkeyPersistentStore {
     }
   }
 
+  /**
+   * Strict record read: a backend failure is logged and rethrown rather than
+   * mapped to `null`. {@link findIndexedHashBySessionId} uses this so a
+   * transient Valkey outage propagates as a retryable error instead of looking
+   * like a stale reverse index that then gets deleted.
+   */
+  async getStrict(hash: string): Promise<PersistentMetadata | null> {
+    try {
+      const data = await this.client.get(`persistent:${hash}`)
+      if (!data) return null
+      return JSON.parse(data) as PersistentMetadata
+    } catch (err) {
+      console.error(JSON.stringify({
+        event: 'valkey.persistent-session-record-lookup-failed',
+        hash,
+        strict: true,
+        error: err instanceof Error ? err.message : String(err),
+      }))
+      throw err
+    }
+  }
+
   async set(hash: string, metadata: PersistentMetadata): Promise<void> {
     try {
       const { waiters, ...storableData } = metadata

@@ -204,6 +204,11 @@ export default function JavaFormatPracticeManager() {
           const body = await response.clone().json() as { persistentRecoveryAvailable?: unknown }
           if (body?.persistentRecoveryAvailable === true) {
             setPersistentRecoverySessionId(sessionId)
+          } else {
+            // The persistent teacher credential is no longer backing this
+            // session; drop any recoverability advertised by an earlier exchange
+            // so the banner does not offer a reload that cannot help.
+            setPersistentRecoverySessionId((current) => (current === sessionId ? null : current))
           }
         } catch {
           // Body parse failure is non-fatal; readiness still releases below.
@@ -212,6 +217,10 @@ export default function JavaFormatPracticeManager() {
         return
       }
       if (response.status === 404 || response.status === 403) {
+        // Recovery is unavailable for this session (temporary, or no persistent
+        // teacher cookie); clear stale recoverability from a prior exchange
+        // before releasing the gate.
+        setPersistentRecoverySessionId((current) => (current === sessionId ? null : current))
         setManagerAccessReadySessionId(sessionId)
         return
       }

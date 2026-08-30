@@ -351,6 +351,7 @@ void test('a disconnected socket cannot deliver onClose once a reconnect owns th
     await act(async () => {
       // The long-dead first socket finally emits its close. It must not reach
       // onClose - that would mark the live replacement disconnected.
+      console.info('[TEST] Expected abnormal close (1006) from a superseded socket; it must be suppressed.')
       firstSocket.emitClose(1006)
     })
     assert.equal(closeCalls, 0, 'a close from a socket the slot no longer holds is suppressed')

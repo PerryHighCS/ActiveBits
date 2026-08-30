@@ -831,6 +831,10 @@ void test('shouldReactivateEmbeddedManager fires only on an actual active-instan
   assert.equal(shouldReactivateEmbeddedManager(null, 'video-sync:3:0'), true)
   // Same instance still active (e.g. a fragment/state update on the same slide).
   assert.equal(shouldReactivateEmbeddedManager('video-sync:3:0', 'video-sync:3:0'), false)
+  // The active iframe's onLoad ran first and primed the ref to the active
+  // instance: the activation effect must then see no transition and skip the
+  // duplicate EMBEDDED_MANAGER_ACTIVATED post.
+  assert.equal(shouldReactivateEmbeddedManager('video-sync:3:0', 'video-sync:3:0'), false)
   // Active instance changed.
   assert.equal(shouldReactivateEmbeddedManager('video-sync:3:0', 'embedded-test:4:0'), true)
   // Nothing active.

@@ -3067,6 +3067,7 @@ void test('embedded manager capability exchange returns a structured 500 when a 
 
   const handler = app.handlers.get['/api/syncdeck/embedded-manager-capability']
   const response = createResponse()
+  console.info('[TEST] Expected embedded-manager-capability-failed log: the injected session store rejects every read.')
   await handler?.(
     createRequest({}, undefined, {}, {}, { sessionId: 'child-capability', token: 'capability-entry-token' }),
     response,
