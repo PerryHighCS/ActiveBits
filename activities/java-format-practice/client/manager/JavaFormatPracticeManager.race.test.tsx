@@ -399,3 +399,83 @@ void test('JavaFormatPracticeManager gates difficulty/theme controls until the p
     restoreDom()
   }
 })
+
+void test('JavaFormatPracticeManager re-gates controls for the new session after a parameter-only route swap', { concurrency: false }, async () => {
+  TestWebSocket.instances = []
+  const restoreDom = installDomEnvironment('https://bits.example/manage/java-format-practice/session-A')
+  const previousFetch = globalThis.fetch
+
+  const difficultyCallsBySession = new Map<string, number>()
+  let sessionBCapabilityResolved: (() => void) | null = null
+  const sessionBCapability = new Promise<Response>((resolve) => {
+    sessionBCapabilityResolved = () => resolve(new Response('{}', { status: 200 }))
+  })
+
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    if (url.includes('/session-A/persistent-manager-capability')) {
+      return new Response('{}', { status: 200 })
+    }
+    if (url.includes('/session-B/persistent-manager-capability')) {
+      return sessionBCapability
+    }
+    const difficultyMatch = url.match(/\/api\/java-format-practice\/(session-[AB])\/difficulty/)
+    if (difficultyMatch && init?.method === 'POST') {
+      difficultyCallsBySession.set(difficultyMatch[1]!, (difficultyCallsBySession.get(difficultyMatch[1]!) ?? 0) + 1)
+      return new Response('{}', { status: 200 })
+    }
+    if (url.includes('/students')) {
+      return new Response(JSON.stringify({ students: [] }), { status: 200 })
+    }
+    throw new Error(`Unexpected fetch: ${url}`)
+  }) as typeof fetch
+
+  let teardown: (() => Promise<void>) | null = null
+  try {
+    const { testingLibrary, router, JavaFormatPracticeManager, act } = await loadHarness()
+
+    function NavProbe(): React.JSX.Element {
+      const navigate = router.useNavigate()
+      return (
+        <>
+          <JavaFormatPracticeManager />
+          <button type="button" onClick={() => navigate('/manage/java-format-practice/session-B')}>go</button>
+        </>
+      )
+    }
+
+    const rendered = testingLibrary.render(
+      <router.MemoryRouter initialEntries={['/manage/java-format-practice/session-A']}>
+        <router.Routes>
+          <router.Route path="/manage/java-format-practice/:sessionId" element={<NavProbe />} />
+        </router.Routes>
+      </router.MemoryRouter>,
+    )
+    teardown = async () => { await act(async () => { rendered.unmount(); testingLibrary.cleanup(); await Promise.resolve() }) }
+
+    // Session A's exchange resolves, so its controls are live.
+    await testingLibrary.waitFor(() => {
+      assert.equal((rendered.getByRole('button', { name: 'Beginner' }) as HTMLButtonElement).disabled, false)
+    })
+
+    // Parameter-only swap to session B, whose exchange is still pending.
+    await act(async () => { testingLibrary.fireEvent.click(rendered.getByRole('button', { name: 'go' })); await Promise.resolve() })
+
+    // Readiness is scoped to the session id, so B's controls are inert immediately -
+    // no window where A's completed exchange makes B's buttons clickable.
+    const beginner = rendered.getByRole('button', { name: 'Beginner' })
+    assert.equal((beginner as HTMLButtonElement).disabled, true, 'the new session re-gates its controls')
+    await act(async () => { testingLibrary.fireEvent.click(beginner); await Promise.resolve() })
+    assert.equal(difficultyCallsBySession.get('session-B') ?? 0, 0, 'no session-B request is sent while its exchange is pending')
+
+    // Once B's exchange settles, its controls become usable.
+    await act(async () => { sessionBCapabilityResolved?.(); await Promise.resolve(); await Promise.resolve() })
+    await testingLibrary.waitFor(() => {
+      assert.equal((rendered.getByRole('button', { name: 'Beginner' }) as HTMLButtonElement).disabled, false)
+    })
+  } finally {
+    await teardown?.()
+    globalThis.fetch = previousFetch
+    restoreDom()
+  }
+})

@@ -86,6 +86,7 @@ interface ResponseLike {
   set?(field: string, value: string): ResponseLike
   json(payload: unknown): void
   cookie(name: string, value: string, options: Record<string, unknown>): void
+  headersSent?: boolean
 }
 
 interface AppLike {
@@ -667,109 +668,120 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
       return
     }
 
-    const activeSession = await sessions.get(sessionId)
-    if (activeSession == null) {
-      res.status(404).json({ error: 'Active session not found' })
-      return
-    }
-
-    const hash = await findHashBySessionId(sessionId)
-    if (!hash) {
-      res.status(404).json({ error: 'Teacher join is unavailable for this session' })
-      return
-    }
-
-    const persistentSession = await getPersistentSession(hash)
-    if (!persistentSession || persistentSession.sessionId !== sessionId) {
-      res.status(404).json({ error: 'Teacher join is unavailable for this session' })
-      return
-    }
-
-    const activityName = typeof persistentSession.activityName === 'string' ? persistentSession.activityName : null
-    if (!activityName || !isValidActivity(activityName)) {
-      res.status(404).json({ error: 'Teacher join is unavailable for this session' })
-      return
-    }
-
-    const activeSessionType = isPlainObject(activeSession) && typeof activeSession.type === 'string'
-      ? activeSession.type
-      : null
-    if (activeSessionType !== activityName) {
-      res.status(404).json({ error: 'Teacher join is unavailable for this session' })
-      return
-    }
-
-    const clientIp = getRequestClientIp(req)
-    const rateLimitKey = `${clientIp}:${hash}`
-    const attemptResult = await recordTeacherCodeAttempt(rateLimitKey)
-    if (!attemptResult.allowed) {
-      res.status(429).json({ error: 'Too many attempts. Please wait a minute.' })
-      return
-    }
-
-    const validation = verifyTeacherCodeWithHash(activityName, hash, teacherCode)
-    if (!validation.valid) {
-      res.status(401).json({ error: validation.error || 'Invalid teacher code' })
-      return
-    }
-
-    const finalEntryPolicy = resolvePersistentSessionEntryPolicy(persistentSession.entryPolicy)
-    if (finalEntryPolicy === 'solo-only') {
-      res.status(409).json(buildSoloOnlyPolicyRejection() satisfies PersistentSessionPolicyRejectionPayload)
-      return
-    }
-
-    const finalSelectedOptions = getCanonicalPersistentLinkSelectedOptions(activityName, persistentSession.selectedOptions)
-    const finalUrlState = {
-      entryPolicy: finalEntryPolicy,
-      selectedOptions: finalSelectedOptions,
-    } satisfies PersistentLinkUrlState
-    const finalUrlHash = computePersistentLinkUrlHash(hash, finalUrlState)
-
-    const cookieName = 'persistent_sessions'
-    let { sessions: sessionEntries } = parsePersistentSessionsCookie(
-      req.cookies?.[cookieName],
-      'persistent_sessions (/api/session/:sessionId/teacher-authenticate)',
-    )
-    const cookieKey = `${activityName}:${hash}`
-    sessionEntries = sessionEntries.filter((entry) => entry.key !== cookieKey)
-    sessionEntries.push({
-      key: cookieKey,
-      teacherCode,
-      selectedOptions: finalSelectedOptions,
-      entryPolicy: finalEntryPolicy,
-      urlHash: finalUrlHash,
-    })
-    writePersistentSessionsCookie(res, sessionEntries)
-    await updatePersistentSessionUrlState(hash, finalUrlState)
-
-    const activeSessionData = isPlainObject(activeSession) && isPlainObject(activeSession.data)
-      ? activeSession.data
-      : {}
-    const createSessionPayload = buildCreateSessionBootstrapPayload(activityName, activeSessionData)
-
-    if (sessions.set && isPlainObject(activeSession)) {
-      try {
-        const capability = issueActivityCapability(activeSession as { data: unknown }, 'manager')
-        await sessions.set(sessionId, activeSession)
-        writeActivityCapabilityCookie(res, sessionId, 'manager', capability.token)
-      } catch (error) {
-        console.error(JSON.stringify({
-          event: 'persistent-manager-capability-persistence-failed',
-          sessionId,
-          errorName: error instanceof Error ? error.name : 'unknown',
-        }))
-        res.status(500).json({ error: 'manager capability unavailable' })
+    try {
+      const activeSession = await sessions.get(sessionId)
+      if (activeSession == null) {
+        res.status(404).json({ error: 'Active session not found' })
         return
       }
-    }
 
-    res.json({
-      success: true,
-      activityName,
-      sessionId,
-      ...(createSessionPayload ? { createSessionPayload } : {}),
-    })
+      const hash = await findHashBySessionId(sessionId)
+      if (!hash) {
+        res.status(404).json({ error: 'Teacher join is unavailable for this session' })
+        return
+      }
+
+      const persistentSession = await getPersistentSession(hash)
+      if (!persistentSession || persistentSession.sessionId !== sessionId) {
+        res.status(404).json({ error: 'Teacher join is unavailable for this session' })
+        return
+      }
+
+      const activityName = typeof persistentSession.activityName === 'string' ? persistentSession.activityName : null
+      if (!activityName || !isValidActivity(activityName)) {
+        res.status(404).json({ error: 'Teacher join is unavailable for this session' })
+        return
+      }
+
+      const activeSessionType = isPlainObject(activeSession) && typeof activeSession.type === 'string'
+        ? activeSession.type
+        : null
+      if (activeSessionType !== activityName) {
+        res.status(404).json({ error: 'Teacher join is unavailable for this session' })
+        return
+      }
+
+      const clientIp = getRequestClientIp(req)
+      const rateLimitKey = `${clientIp}:${hash}`
+      const attemptResult = await recordTeacherCodeAttempt(rateLimitKey)
+      if (!attemptResult.allowed) {
+        res.status(429).json({ error: 'Too many attempts. Please wait a minute.' })
+        return
+      }
+
+      const validation = verifyTeacherCodeWithHash(activityName, hash, teacherCode)
+      if (!validation.valid) {
+        res.status(401).json({ error: validation.error || 'Invalid teacher code' })
+        return
+      }
+
+      const finalEntryPolicy = resolvePersistentSessionEntryPolicy(persistentSession.entryPolicy)
+      if (finalEntryPolicy === 'solo-only') {
+        res.status(409).json(buildSoloOnlyPolicyRejection() satisfies PersistentSessionPolicyRejectionPayload)
+        return
+      }
+
+      const finalSelectedOptions = getCanonicalPersistentLinkSelectedOptions(activityName, persistentSession.selectedOptions)
+      const finalUrlState = {
+        entryPolicy: finalEntryPolicy,
+        selectedOptions: finalSelectedOptions,
+      } satisfies PersistentLinkUrlState
+      const finalUrlHash = computePersistentLinkUrlHash(hash, finalUrlState)
+
+      const cookieName = 'persistent_sessions'
+      let { sessions: sessionEntries } = parsePersistentSessionsCookie(
+        req.cookies?.[cookieName],
+        'persistent_sessions (/api/session/:sessionId/teacher-authenticate)',
+      )
+      const cookieKey = `${activityName}:${hash}`
+      sessionEntries = sessionEntries.filter((entry) => entry.key !== cookieKey)
+      sessionEntries.push({
+        key: cookieKey,
+        teacherCode,
+        selectedOptions: finalSelectedOptions,
+        entryPolicy: finalEntryPolicy,
+        urlHash: finalUrlHash,
+      })
+      writePersistentSessionsCookie(res, sessionEntries)
+      await updatePersistentSessionUrlState(hash, finalUrlState)
+
+      const activeSessionData = isPlainObject(activeSession) && isPlainObject(activeSession.data)
+        ? activeSession.data
+        : {}
+      const createSessionPayload = buildCreateSessionBootstrapPayload(activityName, activeSessionData)
+
+      if (sessions.set && isPlainObject(activeSession)) {
+        try {
+          const capability = issueActivityCapability(activeSession as { data: unknown }, 'manager')
+          await sessions.set(sessionId, activeSession)
+          writeActivityCapabilityCookie(res, sessionId, 'manager', capability.token)
+        } catch (error) {
+          console.error(JSON.stringify({
+            event: 'persistent-manager-capability-persistence-failed',
+            sessionId,
+            errorName: error instanceof Error ? error.name : 'unknown',
+          }))
+          res.status(500).json({ error: 'manager capability unavailable' })
+          return
+        }
+      }
+
+      res.json({
+        success: true,
+        activityName,
+        sessionId,
+        ...(createSessionPayload ? { createSessionPayload } : {}),
+      })
+    } catch (error) {
+      console.error(JSON.stringify({
+        event: 'teacher-authenticate-failed',
+        sessionId,
+        error: error instanceof Error ? error.message : String(error),
+      }))
+      if (!res.headersSent) {
+        res.status(500).json({ error: 'Teacher join is temporarily unavailable' })
+      }
+    }
   })
 
   app.post('/api/session/:sessionId/persistent-manager-capability', async (req, res) => {
@@ -780,45 +792,47 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
       return
     }
 
-    const activeSession = await sessions.get(sessionId)
-    if (!isPlainObject(activeSession) || typeof activeSession.type !== 'string') {
-      res.status(404).json({ error: 'Active session not found' })
-      return
-    }
-
-    const hash = await findHashBySessionId(sessionId)
-    const persistentSession = hash ? await getPersistentSession(hash) : null
-    if (!hash || !persistentSession || persistentSession.sessionId !== sessionId || persistentSession.activityName !== activeSession.type) {
-      res.status(404).json({ error: 'Persistent manager recovery is unavailable for this session' })
-      return
-    }
-
-    const { sessions: sessionEntries } = parsePersistentSessionsCookie(
-      req.cookies?.persistent_sessions,
-      'persistent_sessions (/api/session/:sessionId/persistent-manager-capability)',
-    )
-    if (!getValidatedPersistentSessionCookieEntry(sessionEntries, persistentSession.activityName, hash)) {
-      res.status(403).json({ error: 'Persistent teacher authentication is required' })
-      return
-    }
-
-    if (!sessions.set) {
-      res.status(500).json({ error: 'Manager capability is temporarily unavailable' })
-      return
-    }
-
     try {
+      const activeSession = await sessions.get(sessionId)
+      if (!isPlainObject(activeSession) || typeof activeSession.type !== 'string') {
+        res.status(404).json({ error: 'Active session not found' })
+        return
+      }
+
+      const hash = await findHashBySessionId(sessionId)
+      const persistentSession = hash ? await getPersistentSession(hash) : null
+      if (!hash || !persistentSession || persistentSession.sessionId !== sessionId || persistentSession.activityName !== activeSession.type) {
+        res.status(404).json({ error: 'Persistent manager recovery is unavailable for this session' })
+        return
+      }
+
+      const { sessions: sessionEntries } = parsePersistentSessionsCookie(
+        req.cookies?.persistent_sessions,
+        'persistent_sessions (/api/session/:sessionId/persistent-manager-capability)',
+      )
+      if (!getValidatedPersistentSessionCookieEntry(sessionEntries, persistentSession.activityName, hash)) {
+        res.status(403).json({ error: 'Persistent teacher authentication is required' })
+        return
+      }
+
+      if (!sessions.set) {
+        res.status(500).json({ error: 'Manager capability is temporarily unavailable' })
+        return
+      }
+
       const capability = issueActivityCapability(activeSession as { data: unknown }, 'manager')
       await sessions.set(sessionId, activeSession)
       writeActivityCapabilityCookie(res, sessionId, 'manager', capability.token)
       res.json({ success: true })
     } catch (error) {
       console.error(JSON.stringify({
-        event: 'persistent-manager-capability-persistence-failed',
+        event: 'persistent-manager-capability-failed',
         sessionId,
-        errorName: error instanceof Error ? error.name : 'unknown',
+        error: error instanceof Error ? error.message : String(error),
       }))
-      res.status(500).json({ error: 'Manager capability is temporarily unavailable' })
+      if (!res.headersSent) {
+        res.status(500).json({ error: 'Manager capability is temporarily unavailable' })
+      }
     }
   })
 

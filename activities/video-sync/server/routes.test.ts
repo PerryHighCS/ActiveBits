@@ -24,7 +24,9 @@ interface MockResponse {
   statusCode: number
   body: unknown
   cookies: Array<{ name: string; value: string; options: Record<string, unknown> }>
+  headers: Record<string, string>
   status(code: number): MockResponse
+  set(field: string, value: string): MockResponse
   cookie(name: string, value: string, options: Record<string, unknown>): void
   json(payload: unknown): MockResponse
 }
@@ -34,8 +36,13 @@ function createResponse(): MockResponse {
     statusCode: 200,
     body: null,
     cookies: [],
+    headers: {},
     status(code: number) {
       this.statusCode = code
+      return this
+    },
+    set(field: string, value: string) {
+      this.headers[field.toLowerCase()] = value
       return this
     },
     cookie(name: string, value: string, options: Record<string, unknown>) {
@@ -1700,6 +1707,7 @@ void test('manager-access route returns manager access for persistent teacher co
   assert.equal(res.cookies.length, 1)
   assert.equal(res.cookies[0]?.options.httpOnly, true)
   assert.equal(setCalls, 1)
+  assert.equal(res.headers['cache-control'], 'no-store', 'cookie-dependent manager-access response is not cacheable')
   await cleanupPersistentSession(hash)
 })
 

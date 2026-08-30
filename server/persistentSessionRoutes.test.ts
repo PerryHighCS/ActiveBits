@@ -286,6 +286,12 @@ void test('persistent manager capability recovery issues a manager cookie for an
   assert.equal(res.statusCode, 200)
   assert.deepEqual(res.jsonBody, { success: true })
   assert.equal(Array.from(res.cookies.keys()).filter((name) => name.startsWith('activebits_cap_manager_')).length, 1)
+
+  // The mutation must survive the store boundary: a no-op set would pass the
+  // assertions above but leave no capability record on the persisted session.
+  const persisted = await sessions.get('live-session') as { data?: { activityCapabilities?: Record<string, unknown> } } | null
+  assert.ok(persisted?.data?.activityCapabilities, 'capability is persisted on the live session record')
+  assert.equal(Object.keys(persisted!.data!.activityCapabilities!).length, 1)
 })
 
 void test('persistent session route resets when backing session missing', async (t) => {

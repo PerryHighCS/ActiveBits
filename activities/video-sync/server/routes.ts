@@ -96,6 +96,7 @@ interface RouteRequest {
 
 interface JsonResponse {
   status(code: number): JsonResponse
+  set?(field: string, value: string): JsonResponse
   cookie(name: string, value: string, options: Record<string, unknown>): void
   json(payload: unknown): void
 }
@@ -189,6 +190,11 @@ function isInstructorRoleParam(role: string | null): boolean {
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return value != null && typeof value === 'object' && !Array.isArray(value)
+}
+
+/** Keep cookie-dependent responses out of any shared or browser cache. */
+function setNoStore(res: JsonResponse): void {
+  res.set?.('Cache-Control', 'no-store')
 }
 
 async function withSessionMutation<T>(sessionId: string, mutate: () => Promise<T>): Promise<T> {
@@ -1196,6 +1202,9 @@ export default function setupVideoSyncRoutes(
   })
 
   app.get('/api/video-sync/:sessionId/manager-access', async (req, res) => {
+    // This response reflects the caller's cookies (manager capability / persistent
+    // teacher auth) and can issue a Set-Cookie, so it must never be cached.
+    setNoStore(res)
     const sessionId = resolveSessionId(req)
     if (!sessionId) {
       res.status(400).json({ error: 'INVALID_SESSION_ID', message: 'sessionId is required' })

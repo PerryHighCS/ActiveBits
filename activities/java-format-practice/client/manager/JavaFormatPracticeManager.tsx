@@ -35,7 +35,11 @@ export default function JavaFormatPracticeManager() {
   const [students, setStudents] = useState<JavaFormatStudentRecord[]>([])
   const [startingNewSession, setStartingNewSession] = useState(false)
   const [managerAuthLost, setManagerAuthLost] = useState(false)
-  const [managerAccessReady, setManagerAccessReady] = useState(false)
+  // The sessionId whose persistent-manager-capability exchange has completed.
+  // Tracked as an id rather than a boolean so a parameter-only route swap can
+  // never leave a stale `true` in the window before the passive effect re-runs.
+  const [managerAccessReadySessionId, setManagerAccessReadySessionId] = useState<string | null>(null)
+  const managerAccessReady = sessionId != null && managerAccessReadySessionId === sessionId
   const managerAuthLostRef = useRef(false)
   // Bumped every time a live `studentsUpdate` is applied. An in-flight `/students`
   // poll captures this value and drops its snapshot if a newer socket update
@@ -155,19 +159,17 @@ export default function JavaFormatPracticeManager() {
 
   useEffect(() => {
     if (sessionId == null) {
-      setManagerAccessReady(false)
       return undefined
     }
 
     let cancelled = false
-    setManagerAccessReady(false)
     void fetch(`/api/session/${encodeURIComponent(sessionId)}/persistent-manager-capability`, {
       method: 'POST',
       credentials: 'include',
     }).catch(() => {
       // Temporary sessions do not have persistent recovery; their create route already issued the capability.
     }).finally(() => {
-      if (!cancelled) setManagerAccessReady(true)
+      if (!cancelled) setManagerAccessReadySessionId(sessionId)
     })
 
     return () => { cancelled = true }

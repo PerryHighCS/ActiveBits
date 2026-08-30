@@ -369,8 +369,11 @@ export class ValkeyPersistentStore {
     try {
       return await this.client.get(`persistent-session-by-session:${sessionId}`)
     } catch (err) {
-      // sessionId is caller-supplied; keep it out of the format-string position.
-      console.error('Failed to get persistent session hash for session %s:', sessionId, err)
+      console.error(JSON.stringify({
+        event: 'valkey.persistent-session-hash-lookup-failed',
+        sessionId,
+        error: err instanceof Error ? err.message : String(err),
+      }))
       return null
     }
   }
@@ -379,7 +382,11 @@ export class ValkeyPersistentStore {
     try {
       await this.client.set(`persistent-session-by-session:${sessionId}`, hash, 'PX', this.ttlMs)
     } catch (err) {
-      console.error('Failed to set persistent session hash for session %s:', sessionId, err)
+      console.error(JSON.stringify({
+        event: 'valkey.persistent-session-hash-write-failed',
+        sessionId,
+        error: err instanceof Error ? err.message : String(err),
+      }))
     }
   }
 
@@ -387,7 +394,11 @@ export class ValkeyPersistentStore {
     try {
       await this.client.del(`persistent-session-by-session:${sessionId}`)
     } catch (err) {
-      console.error('Failed to delete persistent session hash for session %s:', sessionId, err)
+      console.error(JSON.stringify({
+        event: 'valkey.persistent-session-hash-delete-failed',
+        sessionId,
+        error: err instanceof Error ? err.message : String(err),
+      }))
     }
   }
 
