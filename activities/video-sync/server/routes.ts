@@ -1246,10 +1246,22 @@ export default function setupVideoSyncRoutes(
       return
     }
 
+    let recovery: 'issued' | 'session-missing'
     try {
-      const capability = issueActivityCapability(session, 'manager')
-      await sessions.set(session.id, session)
-      writeActivityCapabilityCookie(res, sessionId, 'manager', capability.token)
+      recovery = await withSessionMutation(sessionId, async () => {
+        // Re-read inside the per-session queue: the checks above ran several
+        // awaits (persistent-store lookups, teacher-code verification) during
+        // which a command or heartbeat could have persisted newer playback
+        // state onto the snapshot read at the top of this handler.
+        const freshSession = await getVideoSyncSession(sessions, sessionId)
+        if (!freshSession) {
+          return 'session-missing'
+        }
+        const capability = issueActivityCapability(freshSession, 'manager')
+        await sessions.set(freshSession.id, freshSession)
+        writeActivityCapabilityCookie(res, sessionId, 'manager', capability.token)
+        return 'issued'
+      })
     } catch (error) {
       console.error(JSON.stringify({
         activity: 'video-sync',
@@ -1258,6 +1270,10 @@ export default function setupVideoSyncRoutes(
         errorName: error instanceof Error ? error.name : 'unknown',
       }))
       res.status(500).json({ error: 'INTERNAL_ERROR', message: 'Manager access is temporarily unavailable' })
+      return
+    }
+    if (recovery === 'session-missing') {
+      res.status(404).json({ error: 'NOT_FOUND', message: 'Session not found' })
       return
     }
     const persistentSourceUrl = readPersistentSourceUrlFromCookieEntry(persistentHash, matchingEntry)

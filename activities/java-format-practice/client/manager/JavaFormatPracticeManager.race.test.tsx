@@ -338,3 +338,64 @@ void test('JavaFormatPracticeManager auth-lost banner starts a fresh session ins
     restoreDom()
   }
 })
+
+void test('JavaFormatPracticeManager gates difficulty/theme controls until the persistent capability exchange settles', { concurrency: false }, async () => {
+  TestWebSocket.instances = []
+  const restoreDom = installDomEnvironment('https://bits.example/manage/java-format-practice/perma-session')
+  const previousFetch = globalThis.fetch
+
+  let resolveCapability: ((response: Response) => void) | null = null
+  const capability = new Promise<Response>((resolve) => { resolveCapability = resolve })
+  let difficultyCalls = 0
+
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    if (url.includes('/persistent-manager-capability')) {
+      return capability
+    }
+    if (url.includes('/difficulty') && init?.method === 'POST') {
+      difficultyCalls += 1
+      return new Response('{}', { status: 200 })
+    }
+    if (url.includes('/students')) {
+      return new Response(JSON.stringify({ students: [] }), { status: 200 })
+    }
+    throw new Error(`Unexpected fetch: ${url}`)
+  }) as typeof fetch
+
+  let teardown: (() => Promise<void>) | null = null
+  try {
+    const { testingLibrary, router, JavaFormatPracticeManager, act } = await loadHarness()
+    const rendered = testingLibrary.render(
+      <router.MemoryRouter initialEntries={['/manage/java-format-practice/perma-session']}>
+        <router.Routes>
+          <router.Route path="/manage/java-format-practice/:sessionId" element={<JavaFormatPracticeManager />} />
+        </router.Routes>
+      </router.MemoryRouter>,
+    )
+    teardown = async () => { await act(async () => { rendered.unmount(); testingLibrary.cleanup(); await Promise.resolve() }) }
+
+    // While the capability POST is still pending, the manager controls are inert:
+    // a request sent now would 403 and permanently latch manager-auth-lost.
+    const beginner = await testingLibrary.waitFor(() => rendered.getByRole('button', { name: 'Beginner' }))
+    assert.equal((beginner as HTMLButtonElement).disabled, true, 'difficulty control is disabled before the exchange settles')
+    await act(async () => { testingLibrary.fireEvent.click(beginner); await Promise.resolve() })
+    assert.equal(difficultyCalls, 0, 'no capability-gated request is sent before the cookie lands')
+
+    // Once the exchange resolves, the controls become usable.
+    await act(async () => {
+      resolveCapability?.(new Response('{}', { status: 200 }))
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    await testingLibrary.waitFor(() => {
+      assert.equal((rendered.getByRole('button', { name: 'Beginner' }) as HTMLButtonElement).disabled, false)
+    })
+    await act(async () => { testingLibrary.fireEvent.click(rendered.getByRole('button', { name: 'Beginner' })); await Promise.resolve() })
+    assert.equal(difficultyCalls, 1, 'the difficulty request is sent once the capability is ready')
+  } finally {
+    await teardown?.()
+    globalThis.fetch = previousFetch
+    restoreDom()
+  }
+})

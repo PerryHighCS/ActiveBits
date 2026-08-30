@@ -104,7 +104,9 @@ export default function JavaFormatPracticeManager() {
   }, [navigate]);
 
   const handleDifficultyChange = (difficulty: JavaFormatDifficulty) => {
-    if (sessionId == null || managerAuthLostRef.current) return;
+    // Block until the persistent-permalink capability exchange has settled;
+    // a request sent before the cookie lands 403s and latches manager-auth-lost.
+    if (sessionId == null || !managerAccessReady || managerAuthLostRef.current) return;
     setSelectedDifficulty(difficulty);
 
     // Send selected difficulty to server
@@ -120,7 +122,7 @@ export default function JavaFormatPracticeManager() {
   };
 
   const handleThemeChange = (theme: JavaFormatTheme) => {
-    if (sessionId == null || managerAuthLostRef.current) return;
+    if (sessionId == null || !managerAccessReady || managerAuthLostRef.current) return;
     setSelectedTheme(theme);
 
     // Send selected theme to server
@@ -381,7 +383,7 @@ export default function JavaFormatPracticeManager() {
                     : {}),
                 }}
                 onClick={() => handleDifficultyChange(level.id)}
-                disabled={managerAuthLost}
+                disabled={managerAuthLost || !managerAccessReady}
               >
                 {level.label}
               </button>
@@ -403,7 +405,7 @@ export default function JavaFormatPracticeManager() {
                     : {}),
                 }}
                 onClick={() => handleThemeChange(theme.id)}
-                disabled={managerAuthLost}
+                disabled={managerAuthLost || !managerAccessReady}
               >
                 {theme.label}
               </button>

@@ -88,22 +88,6 @@ export function issueActivityCapability(
   return { id, token }
 }
 
-/**
- * Issues a session-scoped httpOnly capability after the caller has already
- * verified the principal through another server-side authority adapter.
- */
-export function issueActivityCapabilityCookie(
-  res: ActivityCapabilityCookieResponse,
-  session: ActivityCapabilitySessionLike,
-  sessionId: string,
-  principalKind: ActivityPrincipalKind,
-  subjectId?: string,
-): { id: string; token: string } {
-  const capability = issueActivityCapability(session, principalKind, subjectId)
-  writeActivityCapabilityCookie(res, sessionId, principalKind, capability.token)
-  return capability
-}
-
 /** Delivers an already-persisted opaque capability as an httpOnly cookie. */
 export function writeActivityCapabilityCookie(
   res: ActivityCapabilityCookieResponse,
