@@ -663,7 +663,11 @@ and `.agent/knowledge/activity-runtime-threat-model.md` for the full contract.
   /create` issues the manager capability cookie, manager REST + WebSocket
   surfaces require it, `POST /stats` requires the participant cookie, and both
   sockets authenticate before any subscription or snapshot. The permalink /
-  persistent-teacher entry path is not yet adapted and is tracked separately.
+  persistent-teacher entry path is adapted: the manager view redeems the
+  verified `persistent_sessions` teacher cookie through `POST
+  /api/session/:sessionId/persistent-manager-capability` for a manager
+  capability before connecting its gated surfaces (temporary sessions 404 there
+  and keep their `/create`-issued capability).
 - **Rollout** is a clean cutover: sessions created before deployment have no
   capability records and are rejected on the migrated surfaces (403 / WebSocket
   `1008 activity-auth-required`); there is no legacy fallback.
