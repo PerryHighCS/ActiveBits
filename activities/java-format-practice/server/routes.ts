@@ -119,14 +119,22 @@ function scheduleCapabilityExpiryClose(
     }
   }
 
-  const ttl = expiresAt - Date.now()
-  if (ttl <= 0) {
-    closeExpired()
-    return
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const arm = (): void => {
+    const remaining = expiresAt - Date.now()
+    if (remaining <= 0) {
+      closeExpired()
+      return
+    }
+    // setTimeout caps at ~24.8 days; for a longer TTL, re-arm in chunks so the
+    // socket is closed at the real `expiresAt`, not early.
+    timer = setTimeout(remaining <= MAX_SET_TIMEOUT_MS ? closeExpired : arm, Math.min(remaining, MAX_SET_TIMEOUT_MS))
+    timer.unref?.()
   }
-  const timer = setTimeout(closeExpired, Math.min(ttl, MAX_SET_TIMEOUT_MS))
-  timer.unref?.()
-  client.on('close', () => clearTimeout(timer))
+  arm()
+  client.on('close', () => {
+    if (timer) clearTimeout(timer)
+  })
 }
 
 function asJavaFormatSession(session: SessionRecord | null): JavaFormatSession | null {

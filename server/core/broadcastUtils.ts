@@ -51,7 +51,16 @@ export function createBroadcastSubscriptionHelper(
       sessions.subscribeToBroadcast(channel, (message) => {
         // `shouldForward` inspects the raw envelope (audience/origin); clients get
         // the transformed shape so local and pub/sub delivery look identical.
-        const payload = JSON.stringify(transformMessage(message))
+        // Broadcast payloads can originate from other instances/builds: treat the
+        // transform + serialization as untrusted and fail closed for this one
+        // message rather than throwing out of the subscription handler.
+        let payload: string
+        try {
+          payload = JSON.stringify(transformMessage(message))
+        } catch (err) {
+          console.error(JSON.stringify({ event: 'broadcast.transform-failed', sessionId, error: String(err) }))
+          return
+        }
         for (const client of ws.wss.clients) {
           if (client.readyState === 1 && client.sessionId === sessionId) {
             try {

@@ -133,3 +133,25 @@ void test('createBroadcastSubscriptionHelper applies transformMessage to the cli
   assert.deepEqual(predicateSawAudience, ['manager'], 'predicate still sees the raw envelope')
   assert.deepEqual(JSON.parse(sentPayloads[0] as string), { type: 'foo', payload: { a: 1 } })
 })
+
+void test('createBroadcastSubscriptionHelper fails closed when transform or serialization throws', () => {
+  let broadcastHandler: ((message: unknown) => void) | null = null
+  const sentPayloads: string[] = []
+  const sessions = {
+    subscribeToBroadcast: (_channel: string, handler: (message: unknown) => void) => { broadcastHandler = handler },
+  }
+  const ws = { wss: { clients: new Set([{ sessionId: 'abc', readyState: 1, send: (m: string) => sentPayloads.push(m) }]) } }
+  const ensure = createBroadcastSubscriptionHelper(
+    sessions,
+    ws,
+    () => true,
+    () => { throw new Error('bad shape') },
+  )
+
+  ensure('abc')
+  // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions
+  assert.ok(broadcastHandler, 'handler was registered')
+  console.log('[TEST] broadcast transform failure is expected below (fail closed, no delivery):')
+  assert.doesNotThrow(() => void broadcastHandler!({ type: 'foo' }))
+  assert.equal(sentPayloads.length, 0, 'nothing is delivered for an unprocessable message')
+})
