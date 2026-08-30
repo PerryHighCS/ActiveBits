@@ -1,6 +1,9 @@
 import { createSession, type SessionRecord, type SessionStore } from 'activebits-server/core/sessions.js'
+import { randomUUID } from 'node:crypto'
 import { createBroadcastSubscriptionHelper } from 'activebits-server/core/broadcastUtils.js'
 import { connectAcceptedSessionParticipant } from 'activebits-server/core/acceptedSessionParticipants.js'
+import { getSessionParticipantCookieName, resolveAcceptedEntryParticipantToken } from 'activebits-server/core/acceptedEntryParticipants.js'
+import { DEFAULT_ACTIVITY_CAPABILITY_TTL_MS, getActivityCapabilityCookieName, issueActivityCapability, readCookieValue, resolveActivityPrincipalFromCookies } from 'activebits-server/core/activityCapabilities.js'
 import { generateParticipantId } from 'activebits-server/core/participantIds.js'
 import { closeDuplicateParticipantSockets } from 'activebits-server/core/participantSockets.js'
 import { disconnectSessionParticipant, updateSessionParticipant } from 'activebits-server/core/sessionParticipants.js'
@@ -15,12 +18,15 @@ import { validateDifficulty, validateStats, validateStudentName, validateTheme }
 
 interface JsonResponse {
   status(code: number): JsonResponse
+  cookie?(name: string, value: string, options: Record<string, unknown>): void
+  setHeader?(name: string, value: string): void
   json(payload: unknown): void
 }
 
 interface RouteRequest {
   params: Record<string, string | undefined>
   body?: unknown
+  cookies?: Record<string, unknown>
 }
 
 interface JavaFormatRouteApp {
@@ -29,6 +35,7 @@ interface JavaFormatRouteApp {
 }
 
 interface JavaFormatSocket extends ActiveBitsWebSocket {
+  principalKind?: 'manager' | 'participant'
   studentName?: string | null
   studentId?: string | null
   ignoreDisconnect?: boolean
@@ -86,6 +93,50 @@ function normalizeSessionData(data: unknown): JavaFormatSessionData {
   }
 }
 
+const MAX_SET_TIMEOUT_MS = 2_147_483_647
+
+/**
+ * Close an admitted manager socket once its capability reaches `expiresAt`. The
+ * handshake rejects an already-expired token, but without this a connection that
+ * stays open (kept alive by the shared heartbeat) would keep receiving private
+ * roster updates past the bounded capability lifetime.
+ */
+function scheduleCapabilityExpiryClose(
+  client: JavaFormatSocket,
+  session: JavaFormatSession,
+  capabilityId: string,
+): void {
+  const record = (session.data as { activityCapabilities?: Record<string, { expiresAt?: unknown }> })
+    .activityCapabilities?.[capabilityId]
+  const expiresAt = record?.expiresAt
+  if (typeof expiresAt !== 'number' || !Number.isFinite(expiresAt)) return
+
+  const closeExpired = (): void => {
+    try {
+      client.close(1008, 'activity-auth-required')
+    } catch {
+      // socket already tearing down
+    }
+  }
+
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const arm = (): void => {
+    const remaining = expiresAt - Date.now()
+    if (remaining <= 0) {
+      closeExpired()
+      return
+    }
+    // setTimeout caps at ~24.8 days; for a longer TTL, re-arm in chunks so the
+    // socket is closed at the real `expiresAt`, not early.
+    timer = setTimeout(remaining <= MAX_SET_TIMEOUT_MS ? closeExpired : arm, Math.min(remaining, MAX_SET_TIMEOUT_MS))
+    timer.unref?.()
+  }
+  arm()
+  client.on('close', () => {
+    if (timer) clearTimeout(timer)
+  })
+}
+
 function asJavaFormatSession(session: SessionRecord | null): JavaFormatSession | null {
   if (!session || session.type !== 'java-format-practice') {
     return null
@@ -104,56 +155,122 @@ export default function setupJavaFormatPracticeRoutes(
   sessions: SessionStore,
   ws: WsRouter,
 ): void {
-  const ensureBroadcastSubscription = createBroadcastSubscriptionHelper(sessions, ws)
+  const broadcastOrigin = randomUUID()
+  const ensureBroadcastSubscription = createBroadcastSubscriptionHelper(sessions, ws, (client, message) => {
+    if (isPlainObject(message) && message.origin === broadcastOrigin) return false
+    const audience = isPlainObject(message) ? message.audience : undefined
+    // Fail closed: a cross-instance message without an explicit recognized
+    // audience (e.g. from an older build during a rolling deploy) is not
+    // forwarded, so a private `studentsUpdate` can never reach participant sockets.
+    if (audience !== 'all' && audience !== 'manager') return false
+    return audience === 'all' || (client as JavaFormatSocket).principalKind === 'manager'
+  }, (message) => (isPlainObject(message) ? { type: message.type, payload: message.payload } : message))
 
-  async function broadcast(type: string, payload: unknown, sessionId: string): Promise<void> {
+  async function broadcast(type: string, payload: unknown, sessionId: string, audience: 'all' | 'manager' = 'all'): Promise<void> {
     const message = JSON.stringify({ type, payload })
 
     if (sessions.publishBroadcast) {
-      await sessions.publishBroadcast(`session:${sessionId}:broadcast`, { type, payload } as Record<string, unknown>)
+      await sessions.publishBroadcast(`session:${sessionId}:broadcast`, {
+        type,
+        payload,
+        audience,
+        origin: broadcastOrigin,
+      })
     }
 
-    let clientCount = 0
     for (const socket of ws.wss.clients as Set<JavaFormatSocket>) {
-      if (socket.readyState === 1 && socket.sessionId === sessionId) {
+      if (socket.readyState === 1 && socket.sessionId === sessionId && (audience === 'all' || socket.principalKind === audience)) {
         try {
           socket.send(message)
-          clientCount += 1
         } catch (error) {
-          console.error('Failed to send to client:', error)
+          console.error(JSON.stringify({
+            event: 'java-format.broadcast-send-failed',
+            sessionId,
+            error: String(error),
+          }))
         }
       }
     }
 
-    console.log(`Broadcast ${type} to ${clientCount} clients in session ${sessionId}`)
   }
 
   ws.register('/ws/java-format-practice', (socket, query) => {
     const client = socket as JavaFormatSocket
-    client.sessionId = query.get('sessionId') || null
-    ensureBroadcastSubscription(client.sessionId)
+    const requestedSessionId = query.get('sessionId') || null
+    const requestedPrincipal = query.get('principal')
 
-    const studentId = query.get('studentId') || null
-    client.studentName = validateStudentName(query.get('studentName'))
+    if (!requestedSessionId) {
+      // wsRouter has already upgraded and retained this socket; a request with no
+      // session can never be admitted, so close it instead of leaving it idle.
+      console.info(JSON.stringify({ event: 'java-format.websocket-denied', reason: 'missing-session-id' }))
+      client.close(1008, 'activity-auth-required')
+      return
+    }
 
-    console.log(
-      `WebSocket connection: sessionId=${client.sessionId}, studentName=${client.studentName}, studentId=${studentId}`,
-    )
-
-    if (client.sessionId) {
-      const activeSessionId = client.sessionId
+    if (requestedSessionId) {
+      const activeSessionId = requestedSessionId
 
       ;(async () => {
         const session = asJavaFormatSession(await sessions.get(activeSessionId))
-        console.log('Found session:', session ? 'yes' : 'no')
-        if (!session) return
+        if (!session) {
+          console.info(JSON.stringify({
+            event: 'java-format.websocket-denied',
+            sessionId: activeSessionId,
+            reason: 'unknown-session',
+          }))
+          client.close(1008, 'activity-auth-required')
+          return
+        }
 
+        // The socket may have closed while the session lookup was in flight; the
+        // close handler already ran (with no sessionId/studentId set), so bail
+        // before retaining, subscribing, or writing a roster record for it.
+        if (client.readyState !== 1) return
+
+        const cookieHeader = client.upgradeHeaders?.cookie
+
+        // The `principal` query param is routing only: manager authority is
+        // attempted solely when it is explicitly `manager`. A missing or unknown
+        // value falls through to participant admission (least privilege by
+        // default), so a browser holding both cookies cannot be admitted as a
+        // manager just because the client forgot the param.
+        if (requestedPrincipal === 'manager') {
+          const manager = resolveActivityPrincipalFromCookies(session, activeSessionId, 'manager', {
+            [getActivityCapabilityCookieName('manager', activeSessionId)]: readCookieValue(cookieHeader, getActivityCapabilityCookieName('manager', activeSessionId)),
+          })
+          if (!manager) {
+            console.info(JSON.stringify({
+              event: 'java-format.websocket-denied',
+              sessionId: activeSessionId,
+              reason: 'missing-manager-principal',
+            }))
+            client.close(1008, 'activity-auth-required')
+            return
+          }
+          client.principalKind = 'manager'
+          client.sessionId = activeSessionId
+          ensureBroadcastSubscription(activeSessionId)
+          scheduleCapabilityExpiryClose(client, session, manager.capabilityId)
+          return
+        }
+
+        const participantToken = readCookieValue(cookieHeader, getSessionParticipantCookieName(activeSessionId))
+        const acceptedParticipant = resolveAcceptedEntryParticipantToken(session, participantToken)
+        if (!acceptedParticipant) {
+          console.info(JSON.stringify({
+            event: 'java-format.websocket-denied',
+            sessionId: activeSessionId,
+            reason: 'missing-or-invalid-principal',
+          }))
+          client.close(1008, 'activity-auth-required')
+          return
+        }
         const result = connectAcceptedSessionParticipant({
           session,
           participants: session.data.students,
-          participantId: studentId,
-          participantName: client.studentName ?? null,
-          allowLegacyUnnamedMatch: true,
+          participantId: acceptedParticipant.participantId,
+          participantName: null,
+          allowLegacyUnnamedMatch: false,
           createParticipant: (participantId, participantName, now) => ({
             id: participantId,
             name: participantName,
@@ -165,43 +282,40 @@ export default function setupJavaFormatPracticeRoutes(
           generateParticipantId,
         })
         if (!result) {
-          try {
-            if (client.readyState === 1) {
-              client.send(
-                JSON.stringify({
-                  type: 'error',
-                  payload: {
-                    code: 'waiting-room-required',
-                    message: 'Student identity not accepted. Rejoin from the waiting room.',
-                  },
-                }),
-              )
-            }
-          } catch (error) {
-            console.error('Failed to send waiting-room-required error:', error)
-          }
-          client.close(1008, 'waiting-room-required')
+          client.close(1008, 'activity-auth-required')
           return
         }
+        client.principalKind = 'participant'
+        client.sessionId = activeSessionId
+        ensureBroadcastSubscription(activeSessionId)
         client.studentName = result.participantName
-        const { participantId, isNew } = result
+        const { participantId } = result
         client.studentId = participantId
 
-        if (!isNew) {
-          console.log(`Reconnecting student: ${result.participantName} (${participantId})`)
-        } else {
-          console.log(`New student joining: ${result.participantName}`)
-        }
         closeDuplicateParticipantSockets(ws.wss.clients as Set<JavaFormatSocket>, client)
 
         await sessions.set(session.id, session)
-        console.log('Total students in session:', session.data.students.length)
-        await broadcast('studentsUpdate', { students: session.data.students }, session.id)
+        await broadcast('studentsUpdate', { students: session.data.students }, session.id, 'manager')
 
         if (client.studentId) {
           client.send(JSON.stringify({ type: 'studentId', payload: { studentId: client.studentId } }))
         }
-      })().catch((error) => console.error('Error in student join:', error))
+      })().catch((error) => {
+        console.error(JSON.stringify({
+          event: 'java-format.websocket-participant-join-failed',
+          sessionId: activeSessionId,
+          error: String(error),
+        }))
+        // Admission threw after the upgrade; don't leave an idle unauthenticated
+        // socket open. A non-1008 close lets the resilient client retry.
+        if (client.readyState === 1) {
+          try {
+            client.close(1011, 'activity-join-failed')
+          } catch {
+            // socket already tearing down
+          }
+        }
+      })
     }
 
     client.on('close', () => {
@@ -220,8 +334,12 @@ export default function setupJavaFormatPracticeRoutes(
         if (!student) return
 
         await sessions.set(session.id, session)
-        await broadcast('studentsUpdate', { students: session.data.students }, session.id)
-      })().catch((error) => console.error('Error in student disconnect:', error))
+        await broadcast('studentsUpdate', { students: session.data.students }, session.id, 'manager')
+      })().catch((error) => console.error(JSON.stringify({
+        event: 'java-format.websocket-participant-disconnect-failed',
+        sessionId: activeSessionId,
+        error: String(error),
+      })))
     })
   })
 
@@ -230,8 +348,15 @@ export default function setupJavaFormatPracticeRoutes(
     session.type = 'java-format-practice'
     session.data = normalizeSessionData(session.data)
 
+    const managerCapability = issueActivityCapability(session, 'manager')
     await sessions.set(session.id, session)
     ensureBroadcastSubscription(session.id)
+    // This response mints a credential-bearing cookie; keep it out of every
+    // cache the same way the participant-consume and private roster responses are.
+    res.setHeader?.('Cache-Control', 'no-store')
+    res.cookie?.(getActivityCapabilityCookieName('manager', session.id), managerCapability.token, {
+      httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production', path: '/', maxAge: DEFAULT_ACTIVITY_CAPABILITY_TTL_MS,
+    })
     res.json({ id: session.id })
   })
 
@@ -269,10 +394,14 @@ export default function setupJavaFormatPracticeRoutes(
       return
     }
 
+    if (!resolveActivityPrincipalFromCookies(session, sessionId, 'manager', req.cookies)) {
+      console.warn(JSON.stringify({ event: 'java-format.manager-difficulty-denied', sessionId }))
+      res.status(403).json({ error: 'manager authentication required' })
+      return
+    }
     const body = isPlainObject(req.body) ? req.body : {}
     const difficulty = validateDifficulty(body.difficulty)
 
-    console.log(`Updating difficulty for session ${session.id}:`, difficulty)
     session.data.selectedDifficulty = difficulty
     await sessions.set(session.id, session)
     await broadcast('difficultyUpdate', { difficulty }, session.id)
@@ -293,10 +422,14 @@ export default function setupJavaFormatPracticeRoutes(
       return
     }
 
+    if (!resolveActivityPrincipalFromCookies(session, sessionId, 'manager', req.cookies)) {
+      console.warn(JSON.stringify({ event: 'java-format.manager-theme-denied', sessionId }))
+      res.status(403).json({ error: 'manager authentication required' })
+      return
+    }
     const body = isPlainObject(req.body) ? req.body : {}
     const theme = validateTheme(body.theme)
 
-    console.log(`Updating theme for session ${session.id}:`, theme)
     session.data.selectedTheme = theme
     await sessions.set(session.id, session)
     await broadcast('themeUpdate', { theme }, session.id)
@@ -317,6 +450,14 @@ export default function setupJavaFormatPracticeRoutes(
       return
     }
 
+    const acceptedParticipant = resolveAcceptedEntryParticipantToken(
+      session,
+      req.cookies?.[getSessionParticipantCookieName(sessionId)],
+    )
+    if (!acceptedParticipant) {
+      res.status(403).json({ error: 'participant authentication required' })
+      return
+    }
     const body = isPlainObject(req.body) ? req.body : {}
     const stats = validateStats(body.stats)
     if (!stats) {
@@ -324,20 +465,43 @@ export default function setupJavaFormatPracticeRoutes(
       return
     }
 
-    const studentId = typeof body.studentId === 'string' ? body.studentId : null
-    const studentName = validateStudentName(body.studentName)
-    const student = updateSessionParticipant({
+    let student = updateSessionParticipant({
       participants: session.data.students,
-      participantId: studentId,
-      participantName: studentName,
-      allowLegacyUnnamedMatch: true,
+      participantId: acceptedParticipant.participantId,
+      participantName: null,
+      allowLegacyUnnamedMatch: false,
       update: (participant) => {
         participant.stats = stats
       },
     })
+    if (!student) {
+      // The participant socket normally creates the roster record on admission,
+      // but the client can POST stats before the socket connects (e.g. on
+      // reload). Establish the record here so restored progress is not dropped.
+      const established = connectAcceptedSessionParticipant({
+        session,
+        participants: session.data.students,
+        participantId: acceptedParticipant.participantId,
+        participantName: null,
+        allowLegacyUnnamedMatch: false,
+        createParticipant: (participantId, participantName, now) => ({
+          id: participantId,
+          name: participantName,
+          connected: false,
+          joined: now,
+          lastSeen: now,
+          stats: { ...defaultStats },
+        }),
+        generateParticipantId,
+      })
+      if (established) {
+        established.participant.stats = stats
+        student = established.participant
+      }
+    }
     if (student) {
       await sessions.set(session.id, session)
-      await broadcast('studentsUpdate', { students: session.data.students }, session.id)
+      await broadcast('studentsUpdate', { students: session.data.students }, session.id, 'manager')
     }
 
     res.json({ success: true })
@@ -356,6 +520,12 @@ export default function setupJavaFormatPracticeRoutes(
       return
     }
 
+    if (!resolveActivityPrincipalFromCookies(session, sessionId, 'manager', req.cookies)) {
+      console.warn(JSON.stringify({ event: 'java-format.manager-roster-denied', sessionId }))
+      res.status(403).json({ error: 'manager authentication required' })
+      return
+    }
+    res.setHeader?.('Cache-Control', 'no-store')
     res.json({ students: session.data.students })
   })
 }

@@ -25,6 +25,7 @@ export interface SessionEntryStatus {
   resolvedRole: WaitingRoomResolvedRole
   entryOutcome: WaitingRoomEntryOutcome
   presentationMode: WaitingRoomPresentationMode
+  participantAuthenticated?: boolean
 }
 
 export interface PersistentSessionEntryStatus {

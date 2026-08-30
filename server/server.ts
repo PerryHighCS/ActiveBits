@@ -65,7 +65,14 @@ if (valkeyUrl && sessions.valkeyStore) {
   initializePersistentStorage(null)
 }
 
-const ws = createWsRouter(server, sessions)
+const ws = createWsRouter(
+  server,
+  sessions,
+  // Only defer `/vite-hmr` when the dev Vite proxy (and its own 'upgrade'
+  // listener) is actually installed — the same `env.startsWith('dev')` gate used
+  // below. In any other env this router is the sole listener and must destroy it.
+  env.startsWith('dev') ? { deferUpgradePath: (pathname) => pathname.startsWith('/vite-hmr') } : {},
+)
 setupSessionRoutes(app, sessions, ws.wss)
 
 setupPersistentSessionWs(ws, sessions)
@@ -99,19 +106,11 @@ if (!env.startsWith('dev')) {
   })
 
   const { createProxyMiddleware } = await import('http-proxy-middleware')
-  const keepAliveAgent = new http.Agent({ keepAlive: true, maxSockets: 128, keepAliveMsecs: 30_000 })
-
   const viteProxy = createProxyMiddleware({
     target: 'http://127.0.0.1:5173',
     changeOrigin: true,
     ws: true,
     xfwd: true,
-    agent: keepAliveAgent,
-    proxyTimeout: 30_000,
-    timeout: 30_000,
-    headers: {
-      connection: 'keep-alive',
-    },
     pathFilter: (pathname) => {
       if (pathname.startsWith('/api')) return false
       if (pathname.startsWith('/ws')) return false

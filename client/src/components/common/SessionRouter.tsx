@@ -36,7 +36,7 @@ import {
 } from './sessionRouterUtils'
 import {
   buildSessionEntryParticipantStorageKey,
-  hasValidEntryParticipantHandoffStorageValue,
+  hasStoredEntryParticipantToken,
 } from './entryParticipantStorage'
 import { shouldAutoRedirectPersistentTeacherToManage, shouldRenderSessionJoinPreflight } from './sessionEntryRenderUtils'
 import { hasCompleteSessionParticipantContext, readSessionParticipantContext } from './sessionParticipantContext'
@@ -138,7 +138,7 @@ const SessionRouter = ({ onShellExpandChange }: SessionRouterProps = {}) => {
     && sessionEntryStatus?.sessionId != null
     && sessionEntryStatus?.activityName != null
     && window.sessionStorage != null
-  ) ? hasValidEntryParticipantHandoffStorageValue(
+  ) ? hasStoredEntryParticipantToken(
     window.sessionStorage,
     buildSessionEntryParticipantStorageKey(sessionEntryStatus.activityName, sessionEntryStatus.sessionId),
   ) : false
@@ -147,7 +147,7 @@ const SessionRouter = ({ onShellExpandChange }: SessionRouterProps = {}) => {
     && persistentSessionEntryStatus?.sessionId != null
     && activityName != null
     && window.sessionStorage != null
-  ) ? hasValidEntryParticipantHandoffStorageValue(
+  ) ? hasStoredEntryParticipantToken(
     window.sessionStorage,
     buildSessionEntryParticipantStorageKey(activityName, persistentSessionEntryStatus.sessionId),
   ) : false
@@ -379,7 +379,7 @@ const SessionRouter = ({ onShellExpandChange }: SessionRouterProps = {}) => {
       sessionId: sessionEntryStatus.sessionId,
       presentationMode: sessionEntryStatus.presentationMode,
       completedJoinPreflightSessionId,
-      hasStoredParticipantContext: hasStoredSessionParticipantContext,
+      hasStoredParticipantContext: sessionEntryStatus.participantAuthenticated === true,
       hasStoredEntryParticipantHandoff: hasStoredSessionEntryParticipantHandoff,
     })) {
       return
@@ -740,7 +740,7 @@ const SessionRouter = ({ onShellExpandChange }: SessionRouterProps = {}) => {
     sessionId: sessionEntryStatus.sessionId,
     presentationMode: sessionEntryStatus.presentationMode,
     completedJoinPreflightSessionId,
-    hasStoredParticipantContext: hasStoredSessionParticipantContext,
+    hasStoredParticipantContext: sessionEntryStatus.participantAuthenticated === true,
     hasStoredEntryParticipantHandoff: hasStoredSessionEntryParticipantHandoff,
   })) {
     return (

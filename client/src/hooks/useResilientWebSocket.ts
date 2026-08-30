@@ -13,6 +13,7 @@ export interface UseResilientWebSocketOptions {
   onMessage?: (event: MessageEvent, ws: WebSocket) => void
   onClose?: (event: CloseEvent, ws: WebSocket) => void
   onError?: (event: Event, ws: WebSocket) => void
+  isTerminalClose?: (event: CloseEvent) => boolean
 }
 
 export interface UseResilientWebSocketResult {
@@ -50,6 +51,7 @@ export function useResilientWebSocket({
   onMessage,
   onClose,
   onError,
+  isTerminalClose,
 }: UseResilientWebSocketOptions = {}): UseResilientWebSocketResult {
   const socketRef = useRef<WebSocket | null>(null)
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -60,6 +62,11 @@ export function useResilientWebSocket({
   const onMessageRef = useRef(onMessage)
   const onCloseRef = useRef(onClose)
   const onErrorRef = useRef(onError)
+  const isTerminalCloseRef = useRef(isTerminalClose)
+
+  useEffect(() => {
+    isTerminalCloseRef.current = isTerminalClose
+  }, [isTerminalClose])
 
   useEffect(() => {
     onOpenRef.current = onOpen
@@ -140,7 +147,7 @@ export function useResilientWebSocket({
       if (isLatestSocket) {
         socketRef.current = null
       }
-      if (!manualCloseRef.current && shouldReconnect && isLatestSocket) {
+      if (!manualCloseRef.current && shouldReconnect && isLatestSocket && !isTerminalCloseRef.current?.(event)) {
         const delay = getReconnectDelay(
           reconnectAttemptsRef.current,
           reconnectDelayBase,

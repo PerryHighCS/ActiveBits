@@ -8,6 +8,7 @@ interface PostboardCreateResponse {
 interface AcceptedStudent {
   studentId: string | null
   studentName: string
+  participantCookie?: { name: string; value: string }
 }
 
 async function createPostboardSession(
@@ -38,9 +39,18 @@ async function acceptStudent(page: Page, sessionId: string, studentName: string)
   })
   expect(consumeResponse.ok()).toBe(true)
 
+  // Live-session entry now bypasses the waiting room only for a server-issued
+  // participant cookie. Capture it here so a student page in a different context
+  // can present the same authenticated identity.
+  const cookieName = `activebits_participant_${Buffer.from(sessionId).toString('base64url')}`
+  const participantCookie = (await page.context().cookies()).find((cookie) => cookie.name === cookieName)
+
   return {
     studentId: stored.values?.participantId ?? '',
     studentName,
+    participantCookie: participantCookie
+      ? { name: cookieName, value: participantCookie.value }
+      : undefined,
   }
 }
 
@@ -91,6 +101,18 @@ async function openPostboardStudent(
       )
     }
   }, { sessionId, student })
+  if (student?.participantCookie) {
+    await page.goto('/')
+    const origin = new URL(page.url())
+    await page.context().addCookies([{
+      name: student.participantCookie.name,
+      value: student.participantCookie.value,
+      domain: origin.hostname,
+      path: '/',
+      httpOnly: true,
+      sameSite: 'Lax',
+    }])
+  }
   await page.goto(`/${encodeURIComponent(sessionId)}`)
   if (expectWaitingRoom) {
     await expect(page.getByRole('button', { name: 'Join Session' })).toBeVisible()

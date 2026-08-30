@@ -442,3 +442,6 @@ Capture reusable test setup patterns, common failure modes, and reliability guid
 # Activities lint memory
 
 - Run the activities workspace lint through `scripts/lint-activities.mjs`. It starts one type-aware ESLint process per top-level activity directory, releasing the TypeScript program between directories instead of constructing one program for the whole workspace.
+# Browser WebSocket lifecycle checks
+
+- React development Strict Mode mounts, cleans up, then remounts effects. For browser WebSockets that are opened from an effect, defer the actual `connect()` to a cancellable microtask and mark cleanup as disposed first. This prevents an intentionally discarded effect from creating a socket that is immediately closed before its handshake, while the retained effect opens the real connection. Verify the retained manager/student connection with browser coverage.

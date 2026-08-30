@@ -15,6 +15,45 @@ Track security-relevant boundaries, risks, and mitigation decisions.
 
 ## Notes
 
+- Date: 2026-08-29
+- Area: shared activity runtime authority boundary
+- Threat or risk: Activities independently treated session IDs, request participant IDs,
+  display names, and WebSocket roles as authority, exposing inconsistent manager,
+  participant, and projection boundaries across HTTP and socket transports.
+- Control or mitigation: The completed repository audit defines a versioned shared
+  principal/capability/projection contract in
+  `.agent/knowledge/activity-runtime-threat-model.md`. It requires opaque httpOnly
+  capabilities, server-resolved principals before handler or socket admission,
+  activity-owned projections, and audience-preserving delivery.
+- Implemented so far (Slice A, PR #349): shared hashed capability + accepted-entry
+  primitives (`server/core/activityCapabilities.ts`, bounded server-side expiry;
+  `server/core/acceptedEntryParticipants.ts`, hashed tokens). Java Format Practice
+  creation issues the manager capability cookie; its manager REST routes
+  (`/difficulty`, `/theme`, `/students`) and the manager WebSocket require that
+  manager capability cookie, while `POST /stats` and the participant WebSocket
+  require the accepted-participant cookie; sockets authenticate before
+  subscription/snapshot. Clean cutover: pre-deployment sessions are rejected on
+  migrated surfaces with no fallback.
+- Residual risk: Most activities are still activity-local until migrated in focused
+  PRs (Slices B/C, Phase 7 waves). Java Format's permalink / persistent-teacher
+  entry does not yet issue a manager capability (needs the Slice C persistent
+  adapter; tracked in #351). The public waiting-room store
+  (`server/core/entryParticipants.ts`) still accepts a request-supplied
+  `participantId`, so a caller who knows another participant's id can mint an
+  accepted-participant cookie for it; a blunt server-only mint breaks SyncDeck's
+  embedded-activity identity handoff, so the real fix is a trusted embedded
+  handoff path (Slice C / #352). The separately tracked raw shared-session
+  disclosure advisory is out of scope.
+- Validation (test/review/path): `.agent/knowledge/activity-runtime-audit.md`;
+  `.agent/knowledge/activity-runtime-threat-model.md`;
+  `.agent/plans/shared-activity-runtime-authentication.md`;
+  `activities/java-format-practice/server/routes.test.ts`;
+  `server/core/activityCapabilities.test.ts`.
+- Follow-up action: Prove the REST-only (Slice B) and multi-mode / persistent
+  adapter (Slice C) contracts, then retrofit Java Format permalink auth (#351)
+  before Phase 7.
+- Owner: Codex
+
 - Date: 2026-07-26
 - Area: Learn SyncDeck substitute instructor link
 - Threat or risk: A direct substitute link is a bearer capability that can start or reuse
@@ -357,3 +396,6 @@ Track security-relevant boundaries, risks, and mitigation decisions.
 - Expected denied student edits (missing accepted identity or Try it disabled) use structured MobCode event logs without source contents.
 - The generic entry-participant consume route now issues an opaque httpOnly token scoped to the accepted session. MobCode reads this token server-side and never accepts a participant ID in its student workspace API bodies.
 - SyncDeck embedded child sessions receive that one-time entry token asynchronously over the parent websocket, so MobCode waits briefly for the token and retries a denied child-workspace bootstrap once. The retry still redeems the opaque token through the generic consume route; it must not reintroduce a browser-supplied participant ID.
+# Shared socket paths with multiple authenticated principals
+
+- A browser can hold both a manager capability cookie and a participant cookie for one session. A shared activity WebSocket path must have the client select its intended view (`manager` or `participant`), but the server must resolve and require the corresponding httpOnly capability before assigning that principal. The selector is routing only; it must never grant authority. This keeps an instructor's student tab from being misclassified as a manager and omitted from the roster.

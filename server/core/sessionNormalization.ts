@@ -8,6 +8,20 @@ interface MutableSession {
 
 const sessionNormalizers = new Map<string, SessionNormalizer>()
 
+/**
+ * Session-data keys owned by the shared runtime (capability + accepted-entry
+ * auth state and the waiting-room handoff store). Activity normalizers that
+ * rebuild `data` from an explicit key list must not be able to silently drop
+ * these, so the framework re-attaches any that a normalizer did not carry
+ * forward. A normalizer that keeps a key (even emptied) still wins.
+ */
+const PLATFORM_OWNED_SESSION_DATA_KEYS = [
+  'activityCapabilities',
+  'participantAuthTokens',
+  'acceptedEntryParticipants',
+  'entryParticipants',
+] as const
+
 function ensurePlainObject(value: unknown): Record<string, unknown> {
   return value != null && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -46,6 +60,14 @@ export function normalizeSessionData<TSession>(session: TSession): TSession {
   const mutableSession = session as MutableSession
   mutableSession.data = ensurePlainObject(mutableSession.data)
 
+  const dataBefore = mutableSession.data as Record<string, unknown>
+  const preservedPlatformState: Record<string, unknown> = {}
+  for (const key of PLATFORM_OWNED_SESSION_DATA_KEYS) {
+    if (Object.hasOwn(dataBefore, key)) {
+      preservedPlatformState[key] = dataBefore[key]
+    }
+  }
+
   const sessionType = mutableSession.type
   const normalizer = typeof sessionType === 'string' ? sessionNormalizers.get(sessionType) : undefined
   if (normalizer) {
@@ -55,6 +77,14 @@ export function normalizeSessionData<TSession>(session: TSession): TSession {
       console.error(`[sessionNormalization] Failed to normalize session for "${sessionType}":`, err)
     }
   }
+
+  const dataAfter = ensurePlainObject(mutableSession.data)
+  for (const key of PLATFORM_OWNED_SESSION_DATA_KEYS) {
+    if (Object.hasOwn(preservedPlatformState, key) && !Object.hasOwn(dataAfter, key)) {
+      dataAfter[key] = preservedPlatformState[key]
+    }
+  }
+  mutableSession.data = dataAfter
 
   return session
 }

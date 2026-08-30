@@ -165,6 +165,13 @@ export default function JavaFormatPractice({ sessionData }: JavaFormatPracticePr
   const [studentId, setStudentId] = useState<string | null>(initialIdentity?.studentId ?? null);
   const [nameSubmitted, setNameSubmitted] = useState(initialIdentity?.nameSubmitted ?? false);
   const [identityResolved, setIdentityResolved] = useState(Boolean(initialIdentity));
+  // Non-solo entry mints/refreshes the `activebits_participant_<sessionId>` cookie
+  // via an awaited `/entry-participant/consume` in the identity effect below. A
+  // stored localStorage context can make `nameSubmitted` true on the first render
+  // (before that POST resolves), so socket startup and server stats sync are
+  // gated on this latch to avoid opening an unauthenticated socket that would
+  // terminal-close and bounce the student back to re-entry.
+  const [entryHandoffSettled, setEntryHandoffSettled] = useState(isSoloSession);
   const [currentChallenge, setCurrentChallenge] = useState<JavaFormatChallenge | null>(null);
   const [currentFormatCallIndex, setCurrentFormatCallIndex] = useState(0);
   const [selectedDifficulty, setSelectedDifficulty] = useState<JavaFormatDifficulty>('beginner');
@@ -184,6 +191,7 @@ export default function JavaFormatPractice({ sessionData }: JavaFormatPracticePr
   });
   const [focusToken, setFocusToken] = useState(0);
   const [hasSubmitted, setHasSubmitted] = useState(false);
+  const authRecoveryStartedRef = useRef(false);
 
   // Cycling feature: for advanced mode after correct answer
   const [isCyclingMode, setIsCyclingMode] = useState(false);
@@ -246,6 +254,30 @@ export default function JavaFormatPractice({ sessionData }: JavaFormatPracticePr
       } finally {
         if (!isCancelled) {
           setIdentityResolved(true);
+          if (isSoloSession || sessionId == null) {
+            setEntryHandoffSettled(true);
+          } else {
+            // The participant cookie is httpOnly, so ask the server whether it
+            // actually authenticates before opening the socket / syncing stats.
+            // A failed server consume, or the waiting-room `kind: 'values'` local
+            // fallback, can leave `nameSubmitted` true with no cookie; opening the
+            // socket then would close 1008 and reload into the same state — a loop.
+            let participantAuthenticated = false;
+            try {
+              const res = await fetch(`/api/session/${sessionId}/entry`, {
+                headers: { Accept: 'application/json' },
+              });
+              if (res.ok) {
+                const status = (await res.json()) as { participantAuthenticated?: boolean };
+                participantAuthenticated = status.participantAuthenticated === true;
+              }
+            } catch (verifyError) {
+              console.error('Failed to verify participant authentication:', verifyError);
+            }
+            if (!isCancelled) {
+              setEntryHandoffSettled(participantAuthenticated);
+            }
+          }
         }
       }
     })();
@@ -342,17 +374,26 @@ export default function JavaFormatPractice({ sessionData }: JavaFormatPracticePr
   const handleWsOpen = useCallback(() => {
   }, []);
 
+  const handleWsClose = useCallback((event: CloseEvent) => {
+    if (event.code === 1008 && event.reason === 'activity-auth-required' && sessionId && !authRecoveryStartedRef.current) {
+      // Full document navigation so SessionRouter re-runs entry resolution; a
+      // same-URL SPA navigate would leave the student on a dead activity view.
+      authRecoveryStartedRef.current = true;
+      window.location.assign(`/${sessionId}`);
+    }
+  }, [sessionId]);
+
+  const isTerminalStudentSocketClose = useCallback(
+    (event: CloseEvent) => event.code === 1008 && event.reason === 'activity-auth-required',
+    [],
+  )
+
   const buildWsUrl = useCallback(() => {
     if (!nameSubmitted || isSoloSession) return null;
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const host = window.location.host;
-    const currentId = studentIdRef.current;
-    const studentIdParam = currentId ? `&studentId=${encodeURIComponent(currentId)}` : '';
-    const studentNameParam = studentName.trim().length > 0
-      ? `&studentName=${encodeURIComponent(studentName)}`
-      : '';
-    return `${protocol}//${host}/ws/java-format-practice?sessionId=${sessionId}${studentNameParam}${studentIdParam}`;
-  }, [nameSubmitted, isSoloSession, sessionId, studentName]);
+    return `${protocol}//${host}/ws/java-format-practice?sessionId=${sessionId}&principal=participant`;
+  }, [nameSubmitted, isSoloSession, sessionId]);
 
   const { connect: connectStudentWs, disconnect: disconnectStudentWs } = useResilientWebSocket({
     buildUrl: buildWsUrl,
@@ -360,20 +401,27 @@ export default function JavaFormatPractice({ sessionData }: JavaFormatPracticePr
     onOpen: handleWsOpen,
     onMessage: handleWsMessage,
     onError: undefined,
-    onClose: undefined,
+    onClose: handleWsClose,
+    isTerminalClose: isTerminalStudentSocketClose,
     attachSessionEndedHandler,
   });
 
   useEffect(() => {
-    if (!nameSubmitted || isSoloSession) {
+    if (!nameSubmitted || isSoloSession || !entryHandoffSettled) {
       disconnectStudentWs();
       return undefined;
     }
-    connectStudentWs();
+    let disposed = false;
+    queueMicrotask(() => {
+      if (!disposed) {
+        void connectStudentWs();
+      }
+    });
     return () => {
+      disposed = true;
       disconnectStudentWs();
     };
-  }, [nameSubmitted, sessionId, isSoloSession, connectStudentWs, disconnectStudentWs]);
+  }, [nameSubmitted, sessionId, isSoloSession, entryHandoffSettled, connectStudentWs, disconnectStudentWs]);
 
   // Save stats to localStorage when they change
   useEffect(() => {
@@ -382,18 +430,24 @@ export default function JavaFormatPractice({ sessionData }: JavaFormatPracticePr
     const key = `format-stats-${sessionId}-${studentId}`;
     localStorage.setItem(key, JSON.stringify(stats));
 
-    // Sync to server if in class mode
-    if (!isSoloSession) {
+    // Sync to server if in class mode, once the participant cookie is in place.
+    if (!isSoloSession && entryHandoffSettled) {
       void fetch(`/api/java-format-practice/${sessionId}/stats`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          studentId,
-          stats,
-        }),
+        body: JSON.stringify({ stats }),
+      }).then((response) => {
+        if (response.status === 403 && !authRecoveryStartedRef.current) {
+          authRecoveryStartedRef.current = true;
+          window.location.assign(`/${sessionId}`);
+          return;
+        }
+        if (!response.ok) {
+          console.error('Failed to sync stats:', response.status);
+        }
       }).catch((err) => console.error('Failed to sync stats:', err));
     }
-  }, [stats, sessionId, studentId, isSoloSession]);
+  }, [stats, sessionId, studentId, isSoloSession, entryHandoffSettled]);
 
   const getCurrentFormatCall = (): JavaFormatFormatCall | null => {
     if (!currentChallenge) return null;

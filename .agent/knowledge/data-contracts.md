@@ -11,6 +11,13 @@
 
 Document API and data-shape assumptions that must stay compatible over time.
 
+## Shared Runtime Contract Pointer
+
+The version 1 activity runtime principal, capability, projection, HTTP-admission, and
+WebSocket-delivery contract is documented in
+`.agent/knowledge/activity-runtime-threat-model.md`. New shared runtime work must use
+that document rather than creating activity-specific authentication payloads.
+
 ## Entry Template
 
 - Date:

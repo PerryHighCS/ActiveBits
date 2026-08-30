@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
-import { useParams } from 'react-router';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useNavigate, useParams } from 'react-router';
 import { arrayToCsv, downloadCsv } from '@src/utils/csvUtils';
 import Button from '@src/components/ui/Button';
 import SessionHeader from '@src/components/common/SessionHeader';
@@ -30,8 +30,31 @@ interface ManagerWsMessage {
  */
 export default function JavaFormatPracticeManager() {
   const { sessionId } = useParams<{ sessionId?: string }>();
+  const navigate = useNavigate();
 
   const [students, setStudents] = useState<JavaFormatStudentRecord[]>([])
+  const [startingNewSession, setStartingNewSession] = useState(false)
+  const [managerAuthLost, setManagerAuthLost] = useState(false)
+  const managerAuthLostRef = useRef(false)
+  // Bumped every time a live `studentsUpdate` is applied. An in-flight `/students`
+  // poll captures this value and drops its snapshot if a newer socket update
+  // landed while the request was outstanding, so a slow HTTP response can never
+  // overwrite a fresher roster.
+  const rosterUpdateGenRef = useRef(0)
+  // Serializes `/students` polls: the mount, on-open, and interval callers skip
+  // starting a new request while one is in flight, so responses cannot pile up or
+  // arrive out of order and a slow (>interval) request still gets to render.
+  // `pollInFlightRef` holds the token of the poll that currently owns the slot
+  // (0 = free); `pollTokenRef` is the monotonic token source. A poll only clears
+  // the slot if it still owns it, so an aborted poll from a previous session
+  // cannot free the slot out from under the new session's request.
+  const pollInFlightRef = useRef(0)
+  const pollTokenRef = useRef(0)
+  // The socket for the *current* sessionId. `disconnect()` closes the previous
+  // session's socket but leaves its `onmessage` bound, so a message already
+  // queued on it can still fire after a route swap; roster updates are only
+  // applied when they come from this socket.
+  const activeSocketRef = useRef<WebSocket | null>(null)
   const [selectedDifficulty, setSelectedDifficulty] = useState<JavaFormatDifficulty>('beginner')
   const [selectedTheme, setSelectedTheme] = useState<JavaFormatTheme>('all')
   const [sortBy, setSortBy] = useState<SortBy>('name') // 'name', 'total', 'correct', 'accuracy', 'streak'
@@ -52,56 +75,123 @@ export default function JavaFormatPracticeManager() {
     { id: 'spy-badge', label: 'Spy Badge' },
   ];
 
-  const handleDifficultyChange = (difficulty: JavaFormatDifficulty) => {
-    setSelectedDifficulty(difficulty);
+  const markManagerAuthLost = useCallback(() => {
+    if (managerAuthLostRef.current) return;
+    managerAuthLostRef.current = true;
+    setManagerAuthLost(true);
+  }, []);
 
-    if (sessionId == null) return;
+  // A lost manager capability cannot be recovered by reloading (the same cookie
+  // is re-sent and `POST /create` is the only issuance path). Mint a fresh
+  // session instead; the sessionId change re-initializes this view with the new
+  // capability cookie.
+  const handleStartNewSession = useCallback(async () => {
+    setStartingNewSession(true);
+    try {
+      const res = await fetch('/api/java-format-practice/create', { method: 'POST' });
+      if (!res.ok) throw new Error(`Failed to create session: ${res.status}`);
+      const data = (await res.json()) as { id?: string };
+      if (data.id) {
+        void navigate(`/manage/java-format-practice/${data.id}`);
+      } else {
+        throw new Error('create response missing session id');
+      }
+    } catch (err) {
+      console.error('Failed to start a new Java Format session:', err);
+      setStartingNewSession(false);
+    }
+  }, [navigate]);
+
+  const handleDifficultyChange = (difficulty: JavaFormatDifficulty) => {
+    if (sessionId == null || managerAuthLostRef.current) return;
+    setSelectedDifficulty(difficulty);
 
     // Send selected difficulty to server
     fetch(`/api/java-format-practice/${sessionId}/difficulty`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ difficulty }),
+    }).then((res) => {
+      if (res.status === 403) markManagerAuthLost();
     }).catch((err) => {
       console.error('Failed to update difficulty:', err);
     });
   };
 
   const handleThemeChange = (theme: JavaFormatTheme) => {
+    if (sessionId == null || managerAuthLostRef.current) return;
     setSelectedTheme(theme);
-
-    if (sessionId == null) return;
 
     // Send selected theme to server
     fetch(`/api/java-format-practice/${sessionId}/theme`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ theme }),
+    }).then((res) => {
+      if (res.status === 403) markManagerAuthLost();
     }).catch((err) => {
       console.error('Failed to update theme:', err);
     });
   };
 
-  const fetchStudents = useCallback(async () => {
-    if (sessionId == null) return;
-    try {
-      const res = await fetch(`/api/java-format-practice/${sessionId}/students`);
-      if (!res.ok) throw new Error('Failed to fetch students');
-      const data = (await res.json()) as StudentsResponse
-      const list = Array.isArray(data.students) ? data.students : [];
-      setStudents(list);
-    } catch (err) {
-      console.error('Failed to fetch students:', err);
-    }
+  // A parameter-only route swap keeps this component mounted. Reset the auth-loss
+  // latch (so it can't suppress the new session's fetches), drop the previous
+  // session's roster from the screen, invalidate every in-flight poll, and stop
+  // trusting the outgoing socket so a late response cannot repaint the new URL.
+  useEffect(() => {
+    managerAuthLostRef.current = false;
+    setManagerAuthLost(false);
+    setStartingNewSession(false);
+    setStudents([]);
+    rosterUpdateGenRef.current += 1;
+    // Invalidate any outstanding poll's ownership and free the slot for the new session.
+    pollTokenRef.current += 1;
+    pollInFlightRef.current = 0;
+    activeSocketRef.current = null;
   }, [sessionId]);
 
-  const handleWsMessage = useCallback((event: MessageEvent<string>) => {
+  const fetchStudents = useCallback(async (signal?: AbortSignal) => {
+    if (sessionId == null || managerAuthLostRef.current || pollInFlightRef.current !== 0) return;
+    const pollToken = (pollTokenRef.current += 1);
+    pollInFlightRef.current = pollToken;
+    try {
+      const rosterGenAtStart = rosterUpdateGenRef.current;
+      const res = await fetch(`/api/java-format-practice/${sessionId}/students`, { signal });
+      // A poll invalidated by a session swap is ignored entirely, including its
+      // status — a stale 403 must not latch auth-loss on the new session.
+      if (signal?.aborted) return;
+      if (res.status === 403) {
+        // The manager capability is gone; stop polling a request that can only 403.
+        markManagerAuthLost();
+        return;
+      }
+      if (!res.ok) throw new Error(`Failed to fetch students: ${res.status}`);
+      const data = (await res.json()) as StudentsResponse
+      const list = Array.isArray(data.students) ? data.students : [];
+      if (signal?.aborted) return;
+      // A live `studentsUpdate` that arrived while this poll was in flight is
+      // authoritative; discard this now-stale HTTP snapshot.
+      if (rosterUpdateGenRef.current !== rosterGenAtStart) return;
+      setStudents(list);
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') return;
+      console.error('Failed to fetch students:', err);
+    } finally {
+      // Only release the slot if this poll still owns it (a session swap or a
+      // superseding reset may have handed it to a newer request).
+      if (pollInFlightRef.current === pollToken) pollInFlightRef.current = 0;
+    }
+  }, [sessionId, markManagerAuthLost]);
+
+  const handleWsMessage = useCallback((event: MessageEvent<string>, ws?: WebSocket) => {
+    // Drop anything that is not from the socket bound to the current sessionId
+    // (e.g. a message queued on a prior session's socket before disconnect()).
+    if (ws !== activeSocketRef.current) return;
     try {
       const message = JSON.parse(event.data) as ManagerWsMessage
-      console.log('Manager received message:', message);
       if (message.type === 'studentsUpdate') {
-        console.log('Updating students:', message.payload?.students);
         const list = Array.isArray(message.payload?.students) ? message.payload.students : [];
+        rosterUpdateGenRef.current += 1;
         setStudents(list);
       }
     } catch (err) {
@@ -109,40 +199,62 @@ export default function JavaFormatPracticeManager() {
     }
   }, []);
 
-  const handleWsOpen = useCallback(() => {
-    console.log('Manager WebSocket connected');
+  const handleWsOpen = useCallback((_event: Event, ws: WebSocket) => {
+    activeSocketRef.current = ws;
     void fetchStudents();
   }, [fetchStudents]);
 
-  const handleWsError = useCallback((error: unknown) => {
-    console.error('WebSocket error:', error);
+  const handleWsClose = useCallback((_event: CloseEvent, ws: WebSocket) => {
+    if (activeSocketRef.current === ws) activeSocketRef.current = null;
   }, []);
 
-  const handleWsClose = useCallback(() => {
-    console.log('Manager WebSocket disconnected');
+  const handleWsError = useCallback((error: unknown) => {
+    console.error('WebSocket error:', error);
   }, []);
 
   const buildWsUrl = useCallback(() => {
     if (sessionId == null) return null;
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const host = window.location.host;
-    return `${protocol}//${host}/ws/java-format-practice?sessionId=${sessionId}`;
+    return `${protocol}//${host}/ws/java-format-practice?sessionId=${sessionId}&principal=manager`;
   }, [sessionId]);
+
+  const isTerminalManagerSocketClose = useCallback((event: CloseEvent) => {
+    const terminal = event.code === 1008 && event.reason === 'activity-auth-required';
+    if (terminal) markManagerAuthLost();
+    return terminal;
+  }, [markManagerAuthLost]);
 
   const { connect, disconnect } = useResilientWebSocket({
     buildUrl: buildWsUrl,
     shouldReconnect: sessionId != null,
     onOpen: handleWsOpen,
     onMessage: handleWsMessage,
-    onError: handleWsError,
     onClose: handleWsClose,
+    onError: handleWsError,
+    isTerminalClose: isTerminalManagerSocketClose,
   });
 
   useEffect(() => {
     if (sessionId == null) return undefined;
-    void fetchStudents();
-    void connect();
+    const controller = new AbortController();
+    void fetchStudents(controller.signal);
+    const refreshInterval = window.setInterval(() => {
+      void fetchStudents(controller.signal);
+    }, 2_000);
+    let disposed = false;
+    queueMicrotask(() => {
+      if (!disposed) {
+        void connect();
+      }
+    });
     return () => {
+      disposed = true;
+      controller.abort();
+      window.clearInterval(refreshInterval);
+      // Stop trusting the outgoing socket immediately so a message it has already
+      // queued cannot land on the next session's roster.
+      activeSocketRef.current = null;
       disconnect();
     };
   }, [sessionId, fetchStudents, connect, disconnect]);
@@ -220,6 +332,19 @@ export default function JavaFormatPracticeManager() {
         sessionId={sessionId}
       />
 
+      {managerAuthLost && (
+        <div role="alert" style={styles.authLostBanner}>
+          <span>
+            This manager session&rsquo;s authentication has expired or is no longer
+            valid. Reloading won&rsquo;t restore it &mdash; start a new session to
+            continue managing students.
+          </span>
+          <Button onClick={() => { void handleStartNewSession(); }} disabled={startingNewSession}>
+            {startingNewSession ? 'Starting…' : 'Start new session'}
+          </Button>
+        </div>
+      )}
+
       <div style={styles.content}>
         {/* Difficulty Selector */}
         <div style={styles.controlSection}>
@@ -235,6 +360,7 @@ export default function JavaFormatPracticeManager() {
                     : {}),
                 }}
                 onClick={() => handleDifficultyChange(level.id)}
+                disabled={managerAuthLost}
               >
                 {level.label}
               </button>
@@ -256,6 +382,7 @@ export default function JavaFormatPracticeManager() {
                     : {}),
                 }}
                 onClick={() => handleThemeChange(theme.id)}
+                disabled={managerAuthLost}
               >
                 {theme.label}
               </button>
@@ -355,6 +482,18 @@ const styles: Record<string, CSSProperties> = {
   },
   content: {
     padding: '30px',
+  },
+  authLostBanner: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: '16px',
+    margin: '20px 30px 0',
+    padding: '12px 16px',
+    background: '#fff5f5',
+    border: '1px solid #feb2b2',
+    borderRadius: '8px',
+    color: '#742a2a',
   },
   controlSection: {
     marginBottom: '30px',

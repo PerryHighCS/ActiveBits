@@ -1,5 +1,5 @@
 import type { EntryParticipantValues } from './entryParticipants.js'
-import { randomBytes } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 
 export interface AcceptedEntryParticipantRecord {
   participantId: string
@@ -44,6 +44,10 @@ function normalizeDisplayName(value: unknown): string | null {
 
   const trimmed = value.trim()
   return trimmed.length > 0 ? trimmed : null
+}
+
+function hashParticipantToken(token: string): string {
+  return createHash('sha256').update(token).digest('base64url')
 }
 
 export function acceptEntryParticipant(
@@ -110,7 +114,7 @@ export function issueAcceptedEntryParticipantToken(
     if (ownerId === participantId) delete container.participantAuthTokens[existingToken]
   }
   const token = randomBytes(24).toString('base64url')
-  container.participantAuthTokens[token] = participantId
+  container.participantAuthTokens[hashParticipantToken(token)] = participantId
   const tokenEntries = Object.entries(container.participantAuthTokens)
   if (tokenEntries.length > MAX_PARTICIPANT_AUTH_TOKENS) {
     for (const [expiredToken] of tokenEntries.slice(0, tokenEntries.length - MAX_PARTICIPANT_AUTH_TOKENS)) {
@@ -126,8 +130,9 @@ export function resolveAcceptedEntryParticipantToken(
 ): AcceptedEntryParticipantRecord | null {
   if (typeof token !== 'string' || !isRecord(session.data)) return null
   const participantAuthTokens = (session.data as AcceptedEntryParticipantContainer).participantAuthTokens
-  const participantId = isRecord(participantAuthTokens) && Object.hasOwn(participantAuthTokens, token)
-    ? participantAuthTokens[token]
+  const tokenHash = hashParticipantToken(token)
+  const participantId = isRecord(participantAuthTokens) && Object.hasOwn(participantAuthTokens, tokenHash)
+    ? participantAuthTokens[tokenHash]
     : null
   return findAcceptedEntryParticipant(session, typeof participantId === 'string' ? participantId : null)
 }

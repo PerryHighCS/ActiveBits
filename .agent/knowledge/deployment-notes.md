@@ -32,3 +32,6 @@ Track deployment constraints, environment expectations, and operational learning
 - Evidence (runbook/logs/path): `server/server.ts`; `activities/mobcode/client/runner/runnerUtils.ts`; `activities/mobcode/playwright/runner.spec.ts`; `DEPLOYMENT.md`
 - Follow-up action: Keep the Playwright popup smoke test in the e2e suite because it caught blob URL asset resolution and worker-locale startup failures that unit tests could not execute.
 - Owner: Codex
+# Development WebSocket upgrade routing
+
+- The Node server hosts both activity WebSockets (`/ws` and `/ws/...`) and the development Vite proxy. The activity router must ignore non-activity upgrade paths so the later Vite proxy listener can handle `/vite-hmr`; it must still explicitly destroy unregistered activity socket paths.

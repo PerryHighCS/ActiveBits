@@ -12,6 +12,23 @@ async function acceptStudent(page: Page, sessionId: string, participantId: strin
   await page.request.post(`/api/session/${sessionId}/entry-participant/consume`, { data: { token: entryParticipantToken } })
 }
 
+// Open the student sockets one at a time. The SyncDeck join handler does an
+// async read-modify-write of the session roster, so two sockets opened in the
+// same tick can race and drop one roster entry (worse on WebKit timing). Real
+// students never join within one tick; waiting for each to appear keeps the
+// multi-client assertion retry-stable. The underlying cross-handler write race
+// is tracked in https://github.com/PerryHighCS/ActiveBits/issues/350.
+async function connectSyncDeckStudentSocket(page: Page, sessionId: string, studentId: string): Promise<void> {
+  await page.evaluate(({ sessionId, studentId }) => new Promise<void>((resolve, reject) => {
+    const ws = new WebSocket(`${location.origin.replace('http', 'ws')}/ws/syncdeck?sessionId=${encodeURIComponent(sessionId)}&studentId=${encodeURIComponent(studentId)}`)
+    const store = window as unknown as { __syncDeckStudentSockets?: WebSocket[] }
+    store.__syncDeckStudentSockets = store.__syncDeckStudentSockets ?? []
+    store.__syncDeckStudentSockets.push(ws)
+    ws.addEventListener('open', () => resolve())
+    ws.addEventListener('error', () => reject(new Error(`SyncDeck student socket failed to open for ${studentId}`)))
+  }), { sessionId, studentId })
+}
+
 test('SyncDeck manager boots a roster student through the rendered panel action', async ({ page }) => {
   const session = await createInstructorSession(page)
   const configured = await page.request.post(`/api/syncdeck/${session.id}/configure`, {
@@ -33,17 +50,9 @@ test('SyncDeck manager boots a roster student through the rendered panel action'
   }, { instructorPasscode: session.instructorPasscode })
   await page.goto(`/manage/syncdeck/${session.id}`)
   await expect(page.getByRole('button', { name: 'Students: 0' })).toBeVisible()
-  await page.evaluate((sessionId) => new Promise<void>((resolve) => {
-    const ids = ['student-1', 'student-2']
-    const sockets: WebSocket[] = []
-    let opened = 0
-    for (const studentId of ids) {
-      const ws = new WebSocket(`${location.origin.replace('http', 'ws')}/ws/syncdeck?sessionId=${encodeURIComponent(sessionId)}&studentId=${studentId}`)
-      sockets.push(ws)
-      ws.addEventListener('open', () => { if (++opened === ids.length) resolve() })
-    }
-    Object.assign(window, { __syncDeckStudentSockets: sockets })
-  }), session.id)
+  await connectSyncDeckStudentSocket(page, session.id, 'student-1')
+  await expect(page.getByRole('button', { name: 'Students: 1' })).toBeVisible()
+  await connectSyncDeckStudentSocket(page, session.id, 'student-2')
   await expect(page.getByRole('button', { name: 'Students: 2' })).toBeVisible()
   await page.getByRole('button', { name: /Students:/ }).click()
   await expect(page.getByRole('button', { name: 'Return Ada to the waiting room' })).toBeVisible()

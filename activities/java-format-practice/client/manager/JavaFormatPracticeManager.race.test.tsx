@@ -1,0 +1,340 @@
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import * as React from 'react'
+import { JSDOM } from 'jsdom'
+
+;(globalThis as { React?: typeof React }).React = React
+
+type SocketHandler = ((...args: unknown[]) => void) | null
+type TestingLibraryAct = (callback: () => void | Promise<void>) => void | Promise<void>
+
+class TestWebSocket {
+  static instances: TestWebSocket[] = []
+  readyState = 1
+  onopen: SocketHandler = null
+  onmessage: SocketHandler = null
+  onclose: SocketHandler = null
+  onerror: SocketHandler = null
+
+  constructor(readonly url: string) {
+    TestWebSocket.instances.push(this)
+  }
+
+  send(): void {}
+  close(): void {
+    this.readyState = 3
+    this.onclose?.({ code: 1000, reason: '' })
+  }
+
+  emitOpen(): void {
+    this.onopen?.(new Event('open'))
+  }
+
+  emitStudents(students: unknown[]): void {
+    this.onmessage?.({ data: JSON.stringify({ type: 'studentsUpdate', payload: { students } }) })
+  }
+}
+
+function installDomEnvironment(url: string) {
+  const dom = new JSDOM('<!doctype html><html><body></body></html>', { url })
+  const previousWindow = globalThis.window
+  const previousDocument = globalThis.document
+  const previousNavigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator')
+  const previousHTMLElement = globalThis.HTMLElement
+  const previousNode = globalThis.Node
+  const previousWebSocket = globalThis.WebSocket
+
+  ;(globalThis as { window?: Window & typeof globalThis }).window = dom.window as unknown as Window & typeof globalThis
+  ;(globalThis as { document?: Document }).document = dom.window.document
+  Object.defineProperty(globalThis, 'navigator', { configurable: true, writable: true, value: dom.window.navigator })
+  globalThis.HTMLElement = dom.window.HTMLElement
+  globalThis.Node = dom.window.Node
+  globalThis.WebSocket = TestWebSocket as unknown as typeof WebSocket
+  dom.window.WebSocket = TestWebSocket as unknown as typeof WebSocket
+
+  return () => {
+    globalThis.document?.body?.replaceChildren()
+    dom.window.close()
+    ;(globalThis as { window?: Window & typeof globalThis }).window = previousWindow
+    ;(globalThis as { document?: Document }).document = previousDocument
+    globalThis.HTMLElement = previousHTMLElement
+    globalThis.Node = previousNode
+    globalThis.WebSocket = previousWebSocket
+    if (previousNavigatorDescriptor) {
+      Object.defineProperty(globalThis, 'navigator', previousNavigatorDescriptor)
+    } else {
+      delete (globalThis as { navigator?: Navigator }).navigator
+    }
+  }
+}
+
+function studentRecord(id: string, name: string) {
+  return { id, name, connected: true, joined: 1, lastSeen: 1, stats: { total: 0, correct: 0, streak: 0, longestStreak: 0 } }
+}
+
+async function loadHarness() {
+  const testingLibrary = await import('@testing-library/react')
+  const router = await import('react-router')
+  const { default: JavaFormatPracticeManager } = await import('./JavaFormatPracticeManager.js')
+  return { testingLibrary, router, JavaFormatPracticeManager, act: testingLibrary.act as TestingLibraryAct }
+}
+
+void test('JavaFormatPracticeManager keeps a live studentsUpdate over a slower /students poll', { concurrency: false }, async () => {
+  TestWebSocket.instances = []
+  const restoreDom = installDomEnvironment('https://bits.example/manage/java-format-practice/session-1')
+  const previousFetch = globalThis.fetch
+
+  let resolveInitialRoster: ((response: Response) => void) | null = null
+  const initialRoster = new Promise<Response>((resolve) => { resolveInitialRoster = resolve })
+  let studentsCalls = 0
+
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input)
+    if (url.includes('/students')) {
+      studentsCalls += 1
+      // The mount poll is deliberately slow so a socket update can land before it
+      // resolves; any later poll echoes the roster the socket will also deliver.
+      if (studentsCalls === 1) return initialRoster
+      return new Response(JSON.stringify({ students: [studentRecord('a', 'Ada')] }), { status: 200 })
+    }
+    throw new Error(`Unexpected fetch: ${url}`)
+  }) as typeof fetch
+
+  let teardown: (() => Promise<void>) | null = null
+  try {
+    const { testingLibrary, router, JavaFormatPracticeManager, act } = await loadHarness()
+    const rendered = testingLibrary.render(
+      <router.MemoryRouter initialEntries={['/manage/java-format-practice/session-1']}>
+        <router.Routes>
+          <router.Route path="/manage/java-format-practice/:sessionId" element={<JavaFormatPracticeManager />} />
+        </router.Routes>
+      </router.MemoryRouter>,
+    )
+    teardown = async () => { await act(async () => { rendered.unmount(); testingLibrary.cleanup(); await Promise.resolve() }) }
+
+    await testingLibrary.waitFor(() => { assert.ok(TestWebSocket.instances.length >= 1) })
+    await act(async () => { TestWebSocket.instances[0]?.emitOpen(); await Promise.resolve() })
+
+    // A live studentsUpdate arrives while the mount poll is still in flight.
+    await act(async () => { TestWebSocket.instances[0]?.emitStudents([studentRecord('a', 'Ada')]); await Promise.resolve() })
+    await testingLibrary.waitFor(() => { assert.ok(rendered.queryByText('Ada')) })
+
+    // The now-stale poll resolves last with a different roster; it must be dropped.
+    await act(async () => {
+      resolveInitialRoster?.(new Response(JSON.stringify({ students: [studentRecord('b', 'Bea')] }), { status: 200 }))
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    assert.ok(rendered.queryByText('Ada'), 'the socket roster is retained')
+    assert.equal(rendered.queryByText('Bea'), null, 'the stale poll response is discarded')
+  } finally {
+    await teardown?.()
+    globalThis.fetch = previousFetch
+    restoreDom()
+  }
+})
+
+void test('JavaFormatPracticeManager applies the /students poll when no socket update supersedes it', { concurrency: false }, async () => {
+  TestWebSocket.instances = []
+  const restoreDom = installDomEnvironment('https://bits.example/manage/java-format-practice/session-2')
+  const previousFetch = globalThis.fetch
+
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input)
+    if (url.includes('/students')) {
+      return new Response(JSON.stringify({ students: [studentRecord('c', 'Cass')] }), { status: 200 })
+    }
+    throw new Error(`Unexpected fetch: ${url}`)
+  }) as typeof fetch
+
+  let teardown: (() => Promise<void>) | null = null
+  try {
+    const { testingLibrary, router, JavaFormatPracticeManager, act } = await loadHarness()
+    const rendered = testingLibrary.render(
+      <router.MemoryRouter initialEntries={['/manage/java-format-practice/session-2']}>
+        <router.Routes>
+          <router.Route path="/manage/java-format-practice/:sessionId" element={<JavaFormatPracticeManager />} />
+        </router.Routes>
+      </router.MemoryRouter>,
+    )
+    teardown = async () => { await act(async () => { rendered.unmount(); testingLibrary.cleanup(); await Promise.resolve() }) }
+
+    await testingLibrary.waitFor(() => { assert.ok(rendered.queryByText('Cass')) })
+  } finally {
+    await teardown?.()
+    globalThis.fetch = previousFetch
+    restoreDom()
+  }
+})
+
+void test('JavaFormatPracticeManager ignores a studentsUpdate queued on a previous session socket', { concurrency: false }, async () => {
+  TestWebSocket.instances = []
+  const restoreDom = installDomEnvironment('https://bits.example/manage/java-format-practice/session-1')
+  const previousFetch = globalThis.fetch
+
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input)
+    if (url.includes('/api/java-format-practice/session-1/students')) {
+      return new Response(JSON.stringify({ students: [studentRecord('a', 'Ada')] }), { status: 200 })
+    }
+    if (url.includes('/api/java-format-practice/session-2/students')) {
+      return new Response(JSON.stringify({ students: [studentRecord('c', 'Cass')] }), { status: 200 })
+    }
+    throw new Error(`Unexpected fetch: ${url}`)
+  }) as typeof fetch
+
+  let teardown: (() => Promise<void>) | null = null
+  try {
+    const { testingLibrary, router, JavaFormatPracticeManager, act } = await loadHarness()
+
+    function NavProbe(): React.JSX.Element {
+      const navigate = router.useNavigate()
+      return (
+        <>
+          <JavaFormatPracticeManager />
+          <button type="button" onClick={() => navigate('/manage/java-format-practice/session-2')}>go</button>
+        </>
+      )
+    }
+
+    const rendered = testingLibrary.render(
+      <router.MemoryRouter initialEntries={['/manage/java-format-practice/session-1']}>
+        <router.Routes>
+          <router.Route path="/manage/java-format-practice/:sessionId" element={<NavProbe />} />
+        </router.Routes>
+      </router.MemoryRouter>,
+    )
+    teardown = async () => { await act(async () => { rendered.unmount(); testingLibrary.cleanup(); await Promise.resolve() }) }
+
+    await testingLibrary.waitFor(() => { assert.ok(TestWebSocket.instances.length >= 1) })
+    const firstSocket = TestWebSocket.instances[0]!
+    await act(async () => { firstSocket.emitOpen(); await Promise.resolve() })
+    await testingLibrary.waitFor(() => { assert.ok(rendered.queryByText('Ada')) })
+
+    // Route to a different session; the manager effect tears down the first socket.
+    await act(async () => { testingLibrary.fireEvent.click(rendered.getByRole('button', { name: 'go' })); await Promise.resolve() })
+    // The previous session's roster must not linger on the new URL.
+    assert.equal(rendered.queryByText('Ada'), null, 'the prior session roster is cleared on the session swap')
+    await testingLibrary.waitFor(() => { assert.ok(TestWebSocket.instances.length >= 2) })
+    const secondSocket = TestWebSocket.instances[1]!
+    await act(async () => { secondSocket.emitOpen(); await Promise.resolve() })
+    await testingLibrary.waitFor(() => { assert.ok(rendered.queryByText('Cass')) })
+
+    // A message that was queued on the old session's socket must not replace the
+    // new session's roster.
+    await act(async () => { firstSocket.emitStudents([studentRecord('z', 'Zed')]); await Promise.resolve() })
+
+    assert.ok(rendered.queryByText('Cass'), 'the current session roster is retained')
+    assert.equal(rendered.queryByText('Zed'), null, 'the stale socket message is ignored')
+  } finally {
+    await teardown?.()
+    globalThis.fetch = previousFetch
+    restoreDom()
+  }
+})
+
+void test('JavaFormatPracticeManager serializes /students polls and still renders a slow response', { concurrency: false }, async () => {
+  TestWebSocket.instances = []
+  const restoreDom = installDomEnvironment('https://bits.example/manage/java-format-practice/session-9')
+  const previousFetch = globalThis.fetch
+
+  let resolveRoster: ((response: Response) => void) | null = null
+  const roster = new Promise<Response>((resolve) => { resolveRoster = resolve })
+  let studentsCalls = 0
+
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    if (String(input).includes('/students')) {
+      studentsCalls += 1
+      return roster
+    }
+    throw new Error(`Unexpected fetch: ${String(input)}`)
+  }) as typeof fetch
+
+  let teardown: (() => Promise<void>) | null = null
+  try {
+    const { testingLibrary, router, JavaFormatPracticeManager, act } = await loadHarness()
+    const rendered = testingLibrary.render(
+      <router.MemoryRouter initialEntries={['/manage/java-format-practice/session-9']}>
+        <router.Routes>
+          <router.Route path="/manage/java-format-practice/:sessionId" element={<JavaFormatPracticeManager />} />
+        </router.Routes>
+      </router.MemoryRouter>,
+    )
+    teardown = async () => { await act(async () => { rendered.unmount(); testingLibrary.cleanup(); await Promise.resolve() }) }
+
+    await testingLibrary.waitFor(() => { assert.ok(TestWebSocket.instances.length >= 1) })
+    // The mount poll is still in flight; the on-open poll must not stack on it.
+    await act(async () => { TestWebSocket.instances[0]?.emitOpen(); await Promise.resolve(); await Promise.resolve() })
+    assert.equal(studentsCalls, 1, 'a second poll is not started while one is in flight')
+
+    // The slow response still gets to render once it resolves.
+    await act(async () => {
+      resolveRoster?.(new Response(JSON.stringify({ students: [studentRecord('s', 'Sol')] }), { status: 200 }))
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    await testingLibrary.waitFor(() => { assert.ok(rendered.queryByText('Sol')) })
+  } finally {
+    await teardown?.()
+    globalThis.fetch = previousFetch
+    restoreDom()
+  }
+})
+
+void test('JavaFormatPracticeManager auth-lost banner starts a fresh session instead of reloading', { concurrency: false }, async () => {
+  console.info('[TEST] java-format manager: a 403 roster response is expected below to latch the auth-lost banner')
+  TestWebSocket.instances = []
+  const restoreDom = installDomEnvironment('https://bits.example/manage/java-format-practice/dead-session')
+  const previousFetch = globalThis.fetch
+  let createCalls = 0
+
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    if (url.includes('/api/java-format-practice/create') && init?.method === 'POST') {
+      createCalls += 1
+      return new Response(JSON.stringify({ id: 'fresh-session' }), { status: 200 })
+    }
+    if (url.includes('/api/java-format-practice/dead-session/students')) {
+      return new Response(JSON.stringify({ error: 'manager authentication required' }), { status: 403 })
+    }
+    if (url.includes('/api/java-format-practice/fresh-session/students')) {
+      return new Response(JSON.stringify({ students: [] }), { status: 200 })
+    }
+    throw new Error(`Unexpected fetch: ${url}`)
+  }) as typeof fetch
+
+  let teardown: (() => Promise<void>) | null = null
+  try {
+    const { testingLibrary, router, JavaFormatPracticeManager, act } = await loadHarness()
+
+    function LocationProbe(): React.JSX.Element {
+      return <span data-testid="loc">{router.useLocation().pathname}</span>
+    }
+
+    const rendered = testingLibrary.render(
+      <router.MemoryRouter initialEntries={['/manage/java-format-practice/dead-session']}>
+        <LocationProbe />
+        <router.Routes>
+          <router.Route path="/manage/java-format-practice/:sessionId" element={<JavaFormatPracticeManager />} />
+        </router.Routes>
+      </router.MemoryRouter>,
+    )
+    teardown = async () => { await act(async () => { rendered.unmount(); testingLibrary.cleanup(); await Promise.resolve() }) }
+
+    // The 403 roster poll latches auth-loss and surfaces the recovery banner.
+    const startButton = await testingLibrary.waitFor(() => rendered.getByRole('button', { name: 'Start new session' }))
+    assert.equal(rendered.queryByRole('button', { name: /reload/i }), null, 'no misleading Reload affordance')
+
+    await act(async () => { testingLibrary.fireEvent.click(startButton); await Promise.resolve(); await Promise.resolve() })
+
+    assert.equal(createCalls, 1, 'a fresh session was minted via POST /create')
+    await testingLibrary.waitFor(() => {
+      assert.equal(rendered.getByTestId('loc').textContent, '/manage/java-format-practice/fresh-session')
+    })
+  } finally {
+    await teardown?.()
+    globalThis.fetch = previousFetch
+    restoreDom()
+  }
+})

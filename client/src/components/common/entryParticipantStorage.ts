@@ -207,6 +207,21 @@ export function hasValidEntryParticipantHandoffStorageValue(
   }
 }
 
+/** Live sessions may bypass entry only with a server-consumable handoff token. */
+export function hasStoredEntryParticipantToken(
+  storage: Pick<EntryParticipantStorageLike, 'getItem'>,
+  storageKey: string,
+): boolean {
+  const raw = storage.getItem(storageKey)
+  if (!raw) return false
+  try {
+    const handoff = JSON.parse(raw) as unknown
+    return isEntryParticipantHandoff(handoff) && handoff.kind === 'token'
+  } catch {
+    return false
+  }
+}
+
 export function buildSessionEntryParticipantSubmitApiUrl(sessionId: string): string {
   return `/api/session/${encodeURIComponent(sessionId)}/entry-participant`
 }

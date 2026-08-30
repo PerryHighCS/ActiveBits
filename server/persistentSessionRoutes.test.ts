@@ -548,7 +548,9 @@ void test('persistent session entry route keeps solo-only links in solo status e
   registerPersistentSessionRoutes({ app, sessions })
   const handler = getRoute(app, 'GET', '/api/persistent-session/:hash/entry')
 
-  const activityName = 'java-format-practice'
+  // A permalink-solo-capable activity (java-format temporarily sets
+  // supportsPermalink: false during the Slice A auth migration — see #351).
+  const activityName = 'java-string-practice'
   const teacherCode = 'solo-only-entry'
   const { hash, hashedTeacherCode } = generatePersistentHash(activityName, teacherCode)
   t.after(async () => cleanupPersistentSession(hash))

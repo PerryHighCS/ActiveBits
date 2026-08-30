@@ -1,0 +1,77 @@
+import assert from 'node:assert/strict'
+import test from 'node:test'
+import { createWsRouter, isActivityWebSocketPath } from './wsRouter.js'
+
+void test('activity WebSocket routing does not claim unrelated upgrade paths', () => {
+  assert.equal(isActivityWebSocketPath('/ws'), true)
+  assert.equal(isActivityWebSocketPath('/ws/java-format-practice'), true)
+  assert.equal(isActivityWebSocketPath('/vite-hmr'), false)
+  assert.equal(isActivityWebSocketPath('/socket.io'), false)
+})
+
+interface FakeUpgradeSocket {
+  destroyed: boolean
+  destroy(): void
+}
+
+function createFakeUpgradeSocket(): FakeUpgradeSocket {
+  return {
+    destroyed: false,
+    destroy() {
+      this.destroyed = true
+    },
+  }
+}
+
+type FakeUpgradeHandler = (
+  req: { url?: string | null; headers: Record<string, string> },
+  socket: FakeUpgradeSocket,
+  head: Buffer,
+) => void
+
+function createFakeUpgradeServer() {
+  const upgradeListeners: FakeUpgradeHandler[] = []
+  return {
+    upgradeListeners,
+    on(event: string, handler: FakeUpgradeHandler) {
+      if (event === 'upgrade') upgradeListeners.push(handler)
+    },
+  }
+}
+
+void test('createWsRouter destroys every unregistered upgrade path in production (no defer predicate)', () => {
+  const server = createFakeUpgradeServer()
+  createWsRouter(server as never, {} as never)
+  const [upgradeHandler] = server.upgradeListeners
+  assert.ok(upgradeHandler, 'createWsRouter must register an upgrade handler')
+
+  for (const path of ['/socket.io', '/vite-hmr', '/ws/not-registered', '/anything']) {
+    const socket = createFakeUpgradeSocket()
+    upgradeHandler({ url: path, headers: {} }, socket, Buffer.alloc(0))
+    assert.equal(socket.destroyed, true, `${path} must be destroyed`)
+  }
+})
+
+void test('createWsRouter defers only the paths the configured predicate claims', () => {
+  const server = createFakeUpgradeServer()
+  createWsRouter(server as never, {} as never, {
+    deferUpgradePath: (pathname) => pathname.startsWith('/vite-hmr'),
+  })
+  const [upgradeHandler] = server.upgradeListeners
+  assert.ok(upgradeHandler)
+
+  // The dev Vite HMR proxy owns this path via its own 'upgrade' listener.
+  const hmrSocket = createFakeUpgradeSocket()
+  upgradeHandler({ url: '/vite-hmr', headers: {} }, hmrSocket, Buffer.alloc(0))
+  assert.equal(hmrSocket.destroyed, false)
+
+  // A non-activity path the predicate does not claim still leaks nowhere.
+  const straySocket = createFakeUpgradeSocket()
+  upgradeHandler({ url: '/socket.io', headers: {} }, straySocket, Buffer.alloc(0))
+  assert.equal(straySocket.destroyed, true)
+
+  // An unclaimed activity WebSocket path is always this router's responsibility.
+  const unknownActivitySocket = createFakeUpgradeSocket()
+  upgradeHandler({ url: '/ws/not-registered', headers: {} }, unknownActivitySocket, Buffer.alloc(0))
+  assert.equal(unknownActivitySocket.destroyed, true)
+})
