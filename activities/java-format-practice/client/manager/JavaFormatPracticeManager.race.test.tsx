@@ -283,6 +283,7 @@ void test('JavaFormatPracticeManager serializes /students polls and still render
 })
 
 void test('JavaFormatPracticeManager auth-lost banner starts a fresh session instead of reloading', { concurrency: false }, async () => {
+  console.info('[TEST] java-format manager: a 403 roster response is expected below to latch the auth-lost banner')
   TestWebSocket.instances = []
   const restoreDom = installDomEnvironment('https://bits.example/manage/java-format-practice/dead-session')
   const previousFetch = globalThis.fetch

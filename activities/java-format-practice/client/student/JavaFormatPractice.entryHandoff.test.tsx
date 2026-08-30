@@ -128,6 +128,7 @@ void test('JavaFormatPractice waits for the entry-participant consume before ope
 })
 
 void test('JavaFormatPractice does not open the socket when the entry-participant consume fails', { concurrency: false }, async () => {
+  console.info('[TEST] java-format student: entry-participant consume 500 + failed auth verification are expected below')
   TestWebSocket.instances = []
   const restoreDom = installDomEnvironment('https://bits.example/session-fail')
   const previousFetch = globalThis.fetch
@@ -185,6 +186,7 @@ void test('JavaFormatPractice does not open the socket when the entry-participan
 })
 
 void test('JavaFormatPractice does not open the socket for a local kind:values handoff with no server cookie', { concurrency: false }, async () => {
+  console.info('[TEST] java-format student: unauthenticated /entry response for a local kind:values fallback is expected below')
   TestWebSocket.instances = []
   const restoreDom = installDomEnvironment('https://bits.example/session-values')
   const previousFetch = globalThis.fetch
