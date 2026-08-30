@@ -9,6 +9,7 @@ import {
   recordTeacherCodeAttempt,
   consumePersistentSessionEntryParticipant,
   findHashBySessionId,
+  findIndexedHashBySessionId,
   generatePersistentHash,
   getOrCreateActivePersistentSession,
   getPersistentSession,
@@ -794,17 +795,19 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
 
       // Fast path: the caller already holds a valid manager capability for this
       // session (issued by /create or a prior recovery). There is nothing to
-      // re-issue, and skipping the persistent-store lookup below matters: the
-      // manager mounts this adapter on every load, and for a temporary
-      // (non-persistent) session `findHashBySessionId` has no reverse-index
-      // entry and degrades to a full `getAllHashes()` scan plus sequential
-      // reads. Keeping the already-authorized case O(1) avoids that cost.
+      // re-issue, and skipping the persistent-store lookup below keeps the
+      // common case - the manager mounts this adapter on every load - O(1).
       if (resolveActivityPrincipalFromCookies(activeSession as { data: unknown }, sessionId, 'manager', req.cookies)) {
         res.json({ success: true, alreadyAuthorized: true })
         return
       }
 
-      const hash = await findHashBySessionId(sessionId)
+      // Index-only lookup: this branch runs before the persistent teacher
+      // cookie is checked, so an uncredentialed caller must not be able to
+      // drive the O(n) `getAllHashes()` scan that `findHashBySessionId` falls
+      // back to for a session id with no reverse-index entry (every temporary
+      // session). A live persistent session always has an index entry.
+      const hash = await findIndexedHashBySessionId(sessionId)
       const persistentSession = hash ? await getPersistentSession(hash) : null
       if (!hash || !persistentSession || persistentSession.sessionId !== sessionId || persistentSession.activityName !== activeSession.type) {
         res.status(404).json({ error: 'Persistent manager recovery is unavailable for this session' })

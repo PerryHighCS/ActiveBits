@@ -510,6 +510,38 @@ export async function resetPersistentSession(hash: string): Promise<void> {
   broadcastToWaiters(hash, { type: 'session-ended' })
 }
 
+/**
+ * Index-only reverse lookup: resolve a session id to its persistent hash using
+ * only the O(1) reverse index, never the O(n) `getAllHashes()` scan that
+ * {@link findHashBySessionId} falls back to. A live persistent session always
+ * has an index entry (written by `persistPersistentSession` alongside the
+ * record), so this is sufficient for request paths that must not let an
+ * uncredentialed caller trigger a full persistent-store scan - e.g. the
+ * manager-capability recovery routes, which run before any auth check.
+ */
+export async function findIndexedHashBySessionId(sessionId: string): Promise<string | null> {
+  const indexedHash = await persistentStore.getHashBySessionId(sessionId)
+  if (!indexedHash) {
+    return null
+  }
+
+  const indexedSession = await persistentStore.get(indexedHash)
+  if (indexedSession?.sessionId === sessionId) {
+    return indexedHash
+  }
+
+  try {
+    await persistentStore.deleteHashBySessionId(sessionId)
+  } catch (error) {
+    console.error(JSON.stringify({
+      event: 'persistent-session.stale-hash-cleanup-failed',
+      sessionId,
+      error: error instanceof Error ? error.message : String(error),
+    }))
+  }
+  return null
+}
+
 export async function findHashBySessionId(sessionId: string): Promise<string | null> {
   const indexedHash = await persistentStore.getHashBySessionId(sessionId)
   if (indexedHash) {

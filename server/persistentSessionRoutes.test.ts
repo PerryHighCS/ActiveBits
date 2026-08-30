@@ -4,6 +4,7 @@ import { initializeActivityRegistry } from './activities/activityRegistry.js'
 import { registerPersistentSessionRoutes } from './routes/persistentSessionRoutes.js'
 import {
   findHashBySessionId,
+  findIndexedHashBySessionId,
   initializePersistentStorage,
   generatePersistentHash,
   getOrCreateActivePersistentSession,
@@ -327,7 +328,7 @@ void test('persistent manager capability recovery fast-paths an already-authoriz
   assert.deepEqual(res.jsonBody, { success: true, alreadyAuthorized: true })
   // Fast path: no re-issue, no session write, no capability cookie set.
   assert.equal(setCalls, 0)
-  assert.equal(Array.from(res.cookies.keys()).some((name) => name.startsWith('activebits_cap_manager_')), false)
+  assert.equal(res.cookies.has(getActivityCapabilityCookieName('manager', 'live-session')), false)
 })
 
 void test('persistent session route resets when backing session missing', async (t) => {
@@ -1238,6 +1239,42 @@ void test('session id reverse lookup ignores stale reverse index entries and rep
 
   assert.equal(await findHashBySessionId('shared-session'), correctHash)
   assert.equal(await valkeyClient.get('persistent-session-by-session:shared-session'), correctHash)
+})
+
+void test('indexed-only session id reverse lookup never scans the persistent-session keyspace', async (t) => {
+  const valkeyClient = createFakePersistentValkeyClient()
+  let persistentScanCount = 0
+  const originalScan = valkeyClient.scan
+  valkeyClient.scan = async (cursor: string, ...args: Array<string | number>) => {
+    const matchIndex = args.findIndex((arg) => arg === 'MATCH')
+    const pattern = matchIndex >= 0 ? String(args[matchIndex + 1] ?? '') : ''
+    if (pattern.startsWith('persistent:')) persistentScanCount += 1
+    return originalScan(cursor, ...args)
+  }
+  initializePersistentStorage(valkeyClient as never)
+
+  const activityName = 'syncdeck'
+  const { hash, hashedTeacherCode } = generatePersistentHash(activityName, 'indexed-only-code')
+  t.after(async () => cleanupPersistentSession(hash))
+
+  await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode, 'solo-allowed')
+  await startPersistentSession(hash, 'live-session', { id: 'teacher-ws', readyState: 1, send() {} })
+
+  // Live persistent session: resolved straight from the reverse index.
+  assert.equal(await findIndexedHashBySessionId('live-session'), hash)
+  // No reverse-index entry (every temporary session): null without a scan.
+  assert.equal(await findIndexedHashBySessionId('temp-session'), null)
+  // Stale/mismatched index entry: dropped, still no scan.
+  await valkeyClient.set('persistent-session-by-session:ghost-session', 'not-a-real-hash')
+  assert.equal(await findIndexedHashBySessionId('ghost-session'), null)
+  assert.equal(await valkeyClient.get('persistent-session-by-session:ghost-session'), null)
+
+  assert.equal(persistentScanCount, 0, 'index-only lookup never enumerates the persistent-session keyspace')
+
+  // Contrast: findHashBySessionId still uses the getAllHashes() scan fallback
+  // for an id with no reverse-index entry.
+  await findHashBySessionId('temp-session')
+  assert.ok(persistentScanCount > 0, 'findHashBySessionId still falls back to a full scan')
 })
 
 void test('authenticate persists selectedOptions from request body when cookie entry is missing', async (t) => {

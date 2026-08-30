@@ -9,7 +9,7 @@ import {
 import { registerSessionNormalizer } from 'activebits-server/core/sessionNormalization.js'
 import { createBroadcastSubscriptionHelper } from 'activebits-server/core/broadcastUtils.js'
 import {
-  findHashBySessionId,
+  findIndexedHashBySessionId,
   resolvePersistentSessionEntryPolicy,
   verifyTeacherCodeWithHash,
 } from 'activebits-server/core/persistentSessions.js'
@@ -1231,14 +1231,17 @@ export default function setupVideoSyncRoutes(
       // Read the embedded-parent context before any persistent-store lookup:
       // embedded children never carry their own persistent-session hash, so the
       // recovery hash is always the parent's. Only a standalone session falls
-      // back to a direct lookup keyed by its own id. `findHashBySessionId`
-      // degrades to a full hash scan when there is no reverse-index entry (the
-      // normal temporary-session case), so this route makes exactly one such
-      // call instead of one per candidate id.
+      // back to a lookup keyed by its own id.
+      //
+      // Use the index-only lookup, not `findHashBySessionId`: this route runs
+      // before any auth check, so an uncredentialed caller must not be able to
+      // drive the O(n) `getAllHashes()` scan that `findHashBySessionId` falls
+      // back to for ids with no reverse-index entry (every temporary session).
+      // A live persistent session always has an index entry.
       const embeddedParentContext = readEmbeddedParentSessionContext(session.data)
       const recoveryActivityName = embeddedParentContext?.activityName ?? 'video-sync'
       const recoverySessionId = embeddedParentContext?.parentSessionId ?? sessionId
-      const persistentHash = await findHashBySessionId(recoverySessionId)
+      const persistentHash = await findIndexedHashBySessionId(recoverySessionId)
       const sessionEntries = parsePersistentSessionsCookie(req.cookies?.persistent_sessions)
       const matchingEntry = (persistentHash && recoveryActivityName)
         ? sessionEntries.find((entry) => entry.key === `${recoveryActivityName}:${persistentHash}`)
