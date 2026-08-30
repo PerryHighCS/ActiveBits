@@ -521,7 +521,8 @@ export async function findHashBySessionId(sessionId: string): Promise<string | n
     try {
       await persistentStore.deleteHashBySessionId(sessionId)
     } catch (error) {
-      console.error(`Failed to clear stale persistent session hash for session ${sessionId}:`, error)
+      // sessionId is caller-supplied; keep it out of the format-string position.
+      console.error('Failed to clear stale persistent session hash for session %s:', sessionId, error)
     }
   }
 
@@ -532,7 +533,7 @@ export async function findHashBySessionId(sessionId: string): Promise<string | n
       try {
         await persistentStore.setHashBySessionId(sessionId, hash)
       } catch (error) {
-        console.error(`Failed to backfill persistent session hash for session ${sessionId}:`, error)
+        console.error('Failed to backfill persistent session hash for session %s:', sessionId, error)
       }
       return hash
     }
