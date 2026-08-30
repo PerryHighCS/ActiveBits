@@ -1232,8 +1232,12 @@ export default function VideoSyncManager() {
               </label>
             ) : null}
 
-            <Button disabled={!isPasscodeReady} onClick={() => void saveConfig()}>
-              {isPasscodeReady ? 'Start instructor view' : 'Loading instructor access...'}
+            <Button disabled={!isPasscodeReady || !instructorPasscode} onClick={() => void saveConfig()}>
+              {!isPasscodeReady
+                ? 'Loading instructor access...'
+                : instructorPasscode
+                  ? 'Start instructor view'
+                  : 'Instructor access unavailable'}
             </Button>
           </section>
         )}
