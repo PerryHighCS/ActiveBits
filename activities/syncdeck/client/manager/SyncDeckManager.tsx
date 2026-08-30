@@ -58,6 +58,7 @@ import ConnectionStatusDot from '../components/ConnectionStatusDot.js'
 const SYNCDECK_CHALKBOARD_OPEN_KEY_PREFIX = 'syncdeck_chalkboard_open_'
 const WS_OPEN_READY_STATE = 1
 const DISCONNECTED_STATUS_DELAY_MS = 250
+const INITIAL_SOCKET_RETRY_DELAY_MS = 350
 const CANONICAL_BOUNDARY_FRAGMENT_INDEX = -1
 const RESTORE_SUPPRESSION_TIMEOUT_MS = 2500
 const EMBEDDED_BOOTSTRAP_BACKFILL_BASE_RETRY_DELAY_MS = 1000
@@ -4005,16 +4006,32 @@ const SyncDeckManager: FC = () => {
     // in development. Deferring the connection lets the discarded setup cancel
     // before it opens a real WebSocket, avoiding a false failed handshake.
     let disposed = false
+    let initialRetryTimeout: ReturnType<typeof setTimeout> | null = null
     queueMicrotask(() => {
       if (!disposed) {
         connectInstructorWs()
       }
     })
+    initialRetryTimeout = setTimeout(() => {
+      if (!disposed && instructorSocketRef.current?.readyState !== WS_OPEN_READY_STATE) {
+        connectInstructorWs()
+      }
+    }, INITIAL_SOCKET_RETRY_DELAY_MS)
     return () => {
       disposed = true
+      if (initialRetryTimeout != null) {
+        clearTimeout(initialRetryTimeout)
+      }
       disconnectInstructorWs()
     }
-  }, [isConfigurePanelOpen, sessionId, instructorPasscode, connectInstructorWs, disconnectInstructorWs])
+  }, [
+    isConfigurePanelOpen,
+    sessionId,
+    instructorPasscode,
+    connectInstructorWs,
+    disconnectInstructorWs,
+    instructorSocketRef,
+  ])
 
   const activityPickerEntries = useMemo(
     () => resolveSyncDeckActivityPickerEntries(
@@ -5267,12 +5284,12 @@ const SyncDeckManager: FC = () => {
                               // (such as YouTube), never the one-time entry token in this URL.
                               referrerPolicy="strict-origin-when-cross-origin"
                               {...inactiveIframeAccessibilityProps}
-                              onLoad={() => {
+                              onLoad={(event) => {
                                 setLoadedEmbeddedManagerInstanceKeys((current) => (
                                   current[instanceKey] ? current : { ...current, [instanceKey]: true }
                                 ))
                                 if (isActive) {
-                                  iframe.contentWindow?.postMessage({
+                                  event.currentTarget.contentWindow?.postMessage({
                                     type: EMBEDDED_MANAGER_ACTIVATED,
                                     childSessionId: record.childSessionId,
                                   }, window.location.origin)

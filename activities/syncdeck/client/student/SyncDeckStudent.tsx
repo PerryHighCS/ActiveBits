@@ -278,6 +278,7 @@ interface RevealCommandMessage {
 }
 
 const WS_OPEN_READY_STATE = 1
+const INITIAL_SOCKET_RETRY_DELAY_MS = 350
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return value != null && typeof value === 'object' && !Array.isArray(value)
 }
@@ -2915,7 +2916,13 @@ const SyncDeckStudent: FC = () => {
     }
 
     connectStudentWs()
+    const initialRetryTimeout = setTimeout(() => {
+      if (studentSocketRef.current?.readyState !== WS_OPEN_READY_STATE) {
+        connectStudentWs()
+      }
+    }, INITIAL_SOCKET_RETRY_DELAY_MS)
     return () => {
+      clearTimeout(initialRetryTimeout)
       disconnectStudentWs()
     }
   }, [
@@ -2927,6 +2934,7 @@ const SyncDeckStudent: FC = () => {
     registeredStudentId,
     connectStudentWs,
     disconnectStudentWs,
+    studentSocketRef,
   ])
 
   const handleIframeLoad = useCallback(() => {
