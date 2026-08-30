@@ -267,6 +267,16 @@ Do not begin with all activities at once.
 
 - [ ] Use Video Sync or MobCode to prove persistent/embedded adapters without replacing their domain protocols prematurely.
 
+#### Current Slice C branch: `feat/persistent-manager-capability-adapter` (Video Sync)
+
+- [x] Select Video Sync because its persistent-teacher and SyncDeck-parent recovery paths are already server-verified and its manager surface is narrower than MobCode's private-workspace model.
+- [x] Audit the existing adapter: verified persistent/parent authority currently reaches the manager by returning `instructorPasscode` from `GET /api/video-sync/:sessionId/instructor-passcode`.
+- [ ] Extract or add a shared persistent/embedded manager-capability issuance adapter that verifies the existing parent authority without exposing an activity credential.
+- [ ] Issue the httpOnly manager capability on Video Sync persistent and embedded recovery, then migrate manager REST routes and WebSocket admission to that capability.
+- [ ] Remove client passcode recovery and authenticate manager WebSockets directly from the capability cookie while preserving Video Sync's authenticate-before-subscribe ordering for participant sockets.
+- [ ] Add persistent, embedded, temporary-manager, capability-loss, and cross-role browser/route/socket coverage.
+- [ ] Restore Java Format permalink support only in the Phase 6 retrofit after this adapter is proven.
+
 ### Phase 6 wrap-up (after Slice C, before Phase 7)
 
 - [ ] Retrofit `java-format-practice` permalink / persistent-teacher manager auth onto the Slice C persistent adapter ([#351](https://github.com/PerryHighCS/ActiveBits/issues/351)); this closes the Slice A known gap so Wave 1's near-identical practice activities inherit a settled pattern.
