@@ -23,7 +23,9 @@ type RouteHandler = (
 interface MockResponse {
   statusCode: number
   body: unknown
+  cookies: Array<{ name: string; value: string; options: Record<string, unknown> }>
   status(code: number): MockResponse
+  cookie(name: string, value: string, options: Record<string, unknown>): void
   json(payload: unknown): MockResponse
 }
 
@@ -31,9 +33,13 @@ function createResponse(): MockResponse {
   return {
     statusCode: 200,
     body: null,
+    cookies: [],
     status(code: number) {
       this.statusCode = code
       return this
+    },
+    cookie(name: string, value: string, options: Record<string, unknown>) {
+      this.cookies.push({ name, value, options })
     },
     json(payload: unknown) {
       this.body = payload
@@ -1648,7 +1654,9 @@ void test('instructor-passcode route returns passcode for persistent teacher coo
 
   assert.equal(res.statusCode, 200)
   assert.deepEqual(res.body, { instructorPasscode: ALT_TEST_INSTRUCTOR_PASSCODE })
-  assert.equal(setCalls, 0)
+  assert.equal(res.cookies.length, 1)
+  assert.equal(res.cookies[0]?.options.httpOnly, true)
+  assert.equal(setCalls, 1)
   await cleanupPersistentSession(hash)
 })
 
@@ -1797,7 +1805,7 @@ void test('instructor-passcode route persists normalized session data when recov
   )
 
   assert.equal(res.statusCode, 200)
-  assert.equal(setCalls, 1)
+  assert.equal(setCalls, 2)
   assert.equal(typeof (res.body as { instructorPasscode?: unknown }).instructorPasscode, 'string')
   const persisted = storeState.store.s1?.data as { instructorPasscode?: string }
   assert.equal(persisted.instructorPasscode?.length, 32)

@@ -1,4 +1,5 @@
 import { createSession, type SessionRecord, type SessionStore } from 'activebits-server/core/sessions.js'
+import { issueActivityCapabilityCookie } from 'activebits-server/core/activityCapabilities.js'
 import { registerSessionNormalizer } from 'activebits-server/core/sessionNormalization.js'
 import { createBroadcastSubscriptionHelper } from 'activebits-server/core/broadcastUtils.js'
 import {
@@ -91,6 +92,7 @@ interface RouteRequest {
 
 interface JsonResponse {
   status(code: number): JsonResponse
+  cookie?(name: string, value: string, options: Record<string, unknown>): void
   json(payload: unknown): void
 }
 
@@ -1344,6 +1346,10 @@ export default function setupVideoSyncRoutes(
     }
 
     if (didNormalizeSessionData) {
+      await sessions.set(session.id, session)
+    }
+    if (res.cookie) {
+      issueActivityCapabilityCookie(res, session, sessionId, 'manager')
       await sessions.set(session.id, session)
     }
     const persistentSourceUrl = readPersistentSourceUrlFromCookieEntry(persistentHash, matchingEntry)
