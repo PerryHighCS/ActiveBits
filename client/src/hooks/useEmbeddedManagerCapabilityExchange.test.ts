@@ -102,3 +102,32 @@ void test('useEmbeddedManagerCapabilityExchange requests bounded bootstrap refre
     restoreDom()
   }
 })
+
+void test('useEmbeddedManagerCapabilityExchange requests a bounded bootstrap refresh after a rejected fetch', async () => {
+  const restoreDom = installDomEnvironment()
+  const originalFetch = globalThis.fetch
+  const parentDescriptor = Object.getOwnPropertyDescriptor(window, 'parent')
+  const refreshRequests: Array<{ payload: unknown; targetOrigin: string }> = []
+  // A network-level rejection (offline, connection reset, DNS failure) after the
+  // one-time token was stripped from the URL must still fall back to the parent.
+  globalThis.fetch = (async () => { throw new TypeError('Failed to fetch') }) as unknown as typeof fetch
+  Object.defineProperty(window, 'parent', {
+    configurable: true,
+    value: { postMessage(payload: unknown, targetOrigin: string) { refreshRequests.push({ payload, targetOrigin }) } },
+  })
+  const root = createRoot(document.getElementById('root') as Element)
+
+  try {
+    console.info('[TEST] Expected rejected embedded-manager capability exchange fetch.')
+    await act(async () => { root.render(createElement(CapabilityProbe, { search: '?embeddedManagerToken=token-1' })) })
+    await flushAsyncWork()
+    assert.deepEqual(refreshRequests, [
+      { payload: { type: 'embedded-manager-bootstrap-refresh', childSessionId: 'child-session' }, targetOrigin: 'https://activebits.local' },
+    ])
+  } finally {
+    await act(async () => { root.unmount() })
+    if (parentDescriptor) Object.defineProperty(window, 'parent', parentDescriptor)
+    globalThis.fetch = originalFetch
+    restoreDom()
+  }
+})

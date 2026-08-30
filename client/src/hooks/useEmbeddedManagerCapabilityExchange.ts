@@ -41,6 +41,21 @@ export function useEmbeddedManagerCapabilityExchange(params: {
     const sessionId = params.sessionId
     if (!exchangeKey || !sessionId || !token) return
     let cancelled = false
+
+    // The one-time token is already stripped from the URL before the request
+    // resolves, so any non-authorized outcome - an explicit non-2xx, a 5xx, or a
+    // rejected fetch (offline, reset, DNS) - leaves this frame unable to retry on
+    // its own. Ask the parent for a fresh bootstrap token, bounded by
+    // nextEmbeddedManagerBootstrapRefreshAttempt so a persistently failing
+    // exchange cannot loop.
+    const requestBoundedBootstrapRefresh = () => {
+      const nextAttempt = nextEmbeddedManagerBootstrapRefreshAttempt(refreshAttemptsBySessionIdRef.current.get(sessionId) ?? 0)
+      if (nextAttempt != null) {
+        refreshAttemptsBySessionIdRef.current.set(sessionId, nextAttempt)
+        requestEmbeddedManagerBootstrapRefresh(sessionId)
+      }
+    }
+
     void (async () => {
       await Promise.resolve()
       if (cancelled) return
@@ -52,22 +67,12 @@ export function useEmbeddedManagerCapabilityExchange(params: {
         if (isAuthorized) {
           refreshAttemptsBySessionIdRef.current.delete(sessionId)
         } else {
-          const nextAttempt = nextEmbeddedManagerBootstrapRefreshAttempt(refreshAttemptsBySessionIdRef.current.get(sessionId) ?? 0)
-          if (nextAttempt != null) {
-            refreshAttemptsBySessionIdRef.current.set(sessionId, nextAttempt)
-            requestEmbeddedManagerBootstrapRefresh(sessionId)
-          }
+          requestBoundedBootstrapRefresh()
         }
         setState({ key: exchangeKey, isAuthorized, error: null, isResolving: false })
       } catch (error) {
         if (cancelled) return
-        if (error instanceof EmbeddedManagerPasscodeExchangeUnavailableError) {
-          const nextAttempt = nextEmbeddedManagerBootstrapRefreshAttempt(refreshAttemptsBySessionIdRef.current.get(sessionId) ?? 0)
-          if (nextAttempt != null) {
-            refreshAttemptsBySessionIdRef.current.set(sessionId, nextAttempt)
-            requestEmbeddedManagerBootstrapRefresh(sessionId)
-          }
-        }
+        requestBoundedBootstrapRefresh()
         setState({ key: exchangeKey, isAuthorized: false, error, isResolving: false })
       }
     })()

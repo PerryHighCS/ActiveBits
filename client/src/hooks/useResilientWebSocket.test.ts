@@ -36,6 +36,18 @@ class FakeWebSocket {
     this.closed = true
   }
 
+  emitOpen(): void {
+    this.onopen?.({})
+  }
+
+  emitMessage(data: unknown): void {
+    this.onmessage?.({ data })
+  }
+
+  emitError(): void {
+    this.onerror?.({})
+  }
+
   emitClose(code: number): void {
     this.readyState = 3
     this.onclose?.({ code })
@@ -183,6 +195,9 @@ void test('stale socket events cannot change the live connection state', async (
   assert.ok(container)
   const root = createRoot(container)
   let reconnect: (() => WebSocket | null) | null = null
+  let openCalls = 0
+  let messageCalls = 0
+  let errorCalls = 0
   let closeCalls = 0
 
   function Probe(): null {
@@ -190,6 +205,9 @@ void test('stale socket events cannot change the live connection state', async (
       buildUrl: 'wss://example.test/socket',
       connectOnMount: true,
       shouldReconnect: false,
+      onOpen: () => { openCalls += 1 },
+      onMessage: () => { messageCalls += 1 },
+      onError: () => { errorCalls += 1 },
       onClose: () => { closeCalls += 1 },
     })
     reconnect = connection.connect
@@ -209,11 +227,29 @@ void test('stale socket events cannot change the live connection state', async (
     const secondSocket = FakeWebSocket.instances[1]
     assert.ok(secondSocket)
 
+    // connect() already closed the replaced socket; clear the flag so the assertion
+    // below proves the onopen handler itself re-closes a stale socket that opens late.
+    firstSocket.closed = false
+
     await act(async () => {
-      console.info('[TEST] closing the replaced socket must not affect the current connection')
+      console.info('[TEST] every event from the replaced socket must be ignored and the stale socket closed on open')
+      firstSocket.emitOpen()
+      firstSocket.emitMessage('stale-payload')
+      firstSocket.emitError()
       firstSocket.emitClose(1006)
     })
-    assert.equal(closeCalls, 0)
+    assert.equal(openCalls, 0, 'a stale open must not reach the consumer')
+    assert.equal(messageCalls, 0, 'a stale message must not reach the consumer')
+    assert.equal(errorCalls, 0, 'a stale error must not reach the consumer')
+    assert.equal(closeCalls, 0, 'a stale close must not reach the consumer')
+    assert.equal(firstSocket.closed, true, 'a stale socket that opens late must be closed')
+
+    await act(async () => {
+      secondSocket.emitOpen()
+      secondSocket.emitMessage('live-payload')
+    })
+    assert.equal(openCalls, 1, 'the current socket still delivers open')
+    assert.equal(messageCalls, 1, 'the current socket still delivers messages')
 
     await act(async () => {
       console.info('[TEST] closing the current socket with an intentional abnormal 1006 code')
