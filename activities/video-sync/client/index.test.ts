@@ -13,7 +13,6 @@ void test('launchVideoSyncPersistentSoloEntry creates and configures a standalon
     if (url === '/api/video-sync/create') {
       return new Response(JSON.stringify({
         id: 'session-123',
-        instructorPasscode: 'pass-123',
       }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -48,7 +47,6 @@ void test('launchVideoSyncPersistentSoloEntry creates and configures a standalon
     assert.deepEqual(
       JSON.parse(String(calls[1]?.init?.body)),
       {
-        instructorPasscode: 'pass-123',
         sourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=43',
         standaloneMode: true,
       },
