@@ -11,10 +11,9 @@ import { computePersistentLinkUrlHash } from 'activebits-server/core/persistentL
 import { getActivityCapabilityCookieName, issueActivityCapability } from 'activebits-server/core/activityCapabilities.js'
 import type { SessionRecord } from 'activebits-server/core/sessions.js'
 import type { WsRouter } from '../../../types/websocket.js'
-import setupVideoSyncRoutes, { waitForInstructorAuthMessage } from './routes.js'
+import setupVideoSyncRoutes from './routes.js'
 
-const TEST_INSTRUCTOR_PASSCODE = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
-const ALT_TEST_INSTRUCTOR_PASSCODE = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+const defaultManagerCookiesBySessionId = new Map<string, Record<string, string>>()
 
 type RouteHandler = (
   req: { params: Record<string, string>; body?: unknown; cookies?: Record<string, unknown> },
@@ -63,15 +62,22 @@ function createMockApp() {
   return {
     handlers,
     post(path: string, handler: RouteHandler) {
-      handlers.post[path] = handler
+      handlers.post[path] = (req, res) => handler(withDefaultManagerCookie(req), res)
     },
     get(path: string, handler: RouteHandler) {
-      handlers.get[path] = handler
+      handlers.get[path] = (req, res) => handler(withDefaultManagerCookie(req), res)
     },
     patch(path: string, handler: RouteHandler) {
-      handlers.patch[path] = handler
+      handlers.patch[path] = (req, res) => handler(withDefaultManagerCookie(req), res)
     },
   }
+}
+
+function withDefaultManagerCookie(req: Parameters<RouteHandler>[0]): Parameters<RouteHandler>[0] {
+  if (req.cookies !== undefined) return req
+  const sessionId = req.params.sessionId
+  const cookies = sessionId ? defaultManagerCookiesBySessionId.get(sessionId) : undefined
+  return cookies ? { ...req, cookies } : req
 }
 
 function createMockWs() {
@@ -332,14 +338,13 @@ function createSessionStore(
   }
 }
 
-function createVideoSyncSession(id: string, instructorPasscode = TEST_INSTRUCTOR_PASSCODE): SessionRecord {
-  return {
+function createVideoSyncSession(id: string): SessionRecord {
+  const session: SessionRecord = {
     id,
     type: 'video-sync',
     created: Date.now(),
     lastActivity: Date.now(),
     data: {
-      instructorPasscode,
       standaloneMode: false,
       state: {
         provider: 'youtube',
@@ -361,6 +366,11 @@ function createVideoSyncSession(id: string, instructorPasscode = TEST_INSTRUCTOR
       },
     },
   }
+  const capability = issueActivityCapability(session, 'manager')
+  defaultManagerCookiesBySessionId.set(id, {
+    [getActivityCapabilityCookieName('manager', id)]: capability.token,
+  })
+  return session
 }
 
 void test('create route initializes video-sync session', async () => {
@@ -377,17 +387,15 @@ void test('create route initializes video-sync session', async () => {
   await handler?.({ params: {} }, res)
 
   assert.equal(res.statusCode, 200)
-  const createdBody = res.body as { id?: string; instructorPasscode?: string }
+  const createdBody = res.body as { id?: string }
   const createdId = createdBody.id
   assert.equal(typeof createdId, 'string')
   assert.ok(createdId)
-  assert.equal(typeof createdBody.instructorPasscode, 'string')
-  assert.equal(createdBody.instructorPasscode?.length, 32)
 
   const created = storeState.store[createdId as string]
   assert.equal(created?.type, 'video-sync')
   const createdData = created?.data as Record<string, unknown>
-  assert.equal(createdData.instructorPasscode, createdBody.instructorPasscode)
+  assert.equal('instructorPasscode' in createdData, false)
   const state = createdData.state as Record<string, unknown>
   assert.equal(state.provider, 'youtube')
   assert.equal(state.videoId, '')
@@ -396,7 +404,7 @@ void test('create route initializes video-sync session', async () => {
 void test('session get route redacts instructor-only fields from public payload', async () => {
   const app = createMockApp()
   const ws = createMockWs() as unknown as WsRouter
-  const storeState = createSessionStore({ s1: createVideoSyncSession('s1', 'secret-passcode') })
+  const storeState = createSessionStore({ s1: createVideoSyncSession('s1') })
 
   setupVideoSyncRoutes(app, storeState.sessions, ws)
 
@@ -453,7 +461,7 @@ void test('session get route includes standaloneMode for standalone sessions', a
   assert.equal(payload.data?.standaloneMode, true)
 })
 
-void test('session get route regenerates malformed persisted instructor passcodes', async () => {
+void test('session get route removes a persisted legacy instructor passcode', async () => {
   const app = createMockApp()
   const ws = createMockWs() as unknown as WsRouter
   const session = createVideoSyncSession('s1')
@@ -493,17 +501,14 @@ void test('session get route regenerates malformed persisted instructor passcode
   const persisted = storeState.store.s1?.data as {
     instructorPasscode?: string
   }
-  assert.equal(typeof persisted.instructorPasscode, 'string')
-  assert.equal(persisted.instructorPasscode?.length, 32)
-  assert.match(persisted.instructorPasscode ?? '', /^[a-f0-9]{32}$/)
-  assert.notEqual(persisted.instructorPasscode, 'legacy-passcode')
+  assert.equal(persisted.instructorPasscode, undefined)
 })
 
-void test('session get route canonicalizes persisted instructor passcodes to lowercase', async () => {
+void test('session get route removes legacy passcodes without preserving their value', async () => {
   const app = createMockApp()
   const ws = createMockWs() as unknown as WsRouter
   const session = createVideoSyncSession('s1')
-  ;(session.data as { instructorPasscode: string }).instructorPasscode = TEST_INSTRUCTOR_PASSCODE.toUpperCase()
+  ;(session.data as { instructorPasscode: string }).instructorPasscode = 'LEGACY-PASSCODE'
   const storeState = createSessionStore({ s1: session })
   let setCalls = 0
   const sessionsWithTrackedSet = {
@@ -532,7 +537,7 @@ void test('session get route canonicalizes persisted instructor passcodes to low
   const persisted = storeState.store.s1?.data as {
     instructorPasscode?: string
   }
-  assert.equal(persisted.instructorPasscode, TEST_INSTRUCTOR_PASSCODE)
+  assert.equal(persisted.instructorPasscode, undefined)
 })
 
 void test('session get route normalizes oversized persisted telemetry.error fields', async () => {
@@ -886,7 +891,7 @@ void test('session patch returns invalid source url for unsupported non-YouTube 
   await handler?.(
     {
       params: { sessionId: 's1' },
-      body: { sourceUrl: 'https://vimeo.com/1234', instructorPasscode: TEST_INSTRUCTOR_PASSCODE },
+      body: { sourceUrl: 'https://vimeo.com/1234' },
     },
     res,
   )
@@ -912,7 +917,7 @@ void test('session patch returns invalid source url for malformed url input', as
   await handler?.(
     {
       params: { sessionId: 's1' },
-      body: { sourceUrl: 'not a url', instructorPasscode: TEST_INSTRUCTOR_PASSCODE },
+      body: { sourceUrl: 'not a url' },
     },
     res,
   )
@@ -938,7 +943,7 @@ void test('session patch returns invalid video id for YouTube url without a usab
   await handler?.(
     {
       params: { sessionId: 's1' },
-      body: { sourceUrl: 'https://www.youtube.com/watch?list=abc123', instructorPasscode: TEST_INSTRUCTOR_PASSCODE },
+      body: { sourceUrl: 'https://www.youtube.com/watch?list=abc123' },
     },
     res,
   )
@@ -964,7 +969,7 @@ void test('session patch accepts youtu.be urls with extra path segments by using
   await handler?.(
     {
       params: { sessionId: 's1' },
-      body: { sourceUrl: 'https://youtu.be/dQw4w9WgXcQ/extra-segment?t=45', instructorPasscode: TEST_INSTRUCTOR_PASSCODE },
+      body: { sourceUrl: 'https://youtu.be/dQw4w9WgXcQ/extra-segment?t=45' },
     },
     res,
   )
@@ -992,7 +997,6 @@ void test('session patch accepts YouTube Education watch urls and prefers educat
       params: { sessionId: 's1' },
       body: {
         sourceUrl: 'https://www.youtubeeducation.com/watch?v=zZkY3MLBGh8&t=1m23s',
-        instructorPasscode: TEST_INSTRUCTOR_PASSCODE,
       },
     },
     res,
@@ -1022,7 +1026,6 @@ void test('session patch accepts YouTube Education embed urls and prefers educat
       params: { sessionId: 's1' },
       body: {
         sourceUrl: 'https://youtubeeducation.com/embed/zZkY3MLBGh8?start=12',
-        instructorPasscode: TEST_INSTRUCTOR_PASSCODE,
       },
     },
     res,
@@ -1052,7 +1055,6 @@ void test('session patch accepts YouTube embed urls and falls back to no-cookie 
       params: { sessionId: 's1' },
       body: {
         sourceUrl: 'https://www.youtube.com/embed/zZkY3MLBGh8?start=12',
-        instructorPasscode: TEST_INSTRUCTOR_PASSCODE,
       },
     },
     res,
@@ -1080,7 +1082,7 @@ void test('session patch returns invalid video id for malformed youtu.be ids', a
   await handler?.(
     {
       params: { sessionId: 's1' },
-      body: { sourceUrl: 'https://youtu.be/dQw4w9WgX$Q', instructorPasscode: TEST_INSTRUCTOR_PASSCODE },
+      body: { sourceUrl: 'https://youtu.be/dQw4w9WgX$Q' },
     },
     res,
   )
@@ -1106,7 +1108,7 @@ void test('session patch returns invalid time range when stop time is before par
   await handler?.(
     {
       params: { sessionId: 's1' },
-      body: { sourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=43', stopSec: 20, instructorPasscode: TEST_INSTRUCTOR_PASSCODE },
+      body: { sourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=43', stopSec: 20 },
     },
     res,
   )
@@ -1132,7 +1134,7 @@ void test('session patch returns invalid stopSec when stopSec is not numeric', a
   await handler?.(
     {
       params: { sessionId: 's1' },
-      body: { sourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=43', stopSec: '120', instructorPasscode: TEST_INSTRUCTOR_PASSCODE },
+      body: { sourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=43', stopSec: '120' },
     },
     res,
   )
@@ -1158,7 +1160,7 @@ void test('session patch normalizes youtube source and publishes extensible enve
   await handler?.(
     {
       params: { sessionId: 's1' },
-      body: { sourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=43', stopSec: 120, instructorPasscode: TEST_INSTRUCTOR_PASSCODE },
+      body: { sourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=43', stopSec: 120 },
     },
     res,
   )
@@ -1204,7 +1206,6 @@ void test('session patch can mark a configured session as standalone', async () 
       params: { sessionId: 's1' },
       body: {
         sourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=43',
-        instructorPasscode: TEST_INSTRUCTOR_PASSCODE,
         standaloneMode: true,
       },
     },
@@ -1255,7 +1256,6 @@ void test('session patch preserves existing standaloneMode when request omits th
       params: { sessionId: 's1' },
       body: {
         sourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=43',
-        instructorPasscode: TEST_INSTRUCTOR_PASSCODE,
       },
     },
     res,
@@ -1281,7 +1281,7 @@ void test('session patch ignores partially numeric timestamp query values', asyn
   await handler?.(
     {
       params: { sessionId: 's1' },
-      body: { sourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=83abc', instructorPasscode: TEST_INSTRUCTOR_PASSCODE },
+      body: { sourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=83abc' },
     },
     res,
   )
@@ -1308,7 +1308,7 @@ void test('session patch falls back to valid t param when start param is malform
   await handler?.(
     {
       params: { sessionId: 's1' },
-      body: { sourceUrl: 'https://youtu.be/dQw4w9WgXcQ?start=oops&t=1m23s', instructorPasscode: TEST_INSTRUCTOR_PASSCODE },
+      body: { sourceUrl: 'https://youtu.be/dQw4w9WgXcQ?start=oops&t=1m23s' },
     },
     res,
   )
@@ -1339,7 +1339,7 @@ void test('session patch rejects reconfiguration after a video is already set', 
   await handler?.(
     {
       params: { sessionId: 's1' },
-      body: { sourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=43', stopSec: 120, instructorPasscode: TEST_INSTRUCTOR_PASSCODE },
+      body: { sourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=43', stopSec: 120 },
     },
     res,
   )
@@ -1367,7 +1367,7 @@ void test('session patch publishes through broadcast channel without direct loca
   await handler?.(
     {
       params: { sessionId: 's1' },
-      body: { sourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=43', stopSec: 120, instructorPasscode: TEST_INSTRUCTOR_PASSCODE },
+      body: { sourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=43', stopSec: 120 },
     },
     res,
   )
@@ -1416,7 +1416,7 @@ void test('session patch falls back to direct local websocket send when pubsub p
     await handler?.(
       {
         params: { sessionId: 's1' },
-        body: { sourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=43', stopSec: 120, instructorPasscode: TEST_INSTRUCTOR_PASSCODE },
+        body: { sourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=43', stopSec: 120 },
       },
       res,
     )
@@ -1476,7 +1476,7 @@ void test('session patch falls back to direct local websocket send when publishB
     await handler?.(
       {
         params: { sessionId: 's1' },
-        body: { sourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=43', stopSec: 120, instructorPasscode: TEST_INSTRUCTOR_PASSCODE },
+        body: { sourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=43', stopSec: 120 },
       },
       res,
     )
@@ -1510,7 +1510,7 @@ void test('command route updates playback and emits extensible envelope', async 
   await handler?.(
     {
       params: { sessionId: 's1' },
-      body: { type: 'play', instructorPasscode: TEST_INSTRUCTOR_PASSCODE },
+      body: { type: 'play' },
     },
     res,
   )
@@ -1532,7 +1532,68 @@ void test('command route updates playback and emits extensible envelope', async 
   assert.equal(message.type, 'state-update')
 })
 
-void test('session patch rejects requests without a valid instructor passcode', async () => {
+void test('manager commands are not overwritten by an overlapping telemetry mutation', async () => {
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  const storeState = createSessionStore({ s1: createVideoSyncSession('s1') })
+  const delayedRead: { started: boolean; release: (() => void) | null } = { started: false, release: null }
+  let readCount = 0
+  const sessionsWithDelayedInitialRead = {
+    ...storeState.sessions,
+    async get(sessionId: string) {
+      readCount += 1
+      const snapshot = await storeState.sessions.get(sessionId)
+      if (readCount === 1) {
+        delayedRead.started = true
+        await new Promise<void>((resolve) => {
+          delayedRead.release = resolve
+        })
+      }
+      return snapshot
+    },
+  }
+
+  setupVideoSyncRoutes(app, sessionsWithDelayedInitialRead, ws)
+
+  const eventHandler = app.handlers.post['/api/video-sync/:sessionId/event']
+  const commandHandler = app.handlers.post['/api/video-sync/:sessionId/command']
+  assert.equal(typeof eventHandler, 'function')
+  assert.equal(typeof commandHandler, 'function')
+
+  const eventResponse = createResponse()
+  const pendingTelemetry = eventHandler?.(
+    {
+      params: { sessionId: 's1' },
+      body: { type: 'autoplay-blocked' },
+    },
+    eventResponse,
+  )
+
+  await waitForCondition(() => delayedRead.started, 250)
+
+  const commandResponse = createResponse()
+  const pendingCommand = commandHandler?.(
+    {
+      params: { sessionId: 's1' },
+      body: { type: 'play' },
+    },
+    commandResponse,
+  )
+
+  const releaseInitialRead = delayedRead.release
+  if (releaseInitialRead == null) {
+    throw new Error('Expected the initial telemetry read to be delayed')
+  }
+  releaseInitialRead()
+  await Promise.all([pendingTelemetry, pendingCommand])
+
+  assert.equal(eventResponse.statusCode, 200)
+  assert.equal(commandResponse.statusCode, 200)
+  const state = (storeState.store.s1?.data as { state?: { isPlaying?: boolean } }).state
+  assert.equal(state?.isPlaying, true)
+})
+
+void test('session patch rejects requests without a manager capability', async () => {
   const app = createMockApp()
   const ws = createMockWs() as unknown as WsRouter
   const storeState = createSessionStore({ s1: createVideoSyncSession('s1') })
@@ -1546,6 +1607,7 @@ void test('session patch rejects requests without a valid instructor passcode', 
   await handler?.(
     {
       params: { sessionId: 's1' },
+      cookies: {},
       body: { sourceUrl: 'https://youtu.be/dQw4w9WgXcQ' },
     },
     res,
@@ -1554,11 +1616,11 @@ void test('session patch rejects requests without a valid instructor passcode', 
   assert.equal(res.statusCode, 403)
   assert.deepEqual(res.body, {
     error: 'FORBIDDEN',
-    message: 'Valid instructorPasscode is required',
+    message: 'Manager capability is required',
   })
 })
 
-void test('command route rejects requests without a valid instructor passcode', async () => {
+void test('command route rejects requests without a manager capability', async () => {
   const app = createMockApp()
   const ws = createMockWs() as unknown as WsRouter
   const storeState = createSessionStore({ s1: createVideoSyncSession('s1') })
@@ -1572,6 +1634,7 @@ void test('command route rejects requests without a valid instructor passcode', 
   await handler?.(
     {
       params: { sessionId: 's1' },
+      cookies: {},
       body: { type: 'play' },
     },
     res,
@@ -1580,11 +1643,11 @@ void test('command route rejects requests without a valid instructor passcode', 
   assert.equal(res.statusCode, 403)
   assert.deepEqual(res.body, {
     error: 'FORBIDDEN',
-    message: 'Valid instructorPasscode is required',
+    message: 'Manager capability is required',
   })
 })
 
-void test('command route rejects oversized instructor passcodes before verification', async () => {
+void test('command route rejects requests without a manager capability', async () => {
   const app = createMockApp()
   const ws = createMockWs() as unknown as WsRouter
   const storeState = createSessionStore({ s1: createVideoSyncSession('s1') })
@@ -1598,7 +1661,8 @@ void test('command route rejects oversized instructor passcodes before verificat
   await handler?.(
     {
       params: { sessionId: 's1' },
-      body: { type: 'play', instructorPasscode: 'a'.repeat(10_000) },
+      cookies: {},
+      body: { type: 'play' },
     },
     res,
   )
@@ -1606,16 +1670,16 @@ void test('command route rejects oversized instructor passcodes before verificat
   assert.equal(res.statusCode, 403)
   assert.deepEqual(res.body, {
     error: 'FORBIDDEN',
-    message: 'Valid instructorPasscode is required',
+    message: 'Manager capability is required',
   })
 })
 
-void test('instructor-passcode route returns passcode for persistent teacher cookie', async () => {
+void test('manager-access route returns manager access for persistent teacher cookie', async () => {
   initializePersistentStorage(null)
 
   const app = createMockApp()
   const ws = createMockWs() as unknown as WsRouter
-  const storeState = createSessionStore({ s1: createVideoSyncSession('s1', ALT_TEST_INSTRUCTOR_PASSCODE) })
+  const storeState = createSessionStore({ s1: createVideoSyncSession('s1') })
   let setCalls = 0
   const sessionsWithTrackedSet = {
     ...storeState.sessions,
@@ -1635,7 +1699,7 @@ void test('instructor-passcode route returns passcode for persistent teacher coo
 
   setupVideoSyncRoutes(app, sessionsWithTrackedSet, ws)
 
-  const handler = app.handlers.get['/api/video-sync/:sessionId/instructor-passcode']
+  const handler = app.handlers.get['/api/video-sync/:sessionId/manager-access']
   assert.equal(typeof handler, 'function')
 
   const res = createResponse()
@@ -1655,19 +1719,19 @@ void test('instructor-passcode route returns passcode for persistent teacher coo
   )
 
   assert.equal(res.statusCode, 200)
-  assert.deepEqual(res.body, { instructorPasscode: ALT_TEST_INSTRUCTOR_PASSCODE })
+  assert.deepEqual(res.body, {})
   assert.equal(res.cookies.length, 1)
   assert.equal(res.cookies[0]?.options.httpOnly, true)
   assert.equal(setCalls, 1)
   await cleanupPersistentSession(hash)
 })
 
-void test('instructor-passcode route returns canonical persistent sourceUrl for persistent teacher cookie', async () => {
+void test('manager-access route returns canonical persistent sourceUrl for persistent teacher cookie', async () => {
   initializePersistentStorage(null)
 
   const app = createMockApp()
   const ws = createMockWs() as unknown as WsRouter
-  const storeState = createSessionStore({ s1: createVideoSyncSession('s1', ALT_TEST_INSTRUCTOR_PASSCODE) })
+  const storeState = createSessionStore({ s1: createVideoSyncSession('s1') })
   const teacherCode = 'persistent-teacher-code'
   const { hash, hashedTeacherCode } = generatePersistentHash('video-sync', teacherCode)
   const selectedOptions = {
@@ -1686,7 +1750,7 @@ void test('instructor-passcode route returns canonical persistent sourceUrl for 
 
   setupVideoSyncRoutes(app, storeState.sessions, ws)
 
-  const handler = app.handlers.get['/api/video-sync/:sessionId/instructor-passcode']
+  const handler = app.handlers.get['/api/video-sync/:sessionId/manager-access']
   assert.equal(typeof handler, 'function')
 
   const res = createResponse()
@@ -1710,18 +1774,17 @@ void test('instructor-passcode route returns canonical persistent sourceUrl for 
 
   assert.equal(res.statusCode, 200)
   assert.deepEqual(res.body, {
-    instructorPasscode: ALT_TEST_INSTRUCTOR_PASSCODE,
     persistentSourceUrl: 'https://www.youtube.com/watch?v=mCq8-xTH7jA',
   })
   await cleanupPersistentSession(hash)
 })
 
-void test('instructor-passcode route ignores unsigned persistent sourceUrl from cookie selectedOptions', async () => {
+void test('manager-access route ignores unsigned persistent sourceUrl from cookie selectedOptions', async () => {
   initializePersistentStorage(null)
 
   const app = createMockApp()
   const ws = createMockWs() as unknown as WsRouter
-  const storeState = createSessionStore({ s1: createVideoSyncSession('s1', ALT_TEST_INSTRUCTOR_PASSCODE) })
+  const storeState = createSessionStore({ s1: createVideoSyncSession('s1') })
   const teacherCode = 'persistent-teacher-code'
   const { hash, hashedTeacherCode } = generatePersistentHash('video-sync', teacherCode)
   await getOrCreateActivePersistentSession('video-sync', hash, hashedTeacherCode)
@@ -1733,7 +1796,7 @@ void test('instructor-passcode route ignores unsigned persistent sourceUrl from 
 
   setupVideoSyncRoutes(app, storeState.sessions, ws)
 
-  const handler = app.handlers.get['/api/video-sync/:sessionId/instructor-passcode']
+  const handler = app.handlers.get['/api/video-sync/:sessionId/manager-access']
   assert.equal(typeof handler, 'function')
 
   const res = createResponse()
@@ -1756,7 +1819,7 @@ void test('instructor-passcode route ignores unsigned persistent sourceUrl from 
   )
 
   assert.equal(res.statusCode, 200)
-  assert.deepEqual(res.body, { instructorPasscode: ALT_TEST_INSTRUCTOR_PASSCODE })
+  assert.deepEqual(res.body, {})
   assert.equal(res.cookies.length, 1)
   const [persistentCookie] = res.cookies
   assert.ok(persistentCookie)
@@ -1765,7 +1828,7 @@ void test('instructor-passcode route ignores unsigned persistent sourceUrl from 
   await cleanupPersistentSession(hash)
 })
 
-void test('instructor-passcode route persists normalized session data when recovery reads repair malformed fields', async () => {
+void test('manager-access route removes a legacy passcode while issuing the capability', async () => {
   initializePersistentStorage(null)
 
   const app = createMockApp()
@@ -1792,7 +1855,7 @@ void test('instructor-passcode route persists normalized session data when recov
 
   setupVideoSyncRoutes(app, sessionsWithTrackedSet, ws)
 
-  const handler = app.handlers.get['/api/video-sync/:sessionId/instructor-passcode']
+  const handler = app.handlers.get['/api/video-sync/:sessionId/manager-access']
   assert.equal(typeof handler, 'function')
 
   const res = createResponse()
@@ -1812,21 +1875,19 @@ void test('instructor-passcode route persists normalized session data when recov
   )
 
   assert.equal(res.statusCode, 200)
-  assert.equal(setCalls, 2)
-  assert.equal(typeof (res.body as { instructorPasscode?: unknown }).instructorPasscode, 'string')
+  assert.equal(setCalls, 1)
+  assert.deepEqual(res.body, {})
   const persisted = storeState.store.s1?.data as { instructorPasscode?: string }
-  assert.equal(persisted.instructorPasscode?.length, 32)
-  assert.match(persisted.instructorPasscode ?? '', /^[a-f0-9]{32}$/)
-  assert.notEqual(persisted.instructorPasscode, 'legacy-passcode')
+  assert.equal(persisted.instructorPasscode, undefined)
   await cleanupPersistentSession(hash)
 })
 
-void test('instructor-passcode route returns passcode for embedded child sessions when parent syncdeck teacher cookie matches', async () => {
+void test('manager-access route returns manager access for embedded child sessions when parent syncdeck teacher cookie matches', async () => {
   initializePersistentStorage(null)
 
   const app = createMockApp()
   const ws = createMockWs() as unknown as WsRouter
-  const embeddedSession = createVideoSyncSession('CHILD:parent-syncdeck:abcde:video-sync', ALT_TEST_INSTRUCTOR_PASSCODE)
+  const embeddedSession = createVideoSyncSession('CHILD:parent-syncdeck:abcde:video-sync')
   embeddedSession.data = {
     ...embeddedSession.data,
     embeddedParentSessionId: 'parent-syncdeck',
@@ -1860,7 +1921,7 @@ void test('instructor-passcode route returns passcode for embedded child session
 
   setupVideoSyncRoutes(app, storeState.sessions, ws)
 
-  const handler = app.handlers.get['/api/video-sync/:sessionId/instructor-passcode']
+  const handler = app.handlers.get['/api/video-sync/:sessionId/manager-access']
   assert.equal(typeof handler, 'function')
 
   const res = createResponse()
@@ -1880,7 +1941,7 @@ void test('instructor-passcode route returns passcode for embedded child session
   )
 
   assert.equal(res.statusCode, 200)
-  assert.deepEqual(res.body, { instructorPasscode: ALT_TEST_INSTRUCTOR_PASSCODE })
+  assert.deepEqual(res.body, {})
   assert.equal(res.cookies.length, 1)
   const [parentCookie] = res.cookies
   assert.ok(parentCookie)
@@ -1889,12 +1950,12 @@ void test('instructor-passcode route returns passcode for embedded child session
   await cleanupPersistentSession(hash)
 })
 
-void test('instructor-passcode route ignores malformed persistent teacher cookie without logging', async () => {
+void test('manager-access route ignores malformed persistent teacher cookie without logging', async () => {
   initializePersistentStorage(null)
 
   const app = createMockApp()
   const ws = createMockWs() as unknown as WsRouter
-  const storeState = createSessionStore({ s1: createVideoSyncSession('s1', ALT_TEST_INSTRUCTOR_PASSCODE) })
+  const storeState = createSessionStore({ s1: createVideoSyncSession('s1') })
   const teacherCode = 'persistent-teacher-code'
   const { hash, hashedTeacherCode } = generatePersistentHash('video-sync', teacherCode)
   await getOrCreateActivePersistentSession('video-sync', hash, hashedTeacherCode)
@@ -1906,7 +1967,7 @@ void test('instructor-passcode route ignores malformed persistent teacher cookie
 
   setupVideoSyncRoutes(app, storeState.sessions, ws)
 
-  const handler = app.handlers.get['/api/video-sync/:sessionId/instructor-passcode']
+  const handler = app.handlers.get['/api/video-sync/:sessionId/manager-access']
   assert.equal(typeof handler, 'function')
 
   const originalConsoleError = console.error
@@ -1939,7 +2000,7 @@ void test('instructor-passcode route ignores malformed persistent teacher cookie
   }
 })
 
-void test('instructor websocket rejects connections without a valid instructor passcode', async () => {
+void test('instructor websocket rejects connections without a manager capability', async () => {
   const app = createMockApp()
   const ws = createMockWs()
   const storeState = createSessionStore({ s1: createVideoSyncSession('s1') }, { valkeyStore: createMockVideoSyncValkeyStore() })
@@ -1971,82 +2032,10 @@ void test('instructor websocket rejects connections without a valid instructor p
   assert.equal(persisted.telemetry.connections.activeCount, 0)
 })
 
-void test('instructor websocket rejects oversized instructor passcodes before verification', async () => {
-  const app = createMockApp()
-  const ws = createMockWs()
-  const storeState = createSessionStore({ s1: createVideoSyncSession('s1') })
-
-  setupVideoSyncRoutes(app, storeState.sessions, ws as unknown as WsRouter)
-
-  const handler = ws.registered['/ws/video-sync']
-  assert.equal(typeof handler, 'function')
-
-  const recorder = createMockSocket()
-  handler?.(recorder.socket, new URLSearchParams({
-    sessionId: 's1',
-    role: 'instructor',
-  }))
-  recorder.emit('message', JSON.stringify({
-    type: 'authenticate',
-    instructorPasscode: 'a'.repeat(10_000),
-  }))
-
-  await new Promise((resolve) => setTimeout(resolve, 0))
-
-  assert.deepEqual(recorder.closed, { code: 1008, reason: 'Forbidden' })
-  assert.deepEqual(recorder.sent, [])
-})
-
-void test('waitForInstructorAuthMessage closes when auth does not arrive in time', async () => {
-  const recorder = createMockSocket()
-  const authPromise = waitForInstructorAuthMessage(recorder.socket, 75)
-
-  await waitForCondition(() => recorder.closed != null, 1000)
-  const authMessage = await authPromise
-
-  assert.equal(authMessage, null)
-  assert.deepEqual(recorder.closed, { code: 1008, reason: 'Auth timeout' })
-  assert.deepEqual(recorder.sent, [])
-})
-
-void test('instructor websocket accepts connections with a valid instructor passcode', async () => {
-  const app = createMockApp()
-  const ws = createMockWs()
-  const storeState = createSessionStore({ s1: createVideoSyncSession('s1', TEST_INSTRUCTOR_PASSCODE) })
-
-  setupVideoSyncRoutes(app, storeState.sessions, ws as unknown as WsRouter)
-
-  const handler = ws.registered['/ws/video-sync']
-  assert.equal(typeof handler, 'function')
-
-  const recorder = createMockSocket()
-  handler?.(recorder.socket, new URLSearchParams({
-    sessionId: 's1',
-    role: 'instructor',
-  }))
-  recorder.emit('message', JSON.stringify({
-    type: 'authenticate',
-    instructorPasscode: TEST_INSTRUCTOR_PASSCODE,
-  }))
-
-  await new Promise((resolve) => setTimeout(resolve, 0))
-
-  assert.equal(recorder.closed, null)
-  assert.equal(recorder.sent.length, 2)
-  const payload = JSON.parse(recorder.sent[0] ?? '{}') as { type?: string; payload?: { role?: string } }
-  assert.equal(payload.type, 'state-snapshot')
-  assert.equal(payload.payload?.role, 'instructor')
-  const telemetryEnvelope = JSON.parse(recorder.sent[1] ?? '{}') as { type?: string; payload?: { reason?: string } }
-  assert.equal(telemetryEnvelope.type, 'telemetry-update')
-  assert.equal(telemetryEnvelope.payload?.reason, 'connection-change')
-  recorder.emit('close')
-  await new Promise((resolve) => setTimeout(resolve, 0))
-})
-
 void test('instructor websocket admits a valid manager capability without a passcode message', async () => {
   const app = createMockApp()
   const ws = createMockWs()
-  const storeState = createSessionStore({ s1: createVideoSyncSession('s1', TEST_INSTRUCTOR_PASSCODE) })
+  const storeState = createSessionStore({ s1: createVideoSyncSession('s1') })
   const session = storeState.store.s1
   assert.ok(session)
   const capability = issueActivityCapability(session, 'manager')
@@ -2068,63 +2057,6 @@ void test('instructor websocket admits a valid manager capability without a pass
   assert.equal(recorder.closed, null)
   const payload = JSON.parse(recorder.sent[0] ?? '{}') as { type?: string; payload?: { role?: string } }
   assert.equal(payload.type, 'state-snapshot')
-  assert.equal(payload.payload?.role, 'instructor')
-  recorder.emit('close')
-  await new Promise((resolve) => setTimeout(resolve, 0))
-})
-
-void test('instructor websocket accepts uppercase instructor passcodes by canonicalizing hex casing', async () => {
-  const app = createMockApp()
-  const ws = createMockWs()
-  const storeState = createSessionStore({ s1: createVideoSyncSession('s1', TEST_INSTRUCTOR_PASSCODE) })
-
-  setupVideoSyncRoutes(app, storeState.sessions, ws as unknown as WsRouter)
-
-  const handler = ws.registered['/ws/video-sync']
-  assert.equal(typeof handler, 'function')
-
-  const recorder = createMockSocket()
-  handler?.(recorder.socket, new URLSearchParams({
-    sessionId: 's1',
-    role: 'instructor',
-  }))
-  recorder.emit('message', JSON.stringify({
-    type: 'authenticate',
-    instructorPasscode: TEST_INSTRUCTOR_PASSCODE.toUpperCase(),
-  }))
-
-  await new Promise((resolve) => setTimeout(resolve, 0))
-
-  assert.equal(recorder.closed, null)
-  assert.equal(recorder.sent.length, 2)
-  recorder.emit('close')
-  await new Promise((resolve) => setTimeout(resolve, 0))
-})
-
-void test('legacy manager websocket role is normalized to instructor', async () => {
-  const app = createMockApp()
-  const ws = createMockWs()
-  const storeState = createSessionStore({ s1: createVideoSyncSession('s1', TEST_INSTRUCTOR_PASSCODE) })
-
-  setupVideoSyncRoutes(app, storeState.sessions, ws as unknown as WsRouter)
-
-  const handler = ws.registered['/ws/video-sync']
-  assert.equal(typeof handler, 'function')
-
-  const recorder = createMockSocket()
-  handler?.(recorder.socket, new URLSearchParams({
-    sessionId: 's1',
-    role: 'manager',
-  }))
-  recorder.emit('message', JSON.stringify({
-    type: 'authenticate',
-    instructorPasscode: TEST_INSTRUCTOR_PASSCODE,
-  }))
-
-  await new Promise((resolve) => setTimeout(resolve, 0))
-
-  assert.equal(recorder.closed, null)
-  const payload = JSON.parse(recorder.sent[0] ?? '{}') as { payload?: { role?: string } }
   assert.equal(payload.payload?.role, 'instructor')
   recorder.emit('close')
   await new Promise((resolve) => setTimeout(resolve, 0))

@@ -1,7 +1,3 @@
-import {
-    consumeCreateSessionBootstrapPayload,
-    storeCreateSessionBootstrapPayload,
-} from '@src/components/common/manageDashboardUtils'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import type { VideoSyncState } from '../protocol.js'
@@ -9,14 +5,11 @@ import {
     autoConfigureBootstrapSource,
     buildManagerWsUrl,
     clearManagerPlayerLoadError,
-    createManagerWsAuthMessage,
     getManagerPlaybackIntentForStateChange,
     parseManagerStopTimeInput,
-    readBootstrapInstructorPasscode,
     readBootstrapSourceUrl,
     readEmbeddedBootstrapSourceUrl,
     readRecoveredPersistentSourceUrl,
-    resolveBootstrapInstructorPasscode,
     sanitizeManagerApiErrorMessage,
     shouldApplyManagerStateUpdate,
     shouldAutoStartBootstrapSource,
@@ -39,119 +32,6 @@ const BASE_STATE: VideoSyncState = {
   updatedBy: 'system',
   serverTimestampMs: 0,
 }
-
-void test('readBootstrapInstructorPasscode returns passcode from create-session navigation state', () => {
-  assert.equal(
-    readBootstrapInstructorPasscode({
-      createSessionPayload: {
-        instructorPasscode: 'teacher-passcode',
-      },
-    }),
-    'teacher-passcode',
-  )
-})
-
-void test('readBootstrapInstructorPasscode ignores missing or invalid state payloads', () => {
-  assert.equal(readBootstrapInstructorPasscode(null), null)
-  assert.equal(readBootstrapInstructorPasscode({}), null)
-  assert.equal(readBootstrapInstructorPasscode({ createSessionPayload: {} }), null)
-  assert.equal(readBootstrapInstructorPasscode({ createSessionPayload: { instructorPasscode: 42 } }), null)
-})
-
-void test('readBootstrapInstructorPasscode works with consumed same-tab bootstrap payloads', () => {
-  storeCreateSessionBootstrapPayload('video-sync', 'session-123', {
-    instructorPasscode: 'teacher-passcode',
-  })
-
-  assert.equal(
-    readBootstrapInstructorPasscode({
-      createSessionPayload: consumeCreateSessionBootstrapPayload('video-sync', 'session-123') ?? undefined,
-    }),
-    'teacher-passcode',
-  )
-})
-
-void test('resolveBootstrapInstructorPasscode clears history state only for navigation bootstrap payloads', () => {
-  assert.deepEqual(
-    resolveBootstrapInstructorPasscode({
-      locationState: {
-        createSessionPayload: {
-          instructorPasscode: 'teacher-passcode',
-        },
-      },
-      sessionId: 'session-123',
-    }),
-    {
-      instructorPasscode: 'teacher-passcode',
-      shouldClearLocationState: true,
-    },
-  )
-})
-
-void test('resolveBootstrapInstructorPasscode clears same-tab fallback cache when location state is used', () => {
-  storeCreateSessionBootstrapPayload('video-sync', 'session-123', {
-    instructorPasscode: 'cached-passcode',
-  })
-
-  assert.deepEqual(
-    resolveBootstrapInstructorPasscode({
-      locationState: {
-        createSessionPayload: {
-          instructorPasscode: 'teacher-passcode',
-        },
-      },
-      sessionId: 'session-123',
-    }),
-    {
-      instructorPasscode: 'teacher-passcode',
-      shouldClearLocationState: true,
-    },
-  )
-
-  assert.equal(consumeCreateSessionBootstrapPayload('video-sync', 'session-123'), null)
-})
-
-void test('resolveBootstrapInstructorPasscode preserves same-tab bootstrap payloads without navigation cleanup', () => {
-  storeCreateSessionBootstrapPayload('video-sync', 'session-123', {
-    instructorPasscode: 'teacher-passcode',
-  })
-
-  assert.deepEqual(
-    resolveBootstrapInstructorPasscode({
-      locationState: null,
-      sessionId: 'session-123',
-    }),
-    {
-      instructorPasscode: 'teacher-passcode',
-      shouldClearLocationState: false,
-    },
-  )
-})
-
-void test('resolveBootstrapInstructorPasscode can be read again before the settled manager consumes bootstrap', () => {
-  storeCreateSessionBootstrapPayload('video-sync', 'child-session-1', {
-    instructorPasscode: 'embedded-passcode',
-  })
-
-  const expected = {
-    instructorPasscode: 'embedded-passcode',
-    shouldClearLocationState: false,
-  }
-  assert.deepEqual(
-    resolveBootstrapInstructorPasscode({
-      locationState: null,
-      sessionId: 'child-session-1',
-    }),
-    expected,
-  )
-  assert.deepEqual(
-    resolveBootstrapInstructorPasscode({
-      locationState: null,
-      sessionId: 'child-session-1',
-    }),
-    expected,
-  )
-})
 
 void test('readBootstrapSourceUrl returns sourceUrl from query string', () => {
   assert.equal(
@@ -246,18 +126,6 @@ void test('buildManagerWsUrl omits instructor credentials from the websocket URL
   )
 })
 
-void test('createManagerWsAuthMessage serializes the post-connect auth payload', () => {
-  assert.equal(
-    createManagerWsAuthMessage('teacher-passcode'),
-    JSON.stringify({
-      type: 'authenticate',
-      instructorPasscode: 'teacher-passcode',
-    }),
-  )
-  assert.equal(createManagerWsAuthMessage(''), null)
-  assert.equal(createManagerWsAuthMessage(null), null)
-})
-
 void test('getManagerPlaybackIntentForStateChange treats natural video completion as a pause', () => {
   assert.equal(
     getManagerPlaybackIntentForStateChange({
@@ -305,8 +173,8 @@ void test('shouldAutoStartBootstrapSource requires setup mode, source url, and r
     shouldAutoStartBootstrapSource({
       setupMode: true,
       bootstrapSourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=43',
-      isPasscodeReady: true,
-      instructorPasscode: 'teacher-passcode',
+      isManagerAccessReady: true,
+      hasManagerAccess: true,
       autoStartStatus: 'idle',
     }),
     true,
@@ -316,8 +184,8 @@ void test('shouldAutoStartBootstrapSource requires setup mode, source url, and r
     shouldAutoStartBootstrapSource({
       setupMode: false,
       bootstrapSourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=43',
-      isPasscodeReady: true,
-      instructorPasscode: 'teacher-passcode',
+      isManagerAccessReady: true,
+      hasManagerAccess: true,
       autoStartStatus: 'idle',
     }),
     false,
@@ -327,8 +195,8 @@ void test('shouldAutoStartBootstrapSource requires setup mode, source url, and r
     shouldAutoStartBootstrapSource({
       setupMode: true,
       bootstrapSourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=43',
-      isPasscodeReady: false,
-      instructorPasscode: 'teacher-passcode',
+      isManagerAccessReady: false,
+      hasManagerAccess: true,
       autoStartStatus: 'idle',
     }),
     false,
@@ -338,8 +206,8 @@ void test('shouldAutoStartBootstrapSource requires setup mode, source url, and r
     shouldAutoStartBootstrapSource({
       setupMode: true,
       bootstrapSourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=43',
-      isPasscodeReady: true,
-      instructorPasscode: 'teacher-passcode',
+      isManagerAccessReady: true,
+      hasManagerAccess: true,
       autoStartStatus: 'failed',
     }),
     false,
@@ -381,9 +249,9 @@ void test('shouldRecoverAutoStartAfterCredentialLoad retries failed bootstrap on
     shouldRecoverAutoStartAfterCredentialLoad({
       setupMode: true,
       bootstrapSourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=43',
-      instructorPasscode: 'teacher-passcode',
+      hasManagerAccess: true,
       autoStartStatus: 'failed',
-      errorMessage: 'Instructor credentials missing. Open this session from the dashboard or authenticated permalink.',
+      errorMessage: 'Manager access is unavailable. Open this session from the dashboard or authenticated permalink.',
     }),
     true,
   )
@@ -391,9 +259,9 @@ void test('shouldRecoverAutoStartAfterCredentialLoad retries failed bootstrap on
     shouldRecoverAutoStartAfterCredentialLoad({
       setupMode: true,
       bootstrapSourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=43',
-      instructorPasscode: null,
+      hasManagerAccess: false,
       autoStartStatus: 'failed',
-      errorMessage: 'Instructor credentials missing. Open this session from the dashboard or authenticated permalink.',
+      errorMessage: 'Manager access is unavailable. Open this session from the dashboard or authenticated permalink.',
     }),
     false,
   )
@@ -401,9 +269,9 @@ void test('shouldRecoverAutoStartAfterCredentialLoad retries failed bootstrap on
     shouldRecoverAutoStartAfterCredentialLoad({
       setupMode: true,
       bootstrapSourceUrl: null,
-      instructorPasscode: 'teacher-passcode',
+      hasManagerAccess: true,
       autoStartStatus: 'failed',
-      errorMessage: 'Instructor credentials missing. Open this session from the dashboard or authenticated permalink.',
+      errorMessage: 'Manager access is unavailable. Open this session from the dashboard or authenticated permalink.',
     }),
     false,
   )
@@ -411,7 +279,7 @@ void test('shouldRecoverAutoStartAfterCredentialLoad retries failed bootstrap on
     shouldRecoverAutoStartAfterCredentialLoad({
       setupMode: true,
       bootstrapSourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=43',
-      instructorPasscode: 'teacher-passcode',
+      hasManagerAccess: true,
       autoStartStatus: 'failed',
       errorMessage: 'Could not save video configuration. Please try again.',
     }),

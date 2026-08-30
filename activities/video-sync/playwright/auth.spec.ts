@@ -36,7 +36,7 @@ test('Video Sync temporary manager becomes read-only after its capability cookie
   await page.goto(`/manage/video-sync/${encodeURIComponent(sessionId)}`)
 
   await expect(page.getByRole('heading', { name: 'Step 1: Configure video source' })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Instructor access unavailable' })).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'Manager access unavailable' })).toBeDisabled()
 
   await page.close()
   await context.close()

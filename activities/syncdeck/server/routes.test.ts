@@ -2488,13 +2488,14 @@ void test('embedded-activity start route creates a child session, stores keyed m
     childSessionId: string
     instanceKey: string
     location?: { h: number; v: number }
-    managerBootstrap?: { instructorPasscode?: string }
+    managerBootstrap?: Record<string, unknown>
+    managerEntryToken?: string
   }
   assert.equal(body.instanceKey, 'video-sync:3:0')
   assert.deepEqual(body.location, { h: 3, v: 0 })
   assert.match(body.childSessionId, /^CHILD:s1:[a-f0-9]{5}:video-sync$/)
-  assert.equal(typeof body.managerBootstrap?.instructorPasscode, 'string')
-  assert.equal(body.managerBootstrap?.instructorPasscode?.length, 32)
+  assert.deepEqual(body.managerBootstrap, {})
+  assert.match(String(body.managerEntryToken), /^[a-f0-9]{64}$/)
 
   const parentSession = storeState.store.s1 as SessionRecord & {
     data: { embeddedActivities: Record<string, { childSessionId: string; activityId: string; startedAt: number; owner: string; location?: { h: number; v: number } }> }

@@ -282,8 +282,10 @@ Do not begin with all activities at once.
 - [x] Stabilize the existing SyncDeck student-return browser regression test: wait for each rendered roster row, rather than only its early connected-count update, before opening the next student socket (the underlying atomic-mutation race remains tracked in [#350](https://github.com/PerryHighCS/ActiveBits/issues/350)).
 - [x] Preserve an origin-only cross-origin referrer for SyncDeck embedded managers and explicitly pass the ActiveBits origin to Video Sync's YouTube players, so Safari can satisfy YouTube's client-identification requirement without leaking the child manager's one-time entry token.
 - [x] Set the client document referrer policy to `strict-origin`, so embedded-manager bootstrap tokens also cannot reach child-document subresources; persist manager capabilities before issuing their cookies and request a bounded fresh bootstrap token after a temporary persistence failure.
+- [x] Complete the Video Sync clean cutover: remove its legacy raw `instructorPasscode` field, responses, REST bodies, and manager-WebSocket fallback now that new sessions do not need mixed-deploy compatibility.
 - [x] Harden the shared resilient WebSocket hook so events from a replaced socket cannot overwrite the state of the current manager connection (including React Strict Mode's discarded development connection).
 - [x] Add Chromium Video Sync browser coverage that clears a temporary manager's capability cookie and verifies the manager becomes read-only without a passcode fallback.
+- [x] Serialize Video Sync's in-process per-session read-modify-write paths (manager commands, telemetry, heartbeats, connection changes, and stale-telemetry pruning) so an overlapping background write cannot restore an older playback state; retain the existing cross-instance atomicity follow-up in Slice A.
 - [ ] Add persistent, embedded, temporary-manager, capability-loss, and cross-role browser/route/socket coverage.
 - [x] Restore Java Format permalink support in the Phase 6 retrofit after the adapter was proven ([#351](https://github.com/PerryHighCS/ActiveBits/issues/351)).
 

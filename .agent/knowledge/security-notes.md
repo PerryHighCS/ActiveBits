@@ -396,6 +396,21 @@ Track security-relevant boundaries, risks, and mitigation decisions.
 - Expected denied student edits (missing accepted identity or Try it disabled) use structured MobCode event logs without source contents.
 - The generic entry-participant consume route now issues an opaque httpOnly token scoped to the accepted session. MobCode reads this token server-side and never accepts a participant ID in its student workspace API bodies.
 - SyncDeck embedded child sessions receive that one-time entry token asynchronously over the parent websocket, so MobCode waits briefly for the token and retries a denied child-workspace bootstrap once. The retry still redeems the opaque token through the generic consume route; it must not reintroduce a browser-supplied participant ID.
+# Video Sync manager capability cutover
+
+- Area: Video Sync manager authorization
+- Threat or risk: A reusable `instructorPasscode` in session data and manager request/WebSocket contracts could be returned to browser JavaScript or replayed by any holder.
+- Control or mitigation: Video Sync now issues only an httpOnly manager capability at creation and verified persistent/embedded recovery. Manager REST and WebSocket admission require that capability; session normalization removes any legacy `instructorPasscode` field.
+- Residual risk: Existing in-flight sessions created before deployment may lose manager access after the field removal; this is an accepted clean-cutover boundary.
+- Validation (test/review/path): `activities/video-sync/server/routes.test.ts`; `activities/video-sync/client/manager/VideoSyncManager.test.ts`; `activities/video-sync/playwright/auth.spec.ts`.
+- Follow-up action: Do not add raw manager secrets to a new activity contract; use the shared capability adapter.
+- Owner: Codex
+
 # Shared socket paths with multiple authenticated principals
 
 - A browser can hold both a manager capability cookie and a participant cookie for one session. A shared activity WebSocket path must have the client select its intended view (`manager` or `participant`), but the server must resolve and require the corresponding httpOnly capability before assigning that principal. The selector is routing only; it must never grant authority. This keeps an instructor's student tab from being misclassified as a manager and omitted from the roster.
+
+# Video Sync session mutation ordering
+
+- Video Sync serializes each local session's read-modify-write operations, including manager commands, student telemetry, heartbeats, socket connection telemetry, and stale-telemetry pruning. This prevents a background operation that read an old state from later persisting over a play, pause, or seek command.
+- The queue is deliberately scoped to one server process. Multi-instance atomic session updates remain tracked separately because a process-local queue cannot serialize writers on different application instances.

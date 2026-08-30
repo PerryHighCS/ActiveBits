@@ -1,9 +1,10 @@
 import { createSession, type SessionRecord, type SessionStore } from 'activebits-server/core/sessions.js'
 import {
   getActivityCapabilityCookieName,
-  issueActivityCapabilityCookie,
+  issueActivityCapability,
   readCookieValue,
   resolveActivityPrincipalFromCookies,
+  writeActivityCapabilityCookie,
 } from 'activebits-server/core/activityCapabilities.js'
 import { registerSessionNormalizer } from 'activebits-server/core/sessionNormalization.js'
 import { createBroadcastSubscriptionHelper } from 'activebits-server/core/broadcastUtils.js'
@@ -17,7 +18,6 @@ import {
   verifyPersistentLinkUrlHash,
   type PersistentLinkUrlState,
 } from 'activebits-server/core/persistentLinkUrlState.js'
-import { randomBytes, timingSafeEqual } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
 import type { ActiveBitsWebSocket, WsRouter } from '../../../types/websocket.js'
 import {
@@ -62,7 +62,6 @@ interface VideoSyncTelemetry {
 }
 
 interface VideoSyncSessionData extends Record<string, unknown> {
-  instructorPasscode: string
   standaloneMode: boolean
   state: VideoSyncState
   telemetry: VideoSyncTelemetry
@@ -121,19 +120,12 @@ interface VideoSyncSocket extends ActiveBitsWebSocket {
   videoSyncRole?: VideoSyncRole
 }
 
-interface VideoSyncInstructorAuthMessage {
-  type: 'authenticate'
-  instructorPasscode: string
-}
-
 interface CommandBody {
-  instructorPasscode?: unknown
   type?: unknown
   positionSec?: unknown
 }
 
 interface ConfigBody {
-  instructorPasscode?: unknown
   sourceUrl?: unknown
   stopSec?: unknown
   standaloneMode?: unknown
@@ -168,15 +160,13 @@ const MAX_TELEMETRY_ERROR_MESSAGE_LENGTH = 256
 const YOUTUBE_VIDEO_ID_PATTERN = /^[A-Za-z0-9_-]{11}$/
 const INVALID_SOURCE_URL_MESSAGE =
   'Only YouTube watch/embed, YouTube Education watch/embed, and youtu.be URLs are supported in v1.'
-const INSTRUCTOR_PASSCODE_LENGTH = 32
-const INSTRUCTOR_PASSCODE_PATTERN = /^[a-f0-9]{32}$/i
 const UNSYNCED_STUDENTS_KEY_PREFIX = 'video-sync:unsynced:'
 const UNSYNCED_STUDENTS_KEY_TTL_MS = UNSYNC_STALE_MS + 1_000
-const DEFAULT_INSTRUCTOR_AUTH_TIMEOUT_MS = 5_000
 const provider = 'youtube'
 const subscribersBySession = new Map<string, Set<VideoSyncSocket>>()
 const heartbeatTimers = new Map<string, ReturnType<typeof setInterval>>()
 const heartbeatInFlightBySession = new Map<string, boolean>()
+const mutationTailsBySession = new Map<string, Promise<void>>()
 const unsyncedStudentsBySession = new Map<string, Map<string, number>>()
 const unsyncedStudentPruneTimersBySession = new Map<string, ReturnType<typeof setTimeout>>()
 
@@ -201,47 +191,20 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return value != null && typeof value === 'object' && !Array.isArray(value)
 }
 
-function createInstructorPasscode(): string {
-  return randomBytes(16).toString('hex')
-}
-
-function normalizeInstructorPasscode(value: unknown): string | null {
-  if (typeof value !== 'string') {
-    return null
-  }
-
-  const normalized = value.trim()
-  if (
-    normalized.length !== INSTRUCTOR_PASSCODE_LENGTH ||
-    !INSTRUCTOR_PASSCODE_PATTERN.test(normalized)
-  ) {
-    return null
-  }
-
-  return normalized.toLowerCase()
-}
-
-function verifyInstructorPasscode(expected: string, candidate: string): boolean {
-  if (
-    expected.length !== INSTRUCTOR_PASSCODE_LENGTH ||
-    !INSTRUCTOR_PASSCODE_PATTERN.test(expected) ||
-    candidate.length !== INSTRUCTOR_PASSCODE_LENGTH ||
-    !INSTRUCTOR_PASSCODE_PATTERN.test(candidate)
-  ) {
-    return false
-  }
-
-  const expectedBuffer = Buffer.from(expected)
-  const candidateBuffer = Buffer.from(candidate)
-
-  if (expectedBuffer.length === 0 || expectedBuffer.length !== candidateBuffer.length) {
-    return false
-  }
-
+async function withSessionMutation<T>(sessionId: string, mutate: () => Promise<T>): Promise<T> {
+  const previous = mutationTailsBySession.get(sessionId) ?? Promise.resolve()
+  let release!: () => void
+  const tail = new Promise<void>((resolve) => { release = resolve })
+  const completion = previous.catch(() => undefined).then(() => tail)
+  mutationTailsBySession.set(sessionId, completion)
+  await previous.catch(() => undefined)
   try {
-    return timingSafeEqual(expectedBuffer, candidateBuffer)
-  } catch {
-    return false
+    return await mutate()
+  } finally {
+    release()
+    if (mutationTailsBySession.get(sessionId) === completion) {
+      mutationTailsBySession.delete(sessionId)
+    }
   }
 }
 
@@ -554,112 +517,6 @@ function normalizeDriftSec(value: unknown): number | null {
   return clampSeconds(Math.abs(value))
 }
 
-function parseInstructorAuthMessage(raw: unknown): VideoSyncInstructorAuthMessage | null {
-  let text: string | null = null
-
-  if (typeof raw === 'string') {
-    text = raw
-  } else if (Buffer.isBuffer(raw)) {
-    text = raw.toString('utf8')
-  } else if (raw instanceof ArrayBuffer) {
-    text = Buffer.from(raw).toString('utf8')
-  }
-
-  if (text == null) {
-    return null
-  }
-
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(text)
-  } catch {
-    return null
-  }
-
-  if (!isPlainObject(parsed) || parsed.type !== 'authenticate') {
-    return null
-  }
-
-  const instructorPasscode = normalizeInstructorPasscode(parsed.instructorPasscode)
-  if (instructorPasscode == null) {
-    return null
-  }
-
-  return {
-    type: 'authenticate',
-    instructorPasscode,
-  }
-}
-
-function getInstructorAuthTimeoutMs(): number {
-  // Temporary compatibility shim for mixed deploys; owner: Codex; cleanup: remove once all callers use ACTIVEBITS_VIDEO_SYNC_INSTRUCTOR_AUTH_TIMEOUT_MS.
-  const rawValue =
-    process.env.ACTIVEBITS_VIDEO_SYNC_INSTRUCTOR_AUTH_TIMEOUT_MS ??
-    process.env.ACTIVEBITS_VIDEO_SYNC_MANAGER_AUTH_TIMEOUT_MS
-  const parsed = rawValue ? Number.parseInt(rawValue, 10) : Number.NaN
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_INSTRUCTOR_AUTH_TIMEOUT_MS
-}
-
-export function waitForInstructorAuthMessage(
-  socket: ActiveBitsWebSocket,
-  timeoutMs = getInstructorAuthTimeoutMs(),
-): Promise<unknown | null> {
-  const waiter = createInstructorAuthMessageWaiter(socket)
-  waiter.startTimeout(timeoutMs)
-  return waiter.promise
-}
-
-interface InstructorAuthMessageWaiter {
-  promise: Promise<unknown | null>
-  startTimeout(timeoutMs: number): void
-}
-
-/**
- * Listens before session lookup so an instructor's first authentication message
- * cannot be missed. Cookie-authenticated managers never need the timeout, but
- * the passcode compatibility path arms it once fallback is required.
- */
-function createInstructorAuthMessageWaiter(socket: ActiveBitsWebSocket): InstructorAuthMessageWaiter {
-  let startTimeout: (timeoutMs: number) => void = () => {}
-  const promise = new Promise<unknown | null>((resolve) => {
-    let settled = false
-    let timeoutId: ReturnType<typeof setTimeout> | null = null
-    const settle = (value: unknown | null) => {
-      if (settled) {
-        return
-      }
-      settled = true
-      if (timeoutId != null) {
-        clearTimeout(timeoutId)
-        timeoutId = null
-      }
-      resolve(value)
-    }
-
-    startTimeout = (timeoutMs) => {
-      if (settled || timeoutId != null) {
-        return
-      }
-      timeoutId = setTimeout(() => {
-        settle(null)
-        socket.close(1008, 'Auth timeout')
-      }, timeoutMs)
-    }
-
-    socket.once('message', (raw: unknown) => {
-      settle(raw)
-    })
-    socket.once('close', () => {
-      settle(null)
-    })
-    socket.once('error', () => {
-      settle(null)
-    })
-  })
-
-  return { promise, startTimeout: (timeoutMs) => startTimeout(timeoutMs) }
-}
-
 function resolveManagerSocketPrincipal(session: VideoSyncSession, sessionId: string, socket: VideoSyncSocket) {
   const cookieName = getActivityCapabilityCookieName('manager', sessionId)
   const cookieHeader = socket.upgradeHeaders?.cookie
@@ -940,27 +797,29 @@ function scheduleUnsyncedStudentsPrune(
   const timer = setTimeout(() => {
     unsyncedStudentPruneTimersBySession.delete(sessionId)
     void (async () => {
-      const studentMap = unsyncedStudentsBySession.get(sessionId)
-      if (!studentMap) {
-        return
-      }
-
       const pruneNowMs = Date.now()
-      pruneStaleUnsyncedStudents(studentMap, pruneNowMs)
+      await withSessionMutation(sessionId, async () => {
+        const studentMap = unsyncedStudentsBySession.get(sessionId)
+        if (!studentMap) {
+          return
+        }
 
-      const session = await getVideoSyncSession(sessions, sessionId)
-      if (!session) {
-        clearUnsyncedStudentState(sessionId)
-        return
-      }
+        pruneStaleUnsyncedStudents(studentMap, pruneNowMs)
 
-      const data = ensureVideoSyncSessionData(session)
-      const previousCount = data.telemetry.sync.unsyncedStudents
-      await refreshUnsyncedStudentsCount(sessions as VideoSyncSessionStore, data, sessionId, pruneNowMs)
+        const session = await getVideoSyncSession(sessions, sessionId)
+        if (!session) {
+          clearUnsyncedStudentState(sessionId)
+          return
+        }
 
-      if (data.telemetry.sync.unsyncedStudents !== previousCount) {
-        await sessions.set(session.id, session)
-      }
+        const data = ensureVideoSyncSessionData(session)
+        const previousCount = data.telemetry.sync.unsyncedStudents
+        await refreshUnsyncedStudentsCount(sessions as VideoSyncSessionStore, data, sessionId, pruneNowMs)
+
+        if (data.telemetry.sync.unsyncedStudents !== previousCount) {
+          await sessions.set(session.id, session)
+        }
+      })
 
       if ((unsyncedStudentsBySession.get(sessionId)?.size ?? 0) > 0) {
         scheduleUnsyncedStudentsPrune(sessions, sessionId, pruneNowMs)
@@ -979,12 +838,12 @@ function normalizeVideoSyncSessionData(session: SessionRecord): {
 } {
   const previousData = session.data
   const rawData = isPlainObject(previousData) ? previousData : {}
+  const { instructorPasscode: _legacyInstructorPasscode, ...dataWithoutLegacyPasscode } = rawData
   const state = normalizeState(rawData.state)
   const telemetry = normalizeTelemetry(rawData.telemetry)
 
   const normalized: VideoSyncSessionData = {
-    ...rawData,
-    instructorPasscode: normalizeInstructorPasscode(rawData.instructorPasscode) ?? createInstructorPasscode(),
+    ...dataWithoutLegacyPasscode,
     standaloneMode: rawData.standaloneMode === true,
     state,
     telemetry,
@@ -1225,6 +1084,7 @@ function ensureHeartbeat(
       heartbeatInFlightBySession.set(sessionId, true)
 
       try {
+        await withSessionMutation(sessionId, async () => {
         const sockets = subscribersBySession.get(sessionId)
         if (!sockets || sockets.size === 0) {
           stopHeartbeat(sessionId)
@@ -1264,6 +1124,7 @@ function ensureHeartbeat(
           telemetry: heartbeatTelemetry,
         })
         await broadcastEnvelope(sessions, ws, sessionId, envelope)
+        })
       } finally {
         if (heartbeatTimers.has(sessionId)) {
           heartbeatInFlightBySession.set(sessionId, false)
@@ -1295,20 +1156,8 @@ function isEventType(value: unknown): value is VideoSyncEventType {
   return value === 'autoplay-blocked' || value === 'unsync' || value === 'sync-correction' || value === 'load-failure'
 }
 
-function readInstructorPasscode(body: unknown): string | null {
-  if (!isPlainObject(body)) {
-    return null
-  }
-
-  return normalizeInstructorPasscode(body.instructorPasscode)
-}
-
 function hasManagerAuthority(session: VideoSyncSession, sessionId: string, req: RouteRequest): boolean {
-  if (resolveActivityPrincipalFromCookies(session, sessionId, 'manager', req.cookies)) {
-    return true
-  }
-  const instructorPasscode = readInstructorPasscode(req.body)
-  return instructorPasscode != null && verifyInstructorPasscode(session.data.instructorPasscode, instructorPasscode)
+  return resolveActivityPrincipalFromCookies(session, sessionId, 'manager', req.cookies) != null
 }
 
 function readBooleanField(body: unknown, key: string): boolean | null {
@@ -1336,17 +1185,17 @@ export default function setupVideoSyncRoutes(
       data.state = createDefaultState()
       data.telemetry = createDefaultTelemetry()
 
+      const capability = issueActivityCapability(session, 'manager')
       await sessions.set(session.id, session)
-      issueActivityCapabilityCookie(res, session, session.id, 'manager')
-      await sessions.set(session.id, session)
-      res.json({ id: session.id, instructorPasscode: data.instructorPasscode })
+      writeActivityCapabilityCookie(res, session.id, 'manager', capability.token)
+      res.json({ id: session.id })
     } catch (error) {
       console.error('Failed to create video-sync session:', error)
       res.status(500).json({ error: 'INTERNAL_ERROR', message: 'Failed to create session' })
     }
   })
 
-  app.get('/api/video-sync/:sessionId/instructor-passcode', async (req, res) => {
+  app.get('/api/video-sync/:sessionId/manager-access', async (req, res) => {
     const sessionId = resolveSessionId(req)
     if (!sessionId) {
       res.status(400).json({ error: 'INVALID_SESSION_ID', message: 'sessionId is required' })
@@ -1356,10 +1205,14 @@ export default function setupVideoSyncRoutes(
     const {
       session,
       data,
-      didNormalizeSessionData,
     } = await getVideoSyncSessionWithNormalization(sessions, sessionId)
     if (!session || !data) {
       res.status(404).json({ error: 'NOT_FOUND', message: 'Session not found' })
+      return
+    }
+
+    if (resolveActivityPrincipalFromCookies(session, sessionId, 'manager', req.cookies)) {
+      res.json({})
       return
     }
 
@@ -1393,14 +1246,22 @@ export default function setupVideoSyncRoutes(
       return
     }
 
-    if (didNormalizeSessionData) {
+    try {
+      const capability = issueActivityCapability(session, 'manager')
       await sessions.set(session.id, session)
+      writeActivityCapabilityCookie(res, sessionId, 'manager', capability.token)
+    } catch (error) {
+      console.error(JSON.stringify({
+        activity: 'video-sync',
+        event: 'manager-capability-persistence-failed',
+        sessionId,
+        errorName: error instanceof Error ? error.name : 'unknown',
+      }))
+      res.status(500).json({ error: 'INTERNAL_ERROR', message: 'Manager access is temporarily unavailable' })
+      return
     }
-    issueActivityCapabilityCookie(res, session, sessionId, 'manager')
-    await sessions.set(session.id, session)
     const persistentSourceUrl = readPersistentSourceUrlFromCookieEntry(persistentHash, matchingEntry)
     res.json({
-      instructorPasscode: data.instructorPasscode,
       ...(persistentSourceUrl ? { persistentSourceUrl } : {}),
     })
   })
@@ -1412,6 +1273,7 @@ export default function setupVideoSyncRoutes(
       return
     }
 
+    await withSessionMutation(sessionId, async () => {
     const {
       session,
       data,
@@ -1453,6 +1315,7 @@ export default function setupVideoSyncRoutes(
         telemetry: projectedTelemetry,
       }),
     })
+    })
   })
 
   app.patch('/api/video-sync/:sessionId/session', async (req, res) => {
@@ -1462,6 +1325,7 @@ export default function setupVideoSyncRoutes(
       return
     }
 
+    await withSessionMutation(sessionId, async () => {
     const session = await getVideoSyncSession(sessions, sessionId)
     if (!session) {
       res.status(404).json({ error: 'NOT_FOUND', message: 'Session not found' })
@@ -1469,7 +1333,7 @@ export default function setupVideoSyncRoutes(
     }
 
     if (!hasManagerAuthority(session, sessionId, req)) {
-      res.status(403).json({ error: 'FORBIDDEN', message: 'Valid instructorPasscode is required' })
+      res.status(403).json({ error: 'FORBIDDEN', message: 'Manager capability is required' })
       return
     }
 
@@ -1575,6 +1439,7 @@ export default function setupVideoSyncRoutes(
     await broadcastEnvelope(sessions, ws, sessionId, envelope)
 
     res.json({ success: true, data: toPublicSessionData(data) })
+    })
   })
 
   app.post('/api/video-sync/:sessionId/command', async (req, res) => {
@@ -1584,6 +1449,7 @@ export default function setupVideoSyncRoutes(
       return
     }
 
+    await withSessionMutation(sessionId, async () => {
     const session = await getVideoSyncSession(sessions, sessionId)
     if (!session) {
       res.status(404).json({ error: 'NOT_FOUND', message: 'Session not found' })
@@ -1591,7 +1457,7 @@ export default function setupVideoSyncRoutes(
     }
 
     if (!hasManagerAuthority(session, sessionId, req)) {
-      res.status(403).json({ error: 'FORBIDDEN', message: 'Valid instructorPasscode is required' })
+      res.status(403).json({ error: 'FORBIDDEN', message: 'Manager capability is required' })
       return
     }
 
@@ -1655,6 +1521,7 @@ export default function setupVideoSyncRoutes(
     await broadcastEnvelope(sessions, ws, sessionId, envelope)
 
     res.json({ success: true, data: toPublicSessionData(data) })
+    })
   })
 
   app.post('/api/video-sync/:sessionId/event', async (req, res) => {
@@ -1664,6 +1531,7 @@ export default function setupVideoSyncRoutes(
       return
     }
 
+    await withSessionMutation(sessionId, async () => {
     const session = await getVideoSyncSession(sessions, sessionId)
     if (!session) {
       res.status(404).json({ error: 'NOT_FOUND', message: 'Session not found' })
@@ -1733,6 +1601,7 @@ export default function setupVideoSyncRoutes(
     await broadcastEnvelope(sessions, ws, sessionId, envelope)
 
     res.json({ success: true, telemetry: data.telemetry })
+    })
   })
 
   ws.register('/ws/video-sync', (socket, query) => {
@@ -1745,9 +1614,6 @@ export default function setupVideoSyncRoutes(
     }
 
     const typedSocket = socket as VideoSyncSocket
-    const instructorAuthMessageWaiter = isInstructorRoleParam(roleParam)
-      ? createInstructorAuthMessageWaiter(typedSocket)
-      : null
     let cleanedUp = false
     let isSubscribed = false
     const handleSocketClosed = () => {
@@ -1763,21 +1629,23 @@ export default function setupVideoSyncRoutes(
       isSubscribed = false
       removeSubscriber(sessionId, typedSocket)
       void (async () => {
-        const currentSession = await getVideoSyncSession(sessions, sessionId)
-        if (!currentSession) {
-          stopHeartbeat(sessionId)
-          return
-        }
+        await withSessionMutation(sessionId, async () => {
+          const currentSession = await getVideoSyncSession(sessions, sessionId)
+          if (!currentSession) {
+            stopHeartbeat(sessionId)
+            return
+          }
 
-        const currentData = ensureVideoSyncSessionData(currentSession)
-        await updateConnectionTelemetry(sessions, currentData, sessionId)
-        await sessions.set(currentSession.id, currentSession)
+          const currentData = ensureVideoSyncSessionData(currentSession)
+          await updateConnectionTelemetry(sessions, currentData, sessionId)
+          await sessions.set(currentSession.id, currentSession)
 
-        const disconnectTelemetryUpdate = createEnvelope(sessionId, 'telemetry-update', {
-          telemetry: currentData.telemetry,
-          reason: 'connection-change',
+          const disconnectTelemetryUpdate = createEnvelope(sessionId, 'telemetry-update', {
+            telemetry: currentData.telemetry,
+            reason: 'connection-change',
+          })
+          await broadcastEnvelope(sessions, ws, sessionId, disconnectTelemetryUpdate)
         })
-        await broadcastEnvelope(sessions, ws, sessionId, disconnectTelemetryUpdate)
 
         if ((subscribersBySession.get(sessionId)?.size ?? 0) === 0) {
           stopHeartbeat(sessionId)
@@ -1808,22 +1676,9 @@ export default function setupVideoSyncRoutes(
       }
 
       if (isInstructorRoleParam(roleParam)) {
-        const managerPrincipal = resolveManagerSocketPrincipal(session, sessionId, typedSocket)
-        if (!managerPrincipal) {
-          // Temporary compatibility path; owner: Codex; cleanup: remove after
-          // the Video Sync manager client authenticates solely with its cookie.
-          instructorAuthMessageWaiter?.startTimeout(getInstructorAuthTimeoutMs())
-          const rawAuthMessage = await instructorAuthMessageWaiter?.promise
-          if (cleanedUp || typedSocket.readyState !== WS_OPEN_READY_STATE) {
-            handleSocketClosed()
-            return
-          }
-
-          const authMessage = parseInstructorAuthMessage(rawAuthMessage)
-          if (!authMessage || !verifyInstructorPasscode(session.data.instructorPasscode, authMessage.instructorPasscode)) {
-            typedSocket.close(1008, 'Forbidden')
-            return
-          }
+        if (!resolveManagerSocketPrincipal(session, sessionId, typedSocket)) {
+          typedSocket.close(1008, 'Forbidden')
+          return
         }
       }
 
@@ -1841,10 +1696,23 @@ export default function setupVideoSyncRoutes(
       isSubscribed = true
       ensureHeartbeat(sessions, ws, sessionId)
 
-      const data = ensureVideoSyncSessionData(session)
-      data.state = applyStopIfReached(data.state)
-      await updateConnectionTelemetry(sessions, data, sessionId)
-      await sessions.set(session.id, session)
+      const data = await withSessionMutation(sessionId, async () => {
+        const currentSession = await getVideoSyncSession(sessions, sessionId)
+        if (!currentSession) {
+          return null
+        }
+
+        const currentData = ensureVideoSyncSessionData(currentSession)
+        currentData.state = applyStopIfReached(currentData.state)
+        await updateConnectionTelemetry(sessions, currentData, sessionId)
+        await sessions.set(currentSession.id, currentSession)
+        return currentData
+      })
+
+      if (!data) {
+        typedSocket.close(1008, 'Session not found')
+        return
+      }
 
       const snapshot = createEnvelope(sessionId, 'state-snapshot', {
         state: data.state,

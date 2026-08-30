@@ -1,9 +1,5 @@
 import SessionHeader from '@src/components/common/SessionHeader'
 import { fetchEmbeddedLaunchSelectedOptions } from '@src/components/common/embeddedLaunchBootstrap'
-import {
-  consumeCreateSessionBootstrapPayload,
-  readCreateSessionBootstrapPayload,
-} from '@src/components/common/manageDashboardUtils'
 import { isEmbeddedChildSessionId } from '@src/components/common/sessionHeaderUtils'
 import Button from '@src/components/ui/Button'
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
@@ -60,28 +56,18 @@ interface CommandResponse {
   }
 }
 
-interface InstructorPasscodeResponse {
-  instructorPasscode?: unknown
+interface ManagerAccessResponse {
   persistentSourceUrl?: unknown
-}
-
-interface ManagerLocationState {
-  createSessionPayload?: {
-    instructorPasscode?: unknown
-  }
 }
 
 type AutoStartStatus = 'idle' | 'starting' | 'failed'
 
 const YOUTUBE_MANAGER_LOAD_ERROR = 'YouTube player failed to load. Try a different video URL.'
-const MISSING_INSTRUCTOR_CREDENTIALS_ERROR = 'Instructor credentials missing. Open this session from the dashboard or authenticated permalink.'
+const MISSING_MANAGER_ACCESS_ERROR = 'Manager access is unavailable. Open this session from the dashboard or authenticated permalink.'
 const YOUTUBE_HOST_FALLBACK_TIMEOUT_MS = 1_500
 const MANAGER_PLAYING_DRIFT_TOLERANCE_SEC = 2
 const MANAGER_PLAYBACK_COMMAND_FLUSH_DELAY_MS = 120
 const MAX_MANAGER_API_ERROR_MESSAGE_LENGTH = 160
-// This is an access-ready marker, never an instructor credential. The server
-// resolves the httpOnly manager capability before considering legacy bodies.
-const COOKIE_MANAGER_ACCESS_MARKER = 'cookie-manager-access'
 
 const EMPTY_TELEMETRY: VideoSyncTelemetry = {
   connections: { activeCount: 0 },
@@ -107,20 +93,6 @@ function clampNumber(value: number): number {
   return Number.isFinite(value) ? Math.max(0, value) : 0
 }
 
-export function readBootstrapInstructorPasscode(locationState: unknown): string | null {
-  if (
-    locationState == null ||
-    typeof locationState !== 'object' ||
-    Array.isArray(locationState)
-  ) {
-    return null
-  }
-
-  const state = locationState as ManagerLocationState
-  const value = state.createSessionPayload?.instructorPasscode
-  return typeof value === 'string' && value.length > 0 ? value : null
-}
-
 export function readBootstrapSourceUrl(search: string): string | null {
   const value = new URLSearchParams(search).get('sourceUrl')
   if (typeof value !== 'string') {
@@ -131,7 +103,7 @@ export function readBootstrapSourceUrl(search: string): string | null {
   return trimmed.length > 0 ? trimmed : null
 }
 
-export function readRecoveredPersistentSourceUrl(payload: InstructorPasscodeResponse | null | undefined): string | null {
+export function readRecoveredPersistentSourceUrl(payload: ManagerAccessResponse | null | undefined): string | null {
   const value = payload?.persistentSourceUrl
   if (typeof value !== 'string') {
     return null
@@ -159,41 +131,6 @@ export function readEmbeddedBootstrapSourceUrl(selectedOptions: unknown): string
   return trimmed.length > 0 ? trimmed : null
 }
 
-export function resolveBootstrapInstructorPasscode(params: {
-  locationState: unknown
-  sessionId: string | null | undefined
-}): {
-  instructorPasscode: string | null
-  shouldClearLocationState: boolean
-} {
-  const fromLocationState = readBootstrapInstructorPasscode(params.locationState)
-  if (fromLocationState != null) {
-    if (params.sessionId) {
-      consumeCreateSessionBootstrapPayload('video-sync', params.sessionId)
-    }
-    return {
-      instructorPasscode: fromLocationState,
-      shouldClearLocationState: true,
-    }
-  }
-
-  if (!params.sessionId) {
-    return {
-      instructorPasscode: null,
-      shouldClearLocationState: false,
-    }
-  }
-
-  const fromBootstrapPayload = readBootstrapInstructorPasscode({
-    createSessionPayload: readCreateSessionBootstrapPayload('video-sync', params.sessionId) ?? undefined,
-  })
-
-  return {
-    instructorPasscode: fromBootstrapPayload,
-    shouldClearLocationState: false,
-  }
-}
-
 export function buildManagerWsUrl(params: {
   sessionId: string | null | undefined
   location: Pick<Location, 'protocol' | 'host'> | null | undefined
@@ -204,17 +141,6 @@ export function buildManagerWsUrl(params: {
 
   const protocol = params.location.protocol === 'https:' ? 'wss:' : 'ws:'
   return `${protocol}//${params.location.host}/ws/video-sync?sessionId=${encodeURIComponent(params.sessionId)}&role=instructor`
-}
-
-export function createManagerWsAuthMessage(instructorPasscode: string | null | undefined): string | null {
-  if (typeof instructorPasscode !== 'string' || instructorPasscode.length === 0) {
-    return null
-  }
-
-  return JSON.stringify({
-    type: 'authenticate',
-    instructorPasscode,
-  })
 }
 
 export function shouldRenderManagerHeaderForSession(sessionId: string | null | undefined): boolean {
@@ -235,32 +161,32 @@ export function shouldFetchEmbeddedBootstrapSourceUrl(params: {
 export function shouldAutoStartBootstrapSource(params: {
   setupMode: boolean
   bootstrapSourceUrl: string | null
-  isPasscodeReady: boolean
-  instructorPasscode: string | null
+  isManagerAccessReady: boolean
+  hasManagerAccess: boolean
   autoStartStatus: AutoStartStatus
 }): boolean {
   return (
     params.setupMode &&
     params.bootstrapSourceUrl != null &&
     params.autoStartStatus !== 'failed' &&
-    params.isPasscodeReady &&
-    params.instructorPasscode != null
+    params.isManagerAccessReady &&
+    params.hasManagerAccess
   )
 }
 
 export function shouldRecoverAutoStartAfterCredentialLoad(params: {
   setupMode: boolean
   bootstrapSourceUrl: string | null
-  instructorPasscode: string | null
+  hasManagerAccess: boolean
   autoStartStatus: AutoStartStatus
   errorMessage: string | null
 }): boolean {
   return (
     params.setupMode
     && params.bootstrapSourceUrl != null
-    && params.instructorPasscode != null
+    && params.hasManagerAccess
     && params.autoStartStatus === 'failed'
-    && params.errorMessage === MISSING_INSTRUCTOR_CREDENTIALS_ERROR
+    && params.errorMessage === MISSING_MANAGER_ACCESS_ERROR
   )
 }
 
@@ -389,8 +315,8 @@ export default function VideoSyncManager() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [playerReady, setPlayerReady] = useState(false)
   const [activePlayerHost, setActivePlayerHost] = useState<VideoSyncPlayerHost | null>(null)
-  const [instructorPasscode, setInstructorPasscode] = useState<string | null>(null)
-  const [isPasscodeReady, setIsPasscodeReady] = useState(false)
+  const [hasManagerAccess, setHasManagerAccess] = useState(false)
+  const [isManagerAccessReady, setIsManagerAccessReady] = useState(false)
   const [autoStartStatus, setAutoStartStatus] = useState<AutoStartStatus>('idle')
   const [embeddedBootstrapSourceUrl, setEmbeddedBootstrapSourceUrl] = useState<string | null>(null)
   const [persistentRecoverySourceUrl, setPersistentRecoverySourceUrl] = useState<string | null>(null)
@@ -495,9 +421,9 @@ export default function VideoSyncManager() {
     if (!sessionId) {
       return false
     }
-    if (!instructorPasscode) {
+    if (!hasManagerAccess) {
       if (options?.reportErrors !== false) {
-        setErrorMessage(MISSING_INSTRUCTOR_CREDENTIALS_ERROR)
+        setErrorMessage(MISSING_MANAGER_ACCESS_ERROR)
       }
       return false
     }
@@ -537,7 +463,7 @@ export default function VideoSyncManager() {
       }
       return false
     }
-  }, [instructorPasscode, sessionId])
+  }, [hasManagerAccess, sessionId])
 
   const flushManagerPlaybackIntent = useCallback(async (): Promise<void> => {
     clearPlaybackCommandFlushTimer()
@@ -669,100 +595,41 @@ export default function VideoSyncManager() {
 
   useEffect(() => {
     if (!sessionId || typeof window === 'undefined') {
-      setInstructorPasscode(null)
+      setHasManagerAccess(false)
       setPersistentRecoverySourceUrl(null)
-      setIsPasscodeReady(true)
+      setIsManagerAccessReady(true)
       return
     }
+    if (embeddedManagerCapabilityExchange.isResolving) return
 
     let isCancelled = false
-
-    const loadInstructorPasscode = async (): Promise<void> => {
-      if (embeddedManagerCapabilityExchange.isResolving) {
-        return
-      }
-      if (embeddedManagerCapabilityExchange.isAuthorized) {
-        setInstructorPasscode(COOKIE_MANAGER_ACCESS_MARKER)
-        setPersistentRecoverySourceUrl(null)
-        setIsPasscodeReady(true)
-        return
-      }
-      const bootstrap = resolveBootstrapInstructorPasscode({
-        locationState: location.state,
-        sessionId,
-      })
-      if (bootstrap.instructorPasscode) {
-        // Yield once so StrictMode's development-only setup/cleanup pass cannot
-        // consume the one-time iframe bootstrap before the durable effect settles.
-        await Promise.resolve()
-        if (isCancelled) {
-          return
-        }
-        if (bootstrap.shouldClearLocationState) {
-          void navigate(location.pathname + location.search, {
-            replace: true,
-            state: null,
-          })
-        }
-        consumeCreateSessionBootstrapPayload('video-sync', sessionId)
-        setInstructorPasscode(COOKIE_MANAGER_ACCESS_MARKER)
-        setPersistentRecoverySourceUrl(null)
-        setIsPasscodeReady(true)
-        return
-      }
-
+    void (async () => {
       try {
-        const response = await fetch(`/api/video-sync/${sessionId}/instructor-passcode`, {
-          credentials: 'include',
-        })
-        if (!response.ok) {
+        const response = await fetch(`/api/video-sync/${sessionId}/manager-access`, { credentials: 'include' })
+        if (!response.ok || isCancelled) {
           if (!isCancelled) {
-            setInstructorPasscode(null)
+            setHasManagerAccess(false)
             setPersistentRecoverySourceUrl(null)
           }
           return
         }
-
-        const payload = (await response.json()) as InstructorPasscodeResponse
-        const recoveredPersistentSourceUrl = readRecoveredPersistentSourceUrl(payload)
-        if (payload != null) {
-          if (!isCancelled) {
-            setInstructorPasscode(COOKIE_MANAGER_ACCESS_MARKER)
-            setPersistentRecoverySourceUrl(recoveredPersistentSourceUrl)
-          }
-          return
-        }
-
+        const payload = (await response.json()) as ManagerAccessResponse
         if (!isCancelled) {
-          setInstructorPasscode(null)
-          setPersistentRecoverySourceUrl(null)
+          setHasManagerAccess(true)
+          setPersistentRecoverySourceUrl(readRecoveredPersistentSourceUrl(payload))
         }
       } catch {
         if (!isCancelled) {
-          setInstructorPasscode(null)
+          setHasManagerAccess(false)
           setPersistentRecoverySourceUrl(null)
         }
       } finally {
-        if (!isCancelled) {
-          setIsPasscodeReady(true)
-        }
+        if (!isCancelled) setIsManagerAccessReady(true)
       }
-    }
-
-    setIsPasscodeReady(false)
-    void loadInstructorPasscode()
-
-    return () => {
-      isCancelled = true
-    }
-  }, [
-    embeddedManagerCapabilityExchange.isAuthorized,
-    embeddedManagerCapabilityExchange.isResolving,
-    location.pathname,
-    location.search,
-    navigate,
-    sessionId,
-  ])
+    })()
+    setIsManagerAccessReady(false)
+    return () => { isCancelled = true }
+  }, [embeddedManagerCapabilityExchange.isResolving, sessionId])
 
   const handleEnvelope = useCallback((envelope: VideoSyncWsEnvelope) => {
     if (envelope.type === 'state-update' || envelope.type === 'state-snapshot' || envelope.type === 'heartbeat') {
@@ -988,7 +855,7 @@ export default function VideoSyncManager() {
 
   const { connect, disconnect } = useResilientWebSocket({
     buildUrl: buildWsUrl,
-    shouldReconnect: Boolean(sessionId && instructorPasscode && isPasscodeReady),
+    shouldReconnect: Boolean(sessionId && hasManagerAccess && isManagerAccessReady),
     onOpen: () => {},
     onMessage: (event) => {
       const envelope = parseVideoSyncEnvelope(event.data)
@@ -1003,11 +870,11 @@ export default function VideoSyncManager() {
   useEffect(() => {
     if (!sessionId) return undefined
     void fetchSession()
-    if (isPasscodeReady && instructorPasscode) {
+    if (isManagerAccessReady && hasManagerAccess) {
       connect()
     }
     return () => disconnect()
-  }, [sessionId, fetchSession, connect, disconnect, instructorPasscode, isPasscodeReady])
+  }, [sessionId, fetchSession, connect, disconnect, hasManagerAccess, isManagerAccessReady])
 
   const saveConfigWithValues = useCallback(async (
     sourceUrlValue: string,
@@ -1015,12 +882,12 @@ export default function VideoSyncManager() {
     stopSecTextValue: string,
   ): Promise<boolean> => {
     if (!sessionId) return false
-    if (!isPasscodeReady) {
-      setErrorMessage('Loading instructor credentials...')
+    if (!isManagerAccessReady) {
+      setErrorMessage('Loading manager access...')
       return false
     }
-    if (!instructorPasscode) {
-      setErrorMessage(MISSING_INSTRUCTOR_CREDENTIALS_ERROR)
+    if (!hasManagerAccess) {
+      setErrorMessage(MISSING_MANAGER_ACCESS_ERROR)
       return false
     }
 
@@ -1064,7 +931,7 @@ export default function VideoSyncManager() {
       setErrorMessage(message)
       return false
     }
-  }, [applyManagerStateUpdate, instructorPasscode, isPasscodeReady, sessionId])
+  }, [applyManagerStateUpdate, hasManagerAccess, isManagerAccessReady, sessionId])
 
   const saveConfig = useCallback(async (): Promise<void> => {
     await saveConfigWithValues(sourceUrlInput, hasStopTime, stopSecInput)
@@ -1088,12 +955,12 @@ export default function VideoSyncManager() {
       return
     }
 
-    if (!isPasscodeReady) {
+    if (!isManagerAccessReady) {
       setAutoStartStatus('starting')
       return
     }
 
-    if (!instructorPasscode) {
+    if (!hasManagerAccess) {
       setAutoStartStatus('failed')
       return
     }
@@ -1101,8 +968,8 @@ export default function VideoSyncManager() {
     if (!shouldAutoStartBootstrapSource({
       setupMode,
       bootstrapSourceUrl,
-      isPasscodeReady,
-      instructorPasscode,
+      isManagerAccessReady,
+      hasManagerAccess,
       autoStartStatus,
     })) {
       return
@@ -1126,8 +993,8 @@ export default function VideoSyncManager() {
   }, [
     autoStartStatus,
     bootstrapSourceUrl,
-    instructorPasscode,
-    isPasscodeReady,
+    hasManagerAccess,
+    isManagerAccessReady,
     saveConfigWithValues,
     sessionId,
     setupMode,
@@ -1137,7 +1004,7 @@ export default function VideoSyncManager() {
     if (!shouldRecoverAutoStartAfterCredentialLoad({
       setupMode,
       bootstrapSourceUrl,
-      instructorPasscode,
+      hasManagerAccess,
       autoStartStatus,
       errorMessage,
     })) {
@@ -1147,9 +1014,9 @@ export default function VideoSyncManager() {
     autoStartAttemptKeyRef.current = null
     setAutoStartStatus('idle')
     setErrorMessage((current) => (
-      current === MISSING_INSTRUCTOR_CREDENTIALS_ERROR ? null : current
+      current === MISSING_MANAGER_ACCESS_ERROR ? null : current
     ))
-  }, [autoStartStatus, bootstrapSourceUrl, errorMessage, instructorPasscode, setupMode])
+  }, [autoStartStatus, bootstrapSourceUrl, errorMessage, hasManagerAccess, setupMode])
 
   const handleEndSession = async (): Promise<void> => {
     if (!sessionId) return
@@ -1233,12 +1100,12 @@ export default function VideoSyncManager() {
               </label>
             ) : null}
 
-            <Button disabled={!isPasscodeReady || !instructorPasscode} onClick={() => void saveConfig()}>
-              {!isPasscodeReady
-                ? 'Loading instructor access...'
-                : instructorPasscode
+            <Button disabled={!isManagerAccessReady || !hasManagerAccess} onClick={() => void saveConfig()}>
+              {!isManagerAccessReady
+                ? 'Loading manager access...'
+                : hasManagerAccess
                   ? 'Start instructor view'
-                  : 'Instructor access unavailable'}
+                  : 'Manager access unavailable'}
             </Button>
           </section>
         )}
