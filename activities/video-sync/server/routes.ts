@@ -1220,11 +1220,11 @@ export default function setupVideoSyncRoutes(
       return
     }
 
-    if (resolveActivityPrincipalFromCookies(session, sessionId, 'manager', req.cookies)) {
-      res.json({})
-      return
-    }
-
+    // Resolve any persistent recovery context up front. It gates capability
+    // recovery below, but is also used to return canonical bootstrap data
+    // (persistentSourceUrl) even when the caller is already authorized - a
+    // just-authenticated teacher lands here with the manager cookie already set
+    // and still needs its configured video to be recovered.
     const directPersistentHash = await findHashBySessionId(sessionId)
     const embeddedParentContext = readEmbeddedParentSessionContext(session.data)
     const recoveryActivityName = directPersistentHash
@@ -1236,21 +1236,27 @@ export default function setupVideoSyncRoutes(
     const persistentHash = recoverySessionId
       ? await findHashBySessionId(recoverySessionId)
       : null
-
-    if (!persistentHash || !recoveryActivityName) {
-      res.status(403).json({ error: 'FORBIDDEN', message: 'Instructor credential recovery is not available for this session' })
-      return
-    }
-
     const sessionEntries = parsePersistentSessionsCookie(req.cookies?.persistent_sessions)
-    const matchingEntry = sessionEntries.find((entry) => entry.key === `${recoveryActivityName}:${persistentHash}`)
-    if (!matchingEntry) {
-      res.status(403).json({ error: 'FORBIDDEN', message: 'Instructor credential recovery is not available for this session' })
+    const matchingEntry = (persistentHash && recoveryActivityName)
+      ? sessionEntries.find((entry) => entry.key === `${recoveryActivityName}:${persistentHash}`)
+      : undefined
+    const hasVerifiedTeacherCookie = Boolean(
+      persistentHash
+      && recoveryActivityName
+      && matchingEntry
+      && verifyTeacherCodeWithHash(recoveryActivityName, persistentHash, String(matchingEntry.teacherCode ?? '')).valid,
+    )
+    const persistentSourceUrl = (persistentHash && matchingEntry && hasVerifiedTeacherCookie)
+      ? readPersistentSourceUrlFromCookieEntry(persistentHash, matchingEntry)
+      : null
+    const bootstrapPayload = persistentSourceUrl ? { persistentSourceUrl } : {}
+
+    if (resolveActivityPrincipalFromCookies(session, sessionId, 'manager', req.cookies)) {
+      res.json({ ...bootstrapPayload })
       return
     }
 
-    const verifiedTeacherCode = verifyTeacherCodeWithHash(recoveryActivityName, persistentHash, String(matchingEntry.teacherCode ?? ''))
-    if (!verifiedTeacherCode.valid) {
+    if (!persistentHash || !recoveryActivityName || !matchingEntry || !hasVerifiedTeacherCookie) {
       res.status(403).json({ error: 'FORBIDDEN', message: 'Instructor credential recovery is not available for this session' })
       return
     }
@@ -1285,10 +1291,7 @@ export default function setupVideoSyncRoutes(
       res.status(404).json({ error: 'NOT_FOUND', message: 'Session not found' })
       return
     }
-    const persistentSourceUrl = readPersistentSourceUrlFromCookieEntry(persistentHash, matchingEntry)
-    res.json({
-      ...(persistentSourceUrl ? { persistentSourceUrl } : {}),
-    })
+    res.json({ ...bootstrapPayload })
   })
 
   app.get('/api/video-sync/:sessionId/session', async (req, res) => {

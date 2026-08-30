@@ -1764,6 +1764,45 @@ void test('manager-access route returns canonical persistent sourceUrl for persi
   await cleanupPersistentSession(hash)
 })
 
+void test('manager-access route still returns canonical sourceUrl when the manager cookie is already present', async () => {
+  initializePersistentStorage(null)
+
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  const session = createVideoSyncSession('s1')
+  const storeState = createSessionStore({ s1: session })
+  const teacherCode = 'persistent-teacher-code'
+  const { hash, hashedTeacherCode } = generatePersistentHash('video-sync', teacherCode)
+  const selectedOptions = { sourceUrl: 'https://www.youtube.com/watch?v=mCq8-xTH7jA' }
+  const urlHash = computePersistentLinkUrlHash(hash, { entryPolicy: 'instructor-required', selectedOptions })
+  await getOrCreateActivePersistentSession('video-sync', hash, hashedTeacherCode)
+  await startPersistentSession(hash, 's1', { id: 'teacher-ws', readyState: 1, send() {} })
+
+  setupVideoSyncRoutes(app, storeState.sessions, ws)
+  const handler = app.handlers.get['/api/video-sync/:sessionId/manager-access']
+
+  const res = createResponse()
+  await handler?.(
+    {
+      params: { sessionId: 's1' },
+      cookies: {
+        // Manager capability already established (e.g. by the shared teacher-authenticate route).
+        ...(defaultManagerCookiesBySessionId.get('s1') ?? {}),
+        persistent_sessions: JSON.stringify([
+          { key: `video-sync:${hash}`, teacherCode, selectedOptions, entryPolicy: 'instructor-required', urlHash },
+        ]),
+      },
+    },
+    res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  assert.deepEqual(res.body, { persistentSourceUrl: 'https://www.youtube.com/watch?v=mCq8-xTH7jA' })
+  // Fast path: no new capability cookie issued.
+  assert.equal(res.cookies.length, 0)
+  await cleanupPersistentSession(hash)
+})
+
 void test('manager-access route ignores unsigned persistent sourceUrl from cookie selectedOptions', async () => {
   initializePersistentStorage(null)
 

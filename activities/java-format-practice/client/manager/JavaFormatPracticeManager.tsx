@@ -163,17 +163,53 @@ export default function JavaFormatPracticeManager() {
     }
 
     let cancelled = false
-    void fetch(`/api/session/${encodeURIComponent(sessionId)}/persistent-manager-capability`, {
-      method: 'POST',
-      credentials: 'include',
-    }).catch(() => {
-      // Temporary sessions do not have persistent recovery; their create route already issued the capability.
-    }).finally(() => {
-      if (!cancelled) setManagerAccessReadySessionId(sessionId)
-    })
+    let retryTimer: ReturnType<typeof setTimeout> | undefined
+    let attempts = 0
+    const MAX_ATTEMPTS = 4
 
-    return () => { cancelled = true }
-  }, [sessionId])
+    const runExchange = async (): Promise<void> => {
+      let response: Response
+      try {
+        response = await fetch(`/api/session/${encodeURIComponent(sessionId)}/persistent-manager-capability`, {
+          method: 'POST',
+          credentials: 'include',
+        })
+      } catch {
+        // Network error: transient, keep the gate closed and retry.
+        if (!cancelled) scheduleRetryOrGiveUp()
+        return
+      }
+      if (cancelled) return
+      // 2xx  -> capability cookie issued.
+      // 404  -> temporary session; POST /create already issued the capability.
+      // 403  -> no persistent teacher cookie; retrying will not help, so release
+      //         and let the first protected request surface the recovery banner.
+      if (response.ok || response.status === 404 || response.status === 403) {
+        setManagerAccessReadySessionId(sessionId)
+        return
+      }
+      // 5xx / unexpected: transient persistence failure - stay gated and retry.
+      scheduleRetryOrGiveUp()
+    }
+
+    const scheduleRetryOrGiveUp = (): void => {
+      attempts += 1
+      if (attempts >= MAX_ATTEMPTS) {
+        // Do not open the protected poll/socket without a cookie; surface the
+        // existing recovery affordance instead of hanging on disabled controls.
+        markManagerAuthLost()
+        return
+      }
+      retryTimer = setTimeout(() => { void runExchange() }, 1000 * attempts)
+    }
+
+    void runExchange()
+
+    return () => {
+      cancelled = true
+      if (retryTimer) clearTimeout(retryTimer)
+    }
+  }, [sessionId, markManagerAuthLost])
 
   const fetchStudents = useCallback(async (signal?: AbortSignal) => {
     if (sessionId == null || !managerAccessReady || managerAuthLostRef.current || pollInFlightRef.current !== 0) return;

@@ -316,12 +316,16 @@ export default function VideoSyncManager() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [playerReady, setPlayerReady] = useState(false)
   const [activePlayerHost, setActivePlayerHost] = useState<VideoSyncPlayerHost | null>(null)
-  const [hasManagerAccess, setHasManagerAccess] = useState(false)
-  const [isManagerAccessReady, setIsManagerAccessReady] = useState(false)
   const [managerAccessRefreshNonce, setManagerAccessRefreshNonce] = useState(0)
+  // The /manager-access outcome, tagged with the session id and refresh nonce it
+  // was resolved for. Readiness is derived from equality with the current values
+  // so a parameter-only route swap can never expose the previous session's
+  // authorization before its own check runs.
+  const [managerAccessState, setManagerAccessState] = useState<
+    { sessionId: string; nonce: number; granted: boolean; sourceUrl: string | null } | null
+  >(null)
   const [autoStartStatus, setAutoStartStatus] = useState<AutoStartStatus>('idle')
   const [embeddedBootstrapSourceUrl, setEmbeddedBootstrapSourceUrl] = useState<string | null>(null)
-  const [persistentRecoverySourceUrl, setPersistentRecoverySourceUrl] = useState<string | null>(null)
 
   const playerContainerRef = useRef<HTMLDivElement | null>(null)
   const playerRef = useRef<YoutubePlayerLike | null>(null)
@@ -340,6 +344,13 @@ export default function VideoSyncManager() {
     sessionId: sessionId ?? undefined,
     search: location.search,
   })
+  const managerAccessResolved =
+    managerAccessState != null
+    && managerAccessState.sessionId === sessionId
+    && managerAccessState.nonce === managerAccessRefreshNonce
+  const isManagerAccessReady = sessionId == null || managerAccessResolved
+  const hasManagerAccess = managerAccessResolved && managerAccessState.granted
+  const persistentRecoverySourceUrl = managerAccessResolved ? managerAccessState.sourceUrl : null
   const bootstrapSourceUrl = persistentRecoverySourceUrl ?? queryBootstrapSourceUrl ?? embeddedBootstrapSourceUrl
 
   useEffect(() => {
@@ -597,39 +608,30 @@ export default function VideoSyncManager() {
 
   useEffect(() => {
     if (!sessionId || typeof window === 'undefined') {
-      setHasManagerAccess(false)
-      setPersistentRecoverySourceUrl(null)
-      setIsManagerAccessReady(true)
       return
     }
     if (embeddedManagerCapabilityExchange.isResolving) return
 
+    const nonce = managerAccessRefreshNonce
     let isCancelled = false
     void (async () => {
       try {
         const response = await fetch(`/api/video-sync/${sessionId}/manager-access`, { credentials: 'include' })
-        if (!response.ok || isCancelled) {
-          if (!isCancelled) {
-            setHasManagerAccess(false)
-            setPersistentRecoverySourceUrl(null)
-          }
+        if (isCancelled) return
+        if (!response.ok) {
+          setManagerAccessState({ sessionId, nonce, granted: false, sourceUrl: null })
           return
         }
         const payload = (await response.json()) as ManagerAccessResponse
         if (!isCancelled) {
-          setHasManagerAccess(true)
-          setPersistentRecoverySourceUrl(readRecoveredPersistentSourceUrl(payload))
+          setManagerAccessState({ sessionId, nonce, granted: true, sourceUrl: readRecoveredPersistentSourceUrl(payload) })
         }
       } catch {
         if (!isCancelled) {
-          setHasManagerAccess(false)
-          setPersistentRecoverySourceUrl(null)
+          setManagerAccessState({ sessionId, nonce, granted: false, sourceUrl: null })
         }
-      } finally {
-        if (!isCancelled) setIsManagerAccessReady(true)
       }
     })()
-    setIsManagerAccessReady(false)
     return () => { isCancelled = true }
   }, [embeddedManagerCapabilityExchange.isResolving, managerAccessRefreshNonce, sessionId])
 

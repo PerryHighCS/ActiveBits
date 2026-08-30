@@ -90,6 +90,7 @@ void test('JavaFormatPracticeManager keeps a live studentsUpdate over a slower /
 
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const url = String(input)
+    if (url.includes('/persistent-manager-capability')) return new Response('{}', { status: 200 })
     if (url.includes('/students')) {
       studentsCalls += 1
       // The mount poll is deliberately slow so a socket update can land before it
@@ -142,6 +143,7 @@ void test('JavaFormatPracticeManager applies the /students poll when no socket u
 
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const url = String(input)
+    if (url.includes('/persistent-manager-capability')) return new Response('{}', { status: 200 })
     if (url.includes('/students')) {
       return new Response(JSON.stringify({ students: [studentRecord('c', 'Cass')] }), { status: 200 })
     }
@@ -175,6 +177,7 @@ void test('JavaFormatPracticeManager ignores a studentsUpdate queued on a previo
 
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const url = String(input)
+    if (url.includes('/persistent-manager-capability')) return new Response('{}', { status: 200 })
     if (url.includes('/api/java-format-practice/session-1/students')) {
       return new Response(JSON.stringify({ students: [studentRecord('a', 'Ada')] }), { status: 200 })
     }
@@ -244,6 +247,7 @@ void test('JavaFormatPracticeManager serializes /students polls and still render
   let studentsCalls = 0
 
   globalThis.fetch = (async (input: RequestInfo | URL) => {
+    if (String(input).includes('/persistent-manager-capability')) return new Response('{}', { status: 200 })
     if (String(input).includes('/students')) {
       studentsCalls += 1
       return roster
@@ -291,6 +295,11 @@ void test('JavaFormatPracticeManager auth-lost banner starts a fresh session ins
 
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
+    // No persistent teacher cookie for this dead session: the capability exchange
+    // 403s, the gate releases, and the roster poll's own 403 latches the banner.
+    if (url.includes('/persistent-manager-capability')) {
+      return new Response(JSON.stringify({ error: 'Persistent teacher authentication is required' }), { status: 403 })
+    }
     if (url.includes('/api/java-format-practice/create') && init?.method === 'POST') {
       createCalls += 1
       return new Response(JSON.stringify({ id: 'fresh-session' }), { status: 200 })
@@ -473,6 +482,53 @@ void test('JavaFormatPracticeManager re-gates controls for the new session after
     await testingLibrary.waitFor(() => {
       assert.equal((rendered.getByRole('button', { name: 'Beginner' }) as HTMLButtonElement).disabled, false)
     })
+  } finally {
+    await teardown?.()
+    globalThis.fetch = previousFetch
+    restoreDom()
+  }
+})
+
+void test('JavaFormatPracticeManager keeps controls gated when the persistent capability exchange keeps failing', { concurrency: false }, async () => {
+  TestWebSocket.instances = []
+  const restoreDom = installDomEnvironment('https://bits.example/manage/java-format-practice/perma-500')
+  const previousFetch = globalThis.fetch
+
+  let studentsCalls = 0
+
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    if (url.includes('/persistent-manager-capability')) {
+      return new Response(JSON.stringify({ error: 'unavailable' }), { status: 500 })
+    }
+    if (url.includes('/students')) {
+      studentsCalls += 1
+      return new Response(JSON.stringify({ students: [] }), { status: 200 })
+    }
+    if (url.includes('/difficulty') && init?.method === 'POST') {
+      throw new Error('difficulty must not be requested without a manager capability')
+    }
+    throw new Error(`Unexpected fetch: ${url}`)
+  }) as typeof fetch
+
+  let teardown: (() => Promise<void>) | null = null
+  try {
+    const { testingLibrary, router, JavaFormatPracticeManager, act } = await loadHarness()
+    const rendered = testingLibrary.render(
+      <router.MemoryRouter initialEntries={['/manage/java-format-practice/perma-500']}>
+        <router.Routes>
+          <router.Route path="/manage/java-format-practice/:sessionId" element={<JavaFormatPracticeManager />} />
+        </router.Routes>
+      </router.MemoryRouter>,
+    )
+    teardown = async () => { await act(async () => { rendered.unmount(); testingLibrary.cleanup(); await Promise.resolve() }) }
+
+    // Let the first (failing) exchange attempt settle.
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve() })
+
+    // A transient 500 must not open the protected surfaces: no cookie was issued.
+    assert.equal((rendered.getByRole('button', { name: 'Beginner' }) as HTMLButtonElement).disabled, true)
+    assert.equal(studentsCalls, 0, 'the roster poll never runs while the capability exchange is failing')
   } finally {
     await teardown?.()
     globalThis.fetch = previousFetch
