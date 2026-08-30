@@ -274,6 +274,7 @@ Do not begin with all activities at once.
 - [ ] Extract or add a shared persistent/embedded manager-capability issuance adapter that verifies the existing parent authority without exposing an activity credential.
 - [ ] Issue the httpOnly manager capability on Video Sync persistent and embedded recovery, then migrate manager REST routes and WebSocket admission to that capability.
 - [ ] Remove client passcode recovery and authenticate manager WebSockets directly from the capability cookie while preserving Video Sync's authenticate-before-subscribe ordering for participant sockets.
+- [x] Stabilize the existing SyncDeck student-return browser regression test: wait for each rendered roster row, rather than only its early connected-count update, before opening the next student socket (the underlying atomic-mutation race remains tracked in [#350](https://github.com/PerryHighCS/ActiveBits/issues/350)).
 - [ ] Add persistent, embedded, temporary-manager, capability-loss, and cross-role browser/route/socket coverage.
 - [ ] Restore Java Format permalink support only in the Phase 6 retrofit after this adapter is proven.
 

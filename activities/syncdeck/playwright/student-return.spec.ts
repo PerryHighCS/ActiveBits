@@ -14,10 +14,11 @@ async function acceptStudent(page: Page, sessionId: string, participantId: strin
 
 // Open the student sockets one at a time. The SyncDeck join handler does an
 // async read-modify-write of the session roster, so two sockets opened in the
-// same tick can race and drop one roster entry (worse on WebKit timing). Real
-// students never join within one tick; waiting for each to appear keeps the
-// multi-client assertion retry-stable. The underlying cross-handler write race
-// is tracked in https://github.com/PerryHighCS/ActiveBits/issues/350.
+// same tick can race and drop one roster entry (worse on WebKit timing). A
+// socket's open event and the connected-count update can both precede the
+// persisted roster update; wait for each rendered row before opening the next
+// socket. The underlying cross-handler write race is tracked in
+// https://github.com/PerryHighCS/ActiveBits/issues/350.
 async function connectSyncDeckStudentSocket(page: Page, sessionId: string, studentId: string): Promise<void> {
   await page.evaluate(({ sessionId, studentId }) => new Promise<void>((resolve, reject) => {
     const ws = new WebSocket(`${location.origin.replace('http', 'ws')}/ws/syncdeck?sessionId=${encodeURIComponent(sessionId)}&studentId=${encodeURIComponent(studentId)}`)
@@ -50,12 +51,12 @@ test('SyncDeck manager boots a roster student through the rendered panel action'
   }, { instructorPasscode: session.instructorPasscode })
   await page.goto(`/manage/syncdeck/${session.id}`)
   await expect(page.getByRole('button', { name: 'Students: 0' })).toBeVisible()
+  await page.getByRole('button', { name: /Students:/ }).click()
   await connectSyncDeckStudentSocket(page, session.id, 'student-1')
   await expect(page.getByRole('button', { name: 'Students: 1' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Return Ada to the waiting room' })).toBeVisible()
   await connectSyncDeckStudentSocket(page, session.id, 'student-2')
   await expect(page.getByRole('button', { name: 'Students: 2' })).toBeVisible()
-  await page.getByRole('button', { name: /Students:/ }).click()
-  await expect(page.getByRole('button', { name: 'Return Ada to the waiting room' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Return Lin to the waiting room' })).toBeVisible()
 
   page.once('dialog', (dialog) => dialog.dismiss())
