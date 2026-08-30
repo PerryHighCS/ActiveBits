@@ -754,20 +754,36 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
       : {}
     const createSessionPayload = buildCreateSessionBootstrapPayload(activityName, activeSessionData)
 
-    if (sessions.set && isPlainObject(activeSession)) {
-      try {
-        const capability = issueActivityCapability(activeSession as { data: unknown }, 'manager')
-        await sessions.set(sessionId, activeSession)
-        writeActivityCapabilityCookie(res, sessionId, 'manager', capability.token)
-      } catch (error) {
-        console.error(JSON.stringify({
-          event: 'persistent-manager-capability-persistence-failed',
-          sessionId,
-          errorName: error instanceof Error ? error.name : 'unknown',
-        }))
-        res.status(500).json({ error: 'manager capability unavailable' })
-        return
-      }
+    // The teacher-auth response is what establishes manager authority, so a
+    // store that cannot persist the capability must fail closed - matching the
+    // persistent-manager-capability recovery endpoint - not return success
+    // without a usable manager cookie.
+    if (typeof sessions.set !== 'function' || !isPlainObject(activeSession)) {
+      console.error(JSON.stringify({
+        event: 'persistent-manager-capability-store-unavailable',
+        sessionId,
+      }))
+      res.status(500).json({ error: 'manager capability unavailable' })
+      return
+    }
+
+    try {
+      // Re-read: `activeSession` was fetched before the rate-limit and
+      // persistent-store awaits above. Issue the capability onto the latest
+      // record so a participant/socket mutation in that window is not lost.
+      const freshSession = await sessions.get(sessionId)
+      const capabilityTarget = isPlainObject(freshSession) ? freshSession : activeSession
+      const capability = issueActivityCapability(capabilityTarget as { data: unknown }, 'manager')
+      await sessions.set(sessionId, capabilityTarget)
+      writeActivityCapabilityCookie(res, sessionId, 'manager', capability.token)
+    } catch (error) {
+      console.error(JSON.stringify({
+        event: 'persistent-manager-capability-persistence-failed',
+        sessionId,
+        errorName: error instanceof Error ? error.name : 'unknown',
+      }))
+      res.status(500).json({ error: 'manager capability unavailable' })
+      return
     }
 
     res.json({
@@ -828,8 +844,17 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
         return
       }
 
-      const capability = issueActivityCapability(activeSession as { data: unknown }, 'manager')
-      await sessions.set(sessionId, activeSession)
+      // Re-read: `activeSession` was fetched before the persistent-store and
+      // cookie-validation awaits above. Issue the capability onto the latest
+      // record so a concurrent activity update in that window is not lost when
+      // the whole-session snapshot is written back.
+      const freshSession = await sessions.get(sessionId)
+      if (!isPlainObject(freshSession)) {
+        res.status(404).json({ error: 'Active session not found' })
+        return
+      }
+      const capability = issueActivityCapability(freshSession as { data: unknown }, 'manager')
+      await sessions.set(sessionId, freshSession)
       writeActivityCapabilityCookie(res, sessionId, 'manager', capability.token)
       res.json({ success: true })
     } catch (error) {

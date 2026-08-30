@@ -157,7 +157,12 @@ export function useResilientWebSocket({
 
     ws.onclose = (event) => {
       const isLatestSocket = socketRef.current === ws
-      if (!isLatestSocket) {
+      // `disconnect()` nulls socketRef synchronously, so an intentional close
+      // arrives here as "not the latest socket". Consumers still need that
+      // close (e.g. WwwSim clears its heartbeat/keepalive intervals only in
+      // onClose), so suppress only a socket that a newer connect() replaced -
+      // never a manual disconnect.
+      if (!isLatestSocket && !manualCloseRef.current) {
         return
       }
       onCloseRef.current?.(event, ws)

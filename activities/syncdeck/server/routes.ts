@@ -78,6 +78,7 @@ interface JsonResponse {
   cookie?(name: string, value: string, options: Record<string, unknown>): void
   setHeader?(name: string, value: string): void
   redirect?(status: number, url: string): void
+  readonly headersSent?: boolean
 }
 
 interface RouteRequest {
@@ -2181,71 +2182,83 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       return
     }
 
-    const session = await sessions.get(sessionId)
-    const entryToken = session ? readEmbeddedManagerEntryToken(session) : null
-    if (!entryToken || !verifyEmbeddedManagerEntryToken(entryToken.value, token)) {
-      res.status(403).json({ error: 'invalid embedded manager credentials' })
-      return
-    }
-    if (!res.cookie) {
-      console.error(JSON.stringify({
-        activity: 'syncdeck',
-        event: 'embedded-manager-capability-cookie-unavailable',
-        sessionId,
-      }))
-      res.status(500).json({ error: 'embedded manager capability unavailable' })
-      return
-    }
-
-    const consumeSessionDataToken = sessions.consumeSessionDataToken
-    if (!consumeSessionDataToken) {
-      console.error(JSON.stringify({
-        activity: 'syncdeck',
-        event: 'embedded-manager-token-consume-unavailable',
-        sessionId,
-      }))
-      res.status(500).json({ error: 'embedded manager credentials unavailable' })
-      return
-    }
-
-    if (!await consumeSessionDataToken.call(
-      sessions,
-      sessionId,
-      'embeddedManagerEntryToken',
-      token,
-    )) {
-      res.status(403).json({ error: 'invalid embedded manager credentials' })
-      return
-    }
-
-    // Re-read after atomic consumption so persisting the capability cannot
-    // resurrect the one-time bootstrap token from the pre-consumption record.
-    const consumedSession = await sessions.get(sessionId)
-    if (!consumedSession) {
-      res.status(404).json({ error: 'embedded activity session not found' })
-      return
-    }
     try {
-      const capability = issueActivityCapability(consumedSession, 'manager')
-      await sessions.set(sessionId, consumedSession)
-      writeActivityCapabilityCookie({ cookie: res.cookie.bind(res) }, sessionId, 'manager', capability.token)
-    } catch (error) {
+      const session = await sessions.get(sessionId)
+      const entryToken = session ? readEmbeddedManagerEntryToken(session) : null
+      if (!entryToken || !verifyEmbeddedManagerEntryToken(entryToken.value, token)) {
+        res.status(403).json({ error: 'invalid embedded manager credentials' })
+        return
+      }
+      if (!res.cookie) {
+        console.error(JSON.stringify({
+          activity: 'syncdeck',
+          event: 'embedded-manager-capability-cookie-unavailable',
+          sessionId,
+        }))
+        res.status(500).json({ error: 'embedded manager capability unavailable' })
+        return
+      }
+
+      const consumeSessionDataToken = sessions.consumeSessionDataToken
+      if (!consumeSessionDataToken) {
+        console.error(JSON.stringify({
+          activity: 'syncdeck',
+          event: 'embedded-manager-token-consume-unavailable',
+          sessionId,
+        }))
+        res.status(500).json({ error: 'embedded manager credentials unavailable' })
+        return
+      }
+
+      if (!await consumeSessionDataToken.call(
+        sessions,
+        sessionId,
+        'embeddedManagerEntryToken',
+        token,
+      )) {
+        res.status(403).json({ error: 'invalid embedded manager credentials' })
+        return
+      }
+
+      // Re-read after atomic consumption so persisting the capability cannot
+      // resurrect the one-time bootstrap token from the pre-consumption record.
+      const consumedSession = await sessions.get(sessionId)
+      if (!consumedSession) {
+        res.status(404).json({ error: 'embedded activity session not found' })
+        return
+      }
+      try {
+        const capability = issueActivityCapability(consumedSession, 'manager')
+        await sessions.set(sessionId, consumedSession)
+        writeActivityCapabilityCookie({ cookie: res.cookie.bind(res) }, sessionId, 'manager', capability.token)
+      } catch (error) {
+        console.error(JSON.stringify({
+          activity: 'syncdeck',
+          event: 'embedded-manager-capability-persistence-failed',
+          sessionId,
+          errorName: error instanceof Error ? error.name : 'unknown',
+        }))
+        res.status(500).json({ error: 'embedded manager capability unavailable' })
+        return
+      }
+
+      console.info(JSON.stringify({
+        activity: 'syncdeck',
+        event: 'embedded-manager-capability-issued',
+        sessionId,
+      }))
+      res.json({ ok: true })
+    } catch (storeError) {
       console.error(JSON.stringify({
         activity: 'syncdeck',
-        event: 'embedded-manager-capability-persistence-failed',
+        event: 'embedded-manager-capability-failed',
         sessionId,
-        errorName: error instanceof Error ? error.name : 'unknown',
+        errorName: storeError instanceof Error ? storeError.name : 'unknown',
       }))
-      res.status(500).json({ error: 'embedded manager capability unavailable' })
-      return
+      if (!res.headersSent) {
+        res.status(500).json({ error: 'embedded manager capability unavailable' })
+      }
     }
-
-    console.info(JSON.stringify({
-      activity: 'syncdeck',
-      event: 'embedded-manager-capability-issued',
-      sessionId,
-    }))
-    res.json({ ok: true })
   })
 
   app.post('/api/syncdeck/:sessionId/embedded-activity/end', async (req, res) => {

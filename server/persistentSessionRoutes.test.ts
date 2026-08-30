@@ -257,6 +257,42 @@ void test('session teacher authenticate does not issue a capability cookie when 
   assert.equal(Array.from(res.cookies.keys()).some((name) => name.startsWith('activebits_cap_manager_')), false)
 })
 
+void test('session teacher authenticate fails closed when the store cannot persist a capability', async (t) => {
+  initializePersistentStorage(null)
+  await initializeActivityRegistry()
+  const sessionMap = new Map<string, unknown>()
+  // No `set`: the store cannot persist a manager capability at all. The
+  // teacher-auth response is what establishes manager authority, so this must
+  // fail closed rather than report success without a usable cookie.
+  const sessions = {
+    get: async (id: string) => {
+      const session = sessionMap.get(id)
+      return session == null ? null : structuredClone(session)
+    },
+  }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+  const handler = getRoute(app, 'POST', '/api/session/:sessionId/teacher-authenticate')
+
+  const activityName = 'syncdeck'
+  const teacherCode = 'teacher-secret'
+  const { hash, hashedTeacherCode } = generatePersistentHash(activityName, teacherCode)
+  t.after(async () => cleanupPersistentSession(hash))
+  sessionMap.set('live-session', {
+    id: 'live-session', type: activityName, data: { instructorPasscode: 'syncdeck-instructor-passcode' },
+  })
+  await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode, 'solo-allowed')
+  await startPersistentSession(hash, 'live-session', { id: 'teacher-ws', readyState: 1, send() {} })
+
+  const res = createMockRes()
+  console.info('[TEST] Expected fail-closed manager capability response: the injected store has no set().')
+  await handler(createMockReq({ params: { sessionId: 'live-session' }, body: { teacherCode } }), res)
+
+  assert.equal(res.statusCode, 500)
+  assert.deepEqual(res.jsonBody, { error: 'manager capability unavailable' })
+  assert.equal(Array.from(res.cookies.keys()).some((name) => name.startsWith('activebits_cap_manager_')), false)
+})
+
 void test('persistent manager capability recovery issues a manager cookie for an authenticated live permalink', async (t) => {
   initializePersistentStorage(null)
   const sessionMap = new Map<string, unknown>()
@@ -294,6 +330,50 @@ void test('persistent manager capability recovery issues a manager cookie for an
   const persisted = await sessions.get('live-session') as { data?: { activityCapabilities?: Record<string, unknown> } } | null
   assert.ok(persisted?.data?.activityCapabilities, 'capability is persisted on the live session record')
   assert.equal(Object.keys(persisted!.data!.activityCapabilities!).length, 1)
+})
+
+void test('persistent manager capability recovery issues the capability onto the latest session record', async (t) => {
+  initializePersistentStorage(null)
+  const sessionMap = new Map<string, unknown>()
+  let getCalls = 0
+  const sessions = {
+    get: async (id: string) => {
+      getCalls += 1
+      // Simulate a concurrent activity update that lands after the handler's
+      // initial read but before it persists the capability: the second read
+      // (the handler's re-read) sees a newer field the first read did not.
+      if (id === 'live-session' && getCalls === 2) {
+        const current = sessionMap.get(id) as { data: Record<string, unknown> }
+        sessionMap.set(id, { ...current, data: { ...current.data, concurrentMarker: 'landed-mid-flight' } })
+      }
+      const session = sessionMap.get(id)
+      return session == null ? null : structuredClone(session)
+    },
+    set: async (id: string, session: unknown) => { sessionMap.set(id, structuredClone(session)) },
+  }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+  const handler = getRoute(app, 'POST', '/api/session/:sessionId/persistent-manager-capability')
+
+  const activityName = 'java-format-practice'
+  const teacherCode = 'teacher-secret'
+  const { hash, hashedTeacherCode } = generatePersistentHash(activityName, teacherCode)
+  t.after(async () => cleanupPersistentSession(hash))
+  sessionMap.set('live-session', { id: 'live-session', type: activityName, data: { students: [] } })
+  await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode)
+  await startPersistentSession(hash, 'live-session', { id: 'teacher-ws', readyState: 1, send() {} })
+
+  const res = createMockRes()
+  await handler(createMockReq({
+    params: { sessionId: 'live-session' },
+    cookies: { persistent_sessions: buildCookieValue(activityName, hash, teacherCode) },
+  }), res)
+
+  assert.equal(res.statusCode, 200)
+  const persisted = await sessions.get('live-session') as
+    { data?: { activityCapabilities?: Record<string, unknown>; concurrentMarker?: string } } | null
+  assert.ok(persisted?.data?.activityCapabilities, 'capability is persisted')
+  assert.equal(persisted?.data?.concurrentMarker, 'landed-mid-flight', 'the concurrent update is not clobbered by a stale snapshot write')
 })
 
 void test('persistent manager capability recovery fast-paths an already-authorized caller without a persistent-store lookup', async () => {

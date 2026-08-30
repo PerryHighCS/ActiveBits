@@ -264,3 +264,49 @@ void test('stale socket events cannot change the live connection state', async (
     restoreDom()
   }
 })
+
+void test('an intentional disconnect still delivers onClose so consumers can clean up', async () => {
+  const restoreDom = installDomEnvironment()
+  FakeWebSocket.instances.length = 0
+  const container = document.getElementById('root')
+  assert.ok(container)
+  const root = createRoot(container)
+  let disconnect: (() => void) | null = null
+  let closeCalls = 0
+
+  function Probe(): null {
+    const connection = useResilientWebSocket({
+      buildUrl: 'wss://example.test/socket',
+      connectOnMount: true,
+      shouldReconnect: false,
+      onClose: () => { closeCalls += 1 },
+    })
+    disconnect = connection.disconnect
+    return null
+  }
+
+  try {
+    await act(async () => {
+      root.render(createElement(Probe))
+    })
+    const socket = FakeWebSocket.instances[0]
+    assert.ok(socket)
+    await act(async () => {
+      socket.emitOpen()
+    })
+
+    await act(async () => {
+      // disconnect() nulls socketRef synchronously; the browser then dispatches
+      // close on a later tick, i.e. after the socket is no longer "latest".
+      disconnect?.()
+      socket.emitClose(1000)
+    })
+    assert.equal(closeCalls, 1, 'onClose must fire for a manual disconnect, not just for live-socket closes')
+
+    await act(async () => {
+      root.unmount()
+    })
+  } finally {
+    restoreDom()
+  }
+})

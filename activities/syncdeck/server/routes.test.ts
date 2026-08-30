@@ -3048,6 +3048,35 @@ void test('embedded manager capability exchange does not issue a cookie when per
   assert.equal(response.cookies.length, 0)
 })
 
+void test('embedded manager capability exchange returns a structured 500 when a store read rejects', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const now = Date.now()
+  const storeState = createSessionStore({
+    'child-capability': {
+      id: 'child-capability', type: 'video-sync', created: now, lastActivity: now,
+      data: { embeddedManagerEntryToken: { value: 'capability-entry-token', expiresAt: now + 60_000 } },
+    },
+  })
+  // [TEST] the backing store rejects the lookup on purpose: the token verify,
+  // atomic consume and post-consume re-read all run before the inner try, so
+  // without route-level error handling the rejection would escape this async
+  // handler with no structured log and no controlled JSON response.
+  storeState.sessions.get = async () => { throw new Error('[TEST] session store unavailable') }
+  setupSyncDeckRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.get['/api/syncdeck/embedded-manager-capability']
+  const response = createResponse()
+  await handler?.(
+    createRequest({}, undefined, {}, {}, { sessionId: 'child-capability', token: 'capability-entry-token' }),
+    response,
+  )
+
+  assert.equal(response.statusCode, 500)
+  assert.deepEqual(response.body, { error: 'embedded manager capability unavailable' })
+  assert.equal(response.cookies.length, 0)
+})
+
 void test('embedded manager passcode exchange allows only one concurrent token redemption', async () => {
   const app = createMockApp()
   const ws = createMockWs()
