@@ -137,6 +137,15 @@ void test('Java Format websocket admits only cookie principals and keeps roster 
   assert.equal(studentSocket.principalKind, 'participant')
   assert.ok(managerSocket.sent.some((value) => JSON.parse(value).type === 'studentsUpdate'))
   assert.equal(studentSocket.sent.some((value) => JSON.parse(value).type === 'studentsUpdate'), false)
+
+  // A socket holding the manager cookie but omitting `principal=manager` must not
+  // be admitted as a manager — the query param is routing only, least privilege.
+  console.info('[TEST] java-format websocket: manager cookie without principal=manager is expected to be denied, not elevated')
+  const unParametrized = makeSocket(`${getActivityCapabilityCookieName('manager', session.id)}=${manager.token}`)
+  registeredSocketHandler(unParametrized, new URLSearchParams(`sessionId=${session.id}`))
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  assert.notEqual(unParametrized.principalKind, 'manager')
+  assert.deepEqual(unParametrized.closed, { code: 1008, reason: 'activity-auth-required' })
 })
 
 void test('Java Format manager socket is closed once its capability reaches expiry', async () => {
@@ -224,6 +233,13 @@ void test('Java Format broadcast subscription drops cross-instance messages with
   forward({ type: 'difficultyUpdate', payload: { difficulty: 'advanced' }, audience: 'all' })
   assert.equal(managerSocket.sent.length, 2)
   assert.equal(studentSocket.sent.length, 1)
+
+  // Clients receive only { type, payload } — routing metadata is stripped so the
+  // shape matches a local send.
+  assert.deepEqual(JSON.parse(studentSocket.sent[0] as string), {
+    type: 'difficultyUpdate',
+    payload: { difficulty: 'advanced' },
+  })
 })
 
 void test('Java Format stats route authorizes the participant cookie and broadcasts roster changes to managers only', async () => {

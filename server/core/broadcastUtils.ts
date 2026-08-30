@@ -17,6 +17,13 @@ interface BroadcastWsRouter {
 export type BroadcastForwardPredicate = (client: BroadcastClient, message: unknown) => boolean
 
 /**
+ * Maps a raw cross-instance broadcast envelope to the client-facing payload.
+ * Use it to strip routing metadata (audience, origin, …) so a socket receives
+ * the same shape whether delivery was local or via pub/sub. Defaults to identity.
+ */
+export type BroadcastMessageTransform = (message: unknown) => unknown
+
+/**
  * Utility helpers for activity-level broadcast subscriptions.
  */
 
@@ -30,6 +37,7 @@ export function createBroadcastSubscriptionHelper(
   sessions: BroadcastSessions,
   ws: BroadcastWsRouter,
   shouldForward: BroadcastForwardPredicate = () => true,
+  transformMessage: BroadcastMessageTransform = (message) => message,
 ) {
   const subscribedSessions = new Set<string>()
 
@@ -41,7 +49,9 @@ export function createBroadcastSubscriptionHelper(
     const channel = `session:${sessionId}:broadcast`
     try {
       sessions.subscribeToBroadcast(channel, (message) => {
-        const payload = JSON.stringify(message)
+        // `shouldForward` inspects the raw envelope (audience/origin); clients get
+        // the transformed shape so local and pub/sub delivery look identical.
+        const payload = JSON.stringify(transformMessage(message))
         for (const client of ws.wss.clients) {
           if (client.readyState === 1 && client.sessionId === sessionId) {
             try {

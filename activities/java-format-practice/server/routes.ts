@@ -156,7 +156,7 @@ export default function setupJavaFormatPracticeRoutes(
     // forwarded, so a private `studentsUpdate` can never reach participant sockets.
     if (audience !== 'all' && audience !== 'manager') return false
     return audience === 'all' || (client as JavaFormatSocket).principalKind === 'manager'
-  })
+  }, (message) => (isPlainObject(message) ? { type: message.type, payload: message.payload } : message))
 
   async function broadcast(type: string, payload: unknown, sessionId: string, audience: 'all' | 'manager' = 'all'): Promise<void> {
     const message = JSON.stringify({ type, payload })
@@ -175,7 +175,11 @@ export default function setupJavaFormatPracticeRoutes(
         try {
           socket.send(message)
         } catch (error) {
-          console.error('Failed to send to client:', error)
+          console.error(JSON.stringify({
+            event: 'java-format.broadcast-send-failed',
+            sessionId,
+            error: String(error),
+          }))
         }
       }
     }
@@ -216,26 +220,29 @@ export default function setupJavaFormatPracticeRoutes(
         if (client.readyState !== 1) return
 
         const cookieHeader = client.upgradeHeaders?.cookie
-        const manager = requestedPrincipal !== 'participant'
-          ? resolveActivityPrincipalFromCookies(session, activeSessionId, 'manager', {
+
+        // The `principal` query param is routing only: manager authority is
+        // attempted solely when it is explicitly `manager`. A missing or unknown
+        // value falls through to participant admission (least privilege by
+        // default), so a browser holding both cookies cannot be admitted as a
+        // manager just because the client forgot the param.
+        if (requestedPrincipal === 'manager') {
+          const manager = resolveActivityPrincipalFromCookies(session, activeSessionId, 'manager', {
             [getActivityCapabilityCookieName('manager', activeSessionId)]: readCookieValue(cookieHeader, getActivityCapabilityCookieName('manager', activeSessionId)),
           })
-          : null
-        if (requestedPrincipal !== 'participant' && manager) {
+          if (!manager) {
+            console.info(JSON.stringify({
+              event: 'java-format.websocket-denied',
+              sessionId: activeSessionId,
+              reason: 'missing-manager-principal',
+            }))
+            client.close(1008, 'activity-auth-required')
+            return
+          }
           client.principalKind = 'manager'
           client.sessionId = activeSessionId
           ensureBroadcastSubscription(activeSessionId)
           scheduleCapabilityExpiryClose(client, session, manager.capabilityId)
-          return
-        }
-
-        if (requestedPrincipal === 'manager') {
-          console.info(JSON.stringify({
-            event: 'java-format.websocket-denied',
-            sessionId: activeSessionId,
-            reason: 'missing-manager-principal',
-          }))
-          client.close(1008, 'activity-auth-required')
           return
         }
 
