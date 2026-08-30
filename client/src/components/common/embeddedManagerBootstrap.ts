@@ -13,6 +13,20 @@ export function removeEmbeddedManagerToken(search: string): string {
 }
 
 export const EMBEDDED_MANAGER_BOOTSTRAP_REFRESH_REQUEST = 'embedded-manager-bootstrap-refresh'
+export const EMBEDDED_MANAGER_ACTIVATED = 'embedded-manager-activated'
+
+/** True only for the same-origin parent signal that an embedded manager is visible again. */
+export function isEmbeddedManagerActivatedMessage(
+  payload: unknown,
+  childSessionId: string,
+): boolean {
+  if (payload == null || typeof payload !== 'object' || Array.isArray(payload)) {
+    return false
+  }
+
+  const message = payload as { type?: unknown; childSessionId?: unknown }
+  return message.type === EMBEDDED_MANAGER_ACTIVATED && message.childSessionId === childSessionId
+}
 
 /**
  * Parses a credentialed child iframe's request for a replacement one-time

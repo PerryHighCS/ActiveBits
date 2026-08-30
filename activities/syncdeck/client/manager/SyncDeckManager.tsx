@@ -2,7 +2,10 @@ import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
 import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler'
 import { copyTextWithReset } from '@src/hooks/useClipboard'
 import { storeCreateSessionBootstrapPayload } from '@src/components/common/manageDashboardUtils'
-import { readEmbeddedManagerBootstrapRefreshRequest } from '@src/components/common/embeddedManagerBootstrap'
+import {
+  EMBEDDED_MANAGER_ACTIVATED,
+  readEmbeddedManagerBootstrapRefreshRequest,
+} from '@src/components/common/embeddedManagerBootstrap'
 import { StudentPresencePanel, StudentPresenceToggleButton } from '@src/components/common/StudentPresence'
 import { requestStudentReturn } from './studentReturnUtils.js'
 import { resolvePersistentSessionEntryPolicy, type PersistentSessionEntryPolicy } from '../../../../types/waitingRoom.js'
@@ -2550,6 +2553,28 @@ const SyncDeckManager: FC = () => {
       setEmbeddedBootstrapBackfillRetryNonce((current) => current + 1)
     }
   }, [embeddedActivities, mountedEmbeddedManagerInstanceKeys])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    const activeInstanceKey = resolveManagerActiveEmbeddedInstanceKey(embeddedActivities, instructorIndicesState)
+    if (!activeInstanceKey) {
+      return
+    }
+
+    const record = embeddedActivities[activeInstanceKey]
+    const iframe = embeddedManagerIframeRefs.current[activeInstanceKey]
+    if (!record || !iframe?.contentWindow) {
+      return
+    }
+
+    iframe.contentWindow.postMessage({
+      type: EMBEDDED_MANAGER_ACTIVATED,
+      childSessionId: record.childSessionId,
+    }, window.location.origin)
+  }, [embeddedActivities, instructorIndicesState])
 
   useEffect(
     () => () => {
@@ -5246,6 +5271,12 @@ const SyncDeckManager: FC = () => {
                                 setLoadedEmbeddedManagerInstanceKeys((current) => (
                                   current[instanceKey] ? current : { ...current, [instanceKey]: true }
                                 ))
+                                if (isActive) {
+                                  iframe.contentWindow?.postMessage({
+                                    type: EMBEDDED_MANAGER_ACTIVATED,
+                                    childSessionId: record.childSessionId,
+                                  }, window.location.origin)
+                                }
                               }}
                             />
                           ) : null}

@@ -1,5 +1,6 @@
 import SessionHeader from '@src/components/common/SessionHeader'
 import { fetchEmbeddedLaunchSelectedOptions } from '@src/components/common/embeddedLaunchBootstrap'
+import { isEmbeddedManagerActivatedMessage } from '@src/components/common/embeddedManagerBootstrap'
 import { isEmbeddedChildSessionId } from '@src/components/common/sessionHeaderUtils'
 import Button from '@src/components/ui/Button'
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
@@ -317,6 +318,7 @@ export default function VideoSyncManager() {
   const [activePlayerHost, setActivePlayerHost] = useState<VideoSyncPlayerHost | null>(null)
   const [hasManagerAccess, setHasManagerAccess] = useState(false)
   const [isManagerAccessReady, setIsManagerAccessReady] = useState(false)
+  const [managerAccessRefreshNonce, setManagerAccessRefreshNonce] = useState(0)
   const [autoStartStatus, setAutoStartStatus] = useState<AutoStartStatus>('idle')
   const [embeddedBootstrapSourceUrl, setEmbeddedBootstrapSourceUrl] = useState<string | null>(null)
   const [persistentRecoverySourceUrl, setPersistentRecoverySourceUrl] = useState<string | null>(null)
@@ -629,7 +631,7 @@ export default function VideoSyncManager() {
     })()
     setIsManagerAccessReady(false)
     return () => { isCancelled = true }
-  }, [embeddedManagerCapabilityExchange.isResolving, sessionId])
+  }, [embeddedManagerCapabilityExchange.isResolving, managerAccessRefreshNonce, sessionId])
 
   const handleEnvelope = useCallback((envelope: VideoSyncWsEnvelope) => {
     if (envelope.type === 'state-update' || envelope.type === 'state-snapshot' || envelope.type === 'heartbeat') {
@@ -875,6 +877,24 @@ export default function VideoSyncManager() {
     }
     return () => disconnect()
   }, [sessionId, fetchSession, connect, disconnect, hasManagerAccess, isManagerAccessReady])
+
+  useEffect(() => {
+    if (!sessionId || typeof window === 'undefined' || window.parent === window) {
+      return undefined
+    }
+
+    const handleParentMessage = (event: MessageEvent<unknown>): void => {
+      if (event.origin !== window.location.origin || event.source !== window.parent) {
+        return
+      }
+      if (isEmbeddedManagerActivatedMessage(event.data, sessionId)) {
+        setManagerAccessRefreshNonce((current) => current + 1)
+      }
+    }
+
+    window.addEventListener('message', handleParentMessage)
+    return () => window.removeEventListener('message', handleParentMessage)
+  }, [sessionId])
 
   const saveConfigWithValues = useCallback(async (
     sourceUrlValue: string,

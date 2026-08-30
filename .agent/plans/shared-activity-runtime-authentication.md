@@ -286,6 +286,7 @@ Do not begin with all activities at once.
 - [x] Harden the shared resilient WebSocket hook so events from a replaced socket cannot overwrite the state of the current manager connection (including React Strict Mode's discarded development connection).
 - [x] Add Chromium Video Sync browser coverage that clears a temporary manager's capability cookie and verifies the manager becomes read-only without a passcode fallback.
 - [x] Serialize Video Sync's in-process per-session read-modify-write paths (manager commands, telemetry, heartbeats, connection changes, and stale-telemetry pruning) so an overlapping background write cannot restore an older playback state; retain the existing cross-instance atomicity follow-up in Slice A.
+- [x] Revalidate Video Sync manager access and replace its manager WebSocket when SyncDeck makes a warm embedded manager active again, so returning to a slide cannot retain a stale connection.
 - [ ] Add persistent, embedded, temporary-manager, capability-loss, and cross-role browser/route/socket coverage.
 - [x] Restore Java Format permalink support in the Phase 6 retrofit after the adapter was proven ([#351](https://github.com/PerryHighCS/ActiveBits/issues/351)).
 
