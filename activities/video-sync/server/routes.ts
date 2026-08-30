@@ -1227,17 +1227,18 @@ export default function setupVideoSyncRoutes(
       // (persistentSourceUrl) even when the caller is already authorized - a
       // just-authenticated teacher lands here with the manager cookie already set
       // and still needs its configured video to be recovered.
-      const directPersistentHash = await findHashBySessionId(sessionId)
+      //
+      // Read the embedded-parent context before any persistent-store lookup:
+      // embedded children never carry their own persistent-session hash, so the
+      // recovery hash is always the parent's. Only a standalone session falls
+      // back to a direct lookup keyed by its own id. `findHashBySessionId`
+      // degrades to a full hash scan when there is no reverse-index entry (the
+      // normal temporary-session case), so this route makes exactly one such
+      // call instead of one per candidate id.
       const embeddedParentContext = readEmbeddedParentSessionContext(session.data)
-      const recoveryActivityName = directPersistentHash
-        ? 'video-sync'
-        : embeddedParentContext?.activityName ?? null
-      const recoverySessionId = directPersistentHash
-        ? sessionId
-        : embeddedParentContext?.parentSessionId ?? null
-      const persistentHash = recoverySessionId
-        ? await findHashBySessionId(recoverySessionId)
-        : null
+      const recoveryActivityName = embeddedParentContext?.activityName ?? 'video-sync'
+      const recoverySessionId = embeddedParentContext?.parentSessionId ?? sessionId
+      const persistentHash = await findHashBySessionId(recoverySessionId)
       const sessionEntries = parsePersistentSessionsCookie(req.cookies?.persistent_sessions)
       const matchingEntry = (persistentHash && recoveryActivityName)
         ? sessionEntries.find((entry) => entry.key === `${recoveryActivityName}:${persistentHash}`)

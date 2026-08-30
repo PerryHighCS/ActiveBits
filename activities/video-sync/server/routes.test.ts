@@ -1804,6 +1804,7 @@ void test('manager-access route still returns canonical sourceUrl when the manag
 })
 
 void test('manager-access route answers with a structured 500 when a backing-store lookup rejects', async () => {
+  console.info('[TEST] video-sync manager-access: the backing-store read below rejects on purpose; the handler is expected to log manager-access-failed and answer 500')
   initializePersistentStorage(null)
 
   const app = createMockApp()

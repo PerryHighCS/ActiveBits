@@ -14,6 +14,7 @@ import {
   updatePersistentSessionUrlState,
 } from './core/persistentSessions.js'
 import { buildPersistentLinkUrlQuery } from './core/persistentLinkUrlState.js'
+import { getActivityCapabilityCookieName, issueActivityCapability } from './core/activityCapabilities.js'
 
 function createFakePersistentValkeyClient(): {
   store: Map<string, string>
@@ -292,6 +293,41 @@ void test('persistent manager capability recovery issues a manager cookie for an
   const persisted = await sessions.get('live-session') as { data?: { activityCapabilities?: Record<string, unknown> } } | null
   assert.ok(persisted?.data?.activityCapabilities, 'capability is persisted on the live session record')
   assert.equal(Object.keys(persisted!.data!.activityCapabilities!).length, 1)
+})
+
+void test('persistent manager capability recovery fast-paths an already-authorized caller without a persistent-store lookup', async () => {
+  initializePersistentStorage(null)
+  const sessionMap = new Map<string, unknown>()
+  let setCalls = 0
+  const sessions = {
+    get: async (id: string) => {
+      const session = sessionMap.get(id)
+      return session == null ? null : structuredClone(session)
+    },
+    set: async (id: string, session: unknown) => { setCalls += 1; sessionMap.set(id, structuredClone(session)) },
+  }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+  const handler = getRoute(app, 'POST', '/api/session/:sessionId/persistent-manager-capability')
+
+  // A live session that carries a valid manager capability already (as /create
+  // would leave it). No persistent session is registered and no
+  // persistent_sessions cookie is sent, so the non-fast path would 404.
+  const liveSession = { id: 'live-session', type: 'java-format-practice', data: { students: [] } }
+  const capability = issueActivityCapability(liveSession, 'manager')
+  sessionMap.set('live-session', liveSession)
+
+  const res = createMockRes()
+  await handler(createMockReq({
+    params: { sessionId: 'live-session' },
+    cookies: { [getActivityCapabilityCookieName('manager', 'live-session')]: capability.token },
+  }), res)
+
+  assert.equal(res.statusCode, 200)
+  assert.deepEqual(res.jsonBody, { success: true, alreadyAuthorized: true })
+  // Fast path: no re-issue, no session write, no capability cookie set.
+  assert.equal(setCalls, 0)
+  assert.equal(Array.from(res.cookies.keys()).some((name) => name.startsWith('activebits_cap_manager_')), false)
 })
 
 void test('persistent session route resets when backing session missing', async (t) => {

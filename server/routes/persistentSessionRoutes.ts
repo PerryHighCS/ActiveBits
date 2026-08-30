@@ -35,7 +35,11 @@ import {
 } from '../core/persistentSessionEntryGateway.js'
 import { buildCreateSessionBootstrapPayload } from '../core/createSessionBootstrapPayload.js'
 import { boundPersistentSessionCookieEntries } from '../core/persistentSessionCookie.js'
-import { issueActivityCapability, writeActivityCapabilityCookie } from '../core/activityCapabilities.js'
+import {
+  issueActivityCapability,
+  resolveActivityPrincipalFromCookies,
+  writeActivityCapabilityCookie,
+} from '../core/activityCapabilities.js'
 
 const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000
 const MAX_TEACHER_CODE_LENGTH = 100
@@ -785,6 +789,18 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
       const activeSession = await sessions.get(sessionId)
       if (!isPlainObject(activeSession) || typeof activeSession.type !== 'string') {
         res.status(404).json({ error: 'Active session not found' })
+        return
+      }
+
+      // Fast path: the caller already holds a valid manager capability for this
+      // session (issued by /create or a prior recovery). There is nothing to
+      // re-issue, and skipping the persistent-store lookup below matters: the
+      // manager mounts this adapter on every load, and for a temporary
+      // (non-persistent) session `findHashBySessionId` has no reverse-index
+      // entry and degrades to a full `getAllHashes()` scan plus sequential
+      // reads. Keeping the already-authorized case O(1) avoids that cost.
+      if (resolveActivityPrincipalFromCookies(activeSession as { data: unknown }, sessionId, 'manager', req.cookies)) {
+        res.json({ success: true, alreadyAuthorized: true })
         return
       }
 
