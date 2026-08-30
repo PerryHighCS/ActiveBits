@@ -1946,7 +1946,7 @@ void test('session teacher authenticate restores teacher cookie from active sess
   assert.ok(managerCapabilityCookie)
   assert.equal(managerCapabilityCookie.value.length > 0, true)
   assert.equal(managerCapabilityCookie.options.httpOnly, true)
-  assert.ok((sessionMap.get('live-session') as { data?: { activityCapabilities?: unknown } }).data?.activityCapabilities)
+  assert.notEqual((sessionMap.get('live-session') as { data?: { activityCapabilities?: unknown } }).data?.activityCapabilities, undefined)
 
   const cookie = res.cookies.get('persistent_sessions')
   assert.ok(cookie)
