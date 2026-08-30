@@ -34,6 +34,7 @@ import { resolveSyncDeckStudentCloseDecision } from './reconnectUtils.js'
 import ConnectionStatusDot from '../components/ConnectionStatusDot.js'
 import { getStudentPresentationCompatibilityError } from '../shared/presentationUrlCompatibility.js'
 import { isSyncDeckDebugEnabled } from '../shared/syncDebug.js'
+import { shouldRetryInitialSocket } from '../shared/initialSocketRetry.js'
 import {
   buildSyncDeckDocumentTitle,
   extractRevealMetadataTitle,
@@ -277,7 +278,6 @@ interface RevealCommandMessage {
   }
 }
 
-const WS_CONNECTING_READY_STATE = 0
 const WS_OPEN_READY_STATE = 1
 const INITIAL_SOCKET_RETRY_DELAY_MS = 350
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -2918,11 +2918,7 @@ const SyncDeckStudent: FC = () => {
 
     connectStudentWs()
     const initialRetryTimeout = setTimeout(() => {
-      // Only retry a socket that never left the gate. A still-CONNECTING socket
-      // has a live handshake, and connectStudentWs() would close it and start
-      // over, so leave it alone until it opens or fails on its own.
-      const readyState = studentSocketRef.current?.readyState
-      if (readyState !== WS_OPEN_READY_STATE && readyState !== WS_CONNECTING_READY_STATE) {
+      if (shouldRetryInitialSocket(studentSocketRef.current?.readyState)) {
         connectStudentWs()
       }
     }, INITIAL_SOCKET_RETRY_DELAY_MS)

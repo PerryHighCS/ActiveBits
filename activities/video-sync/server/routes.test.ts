@@ -73,6 +73,10 @@ function createMockApp() {
   }
 }
 
+// Convenience for the many happy-path tests: a request that omits `cookies`
+// entirely gets the session's default manager capability injected. A test that
+// exercises an authorization failure MUST set `cookies` explicitly (`cookies: {}`
+// for the unauthenticated case) so its intent does not hinge on an absent field.
 function withDefaultManagerCookie(req: Parameters<RouteHandler>[0]): Parameters<RouteHandler>[0] {
   if (req.cookies !== undefined) return req
   const sessionId = req.params.sessionId

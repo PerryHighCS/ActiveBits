@@ -15,6 +15,7 @@ import {
 } from '../shared/presentationUrlCompatibility.js'
 import { isSyncDeckDebugEnabled } from '../shared/syncDebug.js'
 import { shouldRelayRevealSyncPayloadToSession } from '../shared/revealSyncRelayPolicy.js'
+import { shouldRetryInitialSocket } from '../shared/initialSocketRetry.js'
 import {
   buildSyncDeckDocumentTitle,
   extractRevealMetadataTitle,
@@ -56,7 +57,6 @@ import type { SyncDeckSessionReportManifest } from '../../../../types/activity.j
 import ConnectionStatusDot from '../components/ConnectionStatusDot.js'
 
 const SYNCDECK_CHALKBOARD_OPEN_KEY_PREFIX = 'syncdeck_chalkboard_open_'
-const WS_CONNECTING_READY_STATE = 0
 const WS_OPEN_READY_STATE = 1
 const DISCONNECTED_STATUS_DELAY_MS = 250
 const INITIAL_SOCKET_RETRY_DELAY_MS = 350
@@ -4014,10 +4014,7 @@ const SyncDeckManager: FC = () => {
       }
     })
     initialRetryTimeout = setTimeout(() => {
-      // A still-CONNECTING socket has a live handshake; connectInstructorWs()
-      // would close it and start over. Only retry one that never left the gate.
-      const readyState = instructorSocketRef.current?.readyState
-      if (!disposed && readyState !== WS_OPEN_READY_STATE && readyState !== WS_CONNECTING_READY_STATE) {
+      if (!disposed && shouldRetryInitialSocket(instructorSocketRef.current?.readyState)) {
         connectInstructorWs()
       }
     }, INITIAL_SOCKET_RETRY_DELAY_MS)
