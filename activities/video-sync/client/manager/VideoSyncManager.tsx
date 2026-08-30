@@ -7,7 +7,7 @@ import {
 import { isEmbeddedChildSessionId } from '@src/components/common/sessionHeaderUtils'
 import Button from '@src/components/ui/Button'
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
-import { useEmbeddedManagerPasscodeExchange } from '@src/hooks/useEmbeddedManagerPasscodeExchange'
+import { useEmbeddedManagerCapabilityExchange } from '@src/hooks/useEmbeddedManagerCapabilityExchange'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router'
 import {
@@ -79,6 +79,9 @@ const YOUTUBE_HOST_FALLBACK_TIMEOUT_MS = 1_500
 const MANAGER_PLAYING_DRIFT_TOLERANCE_SEC = 2
 const MANAGER_PLAYBACK_COMMAND_FLUSH_DELAY_MS = 120
 const MAX_MANAGER_API_ERROR_MESSAGE_LENGTH = 160
+// This is an access-ready marker, never an instructor credential. The server
+// resolves the httpOnly manager capability before considering legacy bodies.
+const COOKIE_MANAGER_ACCESS_MARKER = 'cookie-manager-access'
 
 const EMPTY_TELEMETRY: VideoSyncTelemetry = {
   connections: { activeCount: 0 },
@@ -405,7 +408,7 @@ export default function VideoSyncManager() {
   const suppressPlayerEventsTimeoutRef = useRef<number | null>(null)
   const autoStartAttemptKeyRef = useRef<string | null>(null)
   const queryBootstrapSourceUrl = useMemo(() => readBootstrapSourceUrl(location.search), [location.search])
-  const embeddedManagerPasscodeExchange = useEmbeddedManagerPasscodeExchange({
+  const embeddedManagerCapabilityExchange = useEmbeddedManagerCapabilityExchange({
     sessionId: sessionId ?? undefined,
     search: location.search,
   })
@@ -503,8 +506,6 @@ export default function VideoSyncManager() {
     if (typeof options?.positionSec === 'number' && Number.isFinite(options.positionSec)) {
       payload.positionSec = clampNumber(options.positionSec)
     }
-    payload.instructorPasscode = instructorPasscode
-
     try {
       const response = await fetch(`/api/video-sync/${sessionId}/command`, {
         method: 'POST',
@@ -677,11 +678,11 @@ export default function VideoSyncManager() {
     let isCancelled = false
 
     const loadInstructorPasscode = async (): Promise<void> => {
-      if (embeddedManagerPasscodeExchange.isResolving) {
+      if (embeddedManagerCapabilityExchange.isResolving) {
         return
       }
-      if (embeddedManagerPasscodeExchange.passcode) {
-        setInstructorPasscode(embeddedManagerPasscodeExchange.passcode)
+      if (embeddedManagerCapabilityExchange.isAuthorized) {
+        setInstructorPasscode(COOKIE_MANAGER_ACCESS_MARKER)
         setPersistentRecoverySourceUrl(null)
         setIsPasscodeReady(true)
         return
@@ -704,7 +705,7 @@ export default function VideoSyncManager() {
           })
         }
         consumeCreateSessionBootstrapPayload('video-sync', sessionId)
-        setInstructorPasscode(bootstrap.instructorPasscode)
+        setInstructorPasscode(COOKIE_MANAGER_ACCESS_MARKER)
         setPersistentRecoverySourceUrl(null)
         setIsPasscodeReady(true)
         return
@@ -724,9 +725,9 @@ export default function VideoSyncManager() {
 
         const payload = (await response.json()) as InstructorPasscodeResponse
         const recoveredPersistentSourceUrl = readRecoveredPersistentSourceUrl(payload)
-        if (typeof payload.instructorPasscode === 'string' && payload.instructorPasscode.length > 0) {
+        if (payload != null) {
           if (!isCancelled) {
-            setInstructorPasscode(payload.instructorPasscode)
+            setInstructorPasscode(COOKIE_MANAGER_ACCESS_MARKER)
             setPersistentRecoverySourceUrl(recoveredPersistentSourceUrl)
           }
           return
@@ -755,8 +756,8 @@ export default function VideoSyncManager() {
       isCancelled = true
     }
   }, [
-    embeddedManagerPasscodeExchange.isResolving,
-    embeddedManagerPasscodeExchange.passcode,
+    embeddedManagerCapabilityExchange.isAuthorized,
+    embeddedManagerCapabilityExchange.isResolving,
     location.pathname,
     location.search,
     navigate,
@@ -987,14 +988,7 @@ export default function VideoSyncManager() {
   const { connect, disconnect } = useResilientWebSocket({
     buildUrl: buildWsUrl,
     shouldReconnect: Boolean(sessionId && instructorPasscode && isPasscodeReady),
-    onOpen: (_event, ws) => {
-      const authMessage = createManagerWsAuthMessage(instructorPasscode)
-      if (!authMessage) {
-        return
-      }
-
-      ws.send(authMessage)
-    },
+    onOpen: () => {},
     onMessage: (event) => {
       const envelope = parseVideoSyncEnvelope(event.data)
       if (!envelope || envelope.sessionId !== sessionId) return
@@ -1045,7 +1039,6 @@ export default function VideoSyncManager() {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          instructorPasscode,
           sourceUrl: sourceUrlValue,
           stopSec: stopSecValue,
         }),

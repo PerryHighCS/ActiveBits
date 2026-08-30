@@ -276,7 +276,7 @@ Do not begin with all activities at once.
 - [x] Admit Video Sync manager WebSockets from that capability while preserving the early auth-message listener and temporary passcode fallback.
 - [x] Add a parallel, generic SyncDeck embedded-manager exchange that consumes the one-time child token and issues only the child manager capability; retain the existing passcode exchange until its other activity clients migrate.
 - [x] Add the shared client hook for the cookie-only embedded-manager exchange, including bounded refresh behavior and request-contract tests.
-- [ ] Remove client passcode recovery and authenticate manager WebSockets directly from the capability cookie while preserving Video Sync's authenticate-before-subscribe ordering for participant sockets.
+- [x] Migrate the Video Sync manager client to capability-only embedded bootstrap, cookie-authenticated WebSockets, and cookie-authorized REST commands; retain the server passcode fallback only for temporary mixed-deploy compatibility.
 - [x] Stabilize the existing SyncDeck student-return browser regression test: wait for each rendered roster row, rather than only its early connected-count update, before opening the next student socket (the underlying atomic-mutation race remains tracked in [#350](https://github.com/PerryHighCS/ActiveBits/issues/350)).
 - [ ] Add persistent, embedded, temporary-manager, capability-loss, and cross-role browser/route/socket coverage.
 - [ ] Restore Java Format permalink support only in the Phase 6 retrofit after this adapter is proven.
