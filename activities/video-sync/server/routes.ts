@@ -92,7 +92,7 @@ interface RouteRequest {
 
 interface JsonResponse {
   status(code: number): JsonResponse
-  cookie?(name: string, value: string, options: Record<string, unknown>): void
+  cookie(name: string, value: string, options: Record<string, unknown>): void
   json(payload: unknown): void
 }
 
@@ -1299,10 +1299,8 @@ export default function setupVideoSyncRoutes(
       data.telemetry = createDefaultTelemetry()
 
       await sessions.set(session.id, session)
-      if (res.cookie) {
-        issueActivityCapabilityCookie(res, session, session.id, 'manager')
-        await sessions.set(session.id, session)
-      }
+      issueActivityCapabilityCookie(res, session, session.id, 'manager')
+      await sessions.set(session.id, session)
       res.json({ id: session.id, instructorPasscode: data.instructorPasscode })
     } catch (error) {
       console.error('Failed to create video-sync session:', error)
@@ -1360,10 +1358,8 @@ export default function setupVideoSyncRoutes(
     if (didNormalizeSessionData) {
       await sessions.set(session.id, session)
     }
-    if (res.cookie) {
-      issueActivityCapabilityCookie(res, session, sessionId, 'manager')
-      await sessions.set(session.id, session)
-    }
+    issueActivityCapabilityCookie(res, session, sessionId, 'manager')
+    await sessions.set(session.id, session)
     const persistentSourceUrl = readPersistentSourceUrlFromCookieEntry(persistentHash, matchingEntry)
     res.json({
       instructorPasscode: data.instructorPasscode,
