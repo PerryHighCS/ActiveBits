@@ -1,5 +1,5 @@
 import { createSession, type SessionRecord, type SessionStore } from 'activebits-server/core/sessions.js'
-import { issueActivityCapabilityCookie } from 'activebits-server/core/activityCapabilities.js'
+import { issueActivityCapabilityCookie, resolveActivityPrincipalFromCookies } from 'activebits-server/core/activityCapabilities.js'
 import { registerSessionNormalizer } from 'activebits-server/core/sessionNormalization.js'
 import { createBroadcastSubscriptionHelper } from 'activebits-server/core/broadcastUtils.js'
 import {
@@ -1265,6 +1265,14 @@ function readInstructorPasscode(body: unknown): string | null {
   return normalizeInstructorPasscode(body.instructorPasscode)
 }
 
+function hasManagerAuthority(session: VideoSyncSession, sessionId: string, req: RouteRequest): boolean {
+  if (resolveActivityPrincipalFromCookies(session, sessionId, 'manager', req.cookies)) {
+    return true
+  }
+  const instructorPasscode = readInstructorPasscode(req.body)
+  return instructorPasscode != null && verifyInstructorPasscode(session.data.instructorPasscode, instructorPasscode)
+}
+
 function readBooleanField(body: unknown, key: string): boolean | null {
   if (!isPlainObject(body)) {
     return null
@@ -1291,6 +1299,10 @@ export default function setupVideoSyncRoutes(
       data.telemetry = createDefaultTelemetry()
 
       await sessions.set(session.id, session)
+      if (res.cookie) {
+        issueActivityCapabilityCookie(res, session, session.id, 'manager')
+        await sessions.set(session.id, session)
+      }
       res.json({ id: session.id, instructorPasscode: data.instructorPasscode })
     } catch (error) {
       console.error('Failed to create video-sync session:', error)
@@ -1422,8 +1434,7 @@ export default function setupVideoSyncRoutes(
       return
     }
 
-    const instructorPasscode = readInstructorPasscode(req.body)
-    if (!instructorPasscode || !verifyInstructorPasscode(session.data.instructorPasscode, instructorPasscode)) {
+    if (!hasManagerAuthority(session, sessionId, req)) {
       res.status(403).json({ error: 'FORBIDDEN', message: 'Valid instructorPasscode is required' })
       return
     }
@@ -1545,8 +1556,7 @@ export default function setupVideoSyncRoutes(
       return
     }
 
-    const instructorPasscode = readInstructorPasscode(req.body)
-    if (!instructorPasscode || !verifyInstructorPasscode(session.data.instructorPasscode, instructorPasscode)) {
+    if (!hasManagerAuthority(session, sessionId, req)) {
       res.status(403).json({ error: 'FORBIDDEN', message: 'Valid instructorPasscode is required' })
       return
     }
