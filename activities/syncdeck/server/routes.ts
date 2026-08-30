@@ -26,6 +26,7 @@ import {
 } from 'activebits-server/core/sessions.js'
 import { storeSessionEntryParticipant } from 'activebits-server/core/sessionEntryParticipants.js'
 import { revokeSessionEntryParticipants } from 'activebits-server/core/sessionEntryParticipants.js'
+import { issueActivityCapabilityCookie } from 'activebits-server/core/activityCapabilities.js'
 import { randomBytes, timingSafeEqual } from 'node:crypto'
 import type { ActiveBitsWebSocket, WsRouter } from '../../../types/websocket.js'
 import {
@@ -2162,6 +2163,77 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       sessionId,
     }))
     res.json({ instructorPasscode })
+  })
+
+  app.get('/api/syncdeck/embedded-manager-capability', async (req, res) => {
+    res.setHeader?.('Cache-Control', 'no-store')
+    const sessionId = typeof req.query?.sessionId === 'string' ? req.query.sessionId.trim() : ''
+    const token = typeof req.query?.token === 'string' ? req.query.token.trim() : ''
+    if (!sessionId || !token) {
+      res.status(400).json({ error: 'missing embedded manager credentials' })
+      return
+    }
+    if (
+      sessionId.length > MAX_EMBEDDED_MANAGER_SESSION_ID_LENGTH
+      || token.length > MAX_EMBEDDED_MANAGER_TOKEN_LENGTH
+    ) {
+      res.status(403).json({ error: 'invalid embedded manager credentials' })
+      return
+    }
+
+    const session = await sessions.get(sessionId)
+    const entryToken = session ? readEmbeddedManagerEntryToken(session) : null
+    if (!entryToken || !verifyEmbeddedManagerEntryToken(entryToken.value, token)) {
+      res.status(403).json({ error: 'invalid embedded manager credentials' })
+      return
+    }
+    if (!res.cookie) {
+      console.error(JSON.stringify({
+        activity: 'syncdeck',
+        event: 'embedded-manager-capability-cookie-unavailable',
+        sessionId,
+      }))
+      res.status(500).json({ error: 'embedded manager capability unavailable' })
+      return
+    }
+
+    const consumeSessionDataToken = sessions.consumeSessionDataToken
+    if (!consumeSessionDataToken) {
+      console.error(JSON.stringify({
+        activity: 'syncdeck',
+        event: 'embedded-manager-token-consume-unavailable',
+        sessionId,
+      }))
+      res.status(500).json({ error: 'embedded manager credentials unavailable' })
+      return
+    }
+
+    if (!await consumeSessionDataToken.call(
+      sessions,
+      sessionId,
+      'embeddedManagerEntryToken',
+      token,
+    )) {
+      res.status(403).json({ error: 'invalid embedded manager credentials' })
+      return
+    }
+
+    // Re-read after atomic consumption so persisting the capability cannot
+    // resurrect the one-time bootstrap token from the pre-consumption record.
+    const consumedSession = await sessions.get(sessionId)
+    if (!consumedSession) {
+      res.status(404).json({ error: 'embedded activity session not found' })
+      return
+    }
+    issueActivityCapabilityCookie({ cookie: res.cookie.bind(res) }, consumedSession, sessionId, 'manager')
+    await sessions.set(sessionId, consumedSession)
+
+    console.info(JSON.stringify({
+      activity: 'syncdeck',
+      event: 'embedded-manager-capability-issued',
+      sessionId,
+    }))
+    res.json({ ok: true })
   })
 
   app.post('/api/syncdeck/:sessionId/embedded-activity/end', async (req, res) => {

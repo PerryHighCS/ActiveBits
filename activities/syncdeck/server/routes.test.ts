@@ -2983,6 +2983,43 @@ void test('embedded manager passcode exchange validates and consumes short-lived
   assert.equal(reusedRes.statusCode, 403)
 })
 
+void test('embedded manager capability exchange consumes its token and issues an httpOnly cookie without a passcode', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const now = Date.now()
+  const storeState = createSessionStore({
+    'child-capability': {
+      id: 'child-capability',
+      type: 'video-sync',
+      created: now,
+      lastActivity: now,
+      data: {
+        instructorPasscode: 'child-passcode',
+        embeddedManagerEntryToken: { value: 'capability-entry-token', expiresAt: now + 60_000 },
+      },
+    },
+  })
+  setupSyncDeckRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.get['/api/syncdeck/embedded-manager-capability']
+  assert.equal(typeof handler, 'function')
+  const response = createResponse()
+  await handler?.(
+    createRequest({}, undefined, {}, {}, { sessionId: 'child-capability', token: 'capability-entry-token' }),
+    response,
+  )
+
+  assert.equal(response.statusCode, 200)
+  assert.deepEqual(response.body, { ok: true })
+  assert.equal(response.cookies.length, 1)
+  const [cookie] = response.cookies
+  assert.ok(cookie)
+  assert.equal(cookie.value.length > 0, true)
+  assert.equal(cookie.options.httpOnly, true)
+  assert.equal((storeState.store['child-capability']?.data as { embeddedManagerEntryToken?: unknown }).embeddedManagerEntryToken, undefined)
+  assert.equal((storeState.store['child-capability']?.data as { activityCapabilities?: unknown }).activityCapabilities != null, true)
+})
+
 void test('embedded manager passcode exchange allows only one concurrent token redemption', async () => {
   const app = createMockApp()
   const ws = createMockWs()
