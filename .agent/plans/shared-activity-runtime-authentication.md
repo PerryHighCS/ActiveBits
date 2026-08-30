@@ -290,6 +290,7 @@ Do not begin with all activities at once.
 - [x] Add a bounded first-load retry for SyncDeck instructor and student WebSockets so transient startup ordering cannot leave a newly configured session disconnected until a browser reload.
 - [ ] Add persistent, embedded, temporary-manager, capability-loss, and cross-role browser/route/socket coverage.
 - [x] Restore Java Format permalink support in the Phase 6 retrofit after the adapter was proven ([#351](https://github.com/PerryHighCS/ActiveBits/issues/351)).
+- [x] Restore the Java Format persistent permalink manager handoff: recover a manager capability from the verified persistent-teacher cookie before its gated manager REST and WebSocket surfaces connect.
 
 ### Phase 6 wrap-up (after Slice C, before Phase 7)
 

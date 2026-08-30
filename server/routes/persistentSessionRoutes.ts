@@ -772,6 +772,56 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
     })
   })
 
+  app.post('/api/session/:sessionId/persistent-manager-capability', async (req, res) => {
+    setNoStore(res)
+    const sessionId = req.params.sessionId
+    if (!sessionId) {
+      res.status(400).json({ error: 'Missing sessionId' })
+      return
+    }
+
+    const activeSession = await sessions.get(sessionId)
+    if (!isPlainObject(activeSession) || typeof activeSession.type !== 'string') {
+      res.status(404).json({ error: 'Active session not found' })
+      return
+    }
+
+    const hash = await findHashBySessionId(sessionId)
+    const persistentSession = hash ? await getPersistentSession(hash) : null
+    if (!hash || !persistentSession || persistentSession.sessionId !== sessionId || persistentSession.activityName !== activeSession.type) {
+      res.status(404).json({ error: 'Persistent manager recovery is unavailable for this session' })
+      return
+    }
+
+    const { sessions: sessionEntries } = parsePersistentSessionsCookie(
+      req.cookies?.persistent_sessions,
+      'persistent_sessions (/api/session/:sessionId/persistent-manager-capability)',
+    )
+    if (!getValidatedPersistentSessionCookieEntry(sessionEntries, persistentSession.activityName, hash)) {
+      res.status(403).json({ error: 'Persistent teacher authentication is required' })
+      return
+    }
+
+    if (!sessions.set) {
+      res.status(500).json({ error: 'Manager capability is temporarily unavailable' })
+      return
+    }
+
+    try {
+      const capability = issueActivityCapability(activeSession as { data: unknown }, 'manager')
+      await sessions.set(sessionId, activeSession)
+      writeActivityCapabilityCookie(res, sessionId, 'manager', capability.token)
+      res.json({ success: true })
+    } catch (error) {
+      console.error(JSON.stringify({
+        event: 'persistent-manager-capability-persistence-failed',
+        sessionId,
+        errorName: error instanceof Error ? error.name : 'unknown',
+      }))
+      res.status(500).json({ error: 'Manager capability is temporarily unavailable' })
+    }
+  })
+
   app.get('/api/persistent-session/:hash', async (req, res) => {
     const hash = req.params.hash
     const activityName = getQueryString(req.query.activityName)

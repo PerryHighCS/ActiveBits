@@ -255,6 +255,39 @@ void test('session teacher authenticate does not issue a capability cookie when 
   assert.equal(Array.from(res.cookies.keys()).some((name) => name.startsWith('activebits_cap_manager_')), false)
 })
 
+void test('persistent manager capability recovery issues a manager cookie for an authenticated live permalink', async (t) => {
+  initializePersistentStorage(null)
+  const sessionMap = new Map<string, unknown>()
+  const sessions = {
+    get: async (id: string) => {
+      const session = sessionMap.get(id)
+      return session == null ? null : structuredClone(session)
+    },
+    set: async (id: string, session: unknown) => { sessionMap.set(id, structuredClone(session)) },
+  }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+  const handler = getRoute(app, 'POST', '/api/session/:sessionId/persistent-manager-capability')
+
+  const activityName = 'java-format-practice'
+  const teacherCode = 'teacher-secret'
+  const { hash, hashedTeacherCode } = generatePersistentHash(activityName, teacherCode)
+  t.after(async () => cleanupPersistentSession(hash))
+  sessionMap.set('live-session', { id: 'live-session', type: activityName, data: { students: [] } })
+  await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode)
+  await startPersistentSession(hash, 'live-session', { id: 'teacher-ws', readyState: 1, send() {} })
+
+  const res = createMockRes()
+  await handler(createMockReq({
+    params: { sessionId: 'live-session' },
+    cookies: { persistent_sessions: buildCookieValue(activityName, hash, teacherCode) },
+  }), res)
+
+  assert.equal(res.statusCode, 200)
+  assert.deepEqual(res.jsonBody, { success: true })
+  assert.equal(Array.from(res.cookies.keys()).filter((name) => name.startsWith('activebits_cap_manager_')).length, 1)
+})
+
 void test('persistent session route resets when backing session missing', async (t) => {
   initializePersistentStorage(null)
   const sessionMap = new Map<string, unknown>()

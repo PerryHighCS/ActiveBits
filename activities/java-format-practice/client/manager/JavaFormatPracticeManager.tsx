@@ -35,6 +35,7 @@ export default function JavaFormatPracticeManager() {
   const [students, setStudents] = useState<JavaFormatStudentRecord[]>([])
   const [startingNewSession, setStartingNewSession] = useState(false)
   const [managerAuthLost, setManagerAuthLost] = useState(false)
+  const [managerAccessReady, setManagerAccessReady] = useState(false)
   const managerAuthLostRef = useRef(false)
   // Bumped every time a live `studentsUpdate` is applied. An in-flight `/students`
   // poll captures this value and drops its snapshot if a newer socket update
@@ -150,8 +151,28 @@ export default function JavaFormatPracticeManager() {
     activeSocketRef.current = null;
   }, [sessionId]);
 
+  useEffect(() => {
+    if (sessionId == null) {
+      setManagerAccessReady(false)
+      return undefined
+    }
+
+    let cancelled = false
+    setManagerAccessReady(false)
+    void fetch(`/api/session/${encodeURIComponent(sessionId)}/persistent-manager-capability`, {
+      method: 'POST',
+      credentials: 'include',
+    }).catch(() => {
+      // Temporary sessions do not have persistent recovery; their create route already issued the capability.
+    }).finally(() => {
+      if (!cancelled) setManagerAccessReady(true)
+    })
+
+    return () => { cancelled = true }
+  }, [sessionId])
+
   const fetchStudents = useCallback(async (signal?: AbortSignal) => {
-    if (sessionId == null || managerAuthLostRef.current || pollInFlightRef.current !== 0) return;
+    if (sessionId == null || !managerAccessReady || managerAuthLostRef.current || pollInFlightRef.current !== 0) return;
     const pollToken = (pollTokenRef.current += 1);
     pollInFlightRef.current = pollToken;
     try {
@@ -181,7 +202,7 @@ export default function JavaFormatPracticeManager() {
       // superseding reset may have handed it to a newer request).
       if (pollInFlightRef.current === pollToken) pollInFlightRef.current = 0;
     }
-  }, [sessionId, markManagerAuthLost]);
+  }, [sessionId, managerAccessReady, markManagerAuthLost]);
 
   const handleWsMessage = useCallback((event: MessageEvent<string>, ws?: WebSocket) => {
     // Drop anything that is not from the socket bound to the current sessionId
@@ -227,7 +248,7 @@ export default function JavaFormatPracticeManager() {
 
   const { connect, disconnect } = useResilientWebSocket({
     buildUrl: buildWsUrl,
-    shouldReconnect: sessionId != null,
+    shouldReconnect: sessionId != null && managerAccessReady,
     onOpen: handleWsOpen,
     onMessage: handleWsMessage,
     onClose: handleWsClose,
@@ -236,7 +257,7 @@ export default function JavaFormatPracticeManager() {
   });
 
   useEffect(() => {
-    if (sessionId == null) return undefined;
+    if (sessionId == null || !managerAccessReady) return undefined;
     const controller = new AbortController();
     void fetchStudents(controller.signal);
     const refreshInterval = window.setInterval(() => {
@@ -257,7 +278,7 @@ export default function JavaFormatPracticeManager() {
       activeSocketRef.current = null;
       disconnect();
     };
-  }, [sessionId, fetchStudents, connect, disconnect]);
+  }, [sessionId, managerAccessReady, fetchStudents, connect, disconnect]);
 
   const handleExportCsv = useCallback(() => {
     if (students.length === 0) {

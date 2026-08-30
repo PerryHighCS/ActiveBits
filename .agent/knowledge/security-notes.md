@@ -414,3 +414,7 @@ Track security-relevant boundaries, risks, and mitigation decisions.
 
 - Video Sync serializes each local session's read-modify-write operations, including manager commands, student telemetry, heartbeats, socket connection telemetry, and stale-telemetry pruning. This prevents a background operation that read an old state from later persisting over a play, pause, or seek command.
 - The queue is deliberately scoped to one server process. Multi-instance atomic session updates remain tracked separately because a process-local queue cannot serialize writers on different application instances.
+
+# Persistent manager capability recovery
+
+- A persistent teacher-cookie authentication proves the teacher's authority but does not itself populate an activity manager capability. Manager clients with capability-gated routes must redeem that verified cookie through the server-side persistent-manager-capability recovery endpoint before opening their manager socket or protected REST calls.
