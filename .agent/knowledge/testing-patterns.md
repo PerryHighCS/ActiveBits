@@ -445,3 +445,4 @@ Capture reusable test setup patterns, common failure modes, and reliability guid
 # Browser WebSocket lifecycle checks
 
 - React development Strict Mode mounts, cleans up, then remounts effects. For browser WebSockets that are opened from an effect, defer the actual `connect()` to a cancellable microtask and mark cleanup as disposed first. This prevents an intentionally discarded effect from creating a socket that is immediately closed before its handshake, while the retained effect opens the real connection. Verify the retained manager/student connection with browser coverage.
+- A resilient single-socket hook must ignore `open`, `message`, `error`, and `close` events from a socket it has already replaced. Otherwise a delayed close from the development-only socket can overwrite the current manager's connected state and trigger incorrect UI behavior. Keep the current socket identity as the event authority and regression-test replacement followed by a stale close.

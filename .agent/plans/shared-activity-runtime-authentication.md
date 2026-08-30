@@ -280,6 +280,8 @@ Do not begin with all activities at once.
 - [x] Remove the Video Sync persistent-solo launcher’s passcode handoff; session creation issues the manager capability before its configuration request.
 - [x] Add Chromium browser coverage for Video Sync manager recovery from its httpOnly capability cookie without a passcode handoff (WebKit API-request cookie retention is unavailable in the shared harness).
 - [x] Stabilize the existing SyncDeck student-return browser regression test: wait for each rendered roster row, rather than only its early connected-count update, before opening the next student socket (the underlying atomic-mutation race remains tracked in [#350](https://github.com/PerryHighCS/ActiveBits/issues/350)).
+- [x] Preserve an origin-only cross-origin referrer for SyncDeck embedded managers and explicitly pass the ActiveBits origin to Video Sync's YouTube players, so Safari can satisfy YouTube's client-identification requirement without leaking the child manager's one-time entry token.
+- [x] Harden the shared resilient WebSocket hook so events from a replaced socket cannot overwrite the state of the current manager connection (including React Strict Mode's discarded development connection).
 - [ ] Add persistent, embedded, temporary-manager, capability-loss, and cross-role browser/route/socket coverage.
 - [ ] Restore Java Format permalink support only in the Phase 6 retrofit after this adapter is proven.
 

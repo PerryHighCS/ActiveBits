@@ -153,11 +153,13 @@ export function buildStudentPlayerVars(isStandaloneSession: boolean): {
   controls: 0 | 1
   rel: 0
   modestbranding: 1
+  origin?: string
 } {
   return {
     controls: isStandaloneSession ? 1 : 0,
     rel: 0,
     modestbranding: 1,
+    ...(typeof window !== 'undefined' ? { origin: window.location.origin } : {}),
   }
 }
 

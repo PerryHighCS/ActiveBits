@@ -175,3 +175,55 @@ void test('a terminal close does not reconnect and a changed isTerminalClose ide
     restoreDom()
   }
 })
+
+void test('stale socket events cannot change the live connection state', async () => {
+  const restoreDom = installDomEnvironment()
+  FakeWebSocket.instances.length = 0
+  const container = document.getElementById('root')
+  assert.ok(container)
+  const root = createRoot(container)
+  let reconnect: (() => WebSocket | null) | null = null
+  let closeCalls = 0
+
+  function Probe(): null {
+    const connection = useResilientWebSocket({
+      buildUrl: 'wss://example.test/socket',
+      connectOnMount: true,
+      shouldReconnect: false,
+      onClose: () => { closeCalls += 1 },
+    })
+    reconnect = connection.connect
+    return null
+  }
+
+  try {
+    await act(async () => {
+      root.render(createElement(Probe))
+    })
+    const firstSocket = FakeWebSocket.instances[0]
+    assert.ok(firstSocket)
+
+    await act(async () => {
+      reconnect?.()
+    })
+    const secondSocket = FakeWebSocket.instances[1]
+    assert.ok(secondSocket)
+
+    await act(async () => {
+      console.info('[TEST] closing the replaced socket must not affect the current connection')
+      firstSocket.emitClose(1006)
+    })
+    assert.equal(closeCalls, 0)
+
+    await act(async () => {
+      secondSocket.emitClose(1006)
+    })
+    assert.equal(closeCalls, 1)
+
+    await act(async () => {
+      root.unmount()
+    })
+  } finally {
+    restoreDom()
+  }
+})

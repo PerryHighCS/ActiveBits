@@ -3976,8 +3976,17 @@ const SyncDeckManager: FC = () => {
       return undefined
     }
 
-    connectInstructorWs()
+    // React Strict Mode intentionally mounts, cleans up, and remounts effects
+    // in development. Deferring the connection lets the discarded setup cancel
+    // before it opens a real WebSocket, avoiding a false failed handshake.
+    let disposed = false
+    queueMicrotask(() => {
+      if (!disposed) {
+        connectInstructorWs()
+      }
+    })
     return () => {
+      disposed = true
       disconnectInstructorWs()
     }
   }, [isConfigurePanelOpen, sessionId, instructorPasscode, connectInstructorWs, disconnectInstructorWs])
@@ -5229,7 +5238,9 @@ const SyncDeckManager: FC = () => {
                                   delete embeddedManagerIframeRefs.current[instanceKey]
                                 }
                               }}
-                              referrerPolicy="no-referrer"
+                              // Preserve only this app's origin for nested third-party embeds
+                              // (such as YouTube), never the one-time entry token in this URL.
+                              referrerPolicy="strict-origin-when-cross-origin"
                               {...inactiveIframeAccessibilityProps}
                               onLoad={() => {
                                 setLoadedEmbeddedManagerInstanceKeys((current) => (

@@ -129,20 +129,37 @@ export function useResilientWebSocket({
     }
 
     ws.onopen = (event) => {
+      if (socketRef.current !== ws) {
+        try {
+          ws.close()
+        } catch {
+          // Ignore a stale socket that has already closed.
+        }
+        return
+      }
       reconnectAttemptsRef.current = 0
       onOpenRef.current?.(event, ws)
     }
 
     ws.onmessage = (event) => {
+      if (socketRef.current !== ws) {
+        return
+      }
       onMessageRef.current?.(event, ws)
     }
 
     ws.onerror = (event) => {
+      if (socketRef.current !== ws) {
+        return
+      }
       onErrorRef.current?.(event, ws)
     }
 
     ws.onclose = (event) => {
       const isLatestSocket = socketRef.current === ws
+      if (!isLatestSocket) {
+        return
+      }
       onCloseRef.current?.(event, ws)
       if (isLatestSocket) {
         socketRef.current = null
