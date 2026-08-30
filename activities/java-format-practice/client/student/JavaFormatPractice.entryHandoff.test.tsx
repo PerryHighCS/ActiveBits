@@ -85,6 +85,9 @@ void test('JavaFormatPractice waits for the entry-participant consume before ope
       consumeCalls += 1
       return consume
     }
+    if (requestUrl.endsWith(`/api/session/${sessionId}/entry`)) {
+      return new Response(JSON.stringify({ participantAuthenticated: true }), { status: 200 })
+    }
     if (requestUrl.includes('/stats')) {
       return new Response(JSON.stringify({ ok: true }), { status: 200 })
     }
@@ -145,6 +148,10 @@ void test('JavaFormatPractice does not open the socket when the entry-participan
       // Transient server error: the helper leaves the handoff token in place.
       return new Response(JSON.stringify({ error: 'boom' }), { status: 500 })
     }
+    if (requestUrl.endsWith(`/api/session/${sessionId}/entry`)) {
+      // No participant cookie was minted, so the server does not authenticate it.
+      return new Response(JSON.stringify({ sessionId }), { status: 200 })
+    }
     throw new Error(`Unexpected fetch: ${requestUrl}`)
   }) as typeof fetch
 
@@ -170,6 +177,59 @@ void test('JavaFormatPractice does not open the socket when the entry-participan
       'a failed consume leaves the handoff token pending',
     )
     assert.equal(TestWebSocket.instances.length, 0, 'the socket stays closed so there is no 1008 -> reload loop')
+  } finally {
+    await teardown?.()
+    globalThis.fetch = previousFetch
+    restoreDom()
+  }
+})
+
+void test('JavaFormatPractice does not open the socket for a local kind:values handoff with no server cookie', { concurrency: false }, async () => {
+  TestWebSocket.instances = []
+  const restoreDom = installDomEnvironment('https://bits.example/session-values')
+  const previousFetch = globalThis.fetch
+  const sessionId = 'session-values'
+
+  const storage = await import('@src/components/common/entryParticipantStorage.js')
+  const identityUtils = await import('@src/components/common/entryParticipantIdentityUtils.js')
+
+  identityUtils.persistSessionParticipantIdentity(window.localStorage, sessionId, 'Ada', 'student-a')
+  // The waiting room's local fallback when the server store request failed: a
+  // `kind: 'values'` handoff that resolves locally without minting any cookie.
+  storage.persistEntryParticipantValues(
+    window.sessionStorage,
+    storage.buildSessionEntryParticipantStorageKey('java-format-practice', sessionId),
+    { participantId: 'student-a', displayName: 'Ada' },
+  )
+
+  let entryChecks = 0
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const requestUrl = String(input)
+    if (requestUrl.endsWith(`/api/session/${sessionId}/entry`)) {
+      entryChecks += 1
+      return new Response(JSON.stringify({ sessionId }), { status: 200 })
+    }
+    throw new Error(`Unexpected fetch: ${requestUrl}`)
+  }) as typeof fetch
+
+  let teardown: (() => Promise<void>) | null = null
+  try {
+    const testingLibrary = await import('@testing-library/react')
+    const router = await import('react-router')
+    const { default: JavaFormatPractice } = await import('./JavaFormatPractice.js')
+    const act = testingLibrary.act as TestingLibraryAct
+
+    const rendered = testingLibrary.render(
+      <router.MemoryRouter initialEntries={[`/${sessionId}`]}>
+        <JavaFormatPractice sessionData={{ sessionId }} />
+      </router.MemoryRouter>,
+    )
+    teardown = async () => { await act(async () => { rendered.unmount(); testingLibrary.cleanup(); await Promise.resolve() }) }
+
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve() })
+
+    assert.ok(entryChecks >= 1, 'server authentication was verified')
+    assert.equal(TestWebSocket.instances.length, 0, 'the local-values fallback does not open the socket')
   } finally {
     await teardown?.()
     globalThis.fetch = previousFetch

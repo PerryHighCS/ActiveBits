@@ -8,10 +8,6 @@ import {
   resolveInitialEntryParticipantIdentity,
 } from '@src/components/common/entryParticipantIdentityUtils';
 import { persistSessionParticipantContext } from '@src/components/common/sessionParticipantContext';
-import {
-  buildSessionEntryParticipantStorageKey,
-  hasStoredEntryParticipantToken,
-} from '@src/components/common/entryParticipantStorage';
 import '../components/styles.css';
 import ChallengeSelector from '../components/ChallengeSelector';
 import CharacterGrid from '../components/CharacterGrid';
@@ -258,18 +254,30 @@ export default function JavaFormatPractice({ sessionData }: JavaFormatPracticePr
       } finally {
         if (!isCancelled) {
           setIdentityResolved(true);
-          // A successful consume removes the sessionStorage handoff token; if it
-          // is still there the consume failed transiently and no participant
-          // cookie was issued. Opening the socket then would 1008 and reload into
-          // the same failed state — a loop — so leave the gate closed and let a
-          // deliberate refresh retry the consume once the network recovers.
-          const handoffStillPending = !isSoloSession
-            && sessionId != null
-            && hasStoredEntryParticipantToken(
-              window.sessionStorage,
-              buildSessionEntryParticipantStorageKey('java-format-practice', sessionId),
-            );
-          setEntryHandoffSettled(!handoffStillPending);
+          if (isSoloSession || sessionId == null) {
+            setEntryHandoffSettled(true);
+          } else {
+            // The participant cookie is httpOnly, so ask the server whether it
+            // actually authenticates before opening the socket / syncing stats.
+            // A failed server consume, or the waiting-room `kind: 'values'` local
+            // fallback, can leave `nameSubmitted` true with no cookie; opening the
+            // socket then would close 1008 and reload into the same state — a loop.
+            let participantAuthenticated = false;
+            try {
+              const res = await fetch(`/api/session/${sessionId}/entry`, {
+                headers: { Accept: 'application/json' },
+              });
+              if (res.ok) {
+                const status = (await res.json()) as { participantAuthenticated?: boolean };
+                participantAuthenticated = status.participantAuthenticated === true;
+              }
+            } catch (verifyError) {
+              console.error('Failed to verify participant authentication:', verifyError);
+            }
+            if (!isCancelled) {
+              setEntryHandoffSettled(participantAuthenticated);
+            }
+          }
         }
       }
     })();
