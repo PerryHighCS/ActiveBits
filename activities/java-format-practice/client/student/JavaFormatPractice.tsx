@@ -8,6 +8,10 @@ import {
   resolveInitialEntryParticipantIdentity,
 } from '@src/components/common/entryParticipantIdentityUtils';
 import { persistSessionParticipantContext } from '@src/components/common/sessionParticipantContext';
+import {
+  buildSessionEntryParticipantStorageKey,
+  hasStoredEntryParticipantToken,
+} from '@src/components/common/entryParticipantStorage';
 import '../components/styles.css';
 import ChallengeSelector from '../components/ChallengeSelector';
 import CharacterGrid from '../components/CharacterGrid';
@@ -254,9 +258,18 @@ export default function JavaFormatPractice({ sessionData }: JavaFormatPracticePr
       } finally {
         if (!isCancelled) {
           setIdentityResolved(true);
-          // The awaited consume (if any) has now settled and the participant
-          // cookie is in place; the socket and stats sync may proceed.
-          setEntryHandoffSettled(true);
+          // A successful consume removes the sessionStorage handoff token; if it
+          // is still there the consume failed transiently and no participant
+          // cookie was issued. Opening the socket then would 1008 and reload into
+          // the same failed state — a loop — so leave the gate closed and let a
+          // deliberate refresh retry the consume once the network recovers.
+          const handoffStillPending = !isSoloSession
+            && sessionId != null
+            && hasStoredEntryParticipantToken(
+              window.sessionStorage,
+              buildSessionEntryParticipantStorageKey('java-format-practice', sessionId),
+            );
+          setEntryHandoffSettled(!handoffStillPending);
         }
       }
     })();

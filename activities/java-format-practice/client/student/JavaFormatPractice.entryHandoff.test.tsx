@@ -123,3 +123,56 @@ void test('JavaFormatPractice waits for the entry-participant consume before ope
     restoreDom()
   }
 })
+
+void test('JavaFormatPractice does not open the socket when the entry-participant consume fails', { concurrency: false }, async () => {
+  TestWebSocket.instances = []
+  const restoreDom = installDomEnvironment('https://bits.example/session-fail')
+  const previousFetch = globalThis.fetch
+  const sessionId = 'session-fail'
+
+  const storage = await import('@src/components/common/entryParticipantStorage.js')
+  const identityUtils = await import('@src/components/common/entryParticipantIdentityUtils.js')
+
+  identityUtils.persistSessionParticipantIdentity(window.localStorage, sessionId, 'Ada', 'student-a')
+  const handoffKey = storage.buildSessionEntryParticipantStorageKey('java-format-practice', sessionId)
+  storage.persistEntryParticipantToken(window.sessionStorage, handoffKey, 'handoff-token-fail')
+
+  let consumeCalls = 0
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const requestUrl = String(input)
+    if (requestUrl.includes('/entry-participant/consume')) {
+      consumeCalls += 1
+      // Transient server error: the helper leaves the handoff token in place.
+      return new Response(JSON.stringify({ error: 'boom' }), { status: 500 })
+    }
+    throw new Error(`Unexpected fetch: ${requestUrl}`)
+  }) as typeof fetch
+
+  let teardown: (() => Promise<void>) | null = null
+  try {
+    const testingLibrary = await import('@testing-library/react')
+    const router = await import('react-router')
+    const { default: JavaFormatPractice } = await import('./JavaFormatPractice.js')
+    const act = testingLibrary.act as TestingLibraryAct
+
+    const rendered = testingLibrary.render(
+      <router.MemoryRouter initialEntries={[`/${sessionId}`]}>
+        <JavaFormatPractice sessionData={{ sessionId }} />
+      </router.MemoryRouter>,
+    )
+    teardown = async () => { await act(async () => { rendered.unmount(); testingLibrary.cleanup(); await Promise.resolve() }) }
+
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve() })
+
+    assert.equal(consumeCalls, 1, 'the consume was attempted')
+    assert.ok(
+      storage.hasStoredEntryParticipantToken(window.sessionStorage, handoffKey),
+      'a failed consume leaves the handoff token pending',
+    )
+    assert.equal(TestWebSocket.instances.length, 0, 'the socket stays closed so there is no 1008 -> reload loop')
+  } finally {
+    await teardown?.()
+    globalThis.fetch = previousFetch
+    restoreDom()
+  }
+})
