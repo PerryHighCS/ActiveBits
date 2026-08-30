@@ -99,6 +99,7 @@ interface JsonResponse {
   set?(field: string, value: string): JsonResponse
   cookie(name: string, value: string, options: Record<string, unknown>): void
   json(payload: unknown): void
+  readonly headersSent?: boolean
 }
 
 interface VideoSyncRouteApp {
@@ -1211,87 +1212,99 @@ export default function setupVideoSyncRoutes(
       return
     }
 
-    const {
-      session,
-      data,
-    } = await getVideoSyncSessionWithNormalization(sessions, sessionId)
-    if (!session || !data) {
-      res.status(404).json({ error: 'NOT_FOUND', message: 'Session not found' })
-      return
-    }
-
-    // Resolve any persistent recovery context up front. It gates capability
-    // recovery below, but is also used to return canonical bootstrap data
-    // (persistentSourceUrl) even when the caller is already authorized - a
-    // just-authenticated teacher lands here with the manager cookie already set
-    // and still needs its configured video to be recovered.
-    const directPersistentHash = await findHashBySessionId(sessionId)
-    const embeddedParentContext = readEmbeddedParentSessionContext(session.data)
-    const recoveryActivityName = directPersistentHash
-      ? 'video-sync'
-      : embeddedParentContext?.activityName ?? null
-    const recoverySessionId = directPersistentHash
-      ? sessionId
-      : embeddedParentContext?.parentSessionId ?? null
-    const persistentHash = recoverySessionId
-      ? await findHashBySessionId(recoverySessionId)
-      : null
-    const sessionEntries = parsePersistentSessionsCookie(req.cookies?.persistent_sessions)
-    const matchingEntry = (persistentHash && recoveryActivityName)
-      ? sessionEntries.find((entry) => entry.key === `${recoveryActivityName}:${persistentHash}`)
-      : undefined
-    const hasVerifiedTeacherCookie = Boolean(
-      persistentHash
-      && recoveryActivityName
-      && matchingEntry
-      && verifyTeacherCodeWithHash(recoveryActivityName, persistentHash, String(matchingEntry.teacherCode ?? '')).valid,
-    )
-    const persistentSourceUrl = (persistentHash && matchingEntry && hasVerifiedTeacherCookie)
-      ? readPersistentSourceUrlFromCookieEntry(persistentHash, matchingEntry)
-      : null
-    const bootstrapPayload = persistentSourceUrl ? { persistentSourceUrl } : {}
-
-    if (resolveActivityPrincipalFromCookies(session, sessionId, 'manager', req.cookies)) {
-      res.json({ ...bootstrapPayload })
-      return
-    }
-
-    if (!persistentHash || !recoveryActivityName || !matchingEntry || !hasVerifiedTeacherCookie) {
-      res.status(403).json({ error: 'FORBIDDEN', message: 'Instructor credential recovery is not available for this session' })
-      return
-    }
-
-    let recovery: 'issued' | 'session-missing'
     try {
-      recovery = await withSessionMutation(sessionId, async () => {
-        // Re-read inside the per-session queue: the checks above ran several
-        // awaits (persistent-store lookups, teacher-code verification) during
-        // which a command or heartbeat could have persisted newer playback
-        // state onto the snapshot read at the top of this handler.
-        const freshSession = await getVideoSyncSession(sessions, sessionId)
-        if (!freshSession) {
-          return 'session-missing'
-        }
-        const capability = issueActivityCapability(freshSession, 'manager')
-        await sessions.set(freshSession.id, freshSession)
-        writeActivityCapabilityCookie(res, sessionId, 'manager', capability.token)
-        return 'issued'
-      })
-    } catch (error) {
+      const {
+        session,
+        data,
+      } = await getVideoSyncSessionWithNormalization(sessions, sessionId)
+      if (!session || !data) {
+        res.status(404).json({ error: 'NOT_FOUND', message: 'Session not found' })
+        return
+      }
+
+      // Resolve any persistent recovery context up front. It gates capability
+      // recovery below, but is also used to return canonical bootstrap data
+      // (persistentSourceUrl) even when the caller is already authorized - a
+      // just-authenticated teacher lands here with the manager cookie already set
+      // and still needs its configured video to be recovered.
+      const directPersistentHash = await findHashBySessionId(sessionId)
+      const embeddedParentContext = readEmbeddedParentSessionContext(session.data)
+      const recoveryActivityName = directPersistentHash
+        ? 'video-sync'
+        : embeddedParentContext?.activityName ?? null
+      const recoverySessionId = directPersistentHash
+        ? sessionId
+        : embeddedParentContext?.parentSessionId ?? null
+      const persistentHash = recoverySessionId
+        ? await findHashBySessionId(recoverySessionId)
+        : null
+      const sessionEntries = parsePersistentSessionsCookie(req.cookies?.persistent_sessions)
+      const matchingEntry = (persistentHash && recoveryActivityName)
+        ? sessionEntries.find((entry) => entry.key === `${recoveryActivityName}:${persistentHash}`)
+        : undefined
+      const hasVerifiedTeacherCookie = Boolean(
+        persistentHash
+        && recoveryActivityName
+        && matchingEntry
+        && verifyTeacherCodeWithHash(recoveryActivityName, persistentHash, String(matchingEntry.teacherCode ?? '')).valid,
+      )
+      const persistentSourceUrl = (persistentHash && matchingEntry && hasVerifiedTeacherCookie)
+        ? readPersistentSourceUrlFromCookieEntry(persistentHash, matchingEntry)
+        : null
+      const bootstrapPayload = persistentSourceUrl ? { persistentSourceUrl } : {}
+
+      if (resolveActivityPrincipalFromCookies(session, sessionId, 'manager', req.cookies)) {
+        res.json({ ...bootstrapPayload })
+        return
+      }
+
+      if (!persistentHash || !recoveryActivityName || !matchingEntry || !hasVerifiedTeacherCookie) {
+        res.status(403).json({ error: 'FORBIDDEN', message: 'Instructor credential recovery is not available for this session' })
+        return
+      }
+
+      let recovery: 'issued' | 'session-missing'
+      try {
+        recovery = await withSessionMutation(sessionId, async () => {
+          // Re-read inside the per-session queue: the checks above ran several
+          // awaits (persistent-store lookups, teacher-code verification) during
+          // which a command or heartbeat could have persisted newer playback
+          // state onto the snapshot read at the top of this handler.
+          const freshSession = await getVideoSyncSession(sessions, sessionId)
+          if (!freshSession) {
+            return 'session-missing'
+          }
+          const capability = issueActivityCapability(freshSession, 'manager')
+          await sessions.set(freshSession.id, freshSession)
+          writeActivityCapabilityCookie(res, sessionId, 'manager', capability.token)
+          return 'issued'
+        })
+      } catch (error) {
+        console.error(JSON.stringify({
+          activity: 'video-sync',
+          event: 'manager-capability-persistence-failed',
+          sessionId,
+          errorName: error instanceof Error ? error.name : 'unknown',
+        }))
+        res.status(500).json({ error: 'INTERNAL_ERROR', message: 'Manager access is temporarily unavailable' })
+        return
+      }
+      if (recovery === 'session-missing') {
+        res.status(404).json({ error: 'NOT_FOUND', message: 'Session not found' })
+        return
+      }
+      res.json({ ...bootstrapPayload })
+    } catch (lookupError) {
       console.error(JSON.stringify({
         activity: 'video-sync',
-        event: 'manager-capability-persistence-failed',
+        event: 'manager-access-failed',
         sessionId,
-        errorName: error instanceof Error ? error.name : 'unknown',
+        errorName: lookupError instanceof Error ? lookupError.name : 'unknown',
       }))
-      res.status(500).json({ error: 'INTERNAL_ERROR', message: 'Manager access is temporarily unavailable' })
-      return
+      if (!res.headersSent) {
+        res.status(500).json({ error: 'INTERNAL_ERROR', message: 'Manager access is temporarily unavailable' })
+      }
     }
-    if (recovery === 'session-missing') {
-      res.status(404).json({ error: 'NOT_FOUND', message: 'Session not found' })
-      return
-    }
-    res.json({ ...bootstrapPayload })
   })
 
   app.get('/api/video-sync/:sessionId/session', async (req, res) => {

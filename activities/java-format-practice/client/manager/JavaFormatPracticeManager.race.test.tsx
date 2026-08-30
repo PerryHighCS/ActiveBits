@@ -287,7 +287,7 @@ void test('JavaFormatPracticeManager serializes /students polls and still render
 })
 
 void test('JavaFormatPracticeManager auth-lost banner starts a fresh session instead of reloading', { concurrency: false }, async () => {
-  console.info('[TEST] java-format manager: a 403 roster response is expected below to latch the auth-lost banner')
+  console.info('[TEST] java-format manager: a 403 persistent-capability response and a 403 roster response are expected below; the exchange gives up and the roster 403 latches the auth-lost banner')
   TestWebSocket.instances = []
   const restoreDom = installDomEnvironment('https://bits.example/manage/java-format-practice/dead-session')
   const previousFetch = globalThis.fetch
@@ -490,6 +490,7 @@ void test('JavaFormatPracticeManager re-gates controls for the new session after
 })
 
 void test('JavaFormatPracticeManager keeps controls gated when the persistent capability exchange keeps failing', { concurrency: false }, async () => {
+  console.info('[TEST] java-format manager: the persistent-capability exchange 500s below; the failed attempt is expected noise and must not release the control gate')
   TestWebSocket.instances = []
   const restoreDom = installDomEnvironment('https://bits.example/manage/java-format-practice/perma-500')
   const previousFetch = globalThis.fetch

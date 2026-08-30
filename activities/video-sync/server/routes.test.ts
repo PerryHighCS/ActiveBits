@@ -1803,6 +1803,39 @@ void test('manager-access route still returns canonical sourceUrl when the manag
   await cleanupPersistentSession(hash)
 })
 
+void test('manager-access route answers with a structured 500 when a backing-store lookup rejects', async () => {
+  initializePersistentStorage(null)
+
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  const storeState = createSessionStore({ s1: createVideoSyncSession('s1') })
+  // [TEST] model a persistent/session store outage during the up-front lookup
+  // block: the handler must log through its structured logger and return its own
+  // JSON 500 rather than letting the rejection bubble to Express's default error
+  // handler (which would bypass this route's error contract).
+  const sessionsWithFailingGet = {
+    ...storeState.sessions,
+    async get(): Promise<never> {
+      throw new Error('[TEST] backing store unavailable')
+    },
+  }
+
+  setupVideoSyncRoutes(app, sessionsWithFailingGet, ws)
+
+  const handler = app.handlers.get['/api/video-sync/:sessionId/manager-access']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.({ params: { sessionId: 's1' }, cookies: {} }, res)
+
+  assert.equal(res.statusCode, 500)
+  assert.deepEqual(res.body, {
+    error: 'INTERNAL_ERROR',
+    message: 'Manager access is temporarily unavailable',
+  })
+  assert.equal(res.headers['cache-control'], 'no-store', 'error response is still marked no-store')
+})
+
 void test('manager-access route ignores unsigned persistent sourceUrl from cookie selectedOptions', async () => {
   initializePersistentStorage(null)
 
