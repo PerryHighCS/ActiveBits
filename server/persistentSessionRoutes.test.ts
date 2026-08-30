@@ -185,7 +185,10 @@ function getRoute(app: ReturnType<typeof createMockApp>, method: 'GET' | 'POST',
 void test('persistent session route keeps valid backing session', async (t) => {
   initializePersistentStorage(null)
   const sessionMap = new Map<string, unknown>()
-  const sessions = { get: async (id: string) => sessionMap.get(id) ?? null }
+  const sessions = {
+    get: async (id: string) => sessionMap.get(id) ?? null,
+    set: async (id: string, session: unknown) => { sessionMap.set(id, session) },
+  }
   const app = createMockApp()
   registerPersistentSessionRoutes({ app, sessions })
   const handler = getRoute(app, 'GET', '/api/persistent-session/:hash')
@@ -1895,7 +1898,10 @@ void test('session teacher authenticate restores teacher cookie from active sess
   initializePersistentStorage(null)
   await initializeActivityRegistry()
   const sessionMap = new Map<string, unknown>()
-  const sessions = { get: async (id: string) => sessionMap.get(id) ?? null }
+  const sessions = {
+    get: async (id: string) => sessionMap.get(id) ?? null,
+    set: async (id: string, session: unknown) => { sessionMap.set(id, session) },
+  }
   const app = createMockApp()
   registerPersistentSessionRoutes({ app, sessions })
   const handler = getRoute(app, 'POST', '/api/session/:sessionId/teacher-authenticate')
@@ -1936,6 +1942,11 @@ void test('session teacher authenticate restores teacher cookie from active sess
     },
   })
   assert.equal(res.headers['cache-control'], 'no-store')
+  const managerCapabilityCookie = Array.from(res.cookies.entries()).find(([name]) => name.startsWith('activebits_cap_manager_'))?.[1]
+  assert.ok(managerCapabilityCookie)
+  assert.equal(managerCapabilityCookie.value.length > 0, true)
+  assert.equal(managerCapabilityCookie.options.httpOnly, true)
+  assert.ok((sessionMap.get('live-session') as { data?: { activityCapabilities?: unknown } }).data?.activityCapabilities)
 
   const cookie = res.cookies.get('persistent_sessions')
   assert.ok(cookie)
