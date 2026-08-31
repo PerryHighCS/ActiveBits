@@ -551,10 +551,11 @@ export async function resetPersistentSession(hash: string): Promise<void> {
  * validating `get` would fall through to the stale-index cleanup below and
  * delete a still-valid reverse index, making recovery look like "no such
  * session". The recovery routes wrap this call and turn a rejection into a
- * retryable 500. A live persistent session normally has an index entry
- * (written by `persistPersistentSession` alongside the record); propagating
- * `setHashBySessionId` write failures where later reads depend on the index is
- * the remaining part, tracked in #357.
+ * retryable 500. A live persistent session always has an index entry:
+ * `persistPersistentSession` writes it alongside the record, and the
+ * Valkey-backed `setHashBySessionId` now rethrows on failure so a persist
+ * cannot report success without its index. (Making the record + index write a
+ * single atomic op is the remaining hardening, tracked in #357.)
  */
 export async function findIndexedHashBySessionId(sessionId: string): Promise<string | null> {
   const readIndex = persistentStore.getHashBySessionIdStrict

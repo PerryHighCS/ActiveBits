@@ -7,6 +7,7 @@ import {
     clearManagerPlayerLoadError,
     getManagerPlaybackIntentForStateChange,
     parseManagerStopTimeInput,
+    isManagerAuthorizationClose,
     isRetryableManagerAccessStatus,
     readBootstrapSourceUrl,
     readEmbeddedBootstrapSourceUrl,
@@ -93,6 +94,13 @@ void test('isRetryableManagerAccessStatus retries 5xx and network-shaped failure
   assert.equal(isRetryableManagerAccessStatus(500), true)
   assert.equal(isRetryableManagerAccessStatus(502), true)
   assert.equal(isRetryableManagerAccessStatus(503), true)
+})
+
+void test('isManagerAuthorizationClose only matches the policy-violation close the manager socket uses for Forbidden', () => {
+  assert.equal(isManagerAuthorizationClose(1008), true)
+  assert.equal(isManagerAuthorizationClose(1000), false)
+  assert.equal(isManagerAuthorizationClose(1006), false)
+  assert.equal(isManagerAuthorizationClose(1001), false)
 })
 
 void test('shouldFetchEmbeddedBootstrapSourceUrl only fetches for embedded child sessions without query bootstrap', () => {

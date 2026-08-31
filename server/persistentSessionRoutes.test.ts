@@ -376,6 +376,50 @@ void test('persistent manager capability recovery issues the capability onto the
   assert.equal(persisted?.data?.concurrentMarker, 'landed-mid-flight', 'the concurrent update is not clobbered by a stale snapshot write')
 })
 
+void test('persistent manager capability recovery does not issue into a session whose id was reused for another activity mid-request', async (t) => {
+  initializePersistentStorage(null)
+  const sessionMap = new Map<string, unknown>()
+  let getCalls = 0
+  let setCalls = 0
+  const sessions = {
+    get: async (id: string) => {
+      getCalls += 1
+      // The persistent authorization is established on the first read
+      // (java-format-practice). By the handler's re-read the id has been reused
+      // for a different activity - issuing a manager capability here would grant
+      // authority over the replacement session.
+      if (id === 'live-session' && getCalls >= 2) {
+        return structuredClone({ id: 'live-session', type: 'algorithm-demo', data: {} })
+      }
+      const session = sessionMap.get(id)
+      return session == null ? null : structuredClone(session)
+    },
+    set: async (id: string, session: unknown) => { setCalls += 1; sessionMap.set(id, structuredClone(session)) },
+  }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+  const handler = getRoute(app, 'POST', '/api/session/:sessionId/persistent-manager-capability')
+
+  const activityName = 'java-format-practice'
+  const teacherCode = 'teacher-secret'
+  const { hash, hashedTeacherCode } = generatePersistentHash(activityName, teacherCode)
+  t.after(async () => cleanupPersistentSession(hash))
+  sessionMap.set('live-session', { id: 'live-session', type: activityName, data: { students: [] } })
+  await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode)
+  await startPersistentSession(hash, 'live-session', { id: 'teacher-ws', readyState: 1, send() {} })
+
+  const res = createMockRes()
+  await handler(createMockReq({
+    params: { sessionId: 'live-session' },
+    cookies: { persistent_sessions: buildCookieValue(activityName, hash, teacherCode) },
+  }), res)
+
+  assert.equal(res.statusCode, 404)
+  assert.deepEqual(res.jsonBody, { error: 'Active session not found' })
+  assert.equal(setCalls, 0, 'no capability is written into the replacement session')
+  assert.equal(res.cookies.has(getActivityCapabilityCookieName('manager', 'live-session')), false)
+})
+
 void test('persistent manager capability recovery fast-paths an already-authorized caller without re-issuing', async () => {
   initializePersistentStorage(null)
   const sessionMap = new Map<string, unknown>()
@@ -1465,6 +1509,35 @@ void test('session id reverse lookup backfills missing reverse index entries for
 
   assert.equal(await findHashBySessionId('legacy-session'), hash)
   assert.equal(await findHashBySessionId('legacy-session'), hash)
+})
+
+void test('starting a persistent session fails loudly when the reverse-index write fails', async (t) => {
+  const valkeyClient = createFakePersistentValkeyClient()
+  initializePersistentStorage(valkeyClient as never)
+
+  const activityName = 'syncdeck'
+  const teacherCode = 'index-write-fail'
+  const { hash, hashedTeacherCode } = generatePersistentHash(activityName, teacherCode)
+  t.after(async () => cleanupPersistentSession(hash))
+
+  await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode, 'solo-allowed')
+
+  const originalSet = valkeyClient.set
+  valkeyClient.set = async (key: string, value: string) => {
+    if (key.startsWith('persistent-session-by-session:')) {
+      throw new Error('[TEST] reverse-index write failed')
+    }
+    return originalSet(key, value)
+  }
+
+  console.info('[TEST] Expected reverse-index write failure while starting a persistent session.')
+  // Manager recovery is index-only, so a record persisted without its reverse
+  // index is silently unrecoverable. The write must reject rather than report a
+  // "successful" persistent session that recovery classifies as missing.
+  await assert.rejects(
+    startPersistentSession(hash, 'index-write-fail-session', { id: 'teacher-ws', readyState: 1, send() {} }),
+    /reverse-index write failed/,
+  )
 })
 
 void test('session id reverse lookup ignores stale reverse index entries and repairs them', async (t) => {

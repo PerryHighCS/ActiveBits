@@ -893,6 +893,14 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
         res.status(404).json({ error: 'Active session not found' })
         return
       }
+      // The persistent authorization was established for `activeSession.type`.
+      // If the session ended and its id was reused for a different activity
+      // during the awaits above, do not issue a manager capability into the
+      // replacement.
+      if (freshSession.type !== activeSession.type) {
+        res.status(404).json({ error: 'Active session not found' })
+        return
+      }
       const capability = issueActivityCapability(freshSession as { data: unknown }, 'manager')
       await sessions.set(sessionId, freshSession)
       writeActivityCapabilityCookie(res, sessionId, 'manager', capability.token)

@@ -157,6 +157,16 @@ export function isRetryableManagerAccessStatus(status: number): boolean {
   return status >= 500
 }
 
+/**
+ * Whether a websocket close means the server rejected the connection for
+ * missing manager authority (an expired capability), i.e. the manager should
+ * re-run `/manager-access` rather than keep reconnecting. `1008` is the policy
+ * violation code the manager socket uses for `Forbidden`.
+ */
+export function isManagerAuthorizationClose(code: number): boolean {
+  return code === 1008
+}
+
 export function shouldFetchEmbeddedBootstrapSourceUrl(params: {
   sessionId: string | null | undefined
   queryBootstrapSourceUrl: string | null
@@ -359,6 +369,15 @@ export default function VideoSyncManager() {
     && managerAccessState.nonce === managerAccessRefreshNonce
   const isManagerAccessReady = sessionId == null || managerAccessResolved
   const hasManagerAccess = managerAccessResolved && managerAccessState.granted
+
+  // Re-run /manager-access after an authorization failure mid-session (a 1008
+  // socket close or a protected-route 401/403): the manager capability cookie
+  // has likely expired. The re-check re-issues for a persistent teacher and
+  // latches read-only for a temporary manager, instead of reconnecting forever
+  // with controls still enabled.
+  const revalidateManagerAccess = useCallback(() => {
+    setManagerAccessRefreshNonce((current) => current + 1)
+  }, [])
   const persistentRecoverySourceUrl = managerAccessResolved ? managerAccessState.sourceUrl : null
   const bootstrapSourceUrl = persistentRecoverySourceUrl ?? queryBootstrapSourceUrl ?? embeddedBootstrapSourceUrl
 
@@ -462,6 +481,9 @@ export default function VideoSyncManager() {
       })
 
       if (!response.ok) {
+        if (response.status === 401 || response.status === 403) {
+          revalidateManagerAccess()
+        }
         const failure = (await response.json()) as { message?: string }
         throw new Error(sanitizeManagerApiErrorMessage(failure.message, 'Failed to send command'))
       }
@@ -485,7 +507,7 @@ export default function VideoSyncManager() {
       }
       return false
     }
-  }, [hasManagerAccess, sessionId])
+  }, [hasManagerAccess, revalidateManagerAccess, sessionId])
 
   const flushManagerPlaybackIntent = useCallback(async (): Promise<void> => {
     clearPlaybackCommandFlushTimer()
@@ -904,6 +926,15 @@ export default function VideoSyncManager() {
   const { connect, disconnect } = useResilientWebSocket({
     buildUrl: buildWsUrl,
     shouldReconnect: Boolean(sessionId && hasManagerAccess && isManagerAccessReady),
+    // A 1008 close is the server rejecting the socket for missing manager
+    // authority (expired capability). Treat it as terminal so the hook stops
+    // reconnecting, and re-run /manager-access to recover or latch read-only.
+    isTerminalClose: (event) => isManagerAuthorizationClose(event.code),
+    onClose: (event) => {
+      if (isManagerAuthorizationClose(event.code)) {
+        revalidateManagerAccess()
+      }
+    },
     onOpen: () => {},
     onMessage: (event) => {
       const envelope = parseVideoSyncEnvelope(event.data)
@@ -979,6 +1010,9 @@ export default function VideoSyncManager() {
       })
 
       if (!response.ok) {
+        if (response.status === 401 || response.status === 403) {
+          revalidateManagerAccess()
+        }
         const failure = (await response.json()) as { message?: string }
         throw new Error(sanitizeManagerApiErrorMessage(failure.message, 'Failed to save video config'))
       }
@@ -997,7 +1031,7 @@ export default function VideoSyncManager() {
       setErrorMessage(message)
       return false
     }
-  }, [applyManagerStateUpdate, hasManagerAccess, isManagerAccessReady, sessionId])
+  }, [applyManagerStateUpdate, hasManagerAccess, isManagerAccessReady, revalidateManagerAccess, sessionId])
 
   const saveConfig = useCallback(async (): Promise<void> => {
     await saveConfigWithValues(sourceUrlInput, hasStopTime, stopSecInput)

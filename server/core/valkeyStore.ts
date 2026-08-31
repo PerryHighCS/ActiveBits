@@ -424,11 +424,18 @@ export class ValkeyPersistentStore {
     try {
       await this.client.set(`persistent-session-by-session:${sessionId}`, hash, 'PX', this.ttlMs)
     } catch (err) {
+      // Rethrow: manager-capability recovery is index-only, so a persistent
+      // session whose record was written but whose reverse index was not is
+      // silently unrecoverable (recovery classifies it as missing). Failing the
+      // write lets the caller retry / surface the error instead of publishing a
+      // "successful" session without its required index. The record write
+      // (`set`) already rethrows, so callers already handle a rejected persist.
       console.error(JSON.stringify({
         event: 'valkey.persistent-session-hash-write-failed',
         sessionId,
         error: err instanceof Error ? err.message : String(err),
       }))
+      throw err
     }
   }
 

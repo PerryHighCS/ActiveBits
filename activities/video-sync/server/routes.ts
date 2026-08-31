@@ -1269,23 +1269,50 @@ export default function setupVideoSyncRoutes(
       const embeddedParentContext = readEmbeddedParentSessionContext(session.data)
       const recoveryActivityName = embeddedParentContext?.activityName ?? 'video-sync'
       const recoverySessionId = embeddedParentContext?.parentSessionId ?? sessionId
-      const persistentHash = await findIndexedHashBySessionId(recoverySessionId)
-      const sessionEntries = parsePersistentSessionsCookie(req.cookies?.persistent_sessions)
-      const matchingEntry = (persistentHash && recoveryActivityName)
-        ? sessionEntries.find((entry) => entry.key === `${recoveryActivityName}:${persistentHash}`)
-        : undefined
-      const hasVerifiedTeacherCookie = Boolean(
-        persistentHash
-        && recoveryActivityName
-        && matchingEntry
-        && verifyTeacherCodeWithHash(recoveryActivityName, persistentHash, String(matchingEntry.teacherCode ?? '')).valid,
+
+      // Does the caller already hold a valid manager capability? For such a
+      // caller the persistent lookup below only enriches the response with
+      // canonical bootstrap data, so a transient Valkey outage must degrade to
+      // "no bootstrap data" rather than fail an already-authorized request. A
+      // caller whose authorization depends on the lookup still gets a
+      // retryable 500 (outer catch) on a store failure.
+      const alreadyAuthorized = Boolean(
+        resolveActivityPrincipalFromCookies(session, sessionId, 'manager', req.cookies),
       )
-      const persistentSourceUrl = (persistentHash && matchingEntry && hasVerifiedTeacherCookie)
-        ? readPersistentSourceUrlFromCookieEntry(persistentHash, matchingEntry)
-        : null
+
+      let persistentHash: string | null = null
+      let matchingEntry: ReturnType<typeof parsePersistentSessionsCookie>[number] | undefined
+      let hasVerifiedTeacherCookie = false
+      let persistentSourceUrl: string | null = null
+      try {
+        persistentHash = await findIndexedHashBySessionId(recoverySessionId)
+        const sessionEntries = parsePersistentSessionsCookie(req.cookies?.persistent_sessions)
+        matchingEntry = (persistentHash && recoveryActivityName)
+          ? sessionEntries.find((entry) => entry.key === `${recoveryActivityName}:${persistentHash}`)
+          : undefined
+        hasVerifiedTeacherCookie = Boolean(
+          persistentHash
+          && recoveryActivityName
+          && matchingEntry
+          && verifyTeacherCodeWithHash(recoveryActivityName, persistentHash, String(matchingEntry.teacherCode ?? '')).valid,
+        )
+        persistentSourceUrl = (persistentHash && matchingEntry && hasVerifiedTeacherCookie)
+          ? readPersistentSourceUrlFromCookieEntry(persistentHash, matchingEntry)
+          : null
+      } catch (recoveryLookupError) {
+        if (!alreadyAuthorized) {
+          throw recoveryLookupError
+        }
+        console.error(JSON.stringify({
+          activity: 'video-sync',
+          event: 'manager-access-recovery-lookup-degraded',
+          sessionId,
+          errorName: recoveryLookupError instanceof Error ? recoveryLookupError.name : 'unknown',
+        }))
+      }
       const bootstrapPayload = persistentSourceUrl ? { persistentSourceUrl } : {}
 
-      if (resolveActivityPrincipalFromCookies(session, sessionId, 'manager', req.cookies)) {
+      if (alreadyAuthorized) {
         res.json({ ...bootstrapPayload })
         return
       }

@@ -1864,6 +1864,38 @@ void test('manager-access route answers with a structured 500 when a backing-sto
   assert.equal(res.headers['cache-control'], 'no-store', 'error response is still marked no-store')
 })
 
+void test('manager-access route degrades persistent bootstrap for an already-authorized caller during a persistent-store outage', async () => {
+  console.info('[TEST] video-sync manager-access: the persistent reverse-index read below rejects on purpose; an already-authorized caller must still get 200 with no bootstrap data, not 500')
+  const failingPersistentClient = {
+    get: async (key: string) => {
+      if (typeof key === 'string' && key.startsWith('persistent-session-by-session:')) {
+        throw new Error('[TEST] persistent index outage')
+      }
+      return null
+    },
+  }
+  initializePersistentStorage(failingPersistentClient as never)
+
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  const storeState = createSessionStore({ s1: createVideoSyncSession('s1') })
+
+  setupVideoSyncRoutes(app, storeState.sessions, ws)
+  const handler = app.handlers.get['/api/video-sync/:sessionId/manager-access']
+  assert.equal(typeof handler, 'function')
+
+  // No explicit cookies -> the session's default manager capability is injected,
+  // so the caller is already authorized and does not depend on the persistent
+  // lookup that is now failing.
+  const res = createResponse()
+  await handler?.({ params: { sessionId: 's1' } }, res)
+
+  assert.equal(res.statusCode, 200)
+  assert.deepEqual(res.body, {}, 'no persistent bootstrap data, but the request is not failed')
+  assert.equal(res.cookies.length, 0, 'the fast path does not re-issue a capability')
+  initializePersistentStorage(null)
+})
+
 void test('manager-access route ignores unsigned persistent sourceUrl from cookie selectedOptions', async () => {
   initializePersistentStorage(null)
 
