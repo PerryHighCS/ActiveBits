@@ -153,6 +153,23 @@ export class ValkeySessionStore {
   }
 
   async consumeSessionDataToken(id: string, field: string, token: string): Promise<SessionLike | null> {
+    // Non-throwing contract: delegate to the strict variant and swallow a
+    // backend failure to `null` for callers that tolerate it.
+    try {
+      return await this.consumeSessionDataTokenStrict(id, field, token)
+    } catch {
+      // consumeSessionDataTokenStrict already logged the structured failure.
+      return null
+    }
+  }
+
+  /**
+   * Strict variant: a backend failure is logged and rethrown rather than mapped
+   * to `null`, which is indistinguishable from "token already consumed /
+   * invalid". Callers that must keep a transient outage retryable (rather than
+   * reporting it as a definitive 403) use this.
+   */
+  async consumeSessionDataTokenStrict(id: string, field: string, token: string): Promise<SessionLike | null> {
     try {
       const script = `
                 local key = KEYS[1]
@@ -197,9 +214,10 @@ export class ValkeySessionStore {
         event: 'consume-session-data-token-failed',
         sessionId: id,
         field,
+        strict: true,
         error: err instanceof Error ? { name: err.name, message: err.message } : String(err),
       }))
-      return null
+      throw err
     }
   }
 

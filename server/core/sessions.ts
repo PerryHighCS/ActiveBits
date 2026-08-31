@@ -70,6 +70,9 @@ export interface SessionStore extends SharedSessionStore<Record<string, unknown>
   getStrict?(id: string): Promise<SessionRecord | null>
   set(id: string, session: SessionRecord, ttl?: number | null): Promise<void>
   consumeSessionDataToken?(id: string, field: string, token: string): Promise<SessionRecord | null>
+  // Like consumeSessionDataToken, but a backend failure propagates instead of
+  // mapping to `null` (indistinguishable from "already consumed / invalid").
+  consumeSessionDataTokenStrict?(id: string, field: string, token: string): Promise<SessionRecord | null>
   delete(id: string): Promise<boolean>
   touch(id: string): Promise<boolean>
   refreshSessionExpiry?(id: string, expectedExpiresAt: number, nextExpiresAt: number, ttlMs: number): Promise<SessionRecord | null>
@@ -296,13 +299,10 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
     cache.set(id, normalized, false)
   }
 
-  const consumeSessionDataToken = async (id: string, field: string, token: string): Promise<SessionRecord | null> => {
-    cache.invalidate(id)
-    const consumed = await valkeyStore.consumeSessionDataToken(id, field, token)
+  const finalizeConsumedToken = async (id: string, consumed: SessionLike | null): Promise<SessionRecord | null> => {
     if (!consumed) {
       return null
     }
-
     const session = normalizeSessionData(toSessionRecord(consumed))
     cache.set(id, session, false)
     const embeddedParentSessionId = getEmbeddedParentSessionId(session)
@@ -310,6 +310,19 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
       await touch(embeddedParentSessionId)
     }
     return session
+  }
+
+  const consumeSessionDataToken = async (id: string, field: string, token: string): Promise<SessionRecord | null> => {
+    cache.invalidate(id)
+    return finalizeConsumedToken(id, await valkeyStore.consumeSessionDataToken(id, field, token))
+  }
+
+  const consumeSessionDataTokenStrict = async (id: string, field: string, token: string): Promise<SessionRecord | null> => {
+    // A backend failure rejects here (-> the route's outer catch -> retryable
+    // 500) instead of mapping to `null`, which a route treats as a definitive
+    // "token invalid / already consumed" 403.
+    cache.invalidate(id)
+    return finalizeConsumedToken(id, await valkeyStore.consumeSessionDataTokenStrict(id, field, token))
   }
 
   const del = async (id: string): Promise<boolean> => {
@@ -427,6 +440,7 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
     getStrict,
     set,
     consumeSessionDataToken,
+    consumeSessionDataTokenStrict,
     delete: del,
     touch,
     refreshSessionExpiry,

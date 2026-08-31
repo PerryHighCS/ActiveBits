@@ -156,6 +156,11 @@ function createSessionStore(initial: Record<string, SessionRecord>) {
       store[id] = cloneSession(consumed)
       return cloneSession(consumed)
     },
+    async consumeSessionDataTokenStrict(id: string, field: string, token: string) {
+      // Same result as consumeSessionDataToken in the happy path; production's
+      // strict variant differs only by rethrowing a backend failure.
+      return this.consumeSessionDataToken!(id, field, token)
+    },
     async delete(id: string) {
       const existed = Boolean(store[id])
       delete store[id]
@@ -3070,6 +3075,38 @@ void test('embedded manager capability exchange returns a structured 500 when a 
   console.info('[TEST] Expected embedded-manager-capability-failed log: the injected session store rejects every read.')
   await handler?.(
     createRequest({}, undefined, {}, {}, { sessionId: 'child-capability', token: 'capability-entry-token' }),
+    response,
+  )
+
+  assert.equal(response.statusCode, 500)
+  assert.deepEqual(response.body, { error: 'embedded manager capability unavailable' })
+  assert.equal(response.cookies.length, 0)
+})
+
+void test('embedded manager capability exchange returns a structured 500 when the token consume rejects', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const now = Date.now()
+  const storeState = createSessionStore({
+    'child-consume-fail': {
+      id: 'child-consume-fail', type: 'video-sync', created: now, lastActivity: now,
+      data: { embeddedManagerEntryToken: { value: 'consume-fail-token', expiresAt: now + 60_000 } },
+    },
+  })
+  // The token verify read succeeds, but the atomic consume then hits a backend
+  // outage. Production's non-strict consume swallows that to `null` (-> a false
+  // 403); the strict variant the route now uses must reject into the outer
+  // catch -> structured log + retryable 500.
+  storeState.sessions.consumeSessionDataTokenStrict = async () => {
+    throw new Error('[TEST] session store consume unavailable')
+  }
+  setupSyncDeckRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.get['/api/syncdeck/embedded-manager-capability']
+  const response = createResponse()
+  console.info('[TEST] Expected embedded-manager-capability-failed log: the atomic token consume rejects.')
+  await handler?.(
+    createRequest({}, undefined, {}, {}, { sessionId: 'child-consume-fail', token: 'consume-fail-token' }),
     response,
   )
 
