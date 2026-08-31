@@ -278,6 +278,11 @@ export default function JavaFormatPracticeManager() {
         } catch {
           // Body parse failure is non-fatal; readiness still releases below.
         }
+        // The body await - whether it resolved or rejected - can settle after a
+        // route swap cancelled this exchange. Re-check here too so a delayed
+        // malformed response from a previous visit cannot mark the returned-to
+        // session ready before its own exchange runs.
+        if (cancelled) return
         // A conclusive answer arrived (possibly on a retry): this is no longer
         // an "unknown / temporarily unavailable" state.
         setManagerAccessUnavailableSessionId((current) => (current === sessionId ? null : current))

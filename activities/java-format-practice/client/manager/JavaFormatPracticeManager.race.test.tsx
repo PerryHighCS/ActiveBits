@@ -674,6 +674,101 @@ void test('JavaFormatPracticeManager ignores a cancelled exchange whose body res
   }
 })
 
+void test('JavaFormatPracticeManager ignores a cancelled exchange whose body parse fails after returning to the session', { concurrency: false }, async () => {
+  console.info('[TEST] java-format manager: the first session-A exchange is cancelled by a route swap; its deferred body then rejects (malformed) - the parse-failure path must stay cancelled-guarded')
+  TestWebSocket.instances = []
+  const restoreDom = installDomEnvironment('https://bits.example/manage/java-format-practice/session-A')
+  const previousFetch = globalThis.fetch
+
+  let capabilityCallsA = 0
+  let studentsCallsA = 0
+  let releaseFirstBody: (() => void) | null = null
+  const firstBodyGate = new Promise<void>((resolve) => { releaseFirstBody = resolve })
+  const secondExchangeGate = new Promise<Response>(() => { /* stays pending for the test */ })
+
+  globalThis.fetch = (async (input: RequestInfo | URL, _init?: RequestInit) => {
+    const url = String(input)
+    if (url.includes('/session-A/persistent-manager-capability')) {
+      capabilityCallsA += 1
+      if (capabilityCallsA === 1) {
+        // First A exchange: 200, but its body only settles - by rejecting -
+        // after we have navigated away (cancelling it) and returned.
+        const deferredJson = async () => {
+          await firstBodyGate
+          throw new Error('malformed body')
+        }
+        return {
+          ok: true,
+          status: 200,
+          clone: () => ({ json: deferredJson }),
+          json: deferredJson,
+        } as unknown as Response
+      }
+      // Second (current) A exchange stays pending: readiness must come from it,
+      // never from the first visit's late parse-failure fall-through.
+      return secondExchangeGate
+    }
+    if (url.includes('/session-B/persistent-manager-capability')) {
+      return new Response('{}', { status: 200 })
+    }
+    if (url.includes('/api/java-format-practice/session-A/students')) {
+      studentsCallsA += 1
+      return new Response(JSON.stringify({ students: [] }), { status: 200 })
+    }
+    if (url.includes('/api/java-format-practice/session-B/students')) {
+      return new Response(JSON.stringify({ students: [] }), { status: 200 })
+    }
+    throw new Error(`Unexpected fetch: ${url}`)
+  }) as typeof fetch
+
+  let teardown: (() => Promise<void>) | null = null
+  try {
+    const { testingLibrary, router, JavaFormatPracticeManager, act } = await loadHarness()
+
+    function NavProbe(): React.JSX.Element {
+      const navigate = router.useNavigate()
+      return (
+        <>
+          <JavaFormatPracticeManager />
+          <button type="button" onClick={() => navigate('/manage/java-format-practice/session-B')}>to-b</button>
+          <button type="button" onClick={() => navigate('/manage/java-format-practice/session-A')}>to-a</button>
+        </>
+      )
+    }
+
+    const rendered = testingLibrary.render(
+      <router.MemoryRouter initialEntries={['/manage/java-format-practice/session-A']}>
+        <router.Routes>
+          <router.Route path="/manage/java-format-practice/:sessionId" element={<NavProbe />} />
+        </router.Routes>
+      </router.MemoryRouter>,
+    )
+    teardown = async () => { await act(async () => { rendered.unmount(); testingLibrary.cleanup(); await Promise.resolve() }) }
+
+    await act(async () => { await Promise.resolve(); await Promise.resolve() })
+    await act(async () => { testingLibrary.fireEvent.click(rendered.getByRole('button', { name: 'to-b' })); await Promise.resolve() })
+    await act(async () => { testingLibrary.fireEvent.click(rendered.getByRole('button', { name: 'to-a' })); await Promise.resolve(); await Promise.resolve() })
+
+    // The current A exchange is still pending, so the gate is closed.
+    assert.equal((rendered.getByRole('button', { name: 'Beginner' }) as HTMLButtonElement).disabled, true)
+
+    // The first, cancelled exchange's body now rejects. The parse-failure path
+    // must re-check `cancelled` and not mark the returned-to session ready
+    // before its own (still pending) exchange answers.
+    await act(async () => { releaseFirstBody?.(); await Promise.resolve(); await Promise.resolve() })
+    assert.equal(
+      (rendered.getByRole('button', { name: 'Beginner' }) as HTMLButtonElement).disabled,
+      true,
+      'a cancelled exchange whose body parse fails cannot release the control gate',
+    )
+    assert.equal(studentsCallsA, 0, 'the protected roster poll never opens off a stale parse-failure')
+  } finally {
+    await teardown?.()
+    globalThis.fetch = previousFetch
+    restoreDom()
+  }
+})
+
 void test('JavaFormatPracticeManager gates difficulty/theme controls until the persistent capability exchange settles', { concurrency: false }, async () => {
   TestWebSocket.instances = []
   const restoreDom = installDomEnvironment('https://bits.example/manage/java-format-practice/perma-session')
