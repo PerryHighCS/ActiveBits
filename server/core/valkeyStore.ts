@@ -336,11 +336,17 @@ export class ValkeyPersistentStore {
 
   async get(hash: string): Promise<PersistentMetadata | null> {
     // Non-throwing contract: delegate the single read/parse path to getStrict
-    // and swallow a backend failure to `null` for callers that tolerate it.
+    // (which already logs the failure) and swallow a backend failure to `null`
+    // for callers that tolerate it. `hash` is kept out of any format-string
+    // position - it derives from a request-controlled session id.
     try {
       return await this.getStrict(hash)
     } catch (err) {
-      console.error(`Failed to get persistent session ${hash}:`, err)
+      console.error(JSON.stringify({
+        event: 'valkey.persistent-session-record-lookup-degraded',
+        hash,
+        error: err instanceof Error ? err.message : String(err),
+      }))
       return null
     }
   }
