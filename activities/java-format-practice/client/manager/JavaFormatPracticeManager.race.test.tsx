@@ -79,6 +79,32 @@ async function loadHarness() {
   return { testingLibrary, router, JavaFormatPracticeManager, act: testingLibrary.act as TestingLibraryAct }
 }
 
+void test('resolveManagerAuthLostRecovery distinguishes a transient outage from a conclusive no-recovery', async () => {
+  const { resolveManagerAuthLostRecovery } = await import('./JavaFormatPracticeManager.js')
+
+  // Confirmed persistent recovery -> reload redeems the teacher cookie.
+  assert.equal(
+    resolveManagerAuthLostRecovery({ persistentRecoveryAvailable: true, managerAccessTemporarilyUnavailable: false }),
+    'reload-from-signin',
+  )
+  // Exchange only ever hit transient failures -> offer retry/reload, do not
+  // claim a reload cannot help.
+  assert.equal(
+    resolveManagerAuthLostRecovery({ persistentRecoveryAvailable: false, managerAccessTemporarilyUnavailable: true }),
+    'temporarily-unavailable',
+  )
+  // A confirmed recovery outranks a stale "temporarily unavailable" flag.
+  assert.equal(
+    resolveManagerAuthLostRecovery({ persistentRecoveryAvailable: true, managerAccessTemporarilyUnavailable: true }),
+    'reload-from-signin',
+  )
+  // Conclusive 403/404 -> reloading will not help.
+  assert.equal(
+    resolveManagerAuthLostRecovery({ persistentRecoveryAvailable: false, managerAccessTemporarilyUnavailable: false }),
+    'no-recovery',
+  )
+})
+
 void test('JavaFormatPracticeManager keeps a live studentsUpdate over a slower /students poll', { concurrency: false }, async () => {
   TestWebSocket.instances = []
   const restoreDom = installDomEnvironment('https://bits.example/manage/java-format-practice/session-1')

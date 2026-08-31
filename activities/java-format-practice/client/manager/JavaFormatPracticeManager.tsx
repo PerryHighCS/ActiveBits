@@ -24,6 +24,27 @@ interface ManagerWsMessage {
   }
 }
 
+export type ManagerAuthLostRecovery = 'reload-from-signin' | 'temporarily-unavailable' | 'no-recovery'
+
+/**
+ * Which recovery affordance the auth-lost banner should present:
+ * - `reload-from-signin`: the capability exchange confirmed a persistent record
+ *   and a still-valid teacher cookie, so a reload redeems a fresh capability.
+ * - `temporarily-unavailable`: the exchange only ever hit transient failures, so
+ *   we never learned whether recovery is possible - offer retry/reload rather
+ *   than telling the instructor a reload cannot help.
+ * - `no-recovery`: a conclusive 403/404 - reloading will not help, mint a new
+ *   session.
+ */
+export function resolveManagerAuthLostRecovery(params: {
+  persistentRecoveryAvailable: boolean
+  managerAccessTemporarilyUnavailable: boolean
+}): ManagerAuthLostRecovery {
+  if (params.persistentRecoveryAvailable) return 'reload-from-signin'
+  if (params.managerAccessTemporarilyUnavailable) return 'temporarily-unavailable'
+  return 'no-recovery'
+}
+
 /**
  * JavaFormatPracticeManager - Teacher view for managing the Java Format Practice activity
  * Displays student roster and their progress statistics
@@ -48,6 +69,16 @@ export default function JavaFormatPracticeManager() {
   // new-session-only.
   const [persistentRecoverySessionId, setPersistentRecoverySessionId] = useState<string | null>(null)
   const persistentRecoveryAvailable = sessionId != null && persistentRecoverySessionId === sessionId
+  // The sessionId whose capability exchange exhausted its retries against a
+  // transient (5xx / network) failure - so we never learned whether persistent
+  // recovery is available. Distinct from a conclusive "no recovery" (403/404):
+  // a later reload of a valid permalink session CAN still redeem the teacher
+  // cookie once the store recovers, so the banner must offer retry/reload here
+  // rather than the temporary-session "reloading won't help" message.
+  const [managerAccessUnavailableSessionId, setManagerAccessUnavailableSessionId] = useState<string | null>(null)
+  const managerAccessTemporarilyUnavailable = sessionId != null && managerAccessUnavailableSessionId === sessionId
+  const managerAuthLostRecovery = resolveManagerAuthLostRecovery({ persistentRecoveryAvailable, managerAccessTemporarilyUnavailable })
+  const [managerAccessRetryNonce, setManagerAccessRetryNonce] = useState(0)
   const managerAuthLostRef = useRef(false)
   // Bumped every time a live `studentsUpdate` is applied. An in-flight `/students`
   // poll captures this value and drops its snapshot if a newer socket update
@@ -92,6 +123,16 @@ export default function JavaFormatPracticeManager() {
     if (managerAuthLostRef.current) return;
     managerAuthLostRef.current = true;
     setManagerAuthLost(true);
+  }, []);
+
+  // Re-run the capability exchange after it gave up on a transient outage:
+  // clear the auth-loss latch so the gate can re-open, and bump the nonce the
+  // exchange effect depends on.
+  const retryManagerAccess = useCallback(() => {
+    managerAuthLostRef.current = false;
+    setManagerAuthLost(false);
+    setManagerAccessUnavailableSessionId(null);
+    setManagerAccessRetryNonce((nonce) => nonce + 1);
   }, []);
 
   // For a temporary session a lost manager capability cannot be recovered by
@@ -157,6 +198,7 @@ export default function JavaFormatPracticeManager() {
   useEffect(() => {
     managerAuthLostRef.current = false;
     setManagerAuthLost(false);
+    setManagerAccessUnavailableSessionId(null);
     setStartingNewSession(false);
     setStudents([]);
     rosterUpdateGenRef.current += 1;
@@ -217,6 +259,9 @@ export default function JavaFormatPracticeManager() {
         } catch {
           // Body parse failure is non-fatal; readiness still releases below.
         }
+        // A conclusive answer arrived (possibly on a retry): this is no longer
+        // an "unknown / temporarily unavailable" state.
+        setManagerAccessUnavailableSessionId((current) => (current === sessionId ? null : current))
         setManagerAccessReadySessionId(sessionId)
         return
       }
@@ -225,6 +270,7 @@ export default function JavaFormatPracticeManager() {
         // teacher cookie); clear stale recoverability from a prior exchange
         // before releasing the gate.
         setPersistentRecoverySessionId((current) => (current === sessionId ? null : current))
+        setManagerAccessUnavailableSessionId((current) => (current === sessionId ? null : current))
         setManagerAccessReadySessionId(sessionId)
         return
       }
@@ -235,8 +281,12 @@ export default function JavaFormatPracticeManager() {
     const scheduleRetryOrGiveUp = (): void => {
       attempts += 1
       if (attempts >= MAX_ATTEMPTS) {
-        // Do not open the protected poll/socket without a cookie; surface the
-        // existing recovery affordance instead of hanging on disabled controls.
+        // Retries exhausted against a transient failure: we never learned
+        // whether persistent recovery is available. Mark the state "temporarily
+        // unavailable" (not "no recovery") so the banner offers retry/reload
+        // instead of the temporary-session "reloading won't help" message, then
+        // latch so the protected poll/socket do not open without a cookie.
+        setManagerAccessUnavailableSessionId(sessionId)
         markManagerAuthLost()
         return
       }
@@ -256,7 +306,7 @@ export default function JavaFormatPracticeManager() {
       cancelled = true
       if (retryTimer) clearTimeout(retryTimer)
     }
-  }, [sessionId, markManagerAuthLost])
+  }, [sessionId, markManagerAuthLost, managerAccessRetryNonce])
 
   const fetchStudents = useCallback(async (signal?: AbortSignal) => {
     if (sessionId == null || !managerAccessReady || managerAuthLostRef.current || pollInFlightRef.current !== 0) return;
@@ -442,12 +492,29 @@ export default function JavaFormatPracticeManager() {
 
       {managerAuthLost && (
         <div role="alert" style={styles.authLostBanner}>
-          {persistentRecoveryAvailable ? (
+          {managerAuthLostRecovery === 'reload-from-signin' ? (
             <>
               <span>
                 This manager session&rsquo;s capability has expired. Reload the page
                 to restore it from your instructor sign-in, or start a new session.
               </span>
+              <Button onClick={() => { window.location.reload(); }}>
+                Reload
+              </Button>
+              <Button onClick={() => { void handleStartNewSession(); }} disabled={startingNewSession}>
+                {startingNewSession ? 'Starting…' : 'Start new session'}
+              </Button>
+            </>
+          ) : managerAuthLostRecovery === 'temporarily-unavailable' ? (
+            <>
+              <span>
+                Manager access is temporarily unavailable. Retry now, or reload the
+                page once the service recovers &mdash; a valid instructor sign-in
+                can still be restored.
+              </span>
+              <Button onClick={retryManagerAccess}>
+                Retry
+              </Button>
               <Button onClick={() => { window.location.reload(); }}>
                 Reload
               </Button>

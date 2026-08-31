@@ -2916,14 +2916,27 @@ const SyncDeckStudent: FC = () => {
       return undefined
     }
 
-    connectStudentWs()
-    const initialRetryTimeout = setTimeout(() => {
-      if (shouldRetryInitialSocket(studentSocketRef.current?.readyState)) {
+    // React Strict Mode mounts, cleans up, then remounts effects in
+    // development. Defer the connect and mark cleanup disposed first so the
+    // discarded setup cancels before it opens a real socket that would close
+    // before its handshake. Matches SyncDeckManager's instructor-socket effect.
+    let disposed = false
+    let initialRetryTimeout: ReturnType<typeof setTimeout> | null = null
+    queueMicrotask(() => {
+      if (!disposed) {
+        connectStudentWs()
+      }
+    })
+    initialRetryTimeout = setTimeout(() => {
+      if (!disposed && shouldRetryInitialSocket(studentSocketRef.current?.readyState)) {
         connectStudentWs()
       }
     }, INITIAL_SOCKET_RETRY_DELAY_MS)
     return () => {
-      clearTimeout(initialRetryTimeout)
+      disposed = true
+      if (initialRetryTimeout != null) {
+        clearTimeout(initialRetryTimeout)
+      }
       disconnectStudentWs()
     }
   }, [
