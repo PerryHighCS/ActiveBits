@@ -560,7 +560,11 @@ export async function rollbackPersistentSessionStart(
 ): Promise<void> {
   try {
     const session = await persistentStore.get(hash)
-    if (session == null || session.sessionId == null) {
+    if (session == null || (expectedSessionId != null && session.sessionId !== expectedSessionId)) {
+      // Nothing of ours to reset: the record is gone, was already rolled back,
+      // or a concurrent start attempt has since linked a newer session. Still
+      // clean up the failed attempt's own reverse-index entry - it is keyed by
+      // session id, so this never touches a concurrent success's entry.
       if (expectedSessionId != null) {
         try {
           await persistentStore.deleteHashBySessionId(expectedSessionId)
@@ -570,26 +574,29 @@ export async function rollbackPersistentSessionStart(
       }
       return
     }
-    if (expectedSessionId != null && session.sessionId !== expectedSessionId) {
-      // A concurrent start attempt already linked a newer session to this
-      // record. Leave that association intact and only clean up the failed
-      // attempt's own reverse-index entry.
-      try {
-        await persistentStore.deleteHashBySessionId(expectedSessionId)
-      } catch {
-        // Best-effort: a stale reverse-index entry self-heals on read.
-      }
+    if (session.sessionId == null) {
       return
     }
+    const staleSessionId = session.sessionId
     try {
-      await persistentStore.deleteHashBySessionId(session.sessionId)
+      await persistentStore.deleteHashBySessionId(staleSessionId)
     } catch {
       // Best-effort: the reverse index is validated on read, so a stale entry
       // self-heals.
     }
-    session.sessionId = null
-    session.teacherSocketId = null
-    await persistPersistentSession(hash, session)
+    // Re-read immediately before the write and persist off that copy, not the
+    // stale snapshot above: a concurrent start attempt can link a newer session
+    // during the awaits in between, and writing back the stale snapshot would
+    // clear it. Without a store-level compare-and-set (tracked in #313) a
+    // sub-await window remains, but this keeps the common interleaving from
+    // clobbering a live session.
+    const latest = await persistentStore.get(hash)
+    if (latest == null || latest.sessionId !== staleSessionId) {
+      return
+    }
+    latest.sessionId = null
+    latest.teacherSocketId = null
+    await persistPersistentSession(hash, latest)
   } catch (error) {
     console.error(JSON.stringify({
       event: 'persistent-session.start-rollback-failed',
@@ -666,6 +673,43 @@ export async function findHashBySessionId(sessionId: string): Promise<string | n
         error: error instanceof Error ? error.message : String(error),
       }))
     }
+  }
+
+  const hashes = await persistentStore.getAllHashes()
+  for (const hash of hashes) {
+    const session = await persistentStore.get(hash)
+    if (session?.sessionId === sessionId) {
+      try {
+        await persistentStore.setHashBySessionId(sessionId, hash)
+      } catch (error) {
+        console.error(JSON.stringify({
+          event: 'persistent-session.hash-backfill-failed',
+          sessionId,
+          error: error instanceof Error ? error.message : String(error),
+        }))
+      }
+      return hash
+    }
+  }
+
+  return null
+}
+
+/**
+ * Strict variant of {@link findHashBySessionId}: the reverse-index read
+ * (`getHashBySessionIdStrict`) and the record read that validates it
+ * (`getStrict`), both via {@link findIndexedHashBySessionId}, propagate a
+ * backend outage instead of mapping it to `null`. A caller such as
+ * `POST /api/session/:sessionId/teacher-authenticate` can then turn a transient
+ * failure into a logged, retryable 500 rather than the terminal 404 it would
+ * otherwise return even though the live session was read successfully. A
+ * genuine index miss still falls back to the legacy O(n) `getAllHashes()` scan
+ * and backfill, so an un-indexed but live persistent session stays resolvable.
+ */
+export async function findHashBySessionIdStrict(sessionId: string): Promise<string | null> {
+  const indexedHash = await findIndexedHashBySessionId(sessionId)
+  if (indexedHash) {
+    return indexedHash
   }
 
   const hashes = await persistentStore.getAllHashes()

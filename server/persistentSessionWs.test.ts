@@ -490,3 +490,44 @@ void test('rollbackPersistentSessionStart scopes to the failed attempt and leave
   await rollbackPersistentSessionStart(hash)
   assert.equal(await isSessionStarted(hash), false, 'an unscoped rollback clears the record')
 })
+
+void test('rollbackPersistentSessionStart re-reads before writing so a mid-rollback re-link survives', async (t) => {
+  const valkeyClient = createFakeValkeyClient()
+  initializePersistentStorage(valkeyClient as never)
+  t.after(() => { initializePersistentStorage(null) })
+
+  const activityName = 'algorithm-demo'
+  const teacherCode = 'rollback-interleave-code'
+  const { hash, hashedTeacherCode } = generatePersistentHash(activityName, teacherCode)
+  t.after(async () => cleanupPersistentSession(hash))
+  await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode)
+
+  // The failed attempt A has linked "sess-A" on the record.
+  await startPersistentSession(hash, 'sess-A', { id: 'teacher-A', readyState: 1, send() {} } as never)
+
+  // Simulate attempt B committing "sess-B" in the window between the rollback's
+  // initial read and its pre-write re-read: right after the first record GET
+  // returns, advance the stored record to sess-B.
+  const recordKey = `persistent:${hash}`
+  const originalGet = valkeyClient.get
+  let recordGets = 0
+  valkeyClient.get = async (key: string) => {
+    const result = await originalGet(key)
+    if (key === recordKey && result) {
+      recordGets += 1
+      if (recordGets === 1) {
+        const parsed = JSON.parse(result) as { sessionId?: string | null }
+        parsed.sessionId = 'sess-B'
+        valkeyClient.store.set(recordKey, JSON.stringify(parsed))
+      }
+    }
+    return result
+  }
+
+  console.info('[TEST] Expected concurrent re-link during rollback; the newer session must survive.')
+  await rollbackPersistentSessionStart(hash, 'sess-A')
+
+  valkeyClient.get = originalGet
+  const record = await getPersistentSession(hash)
+  assert.equal(record?.sessionId, 'sess-B', 'the concurrently linked session is not cleared by the stale rollback')
+})

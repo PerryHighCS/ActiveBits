@@ -1738,6 +1738,50 @@ void test('manager-access route returns manager access for persistent teacher co
   await cleanupPersistentSession(hash)
 })
 
+void test('manager-access route rate-limits repeated persistent teacher-code recovery attempts', async () => {
+  initializePersistentStorage(null)
+
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  const storeState = createSessionStore({ s1: createVideoSyncSession('s1') })
+  const teacherCode = 'persistent-teacher-code'
+  const { hash, hashedTeacherCode } = generatePersistentHash('video-sync', teacherCode)
+  await getOrCreateActivePersistentSession('video-sync', hash, hashedTeacherCode)
+  await startPersistentSession(hash, 's1', { id: 'teacher-ws', readyState: 1, send() {} })
+
+  setupVideoSyncRoutes(app, storeState.sessions, ws)
+  const handler = app.handlers.get['/api/video-sync/:sessionId/manager-access']
+  assert.equal(typeof handler, 'function')
+
+  const callWithWrongCode = async () => {
+    const res = createResponse()
+    await handler?.(
+      {
+        params: { sessionId: 's1' },
+        cookies: {
+          persistent_sessions: JSON.stringify([{ key: `video-sync:${hash}`, teacherCode: 'wrong-teacher-code' }]),
+        },
+      },
+      res,
+    )
+    return res
+  }
+
+  // The global middleware only rate-limits Brython assets, so this endpoint must
+  // apply the same session-and-client attempt cap as POST teacher-authenticate.
+  console.info('[TEST] Expected repeated invalid persistent teacher-code attempts against manager-access.')
+  for (let attempt = 1; attempt <= 5; attempt += 1) {
+    const res = await callWithWrongCode()
+    assert.equal(res.statusCode, 403, `attempt ${attempt} is a normal auth failure`)
+  }
+  const blocked = await callWithWrongCode()
+  assert.equal(blocked.statusCode, 429)
+  assert.equal((blocked.body as { error?: string }).error, 'TOO_MANY_ATTEMPTS')
+  assert.equal(blocked.cookies.length, 0, 'no capability cookie is issued for a rate-limited caller')
+
+  await cleanupPersistentSession(hash)
+})
+
 void test('manager-access route does not resurrect a session deleted between the strict check and capability issuance', async () => {
   initializePersistentStorage(null)
 

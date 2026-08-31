@@ -2624,6 +2624,49 @@ void test('session teacher authenticate stays retryable (500) when the capabilit
   assert.equal(res.cookies.has(getActivityCapabilityCookieName('manager', 'live-session')), false)
 })
 
+void test('session teacher authenticate stays retryable (500) when the reverse-index read rejects', async (t) => {
+  const valkeyClient = createFakePersistentValkeyClient()
+  const originalGet = valkeyClient.get
+  valkeyClient.get = async (key: string) => {
+    if (key.startsWith('persistent-session-by-session:')) {
+      throw new Error('[TEST] reverse-index read failed')
+    }
+    return originalGet(key)
+  }
+  initializePersistentStorage(valkeyClient as never)
+  await initializeActivityRegistry()
+  t.after(() => { initializePersistentStorage(null) })
+
+  const sessionMap = new Map<string, unknown>()
+  sessionMap.set('live-session', {
+    id: 'live-session', type: 'syncdeck', data: { instructorPasscode: 'syncdeck-instructor-passcode' },
+  })
+  const sessions = {
+    get: async (id: string) => {
+      const session = sessionMap.get(id)
+      return session == null ? null : structuredClone(session)
+    },
+    getStrict: async (id: string) => {
+      const session = sessionMap.get(id)
+      return session == null ? null : structuredClone(session)
+    },
+    set: async () => { throw new Error('[TEST] session store write should not run') },
+  }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+  const handler = getRoute(app, 'POST', '/api/session/:sessionId/teacher-authenticate')
+
+  const res = createMockRes()
+  console.info('[TEST] Expected retryable failure: the reverse-index read is unavailable during teacher authentication.')
+  await handler(createMockReq({ params: { sessionId: 'live-session' }, body: { teacherCode: 'teacher-secret' } }), res)
+
+  // The live session read succeeded; a reverse-index backend outage must be a
+  // retryable 500, not the terminal 404 the legacy null contract produced.
+  assert.equal(res.statusCode, 500)
+  assert.deepEqual(res.jsonBody, { error: 'Teacher authentication is temporarily unavailable' })
+  assert.equal(res.cookies.has(getActivityCapabilityCookieName('manager', 'live-session')), false)
+})
+
 void test('session teacher authenticate rejects invalid teacher code', async (t) => {
   initializePersistentStorage(null)
   await initializeActivityRegistry()

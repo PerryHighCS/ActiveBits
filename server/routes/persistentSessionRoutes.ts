@@ -8,7 +8,7 @@ import {
   cleanupPersistentSession,
   recordTeacherCodeAttempt,
   consumePersistentSessionEntryParticipant,
-  findHashBySessionId,
+  findHashBySessionIdStrict,
   findIndexedHashBySessionId,
   generatePersistentHash,
   getOrCreateActivePersistentSession,
@@ -707,7 +707,22 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
       return
     }
 
-    const hash = await findHashBySessionId(sessionId)
+    let hash: string | null
+    try {
+      // Strict reverse-index lookup: a genuine miss still falls back to the
+      // legacy scan, but a backend read failure rejects here instead of
+      // returning `null` -> the terminal 404 below (the live session was
+      // already read successfully, so the failure is transient and retryable).
+      hash = await findHashBySessionIdStrict(sessionId)
+    } catch (error) {
+      console.error(JSON.stringify({
+        event: 'teacher-authenticate-hash-lookup-failed',
+        sessionId,
+        errorName: error instanceof Error ? error.name : 'unknown',
+      }))
+      res.status(500).json({ error: 'Teacher authentication is temporarily unavailable' })
+      return
+    }
     if (!hash) {
       res.status(404).json({ error: 'Teacher join is unavailable for this session' })
       return

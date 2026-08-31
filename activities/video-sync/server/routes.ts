@@ -10,6 +10,7 @@ import { registerSessionNormalizer } from 'activebits-server/core/sessionNormali
 import { createBroadcastSubscriptionHelper } from 'activebits-server/core/broadcastUtils.js'
 import {
   findIndexedHashBySessionId,
+  recordTeacherCodeAttempt,
   resolvePersistentSessionEntryPolicy,
   verifyTeacherCodeWithHash,
 } from 'activebits-server/core/persistentSessions.js'
@@ -92,6 +93,19 @@ interface RouteRequest {
   params: Record<string, string | undefined>
   body?: unknown
   cookies?: Record<string, unknown>
+  ip?: string
+  socket?: { remoteAddress?: string }
+}
+
+function resolveClientIp(req: RouteRequest): string {
+  if (typeof req.ip === 'string' && req.ip.trim()) {
+    return req.ip.trim()
+  }
+  const remoteAddress = req.socket?.remoteAddress
+  if (typeof remoteAddress === 'string' && remoteAddress.trim()) {
+    return remoteAddress.trim()
+  }
+  return 'unknown'
 }
 
 interface JsonResponse {
@@ -1298,6 +1312,21 @@ export default function setupVideoSyncRoutes(
         matchingEntry = (persistentHash && recoveryActivityName)
           ? sessionEntries.find((entry) => entry.key === `${recoveryActivityName}:${persistentHash}`)
           : undefined
+        if (!alreadyAuthorized && persistentHash && recoveryActivityName && matchingEntry) {
+          // Bound teacher-code guessing on this pre-auth, pollable endpoint the
+          // same way POST /api/session/:sessionId/teacher-authenticate does -
+          // the global middleware only rate-limits Brython assets, so without
+          // this a caller could brute-force the persistent teacher code by
+          // replaying requests with different `persistent_sessions` cookies. A
+          // legitimate manager verifies once, receives the manager capability,
+          // and is `alreadyAuthorized` on every later poll, so real users do
+          // not accrue attempts.
+          const attempt = await recordTeacherCodeAttempt(`${resolveClientIp(req)}:${persistentHash}`)
+          if (!attempt.allowed) {
+            res.status(429).json({ error: 'TOO_MANY_ATTEMPTS', message: 'Too many teacher code attempts. Please wait a minute.' })
+            return
+          }
+        }
         hasVerifiedTeacherCookie = Boolean(
           persistentHash
           && recoveryActivityName
