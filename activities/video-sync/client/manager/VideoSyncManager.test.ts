@@ -7,8 +7,10 @@ import {
     clearManagerPlayerLoadError,
     getManagerPlaybackIntentForStateChange,
     parseManagerStopTimeInput,
+    DEFAULT_MANAGER_ACCESS_RETRY_AFTER_MS,
     isManagerAuthorizationClose,
     isRetryableManagerAccessStatus,
+    parseManagerAccessRetryAfterMs,
     readBootstrapSourceUrl,
     readEmbeddedBootstrapSourceUrl,
     readRecoveredPersistentSourceUrl,
@@ -91,10 +93,27 @@ void test('isRetryableManagerAccessStatus retries 5xx and network-shaped failure
   assert.equal(isRetryableManagerAccessStatus(401), false)
   assert.equal(isRetryableManagerAccessStatus(403), false)
   assert.equal(isRetryableManagerAccessStatus(404), false)
+  // 429 is transient but handled on its own longer, Retry-After-honoring path,
+  // so the short-backoff predicate deliberately excludes it.
+  assert.equal(isRetryableManagerAccessStatus(429), false)
   // The route's explicitly temporary store failures are retried with backoff.
   assert.equal(isRetryableManagerAccessStatus(500), true)
   assert.equal(isRetryableManagerAccessStatus(502), true)
   assert.equal(isRetryableManagerAccessStatus(503), true)
+})
+
+void test('parseManagerAccessRetryAfterMs parses delta-seconds and rejects unusable values', () => {
+  assert.equal(parseManagerAccessRetryAfterMs('60'), 60_000)
+  assert.equal(parseManagerAccessRetryAfterMs(' 5 '), 5_000)
+  // Clamped to a 5 minute ceiling so a hostile/absurd header cannot stall the manager.
+  assert.equal(parseManagerAccessRetryAfterMs('99999'), 5 * 60_000)
+  // Absent / non-numeric (HTTP-date form) / non-positive -> caller uses the default.
+  assert.equal(parseManagerAccessRetryAfterMs(null), null)
+  assert.equal(parseManagerAccessRetryAfterMs(undefined), null)
+  assert.equal(parseManagerAccessRetryAfterMs('Wed, 21 Oct 2026 07:28:00 GMT'), null)
+  assert.equal(parseManagerAccessRetryAfterMs('0'), null)
+  assert.equal(parseManagerAccessRetryAfterMs('-3'), null)
+  assert.equal(DEFAULT_MANAGER_ACCESS_RETRY_AFTER_MS, 60_000)
 })
 
 void test('isManagerAuthorizationClose only matches the policy-violation close the manager socket uses for Forbidden', () => {

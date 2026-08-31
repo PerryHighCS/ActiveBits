@@ -12,6 +12,7 @@ import {
   findIndexedHashBySessionId,
   recordTeacherCodeAttempt,
   resolvePersistentSessionEntryPolicy,
+  TEACHER_CODE_ATTEMPT_WINDOW_SECONDS,
   verifyTeacherCodeWithHash,
 } from 'activebits-server/core/persistentSessions.js'
 import {
@@ -1368,6 +1369,11 @@ export default function setupVideoSyncRoutes(
           // not accrue attempts.
           const attempt = await recordTeacherCodeAttempt(`${resolveClientIp(req)}:${persistentHash}`)
           if (!attempt.allowed) {
+            // Signal "wait and retry" - the attempt bucket clears after 60s. The
+            // manager client treats 429 as transient (bounded delayed retry)
+            // rather than a credential rejection, so a valid persistent manager
+            // arriving inside the window is not latched read-only.
+            res.set?.('Retry-After', String(TEACHER_CODE_ATTEMPT_WINDOW_SECONDS))
             res.status(429).json({ error: 'TOO_MANY_ATTEMPTS', message: 'Too many teacher code attempts. Please wait a minute.' })
             return
           }

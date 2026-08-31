@@ -152,13 +152,34 @@ export function shouldRenderManagerHeaderForSession(sessionId: string | null | u
   return !isEmbeddedChildSessionId(sessionId ?? undefined)
 }
 
+/** The `/manager-access` status for an exhausted teacher-code attempt bucket. */
+export const MANAGER_ACCESS_RATE_LIMITED_STATUS = 429
+/** Fallback wait before retrying a 429 when the route sends no usable `Retry-After`. */
+export const DEFAULT_MANAGER_ACCESS_RETRY_AFTER_MS = 60_000
+
 /**
- * Whether a non-OK `/manager-access` response is transient and worth a bounded
- * retry. The route returns an explicit 5xx for persistent/session-store
- * outages; a 4xx is a definitive denial that should latch the read-only state.
+ * Whether a non-OK `/manager-access` response is a fast transient failure worth
+ * a short bounded backoff. The route returns an explicit 5xx for
+ * persistent/session-store outages. A 429 (rate-limited teacher-code
+ * verification) is also transient but handled separately with a longer,
+ * `Retry-After`-honoring delay - see `parseManagerAccessRetryAfterMs`. Any other
+ * 4xx is a definitive denial that latches the read-only state.
  */
 export function isRetryableManagerAccessStatus(status: number): boolean {
   return status >= 500
+}
+
+/**
+ * Parse a `Retry-After` header (delta-seconds form only) into milliseconds,
+ * clamped to a sane ceiling. Returns `null` for an absent, non-numeric, or
+ * non-positive value so the caller can fall back to
+ * `DEFAULT_MANAGER_ACCESS_RETRY_AFTER_MS`.
+ */
+export function parseManagerAccessRetryAfterMs(headerValue: string | null | undefined): number | null {
+  if (headerValue == null) return null
+  const seconds = Number(headerValue.trim())
+  if (!Number.isFinite(seconds) || seconds <= 0) return null
+  return Math.min(seconds * 1000, 5 * 60_000)
 }
 
 /**
@@ -669,6 +690,7 @@ export default function VideoSyncManager() {
     let isCancelled = false
     let retryTimer: ReturnType<typeof setTimeout> | undefined
     let attempts = 0
+    let rateLimitRetried = false
     const MAX_ATTEMPTS = 4
 
     const denyAccess = (): void => {
@@ -704,6 +726,22 @@ export default function VideoSyncManager() {
       if (!response.ok) {
         if (isRetryableManagerAccessStatus(response.status)) {
           scheduleRetryOrDeny()
+        } else if (response.status === MANAGER_ACCESS_RATE_LIMITED_STATUS) {
+          // The route rate-limits pre-auth teacher-code verification for a
+          // minute and returns `Retry-After`. This is "wait and retry", not a
+          // credential rejection: schedule one delayed retry across the window
+          // before latching read-only, so a valid persistent manager that
+          // happened to arrive mid-window still recovers.
+          if (rateLimitRetried) {
+            denyAccess()
+          } else {
+            rateLimitRetried = true
+            const delayMs = parseManagerAccessRetryAfterMs(response.headers.get('retry-after'))
+              ?? DEFAULT_MANAGER_ACCESS_RETRY_AFTER_MS
+            if (!isCancelled) {
+              retryTimer = setTimeout(() => { void runManagerAccess() }, delayMs)
+            }
+          }
         } else if (
           shouldRequestEmbeddedBootstrapRefreshOnDenial({ sessionId, status: response.status })
           && requestBoundedBootstrapRefresh()

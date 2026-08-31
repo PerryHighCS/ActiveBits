@@ -68,6 +68,14 @@ const waitersByHash = new Map<string, PersistentSessionSocket[]>()
 const MAX_ATTEMPTS = 5
 const WAITER_TIMEOUT = 600_000
 const CLEANUP_INTERVAL = 60_000
+/**
+ * How long a teacher-code attempt bucket lives before it clears. Recovery
+ * routes surface this as a `Retry-After` on their 429 so clients can wait out
+ * the window rather than latch a denied state. Kept in sync with the Valkey
+ * backend's `ratelimit:` key TTL in `valkeyStore.ts`.
+ */
+export const TEACHER_CODE_ATTEMPT_WINDOW_SECONDS = 60
+const RATE_LIMIT_WINDOW_MS = TEACHER_CODE_ATTEMPT_WINDOW_SECONDS * 1000
 const MAX_PERSISTENT_ENTRY_PARTICIPANTS = 100
 const MAX_PERSISTENT_ENTRY_PARTICIPANT_VALUES_BYTES = 8 * 1024
 
@@ -97,7 +105,7 @@ function createInMemoryPersistentStore(): PersistentSessionStore {
     const timeout = setTimeout(() => {
       memoryStore.delete(bucket)
       rateLimitTimeouts.delete(bucket)
-    }, 60_000)
+    }, RATE_LIMIT_WINDOW_MS)
     timeout.unref?.()
     rateLimitTimeouts.set(bucket, timeout)
   }

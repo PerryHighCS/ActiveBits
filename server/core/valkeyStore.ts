@@ -575,6 +575,8 @@ export class ValkeyPersistentStore {
                 end
                 return value
             `
+      // Kept in sync with TEACHER_CODE_ATTEMPT_WINDOW_SECONDS in
+      // persistentSessions.ts (surfaced to clients as `Retry-After`).
       const ttlSeconds = 60
       const result = await this.client.eval(script, 1, `ratelimit:${key}`, ttlSeconds)
       if (typeof result === 'number') {

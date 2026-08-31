@@ -1778,6 +1778,9 @@ void test('manager-access route rate-limits repeated persistent teacher-code rec
   assert.equal(blocked.statusCode, 429)
   assert.equal((blocked.body as { error?: string }).error, 'TOO_MANY_ATTEMPTS')
   assert.equal(blocked.cookies.length, 0, 'no capability cookie is issued for a rate-limited caller')
+  // The client treats 429 as "wait and retry" rather than a definitive denial,
+  // so the route advertises the attempt-window length as Retry-After.
+  assert.equal(blocked.headers['retry-after'], '60')
 
   await cleanupPersistentSession(hash)
 })
