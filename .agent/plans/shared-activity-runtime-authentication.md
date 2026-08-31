@@ -271,7 +271,7 @@ Do not begin with all activities at once.
 
 - [x] Select Video Sync because its persistent-teacher and SyncDeck-parent recovery paths are already server-verified and its manager surface is narrower than MobCode's private-workspace model.
 - [x] Audit the existing adapter: verified persistent/parent authority currently reaches the manager by returning `instructorPasscode` from `GET /api/video-sync/:sessionId/instructor-passcode`.
-- [x] Add the shared `issueActivityCapabilityCookie` issuance adapter, used only after an activity's existing server-side parent/persistent authority has been verified and without exposing an activity credential.
+- [x] Add the shared capability issuance adapter (`issueActivityCapability` to mint + persist the digest, `writeActivityCapabilityCookie` to deliver the opaque token as an httpOnly cookie), used only after an activity's existing server-side parent/persistent authority has been verified and without exposing an activity credential.
 - [x] Issue the httpOnly manager capability on Video Sync persistent/parent recovery and accept it on manager REST routes.
 - [x] Admit Video Sync manager WebSockets from that capability while preserving the early auth-message listener and temporary passcode fallback.
 - [x] Add a parallel, generic SyncDeck embedded-manager exchange that consumes the one-time child token and issues only the child manager capability; retain the existing passcode exchange until its other activity clients migrate.

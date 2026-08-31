@@ -633,7 +633,8 @@ export async function rollbackPersistentSessionStart(
  * `persistPersistentSession` writes it alongside the record, and the
  * Valkey-backed `setHashBySessionId` now rethrows on failure so a persist
  * cannot report success without its index. (Making the record + index write a
- * single atomic op is the remaining hardening, tracked in #357.)
+ * single atomic op is the remaining hardening, tracked in #313 - #357 was
+ * closed and folded into it.)
  */
 export async function findIndexedHashBySessionId(sessionId: string): Promise<string | null> {
   const readIndex = persistentStore.getHashBySessionIdStrict
