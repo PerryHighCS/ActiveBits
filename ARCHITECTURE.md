@@ -666,8 +666,10 @@ and `.agent/knowledge/activity-runtime-threat-model.md` for the full contract.
   persistent-teacher entry path is adapted: the manager view redeems the
   verified `persistent_sessions` teacher cookie through `POST
   /api/session/:sessionId/persistent-manager-capability` for a manager
-  capability before connecting its gated surfaces (temporary sessions 404 there
-  and keep their `/create`-issued capability).
+  capability before connecting its gated surfaces. A temporary session's
+  manager still holding its `/create`-issued capability short-circuits that
+  call with a 200 (`alreadyAuthorized` fast path); the 404 there is only for a
+  caller that has neither a live manager capability nor a persistent record.
 - **Rollout** is a clean cutover: sessions created before deployment have no
   capability records and are rejected on the migrated surfaces (403 / WebSocket
   `1008 activity-auth-required`); there is no legacy fallback.

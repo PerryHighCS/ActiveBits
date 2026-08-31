@@ -2296,6 +2296,36 @@ void test('instructor websocket admits a valid manager capability without a pass
   await new Promise((resolve) => setTimeout(resolve, 0))
 })
 
+void test('instructor websocket is closed 1008 once its manager capability reaches expiry', async () => {
+  console.info('[TEST] video-sync websocket: manager capability expiry is expected to close 1008')
+  const app = createMockApp()
+  const ws = createMockWs()
+  const storeState = createSessionStore({ s1: createVideoSyncSession('s1') })
+  const session = storeState.store.s1
+  assert.ok(session)
+  // Valid at admission, but expires shortly after so the expiry-bound close runs.
+  const capability = issueActivityCapability(session, 'manager', undefined, Date.now(), 300)
+  const cookieName = getActivityCapabilityCookieName('manager', session.id)
+
+  setupVideoSyncRoutes(app, storeState.sessions, ws as unknown as WsRouter)
+  const handler = ws.registered['/ws/video-sync']
+  assert.equal(typeof handler, 'function')
+
+  const recorder = createMockSocket({ cookie: `${cookieName}=${capability.token}` })
+  handler?.(recorder.socket, new URLSearchParams({ sessionId: 's1', role: 'instructor' }))
+
+  await waitForCondition(() => recorder.sent.length === 2, 1000)
+  assert.equal(recorder.closed, null, 'admitted and still open while the capability is valid')
+
+  await waitForCondition(() => recorder.closed !== null, 2000)
+  assert.deepEqual(recorder.closed, { code: 1008, reason: 'activity-auth-required' })
+
+  // The mock's close() does not fire listeners; emit so the handler tears down
+  // its subscriber + heartbeat interval and the test process can exit.
+  recorder.emit('close')
+  await new Promise((resolve) => setTimeout(resolve, 0))
+})
+
 void test('websocket close during async initialization does not leave a stale subscriber', async () => {
   const app = createMockApp()
   const ws = createMockWs()

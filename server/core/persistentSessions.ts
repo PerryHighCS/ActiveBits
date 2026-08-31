@@ -736,15 +736,13 @@ export async function findHashBySessionIdStrict(sessionId: string): Promise<stri
   for (const hash of hashes) {
     const session = await readRecord(hash)
     if (session?.sessionId === sessionId) {
-      try {
-        await persistentStore.setHashBySessionId(sessionId, hash)
-      } catch (error) {
-        console.error(JSON.stringify({
-          event: 'persistent-session.hash-backfill-failed',
-          sessionId,
-          error: error instanceof Error ? error.message : String(error),
-        }))
-      }
+      // Propagate a failed backfill here, unlike the non-strict lookup which
+      // logs and returns the hash anyway. `setHashBySessionId` now rejects when
+      // the required reverse index cannot be written, and the index-only
+      // recovery endpoints would not find this session later - so a strict
+      // caller must treat "found but un-indexable" as a retryable failure, not
+      // a success that issues a manager capability the recovery path can't back.
+      await persistentStore.setHashBySessionId(sessionId, hash)
       return hash
     }
   }

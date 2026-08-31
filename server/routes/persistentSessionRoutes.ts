@@ -903,6 +903,22 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
         && persistentSession.sessionId === sessionId
         && persistentSession.activityName === activeSession.type,
       )
+
+      // Rate-limit the teacher-code validation below. `persistent_sessions` is a
+      // client-supplied cookie a direct HTTP client can forge, so without this
+      // an attacker who knows a persistent hash could brute-force its teacher
+      // code here - bypassing the same IP+hash cap already enforced by
+      // `teacher-authenticate` and the video-sync recovery route. The
+      // already-authorized fast path is unaffected (checked below before any
+      // credential comparison that matters).
+      if (!alreadyAuthorized && isPersistentSession && hash) {
+        const attempt = await recordTeacherCodeAttempt(`${getRequestClientIp(req)}:${hash}`)
+        if (!attempt.allowed) {
+          res.status(429).json({ error: 'Too many attempts. Please wait a minute.' })
+          return
+        }
+      }
+
       const { sessions: sessionEntries } = parsePersistentSessionsCookie(
         req.cookies?.persistent_sessions,
         'persistent_sessions (/api/session/:sessionId/persistent-manager-capability)',

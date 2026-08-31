@@ -574,6 +574,51 @@ function resolveManagerSocketPrincipal(session: VideoSyncSession, sessionId: str
   })
 }
 
+const MAX_SET_TIMEOUT_MS = 2_147_483_647
+
+/**
+ * Close an admitted instructor socket once its manager capability reaches
+ * `expiresAt`. Admission only checks authority at connect time, so without this
+ * a socket opened just before expiry would keep receiving manager state past the
+ * bounded capability lifetime. Mirrors the Java Format lifecycle; the 1008 close
+ * is what the Video Sync client's manager-access revalidation path keys on.
+ */
+function scheduleManagerCapabilityExpiryClose(
+  socket: VideoSyncSocket,
+  session: VideoSyncSession,
+  capabilityId: string,
+): void {
+  const record = (session.data as { activityCapabilities?: Record<string, { expiresAt?: unknown }> })
+    .activityCapabilities?.[capabilityId]
+  const expiresAt = record?.expiresAt
+  if (typeof expiresAt !== 'number' || !Number.isFinite(expiresAt)) return
+
+  const closeExpired = (): void => {
+    try {
+      socket.close(1008, 'activity-auth-required')
+    } catch {
+      // socket already tearing down
+    }
+  }
+
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const arm = (): void => {
+    const remaining = expiresAt - Date.now()
+    if (remaining <= 0) {
+      closeExpired()
+      return
+    }
+    // setTimeout caps at ~24.8 days; for a longer TTL, re-arm in chunks so the
+    // socket is closed at the real `expiresAt`, not early.
+    timer = setTimeout(remaining <= MAX_SET_TIMEOUT_MS ? closeExpired : arm, Math.min(remaining, MAX_SET_TIMEOUT_MS))
+    timer.unref?.()
+  }
+  arm()
+  socket.on('close', () => {
+    if (timer) clearTimeout(timer)
+  })
+}
+
 function getUnsyncedStudentsKey(sessionId: string): string {
   return `${UNSYNCED_STUDENTS_KEY_PREFIX}${sessionId}`
 }
@@ -1816,10 +1861,14 @@ export default function setupVideoSyncRoutes(
       }
 
       if (isInstructorRoleParam(roleParam)) {
-        if (!resolveManagerSocketPrincipal(session, sessionId, typedSocket)) {
+        const managerPrincipal = resolveManagerSocketPrincipal(session, sessionId, typedSocket)
+        if (!managerPrincipal) {
           typedSocket.close(1008, 'Forbidden')
           return
         }
+        // Bound the socket to the capability's lifetime so it cannot keep
+        // receiving manager state after the credential expires.
+        scheduleManagerCapabilityExpiryClose(typedSocket, session, managerPrincipal.capabilityId)
       }
 
       const role: VideoSyncRole = isInstructorRoleParam(roleParam) ? 'instructor' : 'student'

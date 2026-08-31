@@ -11,6 +11,10 @@ test('Video Sync manager recovers from its httpOnly capability cookie without a 
   await page.goto(`/manage/video-sync/${encodeURIComponent(sessionId)}`)
   await expect(page.getByRole('heading', { name: 'Step 1: Configure video source' })).toBeVisible()
   await expect(page.getByText('Live updates unavailable. Attempting reconnect...')).toHaveCount(0)
+  // The setup heading renders even when manager access is denied, so assert the
+  // gated action is actually enabled - that is what proves the httpOnly cookie
+  // restored manager authority.
+  await expect(page.getByRole('button', { name: 'Start instructor view' })).toBeEnabled()
 
   await page.close()
   await context.close()
