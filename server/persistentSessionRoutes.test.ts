@@ -2667,6 +2667,97 @@ void test('session teacher authenticate stays retryable (500) when the reverse-i
   assert.equal(res.cookies.has(getActivityCapabilityCookieName('manager', 'live-session')), false)
 })
 
+void test('session teacher authenticate stays retryable (500) when the fallback scan enumeration rejects', async (t) => {
+  const valkeyClient = createFakePersistentValkeyClient()
+  // Reverse index genuinely absent (no throw) so the lookup falls through to the
+  // legacy scan; the scan enumeration itself is then unavailable.
+  valkeyClient.scan = async () => { throw new Error('[TEST] hash enumeration scan failed') }
+  initializePersistentStorage(valkeyClient as never)
+  await initializeActivityRegistry()
+  t.after(() => { initializePersistentStorage(null) })
+
+  const sessionMap = new Map<string, unknown>()
+  sessionMap.set('live-session', {
+    id: 'live-session', type: 'syncdeck', data: { instructorPasscode: 'syncdeck-instructor-passcode' },
+  })
+  const sessions = {
+    get: async (id: string) => {
+      const session = sessionMap.get(id)
+      return session == null ? null : structuredClone(session)
+    },
+    getStrict: async (id: string) => {
+      const session = sessionMap.get(id)
+      return session == null ? null : structuredClone(session)
+    },
+    set: async () => { throw new Error('[TEST] session store write should not run') },
+  }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+  const handler = getRoute(app, 'POST', '/api/session/:sessionId/teacher-authenticate')
+
+  const res = createMockRes()
+  console.info('[TEST] Expected retryable failure: the persistent-session hash enumeration is unavailable during teacher authentication.')
+  await handler(createMockReq({ params: { sessionId: 'live-session' }, body: { teacherCode: 'teacher-secret' } }), res)
+
+  // An un-indexed session during a scan outage must not be flattened to a 404.
+  assert.equal(res.statusCode, 500)
+  assert.deepEqual(res.jsonBody, { error: 'Teacher authentication is temporarily unavailable' })
+})
+
+void test('session teacher authenticate stays retryable (500) when the persistent-record read rejects', async (t) => {
+  const valkeyClient = createFakePersistentValkeyClient()
+  const activityName = 'syncdeck'
+  const teacherCode = 'teacher-secret'
+  const { hash, hashedTeacherCode } = generatePersistentHash(activityName, teacherCode)
+  initializePersistentStorage(valkeyClient as never)
+  await initializeActivityRegistry()
+  t.after(() => { initializePersistentStorage(null) })
+  t.after(async () => cleanupPersistentSession(hash))
+  await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode, 'solo-allowed')
+  await startPersistentSession(hash, 'live-session', { id: 'teacher-ws', readyState: 1, send() {} })
+
+  // Reverse index resolves and validates (first persistent-record read), but the
+  // route's follow-up strict persistent-record read then fails.
+  const originalGet = valkeyClient.get
+  let recordReads = 0
+  valkeyClient.get = async (key: string) => {
+    if (key.startsWith('persistent:')) {
+      recordReads += 1
+      if (recordReads >= 2) {
+        throw new Error('[TEST] persistent record read failed')
+      }
+    }
+    return originalGet(key)
+  }
+
+  const sessionMap = new Map<string, unknown>()
+  sessionMap.set('live-session', {
+    id: 'live-session', type: activityName, data: { instructorPasscode: 'syncdeck-instructor-passcode' },
+  })
+  const sessions = {
+    get: async (id: string) => {
+      const session = sessionMap.get(id)
+      return session == null ? null : structuredClone(session)
+    },
+    getStrict: async (id: string) => {
+      const session = sessionMap.get(id)
+      return session == null ? null : structuredClone(session)
+    },
+    set: async () => { throw new Error('[TEST] session store write should not run') },
+  }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+  const handler = getRoute(app, 'POST', '/api/session/:sessionId/teacher-authenticate')
+
+  const res = createMockRes()
+  console.info('[TEST] Expected retryable failure: the persistent-record read is unavailable during teacher authentication.')
+  await handler(createMockReq({ params: { sessionId: 'live-session' }, body: { teacherCode } }), res)
+
+  assert.equal(res.statusCode, 500)
+  assert.deepEqual(res.jsonBody, { error: 'Teacher authentication is temporarily unavailable' })
+  assert.equal(res.cookies.has(getActivityCapabilityCookieName('manager', 'live-session')), false)
+})
+
 void test('session teacher authenticate rejects invalid teacher code', async (t) => {
   initializePersistentStorage(null)
   await initializeActivityRegistry()

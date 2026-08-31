@@ -29,6 +29,10 @@ interface PersistentSessionStore {
   set(hash: string, data: PersistentSession): Promise<void>
   delete(hash: string): Promise<void>
   getAllHashes(): Promise<string[]>
+  // Like getAllHashes, but a scan failure propagates instead of being mapped to
+  // `[]` (indistinguishable from "no persistent sessions"). Optional: only the
+  // Valkey-backed store needs it; the in-memory store never fails enumeration.
+  getAllHashesStrict?(): Promise<string[]>
   getHashBySessionId(sessionId: string): Promise<string | null>
   // Like getHashBySessionId, but a backend failure propagates instead of being
   // mapped to `null` (which is indistinguishable from "no such session").
@@ -103,6 +107,9 @@ function createInMemoryPersistentStore(): PersistentSessionStore {
     async getAllHashes(): Promise<string[]> {
       return Array.from(memoryStore.keys()).filter((key) => !key.startsWith('rl:') && !key.startsWith('sid:'))
     },
+    async getAllHashesStrict(): Promise<string[]> {
+      return Array.from(memoryStore.keys()).filter((key) => !key.startsWith('rl:') && !key.startsWith('sid:'))
+    },
     async getHashBySessionId(sessionId: string): Promise<string | null> {
       return (memoryStore.get(getReverseIndexKey(sessionId)) as string) ?? null
     },
@@ -148,6 +155,9 @@ export function initializePersistentStorage(valkeyClient: ValkeyStoreClient | nu
       },
       async getAllHashes(): Promise<string[]> {
         return await valkeyStore.getAllHashes()
+      },
+      async getAllHashesStrict(): Promise<string[]> {
+        return await valkeyStore.getAllHashesStrict()
       },
       async getHashBySessionId(sessionId: string): Promise<string | null> {
         return await valkeyStore.getHashBySessionId(sessionId)
@@ -703,8 +713,11 @@ export async function findHashBySessionId(sessionId: string): Promise<string | n
  * `POST /api/session/:sessionId/teacher-authenticate` can then turn a transient
  * failure into a logged, retryable 500 rather than the terminal 404 it would
  * otherwise return even though the live session was read successfully. A
- * genuine index miss still falls back to the legacy O(n) `getAllHashes()` scan
- * and backfill, so an un-indexed but live persistent session stays resolvable.
+ * genuine index miss still falls back to the legacy O(n) scan and backfill, so
+ * an un-indexed but live persistent session stays resolvable - and that
+ * fallback is strict too: enumeration (`getAllHashesStrict`) and each record
+ * read (`getStrict`) propagate a backend outage instead of mapping it to
+ * `[]`/`null` and letting an un-indexed session fall through to a false 404.
  */
 export async function findHashBySessionIdStrict(sessionId: string): Promise<string | null> {
   const indexedHash = await findIndexedHashBySessionId(sessionId)
@@ -712,9 +725,16 @@ export async function findHashBySessionIdStrict(sessionId: string): Promise<stri
     return indexedHash
   }
 
-  const hashes = await persistentStore.getAllHashes()
+  const enumerate = persistentStore.getAllHashesStrict
+    ? persistentStore.getAllHashesStrict.bind(persistentStore)
+    : persistentStore.getAllHashes.bind(persistentStore)
+  const readRecord = persistentStore.getStrict
+    ? persistentStore.getStrict.bind(persistentStore)
+    : persistentStore.get.bind(persistentStore)
+
+  const hashes = await enumerate()
   for (const hash of hashes) {
-    const session = await persistentStore.get(hash)
+    const session = await readRecord(hash)
     if (session?.sessionId === sessionId) {
       try {
         await persistentStore.setHashBySessionId(sessionId, hash)

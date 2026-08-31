@@ -708,12 +708,15 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
     }
 
     let hash: string | null
+    let persistentSession: Awaited<ReturnType<typeof getPersistentSessionStrict>>
     try {
-      // Strict reverse-index lookup: a genuine miss still falls back to the
-      // legacy scan, but a backend read failure rejects here instead of
-      // returning `null` -> the terminal 404 below (the live session was
-      // already read successfully, so the failure is transient and retryable).
+      // Strict throughout: a genuine miss still falls back to the legacy scan,
+      // but a backend read failure - in the reverse-index lookup or the
+      // persistent-record read below - rejects here instead of returning
+      // `null` -> the terminal 404 (the live session was already read
+      // successfully, so the failure is transient and retryable).
       hash = await findHashBySessionIdStrict(sessionId)
+      persistentSession = hash ? await getPersistentSessionStrict(hash) : null
     } catch (error) {
       console.error(JSON.stringify({
         event: 'teacher-authenticate-hash-lookup-failed',
@@ -728,7 +731,6 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
       return
     }
 
-    const persistentSession = await getPersistentSession(hash)
     if (!persistentSession || persistentSession.sessionId !== sessionId) {
       res.status(404).json({ error: 'Teacher join is unavailable for this session' })
       return

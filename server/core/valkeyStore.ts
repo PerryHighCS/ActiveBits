@@ -508,6 +508,27 @@ export class ValkeyPersistentStore {
     }
   }
 
+  /**
+   * Strict enumeration: a scan failure is logged and rethrown rather than
+   * mapped to `[]` (indistinguishable from "no persistent sessions"). Callers
+   * on a strict recovery path use this so a transient Valkey outage during the
+   * legacy fallback scan surfaces as a retryable error, not a false "no such
+   * session".
+   */
+  async getAllHashesStrict(): Promise<string[]> {
+    try {
+      const keys = await this.scanKeys('persistent:*')
+      return keys.map((key) => key.replace('persistent:', ''))
+    } catch (err) {
+      console.error(JSON.stringify({
+        event: 'valkey.persistent-session-hash-enumeration-failed',
+        strict: true,
+        error: err instanceof Error ? err.message : String(err),
+      }))
+      throw err
+    }
+  }
+
   async incrementAttempts(key: string): Promise<number> {
     try {
       const script = `
