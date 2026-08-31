@@ -202,6 +202,10 @@ export default function JavaFormatPracticeManager() {
         // cookie outlives the 7-day capability), so the banner offers reload.
         try {
           const body = await response.clone().json() as { persistentRecoveryAvailable?: unknown }
+          // The body await can resolve after a route swap cancelled this
+          // exchange; a cancelled exchange must not touch the returned-to
+          // session's recovery/readiness state.
+          if (cancelled) return
           if (body?.persistentRecoveryAvailable === true) {
             setPersistentRecoverySessionId(sessionId)
           } else {

@@ -1514,6 +1514,7 @@ void test('session id reverse lookup backfills missing reverse index entries for
 void test('starting a persistent session fails loudly when the reverse-index write fails', async (t) => {
   const valkeyClient = createFakePersistentValkeyClient()
   initializePersistentStorage(valkeyClient as never)
+  t.after(() => { initializePersistentStorage(null) })
 
   const activityName = 'syncdeck'
   const teacherCode = 'index-write-fail'
@@ -1620,6 +1621,7 @@ void test('indexed-only session id reverse lookup rejects a reverse-index read f
 void test('indexed-only session id reverse lookup keeps the reverse index when the record read fails', async (t) => {
   const valkeyClient = createFakePersistentValkeyClient()
   initializePersistentStorage(valkeyClient as never)
+  t.after(() => { initializePersistentStorage(null) })
 
   const activityName = 'syncdeck'
   const { hash, hashedTeacherCode } = generatePersistentHash(activityName, 'record-read-fail-code')

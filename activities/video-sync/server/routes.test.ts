@@ -1864,7 +1864,7 @@ void test('manager-access route answers with a structured 500 when a backing-sto
   assert.equal(res.headers['cache-control'], 'no-store', 'error response is still marked no-store')
 })
 
-void test('manager-access route degrades persistent bootstrap for an already-authorized caller during a persistent-store outage', async () => {
+void test('manager-access route degrades persistent bootstrap for an already-authorized caller during a persistent-store outage', async (t) => {
   console.info('[TEST] video-sync manager-access: the persistent reverse-index read below rejects on purpose; an already-authorized caller must still get 200 with no bootstrap data, not 500')
   const failingPersistentClient = {
     get: async (key: string) => {
@@ -1875,6 +1875,7 @@ void test('manager-access route degrades persistent bootstrap for an already-aut
     },
   }
   initializePersistentStorage(failingPersistentClient as never)
+  t.after(() => { initializePersistentStorage(null) })
 
   const app = createMockApp()
   const ws = createMockWs() as unknown as WsRouter
@@ -1893,7 +1894,6 @@ void test('manager-access route degrades persistent bootstrap for an already-aut
   assert.equal(res.statusCode, 200)
   assert.deepEqual(res.body, {}, 'no persistent bootstrap data, but the request is not failed')
   assert.equal(res.cookies.length, 0, 'the fast path does not re-issue a capability')
-  initializePersistentStorage(null)
 })
 
 void test('manager-access route ignores unsigned persistent sourceUrl from cookie selectedOptions', async () => {

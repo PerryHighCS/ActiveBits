@@ -476,6 +476,97 @@ void test('JavaFormatPracticeManager drops stale reload recovery when a returned
   }
 })
 
+void test('JavaFormatPracticeManager ignores a cancelled exchange whose body resolves after returning to the session', { concurrency: false }, async () => {
+  console.info('[TEST] java-format manager: the first session-A exchange is cancelled by a route swap; its deferred body and a 403 roster response are expected below')
+  TestWebSocket.instances = []
+  const restoreDom = installDomEnvironment('https://bits.example/manage/java-format-practice/session-A')
+  const previousFetch = globalThis.fetch
+
+  let capabilityCallsA = 0
+  let releaseFirstBody: (() => void) | null = null
+  const firstBodyGate = new Promise<void>((resolve) => { releaseFirstBody = resolve })
+
+  globalThis.fetch = (async (input: RequestInfo | URL, _init?: RequestInit) => {
+    const url = String(input)
+    if (url.includes('/session-A/persistent-manager-capability')) {
+      capabilityCallsA += 1
+      if (capabilityCallsA === 1) {
+        // First A exchange: 200, but its body only resolves after we have
+        // navigated away (cancelling it) and returned.
+        const deferredJson = async () => {
+          await firstBodyGate
+          return { success: true, persistentRecoveryAvailable: true }
+        }
+        return {
+          ok: true,
+          status: 200,
+          clone: () => ({ json: deferredJson }),
+          json: deferredJson,
+        } as unknown as Response
+      }
+      // Second A exchange (after returning): recovery is no longer available.
+      return new Response(JSON.stringify({ error: 'Persistent teacher authentication is required' }), { status: 403 })
+    }
+    if (url.includes('/session-B/persistent-manager-capability')) {
+      return new Response('{}', { status: 200 })
+    }
+    if (url.includes('/api/java-format-practice/session-A/students')) {
+      return capabilityCallsA >= 2
+        ? new Response(JSON.stringify({ error: 'manager authentication required' }), { status: 403 })
+        : new Response(JSON.stringify({ students: [] }), { status: 200 })
+    }
+    if (url.includes('/api/java-format-practice/session-B/students')) {
+      return new Response(JSON.stringify({ students: [] }), { status: 200 })
+    }
+    throw new Error(`Unexpected fetch: ${url}`)
+  }) as typeof fetch
+
+  let teardown: (() => Promise<void>) | null = null
+  try {
+    const { testingLibrary, router, JavaFormatPracticeManager, act } = await loadHarness()
+
+    function NavProbe(): React.JSX.Element {
+      const navigate = router.useNavigate()
+      return (
+        <>
+          <JavaFormatPracticeManager />
+          <button type="button" onClick={() => navigate('/manage/java-format-practice/session-B')}>to-b</button>
+          <button type="button" onClick={() => navigate('/manage/java-format-practice/session-A')}>to-a</button>
+        </>
+      )
+    }
+
+    const rendered = testingLibrary.render(
+      <router.MemoryRouter initialEntries={['/manage/java-format-practice/session-A']}>
+        <router.Routes>
+          <router.Route path="/manage/java-format-practice/:sessionId" element={<NavProbe />} />
+        </router.Routes>
+      </router.MemoryRouter>,
+    )
+    teardown = async () => { await act(async () => { rendered.unmount(); testingLibrary.cleanup(); await Promise.resolve() }) }
+
+    // Let the first A exchange reach its (gated) body await, then leave and
+    // return before it can resolve.
+    await act(async () => { await Promise.resolve(); await Promise.resolve() })
+    await act(async () => { testingLibrary.fireEvent.click(rendered.getByRole('button', { name: 'to-b' })); await Promise.resolve() })
+    await act(async () => { testingLibrary.fireEvent.click(rendered.getByRole('button', { name: 'to-a' })); await Promise.resolve(); await Promise.resolve() })
+
+    // The second A exchange 403s and the roster 403 latches the pessimistic banner.
+    await testingLibrary.waitFor(() => rendered.getByText(/reloading won.t restore it/i))
+    assert.equal(rendered.queryByRole('button', { name: /reload/i }), null)
+
+    // The first, cancelled exchange's body now resolves. It must not resurrect
+    // the reload-recovery path for the returned-to session.
+    await act(async () => { releaseFirstBody?.(); await Promise.resolve(); await Promise.resolve() })
+    assert.equal(rendered.queryByRole('button', { name: /reload/i }), null, 'a cancelled exchange cannot re-enable reload recovery')
+    assert.ok(rendered.queryByText(/reloading won.t restore it/i), 'the pessimistic banner still stands')
+  } finally {
+    await teardown?.()
+    globalThis.fetch = previousFetch
+    restoreDom()
+  }
+})
+
 void test('JavaFormatPracticeManager gates difficulty/theme controls until the persistent capability exchange settles', { concurrency: false }, async () => {
   TestWebSocket.instances = []
   const restoreDom = installDomEnvironment('https://bits.example/manage/java-format-practice/perma-session')

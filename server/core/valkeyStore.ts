@@ -335,10 +335,10 @@ export class ValkeyPersistentStore {
   }
 
   async get(hash: string): Promise<PersistentMetadata | null> {
+    // Non-throwing contract: delegate the single read/parse path to getStrict
+    // and swallow a backend failure to `null` for callers that tolerate it.
     try {
-      const data = await this.client.get(`persistent:${hash}`)
-      if (!data) return null
-      return JSON.parse(data) as PersistentMetadata
+      return await this.getStrict(hash)
     } catch (err) {
       console.error(`Failed to get persistent session ${hash}:`, err)
       return null
@@ -349,7 +349,8 @@ export class ValkeyPersistentStore {
    * Strict record read: a backend failure is logged and rethrown rather than
    * mapped to `null`. {@link findIndexedHashBySessionId} uses this so a
    * transient Valkey outage propagates as a retryable error instead of looking
-   * like a stale reverse index that then gets deleted.
+   * like a stale reverse index that then gets deleted. The single source of
+   * truth for the `persistent:` key format and record decoding.
    */
   async getStrict(hash: string): Promise<PersistentMetadata | null> {
     try {
