@@ -545,11 +545,40 @@ export async function resetPersistentSession(hash: string): Promise<void> {
  * not broadcast `session-ended` - the waiters should keep waiting for the
  * teacher's retry - and it swallows its own write failures so it never masks
  * the original error it is being called to clean up after.
+ *
+ * `expectedSessionId` scopes the rollback to a single start attempt: two
+ * teacher-verification messages can race for the same hash, and if a later
+ * attempt has already linked a newer session this rollback must not clear that
+ * association. When it is supplied the record is only reset while it still
+ * points at that id; a stale reverse-index entry for the failed attempt is
+ * always cleaned up (it is keyed by session id, so this never touches a
+ * concurrent success's entry).
  */
-export async function rollbackPersistentSessionStart(hash: string): Promise<void> {
+export async function rollbackPersistentSessionStart(
+  hash: string,
+  expectedSessionId?: string | null,
+): Promise<void> {
   try {
     const session = await persistentStore.get(hash)
     if (session == null || session.sessionId == null) {
+      if (expectedSessionId != null) {
+        try {
+          await persistentStore.deleteHashBySessionId(expectedSessionId)
+        } catch {
+          // Best-effort: a stale reverse-index entry self-heals on read.
+        }
+      }
+      return
+    }
+    if (expectedSessionId != null && session.sessionId !== expectedSessionId) {
+      // A concurrent start attempt already linked a newer session to this
+      // record. Leave that association intact and only clean up the failed
+      // attempt's own reverse-index entry.
+      try {
+        await persistentStore.deleteHashBySessionId(expectedSessionId)
+      } catch {
+        // Best-effort: a stale reverse-index entry self-heals on read.
+      }
       return
     }
     try {

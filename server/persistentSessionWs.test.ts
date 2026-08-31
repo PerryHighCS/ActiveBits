@@ -9,6 +9,8 @@ import {
   getOrCreateActivePersistentSession,
   initializePersistentStorage,
   isSessionStarted,
+  rollbackPersistentSessionStart,
+  startPersistentSession,
   updatePersistentSessionUrlState,
 } from './core/persistentSessions.js'
 import { initializeActivityRegistry } from './activities/activityRegistry.js'
@@ -437,4 +439,54 @@ void test('persistent session websocket rolls back and reports a retryable error
   // The persistent record must not stay marked as started with the deleted id,
   // or the next waiter gets `session-started` and cannot retry verification.
   assert.equal(await isSessionStarted(hash), false, 'the persistent record start state is rolled back')
+})
+
+void test('rollbackPersistentSessionStart scopes to the failed attempt and leaves a concurrently started session intact', async (t) => {
+  const valkeyClient = createFakeValkeyClient()
+  initializePersistentStorage(valkeyClient as never)
+  t.after(() => { initializePersistentStorage(null) })
+
+  const activityName = 'algorithm-demo'
+  const teacherCode = 'rollback-scope-code'
+  const { hash, hashedTeacherCode } = generatePersistentHash(activityName, teacherCode)
+  t.after(async () => cleanupPersistentSession(hash))
+  await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode)
+
+  // Attempt A links "sess-A" onto the record, but its reverse-index write fails.
+  const originalSet = valkeyClient.set
+  valkeyClient.set = async (key: string, value: string) => {
+    if (key === 'persistent-session-by-session:sess-A') {
+      throw new Error('[TEST] reverse-index write failed for the first start attempt')
+    }
+    return originalSet(key, value)
+  }
+  console.info('[TEST] Expected reverse-index write failure for the first persistent start attempt.')
+  await assert.rejects(
+    startPersistentSession(hash, 'sess-A', { id: 'teacher-A', readyState: 1, send() {} } as never),
+    /reverse-index write failed/,
+  )
+
+  // Attempt B then succeeds and links a newer session to the same record.
+  valkeyClient.set = originalSet
+  await startPersistentSession(hash, 'sess-B', { id: 'teacher-B', readyState: 1, send() {} } as never)
+
+  // Attempt A's cleanup runs late. It must not clear B's association.
+  await rollbackPersistentSessionStart(hash, 'sess-A')
+
+  const record = await getPersistentSession(hash)
+  assert.equal(record?.sessionId, 'sess-B', 'the concurrently started session stays linked')
+  assert.equal(
+    valkeyClient.store.get('persistent-session-by-session:sess-B'),
+    hash,
+    'the newer reverse-index entry is untouched',
+  )
+  assert.equal(
+    valkeyClient.store.get('persistent-session-by-session:sess-A') ?? null,
+    null,
+    'the failed attempt\'s reverse-index entry is cleaned up',
+  )
+
+  // A bare (unscoped) rollback still fully resets the record.
+  await rollbackPersistentSessionStart(hash)
+  assert.equal(await isSessionStarted(hash), false, 'an unscoped rollback clears the record')
 })

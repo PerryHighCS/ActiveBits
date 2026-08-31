@@ -687,7 +687,21 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
       return
     }
 
-    const activeSession = await sessions.get(sessionId)
+    let activeSession: unknown
+    try {
+      // Strict read: a transient store outage must reject into a retryable 500
+      // here, not be mapped to `null` -> a terminal 404 the recovering client
+      // treats as "session gone" and stops retrying.
+      activeSession = await getSessionStrict(sessionId)
+    } catch (error) {
+      console.error(JSON.stringify({
+        event: 'teacher-authenticate-live-session-lookup-failed',
+        sessionId,
+        errorName: error instanceof Error ? error.name : 'unknown',
+      }))
+      res.status(500).json({ error: 'Teacher authentication is temporarily unavailable' })
+      return
+    }
     if (activeSession == null) {
       res.status(404).json({ error: 'Active session not found' })
       return
@@ -786,8 +800,11 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
       // persistent-store awaits above. Issue the capability onto the latest
       // record so a participant/socket mutation in that window is not lost.
       // If the session ended in that window, fail rather than resurrect the
-      // stale snapshot and grant a manager cookie for a dead session.
-      const freshSession = await sessions.get(sessionId)
+      // stale snapshot and grant a manager cookie for a dead session. Use the
+      // strict read so a transient store outage rejects into the retryable 500
+      // below instead of `sessions.get()` mapping it to `null` -> a terminal
+      // 404 the client would stop retrying.
+      const freshSession = await getSessionStrict(sessionId)
       if (!isPlainObject(freshSession) || freshSession.type !== activityName) {
         res.status(404).json({ error: 'Teacher join is unavailable for this session' })
         return

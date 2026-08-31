@@ -314,8 +314,10 @@ async function handleTeacherCodeVerification(
     // startPersistentSession may have persisted `sessionId` on the persistent
     // record before its reverse-index write failed. Clear that so the next
     // waiter is not told `session-started` with this now-deleted id and can
-    // still retry teacher verification.
-    await rollbackPersistentSessionStart(hash)
+    // still retry teacher verification. Scope the rollback to this attempt's
+    // session id: a concurrent verification message may have already linked a
+    // newer session, and that association must survive.
+    await rollbackPersistentSessionStart(hash, newSession.id)
     socket.send(
       JSON.stringify({
         type: 'teacher-code-error',

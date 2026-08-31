@@ -2551,6 +2551,79 @@ void test('session teacher authenticate does not resurrect a session that ended 
   assert.equal(res.cookies.has(getActivityCapabilityCookieName('manager', 'live-session')), false)
 })
 
+void test('session teacher authenticate stays retryable (500) when the strict live-session read rejects', async (t) => {
+  initializePersistentStorage(null)
+  await initializeActivityRegistry()
+  const sessions = {
+    // A transient store outage must not be flattened to a terminal 404; the
+    // strict read rejects into the handler's controlled 500 instead.
+    get: async () => { throw new Error('[TEST] session store read (non-strict) unavailable') },
+    getStrict: async () => { throw new Error('[TEST] session store read unavailable') },
+    set: async () => { throw new Error('[TEST] session store write should not run') },
+  }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+  const handler = getRoute(app, 'POST', '/api/session/:sessionId/teacher-authenticate')
+
+  const activityName = 'syncdeck'
+  const teacherCode = 'teacher-secret'
+  const { hash } = generatePersistentHash(activityName, teacherCode)
+  t.after(async () => cleanupPersistentSession(hash))
+
+  const res = createMockRes()
+  console.info('[TEST] Expected retryable failure: the strict live-session read is unavailable during teacher authentication.')
+  await handler(createMockReq({ params: { sessionId: 'live-session' }, body: { teacherCode } }), res)
+
+  assert.equal(res.statusCode, 500)
+  assert.deepEqual(res.jsonBody, { error: 'Teacher authentication is temporarily unavailable' })
+  assert.equal(res.cookies.has(getActivityCapabilityCookieName('manager', 'live-session')), false)
+})
+
+void test('session teacher authenticate stays retryable (500) when the capability re-read rejects', async (t) => {
+  initializePersistentStorage(null)
+  await initializeActivityRegistry()
+  const sessionMap = new Map<string, unknown>()
+  let strictCalls = 0
+  const setCalls: string[] = []
+  const sessions = {
+    get: async (id: string) => {
+      const session = sessionMap.get(id)
+      return session == null ? null : structuredClone(session)
+    },
+    getStrict: async (id: string) => {
+      strictCalls += 1
+      // Initial authorization read succeeds; the post-rate-limit re-read that
+      // issues the capability then hits a transient store outage.
+      if (strictCalls >= 2) throw new Error('[TEST] capability re-read unavailable')
+      const session = sessionMap.get(id)
+      return session == null ? null : structuredClone(session)
+    },
+    set: async (id: string, session: unknown) => { setCalls.push(id); sessionMap.set(id, structuredClone(session)) },
+  }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+  const handler = getRoute(app, 'POST', '/api/session/:sessionId/teacher-authenticate')
+
+  const activityName = 'syncdeck'
+  const teacherCode = 'teacher-secret'
+  const { hash, hashedTeacherCode } = generatePersistentHash(activityName, teacherCode)
+  t.after(async () => cleanupPersistentSession(hash))
+  sessionMap.set('live-session', {
+    id: 'live-session', type: activityName, data: { instructorPasscode: 'syncdeck-instructor-passcode' },
+  })
+  await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode, 'solo-allowed')
+  await startPersistentSession(hash, 'live-session', { id: 'teacher-ws', readyState: 1, send() {} })
+
+  const res = createMockRes()
+  console.info('[TEST] Expected retryable failure: the manager-capability re-read is unavailable during teacher authentication.')
+  await handler(createMockReq({ params: { sessionId: 'live-session' }, body: { teacherCode } }), res)
+
+  assert.equal(res.statusCode, 500)
+  assert.deepEqual(res.jsonBody, { error: 'manager capability unavailable' })
+  assert.equal(setCalls.length, 0, 'the capability write never runs when the re-read fails')
+  assert.equal(res.cookies.has(getActivityCapabilityCookieName('manager', 'live-session')), false)
+})
+
 void test('session teacher authenticate rejects invalid teacher code', async (t) => {
   initializePersistentStorage(null)
   await initializeActivityRegistry()
