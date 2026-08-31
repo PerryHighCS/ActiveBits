@@ -58,6 +58,11 @@ export function useResilientWebSocket({
   const reconnectFnRef = useRef<() => WebSocket | null>(() => null)
   const reconnectAttemptsRef = useRef(0)
   const manualCloseRef = useRef(false)
+  // The exact socket the most recent disconnect() tore down, cleared as soon as
+  // a new connect() runs. Lets onclose tell a standalone teardown (deliver
+  // onClose so consumers can clean up) from a socket left behind by a
+  // disconnect()+reconnect() or a bare supersede (stale - suppress).
+  const manuallyDisconnectedSocketRef = useRef<WebSocket | null>(null)
   const onOpenRef = useRef(onOpen)
   const onMessageRef = useRef(onMessage)
   const onCloseRef = useRef(onClose)
@@ -95,6 +100,7 @@ export function useResilientWebSocket({
     manualCloseRef.current = true
     clearReconnectTimeout()
     if (socketRef.current) {
+      manuallyDisconnectedSocketRef.current = socketRef.current
       try {
         socketRef.current.close()
       } catch {
@@ -111,6 +117,7 @@ export function useResilientWebSocket({
     }
 
     manualCloseRef.current = false
+    manuallyDisconnectedSocketRef.current = null
     clearReconnectTimeout()
 
     const ws = new WebSocket(url)
@@ -157,20 +164,26 @@ export function useResilientWebSocket({
 
     ws.onclose = (event) => {
       const currentSocket = socketRef.current
-      // Deliver this close only if it concerns the consumer's connection: this
-      // socket is still the current one, or nothing has taken its slot (a
-      // standalone disconnect(), which WwwSim relies on to clear its
-      // heartbeat/keepalive intervals). Suppress it whenever a *different*
-      // socket now owns the slot - it was replaced by a later connect(),
-      // whether or not a disconnect() happened in between - so a stale close
-      // can never mark the live replacement disconnected.
-      if (currentSocket !== null && currentSocket !== ws) {
+      const isLatestSocket = currentSocket === ws
+      // Deliver this close only if it concerns the consumer's connection:
+      //  - this socket is still the current one, or
+      //  - this exact socket was torn down by a standalone disconnect() with
+      //    nothing reconnected since (WwwSim relies on that to clear its
+      //    heartbeat/keepalive intervals).
+      // Suppress a socket that was merely superseded by a later connect(), or
+      // one left behind after disconnect()+reconnect(): an empty slot is not
+      // proof this socket was the one disconnect() closed, and a stale close
+      // must never mark the live replacement disconnected.
+      const wasStandaloneDisconnect = manuallyDisconnectedSocketRef.current === ws
+      if (!isLatestSocket && !wasStandaloneDisconnect) {
         return
       }
-      const isLatestSocket = currentSocket === ws
       onCloseRef.current?.(event, ws)
       if (isLatestSocket) {
         socketRef.current = null
+      }
+      if (wasStandaloneDisconnect) {
+        manuallyDisconnectedSocketRef.current = null
       }
       if (!manualCloseRef.current && shouldReconnect && isLatestSocket && !isTerminalCloseRef.current?.(event)) {
         const delay = getReconnectDelay(

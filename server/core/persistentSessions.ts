@@ -350,6 +350,19 @@ export async function getPersistentSession(hash: string): Promise<PersistentSess
   return await persistentStore.get(hash)
 }
 
+/**
+ * Like {@link getPersistentSession}, but a backend read failure propagates
+ * instead of being mapped to `null`. Callers that must distinguish "no such
+ * record" from "the store is down" (e.g. manager-capability recovery, which
+ * turns a rejection into a retryable 500 rather than a terminal 404) use this.
+ */
+export async function getPersistentSessionStrict(hash: string): Promise<PersistentSession | null> {
+  const read = persistentStore.getStrict
+    ? persistentStore.getStrict.bind(persistentStore)
+    : persistentStore.get.bind(persistentStore)
+  return await read(hash)
+}
+
 function normalizeSelectedOptionsRecord(value: unknown): Record<string, string> {
   if (value == null || typeof value !== 'object' || Array.isArray(value)) {
     return {}

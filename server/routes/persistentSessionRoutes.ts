@@ -13,6 +13,7 @@ import {
   generatePersistentHash,
   getOrCreateActivePersistentSession,
   getPersistentSession,
+  getPersistentSessionStrict,
   PersistentSessionEntryParticipantStoreError,
   storePersistentSessionEntryParticipant,
   verifyTeacherCodeWithHash,
@@ -814,19 +815,41 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
         return
       }
 
-      // Resolve the persistent recovery context up front. It gates issuance
-      // below, and the fast path needs it too: `teacher-authenticate` issues
-      // the capability before the manager mounts, so a permalink manager
-      // reaches the fast path yet still needs to be told that a later
-      // capability loss is recoverable by reload (the persistent teacher
-      // cookie outlives the 7-day capability).
+      // Does the caller already hold a valid manager capability? For such a
+      // caller the persistent recovery context below is advisory only (whether
+      // a later capability loss is reload-recoverable), so a transient
+      // persistent-store failure must not fail their request. For a caller
+      // whose authorization *depends* on the persistent lookup, a store failure
+      // has to propagate (-> outer catch -> retryable 500) and only a genuine
+      // miss may yield 404/403.
+      const alreadyAuthorized = Boolean(
+        resolveActivityPrincipalFromCookies(activeSession as { data: unknown }, sessionId, 'manager', req.cookies),
+      )
+
+      // Resolve the persistent recovery context.
       //
       // Index-only lookup: this runs before the persistent teacher cookie is
       // checked, so an uncredentialed caller must not be able to drive the
-      // O(n) `getAllHashes()` scan. It rejects (-> outer catch -> 500) rather
-      // than returning `null` if the index read itself fails.
-      const hash = await findIndexedHashBySessionId(sessionId)
-      const persistentSession = hash ? await getPersistentSession(hash) : null
+      // O(n) `getAllHashes()` scan. Both the index read and the strict record
+      // read reject on a backend failure rather than returning `null`.
+      let hash: string | null = null
+      let persistentSession: Awaited<ReturnType<typeof getPersistentSessionStrict>> = null
+      try {
+        hash = await findIndexedHashBySessionId(sessionId)
+        persistentSession = hash ? await getPersistentSessionStrict(hash) : null
+      } catch (recoveryLookupError) {
+        if (!alreadyAuthorized) {
+          throw recoveryLookupError
+        }
+        // Already-authorized: degrade to "recovery not known" instead of
+        // failing an otherwise-valid live session on a store blip.
+        console.error(JSON.stringify({
+          event: 'persistent-manager-capability-recovery-lookup-degraded',
+          sessionId,
+          error: recoveryLookupError instanceof Error ? recoveryLookupError.message : String(recoveryLookupError),
+        }))
+      }
+
       const isPersistentSession = Boolean(
         hash
         && persistentSession
@@ -842,7 +865,7 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
 
       // Fast path: the caller already holds a valid manager capability. Nothing
       // to re-issue; still report whether recovery is persistently backed.
-      if (resolveActivityPrincipalFromCookies(activeSession as { data: unknown }, sessionId, 'manager', req.cookies)) {
+      if (alreadyAuthorized) {
         res.json({ success: true, alreadyAuthorized: true, persistentRecoveryAvailable })
         return
       }

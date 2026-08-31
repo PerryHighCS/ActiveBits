@@ -487,6 +487,98 @@ void test('persistent manager capability recovery returns a retryable 500 when t
   assert.deepEqual(res.jsonBody, { error: 'Manager capability is temporarily unavailable' })
 })
 
+void test('persistent manager capability recovery returns a retryable 500 when the record read fails for an uncredentialed caller', async (t) => {
+  const valkeyClient = createFakePersistentValkeyClient()
+  initializePersistentStorage(valkeyClient as never)
+  await initializeActivityRegistry()
+  t.after(() => { initializePersistentStorage(null) })
+
+  const activityName = 'java-format-practice'
+  const teacherCode = 'teacher-secret'
+  const { hash, hashedTeacherCode } = generatePersistentHash(activityName, teacherCode)
+  t.after(async () => cleanupPersistentSession(hash))
+  await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode)
+  await startPersistentSession(hash, 'live-session', { id: 'teacher-ws', readyState: 1, send() {} })
+
+  // The reverse index resolves, but the persistent record read then rejects.
+  const originalGet = valkeyClient.get
+  valkeyClient.get = async (key: string) => {
+    if (key.startsWith('persistent:')) {
+      throw new Error('[TEST] persistent record read failed')
+    }
+    return originalGet(key)
+  }
+
+  const sessionMap = new Map<string, unknown>()
+  sessionMap.set('live-session', { id: 'live-session', type: activityName, data: { students: [] } })
+  const sessions = {
+    get: async (id: string) => sessionMap.get(id) ?? null,
+    set: async (id: string, session: unknown) => { sessionMap.set(id, session) },
+  }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+  const handler = getRoute(app, 'POST', '/api/session/:sessionId/persistent-manager-capability')
+
+  const res = createMockRes()
+  console.info('[TEST] Expected persistent record read failure during persistent manager capability recovery for an uncredentialed caller.')
+  await handler(createMockReq({ params: { sessionId: 'live-session' }, cookies: {} }), res)
+
+  // A caller without a capability cookie depends on this lookup to authorize, so
+  // a store outage must be retryable (500), never a terminal 404.
+  assert.equal(res.statusCode, 500)
+  assert.deepEqual(res.jsonBody, { error: 'Manager capability is temporarily unavailable' })
+})
+
+void test('persistent manager capability recovery fast path survives a persistent-store outage for an already-authorized caller', async (t) => {
+  const valkeyClient = createFakePersistentValkeyClient()
+  initializePersistentStorage(valkeyClient as never)
+  await initializeActivityRegistry()
+  t.after(() => { initializePersistentStorage(null) })
+
+  const activityName = 'java-format-practice'
+  const teacherCode = 'teacher-secret'
+  const { hash, hashedTeacherCode } = generatePersistentHash(activityName, teacherCode)
+  t.after(async () => cleanupPersistentSession(hash))
+  await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode)
+  await startPersistentSession(hash, 'live-session', { id: 'teacher-ws', readyState: 1, send() {} })
+
+  const originalGet = valkeyClient.get
+  valkeyClient.get = async (key: string) => {
+    if (key.startsWith('persistent:') || key.startsWith('persistent-session-by-session:')) {
+      throw new Error('[TEST] persistent-store outage')
+    }
+    return originalGet(key)
+  }
+
+  const liveSession = { id: 'live-session', type: activityName, data: { students: [] } }
+  const capability = issueActivityCapability(liveSession, 'manager')
+  const sessionMap = new Map<string, unknown>([['live-session', liveSession]])
+  let setCalls = 0
+  const sessions = {
+    get: async (id: string) => sessionMap.get(id) ?? null,
+    set: async (id: string, session: unknown) => { setCalls += 1; sessionMap.set(id, session) },
+  }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+  const handler = getRoute(app, 'POST', '/api/session/:sessionId/persistent-manager-capability')
+
+  const res = createMockRes()
+  console.info('[TEST] Expected persistent-store outage during an already-authorized persistent manager capability fast path; it must degrade, not 500.')
+  await handler(createMockReq({
+    params: { sessionId: 'live-session' },
+    cookies: {
+      [getActivityCapabilityCookieName('manager', 'live-session')]: capability.token,
+      persistent_sessions: buildCookieValue(activityName, hash, teacherCode),
+    },
+  }), res)
+
+  // The caller already holds a valid capability, so a store blip must not fail
+  // the request; recovery just degrades to "not known recoverable".
+  assert.equal(res.statusCode, 200)
+  assert.deepEqual(res.jsonBody, { success: true, alreadyAuthorized: true, persistentRecoveryAvailable: false })
+  assert.equal(setCalls, 0, 'fast path still does not re-issue')
+})
+
 void test('persistent session route resets when backing session missing', async (t) => {
   initializePersistentStorage(null)
   const sessionMap = new Map<string, unknown>()

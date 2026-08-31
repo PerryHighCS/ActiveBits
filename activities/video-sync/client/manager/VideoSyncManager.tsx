@@ -148,6 +148,15 @@ export function shouldRenderManagerHeaderForSession(sessionId: string | null | u
   return !isEmbeddedChildSessionId(sessionId ?? undefined)
 }
 
+/**
+ * Whether a non-OK `/manager-access` response is transient and worth a bounded
+ * retry. The route returns an explicit 5xx for persistent/session-store
+ * outages; a 4xx is a definitive denial that should latch the read-only state.
+ */
+export function isRetryableManagerAccessStatus(status: number): boolean {
+  return status >= 500
+}
+
 export function shouldFetchEmbeddedBootstrapSourceUrl(params: {
   sessionId: string | null | undefined
   queryBootstrapSourceUrl: string | null
@@ -614,25 +623,60 @@ export default function VideoSyncManager() {
 
     const nonce = managerAccessRefreshNonce
     let isCancelled = false
-    void (async () => {
+    let retryTimer: ReturnType<typeof setTimeout> | undefined
+    let attempts = 0
+    const MAX_ATTEMPTS = 4
+
+    const denyAccess = (): void => {
+      if (!isCancelled) {
+        setManagerAccessState({ sessionId, nonce, granted: false, sourceUrl: null })
+      }
+    }
+
+    const runManagerAccess = async (): Promise<void> => {
+      let response: Response
       try {
-        const response = await fetch(`/api/video-sync/${sessionId}/manager-access`, { credentials: 'include' })
-        if (isCancelled) return
-        if (!response.ok) {
-          setManagerAccessState({ sessionId, nonce, granted: false, sourceUrl: null })
-          return
+        response = await fetch(`/api/video-sync/${sessionId}/manager-access`, { credentials: 'include' })
+      } catch {
+        scheduleRetryOrDeny()
+        return
+      }
+      if (isCancelled) return
+      if (!response.ok) {
+        if (isRetryableManagerAccessStatus(response.status)) {
+          scheduleRetryOrDeny()
+        } else {
+          denyAccess()
         }
+        return
+      }
+      try {
         const payload = (await response.json()) as ManagerAccessResponse
         if (!isCancelled) {
           setManagerAccessState({ sessionId, nonce, granted: true, sourceUrl: readRecoveredPersistentSourceUrl(payload) })
         }
       } catch {
-        if (!isCancelled) {
-          setManagerAccessState({ sessionId, nonce, granted: false, sourceUrl: null })
-        }
+        denyAccess()
       }
-    })()
-    return () => { isCancelled = true }
+    }
+
+    // Network errors and the route's explicitly temporary 5xx failures are
+    // transient: retry with bounded backoff before latching the read-only
+    // state. A 4xx is a definitive denial and latches immediately.
+    const scheduleRetryOrDeny = (): void => {
+      attempts += 1
+      if (attempts >= MAX_ATTEMPTS) {
+        denyAccess()
+        return
+      }
+      retryTimer = setTimeout(() => { void runManagerAccess() }, 1000 * attempts)
+    }
+
+    void runManagerAccess()
+    return () => {
+      isCancelled = true
+      if (retryTimer) clearTimeout(retryTimer)
+    }
   }, [embeddedManagerCapabilityExchange.isResolving, managerAccessRefreshNonce, sessionId])
 
   const handleEnvelope = useCallback((envelope: VideoSyncWsEnvelope) => {

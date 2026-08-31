@@ -369,3 +369,57 @@ void test('a disconnected socket cannot deliver onClose once a reconnect owns th
     restoreDom()
   }
 })
+
+void test('a superseded socket whose close lands after the replacement already closed is still suppressed', async () => {
+  const restoreDom = installDomEnvironment()
+  FakeWebSocket.instances.length = 0
+  const container = document.getElementById('root')
+  assert.ok(container)
+  const root = createRoot(container)
+  let reconnect: (() => WebSocket | null) | null = null
+  let closeCalls = 0
+
+  function Probe(): null {
+    const connection = useResilientWebSocket({
+      buildUrl: 'wss://example.test/socket',
+      connectOnMount: true,
+      shouldReconnect: false,
+      onClose: () => { closeCalls += 1 },
+    })
+    reconnect = connection.connect
+    return null
+  }
+
+  try {
+    await act(async () => {
+      root.render(createElement(Probe))
+    })
+    const firstSocket = FakeWebSocket.instances[0]
+    assert.ok(firstSocket)
+
+    // connect() supersedes the first socket without a disconnect() in between.
+    await act(async () => { reconnect?.() })
+    const secondSocket = FakeWebSocket.instances[1]
+    assert.ok(secondSocket)
+    await act(async () => { secondSocket.emitOpen() })
+
+    // The replacement closes first and clears the slot.
+    await act(async () => { secondSocket.emitClose(1000) })
+    assert.equal(closeCalls, 1, 'the live socket close reaches the consumer')
+
+    await act(async () => {
+      // The long-dead first socket finally emits its close into an empty slot.
+      // An empty slot is not proof this socket was manually disconnected, so it
+      // must stay suppressed rather than firing a second onClose.
+      console.info('[TEST] Expected late 1006 close from a superseded socket landing in an empty slot; it must be suppressed.')
+      firstSocket.emitClose(1006)
+    })
+    assert.equal(closeCalls, 1, 'a stale superseded close does not deliver a second onClose')
+
+    await act(async () => {
+      root.unmount()
+    })
+  } finally {
+    restoreDom()
+  }
+})

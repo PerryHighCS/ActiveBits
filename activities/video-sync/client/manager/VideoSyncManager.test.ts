@@ -7,6 +7,7 @@ import {
     clearManagerPlayerLoadError,
     getManagerPlaybackIntentForStateChange,
     parseManagerStopTimeInput,
+    isRetryableManagerAccessStatus,
     readBootstrapSourceUrl,
     readEmbeddedBootstrapSourceUrl,
     readRecoveredPersistentSourceUrl,
@@ -80,6 +81,18 @@ void test('shouldRenderManagerHeaderForSession hides the manager header for embe
   assert.equal(shouldRenderManagerHeaderForSession('session-123'), true)
   assert.equal(shouldRenderManagerHeaderForSession('CHILD:parent:abcde:video-sync'), false)
   assert.equal(shouldRenderManagerHeaderForSession(null), true)
+})
+
+void test('isRetryableManagerAccessStatus retries 5xx and network-shaped failures but not definitive denials', () => {
+  // Definitive denials latch the read-only state immediately.
+  assert.equal(isRetryableManagerAccessStatus(400), false)
+  assert.equal(isRetryableManagerAccessStatus(401), false)
+  assert.equal(isRetryableManagerAccessStatus(403), false)
+  assert.equal(isRetryableManagerAccessStatus(404), false)
+  // The route's explicitly temporary store failures are retried with backoff.
+  assert.equal(isRetryableManagerAccessStatus(500), true)
+  assert.equal(isRetryableManagerAccessStatus(502), true)
+  assert.equal(isRetryableManagerAccessStatus(503), true)
 })
 
 void test('shouldFetchEmbeddedBootstrapSourceUrl only fetches for embedded child sessions without query bootstrap', () => {
