@@ -1,10 +1,14 @@
 import SessionHeader from '@src/components/common/SessionHeader'
 import { fetchEmbeddedLaunchSelectedOptions } from '@src/components/common/embeddedLaunchBootstrap'
-import { isEmbeddedManagerActivatedMessage } from '@src/components/common/embeddedManagerBootstrap'
+import {
+  isEmbeddedManagerActivatedMessage,
+  requestEmbeddedManagerBootstrapRefresh,
+} from '@src/components/common/embeddedManagerBootstrap'
 import { isEmbeddedChildSessionId } from '@src/components/common/sessionHeaderUtils'
 import Button from '@src/components/ui/Button'
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
 import { useEmbeddedManagerCapabilityExchange } from '@src/hooks/useEmbeddedManagerCapabilityExchange'
+import { nextEmbeddedManagerBootstrapRefreshAttempt } from '@src/hooks/useEmbeddedManagerPasscodeExchange'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router'
 import {
@@ -165,6 +169,23 @@ export function isRetryableManagerAccessStatus(status: number): boolean {
  */
 export function isManagerAuthorizationClose(code: number): boolean {
   return code === 1008
+}
+
+/**
+ * Whether a definitive `/manager-access` denial should trigger a bounded parent
+ * bootstrap-token refresh instead of latching read-only. Only an embedded child
+ * frame can recover this way (its one-time entry token is gone from the URL, but
+ * the parent can mint a new one); a standalone manager just latches. The caller
+ * still applies the per-session attempt bound.
+ */
+export function shouldRequestEmbeddedBootstrapRefreshOnDenial(params: {
+  sessionId: string | null | undefined
+  status: number
+}): boolean {
+  if (params.status !== 401 && params.status !== 403) {
+    return false
+  }
+  return isEmbeddedChildSessionId(params.sessionId ?? undefined)
 }
 
 export function shouldFetchEmbeddedBootstrapSourceUrl(params: {
@@ -358,6 +379,7 @@ export default function VideoSyncManager() {
   const suppressPlayerEventsRef = useRef(false)
   const suppressPlayerEventsTimeoutRef = useRef<number | null>(null)
   const autoStartAttemptKeyRef = useRef<string | null>(null)
+  const managerAccessBootstrapRefreshAttemptsRef = useRef<Map<string, number>>(new Map())
   const queryBootstrapSourceUrl = useMemo(() => readBootstrapSourceUrl(location.search), [location.search])
   const embeddedManagerCapabilityExchange = useEmbeddedManagerCapabilityExchange({
     sessionId: sessionId ?? undefined,
@@ -655,6 +677,21 @@ export default function VideoSyncManager() {
       }
     }
 
+    // An embedded child frame whose capability cookie expired or was cleared
+    // cannot recover on its own - its one-time entry token is long gone from the
+    // URL. Ask the still-authenticated parent for a fresh bootstrap token
+    // (bounded by nextEmbeddedManagerBootstrapRefreshAttempt so a persistently
+    // failing exchange cannot loop) and let the capability-exchange hook re-run,
+    // instead of latching read-only on the first 401/403.
+    const requestBoundedBootstrapRefresh = (): boolean => {
+      const attemptsMap = managerAccessBootstrapRefreshAttemptsRef.current
+      const nextAttempt = nextEmbeddedManagerBootstrapRefreshAttempt(attemptsMap.get(sessionId) ?? 0)
+      if (nextAttempt == null) return false
+      attemptsMap.set(sessionId, nextAttempt)
+      requestEmbeddedManagerBootstrapRefresh(sessionId)
+      return true
+    }
+
     const runManagerAccess = async (): Promise<void> => {
       let response: Response
       try {
@@ -667,6 +704,12 @@ export default function VideoSyncManager() {
       if (!response.ok) {
         if (isRetryableManagerAccessStatus(response.status)) {
           scheduleRetryOrDeny()
+        } else if (
+          shouldRequestEmbeddedBootstrapRefreshOnDenial({ sessionId, status: response.status })
+          && requestBoundedBootstrapRefresh()
+        ) {
+          // Parent asked for a new token; the capability-exchange hook re-runs
+          // and re-triggers this effect. Don't latch read-only yet.
         } else {
           denyAccess()
         }
@@ -675,6 +718,7 @@ export default function VideoSyncManager() {
       try {
         const payload = (await response.json()) as ManagerAccessResponse
         if (!isCancelled) {
+          managerAccessBootstrapRefreshAttemptsRef.current.delete(sessionId)
           setManagerAccessState({ sessionId, nonce, granted: true, sourceUrl: readRecoveredPersistentSourceUrl(payload) })
         }
       } catch {
@@ -694,7 +738,14 @@ export default function VideoSyncManager() {
       retryTimer = setTimeout(() => { void runManagerAccess() }, 1000 * attempts)
     }
 
-    void runManagerAccess()
+    // Defer one microtask so React Strict Mode's throwaway effect pass is
+    // cancelled (isCancelled = true) before the fetch starts, instead of firing
+    // two state-changing /manager-access requests - each consuming a rate-limit
+    // attempt and racing the route's whole-session capability write - per mount.
+    void Promise.resolve().then(() => {
+      if (isCancelled) return
+      void runManagerAccess()
+    })
     return () => {
       isCancelled = true
       if (retryTimer) clearTimeout(retryTimer)

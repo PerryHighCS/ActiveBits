@@ -243,7 +243,14 @@ export default function JavaFormatPracticeManager() {
       retryTimer = setTimeout(() => { void runExchange() }, 1000 * attempts)
     }
 
-    void runExchange()
+    // Defer one microtask so React Strict Mode's throwaway effect pass is
+    // cancelled before this POST fires, instead of sending two
+    // persistent-manager-capability requests - each consuming a rate-limit
+    // attempt and racing the route's whole-session capability write - per mount.
+    void Promise.resolve().then(() => {
+      if (cancelled) return
+      void runExchange()
+    })
 
     return () => {
       cancelled = true

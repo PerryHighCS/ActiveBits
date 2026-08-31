@@ -19,6 +19,7 @@ import {
     shouldFetchEmbeddedBootstrapSourceUrl,
     shouldRecoverAutoStartAfterCredentialLoad,
     shouldRenderManagerHeaderForSession,
+    shouldRequestEmbeddedBootstrapRefreshOnDenial,
     shouldSendManagerPlaybackPositionUpdate,
 } from './VideoSyncManager.js'
 
@@ -101,6 +102,36 @@ void test('isManagerAuthorizationClose only matches the policy-violation close t
   assert.equal(isManagerAuthorizationClose(1000), false)
   assert.equal(isManagerAuthorizationClose(1006), false)
   assert.equal(isManagerAuthorizationClose(1001), false)
+})
+
+void test('shouldRequestEmbeddedBootstrapRefreshOnDenial only fires for an embedded child on a 401/403', () => {
+  // Embedded child + auth denial -> ask the parent for a fresh token.
+  assert.equal(
+    shouldRequestEmbeddedBootstrapRefreshOnDenial({ sessionId: 'CHILD:parent:abcde:video-sync', status: 403 }),
+    true,
+  )
+  assert.equal(
+    shouldRequestEmbeddedBootstrapRefreshOnDenial({ sessionId: 'CHILD:parent:abcde:video-sync', status: 401 }),
+    true,
+  )
+  // Standalone manager cannot redeem a parent token; it just latches read-only.
+  assert.equal(
+    shouldRequestEmbeddedBootstrapRefreshOnDenial({ sessionId: 'session-123', status: 403 }),
+    false,
+  )
+  // Non-denial statuses are handled by the retry/deny paths, not a refresh.
+  assert.equal(
+    shouldRequestEmbeddedBootstrapRefreshOnDenial({ sessionId: 'CHILD:parent:abcde:video-sync', status: 404 }),
+    false,
+  )
+  assert.equal(
+    shouldRequestEmbeddedBootstrapRefreshOnDenial({ sessionId: 'CHILD:parent:abcde:video-sync', status: 500 }),
+    false,
+  )
+  assert.equal(
+    shouldRequestEmbeddedBootstrapRefreshOnDenial({ sessionId: null, status: 403 }),
+    false,
+  )
 })
 
 void test('shouldFetchEmbeddedBootstrapSourceUrl only fetches for embedded child sessions without query bootstrap', () => {
