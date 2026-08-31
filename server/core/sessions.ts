@@ -64,6 +64,10 @@ function toSessionRecord(session: SessionLike): SessionRecord {
 
 export interface SessionStore extends SharedSessionStore<Record<string, unknown>> {
   get(id: string): Promise<SessionRecord | null>
+  // Like get, but a backend read failure propagates instead of being mapped to
+  // `null` (indistinguishable from "no such session"). Optional: only the
+  // Valkey-backed store can fail a read.
+  getStrict?(id: string): Promise<SessionRecord | null>
   set(id: string, session: SessionRecord, ttl?: number | null): Promise<void>
   consumeSessionDataToken?(id: string, field: string, token: string): Promise<SessionRecord | null>
   delete(id: string): Promise<boolean>
@@ -270,6 +274,22 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
     return loaded ? normalizeSessionData(toSessionRecord(loaded)) : null
   }
 
+  const getStrict = async (id: string): Promise<SessionRecord | null> => {
+    // Bypass the cache-miss loader (whose valkey read swallows failures) and
+    // read strictly: a backend outage rejects here so recovery routes can keep
+    // it retryable instead of treating a cold-cache blip as "no such session".
+    const loaded = await valkeyStore.getStrict(id)
+    const normalizedSession = loaded ? normalizeSessionData(toSessionRecord(loaded)) : null
+    if (normalizedSession) {
+      cache.set(id, normalizedSession, false)
+      const embeddedParentSessionId = getEmbeddedParentSessionId(normalizedSession)
+      if (embeddedParentSessionId && embeddedParentSessionId !== id) {
+        await touch(embeddedParentSessionId)
+      }
+    }
+    return normalizedSession
+  }
+
   const set = async (id: string, session: SessionRecord, ttl: number | null = null): Promise<void> => {
     const normalized = normalizeSessionData(session)
     await valkeyStore.set(id, normalized, ttl)
@@ -404,6 +424,7 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
     valkeyStore,
     cache,
     get,
+    getStrict,
     set,
     consumeSessionDataToken,
     delete: del,

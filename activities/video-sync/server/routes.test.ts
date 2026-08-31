@@ -1896,6 +1896,34 @@ void test('manager-access route degrades persistent bootstrap for an already-aut
   assert.equal(res.cookies.length, 0, 'the fast path does not re-issue a capability')
 })
 
+void test('manager-access route stays retryable (500) when the strict live-session read rejects', async (t) => {
+  console.info('[TEST] video-sync manager-access: the strict session read rejects on purpose; production get() would swallow to null and 404, the route must instead 500 so the client retries')
+  initializePersistentStorage(null)
+  t.after(() => { initializePersistentStorage(null) })
+
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  const base = createSessionStore({ s1: createVideoSyncSession('s1') })
+  const sessions = {
+    ...base.sessions,
+    // Mimic ValkeySessionStore.get swallowing a backend failure to null...
+    async get() { return null },
+    // ...while the strict read propagates it.
+    async getStrict(): Promise<never> { throw new Error('[TEST] session store read unavailable') },
+  }
+
+  setupVideoSyncRoutes(app, sessions, ws)
+  const handler = app.handlers.get['/api/video-sync/:sessionId/manager-access']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.({ params: { sessionId: 's1' }, cookies: {} }, res)
+
+  assert.equal(res.statusCode, 500)
+  assert.deepEqual(res.body, { error: 'INTERNAL_ERROR', message: 'Manager access is temporarily unavailable' })
+  assert.equal(res.headers['cache-control'], 'no-store')
+})
+
 void test('manager-access route ignores unsigned persistent sourceUrl from cookie selectedOptions', async () => {
   initializePersistentStorage(null)
 

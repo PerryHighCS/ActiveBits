@@ -78,7 +78,7 @@ interface VideoSyncSession extends SessionRecord {
   data: VideoSyncSessionData
 }
 
-interface VideoSyncSessionStore extends Pick<SessionStore, 'get' | 'set'> {
+interface VideoSyncSessionStore extends Pick<SessionStore, 'get' | 'getStrict' | 'set'> {
   publishBroadcast?: (channel: string, message: Record<string, unknown>) => Promise<void>
   subscribeToBroadcast?: (channel: string, handler: (message: unknown) => void) => void
   valkeyStore?: {
@@ -981,14 +981,21 @@ async function getVideoSyncSession(
 }
 
 async function getVideoSyncSessionWithNormalization(
-  sessions: Pick<VideoSyncSessionStore, 'get'>,
+  sessions: Pick<VideoSyncSessionStore, 'get' | 'getStrict'>,
   sessionId: string,
+  options: { strict?: boolean } = {},
 ): Promise<{
   session: VideoSyncSession | null
   data: VideoSyncSessionData | null
   didNormalizeSessionData: boolean
 }> {
-  const session = await sessions.get(sessionId)
+  // When strict, a backend read failure rejects (-> the route's outer catch ->
+  // retryable 500) instead of mapping to `null`, which a manager client treats
+  // as a definitive "session not found" and stops retrying.
+  const read = options.strict && typeof sessions.getStrict === 'function'
+    ? sessions.getStrict.bind(sessions)
+    : sessions.get.bind(sessions)
+  const session = await read(sessionId)
   if (!session || session.type !== 'video-sync') {
     return {
       session: null,
@@ -1244,7 +1251,7 @@ export default function setupVideoSyncRoutes(
       const {
         session,
         data,
-      } = await getVideoSyncSessionWithNormalization(sessions, sessionId)
+      } = await getVideoSyncSessionWithNormalization(sessions, sessionId, { strict: true })
       if (!session || !data) {
         res.status(404).json({ error: 'NOT_FOUND', message: 'Session not found' })
         return

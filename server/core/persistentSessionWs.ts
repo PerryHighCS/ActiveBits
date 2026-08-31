@@ -32,7 +32,7 @@ interface PersistentSessionSocket {
   on(event: 'message' | 'close', handler: (payload?: unknown) => void): void
 }
 
-type SessionStore = Pick<CoreSessionStore, 'get' | 'set'>
+type SessionStore = Pick<CoreSessionStore, 'get' | 'set'> & Partial<Pick<CoreSessionStore, 'delete'>>
 
 interface WsRouter {
   register(
@@ -155,7 +155,24 @@ export function setupPersistentSessionWs(ws: WsRouter, sessions: SessionStore): 
 
         if (message.type === 'verify-teacher-code') {
           const teacherCode = typeof message.teacherCode === 'string' ? message.teacherCode : ''
-          void handleTeacherCodeVerification(socket, hash, teacherCode, sessions)
+          void handleTeacherCodeVerification(socket, hash, teacherCode, sessions).catch((err) => {
+            // Backstop: handleTeacherCodeVerification handles its own known
+            // failure paths, but a rejection must never escape as an unhandled
+            // promise rejection at this message boundary.
+            console.error(JSON.stringify({
+              event: 'persistent-session.teacher-verification-unhandled',
+              hash,
+              error: err instanceof Error ? err.message : String(err),
+            }))
+            try {
+              socket.send(JSON.stringify({
+                type: 'teacher-code-error',
+                error: 'Teacher verification failed. Please try again.',
+              }))
+            } catch {
+              // Socket already closed; nothing to report to.
+            }
+          })
         }
       } catch (err) {
         console.error('Error handling persistent session message:', err)
@@ -270,7 +287,37 @@ async function handleTeacherCodeVerification(
 
   console.log(`Created session ${newSession.id} for persistent session ${hash}`)
 
-  const waiters = await startPersistentSession(hash, newSession.id, socket)
+  let waiters: Awaited<ReturnType<typeof startPersistentSession>>
+  try {
+    waiters = await startPersistentSession(hash, newSession.id, socket)
+  } catch (err) {
+    // The live session was created but could not be linked to its persistent
+    // record (e.g. the reverse-index write rejected). Roll the orphan back and
+    // surface a retryable error instead of leaking an unhandled rejection.
+    console.error(JSON.stringify({
+      event: 'persistent-session.start-failed-after-create',
+      hash,
+      sessionId: newSession.id,
+      error: err instanceof Error ? err.message : String(err),
+    }))
+    try {
+      await sessions.delete?.(newSession.id)
+    } catch (cleanupErr) {
+      console.error(JSON.stringify({
+        event: 'persistent-session.start-failed-cleanup-failed',
+        hash,
+        sessionId: newSession.id,
+        error: cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr),
+      }))
+    }
+    socket.send(
+      JSON.stringify({
+        type: 'teacher-code-error',
+        error: 'Session start is temporarily unavailable. Please try again.',
+      }),
+    )
+    return
+  }
   removeWaiter(hash, socket)
 
   socket.send(

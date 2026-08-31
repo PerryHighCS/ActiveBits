@@ -52,6 +52,38 @@ function waitForAsyncWork(): Promise<void> {
   return new Promise((resolve) => setImmediate(resolve))
 }
 
+function createFakeValkeyClient(): {
+  store: Map<string, string>
+  on: () => void
+  subscribe: () => Promise<number>
+  publish: () => Promise<number>
+  get: (key: string) => Promise<string | null>
+  set: (key: string, value: string) => Promise<string>
+  del: (key: string) => Promise<number>
+  eval: () => Promise<number>
+  scan: (cursor: string, ...args: Array<string | number>) => Promise<[string, string[]]>
+  quit: () => Promise<string>
+} {
+  const store = new Map<string, string>()
+  return {
+    store,
+    on() {},
+    subscribe: async () => 1,
+    publish: async () => 0,
+    get: async (key: string) => store.get(key) ?? null,
+    set: async (key: string, value: string) => { store.set(key, value); return 'OK' },
+    del: async (key: string) => (store.delete(key) ? 1 : 0),
+    eval: async () => 1,
+    scan: async (_cursor: string, ...args: Array<string | number>) => {
+      const matchIndex = args.findIndex((arg) => arg === 'MATCH')
+      const pattern = matchIndex >= 0 ? String(args[matchIndex + 1] ?? '*') : '*'
+      const prefix = pattern.endsWith('*') ? pattern.slice(0, -1) : pattern
+      return ['0', Array.from(store.keys()).filter((key) => key.startsWith(prefix))]
+    },
+    quit: async () => 'OK',
+  }
+}
+
 void test('persistent session websocket bootstraps started sessions with canonical selected options', async (t) => {
   initializePersistentStorage(null)
 
@@ -344,4 +376,60 @@ void test('updatePersistentSessionUrlState trims selectedOptions and drops blank
   assert.deepEqual(stored?.selectedOptions, {
     algorithm: 'binary-search',
   })
+})
+
+void test('persistent session websocket rolls back and reports a retryable error when starting the session fails', async (t) => {
+  const valkeyClient = createFakeValkeyClient()
+  initializePersistentStorage(valkeyClient as never)
+  t.after(() => { initializePersistentStorage(null) })
+
+  const activityName = 'algorithm-demo'
+  const teacherCode = 'ws-start-failure-code'
+  const { hash, hashedTeacherCode } = generatePersistentHash(activityName, teacherCode)
+  t.after(async () => cleanupPersistentSession(hash))
+  await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode)
+
+  const sessionStore = new Map<string, SessionRecord>()
+  const deleted: string[] = []
+  const sessions = {
+    async get(id: string) { return sessionStore.get(id) ?? null },
+    async set(id: string, value: SessionRecord) { sessionStore.set(id, value) },
+    async delete(id: string) { deleted.push(id); return sessionStore.delete(id) },
+  }
+
+  let registeredHandler: ((socket: MockSocket, query: URLSearchParams, _wss: unknown) => void) | undefined
+  setupPersistentSessionWs({
+    register(pathname, handler) {
+      if (pathname === '/ws/persistent-session') {
+        registeredHandler = handler as (socket: MockSocket, query: URLSearchParams, _wss: unknown) => void
+      }
+    },
+  }, sessions)
+  assert.ok(registeredHandler)
+
+  const socket = createMockSocket()
+  registeredHandler(socket, new URLSearchParams({ hash, activityName }), null)
+  await waitForAsyncWork()
+
+  // startPersistentSession's reverse-index write now rejects (the record write
+  // has already landed), so the WS boundary must roll the orphan back rather
+  // than leak an unhandled rejection.
+  const originalSet = valkeyClient.set
+  valkeyClient.set = async (key: string, value: string) => {
+    if (key.startsWith('persistent-session-by-session:')) {
+      throw new Error('[TEST] reverse-index write failed')
+    }
+    return originalSet(key, value)
+  }
+
+  console.info('[TEST] Expected persistent-session start failure surfaced at the websocket message boundary.')
+  socket.handlers.message?.(JSON.stringify({ type: 'verify-teacher-code', teacherCode }))
+  await waitForAsyncWork()
+  await waitForAsyncWork()
+
+  const messageTypes = socket.sent.map((payload) => (JSON.parse(payload) as { type?: string }).type)
+  assert.ok(messageTypes.includes('teacher-code-error'), 'the teacher receives a controlled error')
+  assert.equal(messageTypes.includes('teacher-authenticated'), false, 'no success message is sent')
+  assert.equal(deleted.length, 1, 'the orphaned live session is rolled back')
+  assert.equal(sessionStore.size, 0, 'no live session is left behind')
 })

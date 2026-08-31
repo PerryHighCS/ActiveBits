@@ -109,13 +109,35 @@ export class ValkeySessionStore {
   }
 
   async get(id: string): Promise<SessionLike | null> {
+    // Non-throwing contract: delegate to getStrict and swallow a backend
+    // failure to `null` for callers that tolerate it.
+    try {
+      return await this.getStrict(id)
+    } catch {
+      // getStrict already logged the structured failure.
+      return null
+    }
+  }
+
+  /**
+   * Strict session read: a backend failure is logged and rethrown rather than
+   * mapped to `null`. Capability-recovery routes use this so a transient Valkey
+   * outage stays a retryable 500 instead of a false 404 the client treats as a
+   * definitive "no such session".
+   */
+  async getStrict(id: string): Promise<SessionLike | null> {
     try {
       const data = await this.client.get(`session:${id}`)
       if (!data) return null
       return JSON.parse(data) as SessionLike
     } catch (err) {
-      console.error(`Failed to get session ${id}:`, err)
-      return null
+      console.error(JSON.stringify({
+        event: 'valkey.session-lookup-failed',
+        sessionId: id,
+        strict: true,
+        error: err instanceof Error ? err.message : String(err),
+      }))
+      throw err
     }
   }
 

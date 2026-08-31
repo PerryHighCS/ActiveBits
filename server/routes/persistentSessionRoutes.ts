@@ -71,6 +71,9 @@ interface PersistentSessionCreateBody {
 
 interface SessionStoreLike {
   get(id: string): Promise<unknown | null>
+  // Strict read: a backend failure propagates instead of mapping to `null`.
+  // Optional; falls back to `get` when the store does not provide it.
+  getStrict?(id: string): Promise<unknown | null>
   set?(id: string, session: unknown): Promise<void>
 }
 
@@ -342,6 +345,16 @@ function validateEntryPolicyForActivity(activityName: string, entryPolicy: strin
 }
 
 export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersistentSessionRoutesOptions): void {
+  // Strict live-session read for the capability-recovery routes: a backend
+  // outage rejects (-> the route's outer catch -> retryable 500) instead of
+  // mapping to `null`, which the Java manager treats as a definitive "no such
+  // session" and stops retrying.
+  const getSessionStrict = (sessionId: string): Promise<unknown | null> => (
+    typeof sessions.getStrict === 'function'
+      ? sessions.getStrict(sessionId)
+      : sessions.get(sessionId)
+  )
+
   app.get('/api/persistent-session/list', async (req, res) => {
     try {
       const { sessions: sessionEntries } = parsePersistentSessionsCookie(
@@ -809,7 +822,7 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
     }
 
     try {
-      const activeSession = await sessions.get(sessionId)
+      const activeSession = await getSessionStrict(sessionId)
       if (!isPlainObject(activeSession) || typeof activeSession.type !== 'string') {
         res.status(404).json({ error: 'Active session not found' })
         return
@@ -888,7 +901,7 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
       // cookie-validation awaits above. Issue the capability onto the latest
       // record so a concurrent activity update in that window is not lost when
       // the whole-session snapshot is written back.
-      const freshSession = await sessions.get(sessionId)
+      const freshSession = await getSessionStrict(sessionId)
       if (!isPlainObject(freshSession)) {
         res.status(404).json({ error: 'Active session not found' })
         return

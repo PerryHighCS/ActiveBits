@@ -573,6 +573,28 @@ void test('persistent manager capability recovery returns a retryable 500 when t
   assert.deepEqual(res.jsonBody, { error: 'Manager capability is temporarily unavailable' })
 })
 
+void test('persistent manager capability recovery returns a retryable 500 when the live-session read rejects', async (t) => {
+  initializePersistentStorage(null)
+  t.after(() => { initializePersistentStorage(null) })
+  const sessions = {
+    get: async () => { throw new Error('[TEST] session store read (non-strict) unavailable') },
+    getStrict: async () => { throw new Error('[TEST] session store read unavailable') },
+    set: async () => {},
+  }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+  const handler = getRoute(app, 'POST', '/api/session/:sessionId/persistent-manager-capability')
+
+  const res = createMockRes()
+  console.info('[TEST] Expected live-session strict read failure during persistent manager capability recovery.')
+  await handler(createMockReq({ params: { sessionId: 'live-session' }, cookies: {} }), res)
+
+  // ValkeySessionStore.get swallows read failures to null (-> false 404). The
+  // strict read must instead reject into the outer catch -> retryable 500.
+  assert.equal(res.statusCode, 500)
+  assert.deepEqual(res.jsonBody, { error: 'Manager capability is temporarily unavailable' })
+})
+
 void test('persistent manager capability recovery fast path survives a persistent-store outage for an already-authorized caller', async (t) => {
   const valkeyClient = createFakePersistentValkeyClient()
   initializePersistentStorage(valkeyClient as never)
