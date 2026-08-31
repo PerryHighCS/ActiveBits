@@ -16,6 +16,7 @@ import {
   getPersistentSessionStrict,
   PersistentSessionEntryParticipantStoreError,
   storePersistentSessionEntryParticipant,
+  TEACHER_CODE_ATTEMPT_WINDOW_SECONDS,
   verifyTeacherCodeWithHash,
   resolvePersistentSessionEntryPolicy,
   updatePersistentSessionUrlState,
@@ -240,6 +241,27 @@ function getValidatedPersistentSessionCookieEntry(
   }
 
   return verifyTeacherCodeWithHash(activityName, hash, teacherCode).valid ? entry : null
+}
+
+/**
+ * Whether the caller supplied a teacher-code *candidate* for this persistent
+ * link: a `persistent_sessions` entry keyed to this activity/hash carrying a
+ * non-empty string `teacherCode`. Unlike `getValidatedPersistentSessionCookieEntry`
+ * this does not check the code is correct - it only tells whether a request is
+ * even *attempting* credentialed recovery, so a caller who merely knows the
+ * live session id (no matching cookie entry) is not charged an attempt against
+ * the shared IP+hash bucket and cannot lock out the real teacher on a shared
+ * NAT/school address.
+ */
+function hasPersistentSessionTeacherCodeCandidate(
+  sessionEntries: readonly CookieSessionEntry[],
+  activityName: string,
+  hash: string,
+): boolean {
+  const cookieKey = `${activityName}:${hash}`
+  return sessionEntries.some(
+    (entry) => entry.key === cookieKey && typeof entry.teacherCode === 'string' && entry.teacherCode.length > 0,
+  )
 }
 
 function writePersistentSessionsCookie(res: ResponseLike, sessionEntries: CookieSessionEntry[]): void {
@@ -904,25 +926,38 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
         && persistentSession.activityName === activeSession.type,
       )
 
-      // Rate-limit the teacher-code validation below. `persistent_sessions` is a
-      // client-supplied cookie a direct HTTP client can forge, so without this
-      // an attacker who knows a persistent hash could brute-force its teacher
-      // code here - bypassing the same IP+hash cap already enforced by
-      // `teacher-authenticate` and the video-sync recovery route. The
-      // already-authorized fast path is unaffected (checked below before any
-      // credential comparison that matters).
-      if (!alreadyAuthorized && isPersistentSession && hash) {
-        const attempt = await recordTeacherCodeAttempt(`${getRequestClientIp(req)}:${hash}`)
-        if (!attempt.allowed) {
-          res.status(429).json({ error: 'Too many attempts. Please wait a minute.' })
-          return
-        }
-      }
-
       const { sessions: sessionEntries } = parsePersistentSessionsCookie(
         req.cookies?.persistent_sessions,
         'persistent_sessions (/api/session/:sessionId/persistent-manager-capability)',
       )
+
+      // Rate-limit the teacher-code validation below. `persistent_sessions` is a
+      // client-supplied cookie a direct HTTP client can forge, so without this
+      // an attacker who knows a persistent hash could brute-force its teacher
+      // code here - bypassing the same IP+hash cap already enforced by
+      // `teacher-authenticate` and the video-sync recovery route. Only a request
+      // that actually carries a teacher-code candidate for this link is charged:
+      // a caller who merely knows the live session id falls through to the 403
+      // below without consuming another client's shared bucket. The
+      // already-authorized fast path is unaffected (checked below before any
+      // credential comparison that matters).
+      if (
+        !alreadyAuthorized
+        && isPersistentSession
+        && hash
+        && hasPersistentSessionTeacherCodeCandidate(sessionEntries, persistentSession!.activityName, hash)
+      ) {
+        const attempt = await recordTeacherCodeAttempt(`${getRequestClientIp(req)}:${hash}`)
+        if (!attempt.allowed) {
+          // "Wait and retry" - the bucket clears after this window. The Java
+          // Format manager treats 429 as transient and honors this header
+          // rather than falling into its 1s/2s/3s backoff (which would expire
+          // entirely inside the window and force a give-up).
+          res.set?.('Retry-After', String(TEACHER_CODE_ATTEMPT_WINDOW_SECONDS))
+          res.status(429).json({ error: 'Too many attempts. Please wait a minute.' })
+          return
+        }
+      }
       const persistentRecoveryAvailable = isPersistentSession
         && getValidatedPersistentSessionCookieEntry(sessionEntries, persistentSession!.activityName, hash!) != null
 

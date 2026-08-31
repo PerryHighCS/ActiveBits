@@ -45,6 +45,22 @@ export function resolveManagerAuthLostRecovery(params: {
   return 'no-recovery'
 }
 
+/** Fallback wait before retrying a rate-limited capability exchange when the route sends no usable `Retry-After`. */
+export const DEFAULT_MANAGER_CAPABILITY_RETRY_AFTER_MS = 60_000
+
+/**
+ * Parse a `Retry-After` header (delta-seconds form only) into milliseconds,
+ * clamped to a 5 minute ceiling. Returns `null` for an absent, non-numeric
+ * (e.g. HTTP-date), or non-positive value so the caller falls back to
+ * `DEFAULT_MANAGER_CAPABILITY_RETRY_AFTER_MS`.
+ */
+export function parseManagerCapabilityRetryAfterMs(headerValue: string | null | undefined): number | null {
+  if (headerValue == null) return null
+  const seconds = Number(headerValue.trim())
+  if (!Number.isFinite(seconds) || seconds <= 0) return null
+  return Math.min(seconds * 1000, 5 * 60_000)
+}
+
 /**
  * JavaFormatPracticeManager - Teacher view for managing the Java Format Practice activity
  * Displays student roster and their progress statistics
@@ -216,6 +232,7 @@ export default function JavaFormatPracticeManager() {
     let cancelled = false
     let retryTimer: ReturnType<typeof setTimeout> | undefined
     let attempts = 0
+    let rateLimitRetried = false
     const MAX_ATTEMPTS = 4
 
     const runExchange = async (): Promise<void> => {
@@ -273,6 +290,23 @@ export default function JavaFormatPracticeManager() {
         setPersistentRecoverySessionId((current) => (current === sessionId ? null : current))
         setManagerAccessUnavailableSessionId((current) => (current === sessionId ? null : current))
         markManagerAuthLost()
+        return
+      }
+      if (response.status === 429) {
+        // The route rate-limits teacher-code verification for a minute and
+        // sends `Retry-After`. The generic 1s/2s/3s backoff expires entirely
+        // inside that window and guarantees a give-up, so honor `Retry-After`
+        // for one delayed retry (mirroring the Video Sync manager-access flow)
+        // before latching "temporarily unavailable".
+        if (rateLimitRetried) {
+          setManagerAccessUnavailableSessionId(sessionId)
+          markManagerAuthLost()
+          return
+        }
+        rateLimitRetried = true
+        const delayMs = parseManagerCapabilityRetryAfterMs(response.headers.get('retry-after'))
+          ?? DEFAULT_MANAGER_CAPABILITY_RETRY_AFTER_MS
+        retryTimer = setTimeout(() => { void runExchange() }, delayMs)
         return
       }
       // 5xx / unexpected: transient persistence failure - stay gated and retry.

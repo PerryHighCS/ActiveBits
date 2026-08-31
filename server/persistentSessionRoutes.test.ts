@@ -373,11 +373,63 @@ void test('persistent manager capability recovery rate-limits repeated teacher-c
   const blocked = await callWithWrongCode()
   assert.equal(blocked.statusCode, 429)
   assert.deepEqual(blocked.jsonBody, { error: 'Too many attempts. Please wait a minute.' })
+  // The client treats 429 as "wait and retry", not a definitive denial.
+  assert.equal(blocked.headers['retry-after'], '60')
   assert.equal(
     Array.from(blocked.cookies.keys()).filter((name) => name.startsWith('activebits_cap_manager_')).length,
     0,
     'no capability cookie is issued for a rate-limited caller',
   )
+})
+
+void test('persistent manager capability recovery does not charge attempts to a caller with no teacher-code candidate', async (t) => {
+  initializePersistentStorage(null)
+  const sessionMap = new Map<string, unknown>()
+  const sessions = {
+    get: async (id: string) => {
+      const session = sessionMap.get(id)
+      return session == null ? null : structuredClone(session)
+    },
+    set: async (id: string, session: unknown) => { sessionMap.set(id, structuredClone(session)) },
+  }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+  const handler = getRoute(app, 'POST', '/api/session/:sessionId/persistent-manager-capability')
+
+  const activityName = 'java-format-practice'
+  const teacherCode = 'teacher-secret'
+  const { hash, hashedTeacherCode } = generatePersistentHash(activityName, teacherCode)
+  t.after(async () => cleanupPersistentSession(hash))
+  sessionMap.set('live-session', { id: 'live-session', type: activityName, data: { students: [] } })
+  await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode)
+  await startPersistentSession(hash, 'live-session', { id: 'teacher-ws', readyState: 1, send() {} })
+
+  // An unrelated caller who only knows the live session id (no matching
+  // `persistent_sessions` entry) must not be able to drain the shared IP+hash
+  // attempt bucket and lock the real teacher out on a shared address.
+  for (let attempt = 1; attempt <= 12; attempt += 1) {
+    const res = createMockRes()
+    await handler(createMockReq({ params: { sessionId: 'live-session' }, cookies: {} }), res)
+    assert.equal(res.statusCode, 403, `cookieless attempt ${attempt} is a plain 403, never 429`)
+  }
+
+  // The teacher's own bucket is untouched: a full run of wrong-code attempts is
+  // still needed before the 429.
+  console.info('[TEST] Expected repeated invalid persistent teacher-code attempts against persistent-manager-capability.')
+  for (let attempt = 1; attempt <= 5; attempt += 1) {
+    const res = createMockRes()
+    await handler(createMockReq({
+      params: { sessionId: 'live-session' },
+      cookies: { persistent_sessions: buildCookieValue(activityName, hash, 'wrong-teacher-code') },
+    }), res)
+    assert.equal(res.statusCode, 403, `wrong-code attempt ${attempt} is a normal auth failure`)
+  }
+  const blocked = createMockRes()
+  await handler(createMockReq({
+    params: { sessionId: 'live-session' },
+    cookies: { persistent_sessions: buildCookieValue(activityName, hash, 'wrong-teacher-code') },
+  }), blocked)
+  assert.equal(blocked.statusCode, 429)
 })
 
 void test('persistent manager capability recovery issues the capability onto the latest session record', async (t) => {

@@ -105,6 +105,87 @@ void test('resolveManagerAuthLostRecovery distinguishes a transient outage from 
   )
 })
 
+void test('parseManagerCapabilityRetryAfterMs parses delta-seconds and rejects unusable values', async () => {
+  const { parseManagerCapabilityRetryAfterMs, DEFAULT_MANAGER_CAPABILITY_RETRY_AFTER_MS } =
+    await import('./JavaFormatPracticeManager.js')
+
+  assert.equal(parseManagerCapabilityRetryAfterMs('60'), 60_000)
+  assert.equal(parseManagerCapabilityRetryAfterMs(' 2 '), 2_000)
+  // Clamped so a hostile/absurd header cannot stall the manager indefinitely.
+  assert.equal(parseManagerCapabilityRetryAfterMs('99999'), 5 * 60_000)
+  // Absent / HTTP-date form / non-positive -> caller uses the default.
+  assert.equal(parseManagerCapabilityRetryAfterMs(null), null)
+  assert.equal(parseManagerCapabilityRetryAfterMs(undefined), null)
+  assert.equal(parseManagerCapabilityRetryAfterMs('Wed, 21 Oct 2026 07:28:00 GMT'), null)
+  assert.equal(parseManagerCapabilityRetryAfterMs('0'), null)
+  assert.equal(parseManagerCapabilityRetryAfterMs('-5'), null)
+  assert.equal(DEFAULT_MANAGER_CAPABILITY_RETRY_AFTER_MS, 60_000)
+})
+
+void test('JavaFormatPracticeManager retries a rate-limited exchange after Retry-After instead of latching', { concurrency: false }, async () => {
+  console.info('[TEST] java-format manager: the first persistent-capability response below is a 429; it must trigger a delayed Retry-After retry, not an immediate give-up')
+  TestWebSocket.instances = []
+  const restoreDom = installDomEnvironment('https://bits.example/manage/java-format-practice/perma-429')
+  const previousFetch = globalThis.fetch
+
+  let capabilityCalls = 0
+  let studentsCalls = 0
+
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    if (url.includes('/persistent-manager-capability')) {
+      capabilityCalls += 1
+      if (capabilityCalls === 1) {
+        return new Response(JSON.stringify({ error: 'Too many attempts. Please wait a minute.' }), {
+          status: 429,
+          headers: { 'Retry-After': '1' },
+        })
+      }
+      return new Response(JSON.stringify({ success: true, persistentRecoveryAvailable: true }), { status: 200 })
+    }
+    if (url.includes('/students')) {
+      studentsCalls += 1
+      return new Response(JSON.stringify({ students: [] }), { status: 200 })
+    }
+    if (url.includes('/difficulty') && init?.method === 'POST') {
+      return new Response(JSON.stringify({ ok: true }), { status: 200 })
+    }
+    throw new Error(`Unexpected fetch: ${url}`)
+  }) as typeof fetch
+
+  let teardown: (() => Promise<void>) | null = null
+  try {
+    const { testingLibrary, router, JavaFormatPracticeManager, act } = await loadHarness()
+    const rendered = testingLibrary.render(
+      <router.MemoryRouter initialEntries={['/manage/java-format-practice/perma-429']}>
+        <router.Routes>
+          <router.Route path="/manage/java-format-practice/:sessionId" element={<JavaFormatPracticeManager />} />
+        </router.Routes>
+      </router.MemoryRouter>,
+    )
+    teardown = async () => { await act(async () => { rendered.unmount(); testingLibrary.cleanup(); await Promise.resolve() }) }
+
+    // After the first 429 settles the gate stays closed but must NOT be latched:
+    // no "reloading won't help" banner, and no give-up yet.
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve() })
+    assert.equal(rendered.queryByText(/reloading won.t restore it/i), null, 'a 429 is not a definitive denial')
+    assert.equal((rendered.getByRole('button', { name: 'Beginner' }) as HTMLButtonElement).disabled, true)
+
+    // The Retry-After (1s) retry succeeds and releases the gate.
+    await testingLibrary.waitFor(
+      () => assert.equal((rendered.getByRole('button', { name: 'Beginner' }) as HTMLButtonElement).disabled, false),
+      { timeout: 4000 },
+    )
+    assert.equal(capabilityCalls, 2, 'exactly one delayed retry after the 429')
+    // The protected roster poll opens only once the gate is released.
+    await testingLibrary.waitFor(() => assert.ok(studentsCalls >= 1), { timeout: 4000 })
+  } finally {
+    await teardown?.()
+    globalThis.fetch = previousFetch
+    restoreDom()
+  }
+})
+
 void test('JavaFormatPracticeManager keeps a live studentsUpdate over a slower /students poll', { concurrency: false }, async () => {
   TestWebSocket.instances = []
   const restoreDom = installDomEnvironment('https://bits.example/manage/java-format-practice/session-1')
