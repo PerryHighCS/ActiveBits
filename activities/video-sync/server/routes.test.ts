@@ -11,7 +11,7 @@ import { computePersistentLinkUrlHash } from 'activebits-server/core/persistentL
 import { getActivityCapabilityCookieName, issueActivityCapability } from 'activebits-server/core/activityCapabilities.js'
 import type { SessionRecord } from 'activebits-server/core/sessions.js'
 import type { WsRouter } from '../../../types/websocket.js'
-import setupVideoSyncRoutes from './routes.js'
+import setupVideoSyncRoutes, { persistentCookieEntryHasTeacherCodeCandidate } from './routes.js'
 
 const defaultManagerCookiesBySessionId = new Map<string, Record<string, string>>()
 
@@ -1781,6 +1781,57 @@ void test('manager-access route rate-limits repeated persistent teacher-code rec
   // The client treats 429 as "wait and retry" rather than a definitive denial,
   // so the route advertises the attempt-window length as Retry-After.
   assert.equal(blocked.headers['retry-after'], '60')
+
+  await cleanupPersistentSession(hash)
+})
+
+void test('persistentCookieEntryHasTeacherCodeCandidate requires a non-empty string teacher code', () => {
+  assert.equal(persistentCookieEntryHasTeacherCodeCandidate({ key: 'k', teacherCode: 'abc' } as never), true)
+  assert.equal(persistentCookieEntryHasTeacherCodeCandidate({ key: 'k', teacherCode: '' } as never), false)
+  assert.equal(persistentCookieEntryHasTeacherCodeCandidate({ key: 'k' } as never), false)
+  assert.equal(persistentCookieEntryHasTeacherCodeCandidate({ key: 'k', teacherCode: 123 } as never), false)
+  assert.equal(persistentCookieEntryHasTeacherCodeCandidate(undefined), false)
+})
+
+void test('manager-access route does not charge attempts for a cookie entry with no teacher-code candidate', async () => {
+  initializePersistentStorage(null)
+
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  const storeState = createSessionStore({ s1: createVideoSyncSession('s1') })
+  const teacherCode = 'persistent-teacher-code'
+  const { hash, hashedTeacherCode } = generatePersistentHash('video-sync', teacherCode)
+  await getOrCreateActivePersistentSession('video-sync', hash, hashedTeacherCode)
+  await startPersistentSession(hash, 's1', { id: 'teacher-ws', readyState: 1, send() {} })
+
+  setupVideoSyncRoutes(app, storeState.sessions, ws)
+  const handler = app.handlers.get['/api/video-sync/:sessionId/manager-access']
+
+  const callWith = async (cookieEntry: Record<string, unknown>) => {
+    const res = createResponse()
+    await handler?.(
+      { params: { sessionId: 's1' }, cookies: { persistent_sessions: JSON.stringify([{ key: `video-sync:${hash}`, ...cookieEntry }]) } },
+      res,
+    )
+    return res
+  }
+
+  // A forged/malformed entry keyed to the hash but with an empty or missing
+  // teacher code must not spend the shared IP+hash bucket.
+  for (let attempt = 1; attempt <= 12; attempt += 1) {
+    const res = await callWith(attempt % 2 === 0 ? { teacherCode: '' } : {})
+    assert.notEqual(res.statusCode, 429, `probe ${attempt} is never rate-limited`)
+  }
+
+  // The real teacher's bucket is untouched: a full run of wrong-code attempts
+  // is still needed before the 429.
+  console.info('[TEST] Expected repeated invalid persistent teacher-code attempts against manager-access.')
+  for (let attempt = 1; attempt <= 5; attempt += 1) {
+    const res = await callWith({ teacherCode: 'wrong-teacher-code' })
+    assert.equal(res.statusCode, 403, `wrong-code attempt ${attempt} is a normal auth failure`)
+  }
+  const blocked = await callWith({ teacherCode: 'wrong-teacher-code' })
+  assert.equal(blocked.statusCode, 429)
 
   await cleanupPersistentSession(hash)
 })

@@ -506,6 +506,17 @@ function readEmbeddedParentSessionContext(data: unknown): EmbeddedParentSessionC
   }
 }
 
+/**
+ * Whether a `persistent_sessions` cookie entry actually carries a teacher-code
+ * *candidate* (a non-empty string), i.e. the request is attempting credentialed
+ * recovery. `persistent_sessions` is client-supplied, so a forged/malformed
+ * entry with no usable code must not be able to spend the shared IP+hash
+ * rate-limit bucket - matching the persistent-manager-capability route's guard.
+ */
+export function persistentCookieEntryHasTeacherCodeCandidate(entry: CookieSessionEntry | undefined): boolean {
+  return typeof entry?.teacherCode === 'string' && entry.teacherCode.length > 0
+}
+
 function readPersistentSourceUrlFromCookieEntry(
   persistentHash: string,
   entry: CookieSessionEntry | undefined,
@@ -1358,7 +1369,12 @@ export default function setupVideoSyncRoutes(
         matchingEntry = (persistentHash && recoveryActivityName)
           ? sessionEntries.find((entry) => entry.key === `${recoveryActivityName}:${persistentHash}`)
           : undefined
-        if (!alreadyAuthorized && persistentHash && recoveryActivityName && matchingEntry) {
+        if (
+          !alreadyAuthorized
+          && persistentHash
+          && recoveryActivityName
+          && persistentCookieEntryHasTeacherCodeCandidate(matchingEntry)
+        ) {
           // Bound teacher-code guessing on this pre-auth, pollable endpoint the
           // same way POST /api/session/:sessionId/teacher-authenticate does -
           // the global middleware only rate-limits Brython assets, so without
@@ -1366,7 +1382,9 @@ export default function setupVideoSyncRoutes(
           // replaying requests with different `persistent_sessions` cookies. A
           // legitimate manager verifies once, receives the manager capability,
           // and is `alreadyAuthorized` on every later poll, so real users do
-          // not accrue attempts.
+          // not accrue attempts. Only a request that actually carries a
+          // teacher-code candidate is charged, so a forged/empty entry cannot
+          // drain another client's shared bucket.
           const attempt = await recordTeacherCodeAttempt(`${resolveClientIp(req)}:${persistentHash}`)
           if (!attempt.allowed) {
             // Signal "wait and retry" - the attempt bucket clears after 60s. The
