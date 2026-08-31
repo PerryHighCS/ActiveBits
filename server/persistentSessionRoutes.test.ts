@@ -863,6 +863,49 @@ void test('persistent session update rejects solo-capable entry policies for non
   assert.deepEqual(res.jsonBody, { error: 'This activity does not support solo entry links' })
 })
 
+void test('persistent session update returns a controlled 500 when the reverse-index write fails for an active link', async (t) => {
+  const valkeyClient = createFakePersistentValkeyClient()
+  initializePersistentStorage(valkeyClient as never)
+  await initializeActivityRegistry()
+  t.after(() => { initializePersistentStorage(null) })
+
+  const sessionMap = new Map<string, unknown>()
+  const sessions = {
+    get: async (id: string) => sessionMap.get(id) ?? null,
+    set: async (id: string, session: unknown) => { sessionMap.set(id, session) },
+  }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+  const handler = getRoute(app, 'POST', '/api/persistent-session/update')
+
+  const activityName = 'java-format-practice'
+  const teacherCode = 'teacher-secret'
+  const { hash, hashedTeacherCode } = generatePersistentHash(activityName, teacherCode)
+  t.after(async () => cleanupPersistentSession(hash))
+  sessionMap.set('live-session', { id: 'live-session', type: activityName, data: { students: [] } })
+  await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode, 'solo-allowed')
+  await startPersistentSession(hash, 'live-session', { id: 'teacher-ws', readyState: 1, send() {} })
+
+  const originalSet = valkeyClient.set
+  valkeyClient.set = async (key: string, ...rest: Array<string | number>) => {
+    if (key.startsWith('persistent-session-by-session:')) {
+      throw new Error('[TEST] reverse-index write failed')
+    }
+    return originalSet(key, rest[0] as string)
+  }
+
+  const res = createMockRes()
+  console.info('[TEST] Expected reverse-index write failure while updating an already-started persistent link.')
+  await handler(createMockReq({
+    body: { activityName, hash, entryPolicy: 'instructor-required' },
+    cookies: { persistent_sessions: buildCookieValue(activityName, hash, teacherCode) },
+  }), res)
+
+  assert.equal(res.statusCode, 500)
+  assert.deepEqual(res.jsonBody, { error: 'Persistent link storage is temporarily unavailable' })
+  assert.equal(res.cookies.has('persistent_sessions'), false, 'no success cookie is written on a persist failure')
+})
+
 void test('persistent session entry route returns shared entry status for started live sessions', async (t) => {
   initializePersistentStorage(null)
   await initializeActivityRegistry()

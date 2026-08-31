@@ -264,6 +264,38 @@ function hasPersistentSessionTeacherCodeCandidate(
   )
 }
 
+/**
+ * Run a persistent-link store mutation (record upsert + URL-state persist),
+ * returning `false` (after sending a controlled 500) if the backend rejects.
+ *
+ * `updatePersistentSessionUrlState` -> `persistPersistentSession` calls the
+ * Valkey-backed `setHashBySessionId`, which now rejects rather than swallowing a
+ * reverse-index write outage (so a persisted record can't silently lack its
+ * recovery index). These link-management routes are not otherwise wrapped, so
+ * without this an index-write outage would escape to Express's default handler
+ * instead of the JSON error the client expects.
+ */
+async function persistPersistentLinkState(
+  res: ResponseLike,
+  hash: string,
+  route: string,
+  apply: () => Promise<void>,
+): Promise<boolean> {
+  try {
+    await apply()
+    return true
+  } catch (error) {
+    console.error(JSON.stringify({
+      event: 'persistent-link-state-persist-failed',
+      route,
+      hash,
+      error: error instanceof Error ? error.message : String(error),
+    }))
+    res.status(500).json({ error: 'Persistent link storage is temporarily unavailable' })
+    return false
+  }
+}
+
 function writePersistentSessionsCookie(res: ResponseLike, sessionEntries: CookieSessionEntry[]): void {
   const boundedEntries = boundPersistentSessionCookieEntries(sessionEntries)
   res.cookie('persistent_sessions', JSON.stringify(boundedEntries), {
@@ -474,11 +506,14 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
       entryPolicy,
       urlHash: query.get('urlHash') ?? undefined,
     })
-    await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode, entryPolicy)
-    await updatePersistentSessionUrlState(hash, {
-      entryPolicy,
-      selectedOptions,
+    const persisted = await persistPersistentLinkState(res, hash, '/api/persistent-session/create', async () => {
+      await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode, entryPolicy)
+      await updatePersistentSessionUrlState(hash, {
+        entryPolicy,
+        selectedOptions,
+      })
     })
+    if (!persisted) return
 
     writePersistentSessionsCookie(res, sessionEntries)
 
@@ -538,16 +573,19 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
       urlHash: query.get('urlHash') ?? undefined,
     })
 
-    await getOrCreateActivePersistentSession(
-      activityName,
-      hash,
-      null,
-      entryPolicy,
-    )
-    await updatePersistentSessionUrlState(hash, {
-      entryPolicy,
-      selectedOptions,
+    const persisted = await persistPersistentLinkState(res, hash, '/api/persistent-session/update', async () => {
+      await getOrCreateActivePersistentSession(
+        activityName,
+        hash,
+        null,
+        entryPolicy,
+      )
+      await updatePersistentSessionUrlState(hash, {
+        entryPolicy,
+        selectedOptions,
+      })
     })
+    if (!persisted) return
 
     writePersistentSessionsCookie(res, sessionEntries)
     res.json({
@@ -677,12 +715,15 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
       entryPolicy: finalEntryPolicy,
       urlHash: finalUrlHash,
     })
-    writePersistentSessionsCookie(res, sessionEntries)
-    await updatePersistentSessionUrlState(hash, {
-      entryPolicy: finalEntryPolicy,
-      selectedOptions: finalSelectedOptions,
+    const persisted = await persistPersistentLinkState(res, hash, '/api/persistent-session/authenticate', async () => {
+      await updatePersistentSessionUrlState(hash, {
+        entryPolicy: finalEntryPolicy,
+        selectedOptions: finalSelectedOptions,
+      })
     })
+    if (!persisted) return
 
+    writePersistentSessionsCookie(res, sessionEntries)
     res.json({
       success: true,
       isStarted: Boolean(persistentSession?.sessionId),
@@ -813,8 +854,14 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
       entryPolicy: finalEntryPolicy,
       urlHash: finalUrlHash,
     })
+    const urlStatePersisted = await persistPersistentLinkState(
+      res,
+      hash,
+      '/api/session/:sessionId/teacher-authenticate',
+      () => updatePersistentSessionUrlState(hash, finalUrlState),
+    )
+    if (!urlStatePersisted) return
     writePersistentSessionsCookie(res, sessionEntries)
-    await updatePersistentSessionUrlState(hash, finalUrlState)
 
     const activeSessionData = isPlainObject(activeSession) && isPlainObject(activeSession.data)
       ? activeSession.data
