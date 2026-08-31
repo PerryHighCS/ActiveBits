@@ -973,10 +973,11 @@ function createEnvelope<TPayload>(
 }
 
 async function getVideoSyncSession(
-  sessions: Pick<VideoSyncSessionStore, 'get'>,
+  sessions: Pick<VideoSyncSessionStore, 'get' | 'getStrict'>,
   sessionId: string,
+  options: { strict?: boolean } = {},
 ): Promise<VideoSyncSession | null> {
-  const result = await getVideoSyncSessionWithNormalization(sessions, sessionId)
+  const result = await getVideoSyncSessionWithNormalization(sessions, sessionId, options)
   return result.session
 }
 
@@ -1335,8 +1336,11 @@ export default function setupVideoSyncRoutes(
           // Re-read inside the per-session queue: the checks above ran several
           // awaits (persistent-store lookups, teacher-code verification) during
           // which a command or heartbeat could have persisted newer playback
-          // state onto the snapshot read at the top of this handler.
-          const freshSession = await getVideoSyncSession(sessions, sessionId)
+          // state onto the snapshot read at the top of this handler. Strict, so
+          // a session deleted or replaced on another instance in that window
+          // stays visible (rejects -> outer catch -> 500) instead of being
+          // recreated by the set() below from a stale cache hit.
+          const freshSession = await getVideoSyncSession(sessions, sessionId, { strict: true })
           if (!freshSession) {
             return 'session-missing'
           }

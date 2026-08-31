@@ -621,6 +621,12 @@ void test('JavaFormatPracticeManager gates difficulty/theme controls until the p
     })
     await act(async () => { testingLibrary.fireEvent.click(rendered.getByRole('button', { name: 'Beginner' })); await Promise.resolve() })
     assert.equal(difficultyCalls, 1, 'the difficulty request is sent once the capability is ready')
+
+    // Selection state is exposed to assistive tech, not just via CSS.
+    await testingLibrary.waitFor(() => {
+      assert.equal(rendered.getByRole('button', { name: 'Beginner' }).getAttribute('aria-pressed'), 'true')
+    })
+    assert.equal(rendered.getByRole('button', { name: 'Intermediate' }).getAttribute('aria-pressed'), 'false')
   } finally {
     await teardown?.()
     globalThis.fetch = previousFetch

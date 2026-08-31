@@ -539,6 +539,38 @@ export async function resetPersistentSession(hash: string): Promise<void> {
 }
 
 /**
+ * Roll back a persistent record's "started" state after a failed start (e.g.
+ * `startPersistentSession` persisted `sessionId` on the record but its reverse
+ * index write then rejected). Unlike {@link resetPersistentSession} this does
+ * not broadcast `session-ended` - the waiters should keep waiting for the
+ * teacher's retry - and it swallows its own write failures so it never masks
+ * the original error it is being called to clean up after.
+ */
+export async function rollbackPersistentSessionStart(hash: string): Promise<void> {
+  try {
+    const session = await persistentStore.get(hash)
+    if (session == null || session.sessionId == null) {
+      return
+    }
+    try {
+      await persistentStore.deleteHashBySessionId(session.sessionId)
+    } catch {
+      // Best-effort: the reverse index is validated on read, so a stale entry
+      // self-heals.
+    }
+    session.sessionId = null
+    session.teacherSocketId = null
+    await persistPersistentSession(hash, session)
+  } catch (error) {
+    console.error(JSON.stringify({
+      event: 'persistent-session.start-rollback-failed',
+      hash,
+      error: error instanceof Error ? error.message : String(error),
+    }))
+  }
+}
+
+/**
  * Index-only reverse lookup: resolve a session id to its persistent hash using
  * only the O(1) reverse index, never the O(n) `getAllHashes()` scan that
  * {@link findHashBySessionId} falls back to. This exists for request paths that

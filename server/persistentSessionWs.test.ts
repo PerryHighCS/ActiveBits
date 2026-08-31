@@ -8,6 +8,7 @@ import {
   getPersistentSession,
   getOrCreateActivePersistentSession,
   initializePersistentStorage,
+  isSessionStarted,
   updatePersistentSessionUrlState,
 } from './core/persistentSessions.js'
 import { initializeActivityRegistry } from './activities/activityRegistry.js'
@@ -430,6 +431,10 @@ void test('persistent session websocket rolls back and reports a retryable error
   const messageTypes = socket.sent.map((payload) => (JSON.parse(payload) as { type?: string }).type)
   assert.ok(messageTypes.includes('teacher-code-error'), 'the teacher receives a controlled error')
   assert.equal(messageTypes.includes('teacher-authenticated'), false, 'no success message is sent')
+  assert.equal(messageTypes.includes('session-started'), false, 'no waiter is told the session started')
   assert.equal(deleted.length, 1, 'the orphaned live session is rolled back')
   assert.equal(sessionStore.size, 0, 'no live session is left behind')
+  // The persistent record must not stay marked as started with the deleted id,
+  // or the next waiter gets `session-started` and cannot retry verification.
+  assert.equal(await isSessionStarted(hash), false, 'the persistent record start state is rolled back')
 })

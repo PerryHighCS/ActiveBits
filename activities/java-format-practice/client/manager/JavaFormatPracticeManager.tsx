@@ -479,6 +479,7 @@ export default function JavaFormatPracticeManager() {
                 }}
                 onClick={() => handleDifficultyChange(level.id)}
                 disabled={managerAuthLost || !managerAccessReady}
+                aria-pressed={selectedDifficulty === level.id}
               >
                 {level.label}
               </button>
@@ -501,6 +502,7 @@ export default function JavaFormatPracticeManager() {
                 }}
                 onClick={() => handleThemeChange(theme.id)}
                 disabled={managerAuthLost || !managerAccessReady}
+                aria-pressed={selectedTheme === theme.id}
               >
                 {theme.label}
               </button>

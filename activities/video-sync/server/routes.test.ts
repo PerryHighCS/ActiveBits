@@ -1738,6 +1738,51 @@ void test('manager-access route returns manager access for persistent teacher co
   await cleanupPersistentSession(hash)
 })
 
+void test('manager-access route does not resurrect a session deleted between the strict check and capability issuance', async () => {
+  initializePersistentStorage(null)
+
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  const storeState = createSessionStore({ s1: createVideoSyncSession('s1') })
+  let strictGetCalls = 0
+  let setCalls = 0
+  const sessions = {
+    ...storeState.sessions,
+    async getStrict(id: string) {
+      strictGetCalls += 1
+      // The initial authorization check sees the session; by the re-read inside
+      // withSessionMutation it has been deleted on another instance.
+      return strictGetCalls === 1 ? storeState.sessions.get(id) : null
+    },
+    async set(id: string, updatedSession: SessionRecord) {
+      setCalls += 1
+      return storeState.sessions.set(id, updatedSession)
+    },
+  }
+  const teacherCode = 'persistent-teacher-code'
+  const { hash, hashedTeacherCode } = generatePersistentHash('video-sync', teacherCode)
+  await getOrCreateActivePersistentSession('video-sync', hash, hashedTeacherCode)
+  await startPersistentSession(hash, 's1', { id: 'teacher-ws', readyState: 1, send() {} })
+
+  setupVideoSyncRoutes(app, sessions, ws)
+  const handler = app.handlers.get['/api/video-sync/:sessionId/manager-access']
+
+  const res = createResponse()
+  await handler?.(
+    {
+      params: { sessionId: 's1' },
+      cookies: { persistent_sessions: JSON.stringify([{ key: `video-sync:${hash}`, teacherCode }]) },
+    },
+    res,
+  )
+
+  assert.equal(res.statusCode, 404)
+  assert.deepEqual(res.body, { error: 'NOT_FOUND', message: 'Session not found' })
+  assert.equal(setCalls, 0, 'no set() recreated the deleted session')
+  assert.equal(res.cookies.length, 0, 'no capability cookie is issued for a vanished session')
+  await cleanupPersistentSession(hash)
+})
+
 void test('manager-access route returns canonical persistent sourceUrl for persistent teacher cookie', async () => {
   initializePersistentStorage(null)
 

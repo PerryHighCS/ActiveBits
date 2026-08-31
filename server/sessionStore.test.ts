@@ -19,6 +19,11 @@ function valkeyStoreForTest(records: Map<string, SessionRecord>, touches: string
       const session = records.get(id)
       return session ? structuredClone(session) : null
     },
+    async getStrict(id: string) {
+      gets.push(id)
+      const session = records.get(id)
+      return session ? structuredClone(session) : null
+    },
     async set(id: string, session: SessionRecord) {
       records.set(id, structuredClone(session))
     },
@@ -449,4 +454,21 @@ void test('a linked session survives past its own ttl as long as the session poi
   await wait(250)
   sessions.cleanup()
   assert.ok(!(await sessions.getAllIds()).includes(linkedSession.id))
+})
+
+void test('a strict miss drops the cached copy so a later get() cannot resurrect a remotely deleted session', async (t) => {
+  const records = new Map<string, SessionRecord>()
+  const sessions = createSessionStore('redis://test', 1_000, valkeyStoreForTest(records, []))
+  t.after(async () => { await sessions.close() })
+
+  const live = await createSession(sessions)
+  // Populate the read cache.
+  assert.ok(await sessions.get(live.id))
+
+  // Another instance deletes the record out from under this one.
+  records.delete(live.id)
+
+  // The strict read reports the miss and must also evict the stale cache entry.
+  assert.equal(await sessions.getStrict!(live.id), null)
+  assert.equal(await sessions.get(live.id), null, 'the deleted session is not resurrected from cache by a later get()')
 })

@@ -289,6 +289,11 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
       if (embeddedParentSessionId && embeddedParentSessionId !== id) {
         await touch(embeddedParentSessionId)
       }
+    } else {
+      // Strict miss: the record is genuinely gone (a backend failure would have
+      // rejected above). Drop any cached copy so a later ordinary get() cannot
+      // resurrect the deleted session from stale cache.
+      cache.invalidate(id)
     }
     return normalizedSession
   }

@@ -8,6 +8,7 @@ import {
   recordTeacherCodeAttempt,
   verifyTeacherCodeWithHash,
   startPersistentSession,
+  rollbackPersistentSessionStart,
   isSessionStarted,
   getSessionId,
 } from './persistentSessions.js'
@@ -310,6 +311,11 @@ async function handleTeacherCodeVerification(
         error: cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr),
       }))
     }
+    // startPersistentSession may have persisted `sessionId` on the persistent
+    // record before its reverse-index write failed. Clear that so the next
+    // waiter is not told `session-started` with this now-deleted id and can
+    // still retry teacher verification.
+    await rollbackPersistentSessionStart(hash)
     socket.send(
       JSON.stringify({
         type: 'teacher-code-error',
