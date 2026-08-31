@@ -787,3 +787,56 @@ void test('JavaFormatPracticeManager keeps controls gated when the persistent ca
     restoreDom()
   }
 })
+
+void test('JavaFormatPracticeManager latches the no-recovery banner directly on a definitive exchange 403 without opening the poll', { concurrency: false }, async () => {
+  console.info('[TEST] java-format manager: a 403 persistent-capability response is expected below; it must latch the banner directly without releasing the gate')
+  TestWebSocket.instances = []
+  const restoreDom = installDomEnvironment('https://bits.example/manage/java-format-practice/perma-no-cookie')
+  const previousFetch = globalThis.fetch
+
+  let studentsCalls = 0
+
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    if (url.includes('/persistent-manager-capability')) {
+      // The route checks alreadyAuthorized first, so a 403 here means there is
+      // no valid manager capability and no teacher cookie to recover one.
+      return new Response(JSON.stringify({ error: 'Persistent teacher authentication is required' }), { status: 403 })
+    }
+    if (url.includes('/students')) {
+      studentsCalls += 1
+      return new Response(JSON.stringify({ students: [] }), { status: 200 })
+    }
+    if (url.includes('/difficulty') && init?.method === 'POST') {
+      throw new Error('difficulty must not be requested without a manager capability')
+    }
+    throw new Error(`Unexpected fetch: ${url}`)
+  }) as typeof fetch
+
+  let teardown: (() => Promise<void>) | null = null
+  try {
+    const { testingLibrary, router, JavaFormatPracticeManager, act } = await loadHarness()
+    const rendered = testingLibrary.render(
+      <router.MemoryRouter initialEntries={['/manage/java-format-practice/perma-no-cookie']}>
+        <router.Routes>
+          <router.Route path="/manage/java-format-practice/:sessionId" element={<JavaFormatPracticeManager />} />
+        </router.Routes>
+      </router.MemoryRouter>,
+    )
+    teardown = async () => { await act(async () => { rendered.unmount(); testingLibrary.cleanup(); await Promise.resolve() }) }
+
+    // The banner latches from the exchange 403 itself - not from a follow-up
+    // protected request that had to fail first.
+    await testingLibrary.waitFor(() => rendered.getByText(/reloading won.t restore it/i))
+    assert.equal(rendered.queryByRole('button', { name: /reload/i }), null, 'no misleading Reload affordance on a definitive denial')
+    assert.ok(rendered.queryByRole('button', { name: 'Start new session' }))
+    assert.equal((rendered.getByRole('button', { name: 'Beginner' }) as HTMLButtonElement).disabled, true, 'controls stay gated')
+    // Give any (incorrectly released) poll a chance to fire before asserting it did not.
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve() })
+    assert.equal(studentsCalls, 0, 'the protected roster poll never opens on a definitive denial')
+  } finally {
+    await teardown?.()
+    globalThis.fetch = previousFetch
+    restoreDom()
+  }
+})

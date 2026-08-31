@@ -41,6 +41,14 @@ interface PersistentSessionStore {
   getHashBySessionIdStrict?(sessionId: string): Promise<string | null>
   setHashBySessionId(sessionId: string, hash: string): Promise<void>
   deleteHashBySessionId(sessionId: string): Promise<void>
+  // Atomically clear a persistent record's started state *only while it still
+  // points at `expectedSessionId`*, and drop that session id's reverse-index
+  // entry. Used to roll back a failed start without a read-modify-write TOCTOU:
+  // a concurrent start that linked a newer session between a caller's read and
+  // write is left intact. Returns true if this call cleared the record.
+  // Optional: the in-memory store implements it directly; a store lacking it
+  // falls back to the non-atomic path in `rollbackPersistentSessionStart`.
+  compareAndClearSessionId?(hash: string, expectedSessionId: string): Promise<boolean>
   incrementAttempts(key: string): Promise<number>
   getAttempts(key: string): Promise<number>
 }
@@ -119,6 +127,18 @@ function createInMemoryPersistentStore(): PersistentSessionStore {
     async deleteHashBySessionId(sessionId: string): Promise<void> {
       memoryStore.delete(getReverseIndexKey(sessionId))
     },
+    async compareAndClearSessionId(hash: string, expectedSessionId: string): Promise<boolean> {
+      // Single synchronous tick: no interleaving is possible in the in-memory
+      // store, so this is atomic by construction.
+      memoryStore.delete(getReverseIndexKey(expectedSessionId))
+      const record = memoryStore.get(hash) as PersistentSession | undefined
+      if (record == null || record.sessionId !== expectedSessionId) {
+        return false
+      }
+      record.sessionId = null
+      record.teacherSocketId = null
+      return true
+    },
     async incrementAttempts(key: string): Promise<number> {
       const bucket = `rl:${key}`
       const current = (memoryStore.get(bucket) as number) ?? 0
@@ -170,6 +190,9 @@ export function initializePersistentStorage(valkeyClient: ValkeyStoreClient | nu
       },
       async deleteHashBySessionId(sessionId: string): Promise<void> {
         await valkeyStore.deleteHashBySessionId(sessionId)
+      },
+      async compareAndClearSessionId(hash: string, expectedSessionId: string): Promise<boolean> {
+        return await valkeyStore.compareAndClearSessionId(hash, expectedSessionId)
       },
       async incrementAttempts(key: string): Promise<number> {
         return await valkeyStore.incrementAttempts(key)
@@ -562,13 +585,23 @@ export async function resetPersistentSession(hash: string): Promise<void> {
  * association. When it is supplied the record is only reset while it still
  * points at that id; a stale reverse-index entry for the failed attempt is
  * always cleaned up (it is keyed by session id, so this never touches a
- * concurrent success's entry).
+ * concurrent success's entry). When the store exposes `compareAndClearSessionId`
+ * the check-and-clear is a single atomic server-side op, so there is no
+ * read-modify-write TOCTOU window at all; otherwise it falls back to a
+ * best-effort re-read-before-write that only narrows the window.
  */
 export async function rollbackPersistentSessionStart(
   hash: string,
   expectedSessionId?: string | null,
 ): Promise<void> {
   try {
+    if (expectedSessionId != null && persistentStore.compareAndClearSessionId) {
+      // Atomic path: clears the record only while it still points at
+      // `expectedSessionId` and drops that id's reverse index, in one op.
+      await persistentStore.compareAndClearSessionId(hash, expectedSessionId)
+      return
+    }
+
     const session = await persistentStore.get(hash)
     if (session == null || (expectedSessionId != null && session.sessionId !== expectedSessionId)) {
       // Nothing of ours to reset: the record is gone, was already rolled back,

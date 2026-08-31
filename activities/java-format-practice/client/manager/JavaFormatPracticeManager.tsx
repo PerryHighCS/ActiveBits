@@ -232,9 +232,11 @@ export default function JavaFormatPracticeManager() {
       }
       if (cancelled) return
       // 2xx  -> capability cookie issued (or already present).
-      // 404  -> temporary session; POST /create already issued the capability.
-      // 403  -> no persistent teacher cookie; retrying will not help, so release
-      //         and let the first protected request surface the recovery banner.
+      // 403/404 -> definitive denial. The route checks `alreadyAuthorized`
+      //         first, so these mean the caller has no valid manager capability
+      //         and no recovery path here (no persistent record, or no teacher
+      //         cookie). Latch the no-recovery banner and keep the gate closed
+      //         rather than opening a poll/socket that can only fail.
       if (response.ok) {
         // The endpoint reports `persistentRecoveryAvailable` when this session
         // has a persistent record and a still-valid persistent teacher cookie -
@@ -266,12 +268,11 @@ export default function JavaFormatPracticeManager() {
         return
       }
       if (response.status === 404 || response.status === 403) {
-        // Recovery is unavailable for this session (temporary, or no persistent
-        // teacher cookie); clear stale recoverability from a prior exchange
-        // before releasing the gate.
+        // Clear any recoverability/"temporarily unavailable" state a prior
+        // exchange advertised so the banner resolves to `no-recovery`.
         setPersistentRecoverySessionId((current) => (current === sessionId ? null : current))
         setManagerAccessUnavailableSessionId((current) => (current === sessionId ? null : current))
-        setManagerAccessReadySessionId(sessionId)
+        markManagerAuthLost()
         return
       }
       // 5xx / unexpected: transient persistence failure - stay gated and retry.

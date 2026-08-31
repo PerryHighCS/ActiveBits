@@ -63,7 +63,7 @@ function createFakeValkeyClient(): {
   get: (key: string) => Promise<string | null>
   set: (key: string, value: string) => Promise<string>
   del: (key: string) => Promise<number>
-  eval: () => Promise<number>
+  eval: (script?: string, numKeys?: number, ...args: Array<string | number>) => Promise<number>
   scan: (cursor: string, ...args: Array<string | number>) => Promise<[string, string[]]>
   quit: () => Promise<string>
 } {
@@ -76,7 +76,24 @@ function createFakeValkeyClient(): {
     get: async (key: string) => store.get(key) ?? null,
     set: async (key: string, value: string) => { store.set(key, value); return 'OK' },
     del: async (key: string) => (store.delete(key) ? 1 : 0),
-    eval: async () => 1,
+    eval: async (script?: string, _numKeys?: number, ...args: Array<string | number>) => {
+      // Interpret the persistent-session compare-and-clear script against the
+      // in-memory store so rollback-scoping tests exercise the real semantics.
+      if (typeof script === 'string' && script.includes('persistent-session-compare-and-clear')) {
+        const [recordKey, indexKey, expectedSessionId, ttl] = args as [string, string, string, string | number]
+        void ttl
+        store.delete(indexKey)
+        const raw = store.get(recordKey)
+        if (raw == null) return 0
+        const record = JSON.parse(raw) as { sessionId?: string | null; teacherSocketId?: string | null }
+        if (record.sessionId !== expectedSessionId) return 0
+        record.sessionId = null
+        record.teacherSocketId = null
+        store.set(recordKey, JSON.stringify(record))
+        return 1
+      }
+      return 1
+    },
     scan: async (_cursor: string, ...args: Array<string | number>) => {
       const matchIndex = args.findIndex((arg) => arg === 'MATCH')
       const pattern = matchIndex >= 0 ? String(args[matchIndex + 1] ?? '*') : '*'
@@ -491,43 +508,64 @@ void test('rollbackPersistentSessionStart scopes to the failed attempt and leave
   assert.equal(await isSessionStarted(hash), false, 'an unscoped rollback clears the record')
 })
 
-void test('rollbackPersistentSessionStart re-reads before writing so a mid-rollback re-link survives', async (t) => {
+void test('rollbackPersistentSessionStart clears through a single atomic compare-and-clear (no read-modify-write)', async (t) => {
   const valkeyClient = createFakeValkeyClient()
   initializePersistentStorage(valkeyClient as never)
   t.after(() => { initializePersistentStorage(null) })
 
   const activityName = 'algorithm-demo'
-  const teacherCode = 'rollback-interleave-code'
+  const teacherCode = 'rollback-atomic-code'
   const { hash, hashedTeacherCode } = generatePersistentHash(activityName, teacherCode)
   t.after(async () => cleanupPersistentSession(hash))
   await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode)
-
-  // The failed attempt A has linked "sess-A" on the record.
   await startPersistentSession(hash, 'sess-A', { id: 'teacher-A', readyState: 1, send() {} } as never)
 
-  // Simulate attempt B committing "sess-B" in the window between the rollback's
-  // initial read and its pre-write re-read: right after the first record GET
-  // returns, advance the stored record to sess-B.
-  const recordKey = `persistent:${hash}`
-  const originalGet = valkeyClient.get
-  let recordGets = 0
-  valkeyClient.get = async (key: string) => {
-    const result = await originalGet(key)
-    if (key === recordKey && result) {
-      recordGets += 1
-      if (recordGets === 1) {
-        const parsed = JSON.parse(result) as { sessionId?: string | null }
-        parsed.sessionId = 'sess-B'
-        valkeyClient.store.set(recordKey, JSON.stringify(parsed))
-      }
-    }
-    return result
+  // The scoped rollback must go through `compareAndClearSessionId` and must not
+  // do its own GET-then-SET on the record (that is the TOCTOU the atomic op
+  // exists to remove).
+  const evalCalls: Array<string> = []
+  const recordSets: Array<string> = []
+  const originalEval = valkeyClient.eval
+  const originalSet = valkeyClient.set
+  valkeyClient.eval = async (script?: string, numKeys?: number, ...args: Array<string | number>) => {
+    if (typeof script === 'string') evalCalls.push(script)
+    return originalEval(script, numKeys, ...args)
+  }
+  valkeyClient.set = async (key: string, value: string) => {
+    if (key === `persistent:${hash}`) recordSets.push(value)
+    return originalSet(key, value)
   }
 
-  console.info('[TEST] Expected concurrent re-link during rollback; the newer session must survive.')
   await rollbackPersistentSessionStart(hash, 'sess-A')
 
-  valkeyClient.get = originalGet
-  const record = await getPersistentSession(hash)
-  assert.equal(record?.sessionId, 'sess-B', 'the concurrently linked session is not cleared by the stale rollback')
+  assert.equal(evalCalls.some((s) => s.includes('persistent-session-compare-and-clear')), true, 'used the atomic compare-and-clear script')
+  assert.equal(recordSets.length, 0, 'no read-modify-write SET on the persistent record')
+  assert.equal(await isSessionStarted(hash), false, 'the record start state is cleared')
+  assert.equal(valkeyClient.store.get('persistent-session-by-session:sess-A') ?? null, null, 'the reverse index is dropped')
+})
+
+void test('compareAndClearSessionId only clears while the record still points at the expected session id', async (t) => {
+  const valkeyClient = createFakeValkeyClient()
+  initializePersistentStorage(valkeyClient as never)
+  t.after(() => { initializePersistentStorage(null) })
+
+  const activityName = 'algorithm-demo'
+  const teacherCode = 'rollback-cas-code'
+  const { hash, hashedTeacherCode } = generatePersistentHash(activityName, teacherCode)
+  t.after(async () => cleanupPersistentSession(hash))
+  await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode)
+  // A concurrent attempt has already linked sess-B.
+  await startPersistentSession(hash, 'sess-B', { id: 'teacher-B', readyState: 1, send() {} } as never)
+
+  // The failed attempt A's rollback (scoped to sess-A) must not touch sess-B.
+  await rollbackPersistentSessionStart(hash, 'sess-A')
+  let record = await getPersistentSession(hash)
+  assert.equal(record?.sessionId, 'sess-B', 'a mismatched compare-and-clear leaves the newer session linked')
+  assert.equal(valkeyClient.store.get('persistent-session-by-session:sess-B'), hash, 'sess-B reverse index untouched')
+  assert.equal(valkeyClient.store.get('persistent-session-by-session:sess-A') ?? null, null, 'sess-A reverse index still cleaned up')
+
+  // Scoped to the id the record actually holds -> it clears.
+  await rollbackPersistentSessionStart(hash, 'sess-B')
+  record = await getPersistentSession(hash)
+  assert.equal(record?.sessionId ?? null, null, 'a matching compare-and-clear resets the record')
 })
