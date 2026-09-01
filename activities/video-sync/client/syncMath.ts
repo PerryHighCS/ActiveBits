@@ -53,10 +53,12 @@ type IncomingStateGuardFields = Pick<
  * - Always apply while still unconfigured (`currentState.videoId === ''`): the
  *   client boots from an empty default, so the first real snapshot and the
  *   empty -> configured transition must always land.
- * - Always apply a (re)configure to a different `videoId`, regardless of
- *   timestamp ordering - it is authoritative by definition.
- * - Reject a frame whose `serverTimestampMs` is strictly older than what is
- *   applied: a late / duplicate / reordered frame that would revert newer state.
+ * - Otherwise reject a frame whose `serverTimestampMs` is strictly older than
+ *   what is applied: a late / duplicate / reordered frame that would revert
+ *   newer state. A different `videoId` is not a bypass - the server blocks
+ *   re-configuration once a video is set, so a configured -> different-id frame
+ *   with an older timestamp is a stale frame for the previous video, and a
+ *   genuine reconfigure always carries a newer timestamp anyway.
  * - On an identical `serverTimestampMs`, reject a non-instructor frame when the
  *   applied state is instructor-authored, so a heartbeat cannot override a
  *   command committed in the same millisecond.
@@ -66,10 +68,6 @@ export function shouldApplyIncomingVideoSyncState(
   nextState: IncomingStateGuardFields,
 ): boolean {
   if (currentState.videoId.length === 0) {
-    return true
-  }
-
-  if (nextState.videoId.length > 0 && nextState.videoId !== currentState.videoId) {
     return true
   }
 

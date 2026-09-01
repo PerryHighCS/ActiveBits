@@ -406,6 +406,20 @@ export function isManagerPlaybackGestureRecent(params: {
   return params.msSinceLastUserActivation <= (params.graceMs ?? MANAGER_USER_GESTURE_GRACE_MS)
 }
 
+/**
+ * Bounded retry decision for a playback command that failed to send (a transient
+ * 401/403 while the manager capability is mid-refresh). Retries up to
+ * `MAX_MANAGER_PLAYBACK_FLUSH_RETRIES`, then gives up and resets the counter.
+ */
+export function nextManagerPlaybackFlushRetry(
+  currentRetryCount: number,
+): { retry: boolean; nextRetryCount: number } {
+  if (currentRetryCount < MAX_MANAGER_PLAYBACK_FLUSH_RETRIES) {
+    return { retry: true, nextRetryCount: currentRetryCount + 1 }
+  }
+  return { retry: false, nextRetryCount: 0 }
+}
+
 function readManagerUserActivation(): { supported: boolean; isActive: boolean } {
   if (typeof navigator === 'undefined') {
     return { supported: false, isActive: false }
@@ -709,14 +723,14 @@ export default function VideoSyncManager() {
       // 401/403 has already triggered `revalidateManagerAccess()`, so a short
       // delayed retry lets the restored capability carry the gesture through
       // instead of silently dropping it.
-      if (playbackFlushRetryCountRef.current < MAX_MANAGER_PLAYBACK_FLUSH_RETRIES) {
-        playbackFlushRetryCountRef.current += 1
+      const { retry, nextRetryCount } = nextManagerPlaybackFlushRetry(playbackFlushRetryCountRef.current)
+      playbackFlushRetryCountRef.current = nextRetryCount
+      if (retry) {
         clearPlaybackCommandFlushTimer()
         playbackCommandFlushTimerRef.current = window.setTimeout(() => {
           void flushManagerPlaybackIntent()
         }, MANAGER_PLAYBACK_COMMAND_RETRY_DELAY_MS)
       } else {
-        playbackFlushRetryCountRef.current = 0
         desiredPlaybackIntentRef.current = null
         desiredPlaybackPositionRef.current = null
       }
@@ -1126,6 +1140,13 @@ export default function VideoSyncManager() {
                 playingStateValue: states.PLAYING,
                 pausedStateValue: states.PAUSED,
               })
+
+              // Playback actually started (possibly after a slow buffer that
+              // tripped the autoplay-blocked check) - retire the affordance.
+              if (nextIntent === 'play') {
+                clearManagerAutoplayCheckTimer()
+                setAutoplayBlocked(false)
+              }
 
               const { record } = resolveManagerStateChangeIntent({
                 suppressed: suppressPlayerEventsRef.current,

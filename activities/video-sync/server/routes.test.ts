@@ -3137,7 +3137,11 @@ void test('heartbeat persisting a telemetry-only change does not overwrite store
   }
 })
 
-void test('heartbeat stop-reached persist re-reads and does not roll back a newer state from another instance', { concurrency: false }, async () => {
+for (const scenario of [
+  { label: 'a newer', replayServerTimestampMs: 21_000, expectedBroadcastPositionSec: 1 },
+  { label: 'a same-timestamp', replayServerTimestampMs: 20_000, expectedBroadcastPositionSec: 2 },
+] as const) {
+void test(`heartbeat stop-reached persist re-reads and does not roll back ${scenario.label} state from another instance`, { concurrency: false }, async () => {
   const originalSetInterval = globalThis.setInterval
   const originalClearInterval = globalThis.clearInterval
   const originalDateNow = Date.now
@@ -3180,7 +3184,7 @@ void test('heartbeat stop-reached persist re-reads and does not roll back a newe
       ...nearStop,
       positionSec: 0,
       isPlaying: true,
-      serverTimestampMs: 21_000,
+      serverTimestampMs: scenario.replayServerTimestampMs,
     }
     // Another instance also incremented an accumulating telemetry counter in the
     // same window; the heartbeat persist must not roll it back.
@@ -3233,20 +3237,22 @@ void test('heartbeat stop-reached persist re-reads and does not roll back a newe
     runHeartbeat()
     await new Promise((resolve) => setTimeout(resolve, 0))
 
-    // The stop-reached projection is still broadcast for clients (their own
-    // monotonic guard sorts out ordering)...
+    // Having seen the concurrent re-play on the strict re-read, the heartbeat
+    // broadcasts that state projected forward - not its own stale stop frame,
+    // which (re-stamped to now) would have paused clients despite the re-play.
     const heartbeatEnvelope = published.at(-1)?.message as {
       type?: string
-      payload?: { state?: { isPlaying?: boolean; serverTimestampMs?: number } }
+      payload?: { state?: { isPlaying?: boolean; serverTimestampMs?: number; positionSec?: number } }
     }
     assert.equal(heartbeatEnvelope.type, 'heartbeat')
-    assert.equal(heartbeatEnvelope.payload?.state?.isPlaying, false)
+    assert.equal(heartbeatEnvelope.payload?.state?.isPlaying, true)
     assert.equal(heartbeatEnvelope.payload?.state?.serverTimestampMs, 22_000)
-    // ...but it is never persisted over the newer re-play.
+    assert.equal(heartbeatEnvelope.payload?.state?.positionSec, scenario.expectedBroadcastPositionSec)
+    // ...and it is never persisted over the re-play.
     assert.ok(strictReads >= 2, 'expected a strict re-read before the persist')
     const lastSetState = setStates.at(-1)
     assert.equal(lastSetState?.isPlaying, true)
-    assert.equal(lastSetState?.serverTimestampMs, 21_000)
+    assert.equal(lastSetState?.serverTimestampMs, scenario.replayServerTimestampMs)
     // The heartbeat only writes its own two counters; the concurrent
     // autoplay.blockedCount increment survives.
     assert.equal(lastSetState?.blockedCount, 4)
@@ -3259,6 +3265,7 @@ void test('heartbeat stop-reached persist re-reads and does not roll back a newe
     Date.now = originalDateNow
   }
 })
+}
 
 void test('event route tracks current unsynced student count', async () => {
   const app = createMockApp()

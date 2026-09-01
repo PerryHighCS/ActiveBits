@@ -15,6 +15,7 @@ import {
     readEmbeddedBootstrapSourceUrl,
     consumeProgrammaticPlaybackTarget,
     isManagerPlaybackGestureRecent,
+    nextManagerPlaybackFlushRetry,
     readRecoveredPersistentSourceUrl,
     resolveManagerStateChangeIntent,
     sanitizeManagerApiErrorMessage,
@@ -443,6 +444,12 @@ void test('consumeProgrammaticPlaybackTarget keeps the target until a play-state
   assert.equal(consumeProgrammaticPlaybackTarget({ nextIntent: null, programmaticTarget: 'play' }), 'play')
   assert.equal(consumeProgrammaticPlaybackTarget({ nextIntent: 'play', programmaticTarget: 'play' }), null)
   assert.equal(consumeProgrammaticPlaybackTarget({ nextIntent: 'pause', programmaticTarget: 'play' }), null)
+})
+
+void test('nextManagerPlaybackFlushRetry retries a failed send to a bound then gives up', () => {
+  assert.deepEqual(nextManagerPlaybackFlushRetry(0), { retry: true, nextRetryCount: 1 })
+  assert.deepEqual(nextManagerPlaybackFlushRetry(2), { retry: true, nextRetryCount: 3 })
+  assert.deepEqual(nextManagerPlaybackFlushRetry(3), { retry: false, nextRetryCount: 0 })
 })
 
 void test('isManagerPlaybackGestureRecent only mirrors transitions close to genuine user activation', () => {

@@ -83,8 +83,14 @@ void test('shouldApplyIncomingVideoSyncState always applies frames while still u
   assert.equal(shouldApplyIncomingVideoSyncState(current, olderConfigured), true)
 })
 
-void test('shouldApplyIncomingVideoSyncState applies a re-configure to a new video id regardless of timestamp', () => {
+void test('shouldApplyIncomingVideoSyncState rejects a stale frame for a different (previous) video id', () => {
+  // A different videoId is not a freshness bypass: the server blocks
+  // re-configuration, so an older-timestamp frame for another id is stale.
   const current = createState({ videoId: 'abc123', serverTimestampMs: 9_000 })
-  const reconfigured = createState({ videoId: 'zzz999', serverTimestampMs: 1_000 })
+  const stalePrevVideo = createState({ videoId: 'zzz999', serverTimestampMs: 1_000 })
+  assert.equal(shouldApplyIncomingVideoSyncState(current, stalePrevVideo), false)
+
+  // A genuine reconfigure still lands because it carries a newer timestamp.
+  const reconfigured = createState({ videoId: 'zzz999', serverTimestampMs: 9_001 })
   assert.equal(shouldApplyIncomingVideoSyncState(current, reconfigured), true)
 })

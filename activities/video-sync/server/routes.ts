@@ -1233,18 +1233,23 @@ function ensureHeartbeat(
           sessionId,
         )
 
+        // What this tick broadcasts. Starts as the projection of our strict
+        // snapshot; if the re-read below shows another instance committed newer
+        // state, we broadcast the projection of *that* instead so a stale
+        // stop-transition frame (re-stamped to now, which clients would accept
+        // as newer) cannot pause a concurrent re-play.
+        let broadcastState = heartbeatState
+
         const persistHeartbeatTelemetry = shouldPersistHeartbeatTelemetry(data.telemetry, heartbeatTelemetry)
         const persistHeartbeatStopTransition = shouldPersistHeartbeatState(data.state, heartbeatState)
         if (persistHeartbeatTelemetry || persistHeartbeatStopTransition) {
           // Re-read strictly before writing: another instance may have advanced
           // the session (a pause / re-play) between the strict read above and
           // this write, and the process-local mutation queue does not serialize
-          // across instances. Merge onto the latest record so a heartbeat never
-          // rolls back newer playback state - it only ever overwrites `state` on
-          // a genuine stop-reached transition, and only when nothing newer than
-          // our snapshot is stored. `applyStopIfReached` re-stamps
-          // `serverTimestampMs` to now, so it cannot be used for that compare;
-          // the pre-projection `data.state.serverTimestampMs` is the baseline.
+          // across instances. This narrows - it does not close - that window; a
+          // storage-level revision / compare-and-set primitive is the deferred
+          // full fix, and the client `shouldApplyIncomingVideoSyncState` guard is
+          // the accepted backstop for the residual read-to-publish race.
           const latest = await getVideoSyncSession(sessions, sessionId, { strict: true })
           if (latest) {
             // Write only the two counters the heartbeat owns. Assigning the
@@ -1254,18 +1259,21 @@ function ensureHeartbeat(
             // the two reads.
             latest.data.telemetry.connections.activeCount = heartbeatTelemetry.connections.activeCount
             latest.data.telemetry.sync.unsyncedStudents = heartbeatTelemetry.sync.unsyncedStudents
-            if (
-              persistHeartbeatStopTransition &&
-              latest.data.state.serverTimestampMs <= data.state.serverTimestampMs
-            ) {
+
+            const stateUnchangedSinceSnapshot = isDeepStrictEqual(latest.data.state, data.state)
+            if (persistHeartbeatStopTransition && stateUnchangedSinceSnapshot) {
               latest.data.state = heartbeatState
+            } else if (!stateUnchangedSinceSnapshot) {
+              // Someone committed a pause / re-play; broadcast their state, not
+              // our stale projection.
+              broadcastState = applyStopIfReached(latest.data.state)
             }
             await sessions.set(latest.id, latest)
           }
         }
 
         const envelope = createEnvelope(sessionId, 'heartbeat', {
-          state: heartbeatState,
+          state: broadcastState,
           telemetry: heartbeatTelemetry,
         })
         await broadcastEnvelope(sessions, ws, sessionId, envelope)
