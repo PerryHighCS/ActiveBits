@@ -23,6 +23,7 @@ import {
 import {
   computeDesiredPositionSec,
   DEFAULT_DRIFT_TOLERANCE_SEC,
+  shouldApplyIncomingVideoSyncState,
   shouldCorrectDrift,
 } from '../syncMath.js'
 import {
@@ -72,6 +73,12 @@ const MISSING_MANAGER_ACCESS_ERROR = 'Manager access is unavailable. Open this s
 const YOUTUBE_HOST_FALLBACK_TIMEOUT_MS = 1_500
 const MANAGER_PLAYING_DRIFT_TOLERANCE_SEC = 2
 const MANAGER_PLAYBACK_COMMAND_FLUSH_DELAY_MS = 120
+// A command rejected for a transient reason (a 401/403 while the manager
+// capability cookie is mid-refresh) keeps its intent and re-flushes a bounded
+// number of times so `revalidateManagerAccess()` can restore authority before
+// the gesture is dropped.
+const MANAGER_PLAYBACK_COMMAND_RETRY_DELAY_MS = 600
+const MAX_MANAGER_PLAYBACK_FLUSH_RETRIES = 3
 const MAX_MANAGER_API_ERROR_MESSAGE_LENGTH = 160
 
 const EMPTY_TELEMETRY: VideoSyncTelemetry = {
@@ -319,6 +326,38 @@ export function getManagerPlaybackIntentForStateChange(params: {
   return null
 }
 
+/**
+ * Whether a native `onStateChange` event should be recorded as a fresh
+ * instructor playback intent.
+ *
+ * `applyStateToPlayer` programmatically calls `playVideo()` / `pauseVideo()`,
+ * which each fire `onStateChange`; a blunt time-based mute (`suppressed`) is
+ * armed around those calls so the echo is not sent straight back to the server
+ * as a redundant command. The old guard dropped *every* event while muted,
+ * which also discarded a genuine instructor click made inside the window.
+ *
+ * Instead, only drop the event that matches the transition `applyStateToPlayer`
+ * just requested (`programmaticTarget`). An opposite-direction gesture - the
+ * instructor hitting pause right after a programmatic play - is still recorded
+ * and flushed. `flushManagerPlaybackIntent` independently no-ops a flush whose
+ * intent already matches authoritative state, so a recorded echo costs nothing.
+ */
+export function resolveManagerStateChangeIntent(params: {
+  suppressed: boolean
+  nextIntent: 'play' | 'pause' | null
+  programmaticTarget: 'play' | 'pause' | null
+}): { record: boolean } {
+  if (params.nextIntent == null) {
+    return { record: false }
+  }
+
+  if (params.suppressed && params.nextIntent === params.programmaticTarget) {
+    return { record: false }
+  }
+
+  return { record: true }
+}
+
 export function shouldSendManagerPlaybackPositionUpdate(params: {
   authoritativeState: VideoSyncState
   desiredPositionSec: number | null
@@ -395,6 +434,11 @@ export default function VideoSyncManager() {
   const latestStateRef = useRef<VideoSyncState>(DEFAULT_STATE)
   const desiredPlaybackIntentRef = useRef<'play' | 'pause' | null>(null)
   const desiredPlaybackPositionRef = useRef<number | null>(null)
+  // The play/pause transition `applyStateToPlayer` last requested. Used to tell a
+  // programmatic `onStateChange` echo apart from a real instructor gesture made
+  // inside the suppression window.
+  const programmaticPlaybackTargetRef = useRef<'play' | 'pause' | null>(null)
+  const playbackFlushRetryCountRef = useRef(0)
   const playbackCommandInFlightRef = useRef(false)
   const playbackCommandFlushTimerRef = useRef<number | null>(null)
   const suppressPlayerEventsRef = useRef(false)
@@ -460,15 +504,17 @@ export default function VideoSyncManager() {
   }, [state])
 
   const applyManagerStateUpdate = useCallback((nextState: VideoSyncState): void => {
-    latestStateRef.current = nextState
-    setState((currentState) => {
-      if (!shouldApplyManagerStateUpdate(currentState, nextState)) {
-        return currentState
-      }
+    const currentState = latestStateRef.current
+    if (
+      !shouldApplyManagerStateUpdate(currentState, nextState) ||
+      !shouldApplyIncomingVideoSyncState(currentState, nextState)
+    ) {
+      return
+    }
 
-      setSetupMode(nextState.videoId.length === 0)
-      return nextState
-    })
+    latestStateRef.current = nextState
+    setSetupMode(nextState.videoId.length === 0)
+    setState(nextState)
   }, [])
 
   const setSuppressPlayerEventsForWindow = useCallback((ms = 450): void => {
@@ -533,8 +579,7 @@ export default function VideoSyncManager() {
 
       const updated = (await response.json()) as CommandResponse
       if (updated.data?.state) {
-        latestStateRef.current = updated.data.state
-        setState(updated.data.state)
+        applyManagerStateUpdate(updated.data.state)
       }
       if (updated.data?.telemetry) {
         setTelemetry(updated.data.telemetry)
@@ -550,7 +595,7 @@ export default function VideoSyncManager() {
       }
       return false
     }
-  }, [hasManagerAccess, revalidateManagerAccess, sessionId])
+  }, [applyManagerStateUpdate, hasManagerAccess, revalidateManagerAccess, sessionId])
 
   const flushManagerPlaybackIntent = useCallback(async (): Promise<void> => {
     clearPlaybackCommandFlushTimer()
@@ -574,6 +619,7 @@ export default function VideoSyncManager() {
     if ((desiredIntent === 'play') === authoritativeIsPlaying && !shouldSendPositionUpdate) {
       desiredPlaybackIntentRef.current = null
       desiredPlaybackPositionRef.current = null
+      playbackFlushRetryCountRef.current = 0
       return
     }
 
@@ -585,11 +631,25 @@ export default function VideoSyncManager() {
     playbackCommandInFlightRef.current = false
 
     if (!didSend) {
-      desiredPlaybackIntentRef.current = null
-      desiredPlaybackPositionRef.current = null
+      // Keep the intent and re-flush a bounded number of times: a transient
+      // 401/403 has already triggered `revalidateManagerAccess()`, so a short
+      // delayed retry lets the restored capability carry the gesture through
+      // instead of silently dropping it.
+      if (playbackFlushRetryCountRef.current < MAX_MANAGER_PLAYBACK_FLUSH_RETRIES) {
+        playbackFlushRetryCountRef.current += 1
+        clearPlaybackCommandFlushTimer()
+        playbackCommandFlushTimerRef.current = window.setTimeout(() => {
+          void flushManagerPlaybackIntent()
+        }, MANAGER_PLAYBACK_COMMAND_RETRY_DELAY_MS)
+      } else {
+        playbackFlushRetryCountRef.current = 0
+        desiredPlaybackIntentRef.current = null
+        desiredPlaybackPositionRef.current = null
+      }
       return
     }
 
+    playbackFlushRetryCountRef.current = 0
     setSuppressPlayerEventsForWindow(900)
 
     const nextDesiredIntent = desiredPlaybackIntentRef.current
@@ -639,6 +699,11 @@ export default function VideoSyncManager() {
 
     const { PLAYING } = resolveYoutubePlayerState(youtubeRef.current)
     const playerState = player.getPlayerState()
+
+    // Record the transition being requested so `onStateChange` can drop only its
+    // own programmatic echo while still capturing an opposing instructor gesture
+    // that lands inside the suppression window.
+    programmaticPlaybackTargetRef.current = nextState.isPlaying ? 'play' : 'pause'
 
     if (nextState.isPlaying) {
       if (playerState !== PLAYING) {
@@ -840,6 +905,8 @@ export default function VideoSyncManager() {
       loadedVideoIdRef.current = null
       desiredPlaybackIntentRef.current = null
       desiredPlaybackPositionRef.current = null
+      programmaticPlaybackTargetRef.current = null
+      playbackFlushRetryCountRef.current = 0
       playbackCommandInFlightRef.current = false
       clearPlaybackCommandFlushTimer()
       playerRef.current?.destroy()
@@ -869,6 +936,8 @@ export default function VideoSyncManager() {
       loadedVideoIdRef.current = null
       desiredPlaybackIntentRef.current = null
       desiredPlaybackPositionRef.current = null
+      programmaticPlaybackTargetRef.current = null
+      playbackFlushRetryCountRef.current = 0
       playbackCommandInFlightRef.current = false
       clearPlaybackCommandFlushTimer()
       clearPlayerEventSuppression()
@@ -942,17 +1011,11 @@ export default function VideoSyncManager() {
               }
 
               clearPlayerReadyTimeout()
-
-              if (suppressPlayerEventsRef.current) {
-                return
-              }
-
+              // The player emitted a state event, so it did load - clear any
+              // stale load-error banner even for our own muted echo.
               setErrorMessage((current) => clearManagerPlayerLoadError(current))
 
-              const target = event.target
-              const playerPosition = clampNumber(target.getCurrentTime())
               const states = resolveYoutubePlayerState(youtubeRef.current)
-
               const nextIntent = getManagerPlaybackIntentForStateChange({
                 eventState: event.data,
                 endedStateValue: states.ENDED,
@@ -960,10 +1023,21 @@ export default function VideoSyncManager() {
                 pausedStateValue: states.PAUSED,
               })
 
-              if (nextIntent == null) {
+              const { record } = resolveManagerStateChangeIntent({
+                suppressed: suppressPlayerEventsRef.current,
+                nextIntent,
+                programmaticTarget: programmaticPlaybackTargetRef.current,
+              })
+              if (!record) {
                 return
               }
 
+              const target = event.target
+              const playerPosition = clampNumber(target.getCurrentTime())
+
+              // A fresh instructor gesture: restart the bounded transient-failure
+              // retry budget for the flush that follows.
+              playbackFlushRetryCountRef.current = 0
               desiredPlaybackIntentRef.current = nextIntent
               desiredPlaybackPositionRef.current = playerPosition
               scheduleManagerPlaybackIntentFlush()
@@ -1002,6 +1076,8 @@ export default function VideoSyncManager() {
       loadedVideoIdRef.current = null
       desiredPlaybackIntentRef.current = null
       desiredPlaybackPositionRef.current = null
+      programmaticPlaybackTargetRef.current = null
+      playbackFlushRetryCountRef.current = 0
       playbackCommandInFlightRef.current = false
       clearPlaybackCommandFlushTimer()
       playerRef.current?.destroy()

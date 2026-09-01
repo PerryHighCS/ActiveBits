@@ -14,6 +14,7 @@ import {
     readBootstrapSourceUrl,
     readEmbeddedBootstrapSourceUrl,
     readRecoveredPersistentSourceUrl,
+    resolveManagerStateChangeIntent,
     sanitizeManagerApiErrorMessage,
     shouldApplyManagerStateUpdate,
     shouldAutoStartBootstrapSource,
@@ -406,6 +407,33 @@ void test('shouldApplyManagerStateUpdate ignores empty late updates after a vide
       },
     ),
     true,
+  )
+})
+
+void test('resolveManagerStateChangeIntent records a real gesture but drops its own programmatic echo', () => {
+  // Not suppressed: any resolved intent is a genuine instructor gesture.
+  assert.deepEqual(
+    resolveManagerStateChangeIntent({ suppressed: false, nextIntent: 'play', programmaticTarget: 'pause' }),
+    { record: true },
+  )
+
+  // Suppressed echo of the transition applyStateToPlayer just requested: drop it.
+  assert.deepEqual(
+    resolveManagerStateChangeIntent({ suppressed: true, nextIntent: 'play', programmaticTarget: 'play' }),
+    { record: false },
+  )
+
+  // Suppressed but opposite to the programmatic target: a real click made inside
+  // the window - this is the dropped-click defect. It must still be recorded.
+  assert.deepEqual(
+    resolveManagerStateChangeIntent({ suppressed: true, nextIntent: 'pause', programmaticTarget: 'play' }),
+    { record: true },
+  )
+
+  // Buffering / cued / unstarted transitions carry no intent.
+  assert.deepEqual(
+    resolveManagerStateChangeIntent({ suppressed: false, nextIntent: null, programmaticTarget: 'play' }),
+    { record: false },
   )
 })
 

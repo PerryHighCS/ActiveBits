@@ -36,3 +36,54 @@ export function shouldCorrectDrift(
 ): boolean {
   return computeDriftSec(playerPositionSec, desiredPositionSec) > toleranceSec
 }
+
+type IncomingStateGuardFields = Pick<
+  VideoSyncState,
+  'videoId' | 'updatedBy' | 'serverTimestampMs'
+>
+
+/**
+ * Whether an incoming `state-update` / `state-snapshot` / `heartbeat` frame is
+ * fresh enough to apply, given the state already applied locally. This is the
+ * client's last line of defence against a stale frame - typically a heartbeat
+ * from a multi-instance peer whose local session cache still holds pre-pause
+ * state - silently resuming playback after an instructor pause.
+ *
+ * Rules:
+ * - Always apply while still unconfigured (`currentState.videoId === ''`): the
+ *   client boots from an empty default, so the first real snapshot and the
+ *   empty -> configured transition must always land.
+ * - Always apply a (re)configure to a different `videoId`, regardless of
+ *   timestamp ordering - it is authoritative by definition.
+ * - Reject a frame whose `serverTimestampMs` is strictly older than what is
+ *   applied: a late / duplicate / reordered frame that would revert newer state.
+ * - On an identical `serverTimestampMs`, reject a non-instructor frame when the
+ *   applied state is instructor-authored, so a heartbeat cannot override a
+ *   command committed in the same millisecond.
+ */
+export function shouldApplyIncomingVideoSyncState(
+  currentState: IncomingStateGuardFields,
+  nextState: IncomingStateGuardFields,
+): boolean {
+  if (currentState.videoId.length === 0) {
+    return true
+  }
+
+  if (nextState.videoId.length > 0 && nextState.videoId !== currentState.videoId) {
+    return true
+  }
+
+  if (nextState.serverTimestampMs < currentState.serverTimestampMs) {
+    return false
+  }
+
+  if (
+    nextState.serverTimestampMs === currentState.serverTimestampMs &&
+    currentState.updatedBy === 'instructor' &&
+    nextState.updatedBy !== 'instructor'
+  ) {
+    return false
+  }
+
+  return true
+}

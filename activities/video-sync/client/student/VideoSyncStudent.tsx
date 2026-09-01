@@ -18,6 +18,7 @@ import {
   computeDriftSec,
   computeDesiredPositionSec,
   DEFAULT_DRIFT_TOLERANCE_SEC,
+  shouldApplyIncomingVideoSyncState,
   shouldCorrectDrift,
 } from '../syncMath.js'
 import {
@@ -509,8 +510,14 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
 
       if (envelope.type === 'state-update' || envelope.type === 'state-snapshot' || envelope.type === 'heartbeat') {
         const payload = parseVideoSyncStateMessagePayload(envelope.payload)
-        if (payload?.state) {
-          setState(payload.state)
+        const nextState = payload?.state
+        if (nextState) {
+          // Reject a stale frame (typically a heartbeat from a multi-instance
+          // peer whose session cache still holds pre-pause state) that would
+          // otherwise resume playback after an instructor pause.
+          setState((current) => (
+            shouldApplyIncomingVideoSyncState(current, nextState) ? nextState : current
+          ))
         }
       }
 
@@ -710,8 +717,11 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
           return
         }
         setIsStandaloneSession(data.data?.standaloneMode === true)
-        if (data.data?.state) {
-          setState(data.data.state)
+        const loadedState = data.data?.state
+        if (loadedState) {
+          setState((current) => (
+            shouldApplyIncomingVideoSyncState(current, loadedState) ? loadedState : current
+          ))
         }
       } catch {
         if (!cancelled) {

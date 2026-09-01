@@ -31,6 +31,23 @@ that document rather than creating activity-specific authentication payloads.
 
 ## Contracts
 
+- Date: 2026-09-01
+- Surface: websocket | REST | activity interface (video-sync)
+- Contract: Video Sync clients (manager and student) apply an incoming `state-update` / `state-snapshot` / `heartbeat` frame only when `shouldApplyIncomingVideoSyncState(current, next)` allows it: reject `next` when `next.serverTimestampMs < current.serverTimestampMs`; on an equal `serverTimestampMs` reject a non-instructor frame when `current.updatedBy === 'instructor'`; always apply while `current.videoId === ''` and always apply a `videoId` change. The manager still also rejects a configured -> empty transition (`shouldApplyManagerStateUpdate`).
+- Compatibility constraints: Server frames must keep carrying a finite, monotone-per-mutation `serverTimestampMs` (`normalizeState` backfills `Date.now()` when absent/invalid). The heartbeat re-stamps `serverTimestampMs` on every tick, so freshness across instances is enforced server-side by a strict Valkey read in the heartbeat, not by the broadcast timestamp; the client guard covers late/duplicate/reordered frames whose timestamp is genuinely older.
+- Validation rules: A late `isPlaying:true` frame after an instructor pause is dropped, not applied. Command HTTP responses are routed through the same manager guard as websocket frames.
+- Evidence (schema/tests/path): `activities/video-sync/client/syncMath.ts`; `activities/video-sync/client/syncMath.test.ts`; `activities/video-sync/client/manager/VideoSyncManager.tsx`; `activities/video-sync/client/manager/VideoSyncManager.test.ts`; `activities/video-sync/client/student/VideoSyncStudent.tsx`; `activities/video-sync/client/student/VideoSyncStudent.test.ts`
+- Follow-up action: If a future transport adds a dedicated monotonic server revision, prefer it over `serverTimestampMs` for this guard and update both client call sites together.
+- Owner: Claude
+
+- Date: 2026-09-01
+- Surface: activity interface (video-sync manager)
+- Contract: The manager mutes only its own programmatic `onStateChange` echo, not every event inside the suppression window. `resolveManagerStateChangeIntent({ suppressed, nextIntent, programmaticTarget })` records an intent unless it is `null` or (`suppressed` and equal to the `play`/`pause` transition `applyStateToPlayer` just requested, tracked in `programmaticPlaybackTargetRef`). An opposite-direction instructor click inside the window is still recorded and flushed.
+- Compatibility constraints: `flushManagerPlaybackIntent` still no-ops a flush whose intent already matches authoritative state, so a recorded echo costs nothing. A command rejected for a transient reason keeps its intent and re-flushes up to `MAX_MANAGER_PLAYBACK_FLUSH_RETRIES` times (`MANAGER_PLAYBACK_COMMAND_RETRY_DELAY_MS` apart) instead of dropping it.
+- Evidence (schema/tests/path): `activities/video-sync/client/manager/VideoSyncManager.tsx`; `activities/video-sync/client/manager/VideoSyncManager.test.ts`
+- Follow-up action: If the YouTube API begins emitting reliable seek events, fold seek intent into the same recorder rather than adding a parallel suppression path.
+- Owner: Claude
+
 - Date: 2026-08-27
 - Surface: REST | websocket | Resonance student session snapshot
 - Contract: During an active Resonance run, `submittedAnswers` contains only the viewer's responses submitted on or after `activeQuestionRunStartedAt` for active questions. Earlier answers remain retained as historical instructor-visible responses but must not repopulate a student's reopened answer field or block a new draft.

@@ -15,6 +15,15 @@ Track deployment constraints, environment expectations, and operational learning
 
 ## Entries
 
+- Date: 2026-09-01
+- Environment: production
+- Change: The `video-sync` 3s heartbeat now reads the session with `{ strict: true }` (cache-bypassing Valkey GET) instead of the cache-backed `sessions.get`. It also only writes `data.state` back on a genuine stop-reached pause; a telemetry-only persist no longer overwrites playback state.
+- Risk: ~1 extra Valkey GET per session per 3s while a session has live subscribers. On a Valkey outage a heartbeat tick rejects and is skipped (logged) rather than serving a stale local cache; the next successful tick recovers. Without this, a multi-instance deploy could rebroadcast — and, on a telemetry-triggered persist, write back — a stale `isPlaying:true` for up to the 30s cache TTL after another instance handled a pause.
+- Rollback approach: In `activities/video-sync/server/routes.ts` drop the `{ strict: true }` on the heartbeat read (and the command read) and restore the single combined `data.state = heartbeatState` persist branch; redeploy.
+- Evidence (runbook/logs/path): `activities/video-sync/server/routes.ts`; `activities/video-sync/server/routes.test.ts` ("heartbeat reads authoritative state strictly…", "heartbeat persisting a telemetry-only change…"); `DEPLOYMENT.md`
+- Follow-up action: If more realtime activities need cache-bypassing heartbeat reads, extract a shared `getStrict`-aware heartbeat read helper.
+- Owner: Claude
+
 - Date: 2026-03-04
 - Environment: production
 - Change: `video-sync` now stores unsynced-student telemetry in a Valkey-backed per-session key when `VALKEY_URL` is configured, instead of relying only on in-process maps.

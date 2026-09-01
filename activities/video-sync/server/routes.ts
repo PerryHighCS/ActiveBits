@@ -1205,7 +1205,16 @@ function ensureHeartbeat(
           return
         }
 
-        const { session, data } = await getVideoSyncSessionWithNormalization(sessions, sessionId)
+        // Strict (cache-bypassing) read: production is multi-instance and
+        // `sessions.set` only refreshes the local cache, so a plain `get` here
+        // can serve this instance's pre-pause snapshot for up to the 30s cache
+        // TTL and rebroadcast `isPlaying:true` after another instance handled the
+        // pause. ~1 extra Valkey GET / 3s / session.
+        const { session, data } = await getVideoSyncSessionWithNormalization(
+          sessions,
+          sessionId,
+          { strict: true },
+        )
         if (!session || !data) {
           closeSubscribersForMissingSession(sessionId)
           stopHeartbeat(sessionId)
@@ -1224,11 +1233,17 @@ function ensureHeartbeat(
           sessionId,
         )
 
-        if (
-          shouldPersistHeartbeatState(data.state, heartbeatState) ||
-          shouldPersistHeartbeatTelemetry(data.telemetry, heartbeatTelemetry)
-        ) {
-          data.state = heartbeatState
+        const persistHeartbeatState = shouldPersistHeartbeatState(data.state, heartbeatState)
+        const persistHeartbeatTelemetry = shouldPersistHeartbeatTelemetry(data.telemetry, heartbeatTelemetry)
+        if (persistHeartbeatState || persistHeartbeatTelemetry) {
+          // Only overwrite the stored playback state on a genuine forward
+          // transition (playback reached `stopSec`). A telemetry-only persist
+          // must not write `heartbeatState` back - `applyStopIfReached` re-stamps
+          // `serverTimestampMs` to now, so doing so would resurrect a stale
+          // `isPlaying:true` with a fresh timestamp.
+          if (persistHeartbeatState) {
+            data.state = heartbeatState
+          }
           data.telemetry = heartbeatTelemetry
           await sessions.set(session.id, session)
         }
@@ -1663,7 +1678,11 @@ export default function setupVideoSyncRoutes(
     }
 
     await withSessionMutationRoute(res, sessionId, 'command-failed', async () => {
-    const session = await getVideoSyncSession(sessions, sessionId)
+    // Strict: a command must mutate from authoritative Valkey state, not a
+    // possibly-stale local cache on whichever instance received the POST. A
+    // store outage stays a retryable 500 (outer catch) instead of a misleading
+    // 404.
+    const session = await getVideoSyncSession(sessions, sessionId, { strict: true })
     if (!session) {
       res.status(404).json({ error: 'NOT_FOUND', message: 'Session not found' })
       return

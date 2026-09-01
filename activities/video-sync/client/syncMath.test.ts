@@ -6,6 +6,7 @@ import {
   computeDriftSec,
   computeDesiredPositionSec,
   DEFAULT_DRIFT_TOLERANCE_SEC,
+  shouldApplyIncomingVideoSyncState,
   shouldCorrectDrift,
 } from './syncMath.js'
 
@@ -53,4 +54,37 @@ void test('computeDriftSec returns a finite drift for non-finite player position
   assert.equal(computeDriftSec(Number.NaN, 12), 12)
   assert.equal(computeDriftSec(Number.POSITIVE_INFINITY, 12), 12)
   assert.equal(computeDriftSec(8, Number.NaN), 8)
+})
+
+void test('shouldApplyIncomingVideoSyncState rejects a frame older than the applied state', () => {
+  const current = createState({ serverTimestampMs: 5_000, isPlaying: false, updatedBy: 'instructor' })
+  const stale = createState({ serverTimestampMs: 4_000, isPlaying: true, updatedBy: 'system' })
+  assert.equal(shouldApplyIncomingVideoSyncState(current, stale), false)
+})
+
+void test('shouldApplyIncomingVideoSyncState accepts a strictly newer frame', () => {
+  const current = createState({ serverTimestampMs: 5_000 })
+  const next = createState({ serverTimestampMs: 5_001, isPlaying: true })
+  assert.equal(shouldApplyIncomingVideoSyncState(current, next), true)
+})
+
+void test('shouldApplyIncomingVideoSyncState keeps an equal-timestamp instructor frame over a system one', () => {
+  const current = createState({ serverTimestampMs: 7_000, updatedBy: 'instructor', isPlaying: false })
+  const heartbeat = createState({ serverTimestampMs: 7_000, updatedBy: 'system', isPlaying: true })
+  assert.equal(shouldApplyIncomingVideoSyncState(current, heartbeat), false)
+
+  const instructorEcho = createState({ serverTimestampMs: 7_000, updatedBy: 'instructor', isPlaying: false })
+  assert.equal(shouldApplyIncomingVideoSyncState(current, instructorEcho), true)
+})
+
+void test('shouldApplyIncomingVideoSyncState always applies frames while still unconfigured', () => {
+  const current = createState({ videoId: '', serverTimestampMs: 9_999 })
+  const olderConfigured = createState({ videoId: 'abc123', serverTimestampMs: 1 })
+  assert.equal(shouldApplyIncomingVideoSyncState(current, olderConfigured), true)
+})
+
+void test('shouldApplyIncomingVideoSyncState applies a re-configure to a new video id regardless of timestamp', () => {
+  const current = createState({ videoId: 'abc123', serverTimestampMs: 9_000 })
+  const reconfigured = createState({ videoId: 'zzz999', serverTimestampMs: 1_000 })
+  assert.equal(shouldApplyIncomingVideoSyncState(current, reconfigured), true)
 })
