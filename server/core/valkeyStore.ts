@@ -598,7 +598,11 @@ export class ValkeyPersistentStore {
     try {
       return await this.evalIncrementAttempts(key)
     } catch (err) {
-      console.error(`Failed to increment attempts for ${key}:`, err)
+      console.error(JSON.stringify({
+        event: 'valkey.increment-attempts-degraded',
+        key,
+        error: err instanceof Error ? err.message : String(err),
+      }))
       return 0
     }
   }

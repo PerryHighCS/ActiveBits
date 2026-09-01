@@ -136,6 +136,13 @@ void test('ValkeyPersistentStore incrementAttempts fails open to 0 but increment
     console.error = originalError
   }
   assert.ok(errorLogs.some((m) => m.includes('increment-attempts-failed')))
+  // The fail-open path still emits a structured event (distinct from the strict
+  // one) so operators can see the limiter is degraded and under-counting.
+  const degraded = errorLogs.find((m) => m.includes('increment-attempts-degraded'))
+  assert.ok(degraded, 'expected a structured increment-attempts-degraded event')
+  const degradedEvent = JSON.parse(degraded as string) as { event: string; key: string; error: string }
+  assert.equal(degradedEvent.event, 'valkey.increment-attempts-degraded')
+  assert.equal(degradedEvent.key, 'ip:hash')
 })
 
 void test('ValkeyPersistentStore incrementAttemptsStrict returns the script count on success', async () => {
