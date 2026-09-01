@@ -580,6 +580,19 @@ export default function VideoSyncManager() {
     }
   }, [queryBootstrapSourceUrl, sessionId])
 
+  // A parameter-only route swap (/manage/video-sync/A -> /manage/video-sync/B) reuses
+  // this component instead of remounting it. Reset the session-scoped baseline so the
+  // new session's snapshot is compared against its own state, not the previous
+  // session's serverTimestampMs - otherwise an older timestamp on B would be rejected
+  // by the freshness guard forever, leaving the manager controlling B while still
+  // displaying A's video.
+  useEffect(() => {
+    latestStateRef.current = DEFAULT_STATE
+    setState(DEFAULT_STATE)
+    setTelemetry(EMPTY_TELEMETRY)
+    setSetupMode(true)
+  }, [sessionId])
+
   useEffect(() => {
     latestStateRef.current = state
   }, [state])
@@ -759,6 +772,17 @@ export default function VideoSyncManager() {
       void flushManagerPlaybackIntent()
     }, delayMs)
   }, [clearPlaybackCommandFlushTimer, flushManagerPlaybackIntent])
+
+  // `scheduleManagerPlaybackIntentFlush` is recreated whenever `sendCommand` is (its
+  // `hasManagerAccess` dependency flips transiently during a 401/403
+  // `revalidateManagerAccess()` cycle). Read the latest flush through a ref inside the
+  // player-lifecycle effect below instead of depending on the callback directly, so an
+  // access-cookie refresh does not tear down and rebuild the YouTube player - which
+  // would also wipe the in-flight retry this callback schedules.
+  const scheduleManagerPlaybackIntentFlushRef = useRef(scheduleManagerPlaybackIntentFlush)
+  useEffect(() => {
+    scheduleManagerPlaybackIntentFlushRef.current = scheduleManagerPlaybackIntentFlush
+  }, [scheduleManagerPlaybackIntentFlush])
 
   const applyStateToPlayer = useCallback((nextState: VideoSyncState) => {
     const player = playerRef.current
@@ -1192,7 +1216,7 @@ export default function VideoSyncManager() {
               playbackFlushRetryCountRef.current = 0
               desiredPlaybackIntentRef.current = nextIntent
               desiredPlaybackPositionRef.current = playerPosition
-              scheduleManagerPlaybackIntentFlush()
+              scheduleManagerPlaybackIntentFlushRef.current()
             },
             onError: () => {
               if (cancelled || candidateIndex !== activeAttemptIndex) return
@@ -1244,7 +1268,6 @@ export default function VideoSyncManager() {
     clearManagerAutoplayCheckTimer,
     clearPlaybackCommandFlushTimer,
     clearPlayerEventSuppression,
-    scheduleManagerPlaybackIntentFlush,
     setupMode,
     state.playerHost,
   ])
