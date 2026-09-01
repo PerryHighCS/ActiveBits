@@ -619,6 +619,13 @@ export async function resetPersistentSession(hash: string): Promise<void> {
  * teacher's retry - and it swallows its own write failures so it never masks
  * the original error it is being called to clean up after.
  *
+ * Returns `true` when the record is *confirmed* to no longer point at
+ * `expectedSessionId` (it was cleared here, was already cleared, or a
+ * concurrent start linked a different session) - the caller may then delete the
+ * orphan live session. Returns `false` when cleanup could not be confirmed (the
+ * store rejected): the caller must NOT delete the orphan, because the record
+ * may still point at it and a waiter would then be handed a dead id.
+ *
  * `expectedSessionId` scopes the rollback to a single start attempt: two
  * teacher-verification messages can race for the same hash, and if a later
  * attempt has already linked a newer session this rollback must not clear that
@@ -633,13 +640,15 @@ export async function resetPersistentSession(hash: string): Promise<void> {
 export async function rollbackPersistentSessionStart(
   hash: string,
   expectedSessionId?: string | null,
-): Promise<void> {
+): Promise<boolean> {
   try {
     if (expectedSessionId != null && persistentStore.compareAndClearSessionId) {
       // Atomic path: clears the record only while it still points at
-      // `expectedSessionId` and drops that id's reverse index, in one op.
+      // `expectedSessionId` and drops that id's reverse index, in one op. A
+      // `false` result means the record already points elsewhere - still a
+      // confirmed "no longer ours" outcome.
       await persistentStore.compareAndClearSessionId(hash, expectedSessionId)
-      return
+      return true
     }
 
     const session = await persistentStore.get(hash)
@@ -655,10 +664,10 @@ export async function rollbackPersistentSessionStart(
           // Best-effort: a stale reverse-index entry self-heals on read.
         }
       }
-      return
+      return true
     }
     if (session.sessionId == null) {
-      return
+      return true
     }
     const staleSessionId = session.sessionId
     try {
@@ -675,17 +684,19 @@ export async function rollbackPersistentSessionStart(
     // clobbering a live session.
     const latest = await persistentStore.get(hash)
     if (latest == null || latest.sessionId !== staleSessionId) {
-      return
+      return true
     }
     latest.sessionId = null
     latest.teacherSocketId = null
     await persistPersistentSession(hash, latest)
+    return true
   } catch (error) {
     console.error(JSON.stringify({
       event: 'persistent-session.start-rollback-failed',
       hash,
       error: error instanceof Error ? error.message : String(error),
     }))
+    return false
   }
 }
 

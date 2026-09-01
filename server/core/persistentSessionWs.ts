@@ -309,15 +309,28 @@ async function handleTeacherCodeVerification(
     // id, then close instead of staying able to retry. Scope the rollback to
     // this attempt's session id so a concurrent verification that linked a
     // newer session survives.
-    await rollbackPersistentSessionStart(hash, newSession.id)
-    try {
-      await sessions.delete?.(newSession.id)
-    } catch (cleanupErr) {
+    const rolledBack = await rollbackPersistentSessionStart(hash, newSession.id)
+    if (rolledBack) {
+      try {
+        await sessions.delete?.(newSession.id)
+      } catch (cleanupErr) {
+        console.error(JSON.stringify({
+          event: 'persistent-session.start-failed-cleanup-failed',
+          hash,
+          sessionId: newSession.id,
+          error: cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr),
+        }))
+      }
+    } else {
+      // Rollback could not be confirmed (the store rejected). Deleting the
+      // live session now could leave the persistent record pointing at a dead
+      // id; retain the orphan instead - a waiter that observes it still gets a
+      // *live* session. It self-heals on the teacher's retry (which relinks a
+      // fresh session and drops this reverse-index entry).
       console.error(JSON.stringify({
-        event: 'persistent-session.start-failed-cleanup-failed',
+        event: 'persistent-session.start-failed-orphan-retained',
         hash,
         sessionId: newSession.id,
-        error: cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr),
       }))
     }
     socket.send(

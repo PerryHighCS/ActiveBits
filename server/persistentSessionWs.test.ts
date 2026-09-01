@@ -471,6 +471,65 @@ void test('persistent session websocket rolls back and reports a retryable error
   assert.equal(await isSessionStarted(hash), false, 'the persistent record start state is rolled back')
 })
 
+void test('persistent session websocket retains the orphan (does not delete) when rollback cannot be confirmed', async (t) => {
+  const valkeyClient = createFakeValkeyClient()
+  initializePersistentStorage(valkeyClient as never)
+  t.after(() => { initializePersistentStorage(null) })
+
+  const activityName = 'algorithm-demo'
+  const teacherCode = 'ws-rollback-unconfirmed-code'
+  const { hash, hashedTeacherCode } = generatePersistentHash(activityName, teacherCode)
+  t.after(async () => cleanupPersistentSession(hash))
+  await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode)
+
+  const sessionStore = new Map<string, SessionRecord>()
+  const deleted: string[] = []
+  const sessions = {
+    async get(id: string) { return sessionStore.get(id) ?? null },
+    async set(id: string, value: SessionRecord) { sessionStore.set(id, value) },
+    async delete(id: string) { deleted.push(id); return sessionStore.delete(id) },
+  }
+
+  let registeredHandler: ((socket: MockSocket, query: URLSearchParams, _wss: unknown) => void) | undefined
+  setupPersistentSessionWs({
+    register(pathname, handler) {
+      if (pathname === '/ws/persistent-session') {
+        registeredHandler = handler as (socket: MockSocket, query: URLSearchParams, _wss: unknown) => void
+      }
+    },
+  }, sessions)
+  assert.ok(registeredHandler)
+
+  const socket = createMockSocket()
+  registeredHandler(socket, new URLSearchParams({ hash, activityName }), null)
+  await waitForAsyncWork()
+
+  // The reverse-index write fails (start fails) AND the atomic compare-and-clear
+  // rollback also rejects, so cleanup is unconfirmed.
+  const originalSet = valkeyClient.set
+  valkeyClient.set = async (key: string, value: string) => {
+    if (key.startsWith('persistent-session-by-session:')) throw new Error('[TEST] reverse-index write failed')
+    return originalSet(key, value)
+  }
+  valkeyClient.eval = async (script?: string) => {
+    if (typeof script === 'string' && script.includes('persistent-session-compare-and-clear')) {
+      throw new Error('[TEST] rollback compare-and-clear failed')
+    }
+    return 1
+  }
+
+  console.info('[TEST] Expected persistent-session start failure AND an unconfirmed rollback at the websocket boundary.')
+  socket.handlers.message?.(JSON.stringify({ type: 'verify-teacher-code', teacherCode }))
+  await waitForAsyncWork()
+  await waitForAsyncWork()
+
+  const messageTypes = socket.sent.map((payload) => (JSON.parse(payload) as { type?: string }).type)
+  assert.ok(messageTypes.includes('teacher-code-error'), 'the teacher still receives a controlled error')
+  assert.equal(messageTypes.includes('teacher-authenticated'), false)
+  assert.equal(deleted.length, 0, 'the orphan is retained rather than deleted into an unconfirmed state')
+  assert.equal(sessionStore.size, 1, 'the live session is kept so a waiter never sees a dead id')
+})
+
 void test('rollbackPersistentSessionStart scopes to the failed attempt and leaves a concurrently started session intact', async (t) => {
   const valkeyClient = createFakeValkeyClient()
   initializePersistentStorage(valkeyClient as never)
