@@ -50,6 +50,10 @@ interface PersistentSessionStore {
   // falls back to the non-atomic path in `rollbackPersistentSessionStart`.
   compareAndClearSessionId?(hash: string, expectedSessionId: string): Promise<boolean>
   incrementAttempts(key: string): Promise<number>
+  // Like `incrementAttempts` but rejects on a backend failure instead of
+  // failing open with `0`. Optional: a store lacking it falls back to the
+  // fail-open path (acceptable for the in-memory store, which cannot fail).
+  incrementAttemptsStrict?(key: string): Promise<number>
   getAttempts(key: string): Promise<number>
 }
 
@@ -96,6 +100,13 @@ function createInMemoryPersistentStore(): PersistentSessionStore {
   const memoryStore = new Map<string, unknown>()
   const rateLimitTimeouts = new Map<string, NodeJS.Timeout>()
   const getReverseIndexKey = (sessionId: string): string => `sid:${sessionId}`
+  const incrementAttemptsInMemory = (key: string): number => {
+    const bucket = `rl:${key}`
+    const next = ((memoryStore.get(bucket) as number) ?? 0) + 1
+    memoryStore.set(bucket, next)
+    scheduleRateLimitExpiry(bucket)
+    return next
+  }
   const scheduleRateLimitExpiry = (bucket: string): void => {
     const existingTimeout = rateLimitTimeouts.get(bucket)
     if (existingTimeout) {
@@ -148,12 +159,12 @@ function createInMemoryPersistentStore(): PersistentSessionStore {
       return true
     },
     async incrementAttempts(key: string): Promise<number> {
-      const bucket = `rl:${key}`
-      const current = (memoryStore.get(bucket) as number) ?? 0
-      const next = current + 1
-      memoryStore.set(bucket, next)
-      scheduleRateLimitExpiry(bucket)
-      return next
+      return incrementAttemptsInMemory(key)
+    },
+    async incrementAttemptsStrict(key: string): Promise<number> {
+      // The in-memory store operates on a Map and cannot fail, so the strict
+      // contract is satisfied by the same implementation.
+      return incrementAttemptsInMemory(key)
     },
     async getAttempts(key: string): Promise<number> {
       return (memoryStore.get(`rl:${key}`) as number) ?? 0
@@ -204,6 +215,9 @@ export function initializePersistentStorage(valkeyClient: ValkeyStoreClient | nu
       },
       async incrementAttempts(key: string): Promise<number> {
         return await valkeyStore.incrementAttempts(key)
+      },
+      async incrementAttemptsStrict(key: string): Promise<number> {
+        return await valkeyStore.incrementAttemptsStrict(key)
       },
       async getAttempts(key: string): Promise<number> {
         return await valkeyStore.getAttempts(key)
@@ -527,6 +541,24 @@ async function persistPersistentSession(hash: string, session: PersistentSession
 
 export async function recordTeacherCodeAttempt(rateLimitKey: string): Promise<{ allowed: boolean; attempts: number }> {
   const attempts = await persistentStore.incrementAttempts(rateLimitKey)
+  return {
+    allowed: attempts <= MAX_ATTEMPTS,
+    attempts,
+  }
+}
+
+/**
+ * Like {@link recordTeacherCodeAttempt} but rejects when the limiter backend is
+ * unavailable instead of failing open (`incrementAttempts` swallows a Valkey
+ * outage to `0`, which would report every guess as "allowed"). Pre-auth,
+ * pollable recovery endpoints use this so a limiter outage surfaces as a
+ * retryable 5xx rather than an open brute-force window.
+ */
+export async function recordTeacherCodeAttemptStrict(rateLimitKey: string): Promise<{ allowed: boolean; attempts: number }> {
+  const increment = persistentStore.incrementAttemptsStrict
+    ? persistentStore.incrementAttemptsStrict.bind(persistentStore)
+    : persistentStore.incrementAttempts.bind(persistentStore)
+  const attempts = await increment(rateLimitKey)
   return {
     allowed: attempts <= MAX_ATTEMPTS,
     attempts,

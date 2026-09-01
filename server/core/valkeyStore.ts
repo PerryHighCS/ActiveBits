@@ -566,30 +566,58 @@ export class ValkeyPersistentStore {
     }
   }
 
-  async incrementAttempts(key: string): Promise<number> {
-    try {
-      const script = `
+  // Kept in sync with TEACHER_CODE_ATTEMPT_WINDOW_SECONDS in
+  // persistentSessions.ts (surfaced to clients as `Retry-After`).
+  private static readonly RATE_LIMIT_TTL_SECONDS = 60
+  private static readonly INCREMENT_ATTEMPTS_SCRIPT = `
                 local value = redis.call('INCR', KEYS[1])
                 if value == 1 then
                     redis.call('EXPIRE', KEYS[1], ARGV[1])
                 end
                 return value
             `
-      // Kept in sync with TEACHER_CODE_ATTEMPT_WINDOW_SECONDS in
-      // persistentSessions.ts (surfaced to clients as `Retry-After`).
-      const ttlSeconds = 60
-      const result = await this.client.eval(script, 1, `ratelimit:${key}`, ttlSeconds)
-      if (typeof result === 'number') {
-        return result
-      }
-      if (typeof result === 'string') {
-        const parsed = parseInt(result, 10)
-        return Number.isNaN(parsed) ? 0 : parsed
-      }
-      return 0
+
+  private async evalIncrementAttempts(key: string): Promise<number> {
+    const result = await this.client.eval(
+      ValkeyPersistentStore.INCREMENT_ATTEMPTS_SCRIPT,
+      1,
+      `ratelimit:${key}`,
+      ValkeyPersistentStore.RATE_LIMIT_TTL_SECONDS,
+    )
+    if (typeof result === 'number') {
+      return result
+    }
+    if (typeof result === 'string') {
+      const parsed = parseInt(result, 10)
+      return Number.isNaN(parsed) ? 0 : parsed
+    }
+    return 0
+  }
+
+  async incrementAttempts(key: string): Promise<number> {
+    try {
+      return await this.evalIncrementAttempts(key)
     } catch (err) {
       console.error(`Failed to increment attempts for ${key}:`, err)
       return 0
+    }
+  }
+
+  /**
+   * Like {@link incrementAttempts} but rethrows a backend failure instead of
+   * failing open with `0`. Brute-force guards on pre-auth recovery endpoints
+   * use this so a limiter outage becomes a retryable 5xx rather than a window
+   * in which every guess counts as "allowed".
+   */
+  async incrementAttemptsStrict(key: string): Promise<number> {
+    try {
+      return await this.evalIncrementAttempts(key)
+    } catch (err) {
+      console.error(JSON.stringify({
+        event: 'valkey.increment-attempts-failed',
+        error: err instanceof Error ? err.message : String(err),
+      }))
+      throw err
     }
   }
 

@@ -382,6 +382,45 @@ void test('persistent manager capability recovery rate-limits repeated teacher-c
   )
 })
 
+void test('persistent manager capability recovery returns a retryable 500 when the rate limiter backend fails', async (t) => {
+  const valkeyClient = createFakePersistentValkeyClient()
+  initializePersistentStorage(valkeyClient as never)
+  await initializeActivityRegistry()
+  t.after(() => { initializePersistentStorage(null) })
+
+  const sessionMap = new Map<string, unknown>()
+  const sessions = {
+    get: async (id: string) => sessionMap.get(id) ?? null,
+    set: async (id: string, session: unknown) => { sessionMap.set(id, session) },
+  }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+  const handler = getRoute(app, 'POST', '/api/session/:sessionId/persistent-manager-capability')
+
+  const activityName = 'java-format-practice'
+  const teacherCode = 'teacher-secret'
+  const { hash, hashedTeacherCode } = generatePersistentHash(activityName, teacherCode)
+  t.after(async () => cleanupPersistentSession(hash))
+  sessionMap.set('live-session', { id: 'live-session', type: activityName, data: { students: [] } })
+  await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode)
+  await startPersistentSession(hash, 'live-session', { id: 'teacher-ws', readyState: 1, send() {} })
+
+  // Fail the rate-limit INCR script only; setup above already ran.
+  valkeyClient.eval = async () => { throw new Error('[TEST] rate limiter outage') }
+
+  const res = createMockRes()
+  console.info('[TEST] Expected rate-limiter backend failure during persistent manager capability recovery.')
+  await handler(createMockReq({
+    params: { sessionId: 'live-session' },
+    cookies: { persistent_sessions: buildCookieValue(activityName, hash, 'wrong-teacher-code') },
+  }), res)
+
+  // Not "allowed" via a fail-open 0: a limiter outage must be a retryable 500,
+  // not an open brute-force window.
+  assert.equal(res.statusCode, 500)
+  assert.deepEqual(res.jsonBody, { error: 'Manager capability is temporarily unavailable' })
+})
+
 void test('persistent manager capability recovery does not charge attempts to a caller with no teacher-code candidate', async (t) => {
   initializePersistentStorage(null)
   const sessionMap = new Map<string, unknown>()

@@ -15,6 +15,7 @@ import {
   getPersistentSession,
   getPersistentSessionStrict,
   PersistentSessionEntryParticipantStoreError,
+  recordTeacherCodeAttemptStrict,
   storePersistentSessionEntryParticipant,
   TEACHER_CODE_ATTEMPT_WINDOW_SECONDS,
   verifyTeacherCodeWithHash,
@@ -994,7 +995,10 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
         && hash
         && hasPersistentSessionTeacherCodeCandidate(sessionEntries, persistentSession!.activityName, hash)
       ) {
-        const attempt = await recordTeacherCodeAttempt(`${getRequestClientIp(req)}:${hash}`)
+        // Strict: a limiter-backend outage rejects here (-> the route's outer
+        // catch -> retryable 500) rather than failing open and reporting every
+        // guess as "allowed" for the duration of the outage.
+        const attempt = await recordTeacherCodeAttemptStrict(`${getRequestClientIp(req)}:${hash}`)
         if (!attempt.allowed) {
           // "Wait and retry" - the bucket clears after this window. The Java
           // Format manager treats 429 as transient and honors this header

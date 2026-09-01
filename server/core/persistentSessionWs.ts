@@ -301,6 +301,15 @@ async function handleTeacherCodeVerification(
       sessionId: newSession.id,
       error: err instanceof Error ? err.message : String(err),
     }))
+    // Order matters: clear the persistent record's started state *before*
+    // deleting the orphan live session. `startPersistentSession` may have
+    // persisted `sessionId` on the record before its reverse-index write
+    // failed; while the delete below is in flight a fresh waiter could still
+    // observe `isSessionStarted(hash)` and be handed this about-to-be-deleted
+    // id, then close instead of staying able to retry. Scope the rollback to
+    // this attempt's session id so a concurrent verification that linked a
+    // newer session survives.
+    await rollbackPersistentSessionStart(hash, newSession.id)
     try {
       await sessions.delete?.(newSession.id)
     } catch (cleanupErr) {
@@ -311,13 +320,6 @@ async function handleTeacherCodeVerification(
         error: cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr),
       }))
     }
-    // startPersistentSession may have persisted `sessionId` on the persistent
-    // record before its reverse-index write failed. Clear that so the next
-    // waiter is not told `session-started` with this now-deleted id and can
-    // still retry teacher verification. Scope the rollback to this attempt's
-    // session id: a concurrent verification message may have already linked a
-    // newer session, and that association must survive.
-    await rollbackPersistentSessionStart(hash, newSession.id)
     socket.send(
       JSON.stringify({
         type: 'teacher-code-error',

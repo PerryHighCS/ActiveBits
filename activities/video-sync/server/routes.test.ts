@@ -1836,6 +1836,56 @@ void test('manager-access route does not charge attempts for a cookie entry with
   await cleanupPersistentSession(hash)
 })
 
+void test('manager-access route stays retryable (500) when the rate-limiter backend fails', async (t) => {
+  console.info('[TEST] video-sync manager-access: the rate-limiter INCR script rejects on purpose; the guard must fail closed to a retryable 500, not fail open to "allowed"')
+  const store = new Map<string, string>()
+  let failEval = false
+  const fakeValkey = {
+    store,
+    on() {},
+    subscribe: async () => 1,
+    publish: async () => 0,
+    get: async (key: string) => store.get(key) ?? null,
+    set: async (key: string, value: string) => { store.set(key, value); return 'OK' },
+    del: async (key: string) => (store.delete(key) ? 1 : 0),
+    eval: async () => { if (failEval) throw new Error('[TEST] rate limiter outage'); return 0 },
+    scan: async (_c: string, ...args: Array<string | number>) => {
+      const mi = args.findIndex((a) => a === 'MATCH')
+      const pat = mi >= 0 ? String(args[mi + 1] ?? '*') : '*'
+      const pre = pat.endsWith('*') ? pat.slice(0, -1) : pat
+      return ['0', Array.from(store.keys()).filter((k) => k.startsWith(pre))]
+    },
+    quit: async () => 'OK', ping: async () => 'PONG', dbsize: async () => store.size,
+    pttl: async () => -1, call: async () => 'OK',
+  }
+  initializePersistentStorage(fakeValkey as never)
+  t.after(() => { initializePersistentStorage(null) })
+
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  const storeState = createSessionStore({ s1: createVideoSyncSession('s1') })
+  const teacherCode = 'persistent-teacher-code'
+  const { hash, hashedTeacherCode } = generatePersistentHash('video-sync', teacherCode)
+  await getOrCreateActivePersistentSession('video-sync', hash, hashedTeacherCode)
+  await startPersistentSession(hash, 's1', { id: 'teacher-ws', readyState: 1, send() {} })
+
+  setupVideoSyncRoutes(app, storeState.sessions, ws)
+  const handler = app.handlers.get['/api/video-sync/:sessionId/manager-access']
+
+  failEval = true
+  const res = createResponse()
+  await handler?.(
+    { params: { sessionId: 's1' }, cookies: { persistent_sessions: JSON.stringify([{ key: `video-sync:${hash}`, teacherCode: 'wrong-teacher-code' }]) } },
+    res,
+  )
+
+  assert.equal(res.statusCode, 500)
+  assert.equal((res.body as { error?: string }).error, 'INTERNAL_ERROR')
+
+  failEval = false
+  await cleanupPersistentSession(hash)
+})
+
 void test('manager-access route does not resurrect a session deleted between the strict check and capability issuance', async () => {
   initializePersistentStorage(null)
 

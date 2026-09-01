@@ -411,10 +411,18 @@ void test('persistent session websocket rolls back and reports a retryable error
 
   const sessionStore = new Map<string, SessionRecord>()
   const deleted: string[] = []
+  const persistentStartedAtDeleteTime: boolean[] = []
   const sessions = {
     async get(id: string) { return sessionStore.get(id) ?? null },
     async set(id: string, value: SessionRecord) { sessionStore.set(id, value) },
-    async delete(id: string) { deleted.push(id); return sessionStore.delete(id) },
+    async delete(id: string) {
+      // Capture whether the persistent record still looks "started" at the
+      // moment the orphan is deleted: the rollback must run first so a waiter
+      // cannot observe `isSessionStarted` and be handed this deleted id.
+      persistentStartedAtDeleteTime.push(await isSessionStarted(hash))
+      deleted.push(id)
+      return sessionStore.delete(id)
+    },
   }
 
   let registeredHandler: ((socket: MockSocket, query: URLSearchParams, _wss: unknown) => void) | undefined
@@ -453,6 +461,11 @@ void test('persistent session websocket rolls back and reports a retryable error
   assert.equal(messageTypes.includes('session-started'), false, 'no waiter is told the session started')
   assert.equal(deleted.length, 1, 'the orphaned live session is rolled back')
   assert.equal(sessionStore.size, 0, 'no live session is left behind')
+  assert.deepEqual(
+    persistentStartedAtDeleteTime,
+    [false],
+    'the persistent record was already rolled back before the orphan delete',
+  )
   // The persistent record must not stay marked as started with the deleted id,
   // or the next waiter gets `session-started` and cannot retry verification.
   assert.equal(await isSessionStarted(hash), false, 'the persistent record start state is rolled back')

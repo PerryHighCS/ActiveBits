@@ -10,7 +10,7 @@ import { registerSessionNormalizer } from 'activebits-server/core/sessionNormali
 import { createBroadcastSubscriptionHelper } from 'activebits-server/core/broadcastUtils.js'
 import {
   findIndexedHashBySessionId,
-  recordTeacherCodeAttempt,
+  recordTeacherCodeAttemptStrict,
   resolvePersistentSessionEntryPolicy,
   TEACHER_CODE_ATTEMPT_WINDOW_SECONDS,
   verifyTeacherCodeWithHash,
@@ -1385,7 +1385,11 @@ export default function setupVideoSyncRoutes(
           // not accrue attempts. Only a request that actually carries a
           // teacher-code candidate is charged, so a forged/empty entry cannot
           // drain another client's shared bucket.
-          const attempt = await recordTeacherCodeAttempt(`${resolveClientIp(req)}:${persistentHash}`)
+          // Strict: a limiter-backend outage rejects here (caught below and
+          // rethrown for a non-authorized caller -> the route's outer catch ->
+          // retryable 500) rather than failing open and treating every guess as
+          // "allowed" while Valkey is unavailable.
+          const attempt = await recordTeacherCodeAttemptStrict(`${resolveClientIp(req)}:${persistentHash}`)
           if (!attempt.allowed) {
             // Signal "wait and retry" - the attempt bucket clears after 60s. The
             // manager client treats 429 as transient (bounded delayed retry)

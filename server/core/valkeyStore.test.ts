@@ -114,3 +114,34 @@ void test('ValkeyPersistentStore compareAndClearSessionId reports not-cleared wh
 
   assert.equal(await store.compareAndClearSessionId('hash-1', 'sess-A'), false)
 })
+
+void test('ValkeyPersistentStore incrementAttempts fails open to 0 but incrementAttemptsStrict rethrows', async () => {
+  console.info('[TEST] Expected Valkey rate-limit increment failure.')
+  const store = Object.create(ValkeyPersistentStore.prototype) as ValkeyPersistentStore & {
+    client: { eval: () => Promise<never> }
+  }
+  Object.defineProperty(store, 'client', {
+    value: { async eval(): Promise<never> { throw new Error('test limiter outage') } },
+  })
+  const errorLogs: string[] = []
+  const originalError = console.error
+  console.error = (...values: unknown[]) => { errorLogs.push(values.map(String).join(' ')) }
+  try {
+    // Non-strict path: swallows the outage so legitimate auth can proceed.
+    assert.equal(await store.incrementAttempts('ip:hash'), 0)
+    // Strict path: a brute-force guard needs the outage to surface, not to
+    // report "0 attempts -> allowed".
+    await assert.rejects(store.incrementAttemptsStrict('ip:hash'), /test limiter outage/)
+  } finally {
+    console.error = originalError
+  }
+  assert.ok(errorLogs.some((m) => m.includes('increment-attempts-failed')))
+})
+
+void test('ValkeyPersistentStore incrementAttemptsStrict returns the script count on success', async () => {
+  const store = Object.create(ValkeyPersistentStore.prototype) as ValkeyPersistentStore & {
+    client: { eval: () => Promise<number> }
+  }
+  Object.defineProperty(store, 'client', { value: { async eval(): Promise<number> { return 3 } } })
+  assert.equal(await store.incrementAttemptsStrict('ip:hash'), 3)
+})
