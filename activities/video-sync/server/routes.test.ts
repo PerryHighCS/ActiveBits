@@ -3182,9 +3182,13 @@ void test('heartbeat stop-reached persist re-reads and does not roll back a newe
       isPlaying: true,
       serverTimestampMs: 21_000,
     }
+    // Another instance also incremented an accumulating telemetry counter in the
+    // same window; the heartbeat persist must not roll it back.
+    ;(replaySession.data as { telemetry: { autoplay: { blockedCount: number } } })
+      .telemetry.autoplay.blockedCount = 4
 
     const published: Array<{ channel: string; message: Record<string, unknown> }> = []
-    const setStates: Array<{ isPlaying: boolean; serverTimestampMs: number }> = []
+    const setStates: Array<{ isPlaying: boolean; serverTimestampMs: number; blockedCount: number }> = []
     let strictReads = 0
     const sessions = {
       async get() {
@@ -3195,8 +3199,15 @@ void test('heartbeat stop-reached persist re-reads and does not roll back a newe
         return cloneSessionRecord(strictReads === 1 ? snapshotSession : replaySession)
       },
       async set(_id: string, session: SessionRecord) {
-        const state = (session.data as { state: { isPlaying: boolean; serverTimestampMs: number } }).state
-        setStates.push({ isPlaying: state.isPlaying, serverTimestampMs: state.serverTimestampMs })
+        const data = session.data as {
+          state: { isPlaying: boolean; serverTimestampMs: number }
+          telemetry: { autoplay: { blockedCount: number } }
+        }
+        setStates.push({
+          isPlaying: data.state.isPlaying,
+          serverTimestampMs: data.state.serverTimestampMs,
+          blockedCount: data.telemetry.autoplay.blockedCount,
+        })
       },
       valkeyStore: createMockVideoSyncValkeyStore(),
       async publishBroadcast(channel: string, message: Record<string, unknown>) {
@@ -3236,6 +3247,9 @@ void test('heartbeat stop-reached persist re-reads and does not roll back a newe
     const lastSetState = setStates.at(-1)
     assert.equal(lastSetState?.isPlaying, true)
     assert.equal(lastSetState?.serverTimestampMs, 21_000)
+    // The heartbeat only writes its own two counters; the concurrent
+    // autoplay.blockedCount increment survives.
+    assert.equal(lastSetState?.blockedCount, 4)
 
     recorder.emit('close')
     await new Promise((resolve) => setTimeout(resolve, 0))

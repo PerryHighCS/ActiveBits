@@ -358,6 +358,20 @@ export function resolveManagerStateChangeIntent(params: {
   return { record: true }
 }
 
+/**
+ * The next value of the programmatic playback target after an `onStateChange`
+ * event. The target absorbs exactly one echo of the transition
+ * `applyStateToPlayer` requested: once any play-state event has been seen
+ * (`nextIntent != null`) it is cleared, so a later same-direction instructor
+ * click inside the same suppression window is not also swallowed as an echo.
+ */
+export function consumeProgrammaticPlaybackTarget(params: {
+  nextIntent: 'play' | 'pause' | null
+  programmaticTarget: 'play' | 'pause' | null
+}): 'play' | 'pause' | null {
+  return params.nextIntent == null ? params.programmaticTarget : null
+}
+
 export function shouldSendManagerPlaybackPositionUpdate(params: {
   authoritativeState: VideoSyncState
   desiredPositionSec: number | null
@@ -1029,14 +1043,15 @@ export default function VideoSyncManager() {
                 programmaticTarget: programmaticPlaybackTargetRef.current,
               })
 
-              // The programmatic target absorbs exactly one echo. Clear it once
+              // The programmatic target absorbs exactly one echo; clear it once
               // any play-state event has been seen so a later same-direction
               // instructor click within the same suppression window is not also
-              // swallowed as an echo. (`flushManagerPlaybackIntent` still no-ops
-              // a redundant flush, so a stray second echo costs nothing.)
-              if (nextIntent != null) {
-                programmaticPlaybackTargetRef.current = null
-              }
+              // swallowed. (`flushManagerPlaybackIntent` still no-ops a redundant
+              // flush, so a stray second echo costs nothing.)
+              programmaticPlaybackTargetRef.current = consumeProgrammaticPlaybackTarget({
+                nextIntent,
+                programmaticTarget: programmaticPlaybackTargetRef.current,
+              })
 
               if (!record) {
                 return

@@ -1247,7 +1247,13 @@ function ensureHeartbeat(
           // the pre-projection `data.state.serverTimestampMs` is the baseline.
           const latest = await getVideoSyncSession(sessions, sessionId, { strict: true })
           if (latest) {
-            latest.data.telemetry = heartbeatTelemetry
+            // Write only the two counters the heartbeat owns. Assigning the
+            // whole `heartbeatTelemetry` (a clone of the first strict read) would
+            // roll back any other telemetry field - notably the accumulating
+            // `autoplay.blockedCount` - that another instance committed between
+            // the two reads.
+            latest.data.telemetry.connections.activeCount = heartbeatTelemetry.connections.activeCount
+            latest.data.telemetry.sync.unsyncedStudents = heartbeatTelemetry.sync.unsyncedStudents
             if (
               persistHeartbeatStopTransition &&
               latest.data.state.serverTimestampMs <= data.state.serverTimestampMs

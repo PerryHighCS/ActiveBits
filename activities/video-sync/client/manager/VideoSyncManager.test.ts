@@ -13,6 +13,7 @@ import {
     parseManagerAccessRetryAfterMs,
     readBootstrapSourceUrl,
     readEmbeddedBootstrapSourceUrl,
+    consumeProgrammaticPlaybackTarget,
     readRecoveredPersistentSourceUrl,
     resolveManagerStateChangeIntent,
     sanitizeManagerApiErrorMessage,
@@ -437,15 +438,19 @@ void test('resolveManagerStateChangeIntent records a real gesture but drops its 
   )
 })
 
+void test('consumeProgrammaticPlaybackTarget keeps the target until a play-state event is seen', () => {
+  assert.equal(consumeProgrammaticPlaybackTarget({ nextIntent: null, programmaticTarget: 'play' }), 'play')
+  assert.equal(consumeProgrammaticPlaybackTarget({ nextIntent: 'play', programmaticTarget: 'play' }), null)
+  assert.equal(consumeProgrammaticPlaybackTarget({ nextIntent: 'pause', programmaticTarget: 'play' }), null)
+})
+
 void test('a consumed programmatic target does not swallow a later same-direction instructor click', () => {
   // Mirrors the onStateChange sequence: the ref absorbs exactly one echo, then
   // is cleared, so play -> pause -> play inside one suppression window all land.
   let programmaticTarget: 'play' | 'pause' | null = 'play'
   const step = (nextIntent: 'play' | 'pause' | null) => {
     const result = resolveManagerStateChangeIntent({ suppressed: true, nextIntent, programmaticTarget })
-    if (nextIntent != null) {
-      programmaticTarget = null
-    }
+    programmaticTarget = consumeProgrammaticPlaybackTarget({ nextIntent, programmaticTarget })
     return result.record
   }
 
