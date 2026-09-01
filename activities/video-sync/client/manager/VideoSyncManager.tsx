@@ -746,8 +746,13 @@ export default function VideoSyncManager() {
           shouldRequestEmbeddedBootstrapRefreshOnDenial({ sessionId, status: response.status })
           && requestBoundedBootstrapRefresh()
         ) {
-          // Parent asked for a new token; the capability-exchange hook re-runs
-          // and re-triggers this effect. Don't latch read-only yet.
+          // Parent asked for a new token; a fresh capability exchange re-runs
+          // this effect (cleanup cancels the retry below). If the parent never
+          // acknowledges - no new token, no `EMBEDDED_MANAGER_ACTIVATED` - the
+          // scheduled retry re-checks `/manager-access` and, once the refresh
+          // and retry budgets are spent, latches read-only via `denyAccess()`
+          // instead of hanging on "Loading manager access..." forever.
+          scheduleRetryOrDeny()
         } else {
           denyAccess()
         }

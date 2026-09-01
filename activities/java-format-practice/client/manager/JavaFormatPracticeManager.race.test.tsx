@@ -769,6 +769,67 @@ void test('JavaFormatPracticeManager ignores a cancelled exchange whose body par
   }
 })
 
+void test('JavaFormatPracticeManager aborts the in-flight capability exchange on a route swap', { concurrency: false }, async () => {
+  TestWebSocket.instances = []
+  const restoreDom = installDomEnvironment('https://bits.example/manage/java-format-practice/session-A')
+  const previousFetch = globalThis.fetch
+
+  const capabilitySignals: Array<AbortSignal | undefined> = []
+  const neverResolves = new Promise<Response>(() => { /* first A exchange hangs until aborted */ })
+
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    if (url.includes('/persistent-manager-capability')) {
+      capabilitySignals.push(init?.signal ?? undefined)
+      if (capabilitySignals.length === 1) return neverResolves
+      return new Response(JSON.stringify({ success: true, persistentRecoveryAvailable: false }), { status: 200 })
+    }
+    if (url.includes('/students')) {
+      return new Response(JSON.stringify({ students: [] }), { status: 200 })
+    }
+    throw new Error(`Unexpected fetch: ${url}`)
+  }) as typeof fetch
+
+  let teardown: (() => Promise<void>) | null = null
+  try {
+    const { testingLibrary, router, JavaFormatPracticeManager, act } = await loadHarness()
+
+    function NavProbe(): React.JSX.Element {
+      const navigate = router.useNavigate()
+      return (
+        <>
+          <JavaFormatPracticeManager />
+          <button type="button" onClick={() => navigate('/manage/java-format-practice/session-B')}>to-b</button>
+        </>
+      )
+    }
+
+    const rendered = testingLibrary.render(
+      <router.MemoryRouter initialEntries={['/manage/java-format-practice/session-A']}>
+        <router.Routes>
+          <router.Route path="/manage/java-format-practice/:sessionId" element={<NavProbe />} />
+        </router.Routes>
+      </router.MemoryRouter>,
+    )
+    teardown = async () => { await act(async () => { rendered.unmount(); testingLibrary.cleanup(); await Promise.resolve() }) }
+
+    // Let the first (hanging) session-A exchange start, then route to B.
+    await act(async () => { await Promise.resolve(); await Promise.resolve() })
+    assert.equal(capabilitySignals.length, 1)
+    assert.equal(capabilitySignals[0]?.aborted, false, 'the session-A exchange starts un-aborted')
+
+    await act(async () => { testingLibrary.fireEvent.click(rendered.getByRole('button', { name: 'to-b' })); await Promise.resolve(); await Promise.resolve() })
+
+    // The route swap must abort the obsolete session-A request so it cannot
+    // land a stale capability write server-side.
+    assert.equal(capabilitySignals[0]?.aborted, true, 'the prior exchange is aborted on cleanup')
+  } finally {
+    await teardown?.()
+    globalThis.fetch = previousFetch
+    restoreDom()
+  }
+})
+
 void test('JavaFormatPracticeManager gates difficulty/theme controls until the persistent capability exchange settles', { concurrency: false }, async () => {
   TestWebSocket.instances = []
   const restoreDom = installDomEnvironment('https://bits.example/manage/java-format-practice/perma-session')

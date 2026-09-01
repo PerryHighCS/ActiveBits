@@ -234,6 +234,10 @@ export default function JavaFormatPracticeManager() {
     let attempts = 0
     let rateLimitRetried = false
     const MAX_ATTEMPTS = 4
+    // `cancelled` blocks stale state writes; this also stops the in-flight
+    // request itself so a slow exchange from a previous session cannot land its
+    // capability write server-side after a route swap.
+    const exchangeController = new AbortController()
 
     const runExchange = async (): Promise<void> => {
       let response: Response
@@ -241,9 +245,11 @@ export default function JavaFormatPracticeManager() {
         response = await fetch(`/api/session/${encodeURIComponent(sessionId)}/persistent-manager-capability`, {
           method: 'POST',
           credentials: 'include',
+          signal: exchangeController.signal,
         })
       } catch {
-        // Network error: transient, keep the gate closed and retry.
+        // Network error or an abort from cleanup: transient, keep the gate
+        // closed and retry (the `cancelled` guard drops an aborted attempt).
         if (!cancelled) scheduleRetryOrGiveUp()
         return
       }
@@ -344,6 +350,7 @@ export default function JavaFormatPracticeManager() {
 
     return () => {
       cancelled = true
+      exchangeController.abort()
       if (retryTimer) clearTimeout(retryTimer)
     }
   }, [sessionId, markManagerAuthLost, managerAccessRetryNonce])
