@@ -17,7 +17,9 @@ import {
     isManagerPlaybackGestureRecent,
     nextManagerPlaybackFlushRetry,
     readRecoveredPersistentSourceUrl,
+    resolveManagerPlaybackFlushOutcome,
     resolveManagerStateChangeIntent,
+    shouldMirrorManagerPlaybackTransition,
     sanitizeManagerApiErrorMessage,
     shouldApplyManagerStateUpdate,
     shouldAutoStartBootstrapSource,
@@ -450,6 +452,49 @@ void test('nextManagerPlaybackFlushRetry retries a failed send to a bound then g
   assert.deepEqual(nextManagerPlaybackFlushRetry(0), { retry: true, nextRetryCount: 1 })
   assert.deepEqual(nextManagerPlaybackFlushRetry(2), { retry: true, nextRetryCount: 3 })
   assert.deepEqual(nextManagerPlaybackFlushRetry(3), { retry: false, nextRetryCount: 0 })
+})
+
+void test('resolveManagerPlaybackFlushOutcome only retries a confirmed auth failure', () => {
+  // Success: nothing to do, counter reset.
+  assert.deepEqual(
+    resolveManagerPlaybackFlushOutcome({ result: { ok: true }, currentRetryCount: 2 }),
+    { action: 'done', nextRetryCount: 0 },
+  )
+  // Confirmed 401/403 within budget: retain and retry.
+  assert.deepEqual(
+    resolveManagerPlaybackFlushOutcome({ result: { ok: false, retryableAuth: true }, currentRetryCount: 0 }),
+    { action: 'retry', nextRetryCount: 1 },
+  )
+  // Auth failure but the retry budget is spent: drop, do not loop.
+  assert.deepEqual(
+    resolveManagerPlaybackFlushOutcome({ result: { ok: false, retryableAuth: true }, currentRetryCount: 3 }),
+    { action: 'drop', nextRetryCount: 0 },
+  )
+  // A permanent 4xx/5xx or an ambiguous network/parse failure: never replay a
+  // non-idempotent play/pause - drop immediately.
+  assert.deepEqual(
+    resolveManagerPlaybackFlushOutcome({ result: { ok: false, retryableAuth: false }, currentRetryCount: 0 }),
+    { action: 'drop', nextRetryCount: 0 },
+  )
+})
+
+void test('shouldMirrorManagerPlaybackTransition exempts a natural completion from the gesture gate', () => {
+  // A real end-of-video ENDED lands long after the last click, but must still
+  // reach the server so the session does not stay isPlaying:true.
+  assert.equal(
+    shouldMirrorManagerPlaybackTransition({ isNaturalCompletion: true, gestureRecent: false }),
+    true,
+  )
+  // An involuntary play/pause with no recent activation is still dropped.
+  assert.equal(
+    shouldMirrorManagerPlaybackTransition({ isNaturalCompletion: false, gestureRecent: false }),
+    false,
+  )
+  // A deliberate click is mirrored as before.
+  assert.equal(
+    shouldMirrorManagerPlaybackTransition({ isNaturalCompletion: false, gestureRecent: true }),
+    true,
+  )
 })
 
 void test('isManagerPlaybackGestureRecent only mirrors transitions close to genuine user activation', () => {

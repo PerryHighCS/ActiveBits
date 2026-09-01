@@ -68,6 +68,12 @@ interface ManagerAccessResponse {
 
 type AutoStartStatus = 'idle' | 'starting' | 'failed'
 
+// `retryableAuth` is true only for a confirmed 401/403 (or a capability that is
+// still resolving): the one case where retaining and retrying the playback
+// intent can succeed. Permanent 4xx/5xx and ambiguous network failures are not
+// retryable - replaying a non-idempotent play/pause could rewind the session.
+type SendCommandResult = { ok: true } | { ok: false; retryableAuth: boolean }
+
 const YOUTUBE_MANAGER_LOAD_ERROR = 'YouTube player failed to load. Try a different video URL.'
 const MISSING_MANAGER_ACCESS_ERROR = 'Manager access is unavailable. Open this session from the dashboard or authenticated permalink.'
 const YOUTUBE_HOST_FALLBACK_TIMEOUT_MS = 1_500
@@ -420,6 +426,42 @@ export function nextManagerPlaybackFlushRetry(
   return { retry: false, nextRetryCount: 0 }
 }
 
+/**
+ * What `flushManagerPlaybackIntent` should do once `sendCommand` returns.
+ * A bounded retry is only ever appropriate for a confirmed auth failure
+ * (`retryableAuth`); a permanent 4xx/5xx or an ambiguous network/parse failure
+ * is dropped, never replayed, because a `play`/`pause` is not idempotent and a
+ * replay at the original position could rewind the session.
+ */
+export function resolveManagerPlaybackFlushOutcome(params: {
+  result: SendCommandResult
+  currentRetryCount: number
+}): { action: 'done' | 'retry' | 'drop'; nextRetryCount: number } {
+  if (params.result.ok) {
+    return { action: 'done', nextRetryCount: 0 }
+  }
+  if (params.result.retryableAuth) {
+    const { retry, nextRetryCount } = nextManagerPlaybackFlushRetry(params.currentRetryCount)
+    if (retry) {
+      return { action: 'retry', nextRetryCount }
+    }
+  }
+  return { action: 'drop', nextRetryCount: 0 }
+}
+
+/**
+ * Whether an `onStateChange` transition should be mirrored to the server. A
+ * natural end-of-video `ENDED` always is (otherwise the session stays
+ * `isPlaying: true` and heartbeats drive a replay loop); every other transition
+ * must follow recent genuine user activation of the manager document.
+ */
+export function shouldMirrorManagerPlaybackTransition(params: {
+  isNaturalCompletion: boolean
+  gestureRecent: boolean
+}): boolean {
+  return params.isNaturalCompletion || params.gestureRecent
+}
+
 function readManagerUserActivation(): { supported: boolean; isActive: boolean } {
   if (typeof navigator === 'undefined') {
     return { supported: false, isActive: false }
@@ -653,15 +695,16 @@ export default function VideoSyncManager() {
   const sendCommand = useCallback(async (
     command: 'play' | 'pause' | 'seek',
     options?: { positionSec?: number; reportErrors?: boolean },
-  ): Promise<boolean> => {
+  ): Promise<SendCommandResult> => {
     if (!sessionId) {
-      return false
+      return { ok: false, retryableAuth: false }
     }
     if (!hasManagerAccess) {
       if (options?.reportErrors !== false) {
         setErrorMessage(MISSING_MANAGER_ACCESS_ERROR)
       }
-      return false
+      // Capability may just be mid-resolution; a bounded retry can still land.
+      return { ok: false, retryableAuth: true }
     }
 
     const payload: Record<string, unknown> = { type: command }
@@ -679,20 +722,29 @@ export default function VideoSyncManager() {
       // a 401 -> revalidate, an error banner, or a state apply - must not
       // land on the new session's view.
       if (sessionIdRef.current !== sessionId) {
-        return false
+        return { ok: false, retryableAuth: false }
       }
 
       if (!response.ok) {
-        if (response.status === 401 || response.status === 403) {
+        const isAuthFailure = response.status === 401 || response.status === 403
+        if (isAuthFailure) {
           revalidateManagerAccess()
         }
-        const failure = (await response.json()) as { message?: string }
-        throw new Error(sanitizeManagerApiErrorMessage(failure.message, 'Failed to send command'))
+        const failure = (await response.json().catch(() => ({}))) as { message?: string }
+        const message = sanitizeManagerApiErrorMessage(failure.message, 'Failed to send command')
+        if (options?.reportErrors === false) {
+          console.error('Video sync command failed:', message)
+        } else {
+          setErrorMessage(message)
+        }
+        // Only an auth failure is worth retaining/retrying the intent for; a
+        // permanent 4xx / 5xx is not going to succeed on replay.
+        return { ok: false, retryableAuth: isAuthFailure }
       }
 
       const updated = (await response.json()) as CommandResponse
       if (sessionIdRef.current !== sessionId) {
-        return false
+        return { ok: false, retryableAuth: false }
       }
       if (updated.data?.state) {
         applyManagerStateUpdate(updated.data.state)
@@ -701,12 +753,12 @@ export default function VideoSyncManager() {
         setTelemetry(updated.data.telemetry)
       }
       setErrorMessage(null)
-      return true
+      return { ok: true }
     } catch (error) {
       // A rejected fetch (network error) skips the post-await guards above; drop
       // it too when the route has since swapped to another session.
       if (sessionIdRef.current !== sessionId) {
-        return false
+        return { ok: false, retryableAuth: false }
       }
       const message = error instanceof Error ? error.message : 'Failed to send command'
       if (options?.reportErrors === false) {
@@ -714,7 +766,11 @@ export default function VideoSyncManager() {
       } else {
         setErrorMessage(message)
       }
-      return false
+      // Ambiguous: the POST may have reached the server and committed the
+      // command. Replaying a non-idempotent play/pause with the original
+      // position could rewind the session, so do not treat this as retryable -
+      // the next heartbeat / state-update reconciles the player.
+      return { ok: false, retryableAuth: false }
     }
   }, [applyManagerStateUpdate, hasManagerAccess, revalidateManagerAccess, sessionId])
 
@@ -753,28 +809,34 @@ export default function VideoSyncManager() {
     }
 
     playbackCommandInFlightRef.current = true
-    const didSend = await sendCommand(desiredIntent, {
+    const result = await sendCommand(desiredIntent, {
       positionSec: desiredPlaybackPositionRef.current ?? undefined,
       reportErrors: false,
     })
     playbackCommandInFlightRef.current = false
 
-    if (!didSend) {
-      // Keep the intent and re-flush a bounded number of times: a transient
-      // 401/403 has already triggered `revalidateManagerAccess()`, so a short
-      // delayed retry lets the restored capability carry the gesture through
-      // instead of silently dropping it.
-      const { retry, nextRetryCount } = nextManagerPlaybackFlushRetry(playbackFlushRetryCountRef.current)
-      playbackFlushRetryCountRef.current = nextRetryCount
-      if (retry) {
+    if (!result.ok) {
+      const outcome = resolveManagerPlaybackFlushOutcome({
+        result,
+        currentRetryCount: playbackFlushRetryCountRef.current,
+      })
+      playbackFlushRetryCountRef.current = outcome.nextRetryCount
+      if (outcome.action === 'retry') {
+        // A confirmed 401/403 has already triggered `revalidateManagerAccess()`;
+        // a short bounded retry lets the restored capability carry the gesture
+        // through instead of silently dropping it.
         clearPlaybackCommandFlushTimer()
         playbackCommandFlushTimerRef.current = window.setTimeout(() => {
           flushManagerPlaybackIntentRef.current()
         }, MANAGER_PLAYBACK_COMMAND_RETRY_DELAY_MS)
-      } else {
-        desiredPlaybackIntentRef.current = null
-        desiredPlaybackPositionRef.current = null
+        return
       }
+      // 'drop': a permanent failure, an ambiguous network/parse error (the
+      // server may already have applied the command - replaying it at a stale
+      // position would rewind playback), or a spent retry budget. Let the next
+      // heartbeat / state-update reconcile the player.
+      desiredPlaybackIntentRef.current = null
+      desiredPlaybackPositionRef.current = null
       return
     }
 
@@ -870,15 +932,17 @@ export default function VideoSyncManager() {
   }, [clearManagerAutoplayCheckTimer, setSuppressPlayerEventsForWindow])
 
   const retryManagerAutoplay = useCallback((): void => {
-    const player = playerRef.current
-    if (!player) {
+    if (!playerRef.current) {
       return
     }
-    // Deliberate click -> this document now has user activation, so the play is
-    // honored and `onStateChange` may legitimately mirror it.
-    player.playVideo()
+    // Re-apply authoritative state rather than a bare `playVideo()`: that seeks
+    // the lagging blocked player to the projected server position and arms the
+    // suppression window + programmatic target, so the resulting `PLAYING`
+    // event is treated as our own echo instead of an instructor command that
+    // would rewind every client to this player's stale position.
+    applyStateToPlayer(latestStateRef.current)
     setAutoplayBlocked(false)
-  }, [])
+  }, [applyStateToPlayer])
 
   const fetchSession = useCallback(async (signal?: AbortSignal) => {
     if (!sessionId) return
@@ -1199,6 +1263,12 @@ export default function VideoSyncManager() {
                 playingStateValue: states.PLAYING,
                 pausedStateValue: states.PAUSED,
               })
+              // A natural end-of-video `ENDED` normally lands long after the last
+              // user activation, but it must still reach the server or the
+              // session stays `isPlaying: true` and heartbeats drive an
+              // end-of-video replay loop. Exempt it from the gesture-recency
+              // gate below (the programmatic-echo suppression still applies).
+              const isNaturalCompletion = event.data === states.ENDED
 
               // Playback actually started (possibly after a slow buffer that
               // tripped the autoplay-blocked check) - retire the affordance.
@@ -1242,10 +1312,11 @@ export default function VideoSyncManager() {
               if (activation.supported && activation.isActive) {
                 lastUserActivationAtRef.current = Date.now()
               }
-              if (!isManagerPlaybackGestureRecent({
+              const gestureRecent = isManagerPlaybackGestureRecent({
                 userActivationSupported: activation.supported,
                 msSinceLastUserActivation: Date.now() - lastUserActivationAtRef.current,
-              })) {
+              })
+              if (!shouldMirrorManagerPlaybackTransition({ isNaturalCompletion, gestureRecent })) {
                 return
               }
 
