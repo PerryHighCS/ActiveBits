@@ -1028,6 +1028,16 @@ export default function VideoSyncManager() {
                 nextIntent,
                 programmaticTarget: programmaticPlaybackTargetRef.current,
               })
+
+              // The programmatic target absorbs exactly one echo. Clear it once
+              // any play-state event has been seen so a later same-direction
+              // instructor click within the same suppression window is not also
+              // swallowed as an echo. (`flushManagerPlaybackIntent` still no-ops
+              // a redundant flush, so a stray second echo costs nothing.)
+              if (nextIntent != null) {
+                programmaticPlaybackTargetRef.current = null
+              }
+
               if (!record) {
                 return
               }

@@ -3137,6 +3137,115 @@ void test('heartbeat persisting a telemetry-only change does not overwrite store
   }
 })
 
+void test('heartbeat stop-reached persist re-reads and does not roll back a newer state from another instance', { concurrency: false }, async () => {
+  const originalSetInterval = globalThis.setInterval
+  const originalClearInterval = globalThis.clearInterval
+  const originalDateNow = Date.now
+  const heartbeatState: { callback: (() => void) | null } = { callback: null }
+  const timerToken = { id: 'heartbeat-token-cas' }
+  let nowMs = 20_000
+
+  globalThis.setInterval = (((callback: TimerHandler) => {
+    heartbeatState.callback = callback as () => void
+    return timerToken as unknown as ReturnType<typeof setInterval>
+  }) as unknown) as typeof setInterval
+  globalThis.clearInterval = (((_timer: ReturnType<typeof setInterval> | undefined) => {
+    // no-op for this test
+  }) as unknown) as typeof clearInterval
+  Date.now = () => nowMs
+
+  try {
+    const app = createMockApp()
+    const ws = createMockWs()
+
+    const nearStop = {
+      provider: 'youtube' as const,
+      playerHost: 'youtube-nocookie' as const,
+      videoId: 'dQw4w9WgXcQ',
+      startSec: 0,
+      stopSec: 6,
+      positionSec: 5,
+      isPlaying: true,
+      playbackRate: 1 as const,
+      updatedBy: 'instructor' as const,
+      serverTimestampMs: 20_000,
+    }
+    // The heartbeat's first strict read sees playback about to reach `stopSec`.
+    const snapshotSession = createVideoSyncSession('s1')
+    ;(snapshotSession.data as { state: typeof nearStop }).state = { ...nearStop }
+    // By the time the heartbeat is ready to persist the stop-reached pause,
+    // another instance has already committed a fresh re-play (newer timestamp).
+    const replaySession = cloneSessionRecord(snapshotSession)
+    ;(replaySession.data as { state: typeof nearStop }).state = {
+      ...nearStop,
+      positionSec: 0,
+      isPlaying: true,
+      serverTimestampMs: 21_000,
+    }
+
+    const published: Array<{ channel: string; message: Record<string, unknown> }> = []
+    const setStates: Array<{ isPlaying: boolean; serverTimestampMs: number }> = []
+    let strictReads = 0
+    const sessions = {
+      async get() {
+        return cloneSessionRecord(replaySession)
+      },
+      async getStrict() {
+        strictReads += 1
+        return cloneSessionRecord(strictReads === 1 ? snapshotSession : replaySession)
+      },
+      async set(_id: string, session: SessionRecord) {
+        const state = (session.data as { state: { isPlaying: boolean; serverTimestampMs: number } }).state
+        setStates.push({ isPlaying: state.isPlaying, serverTimestampMs: state.serverTimestampMs })
+      },
+      valkeyStore: createMockVideoSyncValkeyStore(),
+      async publishBroadcast(channel: string, message: Record<string, unknown>) {
+        published.push({ channel, message })
+      },
+      subscribeToBroadcast() {},
+    }
+
+    setupVideoSyncRoutes(app, sessions as unknown as Parameters<typeof setupVideoSyncRoutes>[1], ws as unknown as WsRouter)
+
+    const handler = ws.registered['/ws/video-sync']
+    assert.equal(typeof handler, 'function')
+
+    const recorder = createMockSocket()
+    handler?.(recorder.socket, new URLSearchParams({ sessionId: 's1', role: 'student' }))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    nowMs += 2_000
+    const runHeartbeat = heartbeatState.callback
+    if (runHeartbeat == null) {
+      throw new Error('Expected heartbeat callback to be registered')
+    }
+    runHeartbeat()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    // The stop-reached projection is still broadcast for clients (their own
+    // monotonic guard sorts out ordering)...
+    const heartbeatEnvelope = published.at(-1)?.message as {
+      type?: string
+      payload?: { state?: { isPlaying?: boolean; serverTimestampMs?: number } }
+    }
+    assert.equal(heartbeatEnvelope.type, 'heartbeat')
+    assert.equal(heartbeatEnvelope.payload?.state?.isPlaying, false)
+    assert.equal(heartbeatEnvelope.payload?.state?.serverTimestampMs, 22_000)
+    // ...but it is never persisted over the newer re-play.
+    assert.ok(strictReads >= 2, 'expected a strict re-read before the persist')
+    const lastSetState = setStates.at(-1)
+    assert.equal(lastSetState?.isPlaying, true)
+    assert.equal(lastSetState?.serverTimestampMs, 21_000)
+
+    recorder.emit('close')
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  } finally {
+    globalThis.setInterval = originalSetInterval
+    globalThis.clearInterval = originalClearInterval
+    Date.now = originalDateNow
+  }
+})
+
 void test('event route tracks current unsynced student count', async () => {
   const app = createMockApp()
   const ws = createMockWs() as unknown as WsRouter

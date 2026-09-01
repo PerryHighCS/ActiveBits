@@ -1233,19 +1233,29 @@ function ensureHeartbeat(
           sessionId,
         )
 
-        const persistHeartbeatState = shouldPersistHeartbeatState(data.state, heartbeatState)
         const persistHeartbeatTelemetry = shouldPersistHeartbeatTelemetry(data.telemetry, heartbeatTelemetry)
-        if (persistHeartbeatState || persistHeartbeatTelemetry) {
-          // Only overwrite the stored playback state on a genuine forward
-          // transition (playback reached `stopSec`). A telemetry-only persist
-          // must not write `heartbeatState` back - `applyStopIfReached` re-stamps
-          // `serverTimestampMs` to now, so doing so would resurrect a stale
-          // `isPlaying:true` with a fresh timestamp.
-          if (persistHeartbeatState) {
-            data.state = heartbeatState
+        const persistHeartbeatStopTransition = shouldPersistHeartbeatState(data.state, heartbeatState)
+        if (persistHeartbeatTelemetry || persistHeartbeatStopTransition) {
+          // Re-read strictly before writing: another instance may have advanced
+          // the session (a pause / re-play) between the strict read above and
+          // this write, and the process-local mutation queue does not serialize
+          // across instances. Merge onto the latest record so a heartbeat never
+          // rolls back newer playback state - it only ever overwrites `state` on
+          // a genuine stop-reached transition, and only when nothing newer than
+          // our snapshot is stored. `applyStopIfReached` re-stamps
+          // `serverTimestampMs` to now, so it cannot be used for that compare;
+          // the pre-projection `data.state.serverTimestampMs` is the baseline.
+          const latest = await getVideoSyncSession(sessions, sessionId, { strict: true })
+          if (latest) {
+            latest.data.telemetry = heartbeatTelemetry
+            if (
+              persistHeartbeatStopTransition &&
+              latest.data.state.serverTimestampMs <= data.state.serverTimestampMs
+            ) {
+              latest.data.state = heartbeatState
+            }
+            await sessions.set(latest.id, latest)
           }
-          data.telemetry = heartbeatTelemetry
-          await sessions.set(session.id, session)
         }
 
         const envelope = createEnvelope(sessionId, 'heartbeat', {
@@ -1262,7 +1272,15 @@ function ensureHeartbeat(
         }
       }
     })().catch((error: unknown) => {
-      console.error(`Video sync heartbeat failed for session ${sessionId}:`, error)
+      // The strict heartbeat read rejects on a Valkey outage; log it as
+      // structured data so an expected transient blip is distinguishable from a
+      // real regression.
+      console.error(JSON.stringify({
+        activity: 'video-sync',
+        event: 'heartbeat-failed',
+        sessionId,
+        errorName: error instanceof Error ? error.name : 'unknown',
+      }))
     })
   }, HEARTBEAT_INTERVAL_MS)
 

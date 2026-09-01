@@ -5,6 +5,11 @@ import { expect, test } from '@playwright/test'
 // and asserts on the manager status bar, whose "Playing:" text is bound purely
 // to the websocket `state` (independent of the YouTube iframe loading), so the
 // check is stable even where youtube-nocookie.com is unreachable from CI.
+//
+// The instructor's playback controls are the embedded YouTube iframe control
+// bar (cross-origin, external), so play/pause here go through the REST
+// `/command` path rather than iframe clicks; the manager-side echo-suppression /
+// retry logic (Defect 1) is covered by unit tests on the pure helpers.
 test('Video Sync instructor pause stays paused across multiple heartbeat intervals', async ({ browser }) => {
   test.skip(test.info().project.name !== 'chromium', 'WebKit request contexts do not retain Set-Cookie responses in this harness.')
 
@@ -24,37 +29,47 @@ test('Video Sync instructor pause stays paused across multiple heartbeat interva
     return body.id
   })
 
-  const command = async (path: string, payload: Record<string, unknown>): Promise<number> =>
-    page.evaluate(async ({ url, body }) => {
+  const command = async (path: string, method: string, data: Record<string, unknown>): Promise<number> =>
+    page.evaluate(async ({ url, verb, body }) => {
       const response = await fetch(url, {
-        method: body.method as string,
+        method: verb,
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body.data),
+        body: JSON.stringify(body),
       })
       return response.status
-    }, { url: path, body: payload })
+    }, { url: path, verb: method, body: data })
 
-  expect(await command(`/api/video-sync/${sessionId}/session`, {
-    method: 'PATCH',
-    data: { sourceUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ' },
+  expect(await command(`/api/video-sync/${sessionId}/session`, 'PATCH', {
+    sourceUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
   })).toBe(200)
+
+  // Count heartbeat frames on the manager's websocket so the "held across >= 2
+  // intervals" check waits on observed heartbeats, not elapsed wall time.
+  let heartbeatFrames = 0
+  page.on('websocket', (ws) => {
+    ws.on('framereceived', (frame) => {
+      if (typeof frame.payload === 'string' && frame.payload.includes('"type":"heartbeat"')) {
+        heartbeatFrames += 1
+      }
+    })
+  })
 
   await page.goto(`/manage/video-sync/${encodeURIComponent(sessionId)}`)
 
   const managerStatus = page.locator('[aria-live="polite"]')
   await expect(managerStatus).toContainText('Playing: No')
 
-  // Play, then pause - mirroring an instructor clicking the controls.
-  expect(await command(`/api/video-sync/${sessionId}/command`, { method: 'POST', data: { type: 'play' } })).toBe(200)
+  expect(await command(`/api/video-sync/${sessionId}/command`, 'POST', { type: 'play' })).toBe(200)
   await expect(managerStatus).toContainText('Playing: Yes')
 
-  expect(await command(`/api/video-sync/${sessionId}/command`, { method: 'POST', data: { type: 'pause' } })).toBe(200)
+  expect(await command(`/api/video-sync/${sessionId}/command`, 'POST', { type: 'pause' })).toBe(200)
   await expect(managerStatus).toContainText('Playing: No')
 
-  // Hold across >= 2 heartbeat intervals (3s each): a stale heartbeat frame must
-  // not resume playback on the client.
-  await page.waitForTimeout(7_000)
+  const framesAtPause = heartbeatFrames
+  // Wait for >= 2 further heartbeat frames (3s cadence): a stale heartbeat frame
+  // must not resume playback on the client.
+  await expect.poll(() => heartbeatFrames - framesAtPause, { timeout: 15_000 }).toBeGreaterThanOrEqual(2)
   await expect(managerStatus).toContainText('Playing: No')
   await expect(page.getByText('Live updates unavailable. Attempting reconnect...')).toHaveCount(0)
 

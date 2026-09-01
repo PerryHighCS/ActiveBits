@@ -437,6 +437,23 @@ void test('resolveManagerStateChangeIntent records a real gesture but drops its 
   )
 })
 
+void test('a consumed programmatic target does not swallow a later same-direction instructor click', () => {
+  // Mirrors the onStateChange sequence: the ref absorbs exactly one echo, then
+  // is cleared, so play -> pause -> play inside one suppression window all land.
+  let programmaticTarget: 'play' | 'pause' | null = 'play'
+  const step = (nextIntent: 'play' | 'pause' | null) => {
+    const result = resolveManagerStateChangeIntent({ suppressed: true, nextIntent, programmaticTarget })
+    if (nextIntent != null) {
+      programmaticTarget = null
+    }
+    return result.record
+  }
+
+  assert.equal(step('play'), false) // programmatic echo, dropped
+  assert.equal(step('pause'), true) // instructor pause inside the window
+  assert.equal(step('play'), true) // instructor re-play, same direction as the echo
+})
+
 void test('shouldCorrectManagerPlaybackDrift is lenient while instructor playback is actively running', () => {
   assert.equal(shouldCorrectManagerPlaybackDrift(10, 10.6, true), false)
   assert.equal(shouldCorrectManagerPlaybackDrift(10, 11.2, true), false)
