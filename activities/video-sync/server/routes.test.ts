@@ -888,6 +888,89 @@ void test('session get route persists the session when projected playback reache
   }
 })
 
+void test('session get route re-reads before persisting and does not roll back a concurrent remote re-play', async () => {
+  const originalDateNow = Date.now
+  Date.now = () => 30_000
+
+  try {
+    const app = createMockApp()
+    const ws = createMockWs() as unknown as WsRouter
+    const session = createVideoSyncSession('s1')
+    ;(session.data as {
+      state: {
+        provider: 'youtube'
+        videoId: string
+        startSec: number
+        stopSec: number | null
+        positionSec: number
+        isPlaying: boolean
+        playbackRate: 1
+        updatedBy: 'instructor' | 'system'
+        serverTimestampMs: number
+      }
+    }).state = {
+      provider: 'youtube',
+      videoId: 'dQw4w9WgXcQ',
+      startSec: 0,
+      stopSec: 6,
+      positionSec: 5,
+      isPlaying: true,
+      playbackRate: 1,
+      updatedBy: 'instructor',
+      serverTimestampMs: 10_000,
+    }
+    const storeState = createSessionStore({ s1: session })
+
+    let strictGetCalls = 0
+    const setStates: Array<{ isPlaying: boolean; positionSec: number }> = []
+    const sessions = {
+      ...storeState.sessions,
+      async getStrict(id: string) {
+        strictGetCalls += 1
+        const record = await storeState.sessions.get(id)
+        if (record && strictGetCalls >= 2) {
+          // Another instance re-played (past the old stop) between the projection
+          // read and this route's write-back.
+          ;(record.data as { state: { isPlaying: boolean; positionSec: number; stopSec: number | null; serverTimestampMs: number } }).state = {
+            ...(record.data as { state: Record<string, unknown> }).state,
+            isPlaying: true,
+            positionSec: 2,
+            stopSec: null,
+            serverTimestampMs: 20_000,
+          } as never
+        }
+        return record
+      },
+      async set(id: string, updatedSession: SessionRecord) {
+        const s = (updatedSession.data as { state?: { isPlaying?: boolean; positionSec?: number } }).state
+        setStates.push({ isPlaying: Boolean(s?.isPlaying), positionSec: Number(s?.positionSec ?? -1) })
+        return storeState.sessions.set(id, updatedSession)
+      },
+    }
+
+    setupVideoSyncRoutes(app, sessions, ws)
+    const handler = app.handlers.get['/api/video-sync/:sessionId/session']
+    assert.equal(typeof handler, 'function')
+
+    const res = createResponse()
+    await handler?.({ params: { sessionId: 's1' } }, res)
+
+    assert.equal(res.statusCode, 200)
+    const payload = res.body as { data?: { state?: { isPlaying?: boolean; positionSec?: number } } }
+    // The concurrent re-play wins; the GET must not roll it back to the
+    // projected stop-reached pause.
+    assert.equal(payload.data?.state?.isPlaying, true)
+    assert.equal(payload.data?.state?.positionSec, 2)
+    assert.ok(strictGetCalls >= 2)
+    assert.ok(
+      setStates.every((entry) => entry.isPlaying === true),
+      `expected no persisted isPlaying:false stop frame, got ${JSON.stringify(setStates)}`,
+    )
+  } finally {
+    Date.now = originalDateNow
+  }
+})
+
 void test('session patch returns invalid source url for unsupported non-YouTube host', async () => {
   const app = createMockApp()
   const ws = createMockWs() as unknown as WsRouter

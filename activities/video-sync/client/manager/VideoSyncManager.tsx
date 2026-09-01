@@ -1231,7 +1231,13 @@ export default function VideoSyncManager() {
               // this document. Without this, a manager whose player cannot reach
               // the shared state (autoplay-blocked, mid-seek, buffering) echoes
               // its involuntary pauses/plays back as commands, and connected
-              // managers fight over playback.
+              // managers fight over playback. Per the HTML activation
+              // notification steps, a click inside the cross-origin YouTube
+              // iframe propagates its activation timestamp to every ancestor
+              // navigable regardless of origin, so this parent document is
+              // activated by a real control-bar click (only descendants are
+              // origin-filtered). `lastUserActivationAtRef` + the grace window
+              // cover the latency before YouTube posts the onStateChange back.
               const activation = readManagerUserActivation()
               if (activation.supported && activation.isActive) {
                 lastUserActivationAtRef.current = Date.now()

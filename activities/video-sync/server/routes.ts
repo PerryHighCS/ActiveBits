@@ -1550,7 +1550,8 @@ export default function setupVideoSyncRoutes(
       return
     }
 
-    const projectedState = applyStopIfReached(data.state)
+    const snapshotState = data.state
+    const projectedState = applyStopIfReached(snapshotState)
     const projectedTelemetry = cloneTelemetry(data.telemetry)
     await updateConnectionTelemetry(
       sessions,
@@ -1562,14 +1563,36 @@ export default function setupVideoSyncRoutes(
       sessionId,
     )
 
+    let responseState = projectedState
+    let responseTelemetry = projectedTelemetry
+
     if (
       didNormalizeSessionData ||
-      shouldPersistHeartbeatState(data.state, projectedState) ||
+      shouldPersistHeartbeatState(snapshotState, projectedState) ||
       shouldPersistHeartbeatTelemetry(data.telemetry, projectedTelemetry)
     ) {
-      data.state = projectedState
-      data.telemetry = projectedTelemetry
-      await sessions.set(session.id, session)
+      // Re-read strictly right before writing. `applyStopIfReached` re-stamps
+      // `serverTimestampMs` to now, so an unconditional write-back of this GET's
+      // older projection would clobber a pause / re-play another instance
+      // committed since the read above and re-stamp it "newer". Fold in only the
+      // two heartbeat-owned telemetry counters; overwrite `state` only when the
+      // store still holds our exact snapshot. Same shape as the heartbeat and
+      // websocket persist paths.
+      const { session: latest, data: latestData } = await getVideoSyncSessionWithNormalization(
+        sessions,
+        sessionId,
+        { strict: true },
+      )
+      if (latest && latestData) {
+        latestData.telemetry.connections.activeCount = projectedTelemetry.connections.activeCount
+        latestData.telemetry.sync.unsyncedStudents = projectedTelemetry.sync.unsyncedStudents
+        if (isDeepStrictEqual(latestData.state, snapshotState)) {
+          latestData.state = projectedState
+        }
+        await sessions.set(latest.id, latest)
+        responseState = latestData.state
+        responseTelemetry = latestData.telemetry
+      }
     }
 
     res.json({
@@ -1577,8 +1600,8 @@ export default function setupVideoSyncRoutes(
       type: session.type,
       data: toPublicSessionData({
         ...data,
-        state: projectedState,
-        telemetry: projectedTelemetry,
+        state: responseState,
+        telemetry: responseTelemetry,
       }),
     })
     })
