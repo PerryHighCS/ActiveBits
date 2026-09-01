@@ -526,6 +526,10 @@ export default function VideoSyncManager() {
   const suppressPlayerEventsTimeoutRef = useRef<number | null>(null)
   const autoStartAttemptKeyRef = useRef<string | null>(null)
   const managerAccessBootstrapRefreshAttemptsRef = useRef<Map<string, number>>(new Map())
+  // The session id the component is currently mounted for. An async request
+  // captures its own `sessionId`; comparing against this ref after each await
+  // drops a response that resolved after a parameter-only route swap.
+  const sessionIdRef = useRef(sessionId)
   const queryBootstrapSourceUrl = useMemo(() => readBootstrapSourceUrl(location.search), [location.search])
   const embeddedManagerCapabilityExchange = useEmbeddedManagerCapabilityExchange({
     sessionId: sessionId ?? undefined,
@@ -587,6 +591,7 @@ export default function VideoSyncManager() {
   // by the freshness guard forever, leaving the manager controlling B while still
   // displaying A's video.
   useEffect(() => {
+    sessionIdRef.current = sessionId
     latestStateRef.current = DEFAULT_STATE
     setState(DEFAULT_STATE)
     setTelemetry(EMPTY_TELEMETRY)
@@ -670,6 +675,13 @@ export default function VideoSyncManager() {
         body: JSON.stringify(payload),
       })
 
+      // A route swap to another session happened mid-request; its result -
+      // a 401 -> revalidate, an error banner, or a state apply - must not
+      // land on the new session's view.
+      if (sessionIdRef.current !== sessionId) {
+        return false
+      }
+
       if (!response.ok) {
         if (response.status === 401 || response.status === 403) {
           revalidateManagerAccess()
@@ -679,6 +691,9 @@ export default function VideoSyncManager() {
       }
 
       const updated = (await response.json()) as CommandResponse
+      if (sessionIdRef.current !== sessionId) {
+        return false
+      }
       if (updated.data?.state) {
         applyManagerStateUpdate(updated.data.state)
       }
@@ -697,6 +712,14 @@ export default function VideoSyncManager() {
       return false
     }
   }, [applyManagerStateUpdate, hasManagerAccess, revalidateManagerAccess, sessionId])
+
+  // `flushManagerPlaybackIntent` re-schedules itself (a bounded transient-failure
+  // retry, and a follow-up flush when a newer gesture landed mid-send). Those
+  // timers must call the *latest* callback: one scheduled while `hasManagerAccess`
+  // was momentarily false during a `revalidateManagerAccess()` cycle would
+  // otherwise keep re-running a closure bound to `hasManagerAccess === false` and
+  // drop the gesture even after access recovers.
+  const flushManagerPlaybackIntentRef = useRef<() => void>(() => {})
 
   const flushManagerPlaybackIntent = useCallback(async (): Promise<void> => {
     clearPlaybackCommandFlushTimer()
@@ -741,7 +764,7 @@ export default function VideoSyncManager() {
       if (retry) {
         clearPlaybackCommandFlushTimer()
         playbackCommandFlushTimerRef.current = window.setTimeout(() => {
-          void flushManagerPlaybackIntent()
+          flushManagerPlaybackIntentRef.current()
         }, MANAGER_PLAYBACK_COMMAND_RETRY_DELAY_MS)
       } else {
         desiredPlaybackIntentRef.current = null
@@ -762,27 +785,27 @@ export default function VideoSyncManager() {
     }
 
     playbackCommandFlushTimerRef.current = window.setTimeout(() => {
-      void flushManagerPlaybackIntent()
+      flushManagerPlaybackIntentRef.current()
     }, MANAGER_PLAYBACK_COMMAND_FLUSH_DELAY_MS)
   }, [clearPlaybackCommandFlushTimer, sendCommand, setSuppressPlayerEventsForWindow])
 
+  useEffect(() => {
+    flushManagerPlaybackIntentRef.current = () => {
+      void flushManagerPlaybackIntent()
+    }
+  }, [flushManagerPlaybackIntent])
+
+  // Reads the latest flush through the ref, so it never closes over a stale
+  // `sendCommand`/`hasManagerAccess` and is referentially stable for the life of
+  // the component (its only dependency is a `[]`-stable callback). That keeps the
+  // player-lifecycle effect below from tearing down and rebuilding the YouTube
+  // player - and wiping any in-flight retry - on every access-cookie refresh.
   const scheduleManagerPlaybackIntentFlush = useCallback((delayMs = MANAGER_PLAYBACK_COMMAND_FLUSH_DELAY_MS): void => {
     clearPlaybackCommandFlushTimer()
     playbackCommandFlushTimerRef.current = window.setTimeout(() => {
-      void flushManagerPlaybackIntent()
+      flushManagerPlaybackIntentRef.current()
     }, delayMs)
-  }, [clearPlaybackCommandFlushTimer, flushManagerPlaybackIntent])
-
-  // `scheduleManagerPlaybackIntentFlush` is recreated whenever `sendCommand` is (its
-  // `hasManagerAccess` dependency flips transiently during a 401/403
-  // `revalidateManagerAccess()` cycle). Read the latest flush through a ref inside the
-  // player-lifecycle effect below instead of depending on the callback directly, so an
-  // access-cookie refresh does not tear down and rebuild the YouTube player - which
-  // would also wipe the in-flight retry this callback schedules.
-  const scheduleManagerPlaybackIntentFlushRef = useRef(scheduleManagerPlaybackIntentFlush)
-  useEffect(() => {
-    scheduleManagerPlaybackIntentFlushRef.current = scheduleManagerPlaybackIntentFlush
-  }, [scheduleManagerPlaybackIntentFlush])
+  }, [clearPlaybackCommandFlushTimer])
 
   const applyStateToPlayer = useCallback((nextState: VideoSyncState) => {
     const player = playerRef.current
@@ -1223,7 +1246,7 @@ export default function VideoSyncManager() {
               playbackFlushRetryCountRef.current = 0
               desiredPlaybackIntentRef.current = nextIntent
               desiredPlaybackPositionRef.current = playerPosition
-              scheduleManagerPlaybackIntentFlushRef.current()
+              scheduleManagerPlaybackIntentFlush()
             },
             onError: () => {
               if (cancelled || candidateIndex !== activeAttemptIndex) return
@@ -1275,6 +1298,7 @@ export default function VideoSyncManager() {
     clearManagerAutoplayCheckTimer,
     clearPlaybackCommandFlushTimer,
     clearPlayerEventSuppression,
+    scheduleManagerPlaybackIntentFlush,
     setupMode,
     state.playerHost,
   ])
