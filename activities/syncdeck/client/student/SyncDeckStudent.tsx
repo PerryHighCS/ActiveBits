@@ -34,6 +34,7 @@ import { resolveSyncDeckStudentCloseDecision } from './reconnectUtils.js'
 import ConnectionStatusDot from '../components/ConnectionStatusDot.js'
 import { getStudentPresentationCompatibilityError } from '../shared/presentationUrlCompatibility.js'
 import { isSyncDeckDebugEnabled } from '../shared/syncDebug.js'
+import { shouldRetryInitialSocket } from '../shared/initialSocketRetry.js'
 import {
   buildSyncDeckDocumentTitle,
   extractRevealMetadataTitle,
@@ -278,6 +279,7 @@ interface RevealCommandMessage {
 }
 
 const WS_OPEN_READY_STATE = 1
+const INITIAL_SOCKET_RETRY_DELAY_MS = 350
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return value != null && typeof value === 'object' && !Array.isArray(value)
 }
@@ -2914,8 +2916,27 @@ const SyncDeckStudent: FC = () => {
       return undefined
     }
 
-    connectStudentWs()
+    // React Strict Mode mounts, cleans up, then remounts effects in
+    // development. Defer the connect and mark cleanup disposed first so the
+    // discarded setup cancels before it opens a real socket that would close
+    // before its handshake. Matches SyncDeckManager's instructor-socket effect.
+    let disposed = false
+    let initialRetryTimeout: ReturnType<typeof setTimeout> | null = null
+    queueMicrotask(() => {
+      if (!disposed) {
+        connectStudentWs()
+      }
+    })
+    initialRetryTimeout = setTimeout(() => {
+      if (!disposed && shouldRetryInitialSocket(studentSocketRef.current?.readyState)) {
+        connectStudentWs()
+      }
+    }, INITIAL_SOCKET_RETRY_DELAY_MS)
     return () => {
+      disposed = true
+      if (initialRetryTimeout != null) {
+        clearTimeout(initialRetryTimeout)
+      }
       disconnectStudentWs()
     }
   }, [
@@ -2927,6 +2948,7 @@ const SyncDeckStudent: FC = () => {
     registeredStudentId,
     connectStudentWs,
     disconnectStudentWs,
+    studentSocketRef,
   ])
 
   const handleIframeLoad = useCallback(() => {

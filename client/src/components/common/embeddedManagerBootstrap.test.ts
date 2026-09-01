@@ -1,12 +1,27 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
+  EMBEDDED_MANAGER_ACTIVATED,
   EMBEDDED_MANAGER_BOOTSTRAP_REFRESH_REQUEST,
+  isEmbeddedManagerActivatedMessage,
   readEmbeddedManagerBootstrapRefreshRequest,
   readEmbeddedManagerToken,
   removeEmbeddedManagerToken,
   requestEmbeddedManagerBootstrapRefresh,
 } from './embeddedManagerBootstrap'
+
+void test('isEmbeddedManagerActivatedMessage accepts only the matching child activation signal', () => {
+  assert.equal(
+    isEmbeddedManagerActivatedMessage({
+      type: EMBEDDED_MANAGER_ACTIVATED,
+      childSessionId: 'child-video',
+    }, 'child-video'),
+    true,
+  )
+  assert.equal(isEmbeddedManagerActivatedMessage({ type: EMBEDDED_MANAGER_ACTIVATED, childSessionId: 'other' }, 'child-video'), false)
+  assert.equal(isEmbeddedManagerActivatedMessage({ type: 'other', childSessionId: 'child-video' }, 'child-video'), false)
+  assert.equal(isEmbeddedManagerActivatedMessage(null, 'child-video'), false)
+})
 
 void test('readEmbeddedManagerToken returns only a non-empty trimmed manager token', () => {
   assert.equal(readEmbeddedManagerToken('?embeddedManagerToken=token-123'), 'token-123')

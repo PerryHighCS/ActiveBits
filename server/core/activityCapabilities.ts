@@ -30,6 +30,10 @@ const MAX_CAPABILITIES_PER_SESSION = 200
 /** Bounded capability lifetime; a captured token cannot be replayed past this. */
 export const DEFAULT_ACTIVITY_CAPABILITY_TTL_MS = 7 * 24 * 60 * 60 * 1000
 
+export interface ActivityCapabilityCookieResponse {
+  cookie(name: string, value: string, options: Record<string, unknown>): void
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value != null && typeof value === 'object' && !Array.isArray(value)
 }
@@ -82,6 +86,22 @@ export function issueActivityCapability(
     delete container.activityCapabilities[entry.id]
   }
   return { id, token }
+}
+
+/** Delivers an already-persisted opaque capability as an httpOnly cookie. */
+export function writeActivityCapabilityCookie(
+  res: ActivityCapabilityCookieResponse,
+  sessionId: string,
+  principalKind: ActivityPrincipalKind,
+  token: string,
+): void {
+  res.cookie(getActivityCapabilityCookieName(principalKind, sessionId), token, {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: process.env.NODE_ENV === 'production',
+    path: '/',
+    maxAge: DEFAULT_ACTIVITY_CAPABILITY_TTL_MS,
+  })
 }
 
 export function resolveActivityCapability(

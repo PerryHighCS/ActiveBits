@@ -2,7 +2,10 @@ import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
 import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler'
 import { copyTextWithReset } from '@src/hooks/useClipboard'
 import { storeCreateSessionBootstrapPayload } from '@src/components/common/manageDashboardUtils'
-import { readEmbeddedManagerBootstrapRefreshRequest } from '@src/components/common/embeddedManagerBootstrap'
+import {
+  EMBEDDED_MANAGER_ACTIVATED,
+  readEmbeddedManagerBootstrapRefreshRequest,
+} from '@src/components/common/embeddedManagerBootstrap'
 import { StudentPresencePanel, StudentPresenceToggleButton } from '@src/components/common/StudentPresence'
 import { requestStudentReturn } from './studentReturnUtils.js'
 import { resolvePersistentSessionEntryPolicy, type PersistentSessionEntryPolicy } from '../../../../types/waitingRoom.js'
@@ -12,6 +15,7 @@ import {
 } from '../shared/presentationUrlCompatibility.js'
 import { isSyncDeckDebugEnabled } from '../shared/syncDebug.js'
 import { shouldRelayRevealSyncPayloadToSession } from '../shared/revealSyncRelayPolicy.js'
+import { shouldRetryInitialSocket } from '../shared/initialSocketRetry.js'
 import {
   buildSyncDeckDocumentTitle,
   extractRevealMetadataTitle,
@@ -55,6 +59,7 @@ import ConnectionStatusDot from '../components/ConnectionStatusDot.js'
 const SYNCDECK_CHALKBOARD_OPEN_KEY_PREFIX = 'syncdeck_chalkboard_open_'
 const WS_OPEN_READY_STATE = 1
 const DISCONNECTED_STATUS_DELAY_MS = 250
+const INITIAL_SOCKET_RETRY_DELAY_MS = 350
 const CANONICAL_BOUNDARY_FRAGMENT_INDEX = -1
 const RESTORE_SUPPRESSION_TIMEOUT_MS = 2500
 const EMBEDDED_BOOTSTRAP_BACKFILL_BASE_RETRY_DELAY_MS = 1000
@@ -1093,6 +1098,20 @@ export function resolveManagerActiveEmbeddedInstanceKey(
   }
 
   return selected
+}
+
+/**
+ * Whether the manager should re-post EMBEDDED_MANAGER_ACTIVATED to the active
+ * embedded child. True only on an actual transition of the active instance -
+ * `instructorIndicesState` also changes for fragment/state updates on the same
+ * slide, and re-posting there makes the child (Video Sync) needlessly churn its
+ * manager socket and re-run /manager-access.
+ */
+export function shouldReactivateEmbeddedManager(
+  previousActiveInstanceKey: string | null,
+  activeInstanceKey: string | null,
+): boolean {
+  return activeInstanceKey != null && activeInstanceKey !== previousActiveInstanceKey
 }
 
 export function resolveManagerEmbeddedInstanceStatus(
@@ -2280,6 +2299,11 @@ const SyncDeckManager: FC = () => {
   const [failedEmbeddedBootstrapChildSessionIds, setFailedEmbeddedBootstrapChildSessionIds] = useState<string[]>([])
   const presentationIframeRef = useRef<HTMLIFrameElement | null>(null)
   const embeddedManagerIframeRefs = useRef<Record<string, HTMLIFrameElement | null>>({})
+  // The embedded instance key we last posted EMBEDDED_MANAGER_ACTIVATED for, so
+  // a re-activation is sent only on an actual change of the active instance -
+  // not on every `instructorIndicesState` update (fragment/state changes on the
+  // same slide), which would make the child manager churn its socket.
+  const lastActivatedEmbeddedInstanceKeyRef = useRef<string | null>(null)
   const reportPreviewTriggerRef = useRef<HTMLButtonElement | null>(null)
   const reportPreviewDialogRef = useRef<HTMLDivElement | null>(null)
   const restoreDocumentTitleRef = useRef<string | null>(null)
@@ -2550,6 +2574,37 @@ const SyncDeckManager: FC = () => {
       setEmbeddedBootstrapBackfillRetryNonce((current) => current + 1)
     }
   }, [embeddedActivities, mountedEmbeddedManagerInstanceKeys])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    const activeInstanceKey = resolveManagerActiveEmbeddedInstanceKey(embeddedActivities, instructorIndicesState)
+    if (!activeInstanceKey) {
+      lastActivatedEmbeddedInstanceKeyRef.current = null
+      return
+    }
+
+    // Only re-activate on a real transition of the active embedded instance.
+    // First delivery for a freshly loaded iframe is still handled by its onLoad
+    // handler.
+    if (!shouldReactivateEmbeddedManager(lastActivatedEmbeddedInstanceKeyRef.current, activeInstanceKey)) {
+      return
+    }
+
+    const record = embeddedActivities[activeInstanceKey]
+    const iframe = embeddedManagerIframeRefs.current[activeInstanceKey]
+    if (!record || !iframe?.contentWindow) {
+      return
+    }
+
+    lastActivatedEmbeddedInstanceKeyRef.current = activeInstanceKey
+    iframe.contentWindow.postMessage({
+      type: EMBEDDED_MANAGER_ACTIVATED,
+      childSessionId: record.childSessionId,
+    }, window.location.origin)
+  }, [embeddedActivities, instructorIndicesState])
 
   useEffect(
     () => () => {
@@ -3976,11 +4031,36 @@ const SyncDeckManager: FC = () => {
       return undefined
     }
 
-    connectInstructorWs()
+    // React Strict Mode intentionally mounts, cleans up, and remounts effects
+    // in development. Deferring the connection lets the discarded setup cancel
+    // before it opens a real WebSocket, avoiding a false failed handshake.
+    let disposed = false
+    let initialRetryTimeout: ReturnType<typeof setTimeout> | null = null
+    queueMicrotask(() => {
+      if (!disposed) {
+        connectInstructorWs()
+      }
+    })
+    initialRetryTimeout = setTimeout(() => {
+      if (!disposed && shouldRetryInitialSocket(instructorSocketRef.current?.readyState)) {
+        connectInstructorWs()
+      }
+    }, INITIAL_SOCKET_RETRY_DELAY_MS)
     return () => {
+      disposed = true
+      if (initialRetryTimeout != null) {
+        clearTimeout(initialRetryTimeout)
+      }
       disconnectInstructorWs()
     }
-  }, [isConfigurePanelOpen, sessionId, instructorPasscode, connectInstructorWs, disconnectInstructorWs])
+  }, [
+    isConfigurePanelOpen,
+    sessionId,
+    instructorPasscode,
+    connectInstructorWs,
+    disconnectInstructorWs,
+    instructorSocketRef,
+  ])
 
   const activityPickerEntries = useMemo(
     () => resolveSyncDeckActivityPickerEntries(
@@ -5229,12 +5309,25 @@ const SyncDeckManager: FC = () => {
                                   delete embeddedManagerIframeRefs.current[instanceKey]
                                 }
                               }}
-                              referrerPolicy="no-referrer"
+                              // Preserve only this app's origin for nested third-party embeds
+                              // (such as YouTube), never the one-time entry token in this URL.
+                              referrerPolicy="strict-origin-when-cross-origin"
                               {...inactiveIframeAccessibilityProps}
-                              onLoad={() => {
+                              onLoad={(event) => {
                                 setLoadedEmbeddedManagerInstanceKeys((current) => (
                                   current[instanceKey] ? current : { ...current, [instanceKey]: true }
                                 ))
+                                if (isActive) {
+                                  // Keep the activation ref in step with this
+                                  // first delivery so the activation effect does
+                                  // not treat the same instance as a new
+                                  // transition and post a duplicate.
+                                  lastActivatedEmbeddedInstanceKeyRef.current = instanceKey
+                                  event.currentTarget.contentWindow?.postMessage({
+                                    type: EMBEDDED_MANAGER_ACTIVATED,
+                                    childSessionId: record.childSessionId,
+                                  }, window.location.origin)
+                                }
                               }}
                             />
                           ) : null}

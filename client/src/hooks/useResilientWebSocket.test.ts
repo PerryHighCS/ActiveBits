@@ -36,6 +36,18 @@ class FakeWebSocket {
     this.closed = true
   }
 
+  emitOpen(): void {
+    this.onopen?.({})
+  }
+
+  emitMessage(data: unknown): void {
+    this.onmessage?.({ data })
+  }
+
+  emitError(): void {
+    this.onerror?.({})
+  }
+
   emitClose(code: number): void {
     this.readyState = 3
     this.onclose?.({ code })
@@ -167,6 +179,242 @@ void test('a terminal close does not reconnect and a changed isTerminalClose ide
       1,
       'an unrelated rerender (new isTerminalClose identity) must not open another socket',
     )
+
+    await act(async () => {
+      root.unmount()
+    })
+  } finally {
+    restoreDom()
+  }
+})
+
+void test('stale socket events cannot change the live connection state', async () => {
+  const restoreDom = installDomEnvironment()
+  FakeWebSocket.instances.length = 0
+  const container = document.getElementById('root')
+  assert.ok(container)
+  const root = createRoot(container)
+  let reconnect: (() => WebSocket | null) | null = null
+  let openCalls = 0
+  let messageCalls = 0
+  let errorCalls = 0
+  let closeCalls = 0
+
+  function Probe(): null {
+    const connection = useResilientWebSocket({
+      buildUrl: 'wss://example.test/socket',
+      connectOnMount: true,
+      shouldReconnect: false,
+      onOpen: () => { openCalls += 1 },
+      onMessage: () => { messageCalls += 1 },
+      onError: () => { errorCalls += 1 },
+      onClose: () => { closeCalls += 1 },
+    })
+    reconnect = connection.connect
+    return null
+  }
+
+  try {
+    await act(async () => {
+      root.render(createElement(Probe))
+    })
+    const firstSocket = FakeWebSocket.instances[0]
+    assert.ok(firstSocket)
+
+    await act(async () => {
+      reconnect?.()
+    })
+    const secondSocket = FakeWebSocket.instances[1]
+    assert.ok(secondSocket)
+
+    // connect() already closed the replaced socket; clear the flag so the assertion
+    // below proves the onopen handler itself re-closes a stale socket that opens late.
+    firstSocket.closed = false
+
+    await act(async () => {
+      console.info('[TEST] every event from the replaced socket must be ignored and the stale socket closed on open')
+      firstSocket.emitOpen()
+      firstSocket.emitMessage('stale-payload')
+      firstSocket.emitError()
+      firstSocket.emitClose(1006)
+    })
+    assert.equal(openCalls, 0, 'a stale open must not reach the consumer')
+    assert.equal(messageCalls, 0, 'a stale message must not reach the consumer')
+    assert.equal(errorCalls, 0, 'a stale error must not reach the consumer')
+    assert.equal(closeCalls, 0, 'a stale close must not reach the consumer')
+    assert.equal(firstSocket.closed, true, 'a stale socket that opens late must be closed')
+
+    await act(async () => {
+      secondSocket.emitOpen()
+      secondSocket.emitMessage('live-payload')
+    })
+    assert.equal(openCalls, 1, 'the current socket still delivers open')
+    assert.equal(messageCalls, 1, 'the current socket still delivers messages')
+
+    await act(async () => {
+      console.info('[TEST] closing the current socket with an intentional abnormal 1006 code')
+      secondSocket.emitClose(1006)
+    })
+    assert.equal(closeCalls, 1)
+
+    await act(async () => {
+      root.unmount()
+    })
+  } finally {
+    restoreDom()
+  }
+})
+
+void test('an intentional disconnect still delivers onClose so consumers can clean up', async () => {
+  const restoreDom = installDomEnvironment()
+  FakeWebSocket.instances.length = 0
+  const container = document.getElementById('root')
+  assert.ok(container)
+  const root = createRoot(container)
+  let disconnect: (() => void) | null = null
+  let closeCalls = 0
+
+  function Probe(): null {
+    const connection = useResilientWebSocket({
+      buildUrl: 'wss://example.test/socket',
+      connectOnMount: true,
+      shouldReconnect: false,
+      onClose: () => { closeCalls += 1 },
+    })
+    disconnect = connection.disconnect
+    return null
+  }
+
+  try {
+    await act(async () => {
+      root.render(createElement(Probe))
+    })
+    const socket = FakeWebSocket.instances[0]
+    assert.ok(socket)
+    await act(async () => {
+      socket.emitOpen()
+    })
+
+    await act(async () => {
+      // disconnect() nulls socketRef synchronously; the browser then dispatches
+      // close on a later tick, i.e. after the socket is no longer "latest".
+      disconnect?.()
+      socket.emitClose(1000)
+    })
+    assert.equal(closeCalls, 1, 'onClose must fire for a manual disconnect, not just for live-socket closes')
+
+    await act(async () => {
+      root.unmount()
+    })
+  } finally {
+    restoreDom()
+  }
+})
+
+void test('a disconnected socket cannot deliver onClose once a reconnect owns the slot', async () => {
+  const restoreDom = installDomEnvironment()
+  FakeWebSocket.instances.length = 0
+  const container = document.getElementById('root')
+  assert.ok(container)
+  const root = createRoot(container)
+  let reconnect: (() => WebSocket | null) | null = null
+  let disconnect: (() => void) | null = null
+  let closeCalls = 0
+
+  function Probe(): null {
+    const connection = useResilientWebSocket({
+      buildUrl: 'wss://example.test/socket',
+      connectOnMount: true,
+      shouldReconnect: false,
+      onClose: () => { closeCalls += 1 },
+    })
+    reconnect = connection.connect
+    disconnect = connection.disconnect
+    return null
+  }
+
+  try {
+    await act(async () => {
+      root.render(createElement(Probe))
+    })
+    const firstSocket = FakeWebSocket.instances[0]
+    assert.ok(firstSocket)
+
+    // disconnect() the first socket, then reconnect before its async close
+    // arrives: a new live socket now owns the slot.
+    await act(async () => { disconnect?.() })
+    await act(async () => { reconnect?.() })
+    const secondSocket = FakeWebSocket.instances[1]
+    assert.ok(secondSocket)
+    await act(async () => { secondSocket.emitOpen() })
+
+    await act(async () => {
+      // The long-dead first socket finally emits its close. It must not reach
+      // onClose - that would mark the live replacement disconnected.
+      console.info('[TEST] Expected abnormal close (1006) from a superseded socket; it must be suppressed.')
+      firstSocket.emitClose(1006)
+    })
+    assert.equal(closeCalls, 0, 'a close from a socket the slot no longer holds is suppressed')
+
+    await act(async () => {
+      // The live socket's own close still reaches the consumer.
+      secondSocket.emitClose(1000)
+    })
+    assert.equal(closeCalls, 1)
+
+    await act(async () => {
+      root.unmount()
+    })
+  } finally {
+    restoreDom()
+  }
+})
+
+void test('a superseded socket whose close lands after the replacement already closed is still suppressed', async () => {
+  const restoreDom = installDomEnvironment()
+  FakeWebSocket.instances.length = 0
+  const container = document.getElementById('root')
+  assert.ok(container)
+  const root = createRoot(container)
+  let reconnect: (() => WebSocket | null) | null = null
+  let closeCalls = 0
+
+  function Probe(): null {
+    const connection = useResilientWebSocket({
+      buildUrl: 'wss://example.test/socket',
+      connectOnMount: true,
+      shouldReconnect: false,
+      onClose: () => { closeCalls += 1 },
+    })
+    reconnect = connection.connect
+    return null
+  }
+
+  try {
+    await act(async () => {
+      root.render(createElement(Probe))
+    })
+    const firstSocket = FakeWebSocket.instances[0]
+    assert.ok(firstSocket)
+
+    // connect() supersedes the first socket without a disconnect() in between.
+    await act(async () => { reconnect?.() })
+    const secondSocket = FakeWebSocket.instances[1]
+    assert.ok(secondSocket)
+    await act(async () => { secondSocket.emitOpen() })
+
+    // The replacement closes first and clears the slot.
+    await act(async () => { secondSocket.emitClose(1000) })
+    assert.equal(closeCalls, 1, 'the live socket close reaches the consumer')
+
+    await act(async () => {
+      // The long-dead first socket finally emits its close into an empty slot.
+      // An empty slot is not proof this socket was manually disconnected, so it
+      // must stay suppressed rather than firing a second onClose.
+      console.info('[TEST] Expected late 1006 close from a superseded socket landing in an empty slot; it must be suppressed.')
+      firstSocket.emitClose(1006)
+    })
+    assert.equal(closeCalls, 1, 'a stale superseded close does not deliver a second onClose')
 
     await act(async () => {
       root.unmount()

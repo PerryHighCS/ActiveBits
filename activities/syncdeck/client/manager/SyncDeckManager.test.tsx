@@ -34,6 +34,7 @@ import { applySyncDeckEmbeddedLifecyclePayload } from './SyncDeckManager.js'
 import { isExpectedEmbeddedActivityStartResponseInstance } from './SyncDeckManager.js'
 import { resolveLocalEmbeddedActivityStartLifecyclePayload } from './SyncDeckManager.js'
 import { resolveManagerActiveEmbeddedInstanceKey } from './SyncDeckManager.js'
+import { shouldReactivateEmbeddedManager } from './SyncDeckManager.js'
 import { resolveManagerEmbeddedInstanceStatus } from './SyncDeckManager.js'
 import { buildManagerOverlayNavigationCommand } from './SyncDeckManager.js'
 import { buildManagerOverlaySetStateCommand } from './SyncDeckManager.js'
@@ -819,10 +820,47 @@ void test('resolveManagerActiveEmbeddedInstanceKey picks instance anchored to cu
   assert.equal(selected, 'embedded-test:3:1')
 })
 
+void test('a fragment-only change keeps the active embedded instance key stable so no re-activation fires', () => {
+  const embeddedActivities = {
+    'video-sync:3:0': {
+      childSessionId: 'CHILD:s1:abc12:video-sync',
+      activityId: 'video-sync',
+      startedAt: 100,
+      owner: 'syncdeck-instructor',
+    },
+  }
+  // Same slide (h/v), advancing fragments: the active-instance key must not move,
+  // or Video Sync's manager would re-post EMBEDDED_MANAGER_ACTIVATED, bump its
+  // refresh nonce, drop its socket, and re-hit /manager-access on every fragment.
+  const atF0 = resolveManagerActiveEmbeddedInstanceKey(embeddedActivities, { h: 3, v: 0, f: 0 })
+  const atF1 = resolveManagerActiveEmbeddedInstanceKey(embeddedActivities, { h: 3, v: 0, f: 1 })
+  const atF2 = resolveManagerActiveEmbeddedInstanceKey(embeddedActivities, { h: 3, v: 0, f: 2 })
+  assert.equal(atF0, 'video-sync:3:0')
+  assert.equal(atF1, 'video-sync:3:0')
+  assert.equal(atF2, 'video-sync:3:0')
+  assert.equal(shouldReactivateEmbeddedManager(atF0, atF1), false)
+  assert.equal(shouldReactivateEmbeddedManager(atF1, atF2), false)
+})
+
 void test('resolveManagerEmbeddedInstanceStatus marks only selected instance as active', () => {
   assert.equal(resolveManagerEmbeddedInstanceStatus('video-sync:3:0', 'video-sync:3:0'), 'active')
   assert.equal(resolveManagerEmbeddedInstanceStatus('video-sync:3:0', 'embedded-test:3:0'), 'idle')
   assert.equal(resolveManagerEmbeddedInstanceStatus('video-sync:3:0', null), 'idle')
+})
+
+void test('shouldReactivateEmbeddedManager fires only on an actual active-instance transition', () => {
+  // First activation once an instance becomes active.
+  assert.equal(shouldReactivateEmbeddedManager(null, 'video-sync:3:0'), true)
+  // Same instance still active (e.g. a fragment/state update on the same slide).
+  assert.equal(shouldReactivateEmbeddedManager('video-sync:3:0', 'video-sync:3:0'), false)
+  // The active iframe's onLoad ran first and primed the ref to the active
+  // instance: the activation effect must then see no transition and skip the
+  // duplicate EMBEDDED_MANAGER_ACTIVATED post.
+  assert.equal(shouldReactivateEmbeddedManager('video-sync:3:0', 'video-sync:3:0'), false)
+  // Active instance changed.
+  assert.equal(shouldReactivateEmbeddedManager('video-sync:3:0', 'embedded-test:4:0'), true)
+  // Nothing active.
+  assert.equal(shouldReactivateEmbeddedManager('video-sync:3:0', null), false)
 })
 
 void test('resolveEmbeddedBootstrapBackfillRequests only returns child sessions that still need bootstrap hydration', () => {

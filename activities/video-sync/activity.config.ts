@@ -29,9 +29,6 @@ const videoSyncConfig: ActivityConfig = {
       validator: 'url',
     },
   },
-  createSessionBootstrap: {
-    historyState: ['instructorPasscode'],
-  },
   manageLayout: {
     expandShell: true,
   },

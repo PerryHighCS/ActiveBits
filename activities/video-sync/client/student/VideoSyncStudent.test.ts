@@ -317,6 +317,28 @@ void test('buildStudentPlayerVars enables native controls for standalone session
   })
 })
 
+void test('buildStudentPlayerVars identifies the ActiveBits origin to YouTube in browsers', () => {
+  const originalWindow = globalThis.window
+  Object.assign(globalThis, {
+    window: { location: { origin: 'https://activebits.example' } },
+  })
+
+  try {
+    assert.deepEqual(buildStudentPlayerVars(false), {
+      controls: 0,
+      rel: 0,
+      modestbranding: 1,
+      origin: 'https://activebits.example',
+    })
+  } finally {
+    if (originalWindow === undefined) {
+      Reflect.deleteProperty(globalThis, 'window')
+    } else {
+      Object.assign(globalThis, { window: originalWindow })
+    }
+  }
+})
+
 void test('shouldRenderStudentInteractionOverlay disables the blocking overlay in standalone mode', () => {
   assert.equal(shouldRenderStudentInteractionOverlay(false), true)
   assert.equal(shouldRenderStudentInteractionOverlay(true), false)

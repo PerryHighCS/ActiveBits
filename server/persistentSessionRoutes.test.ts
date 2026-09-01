@@ -4,6 +4,7 @@ import { initializeActivityRegistry } from './activities/activityRegistry.js'
 import { registerPersistentSessionRoutes } from './routes/persistentSessionRoutes.js'
 import {
   findHashBySessionId,
+  findIndexedHashBySessionId,
   initializePersistentStorage,
   generatePersistentHash,
   getOrCreateActivePersistentSession,
@@ -14,6 +15,7 @@ import {
   updatePersistentSessionUrlState,
 } from './core/persistentSessions.js'
 import { buildPersistentLinkUrlQuery } from './core/persistentLinkUrlState.js'
+import { getActivityCapabilityCookieName, issueActivityCapability } from './core/activityCapabilities.js'
 
 function createFakePersistentValkeyClient(): {
   store: Map<string, string>
@@ -185,7 +187,13 @@ function getRoute(app: ReturnType<typeof createMockApp>, method: 'GET' | 'POST',
 void test('persistent session route keeps valid backing session', async (t) => {
   initializePersistentStorage(null)
   const sessionMap = new Map<string, unknown>()
-  const sessions = { get: async (id: string) => sessionMap.get(id) ?? null }
+  const sessions = {
+    get: async (id: string) => {
+      const session = sessionMap.get(id)
+      return session == null ? null : structuredClone(session)
+    },
+    set: async (id: string, session: unknown) => { sessionMap.set(id, structuredClone(session)) },
+  }
   const app = createMockApp()
   registerPersistentSessionRoutes({ app, sessions })
   const handler = getRoute(app, 'GET', '/api/persistent-session/:hash')
@@ -213,6 +221,567 @@ void test('persistent session route keeps valid backing session', async (t) => {
 
   const stored = await getPersistentSession(hash)
   assert.equal(stored?.entryPolicy, 'instructor-required')
+})
+
+void test('session teacher authenticate does not issue a capability cookie when persistence fails', async (t) => {
+  initializePersistentStorage(null)
+  await initializeActivityRegistry()
+  const sessionMap = new Map<string, unknown>()
+  const sessions = {
+    get: async (id: string) => {
+      const session = sessionMap.get(id)
+      return session == null ? null : structuredClone(session)
+    },
+    set: async () => { throw new Error('simulated session-store write failure') },
+  }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+  const handler = getRoute(app, 'POST', '/api/session/:sessionId/teacher-authenticate')
+
+  const activityName = 'syncdeck'
+  const teacherCode = 'teacher-secret'
+  const { hash, hashedTeacherCode } = generatePersistentHash(activityName, teacherCode)
+  t.after(async () => cleanupPersistentSession(hash))
+  sessionMap.set('live-session', {
+    id: 'live-session', type: activityName, data: { instructorPasscode: 'syncdeck-instructor-passcode' },
+  })
+  await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode, 'solo-allowed')
+  await startPersistentSession(hash, 'live-session', { id: 'teacher-ws', readyState: 1, send() {} })
+
+  const res = createMockRes()
+  console.info('[TEST] Expected manager capability persistence failure during teacher authentication.')
+  await handler(createMockReq({ params: { sessionId: 'live-session' }, body: { teacherCode } }), res)
+
+  assert.equal(res.statusCode, 500)
+  assert.deepEqual(res.jsonBody, { error: 'manager capability unavailable' })
+  assert.equal(res.cookies.has(getActivityCapabilityCookieName('manager', 'live-session')), false)
+})
+
+void test('session teacher authenticate fails closed when the store cannot persist a capability', async (t) => {
+  initializePersistentStorage(null)
+  await initializeActivityRegistry()
+  const sessionMap = new Map<string, unknown>()
+  // No `set`: the store cannot persist a manager capability at all. The
+  // teacher-auth response is what establishes manager authority, so this must
+  // fail closed rather than report success without a usable cookie.
+  const sessions = {
+    get: async (id: string) => {
+      const session = sessionMap.get(id)
+      return session == null ? null : structuredClone(session)
+    },
+  }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+  const handler = getRoute(app, 'POST', '/api/session/:sessionId/teacher-authenticate')
+
+  const activityName = 'syncdeck'
+  const teacherCode = 'teacher-secret'
+  const { hash, hashedTeacherCode } = generatePersistentHash(activityName, teacherCode)
+  t.after(async () => cleanupPersistentSession(hash))
+  sessionMap.set('live-session', {
+    id: 'live-session', type: activityName, data: { instructorPasscode: 'syncdeck-instructor-passcode' },
+  })
+  await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode, 'solo-allowed')
+  await startPersistentSession(hash, 'live-session', { id: 'teacher-ws', readyState: 1, send() {} })
+
+  const res = createMockRes()
+  console.info('[TEST] Expected fail-closed manager capability response: the injected store has no set().')
+  await handler(createMockReq({ params: { sessionId: 'live-session' }, body: { teacherCode } }), res)
+
+  assert.equal(res.statusCode, 500)
+  assert.deepEqual(res.jsonBody, { error: 'manager capability unavailable' })
+  assert.equal(res.cookies.has(getActivityCapabilityCookieName('manager', 'live-session')), false)
+})
+
+void test('persistent manager capability recovery issues a manager cookie for an authenticated live permalink', async (t) => {
+  initializePersistentStorage(null)
+  const sessionMap = new Map<string, unknown>()
+  const sessions = {
+    get: async (id: string) => {
+      const session = sessionMap.get(id)
+      return session == null ? null : structuredClone(session)
+    },
+    set: async (id: string, session: unknown) => { sessionMap.set(id, structuredClone(session)) },
+  }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+  const handler = getRoute(app, 'POST', '/api/session/:sessionId/persistent-manager-capability')
+
+  const activityName = 'java-format-practice'
+  const teacherCode = 'teacher-secret'
+  const { hash, hashedTeacherCode } = generatePersistentHash(activityName, teacherCode)
+  t.after(async () => cleanupPersistentSession(hash))
+  sessionMap.set('live-session', { id: 'live-session', type: activityName, data: { students: [] } })
+  await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode)
+  await startPersistentSession(hash, 'live-session', { id: 'teacher-ws', readyState: 1, send() {} })
+
+  const res = createMockRes()
+  await handler(createMockReq({
+    params: { sessionId: 'live-session' },
+    cookies: { persistent_sessions: buildCookieValue(activityName, hash, teacherCode) },
+  }), res)
+
+  assert.equal(res.statusCode, 200)
+  assert.deepEqual(res.jsonBody, { success: true, persistentRecoveryAvailable: true })
+  assert.equal(Array.from(res.cookies.keys()).filter((name) => name.startsWith('activebits_cap_manager_')).length, 1)
+
+  // The mutation must survive the store boundary: a no-op set would pass the
+  // assertions above but leave no capability record on the persisted session.
+  const persisted = await sessions.get('live-session') as { data?: { activityCapabilities?: Record<string, unknown> } } | null
+  assert.ok(persisted?.data?.activityCapabilities, 'capability is persisted on the live session record')
+  assert.equal(Object.keys(persisted!.data!.activityCapabilities!).length, 1)
+})
+
+void test('persistent manager capability recovery rate-limits repeated teacher-code attempts', async (t) => {
+  initializePersistentStorage(null)
+  const sessionMap = new Map<string, unknown>()
+  const sessions = {
+    get: async (id: string) => {
+      const session = sessionMap.get(id)
+      return session == null ? null : structuredClone(session)
+    },
+    set: async (id: string, session: unknown) => { sessionMap.set(id, structuredClone(session)) },
+  }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+  const handler = getRoute(app, 'POST', '/api/session/:sessionId/persistent-manager-capability')
+
+  const activityName = 'java-format-practice'
+  const teacherCode = 'teacher-secret'
+  const { hash, hashedTeacherCode } = generatePersistentHash(activityName, teacherCode)
+  t.after(async () => cleanupPersistentSession(hash))
+  sessionMap.set('live-session', { id: 'live-session', type: activityName, data: { students: [] } })
+  await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode)
+  await startPersistentSession(hash, 'live-session', { id: 'teacher-ws', readyState: 1, send() {} })
+
+  const callWithWrongCode = async () => {
+    const res = createMockRes()
+    await handler(createMockReq({
+      params: { sessionId: 'live-session' },
+      cookies: { persistent_sessions: buildCookieValue(activityName, hash, 'wrong-teacher-code') },
+    }), res)
+    return res
+  }
+
+  // `persistent_sessions` is client-supplied and forgeable, so this route must
+  // cap teacher-code attempts by IP+hash just like POST /teacher-authenticate.
+  console.info('[TEST] Expected repeated invalid persistent teacher-code attempts against persistent-manager-capability.')
+  for (let attempt = 1; attempt <= 5; attempt += 1) {
+    const res = await callWithWrongCode()
+    assert.equal(res.statusCode, 403, `attempt ${attempt} is a normal auth failure`)
+  }
+  const blocked = await callWithWrongCode()
+  assert.equal(blocked.statusCode, 429)
+  assert.deepEqual(blocked.jsonBody, { error: 'Too many attempts. Please wait a minute.' })
+  // The client treats 429 as "wait and retry", not a definitive denial.
+  assert.equal(blocked.headers['retry-after'], '60')
+  assert.equal(
+    Array.from(blocked.cookies.keys()).filter((name) => name.startsWith('activebits_cap_manager_')).length,
+    0,
+    'no capability cookie is issued for a rate-limited caller',
+  )
+})
+
+void test('persistent manager capability recovery returns a retryable 500 when the rate limiter backend fails', async (t) => {
+  const valkeyClient = createFakePersistentValkeyClient()
+  initializePersistentStorage(valkeyClient as never)
+  await initializeActivityRegistry()
+  t.after(() => { initializePersistentStorage(null) })
+
+  const sessionMap = new Map<string, unknown>()
+  const sessions = {
+    get: async (id: string) => sessionMap.get(id) ?? null,
+    set: async (id: string, session: unknown) => { sessionMap.set(id, session) },
+  }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+  const handler = getRoute(app, 'POST', '/api/session/:sessionId/persistent-manager-capability')
+
+  const activityName = 'java-format-practice'
+  const teacherCode = 'teacher-secret'
+  const { hash, hashedTeacherCode } = generatePersistentHash(activityName, teacherCode)
+  t.after(async () => cleanupPersistentSession(hash))
+  sessionMap.set('live-session', { id: 'live-session', type: activityName, data: { students: [] } })
+  await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode)
+  await startPersistentSession(hash, 'live-session', { id: 'teacher-ws', readyState: 1, send() {} })
+
+  // Fail the rate-limit INCR script only; setup above already ran.
+  valkeyClient.eval = async () => { throw new Error('[TEST] rate limiter outage') }
+
+  const res = createMockRes()
+  console.info('[TEST] Expected rate-limiter backend failure during persistent manager capability recovery.')
+  await handler(createMockReq({
+    params: { sessionId: 'live-session' },
+    cookies: { persistent_sessions: buildCookieValue(activityName, hash, 'wrong-teacher-code') },
+  }), res)
+
+  // Not "allowed" via a fail-open 0: a limiter outage must be a retryable 500,
+  // not an open brute-force window.
+  assert.equal(res.statusCode, 500)
+  assert.deepEqual(res.jsonBody, { error: 'Manager capability is temporarily unavailable' })
+})
+
+void test('persistent manager capability recovery does not charge attempts to a caller with no teacher-code candidate', async (t) => {
+  initializePersistentStorage(null)
+  const sessionMap = new Map<string, unknown>()
+  const sessions = {
+    get: async (id: string) => {
+      const session = sessionMap.get(id)
+      return session == null ? null : structuredClone(session)
+    },
+    set: async (id: string, session: unknown) => { sessionMap.set(id, structuredClone(session)) },
+  }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+  const handler = getRoute(app, 'POST', '/api/session/:sessionId/persistent-manager-capability')
+
+  const activityName = 'java-format-practice'
+  const teacherCode = 'teacher-secret'
+  const { hash, hashedTeacherCode } = generatePersistentHash(activityName, teacherCode)
+  t.after(async () => cleanupPersistentSession(hash))
+  sessionMap.set('live-session', { id: 'live-session', type: activityName, data: { students: [] } })
+  await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode)
+  await startPersistentSession(hash, 'live-session', { id: 'teacher-ws', readyState: 1, send() {} })
+
+  // An unrelated caller who only knows the live session id (no matching
+  // `persistent_sessions` entry) must not be able to drain the shared IP+hash
+  // attempt bucket and lock the real teacher out on a shared address.
+  for (let attempt = 1; attempt <= 12; attempt += 1) {
+    const res = createMockRes()
+    await handler(createMockReq({ params: { sessionId: 'live-session' }, cookies: {} }), res)
+    assert.equal(res.statusCode, 403, `cookieless attempt ${attempt} is a plain 403, never 429`)
+  }
+
+  // The teacher's own bucket is untouched: a full run of wrong-code attempts is
+  // still needed before the 429.
+  console.info('[TEST] Expected repeated invalid persistent teacher-code attempts against persistent-manager-capability.')
+  for (let attempt = 1; attempt <= 5; attempt += 1) {
+    const res = createMockRes()
+    await handler(createMockReq({
+      params: { sessionId: 'live-session' },
+      cookies: { persistent_sessions: buildCookieValue(activityName, hash, 'wrong-teacher-code') },
+    }), res)
+    assert.equal(res.statusCode, 403, `wrong-code attempt ${attempt} is a normal auth failure`)
+  }
+  const blocked = createMockRes()
+  await handler(createMockReq({
+    params: { sessionId: 'live-session' },
+    cookies: { persistent_sessions: buildCookieValue(activityName, hash, 'wrong-teacher-code') },
+  }), blocked)
+  assert.equal(blocked.statusCode, 429)
+})
+
+void test('persistent manager capability recovery issues the capability onto the latest session record', async (t) => {
+  initializePersistentStorage(null)
+  const sessionMap = new Map<string, unknown>()
+  let getCalls = 0
+  const sessions = {
+    get: async (id: string) => {
+      getCalls += 1
+      // Simulate a concurrent activity update that lands after the handler's
+      // initial read but before it persists the capability: the second read
+      // (the handler's re-read) sees a newer field the first read did not.
+      if (id === 'live-session' && getCalls === 2) {
+        const current = sessionMap.get(id) as { data: Record<string, unknown> }
+        sessionMap.set(id, { ...current, data: { ...current.data, concurrentMarker: 'landed-mid-flight' } })
+      }
+      const session = sessionMap.get(id)
+      return session == null ? null : structuredClone(session)
+    },
+    set: async (id: string, session: unknown) => { sessionMap.set(id, structuredClone(session)) },
+  }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+  const handler = getRoute(app, 'POST', '/api/session/:sessionId/persistent-manager-capability')
+
+  const activityName = 'java-format-practice'
+  const teacherCode = 'teacher-secret'
+  const { hash, hashedTeacherCode } = generatePersistentHash(activityName, teacherCode)
+  t.after(async () => cleanupPersistentSession(hash))
+  sessionMap.set('live-session', { id: 'live-session', type: activityName, data: { students: [] } })
+  await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode)
+  await startPersistentSession(hash, 'live-session', { id: 'teacher-ws', readyState: 1, send() {} })
+
+  const res = createMockRes()
+  await handler(createMockReq({
+    params: { sessionId: 'live-session' },
+    cookies: { persistent_sessions: buildCookieValue(activityName, hash, teacherCode) },
+  }), res)
+
+  assert.equal(res.statusCode, 200)
+  const persisted = await sessions.get('live-session') as
+    { data?: { activityCapabilities?: Record<string, unknown>; concurrentMarker?: string } } | null
+  assert.ok(persisted?.data?.activityCapabilities, 'capability is persisted')
+  assert.equal(persisted?.data?.concurrentMarker, 'landed-mid-flight', 'the concurrent update is not clobbered by a stale snapshot write')
+})
+
+void test('persistent manager capability recovery does not issue into a session whose id was reused for another activity mid-request', async (t) => {
+  initializePersistentStorage(null)
+  const sessionMap = new Map<string, unknown>()
+  let getCalls = 0
+  let setCalls = 0
+  const sessions = {
+    get: async (id: string) => {
+      getCalls += 1
+      // The persistent authorization is established on the first read
+      // (java-format-practice). By the handler's re-read the id has been reused
+      // for a different activity - issuing a manager capability here would grant
+      // authority over the replacement session.
+      if (id === 'live-session' && getCalls >= 2) {
+        return structuredClone({ id: 'live-session', type: 'algorithm-demo', data: {} })
+      }
+      const session = sessionMap.get(id)
+      return session == null ? null : structuredClone(session)
+    },
+    set: async (id: string, session: unknown) => { setCalls += 1; sessionMap.set(id, structuredClone(session)) },
+  }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+  const handler = getRoute(app, 'POST', '/api/session/:sessionId/persistent-manager-capability')
+
+  const activityName = 'java-format-practice'
+  const teacherCode = 'teacher-secret'
+  const { hash, hashedTeacherCode } = generatePersistentHash(activityName, teacherCode)
+  t.after(async () => cleanupPersistentSession(hash))
+  sessionMap.set('live-session', { id: 'live-session', type: activityName, data: { students: [] } })
+  await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode)
+  await startPersistentSession(hash, 'live-session', { id: 'teacher-ws', readyState: 1, send() {} })
+
+  const res = createMockRes()
+  await handler(createMockReq({
+    params: { sessionId: 'live-session' },
+    cookies: { persistent_sessions: buildCookieValue(activityName, hash, teacherCode) },
+  }), res)
+
+  assert.equal(res.statusCode, 404)
+  assert.deepEqual(res.jsonBody, { error: 'Active session not found' })
+  assert.equal(setCalls, 0, 'no capability is written into the replacement session')
+  assert.equal(res.cookies.has(getActivityCapabilityCookieName('manager', 'live-session')), false)
+})
+
+void test('persistent manager capability recovery fast-paths an already-authorized caller without re-issuing', async () => {
+  initializePersistentStorage(null)
+  const sessionMap = new Map<string, unknown>()
+  let setCalls = 0
+  const sessions = {
+    get: async (id: string) => {
+      const session = sessionMap.get(id)
+      return session == null ? null : structuredClone(session)
+    },
+    set: async (id: string, session: unknown) => { setCalls += 1; sessionMap.set(id, structuredClone(session)) },
+  }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+  const handler = getRoute(app, 'POST', '/api/session/:sessionId/persistent-manager-capability')
+
+  // A live session that carries a valid manager capability already (as /create
+  // would leave it). No persistent session is registered and no
+  // persistent_sessions cookie is sent, so recovery is not persistently backed.
+  const liveSession = { id: 'live-session', type: 'java-format-practice', data: { students: [] } }
+  const capability = issueActivityCapability(liveSession, 'manager')
+  sessionMap.set('live-session', liveSession)
+
+  const res = createMockRes()
+  await handler(createMockReq({
+    params: { sessionId: 'live-session' },
+    cookies: { [getActivityCapabilityCookieName('manager', 'live-session')]: capability.token },
+  }), res)
+
+  assert.equal(res.statusCode, 200)
+  assert.deepEqual(res.jsonBody, { success: true, alreadyAuthorized: true, persistentRecoveryAvailable: false })
+  // Fast path: no re-issue, no session write, no capability cookie set.
+  assert.equal(setCalls, 0)
+  assert.equal(res.cookies.has(getActivityCapabilityCookieName('manager', 'live-session')), false)
+})
+
+void test('persistent manager capability recovery fast path reports persistent recoverability when a teacher cookie backs it', async (t) => {
+  initializePersistentStorage(null)
+  const sessionMap = new Map<string, unknown>()
+  let setCalls = 0
+  const sessions = {
+    get: async (id: string) => {
+      const session = sessionMap.get(id)
+      return session == null ? null : structuredClone(session)
+    },
+    set: async (id: string, session: unknown) => { setCalls += 1; sessionMap.set(id, structuredClone(session)) },
+  }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+  const handler = getRoute(app, 'POST', '/api/session/:sessionId/persistent-manager-capability')
+
+  const activityName = 'java-format-practice'
+  const teacherCode = 'teacher-secret'
+  const { hash, hashedTeacherCode } = generatePersistentHash(activityName, teacherCode)
+  t.after(async () => cleanupPersistentSession(hash))
+  // The permalink flow: teacher-authenticate already issued the manager
+  // capability, so this call hits the fast path - but it must still report
+  // that a later capability loss is recoverable by reload.
+  const liveSession = { id: 'live-session', type: activityName, data: { students: [] } }
+  const capability = issueActivityCapability(liveSession, 'manager')
+  sessionMap.set('live-session', liveSession)
+  await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode)
+  await startPersistentSession(hash, 'live-session', { id: 'teacher-ws', readyState: 1, send() {} })
+
+  const res = createMockRes()
+  await handler(createMockReq({
+    params: { sessionId: 'live-session' },
+    cookies: {
+      [getActivityCapabilityCookieName('manager', 'live-session')]: capability.token,
+      persistent_sessions: buildCookieValue(activityName, hash, teacherCode),
+    },
+  }), res)
+
+  assert.equal(res.statusCode, 200)
+  assert.deepEqual(res.jsonBody, { success: true, alreadyAuthorized: true, persistentRecoveryAvailable: true })
+  assert.equal(setCalls, 0, 'fast path still does not re-issue')
+})
+
+void test('persistent manager capability recovery returns a retryable 500 when the reverse-index read fails', async (t) => {
+  const valkeyClient = createFakePersistentValkeyClient()
+  const originalGet = valkeyClient.get
+  valkeyClient.get = async (key: string) => {
+    if (key.startsWith('persistent-session-by-session:')) {
+      throw new Error('[TEST] reverse-index read failed')
+    }
+    return originalGet(key)
+  }
+  initializePersistentStorage(valkeyClient as never)
+  await initializeActivityRegistry()
+
+  const sessionMap = new Map<string, unknown>()
+  const sessions = {
+    get: async (id: string) => sessionMap.get(id) ?? null,
+    set: async (id: string, session: unknown) => { sessionMap.set(id, session) },
+  }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+  const handler = getRoute(app, 'POST', '/api/session/:sessionId/persistent-manager-capability')
+  t.after(() => { initializePersistentStorage(null) })
+
+  sessionMap.set('live-session', { id: 'live-session', type: 'java-format-practice', data: { students: [] } })
+
+  const res = createMockRes()
+  console.info('[TEST] Expected reverse-index read failure during persistent manager capability recovery.')
+  await handler(createMockReq({ params: { sessionId: 'live-session' }, cookies: {} }), res)
+
+  // Not 404: a transient outage must surface as retryable, so the Java manager
+  // uses its 5xx retry path instead of latching auth loss.
+  assert.equal(res.statusCode, 500)
+  assert.deepEqual(res.jsonBody, { error: 'Manager capability is temporarily unavailable' })
+})
+
+void test('persistent manager capability recovery returns a retryable 500 when the record read fails for an uncredentialed caller', async (t) => {
+  const valkeyClient = createFakePersistentValkeyClient()
+  initializePersistentStorage(valkeyClient as never)
+  await initializeActivityRegistry()
+  t.after(() => { initializePersistentStorage(null) })
+
+  const activityName = 'java-format-practice'
+  const teacherCode = 'teacher-secret'
+  const { hash, hashedTeacherCode } = generatePersistentHash(activityName, teacherCode)
+  t.after(async () => cleanupPersistentSession(hash))
+  await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode)
+  await startPersistentSession(hash, 'live-session', { id: 'teacher-ws', readyState: 1, send() {} })
+
+  // The reverse index resolves, but the persistent record read then rejects.
+  const originalGet = valkeyClient.get
+  valkeyClient.get = async (key: string) => {
+    if (key.startsWith('persistent:')) {
+      throw new Error('[TEST] persistent record read failed')
+    }
+    return originalGet(key)
+  }
+
+  const sessionMap = new Map<string, unknown>()
+  sessionMap.set('live-session', { id: 'live-session', type: activityName, data: { students: [] } })
+  const sessions = {
+    get: async (id: string) => sessionMap.get(id) ?? null,
+    set: async (id: string, session: unknown) => { sessionMap.set(id, session) },
+  }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+  const handler = getRoute(app, 'POST', '/api/session/:sessionId/persistent-manager-capability')
+
+  const res = createMockRes()
+  console.info('[TEST] Expected persistent record read failure during persistent manager capability recovery for an uncredentialed caller.')
+  await handler(createMockReq({ params: { sessionId: 'live-session' }, cookies: {} }), res)
+
+  // A caller without a capability cookie depends on this lookup to authorize, so
+  // a store outage must be retryable (500), never a terminal 404.
+  assert.equal(res.statusCode, 500)
+  assert.deepEqual(res.jsonBody, { error: 'Manager capability is temporarily unavailable' })
+})
+
+void test('persistent manager capability recovery returns a retryable 500 when the live-session read rejects', async (t) => {
+  initializePersistentStorage(null)
+  t.after(() => { initializePersistentStorage(null) })
+  const sessions = {
+    get: async () => { throw new Error('[TEST] session store read (non-strict) unavailable') },
+    getStrict: async () => { throw new Error('[TEST] session store read unavailable') },
+    set: async () => {},
+  }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+  const handler = getRoute(app, 'POST', '/api/session/:sessionId/persistent-manager-capability')
+
+  const res = createMockRes()
+  console.info('[TEST] Expected live-session strict read failure during persistent manager capability recovery.')
+  await handler(createMockReq({ params: { sessionId: 'live-session' }, cookies: {} }), res)
+
+  // ValkeySessionStore.get swallows read failures to null (-> false 404). The
+  // strict read must instead reject into the outer catch -> retryable 500.
+  assert.equal(res.statusCode, 500)
+  assert.deepEqual(res.jsonBody, { error: 'Manager capability is temporarily unavailable' })
+})
+
+void test('persistent manager capability recovery fast path survives a persistent-store outage for an already-authorized caller', async (t) => {
+  const valkeyClient = createFakePersistentValkeyClient()
+  initializePersistentStorage(valkeyClient as never)
+  await initializeActivityRegistry()
+  t.after(() => { initializePersistentStorage(null) })
+
+  const activityName = 'java-format-practice'
+  const teacherCode = 'teacher-secret'
+  const { hash, hashedTeacherCode } = generatePersistentHash(activityName, teacherCode)
+  t.after(async () => cleanupPersistentSession(hash))
+  await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode)
+  await startPersistentSession(hash, 'live-session', { id: 'teacher-ws', readyState: 1, send() {} })
+
+  const originalGet = valkeyClient.get
+  valkeyClient.get = async (key: string) => {
+    if (key.startsWith('persistent:') || key.startsWith('persistent-session-by-session:')) {
+      throw new Error('[TEST] persistent-store outage')
+    }
+    return originalGet(key)
+  }
+
+  const liveSession = { id: 'live-session', type: activityName, data: { students: [] } }
+  const capability = issueActivityCapability(liveSession, 'manager')
+  const sessionMap = new Map<string, unknown>([['live-session', liveSession]])
+  let setCalls = 0
+  const sessions = {
+    get: async (id: string) => sessionMap.get(id) ?? null,
+    set: async (id: string, session: unknown) => { setCalls += 1; sessionMap.set(id, session) },
+  }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+  const handler = getRoute(app, 'POST', '/api/session/:sessionId/persistent-manager-capability')
+
+  const res = createMockRes()
+  console.info('[TEST] Expected persistent-store outage during an already-authorized persistent manager capability fast path; it must degrade, not 500.')
+  await handler(createMockReq({
+    params: { sessionId: 'live-session' },
+    cookies: {
+      [getActivityCapabilityCookieName('manager', 'live-session')]: capability.token,
+      persistent_sessions: buildCookieValue(activityName, hash, teacherCode),
+    },
+  }), res)
+
+  // The caller already holds a valid capability, so a store blip must not fail
+  // the request; recovery just degrades to "not known recoverable".
+  assert.equal(res.statusCode, 200)
+  assert.deepEqual(res.jsonBody, { success: true, alreadyAuthorized: true, persistentRecoveryAvailable: false })
+  assert.equal(setCalls, 0, 'fast path still does not re-issue')
 })
 
 void test('persistent session route resets when backing session missing', async (t) => {
@@ -331,6 +900,49 @@ void test('persistent session update rejects solo-capable entry policies for non
 
   assert.equal(res.statusCode, 400)
   assert.deepEqual(res.jsonBody, { error: 'This activity does not support solo entry links' })
+})
+
+void test('persistent session update returns a controlled 500 when the reverse-index write fails for an active link', async (t) => {
+  const valkeyClient = createFakePersistentValkeyClient()
+  initializePersistentStorage(valkeyClient as never)
+  await initializeActivityRegistry()
+  t.after(() => { initializePersistentStorage(null) })
+
+  const sessionMap = new Map<string, unknown>()
+  const sessions = {
+    get: async (id: string) => sessionMap.get(id) ?? null,
+    set: async (id: string, session: unknown) => { sessionMap.set(id, session) },
+  }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+  const handler = getRoute(app, 'POST', '/api/persistent-session/update')
+
+  const activityName = 'java-format-practice'
+  const teacherCode = 'teacher-secret'
+  const { hash, hashedTeacherCode } = generatePersistentHash(activityName, teacherCode)
+  t.after(async () => cleanupPersistentSession(hash))
+  sessionMap.set('live-session', { id: 'live-session', type: activityName, data: { students: [] } })
+  await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode, 'solo-allowed')
+  await startPersistentSession(hash, 'live-session', { id: 'teacher-ws', readyState: 1, send() {} })
+
+  const originalSet = valkeyClient.set
+  valkeyClient.set = async (key: string, ...rest: Array<string | number>) => {
+    if (key.startsWith('persistent-session-by-session:')) {
+      throw new Error('[TEST] reverse-index write failed')
+    }
+    return originalSet(key, rest[0] as string)
+  }
+
+  const res = createMockRes()
+  console.info('[TEST] Expected reverse-index write failure while updating an already-started persistent link.')
+  await handler(createMockReq({
+    body: { activityName, hash, entryPolicy: 'instructor-required' },
+    cookies: { persistent_sessions: buildCookieValue(activityName, hash, teacherCode) },
+  }), res)
+
+  assert.equal(res.statusCode, 500)
+  assert.deepEqual(res.jsonBody, { error: 'Persistent link storage is temporarily unavailable' })
+  assert.equal(res.cookies.has('persistent_sessions'), false, 'no success cookie is written on a persist failure')
 })
 
 void test('persistent session entry route returns shared entry status for started live sessions', async (t) => {
@@ -1103,6 +1715,36 @@ void test('session id reverse lookup backfills missing reverse index entries for
   assert.equal(await findHashBySessionId('legacy-session'), hash)
 })
 
+void test('starting a persistent session fails loudly when the reverse-index write fails', async (t) => {
+  const valkeyClient = createFakePersistentValkeyClient()
+  initializePersistentStorage(valkeyClient as never)
+  t.after(() => { initializePersistentStorage(null) })
+
+  const activityName = 'syncdeck'
+  const teacherCode = 'index-write-fail'
+  const { hash, hashedTeacherCode } = generatePersistentHash(activityName, teacherCode)
+  t.after(async () => cleanupPersistentSession(hash))
+
+  await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode, 'solo-allowed')
+
+  const originalSet = valkeyClient.set
+  valkeyClient.set = async (key: string, value: string) => {
+    if (key.startsWith('persistent-session-by-session:')) {
+      throw new Error('[TEST] reverse-index write failed')
+    }
+    return originalSet(key, value)
+  }
+
+  console.info('[TEST] Expected reverse-index write failure while starting a persistent session.')
+  // Manager recovery is index-only, so a record persisted without its reverse
+  // index is silently unrecoverable. The write must reject rather than report a
+  // "successful" persistent session that recovery classifies as missing.
+  await assert.rejects(
+    startPersistentSession(hash, 'index-write-fail-session', { id: 'teacher-ws', readyState: 1, send() {} }),
+    /reverse-index write failed/,
+  )
+})
+
 void test('session id reverse lookup ignores stale reverse index entries and repairs them', async (t) => {
   const valkeyClient = createFakePersistentValkeyClient()
   initializePersistentStorage(valkeyClient as never)
@@ -1123,6 +1765,95 @@ void test('session id reverse lookup ignores stale reverse index entries and rep
 
   assert.equal(await findHashBySessionId('shared-session'), correctHash)
   assert.equal(await valkeyClient.get('persistent-session-by-session:shared-session'), correctHash)
+})
+
+void test('indexed-only session id reverse lookup never scans the persistent-session keyspace', async (t) => {
+  const valkeyClient = createFakePersistentValkeyClient()
+  let persistentScanCount = 0
+  const originalScan = valkeyClient.scan
+  valkeyClient.scan = async (cursor: string, ...args: Array<string | number>) => {
+    const matchIndex = args.findIndex((arg) => arg === 'MATCH')
+    const pattern = matchIndex >= 0 ? String(args[matchIndex + 1] ?? '') : ''
+    if (pattern.startsWith('persistent:')) persistentScanCount += 1
+    return originalScan(cursor, ...args)
+  }
+  initializePersistentStorage(valkeyClient as never)
+
+  const activityName = 'syncdeck'
+  const { hash, hashedTeacherCode } = generatePersistentHash(activityName, 'indexed-only-code')
+  t.after(async () => cleanupPersistentSession(hash))
+
+  await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode, 'solo-allowed')
+  await startPersistentSession(hash, 'live-session', { id: 'teacher-ws', readyState: 1, send() {} })
+
+  // Live persistent session: resolved straight from the reverse index.
+  assert.equal(await findIndexedHashBySessionId('live-session'), hash)
+  // No reverse-index entry (every temporary session): null without a scan.
+  assert.equal(await findIndexedHashBySessionId('temp-session'), null)
+  // Stale/mismatched index entry: dropped, still no scan.
+  await valkeyClient.set('persistent-session-by-session:ghost-session', 'not-a-real-hash')
+  assert.equal(await findIndexedHashBySessionId('ghost-session'), null)
+  assert.equal(await valkeyClient.get('persistent-session-by-session:ghost-session'), null)
+
+  assert.equal(persistentScanCount, 0, 'index-only lookup never enumerates the persistent-session keyspace')
+
+  // Contrast: findHashBySessionId still uses the getAllHashes() scan fallback
+  // for an id with no reverse-index entry.
+  await findHashBySessionId('temp-session')
+  assert.ok(persistentScanCount > 0, 'findHashBySessionId still falls back to a full scan')
+})
+
+void test('indexed-only session id reverse lookup rejects a reverse-index read failure instead of returning null', async () => {
+  const valkeyClient = createFakePersistentValkeyClient()
+  const originalGet = valkeyClient.get
+  valkeyClient.get = async (key: string) => {
+    if (key.startsWith('persistent-session-by-session:')) {
+      throw new Error('[TEST] reverse-index read failed')
+    }
+    return originalGet(key)
+  }
+  initializePersistentStorage(valkeyClient as never)
+
+  // A storage failure must not be indistinguishable from "no such session":
+  // the recovery routes wrap this and turn a rejection into a retryable 500.
+  await assert.rejects(findIndexedHashBySessionId('some-session'), /reverse-index read failed/)
+  // findHashBySessionId keeps its swallow-to-null behaviour for its other
+  // callers that tolerate it.
+  assert.equal(await findHashBySessionId('some-session'), null)
+})
+
+void test('indexed-only session id reverse lookup keeps the reverse index when the record read fails', async (t) => {
+  const valkeyClient = createFakePersistentValkeyClient()
+  initializePersistentStorage(valkeyClient as never)
+  t.after(() => { initializePersistentStorage(null) })
+
+  const activityName = 'syncdeck'
+  const { hash, hashedTeacherCode } = generatePersistentHash(activityName, 'record-read-fail-code')
+  t.after(async () => cleanupPersistentSession(hash))
+
+  await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode, 'solo-allowed')
+  await startPersistentSession(hash, 'record-fail-session', { id: 'teacher-ws', readyState: 1, send() {} })
+
+  const originalGet = valkeyClient.get
+  valkeyClient.get = async (key: string) => {
+    if (key.startsWith('persistent:')) {
+      throw new Error('[TEST] persistent record read failed')
+    }
+    return originalGet(key)
+  }
+
+  console.info('[TEST] Expected persistent record read failure while validating an indexed reverse-lookup hash.')
+  // A transient failure validating the indexed hash must propagate (the
+  // recovery routes turn it into a retryable 500), not fall through to the
+  // stale-index cleanup that would delete a still-valid reverse index.
+  await assert.rejects(findIndexedHashBySessionId('record-fail-session'), /persistent record read failed/)
+
+  valkeyClient.get = originalGet
+  assert.equal(
+    await valkeyClient.get('persistent-session-by-session:record-fail-session'),
+    hash,
+    'a failed record read must not delete the reverse index',
+  )
 })
 
 void test('authenticate persists selectedOptions from request body when cookie entry is missing', async (t) => {
@@ -1895,7 +2626,10 @@ void test('session teacher authenticate restores teacher cookie from active sess
   initializePersistentStorage(null)
   await initializeActivityRegistry()
   const sessionMap = new Map<string, unknown>()
-  const sessions = { get: async (id: string) => sessionMap.get(id) ?? null }
+  const sessions = {
+    get: async (id: string) => sessionMap.get(id) ?? null,
+    set: async (id: string, session: unknown) => { sessionMap.set(id, session) },
+  }
   const app = createMockApp()
   registerPersistentSessionRoutes({ app, sessions })
   const handler = getRoute(app, 'POST', '/api/session/:sessionId/teacher-authenticate')
@@ -1936,6 +2670,11 @@ void test('session teacher authenticate restores teacher cookie from active sess
     },
   })
   assert.equal(res.headers['cache-control'], 'no-store')
+  const managerCapabilityCookie = Array.from(res.cookies.entries()).find(([name]) => name.startsWith('activebits_cap_manager_'))?.[1]
+  assert.ok(managerCapabilityCookie)
+  assert.equal(managerCapabilityCookie.value.length > 0, true)
+  assert.equal(managerCapabilityCookie.options.httpOnly, true)
+  assert.notEqual((sessionMap.get('live-session') as { data?: { activityCapabilities?: unknown } }).data?.activityCapabilities, undefined)
 
   const cookie = res.cookies.get('persistent_sessions')
   assert.ok(cookie)
@@ -1952,6 +2691,306 @@ void test('session teacher authenticate restores teacher cookie from active sess
       selectedOptions: { presentationUrl: 'https://slides.example/deck' },
     }).get('urlHash'),
   })
+})
+
+void test('session teacher authenticate does not resurrect a session that ended during the request', async (t) => {
+  initializePersistentStorage(null)
+  await initializeActivityRegistry()
+  const sessionMap = new Map<string, unknown>()
+  let getCalls = 0
+  const setCalls: string[] = []
+  const sessions = {
+    get: async (id: string) => {
+      getCalls += 1
+      // The initial read succeeds; by the time the handler re-reads to issue the
+      // capability the session has ended (e.g. the class was closed).
+      if (id === 'live-session' && getCalls >= 2) return null
+      const session = sessionMap.get(id)
+      return session == null ? null : structuredClone(session)
+    },
+    set: async (id: string, session: unknown) => { setCalls.push(id); sessionMap.set(id, structuredClone(session)) },
+  }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+  const handler = getRoute(app, 'POST', '/api/session/:sessionId/teacher-authenticate')
+
+  const activityName = 'syncdeck'
+  const teacherCode = 'teacher-secret'
+  const { hash, hashedTeacherCode } = generatePersistentHash(activityName, teacherCode)
+  t.after(async () => cleanupPersistentSession(hash))
+  sessionMap.set('live-session', {
+    id: 'live-session', type: activityName, data: { instructorPasscode: 'syncdeck-instructor-passcode' },
+  })
+  await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode, 'solo-allowed')
+  await startPersistentSession(hash, 'live-session', { id: 'teacher-ws', readyState: 1, send() {} })
+
+  const res = createMockRes()
+  await handler(createMockReq({ params: { sessionId: 'live-session' }, body: { teacherCode } }), res)
+
+  assert.equal(res.statusCode, 404)
+  assert.deepEqual(res.jsonBody, { error: 'Teacher join is unavailable for this session' })
+  assert.equal(setCalls.length, 0, 'no whole-session write recreated the ended session')
+  assert.equal(res.cookies.has(getActivityCapabilityCookieName('manager', 'live-session')), false)
+})
+
+void test('session teacher authenticate stays retryable (500) when the strict live-session read rejects', async (t) => {
+  initializePersistentStorage(null)
+  await initializeActivityRegistry()
+  const sessions = {
+    // A transient store outage must not be flattened to a terminal 404; the
+    // strict read rejects into the handler's controlled 500 instead.
+    get: async () => { throw new Error('[TEST] session store read (non-strict) unavailable') },
+    getStrict: async () => { throw new Error('[TEST] session store read unavailable') },
+    set: async () => { throw new Error('[TEST] session store write should not run') },
+  }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+  const handler = getRoute(app, 'POST', '/api/session/:sessionId/teacher-authenticate')
+
+  const activityName = 'syncdeck'
+  const teacherCode = 'teacher-secret'
+  const { hash } = generatePersistentHash(activityName, teacherCode)
+  t.after(async () => cleanupPersistentSession(hash))
+
+  const res = createMockRes()
+  console.info('[TEST] Expected retryable failure: the strict live-session read is unavailable during teacher authentication.')
+  await handler(createMockReq({ params: { sessionId: 'live-session' }, body: { teacherCode } }), res)
+
+  assert.equal(res.statusCode, 500)
+  assert.deepEqual(res.jsonBody, { error: 'Teacher authentication is temporarily unavailable' })
+  assert.equal(res.cookies.has(getActivityCapabilityCookieName('manager', 'live-session')), false)
+})
+
+void test('session teacher authenticate stays retryable (500) when the capability re-read rejects', async (t) => {
+  initializePersistentStorage(null)
+  await initializeActivityRegistry()
+  const sessionMap = new Map<string, unknown>()
+  let strictCalls = 0
+  const setCalls: string[] = []
+  const sessions = {
+    get: async (id: string) => {
+      const session = sessionMap.get(id)
+      return session == null ? null : structuredClone(session)
+    },
+    getStrict: async (id: string) => {
+      strictCalls += 1
+      // Initial authorization read succeeds; the post-rate-limit re-read that
+      // issues the capability then hits a transient store outage.
+      if (strictCalls >= 2) throw new Error('[TEST] capability re-read unavailable')
+      const session = sessionMap.get(id)
+      return session == null ? null : structuredClone(session)
+    },
+    set: async (id: string, session: unknown) => { setCalls.push(id); sessionMap.set(id, structuredClone(session)) },
+  }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+  const handler = getRoute(app, 'POST', '/api/session/:sessionId/teacher-authenticate')
+
+  const activityName = 'syncdeck'
+  const teacherCode = 'teacher-secret'
+  const { hash, hashedTeacherCode } = generatePersistentHash(activityName, teacherCode)
+  t.after(async () => cleanupPersistentSession(hash))
+  sessionMap.set('live-session', {
+    id: 'live-session', type: activityName, data: { instructorPasscode: 'syncdeck-instructor-passcode' },
+  })
+  await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode, 'solo-allowed')
+  await startPersistentSession(hash, 'live-session', { id: 'teacher-ws', readyState: 1, send() {} })
+
+  const res = createMockRes()
+  console.info('[TEST] Expected retryable failure: the manager-capability re-read is unavailable during teacher authentication.')
+  await handler(createMockReq({ params: { sessionId: 'live-session' }, body: { teacherCode } }), res)
+
+  assert.equal(res.statusCode, 500)
+  assert.deepEqual(res.jsonBody, { error: 'manager capability unavailable' })
+  assert.equal(setCalls.length, 0, 'the capability write never runs when the re-read fails')
+  assert.equal(res.cookies.has(getActivityCapabilityCookieName('manager', 'live-session')), false)
+})
+
+void test('session teacher authenticate stays retryable (500) when the reverse-index read rejects', async (t) => {
+  const valkeyClient = createFakePersistentValkeyClient()
+  const originalGet = valkeyClient.get
+  valkeyClient.get = async (key: string) => {
+    if (key.startsWith('persistent-session-by-session:')) {
+      throw new Error('[TEST] reverse-index read failed')
+    }
+    return originalGet(key)
+  }
+  initializePersistentStorage(valkeyClient as never)
+  await initializeActivityRegistry()
+  t.after(() => { initializePersistentStorage(null) })
+
+  const sessionMap = new Map<string, unknown>()
+  sessionMap.set('live-session', {
+    id: 'live-session', type: 'syncdeck', data: { instructorPasscode: 'syncdeck-instructor-passcode' },
+  })
+  const sessions = {
+    get: async (id: string) => {
+      const session = sessionMap.get(id)
+      return session == null ? null : structuredClone(session)
+    },
+    getStrict: async (id: string) => {
+      const session = sessionMap.get(id)
+      return session == null ? null : structuredClone(session)
+    },
+    set: async () => { throw new Error('[TEST] session store write should not run') },
+  }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+  const handler = getRoute(app, 'POST', '/api/session/:sessionId/teacher-authenticate')
+
+  const res = createMockRes()
+  console.info('[TEST] Expected retryable failure: the reverse-index read is unavailable during teacher authentication.')
+  await handler(createMockReq({ params: { sessionId: 'live-session' }, body: { teacherCode: 'teacher-secret' } }), res)
+
+  // The live session read succeeded; a reverse-index backend outage must be a
+  // retryable 500, not the terminal 404 the legacy null contract produced.
+  assert.equal(res.statusCode, 500)
+  assert.deepEqual(res.jsonBody, { error: 'Teacher authentication is temporarily unavailable' })
+  assert.equal(res.cookies.has(getActivityCapabilityCookieName('manager', 'live-session')), false)
+})
+
+void test('session teacher authenticate stays retryable (500) when the fallback scan enumeration rejects', async (t) => {
+  const valkeyClient = createFakePersistentValkeyClient()
+  // Reverse index genuinely absent (no throw) so the lookup falls through to the
+  // legacy scan; the scan enumeration itself is then unavailable.
+  valkeyClient.scan = async () => { throw new Error('[TEST] hash enumeration scan failed') }
+  initializePersistentStorage(valkeyClient as never)
+  await initializeActivityRegistry()
+  t.after(() => { initializePersistentStorage(null) })
+
+  const sessionMap = new Map<string, unknown>()
+  sessionMap.set('live-session', {
+    id: 'live-session', type: 'syncdeck', data: { instructorPasscode: 'syncdeck-instructor-passcode' },
+  })
+  const sessions = {
+    get: async (id: string) => {
+      const session = sessionMap.get(id)
+      return session == null ? null : structuredClone(session)
+    },
+    getStrict: async (id: string) => {
+      const session = sessionMap.get(id)
+      return session == null ? null : structuredClone(session)
+    },
+    set: async () => { throw new Error('[TEST] session store write should not run') },
+  }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+  const handler = getRoute(app, 'POST', '/api/session/:sessionId/teacher-authenticate')
+
+  const res = createMockRes()
+  console.info('[TEST] Expected retryable failure: the persistent-session hash enumeration is unavailable during teacher authentication.')
+  await handler(createMockReq({ params: { sessionId: 'live-session' }, body: { teacherCode: 'teacher-secret' } }), res)
+
+  // An un-indexed session during a scan outage must not be flattened to a 404.
+  assert.equal(res.statusCode, 500)
+  assert.deepEqual(res.jsonBody, { error: 'Teacher authentication is temporarily unavailable' })
+})
+
+void test('session teacher authenticate stays retryable (500) when the persistent-record read rejects', async (t) => {
+  const valkeyClient = createFakePersistentValkeyClient()
+  const activityName = 'syncdeck'
+  const teacherCode = 'teacher-secret'
+  const { hash, hashedTeacherCode } = generatePersistentHash(activityName, teacherCode)
+  initializePersistentStorage(valkeyClient as never)
+  await initializeActivityRegistry()
+  t.after(() => { initializePersistentStorage(null) })
+  t.after(async () => cleanupPersistentSession(hash))
+  await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode, 'solo-allowed')
+  await startPersistentSession(hash, 'live-session', { id: 'teacher-ws', readyState: 1, send() {} })
+
+  // Reverse index resolves and validates (first persistent-record read), but the
+  // route's follow-up strict persistent-record read then fails.
+  const originalGet = valkeyClient.get
+  let recordReads = 0
+  valkeyClient.get = async (key: string) => {
+    if (key.startsWith('persistent:')) {
+      recordReads += 1
+      if (recordReads >= 2) {
+        throw new Error('[TEST] persistent record read failed')
+      }
+    }
+    return originalGet(key)
+  }
+
+  const sessionMap = new Map<string, unknown>()
+  sessionMap.set('live-session', {
+    id: 'live-session', type: activityName, data: { instructorPasscode: 'syncdeck-instructor-passcode' },
+  })
+  const sessions = {
+    get: async (id: string) => {
+      const session = sessionMap.get(id)
+      return session == null ? null : structuredClone(session)
+    },
+    getStrict: async (id: string) => {
+      const session = sessionMap.get(id)
+      return session == null ? null : structuredClone(session)
+    },
+    set: async () => { throw new Error('[TEST] session store write should not run') },
+  }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+  const handler = getRoute(app, 'POST', '/api/session/:sessionId/teacher-authenticate')
+
+  const res = createMockRes()
+  console.info('[TEST] Expected retryable failure: the persistent-record read is unavailable during teacher authentication.')
+  await handler(createMockReq({ params: { sessionId: 'live-session' }, body: { teacherCode } }), res)
+
+  assert.equal(res.statusCode, 500)
+  assert.deepEqual(res.jsonBody, { error: 'Teacher authentication is temporarily unavailable' })
+  assert.equal(res.cookies.has(getActivityCapabilityCookieName('manager', 'live-session')), false)
+})
+
+void test('session teacher authenticate stays retryable (500) when the fallback reverse-index backfill rejects', async (t) => {
+  const valkeyClient = createFakePersistentValkeyClient()
+  const activityName = 'syncdeck'
+  const teacherCode = 'teacher-secret'
+  const { hash, hashedTeacherCode } = generatePersistentHash(activityName, teacherCode)
+  initializePersistentStorage(valkeyClient as never)
+  await initializeActivityRegistry()
+  t.after(() => { initializePersistentStorage(null) })
+  t.after(async () => cleanupPersistentSession(hash))
+  await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode, 'solo-allowed')
+  await startPersistentSession(hash, 'live-session', { id: 'teacher-ws', readyState: 1, send() {} })
+
+  // Reverse index is gone (so the lookup drops to the legacy scan), the scan
+  // finds the record, but writing the index back then fails. The strict lookup
+  // must propagate that - the index-only recovery route would not find this
+  // session later, so issuing a manager capability now would be unrecoverable.
+  valkeyClient.store.delete('persistent-session-by-session:live-session')
+  const originalSet = valkeyClient.set
+  valkeyClient.set = async (key: string, value: string) => {
+    if (key.startsWith('persistent-session-by-session:')) {
+      throw new Error('[TEST] reverse-index backfill failed')
+    }
+    return originalSet(key, value)
+  }
+
+  const sessionMap = new Map<string, unknown>()
+  sessionMap.set('live-session', {
+    id: 'live-session', type: activityName, data: { instructorPasscode: 'syncdeck-instructor-passcode' },
+  })
+  const sessions = {
+    get: async (id: string) => {
+      const session = sessionMap.get(id)
+      return session == null ? null : structuredClone(session)
+    },
+    getStrict: async (id: string) => {
+      const session = sessionMap.get(id)
+      return session == null ? null : structuredClone(session)
+    },
+    set: async () => { throw new Error('[TEST] session store write should not run') },
+  }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+  const handler = getRoute(app, 'POST', '/api/session/:sessionId/teacher-authenticate')
+
+  const res = createMockRes()
+  console.info('[TEST] Expected retryable failure: the fallback reverse-index backfill is unavailable during teacher authentication.')
+  await handler(createMockReq({ params: { sessionId: 'live-session' }, body: { teacherCode } }), res)
+
+  assert.equal(res.statusCode, 500)
+  assert.deepEqual(res.jsonBody, { error: 'Teacher authentication is temporarily unavailable' })
+  assert.equal(res.cookies.has(getActivityCapabilityCookieName('manager', 'live-session')), false)
 })
 
 void test('session teacher authenticate rejects invalid teacher code', async (t) => {

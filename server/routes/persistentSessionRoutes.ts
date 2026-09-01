@@ -8,12 +8,16 @@ import {
   cleanupPersistentSession,
   recordTeacherCodeAttempt,
   consumePersistentSessionEntryParticipant,
-  findHashBySessionId,
+  findHashBySessionIdStrict,
+  findIndexedHashBySessionId,
   generatePersistentHash,
   getOrCreateActivePersistentSession,
   getPersistentSession,
+  getPersistentSessionStrict,
   PersistentSessionEntryParticipantStoreError,
+  recordTeacherCodeAttemptStrict,
   storePersistentSessionEntryParticipant,
+  TEACHER_CODE_ATTEMPT_WINDOW_SECONDS,
   verifyTeacherCodeWithHash,
   resolvePersistentSessionEntryPolicy,
   updatePersistentSessionUrlState,
@@ -35,6 +39,11 @@ import {
 } from '../core/persistentSessionEntryGateway.js'
 import { buildCreateSessionBootstrapPayload } from '../core/createSessionBootstrapPayload.js'
 import { boundPersistentSessionCookieEntries } from '../core/persistentSessionCookie.js'
+import {
+  issueActivityCapability,
+  resolveActivityPrincipalFromCookies,
+  writeActivityCapabilityCookie,
+} from '../core/activityCapabilities.js'
 
 const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000
 const MAX_TEACHER_CODE_LENGTH = 100
@@ -64,6 +73,10 @@ interface PersistentSessionCreateBody {
 
 interface SessionStoreLike {
   get(id: string): Promise<unknown | null>
+  // Strict read: a backend failure propagates instead of mapping to `null`.
+  // Optional; falls back to `get` when the store does not provide it.
+  getStrict?(id: string): Promise<unknown | null>
+  set?(id: string, session: unknown): Promise<void>
 }
 
 interface RequestLike {
@@ -84,6 +97,7 @@ interface ResponseLike {
   set?(field: string, value: string): ResponseLike
   json(payload: unknown): void
   cookie(name: string, value: string, options: Record<string, unknown>): void
+  headersSent?: boolean
 }
 
 interface AppLike {
@@ -230,6 +244,59 @@ function getValidatedPersistentSessionCookieEntry(
   return verifyTeacherCodeWithHash(activityName, hash, teacherCode).valid ? entry : null
 }
 
+/**
+ * Whether the caller supplied a teacher-code *candidate* for this persistent
+ * link: a `persistent_sessions` entry keyed to this activity/hash carrying a
+ * non-empty string `teacherCode`. Unlike `getValidatedPersistentSessionCookieEntry`
+ * this does not check the code is correct - it only tells whether a request is
+ * even *attempting* credentialed recovery, so a caller who merely knows the
+ * live session id (no matching cookie entry) is not charged an attempt against
+ * the shared IP+hash bucket and cannot lock out the real teacher on a shared
+ * NAT/school address.
+ */
+function hasPersistentSessionTeacherCodeCandidate(
+  sessionEntries: readonly CookieSessionEntry[],
+  activityName: string,
+  hash: string,
+): boolean {
+  const cookieKey = `${activityName}:${hash}`
+  return sessionEntries.some(
+    (entry) => entry.key === cookieKey && typeof entry.teacherCode === 'string' && entry.teacherCode.length > 0,
+  )
+}
+
+/**
+ * Run a persistent-link store mutation (record upsert + URL-state persist),
+ * returning `false` (after sending a controlled 500) if the backend rejects.
+ *
+ * `updatePersistentSessionUrlState` -> `persistPersistentSession` calls the
+ * Valkey-backed `setHashBySessionId`, which now rejects rather than swallowing a
+ * reverse-index write outage (so a persisted record can't silently lack its
+ * recovery index). These link-management routes are not otherwise wrapped, so
+ * without this an index-write outage would escape to Express's default handler
+ * instead of the JSON error the client expects.
+ */
+async function persistPersistentLinkState(
+  res: ResponseLike,
+  hash: string,
+  route: string,
+  apply: () => Promise<void>,
+): Promise<boolean> {
+  try {
+    await apply()
+    return true
+  } catch (error) {
+    console.error(JSON.stringify({
+      event: 'persistent-link-state-persist-failed',
+      route,
+      hash,
+      error: error instanceof Error ? error.message : String(error),
+    }))
+    res.status(500).json({ error: 'Persistent link storage is temporarily unavailable' })
+    return false
+  }
+}
+
 function writePersistentSessionsCookie(res: ResponseLike, sessionEntries: CookieSessionEntry[]): void {
   const boundedEntries = boundPersistentSessionCookieEntries(sessionEntries)
   res.cookie('persistent_sessions', JSON.stringify(boundedEntries), {
@@ -333,6 +400,16 @@ function validateEntryPolicyForActivity(activityName: string, entryPolicy: strin
 }
 
 export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersistentSessionRoutesOptions): void {
+  // Strict live-session read for the capability-recovery routes: a backend
+  // outage rejects (-> the route's outer catch -> retryable 500) instead of
+  // mapping to `null`, which the Java manager treats as a definitive "no such
+  // session" and stops retrying.
+  const getSessionStrict = (sessionId: string): Promise<unknown | null> => (
+    typeof sessions.getStrict === 'function'
+      ? sessions.getStrict(sessionId)
+      : sessions.get(sessionId)
+  )
+
   app.get('/api/persistent-session/list', async (req, res) => {
     try {
       const { sessions: sessionEntries } = parsePersistentSessionsCookie(
@@ -430,11 +507,14 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
       entryPolicy,
       urlHash: query.get('urlHash') ?? undefined,
     })
-    await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode, entryPolicy)
-    await updatePersistentSessionUrlState(hash, {
-      entryPolicy,
-      selectedOptions,
+    const persisted = await persistPersistentLinkState(res, hash, '/api/persistent-session/create', async () => {
+      await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode, entryPolicy)
+      await updatePersistentSessionUrlState(hash, {
+        entryPolicy,
+        selectedOptions,
+      })
     })
+    if (!persisted) return
 
     writePersistentSessionsCookie(res, sessionEntries)
 
@@ -494,16 +574,19 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
       urlHash: query.get('urlHash') ?? undefined,
     })
 
-    await getOrCreateActivePersistentSession(
-      activityName,
-      hash,
-      null,
-      entryPolicy,
-    )
-    await updatePersistentSessionUrlState(hash, {
-      entryPolicy,
-      selectedOptions,
+    const persisted = await persistPersistentLinkState(res, hash, '/api/persistent-session/update', async () => {
+      await getOrCreateActivePersistentSession(
+        activityName,
+        hash,
+        null,
+        entryPolicy,
+      )
+      await updatePersistentSessionUrlState(hash, {
+        entryPolicy,
+        selectedOptions,
+      })
     })
+    if (!persisted) return
 
     writePersistentSessionsCookie(res, sessionEntries)
     res.json({
@@ -633,12 +716,15 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
       entryPolicy: finalEntryPolicy,
       urlHash: finalUrlHash,
     })
-    writePersistentSessionsCookie(res, sessionEntries)
-    await updatePersistentSessionUrlState(hash, {
-      entryPolicy: finalEntryPolicy,
-      selectedOptions: finalSelectedOptions,
+    const persisted = await persistPersistentLinkState(res, hash, '/api/persistent-session/authenticate', async () => {
+      await updatePersistentSessionUrlState(hash, {
+        entryPolicy: finalEntryPolicy,
+        selectedOptions: finalSelectedOptions,
+      })
     })
+    if (!persisted) return
 
+    writePersistentSessionsCookie(res, sessionEntries)
     res.json({
       success: true,
       isStarted: Boolean(persistentSession?.sessionId),
@@ -665,19 +751,50 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
       return
     }
 
-    const activeSession = await sessions.get(sessionId)
+    let activeSession: unknown
+    try {
+      // Strict read: a transient store outage must reject into a retryable 500
+      // here, not be mapped to `null` -> a terminal 404 the recovering client
+      // treats as "session gone" and stops retrying.
+      activeSession = await getSessionStrict(sessionId)
+    } catch (error) {
+      console.error(JSON.stringify({
+        event: 'teacher-authenticate-live-session-lookup-failed',
+        sessionId,
+        errorName: error instanceof Error ? error.name : 'unknown',
+      }))
+      res.status(500).json({ error: 'Teacher authentication is temporarily unavailable' })
+      return
+    }
     if (activeSession == null) {
       res.status(404).json({ error: 'Active session not found' })
       return
     }
 
-    const hash = await findHashBySessionId(sessionId)
+    let hash: string | null
+    let persistentSession: Awaited<ReturnType<typeof getPersistentSessionStrict>>
+    try {
+      // Strict throughout: a genuine miss still falls back to the legacy scan,
+      // but a backend read failure - in the reverse-index lookup or the
+      // persistent-record read below - rejects here instead of returning
+      // `null` -> the terminal 404 (the live session was already read
+      // successfully, so the failure is transient and retryable).
+      hash = await findHashBySessionIdStrict(sessionId)
+      persistentSession = hash ? await getPersistentSessionStrict(hash) : null
+    } catch (error) {
+      console.error(JSON.stringify({
+        event: 'teacher-authenticate-hash-lookup-failed',
+        sessionId,
+        errorName: error instanceof Error ? error.name : 'unknown',
+      }))
+      res.status(500).json({ error: 'Teacher authentication is temporarily unavailable' })
+      return
+    }
     if (!hash) {
       res.status(404).json({ error: 'Teacher join is unavailable for this session' })
       return
     }
 
-    const persistentSession = await getPersistentSession(hash)
     if (!persistentSession || persistentSession.sessionId !== sessionId) {
       res.status(404).json({ error: 'Teacher join is unavailable for this session' })
       return
@@ -738,13 +855,59 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
       entryPolicy: finalEntryPolicy,
       urlHash: finalUrlHash,
     })
+    const urlStatePersisted = await persistPersistentLinkState(
+      res,
+      hash,
+      '/api/session/:sessionId/teacher-authenticate',
+      () => updatePersistentSessionUrlState(hash, finalUrlState),
+    )
+    if (!urlStatePersisted) return
     writePersistentSessionsCookie(res, sessionEntries)
-    await updatePersistentSessionUrlState(hash, finalUrlState)
 
     const activeSessionData = isPlainObject(activeSession) && isPlainObject(activeSession.data)
       ? activeSession.data
       : {}
     const createSessionPayload = buildCreateSessionBootstrapPayload(activityName, activeSessionData)
+
+    // The teacher-auth response is what establishes manager authority, so a
+    // store that cannot persist the capability must fail closed - matching the
+    // persistent-manager-capability recovery endpoint - not return success
+    // without a usable manager cookie.
+    if (typeof sessions.set !== 'function' || !isPlainObject(activeSession)) {
+      console.error(JSON.stringify({
+        event: 'persistent-manager-capability-store-unavailable',
+        sessionId,
+      }))
+      res.status(500).json({ error: 'manager capability unavailable' })
+      return
+    }
+
+    try {
+      // Re-read: `activeSession` was fetched before the rate-limit and
+      // persistent-store awaits above. Issue the capability onto the latest
+      // record so a participant/socket mutation in that window is not lost.
+      // If the session ended in that window, fail rather than resurrect the
+      // stale snapshot and grant a manager cookie for a dead session. Use the
+      // strict read so a transient store outage rejects into the retryable 500
+      // below instead of `sessions.get()` mapping it to `null` -> a terminal
+      // 404 the client would stop retrying.
+      const freshSession = await getSessionStrict(sessionId)
+      if (!isPlainObject(freshSession) || freshSession.type !== activityName) {
+        res.status(404).json({ error: 'Teacher join is unavailable for this session' })
+        return
+      }
+      const capability = issueActivityCapability(freshSession as { data: unknown }, 'manager')
+      await sessions.set(sessionId, freshSession)
+      writeActivityCapabilityCookie(res, sessionId, 'manager', capability.token)
+    } catch (error) {
+      console.error(JSON.stringify({
+        event: 'persistent-manager-capability-persistence-failed',
+        sessionId,
+        errorName: error instanceof Error ? error.name : 'unknown',
+      }))
+      res.status(500).json({ error: 'manager capability unavailable' })
+      return
+    }
 
     res.json({
       success: true,
@@ -752,6 +915,155 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
       sessionId,
       ...(createSessionPayload ? { createSessionPayload } : {}),
     })
+  })
+
+  app.post('/api/session/:sessionId/persistent-manager-capability', async (req, res) => {
+    setNoStore(res)
+    const sessionId = req.params.sessionId
+    if (!sessionId) {
+      res.status(400).json({ error: 'Missing sessionId' })
+      return
+    }
+
+    try {
+      const activeSession = await getSessionStrict(sessionId)
+      if (!isPlainObject(activeSession) || typeof activeSession.type !== 'string') {
+        res.status(404).json({ error: 'Active session not found' })
+        return
+      }
+
+      // Does the caller already hold a valid manager capability? For such a
+      // caller the persistent recovery context below is advisory only (whether
+      // a later capability loss is reload-recoverable), so a transient
+      // persistent-store failure must not fail their request. For a caller
+      // whose authorization *depends* on the persistent lookup, a store failure
+      // has to propagate (-> outer catch -> retryable 500) and only a genuine
+      // miss may yield 404/403.
+      const alreadyAuthorized = Boolean(
+        resolveActivityPrincipalFromCookies(activeSession as { data: unknown }, sessionId, 'manager', req.cookies),
+      )
+
+      // Resolve the persistent recovery context.
+      //
+      // Index-only lookup: this runs before the persistent teacher cookie is
+      // checked, so an uncredentialed caller must not be able to drive the
+      // O(n) `getAllHashes()` scan. Both the index read and the strict record
+      // read reject on a backend failure rather than returning `null`.
+      let hash: string | null = null
+      let persistentSession: Awaited<ReturnType<typeof getPersistentSessionStrict>> = null
+      try {
+        hash = await findIndexedHashBySessionId(sessionId)
+        persistentSession = hash ? await getPersistentSessionStrict(hash) : null
+      } catch (recoveryLookupError) {
+        if (!alreadyAuthorized) {
+          throw recoveryLookupError
+        }
+        // Already-authorized: degrade to "recovery not known" instead of
+        // failing an otherwise-valid live session on a store blip.
+        console.error(JSON.stringify({
+          event: 'persistent-manager-capability-recovery-lookup-degraded',
+          sessionId,
+          error: recoveryLookupError instanceof Error ? recoveryLookupError.message : String(recoveryLookupError),
+        }))
+      }
+
+      const isPersistentSession = Boolean(
+        hash
+        && persistentSession
+        && persistentSession.sessionId === sessionId
+        && persistentSession.activityName === activeSession.type,
+      )
+
+      const { sessions: sessionEntries } = parsePersistentSessionsCookie(
+        req.cookies?.persistent_sessions,
+        'persistent_sessions (/api/session/:sessionId/persistent-manager-capability)',
+      )
+
+      // Rate-limit the teacher-code validation below. `persistent_sessions` is a
+      // client-supplied cookie a direct HTTP client can forge, so without this
+      // an attacker who knows a persistent hash could brute-force its teacher
+      // code here - bypassing the same IP+hash cap already enforced by
+      // `teacher-authenticate` and the video-sync recovery route. Only a request
+      // that actually carries a teacher-code candidate for this link is charged:
+      // a caller who merely knows the live session id falls through to the 403
+      // below without consuming another client's shared bucket. The
+      // already-authorized fast path is unaffected (checked below before any
+      // credential comparison that matters).
+      if (
+        !alreadyAuthorized
+        && isPersistentSession
+        && hash
+        && hasPersistentSessionTeacherCodeCandidate(sessionEntries, persistentSession!.activityName, hash)
+      ) {
+        // Strict: a limiter-backend outage rejects here (-> the route's outer
+        // catch -> retryable 500) rather than failing open and reporting every
+        // guess as "allowed" for the duration of the outage.
+        const attempt = await recordTeacherCodeAttemptStrict(`${getRequestClientIp(req)}:${hash}`)
+        if (!attempt.allowed) {
+          // "Wait and retry" - the bucket clears after this window. The Java
+          // Format manager treats 429 as transient and honors this header
+          // rather than falling into its 1s/2s/3s backoff (which would expire
+          // entirely inside the window and force a give-up).
+          res.set?.('Retry-After', String(TEACHER_CODE_ATTEMPT_WINDOW_SECONDS))
+          res.status(429).json({ error: 'Too many attempts. Please wait a minute.' })
+          return
+        }
+      }
+      const persistentRecoveryAvailable = isPersistentSession
+        && getValidatedPersistentSessionCookieEntry(sessionEntries, persistentSession!.activityName, hash!) != null
+
+      // Fast path: the caller already holds a valid manager capability. Nothing
+      // to re-issue; still report whether recovery is persistently backed.
+      if (alreadyAuthorized) {
+        res.json({ success: true, alreadyAuthorized: true, persistentRecoveryAvailable })
+        return
+      }
+
+      if (!isPersistentSession) {
+        res.status(404).json({ error: 'Persistent manager recovery is unavailable for this session' })
+        return
+      }
+      if (!persistentRecoveryAvailable) {
+        res.status(403).json({ error: 'Persistent teacher authentication is required' })
+        return
+      }
+
+      if (!sessions.set) {
+        res.status(500).json({ error: 'Manager capability is temporarily unavailable' })
+        return
+      }
+
+      // Re-read: `activeSession` was fetched before the persistent-store and
+      // cookie-validation awaits above. Issue the capability onto the latest
+      // record so a concurrent activity update in that window is not lost when
+      // the whole-session snapshot is written back.
+      const freshSession = await getSessionStrict(sessionId)
+      if (!isPlainObject(freshSession)) {
+        res.status(404).json({ error: 'Active session not found' })
+        return
+      }
+      // The persistent authorization was established for `activeSession.type`.
+      // If the session ended and its id was reused for a different activity
+      // during the awaits above, do not issue a manager capability into the
+      // replacement.
+      if (freshSession.type !== activeSession.type) {
+        res.status(404).json({ error: 'Active session not found' })
+        return
+      }
+      const capability = issueActivityCapability(freshSession as { data: unknown }, 'manager')
+      await sessions.set(sessionId, freshSession)
+      writeActivityCapabilityCookie(res, sessionId, 'manager', capability.token)
+      res.json({ success: true, persistentRecoveryAvailable: true })
+    } catch (error) {
+      console.error(JSON.stringify({
+        event: 'persistent-manager-capability-failed',
+        sessionId,
+        error: error instanceof Error ? error.message : String(error),
+      }))
+      if (!res.headersSent) {
+        res.status(500).json({ error: 'Manager capability is temporarily unavailable' })
+      }
+    }
   })
 
   app.get('/api/persistent-session/:hash', async (req, res) => {

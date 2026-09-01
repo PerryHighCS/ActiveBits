@@ -26,6 +26,7 @@ import {
 } from 'activebits-server/core/sessions.js'
 import { storeSessionEntryParticipant } from 'activebits-server/core/sessionEntryParticipants.js'
 import { revokeSessionEntryParticipants } from 'activebits-server/core/sessionEntryParticipants.js'
+import { issueActivityCapability, writeActivityCapabilityCookie } from 'activebits-server/core/activityCapabilities.js'
 import { randomBytes, timingSafeEqual } from 'node:crypto'
 import type { ActiveBitsWebSocket, WsRouter } from '../../../types/websocket.js'
 import {
@@ -77,6 +78,7 @@ interface JsonResponse {
   cookie?(name: string, value: string, options: Record<string, unknown>): void
   setHeader?(name: string, value: string): void
   redirect?(status: number, url: string): void
+  readonly headersSent?: boolean
 }
 
 interface RouteRequest {
@@ -1510,6 +1512,24 @@ async function createSyncDeckInstructorSession(
 export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: SessionStore, ws: WsRouter): void {
   const embeddedActivityStartLocks = new Map<string, Promise<void>>()
 
+  // Strict reads for the embedded-manager-capability redemption: a Valkey
+  // outage rejects into the route's outer catch (-> structured log + retryable
+  // 500) instead of being swallowed to `null`, which the route would report as
+  // a definitive "invalid embedded manager credentials" 403.
+  const getSessionStrict = (sessionId: string): ReturnType<SessionStore['get']> => (
+    typeof sessions.getStrict === 'function' ? sessions.getStrict(sessionId) : sessions.get(sessionId)
+  )
+  const consumeEntryTokenStrict = (
+    sessionId: string,
+    field: string,
+    token: string,
+  ): Promise<SessionRecord | null> | null => {
+    if (typeof sessions.consumeSessionDataTokenStrict === 'function') {
+      return sessions.consumeSessionDataTokenStrict(sessionId, field, token)
+    }
+    return sessions.consumeSessionDataToken?.(sessionId, field, token) ?? null
+  }
+
   registerLearnSyncDeckRoutes({
     app,
     sessions,
@@ -2162,6 +2182,96 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       sessionId,
     }))
     res.json({ instructorPasscode })
+  })
+
+  app.get('/api/syncdeck/embedded-manager-capability', async (req, res) => {
+    res.setHeader?.('Cache-Control', 'no-store')
+    const sessionId = typeof req.query?.sessionId === 'string' ? req.query.sessionId.trim() : ''
+    const token = typeof req.query?.token === 'string' ? req.query.token.trim() : ''
+    if (!sessionId || !token) {
+      res.status(400).json({ error: 'missing embedded manager credentials' })
+      return
+    }
+    if (
+      sessionId.length > MAX_EMBEDDED_MANAGER_SESSION_ID_LENGTH
+      || token.length > MAX_EMBEDDED_MANAGER_TOKEN_LENGTH
+    ) {
+      res.status(403).json({ error: 'invalid embedded manager credentials' })
+      return
+    }
+
+    try {
+      const session = await getSessionStrict(sessionId)
+      const entryToken = session ? readEmbeddedManagerEntryToken(session) : null
+      if (!entryToken || !verifyEmbeddedManagerEntryToken(entryToken.value, token)) {
+        res.status(403).json({ error: 'invalid embedded manager credentials' })
+        return
+      }
+      if (!res.cookie) {
+        console.error(JSON.stringify({
+          activity: 'syncdeck',
+          event: 'embedded-manager-capability-cookie-unavailable',
+          sessionId,
+        }))
+        res.status(500).json({ error: 'embedded manager capability unavailable' })
+        return
+      }
+
+      const consumeEntryToken = consumeEntryTokenStrict(sessionId, 'embeddedManagerEntryToken', token)
+      if (!consumeEntryToken) {
+        console.error(JSON.stringify({
+          activity: 'syncdeck',
+          event: 'embedded-manager-token-consume-unavailable',
+          sessionId,
+        }))
+        res.status(500).json({ error: 'embedded manager credentials unavailable' })
+        return
+      }
+
+      if (!await consumeEntryToken) {
+        res.status(403).json({ error: 'invalid embedded manager credentials' })
+        return
+      }
+
+      // Re-read after atomic consumption so persisting the capability cannot
+      // resurrect the one-time bootstrap token from the pre-consumption record.
+      const consumedSession = await getSessionStrict(sessionId)
+      if (!consumedSession) {
+        res.status(404).json({ error: 'embedded activity session not found' })
+        return
+      }
+      try {
+        const capability = issueActivityCapability(consumedSession, 'manager')
+        await sessions.set(sessionId, consumedSession)
+        writeActivityCapabilityCookie({ cookie: res.cookie.bind(res) }, sessionId, 'manager', capability.token)
+      } catch (error) {
+        console.error(JSON.stringify({
+          activity: 'syncdeck',
+          event: 'embedded-manager-capability-persistence-failed',
+          sessionId,
+          errorName: error instanceof Error ? error.name : 'unknown',
+        }))
+        res.status(500).json({ error: 'embedded manager capability unavailable' })
+        return
+      }
+
+      console.info(JSON.stringify({
+        activity: 'syncdeck',
+        event: 'embedded-manager-capability-issued',
+        sessionId,
+      }))
+      res.json({ ok: true })
+    } catch (storeError) {
+      console.error(JSON.stringify({
+        activity: 'syncdeck',
+        event: 'embedded-manager-capability-failed',
+        sessionId,
+        errorName: storeError instanceof Error ? storeError.name : 'unknown',
+      }))
+      if (!res.headersSent) {
+        res.status(500).json({ error: 'embedded manager capability unavailable' })
+      }
+    }
   })
 
   app.post('/api/syncdeck/:sessionId/embedded-activity/end', async (req, res) => {

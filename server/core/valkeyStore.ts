@@ -109,13 +109,35 @@ export class ValkeySessionStore {
   }
 
   async get(id: string): Promise<SessionLike | null> {
+    // Non-throwing contract: delegate to getStrict and swallow a backend
+    // failure to `null` for callers that tolerate it.
+    try {
+      return await this.getStrict(id)
+    } catch {
+      // getStrict already logged the structured failure.
+      return null
+    }
+  }
+
+  /**
+   * Strict session read: a backend failure is logged and rethrown rather than
+   * mapped to `null`. Capability-recovery routes use this so a transient Valkey
+   * outage stays a retryable 500 instead of a false 404 the client treats as a
+   * definitive "no such session".
+   */
+  async getStrict(id: string): Promise<SessionLike | null> {
     try {
       const data = await this.client.get(`session:${id}`)
       if (!data) return null
       return JSON.parse(data) as SessionLike
     } catch (err) {
-      console.error(`Failed to get session ${id}:`, err)
-      return null
+      console.error(JSON.stringify({
+        event: 'valkey.session-lookup-failed',
+        sessionId: id,
+        strict: true,
+        error: err instanceof Error ? err.message : String(err),
+      }))
+      throw err
     }
   }
 
@@ -131,6 +153,23 @@ export class ValkeySessionStore {
   }
 
   async consumeSessionDataToken(id: string, field: string, token: string): Promise<SessionLike | null> {
+    // Non-throwing contract: delegate to the strict variant and swallow a
+    // backend failure to `null` for callers that tolerate it.
+    try {
+      return await this.consumeSessionDataTokenStrict(id, field, token)
+    } catch {
+      // consumeSessionDataTokenStrict already logged the structured failure.
+      return null
+    }
+  }
+
+  /**
+   * Strict variant: a backend failure is logged and rethrown rather than mapped
+   * to `null`, which is indistinguishable from "token already consumed /
+   * invalid". Callers that must keep a transient outage retryable (rather than
+   * reporting it as a definitive 403) use this.
+   */
+  async consumeSessionDataTokenStrict(id: string, field: string, token: string): Promise<SessionLike | null> {
     try {
       const script = `
                 local key = KEYS[1]
@@ -175,9 +214,10 @@ export class ValkeySessionStore {
         event: 'consume-session-data-token-failed',
         sessionId: id,
         field,
+        strict: true,
         error: err instanceof Error ? { name: err.name, message: err.message } : String(err),
       }))
-      return null
+      throw err
     }
   }
 
@@ -335,13 +375,42 @@ export class ValkeyPersistentStore {
   }
 
   async get(hash: string): Promise<PersistentMetadata | null> {
+    // Non-throwing contract: delegate the single read/parse path to getStrict
+    // (which already logs the failure) and swallow a backend failure to `null`
+    // for callers that tolerate it. `hash` is kept out of any format-string
+    // position - it derives from a request-controlled session id.
+    try {
+      return await this.getStrict(hash)
+    } catch (err) {
+      console.error(JSON.stringify({
+        event: 'valkey.persistent-session-record-lookup-degraded',
+        hash,
+        error: err instanceof Error ? err.message : String(err),
+      }))
+      return null
+    }
+  }
+
+  /**
+   * Strict record read: a backend failure is logged and rethrown rather than
+   * mapped to `null`. {@link findIndexedHashBySessionId} uses this so a
+   * transient Valkey outage propagates as a retryable error instead of looking
+   * like a stale reverse index that then gets deleted. The single source of
+   * truth for the `persistent:` key format and record decoding.
+   */
+  async getStrict(hash: string): Promise<PersistentMetadata | null> {
     try {
       const data = await this.client.get(`persistent:${hash}`)
       if (!data) return null
       return JSON.parse(data) as PersistentMetadata
     } catch (err) {
-      console.error(`Failed to get persistent session ${hash}:`, err)
-      return null
+      console.error(JSON.stringify({
+        event: 'valkey.persistent-session-record-lookup-failed',
+        hash,
+        strict: true,
+        error: err instanceof Error ? err.message : String(err),
+      }))
+      throw err
     }
   }
 
@@ -369,8 +438,32 @@ export class ValkeyPersistentStore {
     try {
       return await this.client.get(`persistent-session-by-session:${sessionId}`)
     } catch (err) {
-      console.error(`Failed to get persistent session hash for session ${sessionId}:`, err)
+      console.error(JSON.stringify({
+        event: 'valkey.persistent-session-hash-lookup-failed',
+        sessionId,
+        error: err instanceof Error ? err.message : String(err),
+      }))
       return null
+    }
+  }
+
+  /**
+   * Strict reverse-index read: a backend failure is logged and rethrown rather
+   * than mapped to `null`. Manager-capability recovery uses this so a transient
+   * Valkey outage becomes a retryable 500 instead of a "no such persistent
+   * session" 404/403 the client would treat as terminal.
+   */
+  async getHashBySessionIdStrict(sessionId: string): Promise<string | null> {
+    try {
+      return await this.client.get(`persistent-session-by-session:${sessionId}`)
+    } catch (err) {
+      console.error(JSON.stringify({
+        event: 'valkey.persistent-session-hash-lookup-failed',
+        sessionId,
+        strict: true,
+        error: err instanceof Error ? err.message : String(err),
+      }))
+      throw err
     }
   }
 
@@ -378,7 +471,18 @@ export class ValkeyPersistentStore {
     try {
       await this.client.set(`persistent-session-by-session:${sessionId}`, hash, 'PX', this.ttlMs)
     } catch (err) {
-      console.error(`Failed to set persistent session hash for session ${sessionId}:`, err)
+      // Rethrow: manager-capability recovery is index-only, so a persistent
+      // session whose record was written but whose reverse index was not is
+      // silently unrecoverable (recovery classifies it as missing). Failing the
+      // write lets the caller retry / surface the error instead of publishing a
+      // "successful" session without its required index. The record write
+      // (`set`) already rethrows, so callers already handle a rejected persist.
+      console.error(JSON.stringify({
+        event: 'valkey.persistent-session-hash-write-failed',
+        sessionId,
+        error: err instanceof Error ? err.message : String(err),
+      }))
+      throw err
     }
   }
 
@@ -386,8 +490,49 @@ export class ValkeyPersistentStore {
     try {
       await this.client.del(`persistent-session-by-session:${sessionId}`)
     } catch (err) {
-      console.error(`Failed to delete persistent session hash for session ${sessionId}:`, err)
+      console.error(JSON.stringify({
+        event: 'valkey.persistent-session-hash-delete-failed',
+        sessionId,
+        error: err instanceof Error ? err.message : String(err),
+      }))
     }
+  }
+
+  /**
+   * Atomic compare-and-clear for a failed start rollback: in one server-side
+   * script, drop the failed attempt's own reverse-index entry, then reset the
+   * persistent record's started state *only if it still points at
+   * `expectedSessionId`*. A concurrent start that linked a newer session id
+   * before this runs is therefore never clobbered - no read-modify-write TOCTOU
+   * window. Returns true only when this call cleared the record. A backend
+   * failure propagates (the caller logs and swallows it).
+   */
+  async compareAndClearSessionId(hash: string, expectedSessionId: string): Promise<boolean> {
+    const script = `
+      -- persistent-session-compare-and-clear
+      redis.call('DEL', KEYS[2])
+      local raw = redis.call('GET', KEYS[1])
+      if not raw then
+        return 0
+      end
+      local record = cjson.decode(raw)
+      if record.sessionId ~= ARGV[1] then
+        return 0
+      end
+      record.sessionId = cjson.null
+      record.teacherSocketId = cjson.null
+      redis.call('SET', KEYS[1], cjson.encode(record), 'PX', tonumber(ARGV[2]))
+      return 1
+    `
+    const result = await this.client.eval(
+      script,
+      2,
+      `persistent:${hash}`,
+      `persistent-session-by-session:${expectedSessionId}`,
+      expectedSessionId,
+      this.ttlMs,
+    )
+    return result === 1 || result === '1'
   }
 
   async getAllHashes(): Promise<string[]> {
@@ -400,28 +545,83 @@ export class ValkeyPersistentStore {
     }
   }
 
-  async incrementAttempts(key: string): Promise<number> {
+  /**
+   * Strict enumeration: a scan failure is logged and rethrown rather than
+   * mapped to `[]` (indistinguishable from "no persistent sessions"). Callers
+   * on a strict recovery path use this so a transient Valkey outage during the
+   * legacy fallback scan surfaces as a retryable error, not a false "no such
+   * session".
+   */
+  async getAllHashesStrict(): Promise<string[]> {
     try {
-      const script = `
+      const keys = await this.scanKeys('persistent:*')
+      return keys.map((key) => key.replace('persistent:', ''))
+    } catch (err) {
+      console.error(JSON.stringify({
+        event: 'valkey.persistent-session-hash-enumeration-failed',
+        strict: true,
+        error: err instanceof Error ? err.message : String(err),
+      }))
+      throw err
+    }
+  }
+
+  // Kept in sync with TEACHER_CODE_ATTEMPT_WINDOW_SECONDS in
+  // persistentSessions.ts (surfaced to clients as `Retry-After`).
+  private static readonly RATE_LIMIT_TTL_SECONDS = 60
+  private static readonly INCREMENT_ATTEMPTS_SCRIPT = `
                 local value = redis.call('INCR', KEYS[1])
                 if value == 1 then
                     redis.call('EXPIRE', KEYS[1], ARGV[1])
                 end
                 return value
             `
-      const ttlSeconds = 60
-      const result = await this.client.eval(script, 1, `ratelimit:${key}`, ttlSeconds)
-      if (typeof result === 'number') {
-        return result
-      }
-      if (typeof result === 'string') {
-        const parsed = parseInt(result, 10)
-        return Number.isNaN(parsed) ? 0 : parsed
-      }
-      return 0
+
+  private async evalIncrementAttempts(key: string): Promise<number> {
+    const result = await this.client.eval(
+      ValkeyPersistentStore.INCREMENT_ATTEMPTS_SCRIPT,
+      1,
+      `ratelimit:${key}`,
+      ValkeyPersistentStore.RATE_LIMIT_TTL_SECONDS,
+    )
+    if (typeof result === 'number') {
+      return result
+    }
+    if (typeof result === 'string') {
+      const parsed = parseInt(result, 10)
+      return Number.isNaN(parsed) ? 0 : parsed
+    }
+    return 0
+  }
+
+  async incrementAttempts(key: string): Promise<number> {
+    try {
+      return await this.evalIncrementAttempts(key)
     } catch (err) {
-      console.error(`Failed to increment attempts for ${key}:`, err)
+      console.error(JSON.stringify({
+        event: 'valkey.increment-attempts-degraded',
+        key,
+        error: err instanceof Error ? err.message : String(err),
+      }))
       return 0
+    }
+  }
+
+  /**
+   * Like {@link incrementAttempts} but rethrows a backend failure instead of
+   * failing open with `0`. Brute-force guards on pre-auth recovery endpoints
+   * use this so a limiter outage becomes a retryable 5xx rather than a window
+   * in which every guess counts as "allowed".
+   */
+  async incrementAttemptsStrict(key: string): Promise<number> {
+    try {
+      return await this.evalIncrementAttempts(key)
+    } catch (err) {
+      console.error(JSON.stringify({
+        event: 'valkey.increment-attempts-failed',
+        error: err instanceof Error ? err.message : String(err),
+      }))
+      throw err
     }
   }
 

@@ -24,6 +24,43 @@ interface ManagerWsMessage {
   }
 }
 
+export type ManagerAuthLostRecovery = 'reload-from-signin' | 'temporarily-unavailable' | 'no-recovery'
+
+/**
+ * Which recovery affordance the auth-lost banner should present:
+ * - `reload-from-signin`: the capability exchange confirmed a persistent record
+ *   and a still-valid teacher cookie, so a reload redeems a fresh capability.
+ * - `temporarily-unavailable`: the exchange only ever hit transient failures, so
+ *   we never learned whether recovery is possible - offer retry/reload rather
+ *   than telling the instructor a reload cannot help.
+ * - `no-recovery`: a conclusive 403/404 - reloading will not help, mint a new
+ *   session.
+ */
+export function resolveManagerAuthLostRecovery(params: {
+  persistentRecoveryAvailable: boolean
+  managerAccessTemporarilyUnavailable: boolean
+}): ManagerAuthLostRecovery {
+  if (params.persistentRecoveryAvailable) return 'reload-from-signin'
+  if (params.managerAccessTemporarilyUnavailable) return 'temporarily-unavailable'
+  return 'no-recovery'
+}
+
+/** Fallback wait before retrying a rate-limited capability exchange when the route sends no usable `Retry-After`. */
+export const DEFAULT_MANAGER_CAPABILITY_RETRY_AFTER_MS = 60_000
+
+/**
+ * Parse a `Retry-After` header (delta-seconds form only) into milliseconds,
+ * clamped to a 5 minute ceiling. Returns `null` for an absent, non-numeric
+ * (e.g. HTTP-date), or non-positive value so the caller falls back to
+ * `DEFAULT_MANAGER_CAPABILITY_RETRY_AFTER_MS`.
+ */
+export function parseManagerCapabilityRetryAfterMs(headerValue: string | null | undefined): number | null {
+  if (headerValue == null) return null
+  const seconds = Number(headerValue.trim())
+  if (!Number.isFinite(seconds) || seconds <= 0) return null
+  return Math.min(seconds * 1000, 5 * 60_000)
+}
+
 /**
  * JavaFormatPracticeManager - Teacher view for managing the Java Format Practice activity
  * Displays student roster and their progress statistics
@@ -35,6 +72,29 @@ export default function JavaFormatPracticeManager() {
   const [students, setStudents] = useState<JavaFormatStudentRecord[]>([])
   const [startingNewSession, setStartingNewSession] = useState(false)
   const [managerAuthLost, setManagerAuthLost] = useState(false)
+  // The sessionId whose persistent-manager-capability exchange has completed.
+  // Tracked as an id rather than a boolean so a parameter-only route swap can
+  // never leave a stale `true` in the window before the passive effect re-runs.
+  const [managerAccessReadySessionId, setManagerAccessReadySessionId] = useState<string | null>(null)
+  const managerAccessReady = sessionId != null && managerAccessReadySessionId === sessionId
+  // The sessionId the capability exchange reported as persistently recoverable
+  // (`persistentRecoveryAvailable` - a persistent record plus a still-valid
+  // persistent teacher cookie). For those managers a later capability expiry IS
+  // recoverable by reloading - the reload redeems the longer-lived teacher
+  // cookie again - so the auth-lost banner offers a reload path instead of
+  // new-session-only.
+  const [persistentRecoverySessionId, setPersistentRecoverySessionId] = useState<string | null>(null)
+  const persistentRecoveryAvailable = sessionId != null && persistentRecoverySessionId === sessionId
+  // The sessionId whose capability exchange exhausted its retries against a
+  // transient (5xx / network) failure - so we never learned whether persistent
+  // recovery is available. Distinct from a conclusive "no recovery" (403/404):
+  // a later reload of a valid permalink session CAN still redeem the teacher
+  // cookie once the store recovers, so the banner must offer retry/reload here
+  // rather than the temporary-session "reloading won't help" message.
+  const [managerAccessUnavailableSessionId, setManagerAccessUnavailableSessionId] = useState<string | null>(null)
+  const managerAccessTemporarilyUnavailable = sessionId != null && managerAccessUnavailableSessionId === sessionId
+  const managerAuthLostRecovery = resolveManagerAuthLostRecovery({ persistentRecoveryAvailable, managerAccessTemporarilyUnavailable })
+  const [managerAccessRetryNonce, setManagerAccessRetryNonce] = useState(0)
   const managerAuthLostRef = useRef(false)
   // Bumped every time a live `studentsUpdate` is applied. An in-flight `/students`
   // poll captures this value and drops its snapshot if a newer socket update
@@ -81,10 +141,21 @@ export default function JavaFormatPracticeManager() {
     setManagerAuthLost(true);
   }, []);
 
-  // A lost manager capability cannot be recovered by reloading (the same cookie
-  // is re-sent and `POST /create` is the only issuance path). Mint a fresh
-  // session instead; the sessionId change re-initializes this view with the new
-  // capability cookie.
+  // Re-run the capability exchange after it gave up on a transient outage:
+  // clear the auth-loss latch so the gate can re-open, and bump the nonce the
+  // exchange effect depends on.
+  const retryManagerAccess = useCallback(() => {
+    managerAuthLostRef.current = false;
+    setManagerAuthLost(false);
+    setManagerAccessUnavailableSessionId(null);
+    setManagerAccessRetryNonce((nonce) => nonce + 1);
+  }, []);
+
+  // For a temporary session a lost manager capability cannot be recovered by
+  // reloading (the same cookie is re-sent and `POST /create` is the only
+  // issuance path), so minting a fresh session is the only way forward. A
+  // permalink manager backed by a persistent teacher cookie is different - see
+  // `persistentRecoverySessionId` - and the banner offers reload there.
   const handleStartNewSession = useCallback(async () => {
     setStartingNewSession(true);
     try {
@@ -103,7 +174,9 @@ export default function JavaFormatPracticeManager() {
   }, [navigate]);
 
   const handleDifficultyChange = (difficulty: JavaFormatDifficulty) => {
-    if (sessionId == null || managerAuthLostRef.current) return;
+    // Block until the persistent-permalink capability exchange has settled;
+    // a request sent before the cookie lands 403s and latches manager-auth-lost.
+    if (sessionId == null || !managerAccessReady || managerAuthLostRef.current) return;
     setSelectedDifficulty(difficulty);
 
     // Send selected difficulty to server
@@ -119,7 +192,7 @@ export default function JavaFormatPracticeManager() {
   };
 
   const handleThemeChange = (theme: JavaFormatTheme) => {
-    if (sessionId == null || managerAuthLostRef.current) return;
+    if (sessionId == null || !managerAccessReady || managerAuthLostRef.current) return;
     setSelectedTheme(theme);
 
     // Send selected theme to server
@@ -141,6 +214,7 @@ export default function JavaFormatPracticeManager() {
   useEffect(() => {
     managerAuthLostRef.current = false;
     setManagerAuthLost(false);
+    setManagerAccessUnavailableSessionId(null);
     setStartingNewSession(false);
     setStudents([]);
     rosterUpdateGenRef.current += 1;
@@ -150,8 +224,139 @@ export default function JavaFormatPracticeManager() {
     activeSocketRef.current = null;
   }, [sessionId]);
 
+  useEffect(() => {
+    if (sessionId == null) {
+      return undefined
+    }
+
+    let cancelled = false
+    let retryTimer: ReturnType<typeof setTimeout> | undefined
+    let attempts = 0
+    let rateLimitRetried = false
+    const MAX_ATTEMPTS = 4
+    // `cancelled` blocks stale state writes; this also stops the in-flight
+    // request itself so a slow exchange from a previous session cannot land its
+    // capability write server-side after a route swap.
+    const exchangeController = new AbortController()
+
+    const runExchange = async (): Promise<void> => {
+      let response: Response
+      try {
+        response = await fetch(`/api/session/${encodeURIComponent(sessionId)}/persistent-manager-capability`, {
+          method: 'POST',
+          credentials: 'include',
+          signal: exchangeController.signal,
+        })
+      } catch {
+        // Network error or an abort from cleanup: transient, keep the gate
+        // closed and retry (the `cancelled` guard drops an aborted attempt).
+        if (!cancelled) scheduleRetryOrGiveUp()
+        return
+      }
+      if (cancelled) return
+      // 2xx  -> capability cookie issued (or already present).
+      // 403/404 -> definitive denial. The route checks `alreadyAuthorized`
+      //         first, so these mean the caller has no valid manager capability
+      //         and no recovery path here (no persistent record, or no teacher
+      //         cookie). Latch the no-recovery banner and keep the gate closed
+      //         rather than opening a poll/socket that can only fail.
+      if (response.ok) {
+        // The endpoint reports `persistentRecoveryAvailable` when this session
+        // has a persistent record and a still-valid persistent teacher cookie -
+        // including on its fast path, where the capability was already issued by
+        // `teacher-authenticate` before this component mounted. When true, a
+        // later capability expiry is recoverable by reloading (the teacher
+        // cookie outlives the 7-day capability), so the banner offers reload.
+        try {
+          const body = await response.clone().json() as { persistentRecoveryAvailable?: unknown }
+          // The body await can resolve after a route swap cancelled this
+          // exchange; a cancelled exchange must not touch the returned-to
+          // session's recovery/readiness state.
+          if (cancelled) return
+          if (body?.persistentRecoveryAvailable === true) {
+            setPersistentRecoverySessionId(sessionId)
+          } else {
+            // The persistent teacher credential is no longer backing this
+            // session; drop any recoverability advertised by an earlier exchange
+            // so the banner does not offer a reload that cannot help.
+            setPersistentRecoverySessionId((current) => (current === sessionId ? null : current))
+          }
+        } catch {
+          // Body parse failure is non-fatal; readiness still releases below.
+        }
+        // The body await - whether it resolved or rejected - can settle after a
+        // route swap cancelled this exchange. Re-check here too so a delayed
+        // malformed response from a previous visit cannot mark the returned-to
+        // session ready before its own exchange runs.
+        if (cancelled) return
+        // A conclusive answer arrived (possibly on a retry): this is no longer
+        // an "unknown / temporarily unavailable" state.
+        setManagerAccessUnavailableSessionId((current) => (current === sessionId ? null : current))
+        setManagerAccessReadySessionId(sessionId)
+        return
+      }
+      if (response.status === 404 || response.status === 403) {
+        // Clear any recoverability/"temporarily unavailable" state a prior
+        // exchange advertised so the banner resolves to `no-recovery`.
+        setPersistentRecoverySessionId((current) => (current === sessionId ? null : current))
+        setManagerAccessUnavailableSessionId((current) => (current === sessionId ? null : current))
+        markManagerAuthLost()
+        return
+      }
+      if (response.status === 429) {
+        // The route rate-limits teacher-code verification for a minute and
+        // sends `Retry-After`. The generic 1s/2s/3s backoff expires entirely
+        // inside that window and guarantees a give-up, so honor `Retry-After`
+        // for one delayed retry (mirroring the Video Sync manager-access flow)
+        // before latching "temporarily unavailable".
+        if (rateLimitRetried) {
+          setManagerAccessUnavailableSessionId(sessionId)
+          markManagerAuthLost()
+          return
+        }
+        rateLimitRetried = true
+        const delayMs = parseManagerCapabilityRetryAfterMs(response.headers.get('retry-after'))
+          ?? DEFAULT_MANAGER_CAPABILITY_RETRY_AFTER_MS
+        retryTimer = setTimeout(() => { void runExchange() }, delayMs)
+        return
+      }
+      // 5xx / unexpected: transient persistence failure - stay gated and retry.
+      scheduleRetryOrGiveUp()
+    }
+
+    const scheduleRetryOrGiveUp = (): void => {
+      attempts += 1
+      if (attempts >= MAX_ATTEMPTS) {
+        // Retries exhausted against a transient failure: we never learned
+        // whether persistent recovery is available. Mark the state "temporarily
+        // unavailable" (not "no recovery") so the banner offers retry/reload
+        // instead of the temporary-session "reloading won't help" message, then
+        // latch so the protected poll/socket do not open without a cookie.
+        setManagerAccessUnavailableSessionId(sessionId)
+        markManagerAuthLost()
+        return
+      }
+      retryTimer = setTimeout(() => { void runExchange() }, 1000 * attempts)
+    }
+
+    // Defer one microtask so React Strict Mode's throwaway effect pass is
+    // cancelled before this POST fires, instead of sending two
+    // persistent-manager-capability requests - each consuming a rate-limit
+    // attempt and racing the route's whole-session capability write - per mount.
+    void Promise.resolve().then(() => {
+      if (cancelled) return
+      void runExchange()
+    })
+
+    return () => {
+      cancelled = true
+      exchangeController.abort()
+      if (retryTimer) clearTimeout(retryTimer)
+    }
+  }, [sessionId, markManagerAuthLost, managerAccessRetryNonce])
+
   const fetchStudents = useCallback(async (signal?: AbortSignal) => {
-    if (sessionId == null || managerAuthLostRef.current || pollInFlightRef.current !== 0) return;
+    if (sessionId == null || !managerAccessReady || managerAuthLostRef.current || pollInFlightRef.current !== 0) return;
     const pollToken = (pollTokenRef.current += 1);
     pollInFlightRef.current = pollToken;
     try {
@@ -181,7 +386,7 @@ export default function JavaFormatPracticeManager() {
       // superseding reset may have handed it to a newer request).
       if (pollInFlightRef.current === pollToken) pollInFlightRef.current = 0;
     }
-  }, [sessionId, markManagerAuthLost]);
+  }, [sessionId, managerAccessReady, markManagerAuthLost]);
 
   const handleWsMessage = useCallback((event: MessageEvent<string>, ws?: WebSocket) => {
     // Drop anything that is not from the socket bound to the current sessionId
@@ -227,7 +432,7 @@ export default function JavaFormatPracticeManager() {
 
   const { connect, disconnect } = useResilientWebSocket({
     buildUrl: buildWsUrl,
-    shouldReconnect: sessionId != null,
+    shouldReconnect: sessionId != null && managerAccessReady,
     onOpen: handleWsOpen,
     onMessage: handleWsMessage,
     onClose: handleWsClose,
@@ -236,7 +441,7 @@ export default function JavaFormatPracticeManager() {
   });
 
   useEffect(() => {
-    if (sessionId == null) return undefined;
+    if (sessionId == null || !managerAccessReady) return undefined;
     const controller = new AbortController();
     void fetchStudents(controller.signal);
     const refreshInterval = window.setInterval(() => {
@@ -257,7 +462,7 @@ export default function JavaFormatPracticeManager() {
       activeSocketRef.current = null;
       disconnect();
     };
-  }, [sessionId, fetchStudents, connect, disconnect]);
+  }, [sessionId, managerAccessReady, fetchStudents, connect, disconnect]);
 
   const handleExportCsv = useCallback(() => {
     if (students.length === 0) {
@@ -334,14 +539,48 @@ export default function JavaFormatPracticeManager() {
 
       {managerAuthLost && (
         <div role="alert" style={styles.authLostBanner}>
-          <span>
-            This manager session&rsquo;s authentication has expired or is no longer
-            valid. Reloading won&rsquo;t restore it &mdash; start a new session to
-            continue managing students.
-          </span>
-          <Button onClick={() => { void handleStartNewSession(); }} disabled={startingNewSession}>
-            {startingNewSession ? 'Starting…' : 'Start new session'}
-          </Button>
+          {managerAuthLostRecovery === 'reload-from-signin' ? (
+            <>
+              <span>
+                This manager session&rsquo;s capability has expired. Reload the page
+                to restore it from your instructor sign-in, or start a new session.
+              </span>
+              <Button onClick={() => { window.location.reload(); }}>
+                Reload
+              </Button>
+              <Button onClick={() => { void handleStartNewSession(); }} disabled={startingNewSession}>
+                {startingNewSession ? 'Starting…' : 'Start new session'}
+              </Button>
+            </>
+          ) : managerAuthLostRecovery === 'temporarily-unavailable' ? (
+            <>
+              <span>
+                Manager access is temporarily unavailable. Retry now, or reload the
+                page once the service recovers &mdash; a valid instructor sign-in
+                can still be restored.
+              </span>
+              <Button onClick={retryManagerAccess}>
+                Retry
+              </Button>
+              <Button onClick={() => { window.location.reload(); }}>
+                Reload
+              </Button>
+              <Button onClick={() => { void handleStartNewSession(); }} disabled={startingNewSession}>
+                {startingNewSession ? 'Starting…' : 'Start new session'}
+              </Button>
+            </>
+          ) : (
+            <>
+              <span>
+                This manager session&rsquo;s authentication has expired or is no
+                longer valid. Reloading won&rsquo;t restore it &mdash; start a new
+                session to continue managing students.
+              </span>
+              <Button onClick={() => { void handleStartNewSession(); }} disabled={startingNewSession}>
+                {startingNewSession ? 'Starting…' : 'Start new session'}
+              </Button>
+            </>
+          )}
         </div>
       )}
 
@@ -360,7 +599,8 @@ export default function JavaFormatPracticeManager() {
                     : {}),
                 }}
                 onClick={() => handleDifficultyChange(level.id)}
-                disabled={managerAuthLost}
+                disabled={managerAuthLost || !managerAccessReady}
+                aria-pressed={selectedDifficulty === level.id}
               >
                 {level.label}
               </button>
@@ -382,7 +622,8 @@ export default function JavaFormatPracticeManager() {
                     : {}),
                 }}
                 onClick={() => handleThemeChange(theme.id)}
-                disabled={managerAuthLost}
+                disabled={managerAuthLost || !managerAccessReady}
+                aria-pressed={selectedTheme === theme.id}
               >
                 {theme.label}
               </button>

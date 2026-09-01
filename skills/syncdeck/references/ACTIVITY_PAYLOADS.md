@@ -17,7 +17,12 @@ In some activities those shapes are nearly identical. In others, the host normal
 
 ## Embedded Instructor Manager Bootstrap
 
-SyncDeck starts embedded instructor iframes only after `POST /api/syncdeck/:sessionId/embedded-activity/start` returns a short-lived `managerEntryToken`. Credentialed child managers exchange that single-use token with `GET /api/syncdeck/embedded-manager-passcode?sessionId=<child-session-id>&token=<manager-entry-token>` to receive their child activity passcode. Credentialless managers, such as Raffle, receive an empty `managerBootstrap` object plus the token so the parent can use the same mount/retry lifecycle, but must not redeem the token; the exchange endpoint rejects child sessions without an instructor passcode. This is host-managed runtime state, not deck-authored `data-activity-options`; do not add credentials or bootstrap tokens to deck payloads.
+SyncDeck starts embedded instructor iframes only after `POST /api/syncdeck/:sessionId/embedded-activity/start` returns a short-lived `managerEntryToken`. That single-use token is redeemed at one of two child-manager exchange endpoints, depending on how the child activity authenticates its instructor:
+
+- **Passcode exchange** (legacy) — `GET /api/syncdeck/embedded-manager-passcode?sessionId=<child-session-id>&token=<manager-entry-token>` returns the child activity's instructor passcode. Used by activities whose manager still authenticates with a passcode. It rejects a child that has no instructor passcode, because there is nothing to hand back.
+- **Capability exchange** — `GET /api/syncdeck/embedded-manager-capability?sessionId=<child-session-id>&token=<manager-entry-token>` issues an httpOnly manager capability cookie (`activebits_cap_manager_<base64url(child-session-id)>`) scoped to the child session and returns `{ ok: true }`. No passcode crosses the iframe boundary. This is the activity-agnostic parent-derived handoff from the shared runtime-authentication plan. **Endpoint availability is not the same as activity adoption.** The endpoint will accept any embedded child that presents a valid one-time entry token minted by its parent — so no activity needs its own passcode to authenticate an embedded manager through it — but a child only *becomes* capability-authenticated once its manager client actually redeems the token via `useEmbeddedManagerCapabilityExchange`. As of this writing the sole adopter is **Video Sync**: its embedded manager stays gated until the capability call resolves and its `/manager-access` check re-confirms authority. Every other embedded manager, including credentialless children such as Raffle, still ignores the accompanying token (see `buildEmbeddedManagerBootstrapPayload` in `activities/syncdeck/server/routes.ts`) and stays a public principal until it migrates; the capability exchange is available to them, not yet used by them.
+
+Both endpoints consume the entry token atomically (one redemption only), so the one-time token cannot be resurrected. They differ after the consume: the legacy passcode exchange returns the passcode it captured *before* the atomic consume and does not re-read or re-persist the child; the capability exchange re-reads the child session after consumption and issues the capability onto that fresh record before writing the cookie. A credentialless child still receives an empty `managerBootstrap` object alongside the token so the parent can reuse the same mount/retry lifecycle; once activities have migrated off the passcode exchange it simply redeems the token at the capability endpoint. This is host-managed runtime state, not deck-authored `data-activity-options`; do not add credentials or bootstrap tokens to deck payloads.
 
 ## Resonance
 
@@ -174,6 +179,10 @@ Field guidance:
 ### Child embedded launch state
 
 Video Sync reads `selectedOptions.sourceUrl` from embedded launch state. Keep that field present and canonical.
+
+### Embedded manager authentication
+
+Video Sync's embedded manager does not receive a passcode. It redeems the `managerEntryToken` at the capability exchange (`GET /api/syncdeck/embedded-manager-capability`) for an httpOnly manager capability cookie — see [Embedded Instructor Manager Bootstrap](#embedded-instructor-manager-bootstrap). Nothing about this is deck-authored.
 
 ## Algorithm Demo
 

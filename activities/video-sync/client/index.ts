@@ -26,9 +26,8 @@ export async function launchVideoSyncPersistentSoloEntry(
 
   const created = (await createResponse.json()) as {
     id?: unknown
-    instructorPasscode?: unknown
   }
-  if (typeof created.id !== 'string' || created.id.length === 0 || typeof created.instructorPasscode !== 'string' || created.instructorPasscode.length === 0) {
+  if (typeof created.id !== 'string' || created.id.length === 0) {
     throw new Error('Video Sync solo session response was invalid.')
   }
 
@@ -38,7 +37,6 @@ export async function launchVideoSyncPersistentSoloEntry(
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      instructorPasscode: created.instructorPasscode,
       sourceUrl,
       standaloneMode: true,
     }),

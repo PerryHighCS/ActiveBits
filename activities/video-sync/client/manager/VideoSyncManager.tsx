@@ -1,13 +1,14 @@
 import SessionHeader from '@src/components/common/SessionHeader'
 import { fetchEmbeddedLaunchSelectedOptions } from '@src/components/common/embeddedLaunchBootstrap'
 import {
-  consumeCreateSessionBootstrapPayload,
-  readCreateSessionBootstrapPayload,
-} from '@src/components/common/manageDashboardUtils'
+  isEmbeddedManagerActivatedMessage,
+  requestEmbeddedManagerBootstrapRefresh,
+} from '@src/components/common/embeddedManagerBootstrap'
 import { isEmbeddedChildSessionId } from '@src/components/common/sessionHeaderUtils'
 import Button from '@src/components/ui/Button'
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
-import { useEmbeddedManagerPasscodeExchange } from '@src/hooks/useEmbeddedManagerPasscodeExchange'
+import { useEmbeddedManagerCapabilityExchange } from '@src/hooks/useEmbeddedManagerCapabilityExchange'
+import { nextEmbeddedManagerBootstrapRefreshAttempt } from '@src/hooks/useEmbeddedManagerPasscodeExchange'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router'
 import {
@@ -60,21 +61,14 @@ interface CommandResponse {
   }
 }
 
-interface InstructorPasscodeResponse {
-  instructorPasscode?: unknown
+interface ManagerAccessResponse {
   persistentSourceUrl?: unknown
-}
-
-interface ManagerLocationState {
-  createSessionPayload?: {
-    instructorPasscode?: unknown
-  }
 }
 
 type AutoStartStatus = 'idle' | 'starting' | 'failed'
 
 const YOUTUBE_MANAGER_LOAD_ERROR = 'YouTube player failed to load. Try a different video URL.'
-const MISSING_INSTRUCTOR_CREDENTIALS_ERROR = 'Instructor credentials missing. Open this session from the dashboard or authenticated permalink.'
+const MISSING_MANAGER_ACCESS_ERROR = 'Manager access is unavailable. Open this session from the dashboard or authenticated permalink.'
 const YOUTUBE_HOST_FALLBACK_TIMEOUT_MS = 1_500
 const MANAGER_PLAYING_DRIFT_TOLERANCE_SEC = 2
 const MANAGER_PLAYBACK_COMMAND_FLUSH_DELAY_MS = 120
@@ -104,20 +98,6 @@ function clampNumber(value: number): number {
   return Number.isFinite(value) ? Math.max(0, value) : 0
 }
 
-export function readBootstrapInstructorPasscode(locationState: unknown): string | null {
-  if (
-    locationState == null ||
-    typeof locationState !== 'object' ||
-    Array.isArray(locationState)
-  ) {
-    return null
-  }
-
-  const state = locationState as ManagerLocationState
-  const value = state.createSessionPayload?.instructorPasscode
-  return typeof value === 'string' && value.length > 0 ? value : null
-}
-
 export function readBootstrapSourceUrl(search: string): string | null {
   const value = new URLSearchParams(search).get('sourceUrl')
   if (typeof value !== 'string') {
@@ -128,7 +108,7 @@ export function readBootstrapSourceUrl(search: string): string | null {
   return trimmed.length > 0 ? trimmed : null
 }
 
-export function readRecoveredPersistentSourceUrl(payload: InstructorPasscodeResponse | null | undefined): string | null {
+export function readRecoveredPersistentSourceUrl(payload: ManagerAccessResponse | null | undefined): string | null {
   const value = payload?.persistentSourceUrl
   if (typeof value !== 'string') {
     return null
@@ -156,41 +136,6 @@ export function readEmbeddedBootstrapSourceUrl(selectedOptions: unknown): string
   return trimmed.length > 0 ? trimmed : null
 }
 
-export function resolveBootstrapInstructorPasscode(params: {
-  locationState: unknown
-  sessionId: string | null | undefined
-}): {
-  instructorPasscode: string | null
-  shouldClearLocationState: boolean
-} {
-  const fromLocationState = readBootstrapInstructorPasscode(params.locationState)
-  if (fromLocationState != null) {
-    if (params.sessionId) {
-      consumeCreateSessionBootstrapPayload('video-sync', params.sessionId)
-    }
-    return {
-      instructorPasscode: fromLocationState,
-      shouldClearLocationState: true,
-    }
-  }
-
-  if (!params.sessionId) {
-    return {
-      instructorPasscode: null,
-      shouldClearLocationState: false,
-    }
-  }
-
-  const fromBootstrapPayload = readBootstrapInstructorPasscode({
-    createSessionPayload: readCreateSessionBootstrapPayload('video-sync', params.sessionId) ?? undefined,
-  })
-
-  return {
-    instructorPasscode: fromBootstrapPayload,
-    shouldClearLocationState: false,
-  }
-}
-
 export function buildManagerWsUrl(params: {
   sessionId: string | null | undefined
   location: Pick<Location, 'protocol' | 'host'> | null | undefined
@@ -203,19 +148,65 @@ export function buildManagerWsUrl(params: {
   return `${protocol}//${params.location.host}/ws/video-sync?sessionId=${encodeURIComponent(params.sessionId)}&role=instructor`
 }
 
-export function createManagerWsAuthMessage(instructorPasscode: string | null | undefined): string | null {
-  if (typeof instructorPasscode !== 'string' || instructorPasscode.length === 0) {
-    return null
-  }
-
-  return JSON.stringify({
-    type: 'authenticate',
-    instructorPasscode,
-  })
-}
-
 export function shouldRenderManagerHeaderForSession(sessionId: string | null | undefined): boolean {
   return !isEmbeddedChildSessionId(sessionId ?? undefined)
+}
+
+/** The `/manager-access` status for an exhausted teacher-code attempt bucket. */
+export const MANAGER_ACCESS_RATE_LIMITED_STATUS = 429
+/** Fallback wait before retrying a 429 when the route sends no usable `Retry-After`. */
+export const DEFAULT_MANAGER_ACCESS_RETRY_AFTER_MS = 60_000
+
+/**
+ * Whether a non-OK `/manager-access` response is a fast transient failure worth
+ * a short bounded backoff. The route returns an explicit 5xx for
+ * persistent/session-store outages. A 429 (rate-limited teacher-code
+ * verification) is also transient but handled separately with a longer,
+ * `Retry-After`-honoring delay - see `parseManagerAccessRetryAfterMs`. Any other
+ * 4xx is a definitive denial that latches the read-only state.
+ */
+export function isRetryableManagerAccessStatus(status: number): boolean {
+  return status >= 500
+}
+
+/**
+ * Parse a `Retry-After` header (delta-seconds form only) into milliseconds,
+ * clamped to a sane ceiling. Returns `null` for an absent, non-numeric, or
+ * non-positive value so the caller can fall back to
+ * `DEFAULT_MANAGER_ACCESS_RETRY_AFTER_MS`.
+ */
+export function parseManagerAccessRetryAfterMs(headerValue: string | null | undefined): number | null {
+  if (headerValue == null) return null
+  const seconds = Number(headerValue.trim())
+  if (!Number.isFinite(seconds) || seconds <= 0) return null
+  return Math.min(seconds * 1000, 5 * 60_000)
+}
+
+/**
+ * Whether a websocket close means the server rejected the connection for
+ * missing manager authority (an expired capability), i.e. the manager should
+ * re-run `/manager-access` rather than keep reconnecting. `1008` is the policy
+ * violation code the manager socket uses for `Forbidden`.
+ */
+export function isManagerAuthorizationClose(code: number): boolean {
+  return code === 1008
+}
+
+/**
+ * Whether a definitive `/manager-access` denial should trigger a bounded parent
+ * bootstrap-token refresh instead of latching read-only. Only an embedded child
+ * frame can recover this way (its one-time entry token is gone from the URL, but
+ * the parent can mint a new one); a standalone manager just latches. The caller
+ * still applies the per-session attempt bound.
+ */
+export function shouldRequestEmbeddedBootstrapRefreshOnDenial(params: {
+  sessionId: string | null | undefined
+  status: number
+}): boolean {
+  if (params.status !== 401 && params.status !== 403) {
+    return false
+  }
+  return isEmbeddedChildSessionId(params.sessionId ?? undefined)
 }
 
 export function shouldFetchEmbeddedBootstrapSourceUrl(params: {
@@ -232,32 +223,32 @@ export function shouldFetchEmbeddedBootstrapSourceUrl(params: {
 export function shouldAutoStartBootstrapSource(params: {
   setupMode: boolean
   bootstrapSourceUrl: string | null
-  isPasscodeReady: boolean
-  instructorPasscode: string | null
+  isManagerAccessReady: boolean
+  hasManagerAccess: boolean
   autoStartStatus: AutoStartStatus
 }): boolean {
   return (
     params.setupMode &&
     params.bootstrapSourceUrl != null &&
     params.autoStartStatus !== 'failed' &&
-    params.isPasscodeReady &&
-    params.instructorPasscode != null
+    params.isManagerAccessReady &&
+    params.hasManagerAccess
   )
 }
 
 export function shouldRecoverAutoStartAfterCredentialLoad(params: {
   setupMode: boolean
   bootstrapSourceUrl: string | null
-  instructorPasscode: string | null
+  hasManagerAccess: boolean
   autoStartStatus: AutoStartStatus
   errorMessage: string | null
 }): boolean {
   return (
     params.setupMode
     && params.bootstrapSourceUrl != null
-    && params.instructorPasscode != null
+    && params.hasManagerAccess
     && params.autoStartStatus === 'failed'
-    && params.errorMessage === MISSING_INSTRUCTOR_CREDENTIALS_ERROR
+    && params.errorMessage === MISSING_MANAGER_ACCESS_ERROR
   )
 }
 
@@ -386,11 +377,16 @@ export default function VideoSyncManager() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [playerReady, setPlayerReady] = useState(false)
   const [activePlayerHost, setActivePlayerHost] = useState<VideoSyncPlayerHost | null>(null)
-  const [instructorPasscode, setInstructorPasscode] = useState<string | null>(null)
-  const [isPasscodeReady, setIsPasscodeReady] = useState(false)
+  const [managerAccessRefreshNonce, setManagerAccessRefreshNonce] = useState(0)
+  // The /manager-access outcome, tagged with the session id and refresh nonce it
+  // was resolved for. Readiness is derived from equality with the current values
+  // so a parameter-only route swap can never expose the previous session's
+  // authorization before its own check runs.
+  const [managerAccessState, setManagerAccessState] = useState<
+    { sessionId: string; nonce: number; granted: boolean; sourceUrl: string | null } | null
+  >(null)
   const [autoStartStatus, setAutoStartStatus] = useState<AutoStartStatus>('idle')
   const [embeddedBootstrapSourceUrl, setEmbeddedBootstrapSourceUrl] = useState<string | null>(null)
-  const [persistentRecoverySourceUrl, setPersistentRecoverySourceUrl] = useState<string | null>(null)
 
   const playerContainerRef = useRef<HTMLDivElement | null>(null)
   const playerRef = useRef<YoutubePlayerLike | null>(null)
@@ -404,11 +400,28 @@ export default function VideoSyncManager() {
   const suppressPlayerEventsRef = useRef(false)
   const suppressPlayerEventsTimeoutRef = useRef<number | null>(null)
   const autoStartAttemptKeyRef = useRef<string | null>(null)
+  const managerAccessBootstrapRefreshAttemptsRef = useRef<Map<string, number>>(new Map())
   const queryBootstrapSourceUrl = useMemo(() => readBootstrapSourceUrl(location.search), [location.search])
-  const embeddedManagerPasscodeExchange = useEmbeddedManagerPasscodeExchange({
+  const embeddedManagerCapabilityExchange = useEmbeddedManagerCapabilityExchange({
     sessionId: sessionId ?? undefined,
     search: location.search,
   })
+  const managerAccessResolved =
+    managerAccessState != null
+    && managerAccessState.sessionId === sessionId
+    && managerAccessState.nonce === managerAccessRefreshNonce
+  const isManagerAccessReady = sessionId == null || managerAccessResolved
+  const hasManagerAccess = managerAccessResolved && managerAccessState.granted
+
+  // Re-run /manager-access after an authorization failure mid-session (a 1008
+  // socket close or a protected-route 401/403): the manager capability cookie
+  // has likely expired. The re-check re-issues for a persistent teacher and
+  // latches read-only for a temporary manager, instead of reconnecting forever
+  // with controls still enabled.
+  const revalidateManagerAccess = useCallback(() => {
+    setManagerAccessRefreshNonce((current) => current + 1)
+  }, [])
+  const persistentRecoverySourceUrl = managerAccessResolved ? managerAccessState.sourceUrl : null
   const bootstrapSourceUrl = persistentRecoverySourceUrl ?? queryBootstrapSourceUrl ?? embeddedBootstrapSourceUrl
 
   useEffect(() => {
@@ -492,9 +505,9 @@ export default function VideoSyncManager() {
     if (!sessionId) {
       return false
     }
-    if (!instructorPasscode) {
+    if (!hasManagerAccess) {
       if (options?.reportErrors !== false) {
-        setErrorMessage(MISSING_INSTRUCTOR_CREDENTIALS_ERROR)
+        setErrorMessage(MISSING_MANAGER_ACCESS_ERROR)
       }
       return false
     }
@@ -503,8 +516,6 @@ export default function VideoSyncManager() {
     if (typeof options?.positionSec === 'number' && Number.isFinite(options.positionSec)) {
       payload.positionSec = clampNumber(options.positionSec)
     }
-    payload.instructorPasscode = instructorPasscode
-
     try {
       const response = await fetch(`/api/video-sync/${sessionId}/command`, {
         method: 'POST',
@@ -513,6 +524,9 @@ export default function VideoSyncManager() {
       })
 
       if (!response.ok) {
+        if (response.status === 401 || response.status === 403) {
+          revalidateManagerAccess()
+        }
         const failure = (await response.json()) as { message?: string }
         throw new Error(sanitizeManagerApiErrorMessage(failure.message, 'Failed to send command'))
       }
@@ -536,7 +550,7 @@ export default function VideoSyncManager() {
       }
       return false
     }
-  }, [instructorPasscode, sessionId])
+  }, [hasManagerAccess, revalidateManagerAccess, sessionId])
 
   const flushManagerPlaybackIntent = useCallback(async (): Promise<void> => {
     clearPlaybackCommandFlushTimer()
@@ -668,100 +682,129 @@ export default function VideoSyncManager() {
 
   useEffect(() => {
     if (!sessionId || typeof window === 'undefined') {
-      setInstructorPasscode(null)
-      setPersistentRecoverySourceUrl(null)
-      setIsPasscodeReady(true)
       return
     }
+    if (embeddedManagerCapabilityExchange.isResolving) return
 
+    const nonce = managerAccessRefreshNonce
     let isCancelled = false
+    let retryTimer: ReturnType<typeof setTimeout> | undefined
+    let attempts = 0
+    let rateLimitRetried = false
+    const MAX_ATTEMPTS = 4
+    // `isCancelled` blocks stale state writes; this also stops the in-flight
+    // request so a slow `/manager-access` from a previous session cannot reach
+    // the route and issue a capability / `sessions.set` for the old session
+    // after a route swap.
+    const accessController = new AbortController()
 
-    const loadInstructorPasscode = async (): Promise<void> => {
-      if (embeddedManagerPasscodeExchange.isResolving) {
-        return
+    const denyAccess = (): void => {
+      if (!isCancelled) {
+        setManagerAccessState({ sessionId, nonce, granted: false, sourceUrl: null })
       }
-      if (embeddedManagerPasscodeExchange.passcode) {
-        setInstructorPasscode(embeddedManagerPasscodeExchange.passcode)
-        setPersistentRecoverySourceUrl(null)
-        setIsPasscodeReady(true)
-        return
-      }
-      const bootstrap = resolveBootstrapInstructorPasscode({
-        locationState: location.state,
-        sessionId,
-      })
-      if (bootstrap.instructorPasscode) {
-        // Yield once so StrictMode's development-only setup/cleanup pass cannot
-        // consume the one-time iframe bootstrap before the durable effect settles.
-        await Promise.resolve()
-        if (isCancelled) {
-          return
-        }
-        if (bootstrap.shouldClearLocationState) {
-          void navigate(location.pathname + location.search, {
-            replace: true,
-            state: null,
-          })
-        }
-        consumeCreateSessionBootstrapPayload('video-sync', sessionId)
-        setInstructorPasscode(bootstrap.instructorPasscode)
-        setPersistentRecoverySourceUrl(null)
-        setIsPasscodeReady(true)
-        return
-      }
+    }
 
+    // An embedded child frame whose capability cookie expired or was cleared
+    // cannot recover on its own - its one-time entry token is long gone from the
+    // URL. Ask the still-authenticated parent for a fresh bootstrap token
+    // (bounded by nextEmbeddedManagerBootstrapRefreshAttempt so a persistently
+    // failing exchange cannot loop) and let the capability-exchange hook re-run,
+    // instead of latching read-only on the first 401/403.
+    const requestBoundedBootstrapRefresh = (): boolean => {
+      const attemptsMap = managerAccessBootstrapRefreshAttemptsRef.current
+      const nextAttempt = nextEmbeddedManagerBootstrapRefreshAttempt(attemptsMap.get(sessionId) ?? 0)
+      if (nextAttempt == null) return false
+      attemptsMap.set(sessionId, nextAttempt)
+      requestEmbeddedManagerBootstrapRefresh(sessionId)
+      return true
+    }
+
+    const runManagerAccess = async (): Promise<void> => {
+      let response: Response
       try {
-        const response = await fetch(`/api/video-sync/${sessionId}/instructor-passcode`, {
+        response = await fetch(`/api/video-sync/${sessionId}/manager-access`, {
           credentials: 'include',
+          signal: accessController.signal,
         })
-        if (!response.ok) {
-          if (!isCancelled) {
-            setInstructorPasscode(null)
-            setPersistentRecoverySourceUrl(null)
+      } catch {
+        // Network error or an abort from cleanup; the `isCancelled` guard below
+        // drops an aborted attempt so it never retries for an inactive effect.
+        if (!isCancelled) scheduleRetryOrDeny()
+        return
+      }
+      if (isCancelled) return
+      if (!response.ok) {
+        if (isRetryableManagerAccessStatus(response.status)) {
+          scheduleRetryOrDeny()
+        } else if (response.status === MANAGER_ACCESS_RATE_LIMITED_STATUS) {
+          // The route rate-limits pre-auth teacher-code verification for a
+          // minute and returns `Retry-After`. This is "wait and retry", not a
+          // credential rejection: schedule one delayed retry across the window
+          // before latching read-only, so a valid persistent manager that
+          // happened to arrive mid-window still recovers.
+          if (rateLimitRetried) {
+            denyAccess()
+          } else {
+            rateLimitRetried = true
+            const delayMs = parseManagerAccessRetryAfterMs(response.headers.get('retry-after'))
+              ?? DEFAULT_MANAGER_ACCESS_RETRY_AFTER_MS
+            if (!isCancelled) {
+              retryTimer = setTimeout(() => { void runManagerAccess() }, delayMs)
+            }
           }
-          return
+        } else if (
+          shouldRequestEmbeddedBootstrapRefreshOnDenial({ sessionId, status: response.status })
+          && requestBoundedBootstrapRefresh()
+        ) {
+          // Parent asked for a new token; a fresh capability exchange re-runs
+          // this effect (cleanup cancels the retry below). If the parent never
+          // acknowledges - no new token, no `EMBEDDED_MANAGER_ACTIVATED` - the
+          // scheduled retry re-checks `/manager-access` and, once the refresh
+          // and retry budgets are spent, latches read-only via `denyAccess()`
+          // instead of hanging on "Loading manager access..." forever.
+          scheduleRetryOrDeny()
+        } else {
+          denyAccess()
         }
-
-        const payload = (await response.json()) as InstructorPasscodeResponse
-        const recoveredPersistentSourceUrl = readRecoveredPersistentSourceUrl(payload)
-        if (typeof payload.instructorPasscode === 'string' && payload.instructorPasscode.length > 0) {
-          if (!isCancelled) {
-            setInstructorPasscode(payload.instructorPasscode)
-            setPersistentRecoverySourceUrl(recoveredPersistentSourceUrl)
-          }
-          return
-        }
-
+        return
+      }
+      try {
+        const payload = (await response.json()) as ManagerAccessResponse
         if (!isCancelled) {
-          setInstructorPasscode(null)
-          setPersistentRecoverySourceUrl(null)
+          managerAccessBootstrapRefreshAttemptsRef.current.delete(sessionId)
+          setManagerAccessState({ sessionId, nonce, granted: true, sourceUrl: readRecoveredPersistentSourceUrl(payload) })
         }
       } catch {
-        if (!isCancelled) {
-          setInstructorPasscode(null)
-          setPersistentRecoverySourceUrl(null)
-        }
-      } finally {
-        if (!isCancelled) {
-          setIsPasscodeReady(true)
-        }
+        denyAccess()
       }
     }
 
-    setIsPasscodeReady(false)
-    void loadInstructorPasscode()
+    // Network errors and the route's explicitly temporary 5xx failures are
+    // transient: retry with bounded backoff before latching the read-only
+    // state. A 4xx is a definitive denial and latches immediately.
+    const scheduleRetryOrDeny = (): void => {
+      attempts += 1
+      if (attempts >= MAX_ATTEMPTS) {
+        denyAccess()
+        return
+      }
+      retryTimer = setTimeout(() => { void runManagerAccess() }, 1000 * attempts)
+    }
 
+    // Defer one microtask so React Strict Mode's throwaway effect pass is
+    // cancelled (isCancelled = true) before the fetch starts, instead of firing
+    // two state-changing /manager-access requests - each consuming a rate-limit
+    // attempt and racing the route's whole-session capability write - per mount.
+    void Promise.resolve().then(() => {
+      if (isCancelled) return
+      void runManagerAccess()
+    })
     return () => {
       isCancelled = true
+      accessController.abort()
+      if (retryTimer) clearTimeout(retryTimer)
     }
-  }, [
-    embeddedManagerPasscodeExchange.isResolving,
-    embeddedManagerPasscodeExchange.passcode,
-    location.pathname,
-    location.search,
-    navigate,
-    sessionId,
-  ])
+  }, [embeddedManagerCapabilityExchange.isResolving, managerAccessRefreshNonce, sessionId])
 
   const handleEnvelope = useCallback((envelope: VideoSyncWsEnvelope) => {
     if (envelope.type === 'state-update' || envelope.type === 'state-snapshot' || envelope.type === 'heartbeat') {
@@ -881,6 +924,7 @@ export default function VideoSyncManager() {
             controls: 1,
             rel: 0,
             modestbranding: 1,
+            origin: window.location.origin,
           },
           events: {
             onReady: () => {
@@ -986,15 +1030,17 @@ export default function VideoSyncManager() {
 
   const { connect, disconnect } = useResilientWebSocket({
     buildUrl: buildWsUrl,
-    shouldReconnect: Boolean(sessionId && instructorPasscode && isPasscodeReady),
-    onOpen: (_event, ws) => {
-      const authMessage = createManagerWsAuthMessage(instructorPasscode)
-      if (!authMessage) {
-        return
+    shouldReconnect: Boolean(sessionId && hasManagerAccess && isManagerAccessReady),
+    // A 1008 close is the server rejecting the socket for missing manager
+    // authority (expired capability). Treat it as terminal so the hook stops
+    // reconnecting, and re-run /manager-access to recover or latch read-only.
+    isTerminalClose: (event) => isManagerAuthorizationClose(event.code),
+    onClose: (event) => {
+      if (isManagerAuthorizationClose(event.code)) {
+        revalidateManagerAccess()
       }
-
-      ws.send(authMessage)
     },
+    onOpen: () => {},
     onMessage: (event) => {
       const envelope = parseVideoSyncEnvelope(event.data)
       if (!envelope || envelope.sessionId !== sessionId) return
@@ -1008,11 +1054,29 @@ export default function VideoSyncManager() {
   useEffect(() => {
     if (!sessionId) return undefined
     void fetchSession()
-    if (isPasscodeReady && instructorPasscode) {
+    if (isManagerAccessReady && hasManagerAccess) {
       connect()
     }
     return () => disconnect()
-  }, [sessionId, fetchSession, connect, disconnect, instructorPasscode, isPasscodeReady])
+  }, [sessionId, fetchSession, connect, disconnect, hasManagerAccess, isManagerAccessReady])
+
+  useEffect(() => {
+    if (!sessionId || typeof window === 'undefined' || window.parent === window) {
+      return undefined
+    }
+
+    const handleParentMessage = (event: MessageEvent<unknown>): void => {
+      if (event.origin !== window.location.origin || event.source !== window.parent) {
+        return
+      }
+      if (isEmbeddedManagerActivatedMessage(event.data, sessionId)) {
+        setManagerAccessRefreshNonce((current) => current + 1)
+      }
+    }
+
+    window.addEventListener('message', handleParentMessage)
+    return () => window.removeEventListener('message', handleParentMessage)
+  }, [sessionId])
 
   const saveConfigWithValues = useCallback(async (
     sourceUrlValue: string,
@@ -1020,12 +1084,12 @@ export default function VideoSyncManager() {
     stopSecTextValue: string,
   ): Promise<boolean> => {
     if (!sessionId) return false
-    if (!isPasscodeReady) {
-      setErrorMessage('Loading instructor credentials...')
+    if (!isManagerAccessReady) {
+      setErrorMessage('Loading manager access...')
       return false
     }
-    if (!instructorPasscode) {
-      setErrorMessage(MISSING_INSTRUCTOR_CREDENTIALS_ERROR)
+    if (!hasManagerAccess) {
+      setErrorMessage(MISSING_MANAGER_ACCESS_ERROR)
       return false
     }
 
@@ -1045,13 +1109,15 @@ export default function VideoSyncManager() {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          instructorPasscode,
           sourceUrl: sourceUrlValue,
           stopSec: stopSecValue,
         }),
       })
 
       if (!response.ok) {
+        if (response.status === 401 || response.status === 403) {
+          revalidateManagerAccess()
+        }
         const failure = (await response.json()) as { message?: string }
         throw new Error(sanitizeManagerApiErrorMessage(failure.message, 'Failed to save video config'))
       }
@@ -1070,7 +1136,7 @@ export default function VideoSyncManager() {
       setErrorMessage(message)
       return false
     }
-  }, [applyManagerStateUpdate, instructorPasscode, isPasscodeReady, sessionId])
+  }, [applyManagerStateUpdate, hasManagerAccess, isManagerAccessReady, revalidateManagerAccess, sessionId])
 
   const saveConfig = useCallback(async (): Promise<void> => {
     await saveConfigWithValues(sourceUrlInput, hasStopTime, stopSecInput)
@@ -1094,12 +1160,12 @@ export default function VideoSyncManager() {
       return
     }
 
-    if (!isPasscodeReady) {
+    if (!isManagerAccessReady) {
       setAutoStartStatus('starting')
       return
     }
 
-    if (!instructorPasscode) {
+    if (!hasManagerAccess) {
       setAutoStartStatus('failed')
       return
     }
@@ -1107,8 +1173,8 @@ export default function VideoSyncManager() {
     if (!shouldAutoStartBootstrapSource({
       setupMode,
       bootstrapSourceUrl,
-      isPasscodeReady,
-      instructorPasscode,
+      isManagerAccessReady,
+      hasManagerAccess,
       autoStartStatus,
     })) {
       return
@@ -1132,8 +1198,8 @@ export default function VideoSyncManager() {
   }, [
     autoStartStatus,
     bootstrapSourceUrl,
-    instructorPasscode,
-    isPasscodeReady,
+    hasManagerAccess,
+    isManagerAccessReady,
     saveConfigWithValues,
     sessionId,
     setupMode,
@@ -1143,7 +1209,7 @@ export default function VideoSyncManager() {
     if (!shouldRecoverAutoStartAfterCredentialLoad({
       setupMode,
       bootstrapSourceUrl,
-      instructorPasscode,
+      hasManagerAccess,
       autoStartStatus,
       errorMessage,
     })) {
@@ -1153,9 +1219,9 @@ export default function VideoSyncManager() {
     autoStartAttemptKeyRef.current = null
     setAutoStartStatus('idle')
     setErrorMessage((current) => (
-      current === MISSING_INSTRUCTOR_CREDENTIALS_ERROR ? null : current
+      current === MISSING_MANAGER_ACCESS_ERROR ? null : current
     ))
-  }, [autoStartStatus, bootstrapSourceUrl, errorMessage, instructorPasscode, setupMode])
+  }, [autoStartStatus, bootstrapSourceUrl, errorMessage, hasManagerAccess, setupMode])
 
   const handleEndSession = async (): Promise<void> => {
     if (!sessionId) return
@@ -1239,8 +1305,12 @@ export default function VideoSyncManager() {
               </label>
             ) : null}
 
-            <Button disabled={!isPasscodeReady} onClick={() => void saveConfig()}>
-              {isPasscodeReady ? 'Start instructor view' : 'Loading instructor access...'}
+            <Button disabled={!isManagerAccessReady || !hasManagerAccess} onClick={() => void saveConfig()}>
+              {!isManagerAccessReady
+                ? 'Loading manager access...'
+                : hasManagerAccess
+                  ? 'Start instructor view'
+                  : 'Manager access unavailable'}
             </Button>
           </section>
         )}

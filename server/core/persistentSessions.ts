@@ -22,13 +22,38 @@ interface PersistentSession {
 
 interface PersistentSessionStore {
   get(hash: string): Promise<PersistentSession | null>
+  // Like get, but a backend failure propagates instead of being mapped to
+  // `null` (which is indistinguishable from "no such record"). Optional: only
+  // the Valkey-backed store needs it; the in-memory store never fails a read.
+  getStrict?(hash: string): Promise<PersistentSession | null>
   set(hash: string, data: PersistentSession): Promise<void>
   delete(hash: string): Promise<void>
   getAllHashes(): Promise<string[]>
+  // Like getAllHashes, but a scan failure propagates instead of being mapped to
+  // `[]` (indistinguishable from "no persistent sessions"). Optional: only the
+  // Valkey-backed store needs it; the in-memory store never fails enumeration.
+  getAllHashesStrict?(): Promise<string[]>
   getHashBySessionId(sessionId: string): Promise<string | null>
+  // Like getHashBySessionId, but a backend failure propagates instead of being
+  // mapped to `null` (which is indistinguishable from "no such session").
+  // Optional: only the Valkey-backed store needs it; the in-memory store never
+  // fails a read.
+  getHashBySessionIdStrict?(sessionId: string): Promise<string | null>
   setHashBySessionId(sessionId: string, hash: string): Promise<void>
   deleteHashBySessionId(sessionId: string): Promise<void>
+  // Atomically clear a persistent record's started state *only while it still
+  // points at `expectedSessionId`*, and drop that session id's reverse-index
+  // entry. Used to roll back a failed start without a read-modify-write TOCTOU:
+  // a concurrent start that linked a newer session between a caller's read and
+  // write is left intact. Returns true if this call cleared the record.
+  // Optional: the in-memory store implements it directly; a store lacking it
+  // falls back to the non-atomic path in `rollbackPersistentSessionStart`.
+  compareAndClearSessionId?(hash: string, expectedSessionId: string): Promise<boolean>
   incrementAttempts(key: string): Promise<number>
+  // Like `incrementAttempts` but rejects on a backend failure instead of
+  // failing open with `0`. Optional: a store lacking it falls back to the
+  // fail-open path (acceptable for the in-memory store, which cannot fail).
+  incrementAttemptsStrict?(key: string): Promise<number>
   getAttempts(key: string): Promise<number>
 }
 
@@ -47,6 +72,14 @@ const waitersByHash = new Map<string, PersistentSessionSocket[]>()
 const MAX_ATTEMPTS = 5
 const WAITER_TIMEOUT = 600_000
 const CLEANUP_INTERVAL = 60_000
+/**
+ * How long a teacher-code attempt bucket lives before it clears. Recovery
+ * routes surface this as a `Retry-After` on their 429 so clients can wait out
+ * the window rather than latch a denied state. Kept in sync with the Valkey
+ * backend's `ratelimit:` key TTL in `valkeyStore.ts`.
+ */
+export const TEACHER_CODE_ATTEMPT_WINDOW_SECONDS = 60
+const RATE_LIMIT_WINDOW_MS = TEACHER_CODE_ATTEMPT_WINDOW_SECONDS * 1000
 const MAX_PERSISTENT_ENTRY_PARTICIPANTS = 100
 const MAX_PERSISTENT_ENTRY_PARTICIPANT_VALUES_BYTES = 8 * 1024
 
@@ -67,6 +100,13 @@ function createInMemoryPersistentStore(): PersistentSessionStore {
   const memoryStore = new Map<string, unknown>()
   const rateLimitTimeouts = new Map<string, NodeJS.Timeout>()
   const getReverseIndexKey = (sessionId: string): string => `sid:${sessionId}`
+  const incrementAttemptsInMemory = (key: string): number => {
+    const bucket = `rl:${key}`
+    const next = ((memoryStore.get(bucket) as number) ?? 0) + 1
+    memoryStore.set(bucket, next)
+    scheduleRateLimitExpiry(bucket)
+    return next
+  }
   const scheduleRateLimitExpiry = (bucket: string): void => {
     const existingTimeout = rateLimitTimeouts.get(bucket)
     if (existingTimeout) {
@@ -76,7 +116,7 @@ function createInMemoryPersistentStore(): PersistentSessionStore {
     const timeout = setTimeout(() => {
       memoryStore.delete(bucket)
       rateLimitTimeouts.delete(bucket)
-    }, 60_000)
+    }, RATE_LIMIT_WINDOW_MS)
     timeout.unref?.()
     rateLimitTimeouts.set(bucket, timeout)
   }
@@ -94,6 +134,9 @@ function createInMemoryPersistentStore(): PersistentSessionStore {
     async getAllHashes(): Promise<string[]> {
       return Array.from(memoryStore.keys()).filter((key) => !key.startsWith('rl:') && !key.startsWith('sid:'))
     },
+    async getAllHashesStrict(): Promise<string[]> {
+      return Array.from(memoryStore.keys()).filter((key) => !key.startsWith('rl:') && !key.startsWith('sid:'))
+    },
     async getHashBySessionId(sessionId: string): Promise<string | null> {
       return (memoryStore.get(getReverseIndexKey(sessionId)) as string) ?? null
     },
@@ -103,13 +146,25 @@ function createInMemoryPersistentStore(): PersistentSessionStore {
     async deleteHashBySessionId(sessionId: string): Promise<void> {
       memoryStore.delete(getReverseIndexKey(sessionId))
     },
+    async compareAndClearSessionId(hash: string, expectedSessionId: string): Promise<boolean> {
+      // Single synchronous tick: no interleaving is possible in the in-memory
+      // store, so this is atomic by construction.
+      memoryStore.delete(getReverseIndexKey(expectedSessionId))
+      const record = memoryStore.get(hash) as PersistentSession | undefined
+      if (record == null || record.sessionId !== expectedSessionId) {
+        return false
+      }
+      record.sessionId = null
+      record.teacherSocketId = null
+      return true
+    },
     async incrementAttempts(key: string): Promise<number> {
-      const bucket = `rl:${key}`
-      const current = (memoryStore.get(bucket) as number) ?? 0
-      const next = current + 1
-      memoryStore.set(bucket, next)
-      scheduleRateLimitExpiry(bucket)
-      return next
+      return incrementAttemptsInMemory(key)
+    },
+    async incrementAttemptsStrict(key: string): Promise<number> {
+      // The in-memory store operates on a Map and cannot fail, so the strict
+      // contract is satisfied by the same implementation.
+      return incrementAttemptsInMemory(key)
     },
     async getAttempts(key: string): Promise<number> {
       return (memoryStore.get(`rl:${key}`) as number) ?? 0
@@ -128,6 +183,9 @@ export function initializePersistentStorage(valkeyClient: ValkeyStoreClient | nu
       async get(hash: string): Promise<PersistentSession | null> {
         return (await valkeyStore.get(hash)) as PersistentSession | null
       },
+      async getStrict(hash: string): Promise<PersistentSession | null> {
+        return (await valkeyStore.getStrict(hash)) as PersistentSession | null
+      },
       async set(hash: string, data: PersistentSession): Promise<void> {
         await valkeyStore.set(hash, data)
       },
@@ -137,8 +195,14 @@ export function initializePersistentStorage(valkeyClient: ValkeyStoreClient | nu
       async getAllHashes(): Promise<string[]> {
         return await valkeyStore.getAllHashes()
       },
+      async getAllHashesStrict(): Promise<string[]> {
+        return await valkeyStore.getAllHashesStrict()
+      },
       async getHashBySessionId(sessionId: string): Promise<string | null> {
         return await valkeyStore.getHashBySessionId(sessionId)
+      },
+      async getHashBySessionIdStrict(sessionId: string): Promise<string | null> {
+        return await valkeyStore.getHashBySessionIdStrict(sessionId)
       },
       async setHashBySessionId(sessionId: string, hash: string): Promise<void> {
         await valkeyStore.setHashBySessionId(sessionId, hash)
@@ -146,8 +210,14 @@ export function initializePersistentStorage(valkeyClient: ValkeyStoreClient | nu
       async deleteHashBySessionId(sessionId: string): Promise<void> {
         await valkeyStore.deleteHashBySessionId(sessionId)
       },
+      async compareAndClearSessionId(hash: string, expectedSessionId: string): Promise<boolean> {
+        return await valkeyStore.compareAndClearSessionId(hash, expectedSessionId)
+      },
       async incrementAttempts(key: string): Promise<number> {
         return await valkeyStore.incrementAttempts(key)
+      },
+      async incrementAttemptsStrict(key: string): Promise<number> {
+        return await valkeyStore.incrementAttemptsStrict(key)
       },
       async getAttempts(key: string): Promise<number> {
         return await valkeyStore.getAttempts(key)
@@ -335,6 +405,19 @@ export async function getPersistentSession(hash: string): Promise<PersistentSess
   return await persistentStore.get(hash)
 }
 
+/**
+ * Like {@link getPersistentSession}, but a backend read failure propagates
+ * instead of being mapped to `null`. Callers that must distinguish "no such
+ * record" from "the store is down" (e.g. manager-capability recovery, which
+ * turns a rejection into a retryable 500 rather than a terminal 404) use this.
+ */
+export async function getPersistentSessionStrict(hash: string): Promise<PersistentSession | null> {
+  const read = persistentStore.getStrict
+    ? persistentStore.getStrict.bind(persistentStore)
+    : persistentStore.get.bind(persistentStore)
+  return await read(hash)
+}
+
 function normalizeSelectedOptionsRecord(value: unknown): Record<string, string> {
   if (value == null || typeof value !== 'object' || Array.isArray(value)) {
     return {}
@@ -464,6 +547,24 @@ export async function recordTeacherCodeAttempt(rateLimitKey: string): Promise<{ 
   }
 }
 
+/**
+ * Like {@link recordTeacherCodeAttempt} but rejects when the limiter backend is
+ * unavailable instead of failing open (`incrementAttempts` swallows a Valkey
+ * outage to `0`, which would report every guess as "allowed"). Pre-auth,
+ * pollable recovery endpoints use this so a limiter outage surfaces as a
+ * retryable 5xx rather than an open brute-force window.
+ */
+export async function recordTeacherCodeAttemptStrict(rateLimitKey: string): Promise<{ allowed: boolean; attempts: number }> {
+  const increment = persistentStore.incrementAttemptsStrict
+    ? persistentStore.incrementAttemptsStrict.bind(persistentStore)
+    : persistentStore.incrementAttempts.bind(persistentStore)
+  const attempts = await increment(rateLimitKey)
+  return {
+    allowed: attempts <= MAX_ATTEMPTS,
+    attempts,
+  }
+}
+
 export async function startPersistentSession(
   hash: string,
   sessionId: string,
@@ -510,6 +611,146 @@ export async function resetPersistentSession(hash: string): Promise<void> {
   broadcastToWaiters(hash, { type: 'session-ended' })
 }
 
+/**
+ * Roll back a persistent record's "started" state after a failed start (e.g.
+ * `startPersistentSession` persisted `sessionId` on the record but its reverse
+ * index write then rejected). Unlike {@link resetPersistentSession} this does
+ * not broadcast `session-ended` - the waiters should keep waiting for the
+ * teacher's retry - and it swallows its own write failures so it never masks
+ * the original error it is being called to clean up after.
+ *
+ * Returns `true` when the record is *confirmed* to no longer point at
+ * `expectedSessionId` (it was cleared here, was already cleared, or a
+ * concurrent start linked a different session) - the caller may then delete the
+ * orphan live session. Returns `false` when cleanup could not be confirmed (the
+ * store rejected): the caller must NOT delete the orphan, because the record
+ * may still point at it and a waiter would then be handed a dead id.
+ *
+ * `expectedSessionId` scopes the rollback to a single start attempt: two
+ * teacher-verification messages can race for the same hash, and if a later
+ * attempt has already linked a newer session this rollback must not clear that
+ * association. When it is supplied the record is only reset while it still
+ * points at that id; a stale reverse-index entry for the failed attempt is
+ * always cleaned up (it is keyed by session id, so this never touches a
+ * concurrent success's entry). When the store exposes `compareAndClearSessionId`
+ * the check-and-clear is a single atomic server-side op, so there is no
+ * read-modify-write TOCTOU window at all; otherwise it falls back to a
+ * best-effort re-read-before-write that only narrows the window.
+ */
+export async function rollbackPersistentSessionStart(
+  hash: string,
+  expectedSessionId?: string | null,
+): Promise<boolean> {
+  try {
+    if (expectedSessionId != null && persistentStore.compareAndClearSessionId) {
+      // Atomic path: clears the record only while it still points at
+      // `expectedSessionId` and drops that id's reverse index, in one op. A
+      // `false` result means the record already points elsewhere - still a
+      // confirmed "no longer ours" outcome.
+      await persistentStore.compareAndClearSessionId(hash, expectedSessionId)
+      return true
+    }
+
+    const session = await persistentStore.get(hash)
+    if (session == null || (expectedSessionId != null && session.sessionId !== expectedSessionId)) {
+      // Nothing of ours to reset: the record is gone, was already rolled back,
+      // or a concurrent start attempt has since linked a newer session. Still
+      // clean up the failed attempt's own reverse-index entry - it is keyed by
+      // session id, so this never touches a concurrent success's entry.
+      if (expectedSessionId != null) {
+        try {
+          await persistentStore.deleteHashBySessionId(expectedSessionId)
+        } catch {
+          // Best-effort: a stale reverse-index entry self-heals on read.
+        }
+      }
+      return true
+    }
+    if (session.sessionId == null) {
+      return true
+    }
+    const staleSessionId = session.sessionId
+    try {
+      await persistentStore.deleteHashBySessionId(staleSessionId)
+    } catch {
+      // Best-effort: the reverse index is validated on read, so a stale entry
+      // self-heals.
+    }
+    // Re-read immediately before the write and persist off that copy, not the
+    // stale snapshot above: a concurrent start attempt can link a newer session
+    // during the awaits in between, and writing back the stale snapshot would
+    // clear it. Without a store-level compare-and-set (tracked in #313) a
+    // sub-await window remains, but this keeps the common interleaving from
+    // clobbering a live session.
+    const latest = await persistentStore.get(hash)
+    if (latest == null || latest.sessionId !== staleSessionId) {
+      return true
+    }
+    latest.sessionId = null
+    latest.teacherSocketId = null
+    await persistPersistentSession(hash, latest)
+    return true
+  } catch (error) {
+    console.error(JSON.stringify({
+      event: 'persistent-session.start-rollback-failed',
+      hash,
+      error: error instanceof Error ? error.message : String(error),
+    }))
+    return false
+  }
+}
+
+/**
+ * Index-only reverse lookup: resolve a session id to its persistent hash using
+ * only the O(1) reverse index, never the O(n) `getAllHashes()` scan that
+ * {@link findHashBySessionId} falls back to. This exists for request paths that
+ * must not let an uncredentialed caller trigger a full persistent-store scan -
+ * e.g. the manager-capability recovery routes, which run before any auth check.
+ *
+ * Both the index read (`getHashBySessionIdStrict`) and the record read that
+ * validates it (`getStrict`) propagate a Valkey outage rather than mapping it
+ * to `null`/stale. Without the strict record read, a transient failure on the
+ * validating `get` would fall through to the stale-index cleanup below and
+ * delete a still-valid reverse index, making recovery look like "no such
+ * session". The recovery routes wrap this call and turn a rejection into a
+ * retryable 500. A live persistent session always has an index entry:
+ * `persistPersistentSession` writes it alongside the record, and the
+ * Valkey-backed `setHashBySessionId` now rethrows on failure so a persist
+ * cannot report success without its index. (Making the record + index write a
+ * single atomic op is the remaining hardening, tracked in #313 - #357 was
+ * closed and folded into it.)
+ */
+export async function findIndexedHashBySessionId(sessionId: string): Promise<string | null> {
+  const readIndex = persistentStore.getHashBySessionIdStrict
+    ? persistentStore.getHashBySessionIdStrict.bind(persistentStore)
+    : persistentStore.getHashBySessionId.bind(persistentStore)
+  const indexedHash = await readIndex(sessionId)
+  if (!indexedHash) {
+    return null
+  }
+
+  const readRecord = persistentStore.getStrict
+    ? persistentStore.getStrict.bind(persistentStore)
+    : persistentStore.get.bind(persistentStore)
+  const indexedSession = await readRecord(indexedHash)
+  if (indexedSession?.sessionId === sessionId) {
+    return indexedHash
+  }
+
+  // The record read succeeded and does not match this session id: the reverse
+  // index is genuinely stale, so drop it.
+  try {
+    await persistentStore.deleteHashBySessionId(sessionId)
+  } catch (error) {
+    console.error(JSON.stringify({
+      event: 'persistent-session.stale-hash-cleanup-failed',
+      sessionId,
+      error: error instanceof Error ? error.message : String(error),
+    }))
+  }
+  return null
+}
+
 export async function findHashBySessionId(sessionId: string): Promise<string | null> {
   const indexedHash = await persistentStore.getHashBySessionId(sessionId)
   if (indexedHash) {
@@ -521,7 +762,11 @@ export async function findHashBySessionId(sessionId: string): Promise<string | n
     try {
       await persistentStore.deleteHashBySessionId(sessionId)
     } catch (error) {
-      console.error(`Failed to clear stale persistent session hash for session ${sessionId}:`, error)
+      console.error(JSON.stringify({
+        event: 'persistent-session.stale-hash-cleanup-failed',
+        sessionId,
+        error: error instanceof Error ? error.message : String(error),
+      }))
     }
   }
 
@@ -532,8 +777,57 @@ export async function findHashBySessionId(sessionId: string): Promise<string | n
       try {
         await persistentStore.setHashBySessionId(sessionId, hash)
       } catch (error) {
-        console.error(`Failed to backfill persistent session hash for session ${sessionId}:`, error)
+        console.error(JSON.stringify({
+          event: 'persistent-session.hash-backfill-failed',
+          sessionId,
+          error: error instanceof Error ? error.message : String(error),
+        }))
       }
+      return hash
+    }
+  }
+
+  return null
+}
+
+/**
+ * Strict variant of {@link findHashBySessionId}: the reverse-index read
+ * (`getHashBySessionIdStrict`) and the record read that validates it
+ * (`getStrict`), both via {@link findIndexedHashBySessionId}, propagate a
+ * backend outage instead of mapping it to `null`. A caller such as
+ * `POST /api/session/:sessionId/teacher-authenticate` can then turn a transient
+ * failure into a logged, retryable 500 rather than the terminal 404 it would
+ * otherwise return even though the live session was read successfully. A
+ * genuine index miss still falls back to the legacy O(n) scan and backfill, so
+ * an un-indexed but live persistent session stays resolvable - and that
+ * fallback is strict too: enumeration (`getAllHashesStrict`) and each record
+ * read (`getStrict`) propagate a backend outage instead of mapping it to
+ * `[]`/`null` and letting an un-indexed session fall through to a false 404.
+ */
+export async function findHashBySessionIdStrict(sessionId: string): Promise<string | null> {
+  const indexedHash = await findIndexedHashBySessionId(sessionId)
+  if (indexedHash) {
+    return indexedHash
+  }
+
+  const enumerate = persistentStore.getAllHashesStrict
+    ? persistentStore.getAllHashesStrict.bind(persistentStore)
+    : persistentStore.getAllHashes.bind(persistentStore)
+  const readRecord = persistentStore.getStrict
+    ? persistentStore.getStrict.bind(persistentStore)
+    : persistentStore.get.bind(persistentStore)
+
+  const hashes = await enumerate()
+  for (const hash of hashes) {
+    const session = await readRecord(hash)
+    if (session?.sessionId === sessionId) {
+      // Propagate a failed backfill here, unlike the non-strict lookup which
+      // logs and returns the hash anyway. `setHashBySessionId` now rejects when
+      // the required reverse index cannot be written, and the index-only
+      // recovery endpoints would not find this session later - so a strict
+      // caller must treat "found but un-indexable" as a retryable failure, not
+      // a success that issues a manager capability the recovery path can't back.
+      await persistentStore.setHashBySessionId(sessionId, hash)
       return hash
     }
   }

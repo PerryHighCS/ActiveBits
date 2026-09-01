@@ -156,6 +156,11 @@ function createSessionStore(initial: Record<string, SessionRecord>) {
       store[id] = cloneSession(consumed)
       return cloneSession(consumed)
     },
+    async consumeSessionDataTokenStrict(id: string, field: string, token: string) {
+      // Same result as consumeSessionDataToken in the happy path; production's
+      // strict variant differs only by rethrowing a backend failure.
+      return this.consumeSessionDataToken!(id, field, token)
+    },
     async delete(id: string) {
       const existed = Boolean(store[id])
       delete store[id]
@@ -2488,13 +2493,14 @@ void test('embedded-activity start route creates a child session, stores keyed m
     childSessionId: string
     instanceKey: string
     location?: { h: number; v: number }
-    managerBootstrap?: { instructorPasscode?: string }
+    managerBootstrap?: Record<string, unknown>
+    managerEntryToken?: string
   }
   assert.equal(body.instanceKey, 'video-sync:3:0')
   assert.deepEqual(body.location, { h: 3, v: 0 })
   assert.match(body.childSessionId, /^CHILD:s1:[a-f0-9]{5}:video-sync$/)
-  assert.equal(typeof body.managerBootstrap?.instructorPasscode, 'string')
-  assert.equal(body.managerBootstrap?.instructorPasscode?.length, 32)
+  assert.deepEqual(body.managerBootstrap, {})
+  assert.match(String(body.managerEntryToken), /^[a-f0-9]{64}$/)
 
   const parentSession = storeState.store.s1 as SessionRecord & {
     data: { embeddedActivities: Record<string, { childSessionId: string; activityId: string; startedAt: number; owner: string; location?: { h: number; v: number } }> }
@@ -2981,6 +2987,132 @@ void test('embedded manager passcode exchange validates and consumes short-lived
     reusedRes,
   )
   assert.equal(reusedRes.statusCode, 403)
+})
+
+void test('embedded manager capability exchange consumes its token and issues an httpOnly cookie without a passcode', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const now = Date.now()
+  const storeState = createSessionStore({
+    'child-capability': {
+      id: 'child-capability',
+      type: 'video-sync',
+      created: now,
+      lastActivity: now,
+      data: {
+        instructorPasscode: 'child-passcode',
+        embeddedManagerEntryToken: { value: 'capability-entry-token', expiresAt: now + 60_000 },
+      },
+    },
+  })
+  setupSyncDeckRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.get['/api/syncdeck/embedded-manager-capability']
+  assert.equal(typeof handler, 'function')
+  const response = createResponse()
+  await handler?.(
+    createRequest({}, undefined, {}, {}, { sessionId: 'child-capability', token: 'capability-entry-token' }),
+    response,
+  )
+
+  assert.equal(response.statusCode, 200)
+  assert.deepEqual(response.body, { ok: true })
+  assert.equal(response.cookies.length, 1)
+  const [cookie] = response.cookies
+  assert.ok(cookie)
+  assert.equal(cookie.value.length > 0, true)
+  assert.equal(cookie.options.httpOnly, true)
+  assert.equal((storeState.store['child-capability']?.data as { embeddedManagerEntryToken?: unknown }).embeddedManagerEntryToken, undefined)
+  assert.equal((storeState.store['child-capability']?.data as { activityCapabilities?: unknown }).activityCapabilities != null, true)
+})
+
+void test('embedded manager capability exchange does not issue a cookie when persistence fails', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const now = Date.now()
+  const storeState = createSessionStore({
+    'child-capability': {
+      id: 'child-capability', type: 'video-sync', created: now, lastActivity: now,
+      data: { embeddedManagerEntryToken: { value: 'capability-entry-token', expiresAt: now + 60_000 } },
+    },
+  })
+  storeState.sessions.set = async () => { throw new Error('simulated session-store write failure') }
+  setupSyncDeckRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.get['/api/syncdeck/embedded-manager-capability']
+  assert.equal(typeof handler, 'function')
+  const response = createResponse()
+  console.info('[TEST] Expected embedded manager capability persistence failure.')
+  await handler?.(
+    createRequest({}, undefined, {}, {}, { sessionId: 'child-capability', token: 'capability-entry-token' }),
+    response,
+  )
+
+  assert.equal(response.statusCode, 500)
+  assert.deepEqual(response.body, { error: 'embedded manager capability unavailable' })
+  assert.equal(response.cookies.length, 0)
+})
+
+void test('embedded manager capability exchange returns a structured 500 when a store read rejects', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const now = Date.now()
+  const storeState = createSessionStore({
+    'child-capability': {
+      id: 'child-capability', type: 'video-sync', created: now, lastActivity: now,
+      data: { embeddedManagerEntryToken: { value: 'capability-entry-token', expiresAt: now + 60_000 } },
+    },
+  })
+  // [TEST] the backing store rejects the lookup on purpose: the token verify,
+  // atomic consume and post-consume re-read all run before the inner try, so
+  // without route-level error handling the rejection would escape this async
+  // handler with no structured log and no controlled JSON response.
+  storeState.sessions.get = async () => { throw new Error('[TEST] session store unavailable') }
+  setupSyncDeckRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.get['/api/syncdeck/embedded-manager-capability']
+  const response = createResponse()
+  console.info('[TEST] Expected embedded-manager-capability-failed log: the injected session store rejects every read.')
+  await handler?.(
+    createRequest({}, undefined, {}, {}, { sessionId: 'child-capability', token: 'capability-entry-token' }),
+    response,
+  )
+
+  assert.equal(response.statusCode, 500)
+  assert.deepEqual(response.body, { error: 'embedded manager capability unavailable' })
+  assert.equal(response.cookies.length, 0)
+})
+
+void test('embedded manager capability exchange returns a structured 500 when the token consume rejects', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const now = Date.now()
+  const storeState = createSessionStore({
+    'child-consume-fail': {
+      id: 'child-consume-fail', type: 'video-sync', created: now, lastActivity: now,
+      data: { embeddedManagerEntryToken: { value: 'consume-fail-token', expiresAt: now + 60_000 } },
+    },
+  })
+  // The token verify read succeeds, but the atomic consume then hits a backend
+  // outage. Production's non-strict consume swallows that to `null` (-> a false
+  // 403); the strict variant the route now uses must reject into the outer
+  // catch -> structured log + retryable 500.
+  storeState.sessions.consumeSessionDataTokenStrict = async () => {
+    throw new Error('[TEST] session store consume unavailable')
+  }
+  setupSyncDeckRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.get['/api/syncdeck/embedded-manager-capability']
+  const response = createResponse()
+  console.info('[TEST] Expected embedded-manager-capability-failed log: the atomic token consume rejects.')
+  await handler?.(
+    createRequest({}, undefined, {}, {}, { sessionId: 'child-consume-fail', token: 'consume-fail-token' }),
+    response,
+  )
+
+  assert.equal(response.statusCode, 500)
+  assert.deepEqual(response.body, { error: 'embedded manager capability unavailable' })
+  assert.equal(response.cookies.length, 0)
 })
 
 void test('embedded manager passcode exchange allows only one concurrent token redemption', async () => {

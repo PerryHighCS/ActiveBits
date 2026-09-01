@@ -1,9 +1,18 @@
 import { createSession, type SessionRecord, type SessionStore } from 'activebits-server/core/sessions.js'
+import {
+  getActivityCapabilityCookieName,
+  issueActivityCapability,
+  readCookieValue,
+  resolveActivityPrincipalFromCookies,
+  writeActivityCapabilityCookie,
+} from 'activebits-server/core/activityCapabilities.js'
 import { registerSessionNormalizer } from 'activebits-server/core/sessionNormalization.js'
 import { createBroadcastSubscriptionHelper } from 'activebits-server/core/broadcastUtils.js'
 import {
-  findHashBySessionId,
+  findIndexedHashBySessionId,
+  recordTeacherCodeAttemptStrict,
   resolvePersistentSessionEntryPolicy,
+  TEACHER_CODE_ATTEMPT_WINDOW_SECONDS,
   verifyTeacherCodeWithHash,
 } from 'activebits-server/core/persistentSessions.js'
 import {
@@ -11,7 +20,6 @@ import {
   verifyPersistentLinkUrlHash,
   type PersistentLinkUrlState,
 } from 'activebits-server/core/persistentLinkUrlState.js'
-import { randomBytes, timingSafeEqual } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
 import type { ActiveBitsWebSocket, WsRouter } from '../../../types/websocket.js'
 import {
@@ -56,7 +64,6 @@ interface VideoSyncTelemetry {
 }
 
 interface VideoSyncSessionData extends Record<string, unknown> {
-  instructorPasscode: string
   standaloneMode: boolean
   state: VideoSyncState
   telemetry: VideoSyncTelemetry
@@ -73,7 +80,7 @@ interface VideoSyncSession extends SessionRecord {
   data: VideoSyncSessionData
 }
 
-interface VideoSyncSessionStore extends Pick<SessionStore, 'get' | 'set'> {
+interface VideoSyncSessionStore extends Pick<SessionStore, 'get' | 'getStrict' | 'set'> {
   publishBroadcast?: (channel: string, message: Record<string, unknown>) => Promise<void>
   subscribeToBroadcast?: (channel: string, handler: (message: unknown) => void) => void
   valkeyStore?: {
@@ -87,11 +94,27 @@ interface RouteRequest {
   params: Record<string, string | undefined>
   body?: unknown
   cookies?: Record<string, unknown>
+  ip?: string
+  socket?: { remoteAddress?: string }
+}
+
+function resolveClientIp(req: RouteRequest): string {
+  if (typeof req.ip === 'string' && req.ip.trim()) {
+    return req.ip.trim()
+  }
+  const remoteAddress = req.socket?.remoteAddress
+  if (typeof remoteAddress === 'string' && remoteAddress.trim()) {
+    return remoteAddress.trim()
+  }
+  return 'unknown'
 }
 
 interface JsonResponse {
   status(code: number): JsonResponse
+  set?(field: string, value: string): JsonResponse
+  cookie(name: string, value: string, options: Record<string, unknown>): void
   json(payload: unknown): void
+  readonly headersSent?: boolean
 }
 
 interface VideoSyncRouteApp {
@@ -114,19 +137,12 @@ interface VideoSyncSocket extends ActiveBitsWebSocket {
   videoSyncRole?: VideoSyncRole
 }
 
-interface VideoSyncInstructorAuthMessage {
-  type: 'authenticate'
-  instructorPasscode: string
-}
-
 interface CommandBody {
-  instructorPasscode?: unknown
   type?: unknown
   positionSec?: unknown
 }
 
 interface ConfigBody {
-  instructorPasscode?: unknown
   sourceUrl?: unknown
   stopSec?: unknown
   standaloneMode?: unknown
@@ -161,15 +177,13 @@ const MAX_TELEMETRY_ERROR_MESSAGE_LENGTH = 256
 const YOUTUBE_VIDEO_ID_PATTERN = /^[A-Za-z0-9_-]{11}$/
 const INVALID_SOURCE_URL_MESSAGE =
   'Only YouTube watch/embed, YouTube Education watch/embed, and youtu.be URLs are supported in v1.'
-const INSTRUCTOR_PASSCODE_LENGTH = 32
-const INSTRUCTOR_PASSCODE_PATTERN = /^[a-f0-9]{32}$/i
 const UNSYNCED_STUDENTS_KEY_PREFIX = 'video-sync:unsynced:'
 const UNSYNCED_STUDENTS_KEY_TTL_MS = UNSYNC_STALE_MS + 1_000
-const DEFAULT_INSTRUCTOR_AUTH_TIMEOUT_MS = 5_000
 const provider = 'youtube'
 const subscribersBySession = new Map<string, Set<VideoSyncSocket>>()
 const heartbeatTimers = new Map<string, ReturnType<typeof setInterval>>()
 const heartbeatInFlightBySession = new Map<string, boolean>()
+const mutationTailsBySession = new Map<string, Promise<void>>()
 const unsyncedStudentsBySession = new Map<string, Map<string, number>>()
 const unsyncedStudentPruneTimersBySession = new Map<string, ReturnType<typeof setTimeout>>()
 
@@ -194,47 +208,53 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return value != null && typeof value === 'object' && !Array.isArray(value)
 }
 
-function createInstructorPasscode(): string {
-  return randomBytes(16).toString('hex')
+/** Keep cookie-dependent responses out of any shared or browser cache. */
+function setNoStore(res: JsonResponse): void {
+  res.set?.('Cache-Control', 'no-store')
 }
 
-function normalizeInstructorPasscode(value: unknown): string | null {
-  if (typeof value !== 'string') {
-    return null
-  }
-
-  const normalized = value.trim()
-  if (
-    normalized.length !== INSTRUCTOR_PASSCODE_LENGTH ||
-    !INSTRUCTOR_PASSCODE_PATTERN.test(normalized)
-  ) {
-    return null
-  }
-
-  return normalized.toLowerCase()
-}
-
-function verifyInstructorPasscode(expected: string, candidate: string): boolean {
-  if (
-    expected.length !== INSTRUCTOR_PASSCODE_LENGTH ||
-    !INSTRUCTOR_PASSCODE_PATTERN.test(expected) ||
-    candidate.length !== INSTRUCTOR_PASSCODE_LENGTH ||
-    !INSTRUCTOR_PASSCODE_PATTERN.test(candidate)
-  ) {
-    return false
-  }
-
-  const expectedBuffer = Buffer.from(expected)
-  const candidateBuffer = Buffer.from(candidate)
-
-  if (expectedBuffer.length === 0 || expectedBuffer.length !== candidateBuffer.length) {
-    return false
-  }
-
+async function withSessionMutation<T>(sessionId: string, mutate: () => Promise<T>): Promise<T> {
+  const previous = mutationTailsBySession.get(sessionId) ?? Promise.resolve()
+  let release!: () => void
+  const tail = new Promise<void>((resolve) => { release = resolve })
+  const completion = previous.catch(() => undefined).then(() => tail)
+  mutationTailsBySession.set(sessionId, completion)
+  await previous.catch(() => undefined)
   try {
-    return timingSafeEqual(expectedBuffer, candidateBuffer)
-  } catch {
-    return false
+    return await mutate()
+  } finally {
+    release()
+    if (mutationTailsBySession.get(sessionId) === completion) {
+      mutationTailsBySession.delete(sessionId)
+    }
+  }
+}
+
+/**
+ * Run a serialized session mutation for a REST route, converting a rejected
+ * session-store or broadcast operation into a structured log plus a controlled
+ * 500 instead of letting the rejection escape the handler (Express 5 would
+ * otherwise forward it to the default error handler with no structured log).
+ * Mirrors the route-level guard already used by `/manager-access`.
+ */
+async function withSessionMutationRoute(
+  res: JsonResponse,
+  sessionId: string,
+  event: string,
+  mutate: () => Promise<void>,
+): Promise<void> {
+  try {
+    await withSessionMutation(sessionId, mutate)
+  } catch (mutationError) {
+    console.error(JSON.stringify({
+      activity: 'video-sync',
+      event,
+      sessionId,
+      errorName: mutationError instanceof Error ? mutationError.name : 'unknown',
+    }))
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'INTERNAL_ERROR', message: 'This action is temporarily unavailable' })
+    }
   }
 }
 
@@ -486,6 +506,17 @@ function readEmbeddedParentSessionContext(data: unknown): EmbeddedParentSessionC
   }
 }
 
+/**
+ * Whether a `persistent_sessions` cookie entry actually carries a teacher-code
+ * *candidate* (a non-empty string), i.e. the request is attempting credentialed
+ * recovery. `persistent_sessions` is client-supplied, so a forged/malformed
+ * entry with no usable code must not be able to spend the shared IP+hash
+ * rate-limit bucket - matching the persistent-manager-capability route's guard.
+ */
+export function persistentCookieEntryHasTeacherCodeCandidate(entry: CookieSessionEntry | undefined): boolean {
+  return typeof entry?.teacherCode === 'string' && entry.teacherCode.length > 0
+}
+
 function readPersistentSourceUrlFromCookieEntry(
   persistentHash: string,
   entry: CookieSessionEntry | undefined,
@@ -547,84 +578,56 @@ function normalizeDriftSec(value: unknown): number | null {
   return clampSeconds(Math.abs(value))
 }
 
-function parseInstructorAuthMessage(raw: unknown): VideoSyncInstructorAuthMessage | null {
-  let text: string | null = null
-
-  if (typeof raw === 'string') {
-    text = raw
-  } else if (Buffer.isBuffer(raw)) {
-    text = raw.toString('utf8')
-  } else if (raw instanceof ArrayBuffer) {
-    text = Buffer.from(raw).toString('utf8')
-  }
-
-  if (text == null) {
-    return null
-  }
-
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(text)
-  } catch {
-    return null
-  }
-
-  if (!isPlainObject(parsed) || parsed.type !== 'authenticate') {
-    return null
-  }
-
-  const instructorPasscode = normalizeInstructorPasscode(parsed.instructorPasscode)
-  if (instructorPasscode == null) {
-    return null
-  }
-
-  return {
-    type: 'authenticate',
-    instructorPasscode,
-  }
+function resolveManagerSocketPrincipal(session: VideoSyncSession, sessionId: string, socket: VideoSyncSocket) {
+  const cookieName = getActivityCapabilityCookieName('manager', sessionId)
+  const cookieHeader = socket.upgradeHeaders?.cookie
+  return resolveActivityPrincipalFromCookies(session, sessionId, 'manager', {
+    [cookieName]: readCookieValue(cookieHeader, cookieName),
+  })
 }
 
-function getInstructorAuthTimeoutMs(): number {
-  // Temporary compatibility shim for mixed deploys; owner: Codex; cleanup: remove once all callers use ACTIVEBITS_VIDEO_SYNC_INSTRUCTOR_AUTH_TIMEOUT_MS.
-  const rawValue =
-    process.env.ACTIVEBITS_VIDEO_SYNC_INSTRUCTOR_AUTH_TIMEOUT_MS ??
-    process.env.ACTIVEBITS_VIDEO_SYNC_MANAGER_AUTH_TIMEOUT_MS
-  const parsed = rawValue ? Number.parseInt(rawValue, 10) : Number.NaN
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_INSTRUCTOR_AUTH_TIMEOUT_MS
-}
+const MAX_SET_TIMEOUT_MS = 2_147_483_647
 
-export function waitForInstructorAuthMessage(
-  socket: ActiveBitsWebSocket,
-  timeoutMs = getInstructorAuthTimeoutMs(),
-): Promise<unknown | null> {
-  return new Promise<unknown | null>((resolve) => {
-    let settled = false
-    let timeoutId: ReturnType<typeof setTimeout> | null = setTimeout(() => {
-      settle(null)
-      socket.close(1008, 'Auth timeout')
-    }, timeoutMs)
+/**
+ * Close an admitted instructor socket once its manager capability reaches
+ * `expiresAt`. Admission only checks authority at connect time, so without this
+ * a socket opened just before expiry would keep receiving manager state past the
+ * bounded capability lifetime. Mirrors the Java Format lifecycle; the 1008 close
+ * is what the Video Sync client's manager-access revalidation path keys on.
+ */
+function scheduleManagerCapabilityExpiryClose(
+  socket: VideoSyncSocket,
+  session: VideoSyncSession,
+  capabilityId: string,
+): void {
+  const record = (session.data as { activityCapabilities?: Record<string, { expiresAt?: unknown }> })
+    .activityCapabilities?.[capabilityId]
+  const expiresAt = record?.expiresAt
+  if (typeof expiresAt !== 'number' || !Number.isFinite(expiresAt)) return
 
-    const settle = (value: unknown | null) => {
-      if (settled) {
-        return
-      }
-      settled = true
-      if (timeoutId != null) {
-        clearTimeout(timeoutId)
-        timeoutId = null
-      }
-      resolve(value)
+  const closeExpired = (): void => {
+    try {
+      socket.close(1008, 'activity-auth-required')
+    } catch {
+      // socket already tearing down
     }
+  }
 
-    socket.once('message', (raw: unknown) => {
-      settle(raw)
-    })
-    socket.once('close', () => {
-      settle(null)
-    })
-    socket.once('error', () => {
-      settle(null)
-    })
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const arm = (): void => {
+    const remaining = expiresAt - Date.now()
+    if (remaining <= 0) {
+      closeExpired()
+      return
+    }
+    // setTimeout caps at ~24.8 days; for a longer TTL, re-arm in chunks so the
+    // socket is closed at the real `expiresAt`, not early.
+    timer = setTimeout(remaining <= MAX_SET_TIMEOUT_MS ? closeExpired : arm, Math.min(remaining, MAX_SET_TIMEOUT_MS))
+    timer.unref?.()
+  }
+  arm()
+  socket.on('close', () => {
+    if (timer) clearTimeout(timer)
   })
 }
 
@@ -900,27 +903,29 @@ function scheduleUnsyncedStudentsPrune(
   const timer = setTimeout(() => {
     unsyncedStudentPruneTimersBySession.delete(sessionId)
     void (async () => {
-      const studentMap = unsyncedStudentsBySession.get(sessionId)
-      if (!studentMap) {
-        return
-      }
-
       const pruneNowMs = Date.now()
-      pruneStaleUnsyncedStudents(studentMap, pruneNowMs)
+      await withSessionMutation(sessionId, async () => {
+        const studentMap = unsyncedStudentsBySession.get(sessionId)
+        if (!studentMap) {
+          return
+        }
 
-      const session = await getVideoSyncSession(sessions, sessionId)
-      if (!session) {
-        clearUnsyncedStudentState(sessionId)
-        return
-      }
+        pruneStaleUnsyncedStudents(studentMap, pruneNowMs)
 
-      const data = ensureVideoSyncSessionData(session)
-      const previousCount = data.telemetry.sync.unsyncedStudents
-      await refreshUnsyncedStudentsCount(sessions as VideoSyncSessionStore, data, sessionId, pruneNowMs)
+        const session = await getVideoSyncSession(sessions, sessionId)
+        if (!session) {
+          clearUnsyncedStudentState(sessionId)
+          return
+        }
 
-      if (data.telemetry.sync.unsyncedStudents !== previousCount) {
-        await sessions.set(session.id, session)
-      }
+        const data = ensureVideoSyncSessionData(session)
+        const previousCount = data.telemetry.sync.unsyncedStudents
+        await refreshUnsyncedStudentsCount(sessions as VideoSyncSessionStore, data, sessionId, pruneNowMs)
+
+        if (data.telemetry.sync.unsyncedStudents !== previousCount) {
+          await sessions.set(session.id, session)
+        }
+      })
 
       if ((unsyncedStudentsBySession.get(sessionId)?.size ?? 0) > 0) {
         scheduleUnsyncedStudentsPrune(sessions, sessionId, pruneNowMs)
@@ -939,12 +944,12 @@ function normalizeVideoSyncSessionData(session: SessionRecord): {
 } {
   const previousData = session.data
   const rawData = isPlainObject(previousData) ? previousData : {}
+  const { instructorPasscode: _legacyInstructorPasscode, ...dataWithoutLegacyPasscode } = rawData
   const state = normalizeState(rawData.state)
   const telemetry = normalizeTelemetry(rawData.telemetry)
 
   const normalized: VideoSyncSessionData = {
-    ...rawData,
-    instructorPasscode: normalizeInstructorPasscode(rawData.instructorPasscode) ?? createInstructorPasscode(),
+    ...dataWithoutLegacyPasscode,
     standaloneMode: rawData.standaloneMode === true,
     state,
     telemetry,
@@ -1039,22 +1044,30 @@ function createEnvelope<TPayload>(
 }
 
 async function getVideoSyncSession(
-  sessions: Pick<VideoSyncSessionStore, 'get'>,
+  sessions: Pick<VideoSyncSessionStore, 'get' | 'getStrict'>,
   sessionId: string,
+  options: { strict?: boolean } = {},
 ): Promise<VideoSyncSession | null> {
-  const result = await getVideoSyncSessionWithNormalization(sessions, sessionId)
+  const result = await getVideoSyncSessionWithNormalization(sessions, sessionId, options)
   return result.session
 }
 
 async function getVideoSyncSessionWithNormalization(
-  sessions: Pick<VideoSyncSessionStore, 'get'>,
+  sessions: Pick<VideoSyncSessionStore, 'get' | 'getStrict'>,
   sessionId: string,
+  options: { strict?: boolean } = {},
 ): Promise<{
   session: VideoSyncSession | null
   data: VideoSyncSessionData | null
   didNormalizeSessionData: boolean
 }> {
-  const session = await sessions.get(sessionId)
+  // When strict, a backend read failure rejects (-> the route's outer catch ->
+  // retryable 500) instead of mapping to `null`, which a manager client treats
+  // as a definitive "session not found" and stops retrying.
+  const read = options.strict && typeof sessions.getStrict === 'function'
+    ? sessions.getStrict.bind(sessions)
+    : sessions.get.bind(sessions)
+  const session = await read(sessionId)
   if (!session || session.type !== 'video-sync') {
     return {
       session: null,
@@ -1185,6 +1198,7 @@ function ensureHeartbeat(
       heartbeatInFlightBySession.set(sessionId, true)
 
       try {
+        await withSessionMutation(sessionId, async () => {
         const sockets = subscribersBySession.get(sessionId)
         if (!sockets || sockets.size === 0) {
           stopHeartbeat(sessionId)
@@ -1224,6 +1238,7 @@ function ensureHeartbeat(
           telemetry: heartbeatTelemetry,
         })
         await broadcastEnvelope(sessions, ws, sessionId, envelope)
+        })
       } finally {
         if (heartbeatTimers.has(sessionId)) {
           heartbeatInFlightBySession.set(sessionId, false)
@@ -1255,12 +1270,8 @@ function isEventType(value: unknown): value is VideoSyncEventType {
   return value === 'autoplay-blocked' || value === 'unsync' || value === 'sync-correction' || value === 'load-failure'
 }
 
-function readInstructorPasscode(body: unknown): string | null {
-  if (!isPlainObject(body)) {
-    return null
-  }
-
-  return normalizeInstructorPasscode(body.instructorPasscode)
+function hasManagerAuthority(session: VideoSyncSession, sessionId: string, req: RouteRequest): boolean {
+  return resolveActivityPrincipalFromCookies(session, sessionId, 'manager', req.cookies) != null
 }
 
 function readBooleanField(body: unknown, key: string): boolean | null {
@@ -1288,69 +1299,184 @@ export default function setupVideoSyncRoutes(
       data.state = createDefaultState()
       data.telemetry = createDefaultTelemetry()
 
+      const capability = issueActivityCapability(session, 'manager')
       await sessions.set(session.id, session)
-      res.json({ id: session.id, instructorPasscode: data.instructorPasscode })
+      writeActivityCapabilityCookie(res, session.id, 'manager', capability.token)
+      res.json({ id: session.id })
     } catch (error) {
       console.error('Failed to create video-sync session:', error)
       res.status(500).json({ error: 'INTERNAL_ERROR', message: 'Failed to create session' })
     }
   })
 
-  app.get('/api/video-sync/:sessionId/instructor-passcode', async (req, res) => {
+  app.get('/api/video-sync/:sessionId/manager-access', async (req, res) => {
+    // This response reflects the caller's cookies (manager capability / persistent
+    // teacher auth) and can issue a Set-Cookie, so it must never be cached.
+    setNoStore(res)
     const sessionId = resolveSessionId(req)
     if (!sessionId) {
       res.status(400).json({ error: 'INVALID_SESSION_ID', message: 'sessionId is required' })
       return
     }
 
-    const {
-      session,
-      data,
-      didNormalizeSessionData,
-    } = await getVideoSyncSessionWithNormalization(sessions, sessionId)
-    if (!session || !data) {
-      res.status(404).json({ error: 'NOT_FOUND', message: 'Session not found' })
-      return
-    }
+    try {
+      const {
+        session,
+        data,
+      } = await getVideoSyncSessionWithNormalization(sessions, sessionId, { strict: true })
+      if (!session || !data) {
+        res.status(404).json({ error: 'NOT_FOUND', message: 'Session not found' })
+        return
+      }
 
-    const directPersistentHash = await findHashBySessionId(sessionId)
-    const embeddedParentContext = readEmbeddedParentSessionContext(session.data)
-    const recoveryActivityName = directPersistentHash
-      ? 'video-sync'
-      : embeddedParentContext?.activityName ?? null
-    const recoverySessionId = directPersistentHash
-      ? sessionId
-      : embeddedParentContext?.parentSessionId ?? null
-    const persistentHash = recoverySessionId
-      ? await findHashBySessionId(recoverySessionId)
-      : null
+      // Resolve any persistent recovery context up front. It gates capability
+      // recovery below, but is also used to return canonical bootstrap data
+      // (persistentSourceUrl) even when the caller is already authorized - a
+      // just-authenticated teacher lands here with the manager cookie already set
+      // and still needs its configured video to be recovered.
+      //
+      // Read the embedded-parent context before any persistent-store lookup:
+      // embedded children never carry their own persistent-session hash, so the
+      // recovery hash is always the parent's. Only a standalone session falls
+      // back to a lookup keyed by its own id.
+      //
+      // Use the index-only lookup, not `findHashBySessionId`: this route runs
+      // before any auth check, so an uncredentialed caller must not be able to
+      // drive the O(n) `getAllHashes()` scan that `findHashBySessionId` falls
+      // back to for ids with no reverse-index entry (every temporary session).
+      // A live persistent session always has an index entry.
+      const embeddedParentContext = readEmbeddedParentSessionContext(session.data)
+      const recoveryActivityName = embeddedParentContext?.activityName ?? 'video-sync'
+      const recoverySessionId = embeddedParentContext?.parentSessionId ?? sessionId
 
-    if (!persistentHash || !recoveryActivityName) {
-      res.status(403).json({ error: 'FORBIDDEN', message: 'Instructor credential recovery is not available for this session' })
-      return
-    }
+      // Does the caller already hold a valid manager capability? For such a
+      // caller the persistent lookup below only enriches the response with
+      // canonical bootstrap data, so a transient Valkey outage must degrade to
+      // "no bootstrap data" rather than fail an already-authorized request. A
+      // caller whose authorization depends on the lookup still gets a
+      // retryable 500 (outer catch) on a store failure.
+      const alreadyAuthorized = Boolean(
+        resolveActivityPrincipalFromCookies(session, sessionId, 'manager', req.cookies),
+      )
 
-    const sessionEntries = parsePersistentSessionsCookie(req.cookies?.persistent_sessions)
-    const matchingEntry = sessionEntries.find((entry) => entry.key === `${recoveryActivityName}:${persistentHash}`)
-    if (!matchingEntry) {
-      res.status(403).json({ error: 'FORBIDDEN', message: 'Instructor credential recovery is not available for this session' })
-      return
-    }
+      let persistentHash: string | null = null
+      let matchingEntry: ReturnType<typeof parsePersistentSessionsCookie>[number] | undefined
+      let hasVerifiedTeacherCookie = false
+      let persistentSourceUrl: string | null = null
+      try {
+        persistentHash = await findIndexedHashBySessionId(recoverySessionId)
+        const sessionEntries = parsePersistentSessionsCookie(req.cookies?.persistent_sessions)
+        matchingEntry = (persistentHash && recoveryActivityName)
+          ? sessionEntries.find((entry) => entry.key === `${recoveryActivityName}:${persistentHash}`)
+          : undefined
+        if (
+          !alreadyAuthorized
+          && persistentHash
+          && recoveryActivityName
+          && persistentCookieEntryHasTeacherCodeCandidate(matchingEntry)
+        ) {
+          // Bound teacher-code guessing on this pre-auth, pollable endpoint the
+          // same way POST /api/session/:sessionId/teacher-authenticate does -
+          // the global middleware only rate-limits Brython assets, so without
+          // this a caller could brute-force the persistent teacher code by
+          // replaying requests with different `persistent_sessions` cookies. A
+          // legitimate manager verifies once, receives the manager capability,
+          // and is `alreadyAuthorized` on every later poll, so real users do
+          // not accrue attempts. Only a request that actually carries a
+          // teacher-code candidate is charged, so a forged/empty entry cannot
+          // drain another client's shared bucket.
+          // Strict: a limiter-backend outage rejects here (caught below and
+          // rethrown for a non-authorized caller -> the route's outer catch ->
+          // retryable 500) rather than failing open and treating every guess as
+          // "allowed" while Valkey is unavailable.
+          const attempt = await recordTeacherCodeAttemptStrict(`${resolveClientIp(req)}:${persistentHash}`)
+          if (!attempt.allowed) {
+            // Signal "wait and retry" - the attempt bucket clears after 60s. The
+            // manager client treats 429 as transient (bounded delayed retry)
+            // rather than a credential rejection, so a valid persistent manager
+            // arriving inside the window is not latched read-only.
+            res.set?.('Retry-After', String(TEACHER_CODE_ATTEMPT_WINDOW_SECONDS))
+            res.status(429).json({ error: 'TOO_MANY_ATTEMPTS', message: 'Too many teacher code attempts. Please wait a minute.' })
+            return
+          }
+        }
+        hasVerifiedTeacherCookie = Boolean(
+          persistentHash
+          && recoveryActivityName
+          && matchingEntry
+          && verifyTeacherCodeWithHash(recoveryActivityName, persistentHash, String(matchingEntry.teacherCode ?? '')).valid,
+        )
+        persistentSourceUrl = (persistentHash && matchingEntry && hasVerifiedTeacherCookie)
+          ? readPersistentSourceUrlFromCookieEntry(persistentHash, matchingEntry)
+          : null
+      } catch (recoveryLookupError) {
+        if (!alreadyAuthorized) {
+          throw recoveryLookupError
+        }
+        console.error(JSON.stringify({
+          activity: 'video-sync',
+          event: 'manager-access-recovery-lookup-degraded',
+          sessionId,
+          errorName: recoveryLookupError instanceof Error ? recoveryLookupError.name : 'unknown',
+        }))
+      }
+      const bootstrapPayload = persistentSourceUrl ? { persistentSourceUrl } : {}
 
-    const verifiedTeacherCode = verifyTeacherCodeWithHash(recoveryActivityName, persistentHash, String(matchingEntry.teacherCode ?? ''))
-    if (!verifiedTeacherCode.valid) {
-      res.status(403).json({ error: 'FORBIDDEN', message: 'Instructor credential recovery is not available for this session' })
-      return
-    }
+      if (alreadyAuthorized) {
+        res.json({ ...bootstrapPayload })
+        return
+      }
 
-    if (didNormalizeSessionData) {
-      await sessions.set(session.id, session)
+      if (!persistentHash || !recoveryActivityName || !matchingEntry || !hasVerifiedTeacherCookie) {
+        res.status(403).json({ error: 'FORBIDDEN', message: 'Instructor credential recovery is not available for this session' })
+        return
+      }
+
+      let recovery: 'issued' | 'session-missing'
+      try {
+        recovery = await withSessionMutation(sessionId, async () => {
+          // Re-read inside the per-session queue: the checks above ran several
+          // awaits (persistent-store lookups, teacher-code verification) during
+          // which a command or heartbeat could have persisted newer playback
+          // state onto the snapshot read at the top of this handler. Strict, so
+          // a session deleted or replaced on another instance in that window
+          // stays visible (rejects -> outer catch -> 500) instead of being
+          // recreated by the set() below from a stale cache hit.
+          const freshSession = await getVideoSyncSession(sessions, sessionId, { strict: true })
+          if (!freshSession) {
+            return 'session-missing'
+          }
+          const capability = issueActivityCapability(freshSession, 'manager')
+          await sessions.set(freshSession.id, freshSession)
+          writeActivityCapabilityCookie(res, sessionId, 'manager', capability.token)
+          return 'issued'
+        })
+      } catch (error) {
+        console.error(JSON.stringify({
+          activity: 'video-sync',
+          event: 'manager-capability-persistence-failed',
+          sessionId,
+          errorName: error instanceof Error ? error.name : 'unknown',
+        }))
+        res.status(500).json({ error: 'INTERNAL_ERROR', message: 'Manager access is temporarily unavailable' })
+        return
+      }
+      if (recovery === 'session-missing') {
+        res.status(404).json({ error: 'NOT_FOUND', message: 'Session not found' })
+        return
+      }
+      res.json({ ...bootstrapPayload })
+    } catch (lookupError) {
+      console.error(JSON.stringify({
+        activity: 'video-sync',
+        event: 'manager-access-failed',
+        sessionId,
+        errorName: lookupError instanceof Error ? lookupError.name : 'unknown',
+      }))
+      if (!res.headersSent) {
+        res.status(500).json({ error: 'INTERNAL_ERROR', message: 'Manager access is temporarily unavailable' })
+      }
     }
-    const persistentSourceUrl = readPersistentSourceUrlFromCookieEntry(persistentHash, matchingEntry)
-    res.json({
-      instructorPasscode: data.instructorPasscode,
-      ...(persistentSourceUrl ? { persistentSourceUrl } : {}),
-    })
   })
 
   app.get('/api/video-sync/:sessionId/session', async (req, res) => {
@@ -1360,6 +1486,7 @@ export default function setupVideoSyncRoutes(
       return
     }
 
+    await withSessionMutationRoute(res, sessionId, 'session-read-failed', async () => {
     const {
       session,
       data,
@@ -1401,6 +1528,7 @@ export default function setupVideoSyncRoutes(
         telemetry: projectedTelemetry,
       }),
     })
+    })
   })
 
   app.patch('/api/video-sync/:sessionId/session', async (req, res) => {
@@ -1410,15 +1538,15 @@ export default function setupVideoSyncRoutes(
       return
     }
 
+    await withSessionMutationRoute(res, sessionId, 'session-configure-failed', async () => {
     const session = await getVideoSyncSession(sessions, sessionId)
     if (!session) {
       res.status(404).json({ error: 'NOT_FOUND', message: 'Session not found' })
       return
     }
 
-    const instructorPasscode = readInstructorPasscode(req.body)
-    if (!instructorPasscode || !verifyInstructorPasscode(session.data.instructorPasscode, instructorPasscode)) {
-      res.status(403).json({ error: 'FORBIDDEN', message: 'Valid instructorPasscode is required' })
+    if (!hasManagerAuthority(session, sessionId, req)) {
+      res.status(403).json({ error: 'FORBIDDEN', message: 'Manager capability is required' })
       return
     }
 
@@ -1524,6 +1652,7 @@ export default function setupVideoSyncRoutes(
     await broadcastEnvelope(sessions, ws, sessionId, envelope)
 
     res.json({ success: true, data: toPublicSessionData(data) })
+    })
   })
 
   app.post('/api/video-sync/:sessionId/command', async (req, res) => {
@@ -1533,15 +1662,15 @@ export default function setupVideoSyncRoutes(
       return
     }
 
+    await withSessionMutationRoute(res, sessionId, 'command-failed', async () => {
     const session = await getVideoSyncSession(sessions, sessionId)
     if (!session) {
       res.status(404).json({ error: 'NOT_FOUND', message: 'Session not found' })
       return
     }
 
-    const instructorPasscode = readInstructorPasscode(req.body)
-    if (!instructorPasscode || !verifyInstructorPasscode(session.data.instructorPasscode, instructorPasscode)) {
-      res.status(403).json({ error: 'FORBIDDEN', message: 'Valid instructorPasscode is required' })
+    if (!hasManagerAuthority(session, sessionId, req)) {
+      res.status(403).json({ error: 'FORBIDDEN', message: 'Manager capability is required' })
       return
     }
 
@@ -1605,6 +1734,7 @@ export default function setupVideoSyncRoutes(
     await broadcastEnvelope(sessions, ws, sessionId, envelope)
 
     res.json({ success: true, data: toPublicSessionData(data) })
+    })
   })
 
   app.post('/api/video-sync/:sessionId/event', async (req, res) => {
@@ -1614,6 +1744,7 @@ export default function setupVideoSyncRoutes(
       return
     }
 
+    await withSessionMutationRoute(res, sessionId, 'event-failed', async () => {
     const session = await getVideoSyncSession(sessions, sessionId)
     if (!session) {
       res.status(404).json({ error: 'NOT_FOUND', message: 'Session not found' })
@@ -1683,6 +1814,7 @@ export default function setupVideoSyncRoutes(
     await broadcastEnvelope(sessions, ws, sessionId, envelope)
 
     res.json({ success: true, telemetry: data.telemetry })
+    })
   })
 
   ws.register('/ws/video-sync', (socket, query) => {
@@ -1695,9 +1827,6 @@ export default function setupVideoSyncRoutes(
     }
 
     const typedSocket = socket as VideoSyncSocket
-    const instructorAuthMessagePromise = isInstructorRoleParam(roleParam)
-      ? waitForInstructorAuthMessage(typedSocket)
-      : null
     let cleanedUp = false
     let isSubscribed = false
     const handleSocketClosed = () => {
@@ -1713,21 +1842,23 @@ export default function setupVideoSyncRoutes(
       isSubscribed = false
       removeSubscriber(sessionId, typedSocket)
       void (async () => {
-        const currentSession = await getVideoSyncSession(sessions, sessionId)
-        if (!currentSession) {
-          stopHeartbeat(sessionId)
-          return
-        }
+        await withSessionMutation(sessionId, async () => {
+          const currentSession = await getVideoSyncSession(sessions, sessionId)
+          if (!currentSession) {
+            stopHeartbeat(sessionId)
+            return
+          }
 
-        const currentData = ensureVideoSyncSessionData(currentSession)
-        await updateConnectionTelemetry(sessions, currentData, sessionId)
-        await sessions.set(currentSession.id, currentSession)
+          const currentData = ensureVideoSyncSessionData(currentSession)
+          await updateConnectionTelemetry(sessions, currentData, sessionId)
+          await sessions.set(currentSession.id, currentSession)
 
-        const disconnectTelemetryUpdate = createEnvelope(sessionId, 'telemetry-update', {
-          telemetry: currentData.telemetry,
-          reason: 'connection-change',
+          const disconnectTelemetryUpdate = createEnvelope(sessionId, 'telemetry-update', {
+            telemetry: currentData.telemetry,
+            reason: 'connection-change',
+          })
+          await broadcastEnvelope(sessions, ws, sessionId, disconnectTelemetryUpdate)
         })
-        await broadcastEnvelope(sessions, ws, sessionId, disconnectTelemetryUpdate)
 
         if ((subscribersBySession.get(sessionId)?.size ?? 0) === 0) {
           stopHeartbeat(sessionId)
@@ -1758,17 +1889,14 @@ export default function setupVideoSyncRoutes(
       }
 
       if (isInstructorRoleParam(roleParam)) {
-        const rawAuthMessage = await instructorAuthMessagePromise
-        if (cleanedUp || typedSocket.readyState !== WS_OPEN_READY_STATE) {
-          handleSocketClosed()
-          return
-        }
-
-        const authMessage = parseInstructorAuthMessage(rawAuthMessage)
-        if (!authMessage || !verifyInstructorPasscode(session.data.instructorPasscode, authMessage.instructorPasscode)) {
+        const managerPrincipal = resolveManagerSocketPrincipal(session, sessionId, typedSocket)
+        if (!managerPrincipal) {
           typedSocket.close(1008, 'Forbidden')
           return
         }
+        // Bound the socket to the capability's lifetime so it cannot keep
+        // receiving manager state after the credential expires.
+        scheduleManagerCapabilityExpiryClose(typedSocket, session, managerPrincipal.capabilityId)
       }
 
       const role: VideoSyncRole = isInstructorRoleParam(roleParam) ? 'instructor' : 'student'
@@ -1785,10 +1913,23 @@ export default function setupVideoSyncRoutes(
       isSubscribed = true
       ensureHeartbeat(sessions, ws, sessionId)
 
-      const data = ensureVideoSyncSessionData(session)
-      data.state = applyStopIfReached(data.state)
-      await updateConnectionTelemetry(sessions, data, sessionId)
-      await sessions.set(session.id, session)
+      const data = await withSessionMutation(sessionId, async () => {
+        const currentSession = await getVideoSyncSession(sessions, sessionId)
+        if (!currentSession) {
+          return null
+        }
+
+        const currentData = ensureVideoSyncSessionData(currentSession)
+        currentData.state = applyStopIfReached(currentData.state)
+        await updateConnectionTelemetry(sessions, currentData, sessionId)
+        await sessions.set(currentSession.id, currentSession)
+        return currentData
+      })
+
+      if (!data) {
+        typedSocket.close(1008, 'Session not found')
+        return
+      }
 
       const snapshot = createEnvelope(sessionId, 'state-snapshot', {
         state: data.state,

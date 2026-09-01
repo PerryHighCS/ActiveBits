@@ -1,7 +1,3 @@
-import {
-    consumeCreateSessionBootstrapPayload,
-    storeCreateSessionBootstrapPayload,
-} from '@src/components/common/manageDashboardUtils'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import type { VideoSyncState } from '../protocol.js'
@@ -9,14 +5,15 @@ import {
     autoConfigureBootstrapSource,
     buildManagerWsUrl,
     clearManagerPlayerLoadError,
-    createManagerWsAuthMessage,
     getManagerPlaybackIntentForStateChange,
     parseManagerStopTimeInput,
-    readBootstrapInstructorPasscode,
+    DEFAULT_MANAGER_ACCESS_RETRY_AFTER_MS,
+    isManagerAuthorizationClose,
+    isRetryableManagerAccessStatus,
+    parseManagerAccessRetryAfterMs,
     readBootstrapSourceUrl,
     readEmbeddedBootstrapSourceUrl,
     readRecoveredPersistentSourceUrl,
-    resolveBootstrapInstructorPasscode,
     sanitizeManagerApiErrorMessage,
     shouldApplyManagerStateUpdate,
     shouldAutoStartBootstrapSource,
@@ -24,6 +21,7 @@ import {
     shouldFetchEmbeddedBootstrapSourceUrl,
     shouldRecoverAutoStartAfterCredentialLoad,
     shouldRenderManagerHeaderForSession,
+    shouldRequestEmbeddedBootstrapRefreshOnDenial,
     shouldSendManagerPlaybackPositionUpdate,
 } from './VideoSyncManager.js'
 
@@ -39,119 +37,6 @@ const BASE_STATE: VideoSyncState = {
   updatedBy: 'system',
   serverTimestampMs: 0,
 }
-
-void test('readBootstrapInstructorPasscode returns passcode from create-session navigation state', () => {
-  assert.equal(
-    readBootstrapInstructorPasscode({
-      createSessionPayload: {
-        instructorPasscode: 'teacher-passcode',
-      },
-    }),
-    'teacher-passcode',
-  )
-})
-
-void test('readBootstrapInstructorPasscode ignores missing or invalid state payloads', () => {
-  assert.equal(readBootstrapInstructorPasscode(null), null)
-  assert.equal(readBootstrapInstructorPasscode({}), null)
-  assert.equal(readBootstrapInstructorPasscode({ createSessionPayload: {} }), null)
-  assert.equal(readBootstrapInstructorPasscode({ createSessionPayload: { instructorPasscode: 42 } }), null)
-})
-
-void test('readBootstrapInstructorPasscode works with consumed same-tab bootstrap payloads', () => {
-  storeCreateSessionBootstrapPayload('video-sync', 'session-123', {
-    instructorPasscode: 'teacher-passcode',
-  })
-
-  assert.equal(
-    readBootstrapInstructorPasscode({
-      createSessionPayload: consumeCreateSessionBootstrapPayload('video-sync', 'session-123') ?? undefined,
-    }),
-    'teacher-passcode',
-  )
-})
-
-void test('resolveBootstrapInstructorPasscode clears history state only for navigation bootstrap payloads', () => {
-  assert.deepEqual(
-    resolveBootstrapInstructorPasscode({
-      locationState: {
-        createSessionPayload: {
-          instructorPasscode: 'teacher-passcode',
-        },
-      },
-      sessionId: 'session-123',
-    }),
-    {
-      instructorPasscode: 'teacher-passcode',
-      shouldClearLocationState: true,
-    },
-  )
-})
-
-void test('resolveBootstrapInstructorPasscode clears same-tab fallback cache when location state is used', () => {
-  storeCreateSessionBootstrapPayload('video-sync', 'session-123', {
-    instructorPasscode: 'cached-passcode',
-  })
-
-  assert.deepEqual(
-    resolveBootstrapInstructorPasscode({
-      locationState: {
-        createSessionPayload: {
-          instructorPasscode: 'teacher-passcode',
-        },
-      },
-      sessionId: 'session-123',
-    }),
-    {
-      instructorPasscode: 'teacher-passcode',
-      shouldClearLocationState: true,
-    },
-  )
-
-  assert.equal(consumeCreateSessionBootstrapPayload('video-sync', 'session-123'), null)
-})
-
-void test('resolveBootstrapInstructorPasscode preserves same-tab bootstrap payloads without navigation cleanup', () => {
-  storeCreateSessionBootstrapPayload('video-sync', 'session-123', {
-    instructorPasscode: 'teacher-passcode',
-  })
-
-  assert.deepEqual(
-    resolveBootstrapInstructorPasscode({
-      locationState: null,
-      sessionId: 'session-123',
-    }),
-    {
-      instructorPasscode: 'teacher-passcode',
-      shouldClearLocationState: false,
-    },
-  )
-})
-
-void test('resolveBootstrapInstructorPasscode can be read again before the settled manager consumes bootstrap', () => {
-  storeCreateSessionBootstrapPayload('video-sync', 'child-session-1', {
-    instructorPasscode: 'embedded-passcode',
-  })
-
-  const expected = {
-    instructorPasscode: 'embedded-passcode',
-    shouldClearLocationState: false,
-  }
-  assert.deepEqual(
-    resolveBootstrapInstructorPasscode({
-      locationState: null,
-      sessionId: 'child-session-1',
-    }),
-    expected,
-  )
-  assert.deepEqual(
-    resolveBootstrapInstructorPasscode({
-      locationState: null,
-      sessionId: 'child-session-1',
-    }),
-    expected,
-  )
-})
 
 void test('readBootstrapSourceUrl returns sourceUrl from query string', () => {
   assert.equal(
@@ -202,6 +87,72 @@ void test('shouldRenderManagerHeaderForSession hides the manager header for embe
   assert.equal(shouldRenderManagerHeaderForSession(null), true)
 })
 
+void test('isRetryableManagerAccessStatus retries 5xx and network-shaped failures but not definitive denials', () => {
+  // Definitive denials latch the read-only state immediately.
+  assert.equal(isRetryableManagerAccessStatus(400), false)
+  assert.equal(isRetryableManagerAccessStatus(401), false)
+  assert.equal(isRetryableManagerAccessStatus(403), false)
+  assert.equal(isRetryableManagerAccessStatus(404), false)
+  // 429 is transient but handled on its own longer, Retry-After-honoring path,
+  // so the short-backoff predicate deliberately excludes it.
+  assert.equal(isRetryableManagerAccessStatus(429), false)
+  // The route's explicitly temporary store failures are retried with backoff.
+  assert.equal(isRetryableManagerAccessStatus(500), true)
+  assert.equal(isRetryableManagerAccessStatus(502), true)
+  assert.equal(isRetryableManagerAccessStatus(503), true)
+})
+
+void test('parseManagerAccessRetryAfterMs parses delta-seconds and rejects unusable values', () => {
+  assert.equal(parseManagerAccessRetryAfterMs('60'), 60_000)
+  assert.equal(parseManagerAccessRetryAfterMs(' 5 '), 5_000)
+  // Clamped to a 5 minute ceiling so a hostile/absurd header cannot stall the manager.
+  assert.equal(parseManagerAccessRetryAfterMs('99999'), 5 * 60_000)
+  // Absent / non-numeric (HTTP-date form) / non-positive -> caller uses the default.
+  assert.equal(parseManagerAccessRetryAfterMs(null), null)
+  assert.equal(parseManagerAccessRetryAfterMs(undefined), null)
+  assert.equal(parseManagerAccessRetryAfterMs('Wed, 21 Oct 2026 07:28:00 GMT'), null)
+  assert.equal(parseManagerAccessRetryAfterMs('0'), null)
+  assert.equal(parseManagerAccessRetryAfterMs('-3'), null)
+  assert.equal(DEFAULT_MANAGER_ACCESS_RETRY_AFTER_MS, 60_000)
+})
+
+void test('isManagerAuthorizationClose only matches the policy-violation close the manager socket uses for Forbidden', () => {
+  assert.equal(isManagerAuthorizationClose(1008), true)
+  assert.equal(isManagerAuthorizationClose(1000), false)
+  assert.equal(isManagerAuthorizationClose(1006), false)
+  assert.equal(isManagerAuthorizationClose(1001), false)
+})
+
+void test('shouldRequestEmbeddedBootstrapRefreshOnDenial only fires for an embedded child on a 401/403', () => {
+  // Embedded child + auth denial -> ask the parent for a fresh token.
+  assert.equal(
+    shouldRequestEmbeddedBootstrapRefreshOnDenial({ sessionId: 'CHILD:parent:abcde:video-sync', status: 403 }),
+    true,
+  )
+  assert.equal(
+    shouldRequestEmbeddedBootstrapRefreshOnDenial({ sessionId: 'CHILD:parent:abcde:video-sync', status: 401 }),
+    true,
+  )
+  // Standalone manager cannot redeem a parent token; it just latches read-only.
+  assert.equal(
+    shouldRequestEmbeddedBootstrapRefreshOnDenial({ sessionId: 'session-123', status: 403 }),
+    false,
+  )
+  // Non-denial statuses are handled by the retry/deny paths, not a refresh.
+  assert.equal(
+    shouldRequestEmbeddedBootstrapRefreshOnDenial({ sessionId: 'CHILD:parent:abcde:video-sync', status: 404 }),
+    false,
+  )
+  assert.equal(
+    shouldRequestEmbeddedBootstrapRefreshOnDenial({ sessionId: 'CHILD:parent:abcde:video-sync', status: 500 }),
+    false,
+  )
+  assert.equal(
+    shouldRequestEmbeddedBootstrapRefreshOnDenial({ sessionId: null, status: 403 }),
+    false,
+  )
+})
+
 void test('shouldFetchEmbeddedBootstrapSourceUrl only fetches for embedded child sessions without query bootstrap', () => {
   assert.equal(
     shouldFetchEmbeddedBootstrapSourceUrl({
@@ -244,18 +195,6 @@ void test('buildManagerWsUrl omits instructor credentials from the websocket URL
     }),
     'wss://bits.example.test/ws/video-sync?sessionId=session-123&role=instructor',
   )
-})
-
-void test('createManagerWsAuthMessage serializes the post-connect auth payload', () => {
-  assert.equal(
-    createManagerWsAuthMessage('teacher-passcode'),
-    JSON.stringify({
-      type: 'authenticate',
-      instructorPasscode: 'teacher-passcode',
-    }),
-  )
-  assert.equal(createManagerWsAuthMessage(''), null)
-  assert.equal(createManagerWsAuthMessage(null), null)
 })
 
 void test('getManagerPlaybackIntentForStateChange treats natural video completion as a pause', () => {
@@ -305,8 +244,8 @@ void test('shouldAutoStartBootstrapSource requires setup mode, source url, and r
     shouldAutoStartBootstrapSource({
       setupMode: true,
       bootstrapSourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=43',
-      isPasscodeReady: true,
-      instructorPasscode: 'teacher-passcode',
+      isManagerAccessReady: true,
+      hasManagerAccess: true,
       autoStartStatus: 'idle',
     }),
     true,
@@ -316,8 +255,8 @@ void test('shouldAutoStartBootstrapSource requires setup mode, source url, and r
     shouldAutoStartBootstrapSource({
       setupMode: false,
       bootstrapSourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=43',
-      isPasscodeReady: true,
-      instructorPasscode: 'teacher-passcode',
+      isManagerAccessReady: true,
+      hasManagerAccess: true,
       autoStartStatus: 'idle',
     }),
     false,
@@ -327,8 +266,8 @@ void test('shouldAutoStartBootstrapSource requires setup mode, source url, and r
     shouldAutoStartBootstrapSource({
       setupMode: true,
       bootstrapSourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=43',
-      isPasscodeReady: false,
-      instructorPasscode: 'teacher-passcode',
+      isManagerAccessReady: false,
+      hasManagerAccess: true,
       autoStartStatus: 'idle',
     }),
     false,
@@ -338,8 +277,8 @@ void test('shouldAutoStartBootstrapSource requires setup mode, source url, and r
     shouldAutoStartBootstrapSource({
       setupMode: true,
       bootstrapSourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=43',
-      isPasscodeReady: true,
-      instructorPasscode: 'teacher-passcode',
+      isManagerAccessReady: true,
+      hasManagerAccess: true,
       autoStartStatus: 'failed',
     }),
     false,
@@ -381,9 +320,9 @@ void test('shouldRecoverAutoStartAfterCredentialLoad retries failed bootstrap on
     shouldRecoverAutoStartAfterCredentialLoad({
       setupMode: true,
       bootstrapSourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=43',
-      instructorPasscode: 'teacher-passcode',
+      hasManagerAccess: true,
       autoStartStatus: 'failed',
-      errorMessage: 'Instructor credentials missing. Open this session from the dashboard or authenticated permalink.',
+      errorMessage: 'Manager access is unavailable. Open this session from the dashboard or authenticated permalink.',
     }),
     true,
   )
@@ -391,9 +330,9 @@ void test('shouldRecoverAutoStartAfterCredentialLoad retries failed bootstrap on
     shouldRecoverAutoStartAfterCredentialLoad({
       setupMode: true,
       bootstrapSourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=43',
-      instructorPasscode: null,
+      hasManagerAccess: false,
       autoStartStatus: 'failed',
-      errorMessage: 'Instructor credentials missing. Open this session from the dashboard or authenticated permalink.',
+      errorMessage: 'Manager access is unavailable. Open this session from the dashboard or authenticated permalink.',
     }),
     false,
   )
@@ -401,9 +340,9 @@ void test('shouldRecoverAutoStartAfterCredentialLoad retries failed bootstrap on
     shouldRecoverAutoStartAfterCredentialLoad({
       setupMode: true,
       bootstrapSourceUrl: null,
-      instructorPasscode: 'teacher-passcode',
+      hasManagerAccess: true,
       autoStartStatus: 'failed',
-      errorMessage: 'Instructor credentials missing. Open this session from the dashboard or authenticated permalink.',
+      errorMessage: 'Manager access is unavailable. Open this session from the dashboard or authenticated permalink.',
     }),
     false,
   )
@@ -411,7 +350,7 @@ void test('shouldRecoverAutoStartAfterCredentialLoad retries failed bootstrap on
     shouldRecoverAutoStartAfterCredentialLoad({
       setupMode: true,
       bootstrapSourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=43',
-      instructorPasscode: 'teacher-passcode',
+      hasManagerAccess: true,
       autoStartStatus: 'failed',
       errorMessage: 'Could not save video configuration. Please try again.',
     }),
