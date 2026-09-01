@@ -692,6 +692,11 @@ export default function VideoSyncManager() {
     let attempts = 0
     let rateLimitRetried = false
     const MAX_ATTEMPTS = 4
+    // `isCancelled` blocks stale state writes; this also stops the in-flight
+    // request so a slow `/manager-access` from a previous session cannot reach
+    // the route and issue a capability / `sessions.set` for the old session
+    // after a route swap.
+    const accessController = new AbortController()
 
     const denyAccess = (): void => {
       if (!isCancelled) {
@@ -717,9 +722,14 @@ export default function VideoSyncManager() {
     const runManagerAccess = async (): Promise<void> => {
       let response: Response
       try {
-        response = await fetch(`/api/video-sync/${sessionId}/manager-access`, { credentials: 'include' })
+        response = await fetch(`/api/video-sync/${sessionId}/manager-access`, {
+          credentials: 'include',
+          signal: accessController.signal,
+        })
       } catch {
-        scheduleRetryOrDeny()
+        // Network error or an abort from cleanup; the `isCancelled` guard below
+        // drops an aborted attempt so it never retries for an inactive effect.
+        if (!isCancelled) scheduleRetryOrDeny()
         return
       }
       if (isCancelled) return
@@ -791,6 +801,7 @@ export default function VideoSyncManager() {
     })
     return () => {
       isCancelled = true
+      accessController.abort()
       if (retryTimer) clearTimeout(retryTimer)
     }
   }, [embeddedManagerCapabilityExchange.isResolving, managerAccessRefreshNonce, sessionId])
