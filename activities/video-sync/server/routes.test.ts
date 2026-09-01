@@ -2558,6 +2558,76 @@ void test('websocket initial snapshot reads authoritative state and never persis
   await new Promise((resolve) => setTimeout(resolve, 0))
 })
 
+void test('websocket initial snapshot re-reads before persisting and does not roll back a concurrent remote pause', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const committed = createVideoSyncSession('s1')
+  ;(committed.data as {
+    state: { videoId: string; positionSec: number; isPlaying: boolean; updatedBy: string; serverTimestampMs: number }
+  }).state = {
+    ...(committed.data as { state: Record<string, unknown> }).state,
+    videoId: 'vid123456789',
+    positionSec: 30,
+    isPlaying: true,
+    updatedBy: 'instructor',
+    serverTimestampMs: 40_000,
+  } as never
+  const storeState = createSessionStore({ s1: committed }, { valkeyStore: createMockVideoSyncValkeyStore() })
+
+  let strictGetCalls = 0
+  const setStates: Array<{ isPlaying: boolean }> = []
+  const sessions = {
+    ...storeState.sessions,
+    async getStrict(id: string) {
+      strictGetCalls += 1
+      const record = await storeState.sessions.get(id)
+      if (record && strictGetCalls >= 2) {
+        // Another instance committed a pause between the snapshot read and the
+        // write.
+        ;(record.data as { state: { isPlaying: boolean; positionSec: number; serverTimestampMs: number } }).state = {
+          ...(record.data as { state: Record<string, unknown> }).state,
+          isPlaying: false,
+          positionSec: 33,
+          serverTimestampMs: 41_000,
+        } as never
+      }
+      return record
+    },
+    async set(id: string, session: SessionRecord) {
+      setStates.push({
+        isPlaying: Boolean((session.data as { state?: { isPlaying?: boolean } }).state?.isPlaying),
+      })
+      return storeState.sessions.set(id, session)
+    },
+  }
+
+  setupVideoSyncRoutes(app, sessions, ws as unknown as WsRouter)
+  const handler = ws.registered['/ws/video-sync']
+  assert.equal(typeof handler, 'function')
+
+  const recorder = createMockSocket()
+  handler?.(recorder.socket, new URLSearchParams({ sessionId: 's1', role: 'student' }))
+
+  await waitForCondition(() => recorder.sent.length >= 1, 1000)
+
+  const snapshot = JSON.parse(recorder.sent[0] ?? '{}') as {
+    type?: string
+    payload?: { state?: { isPlaying?: boolean } }
+  }
+  assert.equal(snapshot.type, 'state-snapshot')
+  // The concurrent pause wins; the snapshot must carry it, not our re-stamped
+  // pre-pause projection.
+  assert.equal(snapshot.payload?.state?.isPlaying, false)
+  assert.ok(strictGetCalls >= 2)
+  assert.ok(
+    setStates.every((entry) => entry.isPlaying === false),
+    `expected no persisted isPlaying:true, got ${JSON.stringify(setStates)}`,
+  )
+
+  recorder.emit('close')
+  await new Promise((resolve) => setTimeout(resolve, 0))
+})
+
 void test('instructor websocket is closed 1008 once its manager capability reaches expiry', async () => {
   console.info('[TEST] video-sync websocket: manager capability expiry is expected to close 1008')
   const app = createMockApp()

@@ -1981,11 +1981,27 @@ export default function setupVideoSyncRoutes(
           return null
         }
 
-        const currentData = ensureVideoSyncSessionData(currentSession)
-        currentData.state = applyStopIfReached(currentData.state)
-        await updateConnectionTelemetry(sessions, currentData, sessionId)
-        await sessions.set(currentSession.id, currentSession)
-        return currentData
+        const snapshotState = ensureVideoSyncSessionData(currentSession).state
+        const projectedState = applyStopIfReached(snapshotState)
+
+        // Re-read strictly right before writing. `withSessionMutation` only
+        // serializes this block per-process, so another instance may have
+        // committed a pause / re-play since the read above. An unconditional
+        // write-back of our re-stamped projection would both clobber their
+        // state in Valkey and look "newer" to the client freshness guard.
+        // Overwrite `state` only when the store still holds our exact snapshot;
+        // otherwise keep - and send - theirs.
+        const latest = await getVideoSyncSession(sessions, sessionId, { strict: true })
+        if (!latest) {
+          return null
+        }
+        const latestData = ensureVideoSyncSessionData(latest)
+        if (isDeepStrictEqual(latestData.state, snapshotState)) {
+          latestData.state = projectedState
+        }
+        await updateConnectionTelemetry(sessions, latestData, sessionId)
+        await sessions.set(latest.id, latest)
+        return latestData
       })
 
       if (!data) {

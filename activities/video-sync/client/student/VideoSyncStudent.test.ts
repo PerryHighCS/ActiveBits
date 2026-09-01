@@ -16,7 +16,7 @@ import { shouldBlockStudentOverlayKey } from './VideoSyncStudent.js'
 import { shouldConnectVideoSyncStudentRealtime } from './VideoSyncStudent.js'
 import { getVideoSyncStudentIdentityLookup } from './VideoSyncStudent.js'
 import { getVideoSyncStudentSessionModeResetState } from './VideoSyncStudent.js'
-import { shouldApplyIncomingVideoSyncState } from '../syncMath.js'
+import { reduceVideoSyncStudentIncomingState } from './VideoSyncStudent.js'
 import type { VideoSyncState } from '../protocol.js'
 import type { YoutubePlayerLike } from '../youtubeIframeApi.js'
 
@@ -34,9 +34,10 @@ const BASE_STATE: VideoSyncState = {
 }
 
 void test('student rejects a stale heartbeat that would resume playback after a pause', () => {
-  // The WS onMessage handler applies incoming frames through this guard. A
-  // heartbeat from a multi-instance peer carrying pre-pause `isPlaying:true`
-  // with an older serverTimestampMs must not overwrite the applied pause.
+  // Both the WS onMessage updater and the loadSession updater run every incoming
+  // frame through `reduceVideoSyncStudentIncomingState`. A heartbeat from a
+  // multi-instance peer carrying pre-pause `isPlaying:true` with an older
+  // serverTimestampMs must not overwrite the applied pause.
   const applied: VideoSyncState = {
     ...BASE_STATE,
     videoId: 'abcdefghijk',
@@ -51,10 +52,12 @@ void test('student rejects a stale heartbeat that would resume playback after a 
     updatedBy: 'system',
     serverTimestampMs: 9_000,
   }
-  assert.equal(shouldApplyIncomingVideoSyncState(applied, staleHeartbeat), false)
+  // The reducer returns the *current* state, so the setState updater is a no-op
+  // and the student stays paused.
+  assert.equal(reduceVideoSyncStudentIncomingState(applied, staleHeartbeat), applied)
 
   const freshPlay: VideoSyncState = { ...staleHeartbeat, updatedBy: 'instructor', serverTimestampMs: 15_000 }
-  assert.equal(shouldApplyIncomingVideoSyncState(applied, freshPlay), true)
+  assert.equal(reduceVideoSyncStudentIncomingState(applied, freshPlay), freshPlay)
 })
 
 void test('hasInstructorPlaybackStarted is false without configured video', () => {

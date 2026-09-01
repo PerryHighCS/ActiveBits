@@ -703,6 +703,11 @@ export default function VideoSyncManager() {
       setErrorMessage(null)
       return true
     } catch (error) {
+      // A rejected fetch (network error) skips the post-await guards above; drop
+      // it too when the route has since swapped to another session.
+      if (sessionIdRef.current !== sessionId) {
+        return false
+      }
       const message = error instanceof Error ? error.message : 'Failed to send command'
       if (options?.reportErrors === false) {
         console.error('Video sync command failed:', message)
@@ -1403,6 +1408,13 @@ export default function VideoSyncManager() {
         }),
       })
 
+      // A parameter-only route swap while this PATCH was in flight must not
+      // land session A's config response (or its 401 -> revalidate / error)
+      // on session B's freshly reset view.
+      if (sessionIdRef.current !== sessionId) {
+        return false
+      }
+
       if (!response.ok) {
         if (response.status === 401 || response.status === 403) {
           revalidateManagerAccess()
@@ -1412,6 +1424,9 @@ export default function VideoSyncManager() {
       }
 
       const updated = (await response.json()) as ConfigResponse
+      if (sessionIdRef.current !== sessionId) {
+        return false
+      }
       if (updated.data?.state) {
         applyManagerStateUpdate(updated.data.state)
       }
@@ -1421,6 +1436,9 @@ export default function VideoSyncManager() {
       setErrorMessage(null)
       return true
     } catch (error) {
+      if (sessionIdRef.current !== sessionId) {
+        return false
+      }
       const message = error instanceof Error ? error.message : 'Failed to save video config'
       setErrorMessage(message)
       return false
