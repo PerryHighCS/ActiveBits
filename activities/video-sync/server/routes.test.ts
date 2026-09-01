@@ -1570,6 +1570,95 @@ void test('command route answers with a structured 500 when the session write re
   })
 })
 
+void test('command route mutates from the strict read, not a stale local cache snapshot', async () => {
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  const committed = createVideoSyncSession('s1')
+  ;(committed.data as {
+    state: { videoId: string; positionSec: number; isPlaying: boolean; updatedBy: string; serverTimestampMs: number }
+  }).state = {
+    ...(committed.data as { state: Record<string, unknown> }).state,
+    videoId: 'vid123456789',
+    positionSec: 5,
+    isPlaying: false,
+    updatedBy: 'instructor',
+    serverTimestampMs: 10_000,
+  } as never
+  const storeState = createSessionStore({ s1: committed }, { valkeyStore: createMockVideoSyncValkeyStore() })
+
+  let strictGetCalls = 0
+  const sessions = {
+    ...storeState.sessions,
+    async get(id: string) {
+      // A peer instance still holds the pre-pause frame in its 30s cache: an
+      // old timestamp so `computeCurrentPositionSec` would fast-forward it well
+      // past the real paused position.
+      const snapshot = await storeState.sessions.get(id)
+      if (snapshot) {
+        ;(snapshot.data as {
+          state: { positionSec: number; isPlaying: boolean; updatedBy: string; serverTimestampMs: number }
+        }).state = {
+          ...(snapshot.data as { state: Record<string, unknown> }).state,
+          positionSec: 900,
+          isPlaying: true,
+          updatedBy: 'instructor',
+          serverTimestampMs: 1_000,
+        } as never
+      }
+      return snapshot
+    },
+    async getStrict(id: string) {
+      strictGetCalls += 1
+      return storeState.sessions.get(id)
+    },
+  }
+
+  setupVideoSyncRoutes(app, sessions, ws)
+  const handler = app.handlers.post['/api/video-sync/:sessionId/command']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.({ params: { sessionId: 's1' }, body: { type: 'pause' } }, res)
+
+  assert.equal(res.statusCode, 200)
+  assert.equal(strictGetCalls, 1)
+
+  const persisted = (storeState.store.s1?.data as { state?: { positionSec?: number; isPlaying?: boolean } }).state
+  assert.equal(persisted?.isPlaying, false)
+  // Anchored to the strict paused position (~5s), not the stale playing
+  // snapshot's 900s+fast-forward.
+  assert.ok((persisted?.positionSec ?? 0) < 100, `expected strict position, got ${persisted?.positionSec ?? 'undefined'}`)
+
+  const broadcast = storeState.published[0]?.message as { payload?: { state?: { positionSec?: number } } }
+  assert.ok((broadcast.payload?.state?.positionSec ?? 0) < 100)
+})
+
+void test('command route stays a retryable 500 when the strict read rejects', async () => {
+  console.info('[TEST] video-sync command: the strict session read below rejects on purpose; the handler must answer 500 (retryable) rather than a misleading 404')
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  const storeState = createSessionStore({ s1: createVideoSyncSession('s1') })
+  const sessions = {
+    ...storeState.sessions,
+    async getStrict(): Promise<never> {
+      throw new Error('[TEST] strict session store read unavailable')
+    },
+  }
+
+  setupVideoSyncRoutes(app, sessions, ws)
+  const handler = app.handlers.post['/api/video-sync/:sessionId/command']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.({ params: { sessionId: 's1' }, body: { type: 'play' } }, res)
+
+  assert.equal(res.statusCode, 500)
+  assert.deepEqual(res.body, {
+    error: 'INTERNAL_ERROR',
+    message: 'This action is temporarily unavailable',
+  })
+})
+
 void test('manager commands are not overwritten by an overlapping telemetry mutation', async () => {
   const app = createMockApp()
   const ws = createMockWs() as unknown as WsRouter
@@ -2396,6 +2485,75 @@ void test('instructor websocket admits a valid manager capability without a pass
   const payload = JSON.parse(recorder.sent[0] ?? '{}') as { type?: string; payload?: { role?: string } }
   assert.equal(payload.type, 'state-snapshot')
   assert.equal(payload.payload?.role, 'instructor')
+  recorder.emit('close')
+  await new Promise((resolve) => setTimeout(resolve, 0))
+})
+
+void test('websocket initial snapshot reads authoritative state and never persists or sends a stale cross-instance isPlaying:true', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const committed = createVideoSyncSession('s1')
+  ;(committed.data as {
+    state: { videoId: string; positionSec: number; isPlaying: boolean; updatedBy: string; serverTimestampMs: number }
+  }).state = {
+    ...(committed.data as { state: Record<string, unknown> }).state,
+    videoId: 'vid123456789',
+    positionSec: 12,
+    isPlaying: false,
+    updatedBy: 'instructor',
+    serverTimestampMs: 50_000,
+  } as never
+  const storeState = createSessionStore({ s1: committed }, { valkeyStore: createMockVideoSyncValkeyStore() })
+
+  let strictGetCalls = 0
+  const setStates: Array<{ isPlaying: boolean }> = []
+  const sessions = {
+    ...storeState.sessions,
+    async get(id: string) {
+      // A peer instance still holds the pre-pause frame in its 30s cache.
+      const snapshot = await storeState.sessions.get(id)
+      if (snapshot) {
+        ;(snapshot.data as { state: { isPlaying: boolean; serverTimestampMs: number } }).state = {
+          ...(snapshot.data as { state: Record<string, unknown> }).state,
+          isPlaying: true,
+          serverTimestampMs: 1_000,
+        } as never
+      }
+      return snapshot
+    },
+    async getStrict(id: string) {
+      strictGetCalls += 1
+      return storeState.sessions.get(id)
+    },
+    async set(id: string, session: SessionRecord) {
+      setStates.push({
+        isPlaying: Boolean((session.data as { state?: { isPlaying?: boolean } }).state?.isPlaying),
+      })
+      return storeState.sessions.set(id, session)
+    },
+  }
+
+  setupVideoSyncRoutes(app, sessions, ws as unknown as WsRouter)
+  const handler = ws.registered['/ws/video-sync']
+  assert.equal(typeof handler, 'function')
+
+  const recorder = createMockSocket()
+  handler?.(recorder.socket, new URLSearchParams({ sessionId: 's1', role: 'student' }))
+
+  await waitForCondition(() => recorder.sent.length >= 1, 1000)
+
+  const snapshot = JSON.parse(recorder.sent[0] ?? '{}') as {
+    type?: string
+    payload?: { state?: { isPlaying?: boolean } }
+  }
+  assert.equal(snapshot.type, 'state-snapshot')
+  assert.equal(snapshot.payload?.state?.isPlaying, false)
+  assert.ok(strictGetCalls >= 1)
+  assert.ok(
+    setStates.every((entry) => entry.isPlaying === false),
+    `expected no persisted isPlaying:true, got ${JSON.stringify(setStates)}`,
+  )
+
   recorder.emit('close')
   await new Promise((resolve) => setTimeout(resolve, 0))
 })

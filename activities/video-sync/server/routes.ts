@@ -1534,11 +1534,17 @@ export default function setupVideoSyncRoutes(
     }
 
     await withSessionMutationRoute(res, sessionId, 'session-read-failed', async () => {
+    // Strict: the response carries `applyStopIfReached`'s re-stamped
+    // `serverTimestampMs`, and a stop/normalization/telemetry change persists it.
+    // A cache-backed read on a multi-instance deploy would hand a reconnecting
+    // client a freshly stamped pre-pause `isPlaying:true` that its freshness
+    // guard accepts over the authoritative paused state. A store outage stays a
+    // retryable 500 via the surrounding route wrapper, not a 404.
     const {
       session,
       data,
       didNormalizeSessionData,
-    } = await getVideoSyncSessionWithNormalization(sessions, sessionId)
+    } = await getVideoSyncSessionWithNormalization(sessions, sessionId, { strict: true })
     if (!session || !data) {
       res.status(404).json({ error: 'NOT_FOUND', message: 'Session not found' })
       return
@@ -1965,7 +1971,12 @@ export default function setupVideoSyncRoutes(
       ensureHeartbeat(sessions, ws, sessionId)
 
       const data = await withSessionMutation(sessionId, async () => {
-        const currentSession = await getVideoSyncSession(sessions, sessionId)
+        // Strict: `applyStopIfReached` below re-stamps `serverTimestampMs` to now
+        // and this block persists the result. A cache-backed read on a
+        // multi-instance deploy could resurrect a pre-pause `isPlaying:true`
+        // (still within the 30s local TTL) as a freshly stamped frame that the
+        // client freshness guard would then accept over the real paused state.
+        const currentSession = await getVideoSyncSession(sessions, sessionId, { strict: true })
         if (!currentSession) {
           return null
         }
@@ -1998,7 +2009,12 @@ export default function setupVideoSyncRoutes(
       })
       await broadcastEnvelope(sessions, ws, sessionId, telemetryUpdate)
     })().catch((error: unknown) => {
-      console.error('Failed to send initial video-sync snapshot:', error)
+      console.error(JSON.stringify({
+        activity: 'video-sync',
+        event: 'initial-snapshot-failed',
+        sessionId,
+        errorName: error instanceof Error ? error.name : 'unknown',
+      }))
     })
   })
 }
