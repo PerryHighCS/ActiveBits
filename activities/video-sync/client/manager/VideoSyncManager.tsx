@@ -852,16 +852,20 @@ export default function VideoSyncManager() {
     setAutoplayBlocked(false)
   }, [])
 
-  const fetchSession = useCallback(async () => {
+  const fetchSession = useCallback(async (signal?: AbortSignal) => {
     if (!sessionId) return
 
     try {
-      const response = await fetch(`/api/video-sync/${sessionId}/session`)
+      const response = await fetch(`/api/video-sync/${sessionId}/session`, { signal })
       if (!response.ok) {
         throw new Error('Failed to load video-sync session')
       }
 
       const data = (await response.json()) as SessionResponse
+      // A route swap to another session aborts this request in the effect
+      // cleanup; drop a response that resolved first so it cannot restore the
+      // previous session's state over the freshly reset baseline.
+      if (signal?.aborted) return
       if (data.data?.state) {
         applyManagerStateUpdate(data.data.state)
       }
@@ -870,10 +874,13 @@ export default function VideoSyncManager() {
       }
       setErrorMessage(null)
     } catch (error) {
+      if (signal?.aborted || (error instanceof DOMException && error.name === 'AbortError')) {
+        return
+      }
       const message = error instanceof Error ? error.message : 'Failed to load video-sync session'
       setErrorMessage(message)
     }
-  }, [sessionId])
+  }, [applyManagerStateUpdate, sessionId])
 
   const buildWsUrl = useCallback(() => {
     if (typeof window === 'undefined') return null
@@ -1307,11 +1314,15 @@ export default function VideoSyncManager() {
 
   useEffect(() => {
     if (!sessionId) return undefined
-    void fetchSession()
+    const sessionFetchController = new AbortController()
+    void fetchSession(sessionFetchController.signal)
     if (isManagerAccessReady && hasManagerAccess) {
       connect()
     }
-    return () => disconnect()
+    return () => {
+      sessionFetchController.abort()
+      disconnect()
+    }
   }, [sessionId, fetchSession, connect, disconnect, hasManagerAccess, isManagerAccessReady])
 
   useEffect(() => {
