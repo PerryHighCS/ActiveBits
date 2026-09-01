@@ -14,6 +14,14 @@ Use this log for durable findings that future contributors and agents should reu
 
 ## Discoveries
 
+- Date: 2026-09-01
+- Area: client | activities | video-sync | instructor playback
+- Discovery: With more than one Video Sync manager view connected, the `onStateChange` -> `sendCommand` mirror creates a feedback loop. The manager player is unmuted, so a programmatic `playVideo()` on a second, non-interacted manager is refused by the browser autoplay policy; that manager's player then emits involuntary `PAUSED` (autoplay fallback, per-heartbeat `seekTo` once drift exceeds the 2s tolerance, buffering/stall events) which the mirror sends back as `pause` commands, re-pausing playback for everyone every few seconds. Was latent because a second instructor was previously blocked from the player.
+- Why it matters: The `onStateChange` mirror is only meant to capture deliberate instructor clicks on the YouTube control bar, not the player's involuntary transitions while `applyStateToPlayer` forces it toward the shared state. Fix: mirror a transition only when the manager document has recent genuine user activation (`navigator.userActivation.isActive`, which propagates from a click inside the cross-origin iframe; browsers without the API keep mirror-always). Also added a manager autoplay-blocked "Click to start playback" affordance mirroring the student view.
+- Evidence: `activities/video-sync/client/manager/VideoSyncManager.tsx` (`isManagerPlaybackGestureRecent`, `readManagerUserActivation`, `MANAGER_USER_GESTURE_GRACE_MS`, `autoplayBlocked`); `activities/video-sync/client/manager/VideoSyncManager.test.ts`.
+- Follow-up action: If Video Sync ever needs an explicit "driver" among multiple managers, prefer a server-assigned control token over per-manager mirroring.
+- Owner: Claude
+
 - Date: 2026-08-01
 - Area: client | activities | syncdeck | instructor lifecycle
 - Discovery: SyncDeck's instructor manager uses the same parent-session websocket as students, so it must attach the shared `useSessionEndedHandler` when creating its resilient websocket. Without that attachment, a valid server `session-ended` broadcast leaves the instructor on a deleted manager route while students redirect correctly.

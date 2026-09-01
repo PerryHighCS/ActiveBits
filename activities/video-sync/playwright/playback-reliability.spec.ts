@@ -57,7 +57,9 @@ test('Video Sync instructor pause stays paused across multiple heartbeat interva
 
   await page.goto(`/manage/video-sync/${encodeURIComponent(sessionId)}`)
 
-  const managerStatus = page.locator('[aria-live="polite"]')
+  // The status-bar span is the only element carrying "Playing:" text; scope to it
+  // so the amber autoplay-blocked notice (also aria-live) can't be matched here.
+  const managerStatus = page.getByText('Playing:')
   await expect(managerStatus).toContainText('Playing: No')
 
   expect(await command(`/api/video-sync/${sessionId}/command`, 'POST', { type: 'play' })).toBe(200)

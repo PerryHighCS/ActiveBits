@@ -80,6 +80,15 @@ const MANAGER_PLAYBACK_COMMAND_FLUSH_DELAY_MS = 120
 const MANAGER_PLAYBACK_COMMAND_RETRY_DELAY_MS = 600
 const MAX_MANAGER_PLAYBACK_FLUSH_RETRIES = 3
 const MAX_MANAGER_API_ERROR_MESSAGE_LENGTH = 160
+// How long after genuine user activation an `onStateChange` still counts as an
+// instructor gesture worth mirroring to the server. Beyond this, a play/pause
+// transition is treated as involuntary (autoplay block, heartbeat-driven seek,
+// buffering) and not echoed back as a command - otherwise two connected manager
+// views ping-pong each other's stuck players into repeated pauses.
+const MANAGER_USER_GESTURE_GRACE_MS = 4_000
+const MANAGER_AUTOPLAY_CHECK_DELAY_MS = 1_200
+const MANAGER_AUTOPLAY_BLOCKED_MESSAGE =
+  'This browser blocked playback on the instructor view. Click once to start; playback then follows the shared session.'
 
 const EMPTY_TELEMETRY: VideoSyncTelemetry = {
   connections: { activeCount: 0 },
@@ -372,6 +381,44 @@ export function consumeProgrammaticPlaybackTarget(params: {
   return params.nextIntent == null ? params.programmaticTarget : null
 }
 
+/**
+ * Whether an `onStateChange` transition is recent enough after genuine user
+ * activation to mirror to the server as an instructor command.
+ *
+ * With several manager views open, a manager whose player cannot reach the
+ * authoritative state - autoplay-blocked, mid-seek, buffering - emits
+ * involuntary play/pause transitions. Echoing each one back as a command makes
+ * the managers fight over playback (the classic symptom: a passive second
+ * instructor's view re-pausing the video every few seconds). A real click on the
+ * YouTube control bar gives the manager document transient user activation,
+ * which propagates from the cross-origin iframe; an involuntary transition does
+ * not. Browsers without `navigator.userActivation` keep the prior
+ * mirror-always behavior.
+ */
+export function isManagerPlaybackGestureRecent(params: {
+  userActivationSupported: boolean
+  msSinceLastUserActivation: number
+  graceMs?: number
+}): boolean {
+  if (!params.userActivationSupported) {
+    return true
+  }
+  return params.msSinceLastUserActivation <= (params.graceMs ?? MANAGER_USER_GESTURE_GRACE_MS)
+}
+
+function readManagerUserActivation(): { supported: boolean; isActive: boolean } {
+  if (typeof navigator === 'undefined') {
+    return { supported: false, isActive: false }
+  }
+
+  const activation = (navigator as Navigator & { userActivation?: { isActive?: unknown } }).userActivation
+  if (activation == null || typeof activation.isActive !== 'boolean') {
+    return { supported: false, isActive: false }
+  }
+
+  return { supported: true, isActive: activation.isActive }
+}
+
 export function shouldSendManagerPlaybackPositionUpdate(params: {
   authoritativeState: VideoSyncState
   desiredPositionSec: number | null
@@ -440,6 +487,7 @@ export default function VideoSyncManager() {
   >(null)
   const [autoStartStatus, setAutoStartStatus] = useState<AutoStartStatus>('idle')
   const [embeddedBootstrapSourceUrl, setEmbeddedBootstrapSourceUrl] = useState<string | null>(null)
+  const [autoplayBlocked, setAutoplayBlocked] = useState(false)
 
   const playerContainerRef = useRef<HTMLDivElement | null>(null)
   const playerRef = useRef<YoutubePlayerLike | null>(null)
@@ -453,8 +501,13 @@ export default function VideoSyncManager() {
   // inside the suppression window.
   const programmaticPlaybackTargetRef = useRef<'play' | 'pause' | null>(null)
   const playbackFlushRetryCountRef = useRef(0)
+  // Wall-clock of the last `onStateChange` that fired with genuine document user
+  // activation. An involuntary transition (autoplay block, heartbeat seek,
+  // buffering) has no recent activation and must not be mirrored as a command.
+  const lastUserActivationAtRef = useRef(0)
   const playbackCommandInFlightRef = useRef(false)
   const playbackCommandFlushTimerRef = useRef<number | null>(null)
+  const managerAutoplayCheckTimerRef = useRef<number | null>(null)
   const suppressPlayerEventsRef = useRef(false)
   const suppressPlayerEventsTimeoutRef = useRef<number | null>(null)
   const autoStartAttemptKeyRef = useRef<string | null>(null)
@@ -555,6 +608,13 @@ export default function VideoSyncManager() {
     if (playbackCommandFlushTimerRef.current != null) {
       window.clearTimeout(playbackCommandFlushTimerRef.current)
       playbackCommandFlushTimerRef.current = null
+    }
+  }, [])
+
+  const clearManagerAutoplayCheckTimer = useCallback(() => {
+    if (managerAutoplayCheckTimerRef.current != null) {
+      window.clearTimeout(managerAutoplayCheckTimerRef.current)
+      managerAutoplayCheckTimerRef.current = null
     }
   }, [])
 
@@ -723,10 +783,36 @@ export default function VideoSyncManager() {
       if (playerState !== PLAYING) {
         player.playVideo()
       }
+
+      // A programmatic play on this (unmuted) instructor view can be refused by
+      // the browser autoplay policy - most likely on a second manager that has
+      // not been interacted with. Surface a one-click affordance instead of
+      // leaving the view silently stuck behind the shared session.
+      clearManagerAutoplayCheckTimer()
+      managerAutoplayCheckTimerRef.current = window.setTimeout(() => {
+        const activePlayer = playerRef.current
+        if (activePlayer !== player) {
+          return
+        }
+        setAutoplayBlocked(activePlayer.getPlayerState() !== PLAYING)
+      }, MANAGER_AUTOPLAY_CHECK_DELAY_MS)
     } else {
+      clearManagerAutoplayCheckTimer()
       player.pauseVideo()
+      setAutoplayBlocked(false)
     }
-  }, [setSuppressPlayerEventsForWindow])
+  }, [clearManagerAutoplayCheckTimer, setSuppressPlayerEventsForWindow])
+
+  const retryManagerAutoplay = useCallback((): void => {
+    const player = playerRef.current
+    if (!player) {
+      return
+    }
+    // Deliberate click -> this document now has user activation, so the play is
+    // honored and `onStateChange` may legitimately mirror it.
+    player.playVideo()
+    setAutoplayBlocked(false)
+  }, [])
 
   const fetchSession = useCallback(async () => {
     if (!sessionId) return
@@ -923,6 +1009,8 @@ export default function VideoSyncManager() {
       playbackFlushRetryCountRef.current = 0
       playbackCommandInFlightRef.current = false
       clearPlaybackCommandFlushTimer()
+      clearManagerAutoplayCheckTimer()
+      setAutoplayBlocked(false)
       playerRef.current?.destroy()
       playerRef.current = null
       setActivePlayerHost(null)
@@ -954,6 +1042,8 @@ export default function VideoSyncManager() {
       playbackFlushRetryCountRef.current = 0
       playbackCommandInFlightRef.current = false
       clearPlaybackCommandFlushTimer()
+      clearManagerAutoplayCheckTimer()
+      setAutoplayBlocked(false)
       clearPlayerEventSuppression()
       player.destroy()
       if (playerRef.current === player) {
@@ -1057,6 +1147,22 @@ export default function VideoSyncManager() {
                 return
               }
 
+              // Only mirror a transition that follows genuine user activation of
+              // this document. Without this, a manager whose player cannot reach
+              // the shared state (autoplay-blocked, mid-seek, buffering) echoes
+              // its involuntary pauses/plays back as commands, and connected
+              // managers fight over playback.
+              const activation = readManagerUserActivation()
+              if (activation.supported && activation.isActive) {
+                lastUserActivationAtRef.current = Date.now()
+              }
+              if (!isManagerPlaybackGestureRecent({
+                userActivationSupported: activation.supported,
+                msSinceLastUserActivation: Date.now() - lastUserActivationAtRef.current,
+              })) {
+                return
+              }
+
               const target = event.target
               const playerPosition = clampNumber(target.getCurrentTime())
 
@@ -1105,6 +1211,8 @@ export default function VideoSyncManager() {
       playbackFlushRetryCountRef.current = 0
       playbackCommandInFlightRef.current = false
       clearPlaybackCommandFlushTimer()
+      clearManagerAutoplayCheckTimer()
+      setAutoplayBlocked(false)
       playerRef.current?.destroy()
       playerRef.current = null
       setActivePlayerHost(null)
@@ -1112,6 +1220,7 @@ export default function VideoSyncManager() {
     }
   }, [
     applyStateToPlayer,
+    clearManagerAutoplayCheckTimer,
     clearPlaybackCommandFlushTimer,
     clearPlayerEventSuppression,
     scheduleManagerPlaybackIntentFlush,
@@ -1454,6 +1563,20 @@ export default function VideoSyncManager() {
           </div>
         )}
       </div>
+
+      {state.videoId && autoplayBlocked && (
+        <div
+          className="absolute bottom-16 right-4 z-20 w-[min(28rem,calc(100vw-2rem))] border border-amber-300 bg-amber-50 text-amber-900 rounded p-3 text-sm"
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+        >
+          {MANAGER_AUTOPLAY_BLOCKED_MESSAGE}
+          <div className="mt-2">
+            <Button onClick={retryManagerAutoplay}>Click to start playback</Button>
+          </div>
+        </div>
+      )}
 
       <div className="absolute bottom-0 left-0 right-0 z-20 px-4 py-2 bg-black/80 border-t border-white/10 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-gray-200" aria-live="polite">
         <span>Video: {state.videoId || 'Not configured'}</span>

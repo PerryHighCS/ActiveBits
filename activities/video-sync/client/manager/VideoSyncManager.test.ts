@@ -14,6 +14,7 @@ import {
     readBootstrapSourceUrl,
     readEmbeddedBootstrapSourceUrl,
     consumeProgrammaticPlaybackTarget,
+    isManagerPlaybackGestureRecent,
     readRecoveredPersistentSourceUrl,
     resolveManagerStateChangeIntent,
     sanitizeManagerApiErrorMessage,
@@ -442,6 +443,29 @@ void test('consumeProgrammaticPlaybackTarget keeps the target until a play-state
   assert.equal(consumeProgrammaticPlaybackTarget({ nextIntent: null, programmaticTarget: 'play' }), 'play')
   assert.equal(consumeProgrammaticPlaybackTarget({ nextIntent: 'play', programmaticTarget: 'play' }), null)
   assert.equal(consumeProgrammaticPlaybackTarget({ nextIntent: 'pause', programmaticTarget: 'play' }), null)
+})
+
+void test('isManagerPlaybackGestureRecent only mirrors transitions close to genuine user activation', () => {
+  // Fresh activation -> a real control-bar click: mirror it.
+  assert.equal(
+    isManagerPlaybackGestureRecent({ userActivationSupported: true, msSinceLastUserActivation: 200 }),
+    true,
+  )
+  // Steady-state playback with no interaction for seconds -> involuntary
+  // (autoplay block / heartbeat seek / buffering): do not mirror.
+  assert.equal(
+    isManagerPlaybackGestureRecent({ userActivationSupported: true, msSinceLastUserActivation: 9_000 }),
+    false,
+  )
+  assert.equal(
+    isManagerPlaybackGestureRecent({ userActivationSupported: true, msSinceLastUserActivation: 500, graceMs: 300 }),
+    false,
+  )
+  // Browser without navigator.userActivation keeps the prior mirror-always path.
+  assert.equal(
+    isManagerPlaybackGestureRecent({ userActivationSupported: false, msSinceLastUserActivation: 9_999_999 }),
+    true,
+  )
 })
 
 void test('a consumed programmatic target does not swallow a later same-direction instructor click', () => {
