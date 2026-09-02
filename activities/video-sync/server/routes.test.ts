@@ -3500,6 +3500,55 @@ void test('websocket cleanup runs only once when error is followed by close', as
   assert.equal(disconnectEnvelope.payload?.telemetry?.connections?.activeCount, 0)
 })
 
+void test('websocket cleanup abandons its telemetry write and broadcast when the session id is recreated mid-flush', { concurrency: false }, async () => {
+  console.info('[TEST] video-sync socket cleanup: a subscriber disconnects and the id is recreated as a fresh incarnation during the atomic connection-telemetry write; the old socket must not persist activeCount into - or broadcast for - the replacement')
+  const app = createMockApp()
+  const ws = createMockWs()
+  let armed = false
+  let swapped = false
+  const storeState = createSessionStore(
+    { 'ws-cleanup-incarnation': createVideoSyncSession('ws-cleanup-incarnation') },
+    {
+      valkeyStore: createMockVideoSyncValkeyStore(),
+      atomic: true,
+      onAtomicAttempt: (attempt, store) => {
+        if (!armed || attempt !== 0 || swapped) return
+        const record = store['ws-cleanup-incarnation']
+        if (!record) return
+        swapped = true
+        const replacement = createVideoSyncSession('ws-cleanup-incarnation')
+        replacement.created = record.created + 10_000
+        replacement.mutationRevision = 5
+        ;(replacement.data as { telemetry: { connections: { activeCount: number } } })
+          .telemetry.connections.activeCount = 9
+        store['ws-cleanup-incarnation'] = replacement
+      },
+    },
+  )
+  setupVideoSyncRoutes(app, storeState.sessions, ws as unknown as WsRouter)
+
+  const handler = ws.registered['/ws/video-sync']
+  assert.equal(typeof handler, 'function')
+
+  const recorder = createMockSocket()
+  handler?.(recorder.socket, new URLSearchParams({ sessionId: 'ws-cleanup-incarnation', role: 'student' }))
+  await new Promise((resolve) => setTimeout(resolve, 0))
+
+  const publishedAfterAdmission = storeState.published.length
+  armed = true
+
+  recorder.emit('close')
+  await new Promise((resolve) => setTimeout(resolve, 0))
+
+  assert.equal(swapped, true, 'the id-reuse hook must have fired during socket cleanup')
+  const replacement = storeState.store['ws-cleanup-incarnation']?.data as {
+    telemetry: { connections: { activeCount: number } }
+  }
+  assert.equal(replacement.telemetry.connections.activeCount, 9, 'the disconnect did not overwrite the replacement session activeCount')
+  assert.equal(storeState.store['ws-cleanup-incarnation']?.mutationRevision, 5, 'the abandoned cleanup write did not bump the replacement revision')
+  assert.equal(storeState.published.length, publishedAfterAdmission, 'no connection-change telemetry broadcast for the replacement session')
+})
+
 void test('invalid websocket session is rejected before subscription side effects are created', async () => {
   const app = createMockApp()
   const ws = createMockWs()
@@ -4672,6 +4721,82 @@ void test('event route prunes stale unsynced students without a follow-up heartb
       }
     }
     assert.equal(persisted.telemetry?.sync?.unsyncedStudents, 0)
+  } finally {
+    Date.now = originalDateNow
+    globalThis.setTimeout = originalSetTimeout
+    globalThis.clearTimeout = originalClearTimeout
+  }
+})
+
+void test('unsynced-student prune abandons its telemetry write when the session id is recreated mid-flush', { concurrency: false }, async () => {
+  console.info('[TEST] video-sync unsynced-student prune: the id is recreated as a fresh incarnation during the atomic telemetry write; the stale prune count must not land on - or be rescheduled against - the replacement')
+  const originalDateNow = Date.now
+  const originalSetTimeout = globalThis.setTimeout
+  const originalClearTimeout = globalThis.clearTimeout
+  const timerState: { callback: (() => void) | null } = { callback: null }
+  const timerToken = { id: 'unsync-prune-incarnation-token' }
+  let nowMs = 1_000
+  let armed = false
+  let swapped = false
+
+  Date.now = () => nowMs
+  globalThis.setTimeout = (((callback: TimerHandler) => {
+    timerState.callback = callback as () => void
+    return timerToken as unknown as ReturnType<typeof setTimeout>
+  }) as unknown) as typeof setTimeout
+  globalThis.clearTimeout = (((_timer: ReturnType<typeof setTimeout> | undefined) => {
+    // no-op for this test
+  }) as unknown) as typeof clearTimeout
+
+  try {
+    const app = createMockApp()
+    const ws = createMockWs() as unknown as WsRouter
+    // No `valkeyStore`: the in-process prune timer only runs in that deployment
+    // shape (with Valkey, the key TTL handles expiry).
+    const storeState = createSessionStore(
+      { s1: createVideoSyncSession('s1') },
+      {
+        atomic: true,
+        onAtomicAttempt: (attempt, store) => {
+          if (!armed || attempt !== 0 || swapped) return
+          const record = store.s1
+          if (!record) return
+          swapped = true
+          const replacement = createVideoSyncSession('s1')
+          replacement.created = record.created + 10_000
+          replacement.mutationRevision = 5
+          ;(replacement.data as { telemetry: { sync: { unsyncedStudents: number } } })
+            .telemetry.sync.unsyncedStudents = 7
+          store.s1 = replacement
+        },
+      },
+    )
+
+    setupVideoSyncRoutes(app, storeState.sessions, ws)
+
+    const handler = app.handlers.post['/api/video-sync/:sessionId/event']
+    assert.equal(typeof handler, 'function')
+
+    const unsyncResponse = createResponse()
+    await handler?.(
+      {
+        params: { sessionId: 's1' },
+        body: { type: 'unsync', studentId: 'student-a', driftSec: 1.2 },
+      },
+      unsyncResponse,
+    )
+    assert.equal(unsyncResponse.statusCode, 200)
+    assert.equal(typeof timerState.callback, 'function')
+
+    armed = true
+    nowMs += 20_001
+    timerState.callback?.()
+    await new Promise((resolve) => originalSetTimeout(resolve, 0))
+
+    assert.equal(swapped, true, 'the id-reuse hook must have fired during the prune write')
+    const replacement = storeState.store.s1?.data as { telemetry: { sync: { unsyncedStudents: number } } }
+    assert.equal(replacement.telemetry.sync.unsyncedStudents, 7, 'the abandoned prune did not overwrite the replacement session count')
+    assert.equal(storeState.store.s1?.mutationRevision, 5, 'the abandoned prune write did not bump the replacement revision')
   } finally {
     Date.now = originalDateNow
     globalThis.setTimeout = originalSetTimeout

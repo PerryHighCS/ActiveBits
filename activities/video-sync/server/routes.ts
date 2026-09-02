@@ -951,9 +951,17 @@ function scheduleUnsyncedStudentsPrune(
         await refreshUnsyncedStudentsCount(sessions as VideoSyncSessionStore, probeData, sessionId, pruneNowMs)
 
         if (telemetryProbe.sync.unsyncedStudents !== data.telemetry.sync.unsyncedStudents) {
-          await updateVideoSyncSessionAtomic(sessions as VideoSyncSessionStore, sessionId, (_draft, latestData) => {
+          const committed = await updateVideoSyncSessionAtomic(sessions as VideoSyncSessionStore, sessionId, (_draft, latestData) => {
             latestData.telemetry.sync.unsyncedStudents = telemetryProbe.sync.unsyncedStudents
-          })
+          }, { expectedCreated: session.created })
+          if (!committed) {
+            // The id was deleted or recreated as a different incarnation between
+            // the strict read above and this write. Drop the stale prune
+            // bookkeeping instead of committing it to - and rescheduling it
+            // against - the replacement session.
+            clearUnsyncedStudentState(sessionId)
+            return
+          }
         }
       })
 
@@ -2116,7 +2124,10 @@ export default function setupVideoSyncRoutes(
           const committed = await updateVideoSyncSessionAtomic(sessions, sessionId, (_draft, latestData) => {
             latestData.telemetry.connections.activeCount = telemetryProbe.connections.activeCount
             latestData.telemetry.sync.unsyncedStudents = telemetryProbe.sync.unsyncedStudents
-          })
+          }, { expectedCreated: currentSession.created })
+          // `!committed` also covers a same-id delete+recreate between the strict
+          // read and this write: do not publish this old socket's connection
+          // update against the replacement session.
           if (!committed) return
           const currentData = committed.data
 

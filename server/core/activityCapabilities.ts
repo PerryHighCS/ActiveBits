@@ -117,6 +117,11 @@ function isAuthorizedCapabilityIncarnation(
   return expectedCreated == null || record.created === expectedCreated
 }
 
+/** Minimal session store shape that can apply a compare-and-set mutation. */
+export interface AtomicManagerCapabilityStore {
+  updateAtomic?(id: string, mutate: (session: Session) => Session): Promise<Session | null>
+}
+
 /**
  * Issue a manager capability into one session through a single compare-and-set,
  * bound to the incarnation the request authorized (`expectedType`, and
@@ -131,10 +136,6 @@ function isAuthorizedCapabilityIncarnation(
  * `persistent-manager-capability`) and SyncDeck `embedded-manager-capability` so
  * the guard cannot drift between routes.
  */
-export interface AtomicManagerCapabilityStore {
-  updateAtomic?(id: string, mutate: (session: Session) => Session): Promise<Session | null>
-}
-
 export async function issueManagerCapabilityAtomically(
   sessions: AtomicManagerCapabilityStore,
   sessionId: string,
