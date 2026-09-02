@@ -900,11 +900,15 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
       let capabilityToken: string | null = null
       if (sessions.updateAtomic) {
         const updated = await sessions.updateAtomic(sessionId, (draft) => {
+          // Reset per invocation: updateAtomic re-runs this on a CAS retry, and
+          // a retry that early-returns on a type mismatch must not leave a stale
+          // token from an earlier attempt.
+          capabilityToken = null
           if (draft.type !== activityName) return draft
           capabilityToken = issueActivityCapability(draft as { data: unknown }, 'manager').token
           return draft
         })
-        if (updated == null || capabilityToken == null) {
+        if (updated == null || capabilityToken == null || (updated as { type?: unknown }).type !== activityName) {
           res.status(404).json({ error: 'Teacher join is unavailable for this session' })
           return
         }
@@ -1068,11 +1072,15 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
       if (sessions.updateAtomic) {
         const expectedType = activeSession.type
         const updated = await sessions.updateAtomic(sessionId, (draft) => {
+          // Reset per invocation: updateAtomic re-runs this on a CAS retry, and
+          // a retry that early-returns on a type mismatch must not leave a stale
+          // token from an earlier attempt.
+          capabilityToken = null
           if (draft.type !== expectedType) return draft
           capabilityToken = issueActivityCapability(draft as { data: unknown }, 'manager').token
           return draft
         })
-        if (updated == null || capabilityToken == null) {
+        if (updated == null || capabilityToken == null || (updated as { type?: unknown }).type !== expectedType) {
           res.status(404).json({ error: 'Active session not found' })
           return
         }

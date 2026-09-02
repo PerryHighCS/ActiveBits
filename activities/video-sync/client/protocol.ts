@@ -5,6 +5,11 @@ import {
   type VideoSyncPlayerHost,
 } from '../shared/playerHosts.js'
 
+// Mirrors the server's `MAX_COMMAND_ID_LENGTH` for `controllerId` so an
+// oversized value from an untrusted frame is coerced to `null` rather than kept
+// in client state.
+const MAX_CONTROLLER_ID_LENGTH = 128
+
 export type VideoSyncMessageType =
   | 'state-snapshot'
   | 'state-update'
@@ -135,7 +140,10 @@ function normalizeState(value: unknown, allowLegacyMissingPlayerHost = true): Vi
     isPlaying: value.isPlaying,
     playbackRate: 1,
     updatedBy: normalizeUpdatedBy(value.updatedBy) ?? 'system',
-    controllerId: typeof value.controllerId === 'string' ? value.controllerId : null,
+    controllerId:
+      typeof value.controllerId === 'string' && value.controllerId.length <= MAX_CONTROLLER_ID_LENGTH
+        ? value.controllerId
+        : null,
     playbackRevision: isFiniteNumber(value.playbackRevision) ? value.playbackRevision : 0,
     serverTimestampMs: value.serverTimestampMs,
   }

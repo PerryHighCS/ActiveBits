@@ -1920,6 +1920,48 @@ void test('command route atomic path accumulates the playback revision across se
   assert.equal(storeState.published.length, 2)
 })
 
+void test('command route abandons the atomic write when the session id is reused for another activity mid-flush', async () => {
+  console.info('[TEST] video-sync command: the session id is swapped to a non-video-sync record mid-flush; the handler is expected to answer 404 without committing a write')
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  let swapped = false
+  const storeState = createSessionStore(
+    { s1: createVideoSyncSession('s1') },
+    {
+      valkeyStore: createMockVideoSyncValkeyStore(),
+      atomic: true,
+      onAtomicAttempt: (attempt, store) => {
+        // After the first attempt's mutate ran against the video-sync draft,
+        // the id is reused for a syncdeck session and the revision advances, so
+        // the retry's callback sees a non-video-sync record.
+        if (attempt !== 0 || swapped) return
+        const record = store.s1
+        if (!record) return
+        swapped = true
+        store.s1 = {
+          id: 's1', type: 'syncdeck', created: record.created,
+          lastActivity: Date.now(), mutationRevision: 5, data: {},
+        }
+      },
+    },
+  )
+  setupVideoSyncRoutes(app, storeState.sessions, ws)
+  const handler = app.handlers.post['/api/video-sync/:sessionId/command']
+
+  const res = createResponse()
+  await handler?.({
+    params: { sessionId: 's1' },
+    body: { type: 'play', commandId: 'manager-x:1', managerId: 'manager-x' },
+  }, res)
+
+  assert.equal(swapped, true, 'the id-reuse hook must have fired')
+  assert.equal(res.statusCode, 404)
+  const record = storeState.store.s1 as SessionRecord
+  assert.equal(record.type, 'syncdeck', 'the reused record is untouched')
+  assert.equal(record.mutationRevision, 5, 'the abandoned atomic attempt did not bump the revision or extend the TTL')
+  assert.equal(storeState.published.length, 0, 'no broadcast for the abandoned command')
+})
+
 void test('command route answers with a structured 500 when the session write rejects', async () => {
   console.info('[TEST] video-sync command: the session-store write below rejects on purpose; the handler is expected to log command-failed and answer 500 rather than let the rejection escape the mutation')
   const app = createMockApp()

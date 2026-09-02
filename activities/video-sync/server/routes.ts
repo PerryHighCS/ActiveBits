@@ -1116,18 +1116,30 @@ async function getVideoSyncSessionWithNormalization(
   }
 }
 
+// Thrown inside the `updateAtomic` callback when the stored record is not a
+// video-sync session, so the compare-and-set is abandoned rather than committing
+// a no-op write that bumps `mutationRevision` and extends the TTL of a
+// wrong-type / reused session id.
+class NotVideoSyncSessionError extends Error {}
+
 async function updateVideoSyncSessionAtomic(
   sessions: VideoSyncSessionStore,
   sessionId: string,
   mutate: (session: VideoSyncSession, data: VideoSyncSessionData) => void,
 ): Promise<{ session: VideoSyncSession; data: VideoSyncSessionData } | null> {
   if (typeof sessions.updateAtomic === 'function') {
-    const updated = await sessions.updateAtomic(sessionId, (draft) => {
-      if (draft.type !== 'video-sync') return draft
-      const data = ensureVideoSyncSessionData(draft)
-      mutate(draft as VideoSyncSession, data)
-      return draft
-    })
+    let updated: SessionRecord | null
+    try {
+      updated = await sessions.updateAtomic(sessionId, (draft) => {
+        if (draft.type !== 'video-sync') throw new NotVideoSyncSessionError()
+        const data = ensureVideoSyncSessionData(draft)
+        mutate(draft as VideoSyncSession, data)
+        return draft
+      })
+    } catch (error) {
+      if (error instanceof NotVideoSyncSessionError) return null
+      throw error
+    }
     if (!updated || updated.type !== 'video-sync') return null
     return {
       session: updated as VideoSyncSession,
@@ -1138,7 +1150,7 @@ async function updateVideoSyncSessionAtomic(
   // Test/minimal store compatibility. Production stores expose updateAtomic;
   // the existing per-process queue still serializes this fallback.
   const session = await getVideoSyncSession(sessions, sessionId, { strict: true })
-  if (!session) return null
+  if (!session || session.type !== 'video-sync') return null
   const data = ensureVideoSyncSessionData(session)
   mutate(session, data)
   await sessions.set(session.id, session)

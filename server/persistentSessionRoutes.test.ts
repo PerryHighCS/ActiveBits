@@ -344,6 +344,55 @@ void test('session teacher authenticate persists the capability through updateAt
   assert.equal((persisted.mutationRevision ?? 0) > 1, true, 'the atomic write advanced the revision')
 })
 
+void test('session teacher authenticate does not issue a cookie when an updateAtomic retry runs against a reused id', async (t) => {
+  initializePersistentStorage(null)
+  await initializeActivityRegistry()
+  const sessionMap = new Map<string, unknown>()
+  const sessions = {
+    get: async (id: string) => {
+      const session = sessionMap.get(id)
+      return session == null ? null : structuredClone(session)
+    },
+    getStrict: async (id: string) => {
+      const session = sessionMap.get(id)
+      return session == null ? null : structuredClone(session)
+    },
+    set: async (id: string, session: unknown) => { sessionMap.set(id, structuredClone(session)) },
+    // Simulate a CAS conflict + concurrent id reuse: the callback runs once
+    // against the authorized record, then again against an algorithm-demo
+    // replacement. The stale capabilityToken from attempt 1 must not leak.
+    updateAtomic: async (id: string, mutate: (draft: Record<string, unknown>) => Record<string, unknown>) => {
+      const first = sessionMap.get(id) as Record<string, unknown> | undefined
+      if (first == null) return null
+      mutate(structuredClone(first))
+      const replacement = { id, type: 'algorithm-demo', created: Date.now(), data: {} }
+      sessionMap.set(id, replacement)
+      return mutate(structuredClone(replacement))
+    },
+  }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+  const handler = getRoute(app, 'POST', '/api/session/:sessionId/teacher-authenticate')
+
+  const activityName = 'syncdeck'
+  const teacherCode = 'teacher-secret'
+  const { hash, hashedTeacherCode } = generatePersistentHash(activityName, teacherCode)
+  t.after(async () => cleanupPersistentSession(hash))
+  sessionMap.set('live-session', {
+    id: 'live-session', type: activityName, data: { instructorPasscode: 'syncdeck-instructor-passcode' },
+  })
+  await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode, 'solo-allowed')
+  await startPersistentSession(hash, 'live-session', { id: 'teacher-ws', readyState: 1, send() {} })
+
+  const res = createMockRes()
+  await handler(createMockReq({ params: { sessionId: 'live-session' }, body: { teacherCode } }), res)
+
+  assert.equal(res.statusCode, 404)
+  assert.equal(res.cookies.has(getActivityCapabilityCookieName('manager', 'live-session')), false)
+  const replacement = sessionMap.get('live-session') as { data?: { activityCapabilities?: unknown } }
+  assert.equal(replacement.data?.activityCapabilities, undefined, 'the algorithm-demo replacement gets no manager capability')
+})
+
 void test('session teacher authenticate returns 404 when updateAtomic cannot commit the capability', async (t) => {
   initializePersistentStorage(null)
   await initializeActivityRegistry()
