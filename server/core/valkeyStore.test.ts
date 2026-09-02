@@ -2,33 +2,100 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { ValkeySessionStore, ValkeyPersistentStore } from './valkeyStore.js'
 
-void test('ValkeySessionStore compareAndSet commits only the expected mutation revision', async () => {
-  let script = ''
-  let args: Array<string | number> = []
-  const store = Object.create(ValkeySessionStore.prototype) as ValkeySessionStore & {
-    client: { eval: (source: string, numKeys: number, ...values: Array<string | number>) => Promise<string> }
+// Faithful JS execution of the `compareAndSet` Lua body: GET -> revision compare
+// against ARGV[1] -> on mismatch return nil -> else re-stamp mutationRevision /
+// lastActivity, SET, return the new JSON. Lets the tests exercise the actual
+// commit / reject / conflict semantics without a live Redis.
+function compareAndSetValkeyStoreForTest(initial: Record<string, unknown> = {}) {
+  const backing = new Map<string, string>()
+  for (const [key, value] of Object.entries(initial)) {
+    backing.set(key, JSON.stringify(value))
   }
+  const scripts: string[] = []
+  const store = Object.create(ValkeySessionStore.prototype) as ValkeySessionStore & {
+    client: { eval: (source: string, numKeys: number, ...values: Array<string | number>) => Promise<string | null> }
+  }
+  Object.defineProperty(store, 'ttlMs', { value: 60_000 })
   Object.defineProperty(store, 'client', {
     value: {
-      async eval(source: string, _numKeys: number, ...values: Array<string | number>): Promise<string> {
-        script = source
-        args = values
-        return JSON.stringify({ id: 'session-1', mutationRevision: 8, data: { value: 'new' } })
+      async eval(source: string, _numKeys: number, ...values: Array<string | number>): Promise<string | null> {
+        scripts.push(source)
+        const [key, expectedRevisionArg, replacementJson, lastActivityArg] = values as [string, string | number, string, string | number]
+        const currentJson = backing.get(key)
+        if (currentJson == null) return null
+        const current = JSON.parse(currentJson) as { mutationRevision?: number }
+        const currentRevision = Number(current.mutationRevision ?? 0)
+        if (currentRevision !== Number(expectedRevisionArg)) return null
+        const replacement = JSON.parse(replacementJson) as Record<string, unknown>
+        replacement.mutationRevision = currentRevision + 1
+        replacement.lastActivity = Number(lastActivityArg)
+        const updated = JSON.stringify(replacement)
+        backing.set(key, updated)
+        return updated
       },
     },
   })
-  Object.defineProperty(store, 'ttlMs', { value: 60_000 })
+  return { store, backing, scripts }
+}
 
-  const updated = await store.compareAndSet(
-    'session-1',
-    7,
-    { id: 'session-1', mutationRevision: 7, data: { value: 'new' } },
+void test('ValkeySessionStore compareAndSet commits and advances the revision on a match, preserving all field updates', async () => {
+  const { store, backing, scripts } = compareAndSetValkeyStoreForTest({
+    'session:s1': { id: 's1', mutationRevision: 7, data: { a: 'old', b: 'old' } },
+  })
+
+  const updated = await store.compareAndSet('s1', 7, {
+    id: 's1',
+    mutationRevision: 7,
+    data: { a: 'new-a', b: 'new-b' },
+  })
+
+  assert.equal(updated?.mutationRevision, 8)
+  assert.deepEqual((updated?.data as Record<string, unknown>), { a: 'new-a', b: 'new-b' })
+  assert.equal((JSON.parse(backing.get('session:s1') as string) as { mutationRevision: number }).mutationRevision, 8)
+  assert.match(scripts[0] ?? '', /currentRevision ~= tonumber\(ARGV\[1\]\)/)
+  assert.match(scripts[0] ?? '', /replacement\.mutationRevision = currentRevision \+ 1/)
+})
+
+void test('ValkeySessionStore compareAndSet rejects a stale expected revision and leaves the record untouched', async () => {
+  const { store, backing } = compareAndSetValkeyStoreForTest({
+    'session:s1': { id: 's1', mutationRevision: 9, data: { value: 'committed' } },
+  })
+
+  const result = await store.compareAndSet('s1', 7, {
+    id: 's1',
+    mutationRevision: 7,
+    data: { value: 'stale' },
+  })
+
+  assert.equal(result, null)
+  assert.deepEqual(
+    JSON.parse(backing.get('session:s1') as string),
+    { id: 's1', mutationRevision: 9, data: { value: 'committed' } },
   )
+})
 
-  assert.deepEqual(updated, { id: 'session-1', mutationRevision: 8, data: { value: 'new' } })
-  assert.match(script, /currentRevision ~= tonumber\(ARGV\[1\]\)/)
-  assert.match(script, /replacement\.mutationRevision = currentRevision \+ 1/)
-  assert.deepEqual(args.slice(0, 2), ['session:session-1', 7])
+void test('ValkeySessionStore compareAndSet returns null for a missing key', async () => {
+  const { store } = compareAndSetValkeyStoreForTest()
+  assert.equal(await store.compareAndSet('gone', 0, { id: 'gone', data: {} }), null)
+})
+
+void test('ValkeySessionStore compareAndSet serializes two writers racing the same revision', async () => {
+  const { store, backing } = compareAndSetValkeyStoreForTest({
+    'session:s1': { id: 's1', mutationRevision: 7, data: { owner: null } },
+  })
+
+  // Both read revision 7. Writer A commits first.
+  const a = await store.compareAndSet('s1', 7, { id: 's1', data: { owner: 'A' } })
+  assert.equal(a?.mutationRevision, 8)
+
+  // Writer B's compare-and-set against the now-stale revision 7 is rejected...
+  assert.equal(await store.compareAndSet('s1', 7, { id: 's1', data: { owner: 'B' } }), null)
+
+  // ...and only succeeds after re-reading the current revision (what
+  // updateAtomic's retry loop does), without clobbering A's commit history.
+  const b = await store.compareAndSet('s1', 8, { id: 's1', data: { owner: 'B' } })
+  assert.equal(b?.mutationRevision, 9)
+  assert.equal((JSON.parse(backing.get('session:s1') as string) as { data: { owner: string } }).data.owner, 'B')
 })
 
 void test('ValkeySessionStore consume script rejects malformed and expired token expiries atomically', async () => {
