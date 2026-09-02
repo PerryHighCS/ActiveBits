@@ -410,7 +410,8 @@ void test('session teacher authenticate does not issue a cookie when the id is r
     // The pre-mutation strict read still sees the authorized incarnation
     // (created: 1000); the CAS then runs against a same-type replacement that
     // carries a fresh `created`, so the incarnation guard - not just the type
-    // check - must abandon the write.
+    // check - must abandon the write. A faithful store commits nothing when the
+    // callback throws (no revision bump, no TTL reset).
     updateAtomic: async (id: string, mutate: (draft: Record<string, unknown>) => Record<string, unknown>) => {
       const replacement = { id, type: 'syncdeck', created: 5000, mutationRevision: 7, data: {} }
       sessionMap.set(id, replacement)
@@ -441,8 +442,9 @@ void test('session teacher authenticate does not issue a cookie when the id is r
 
   assert.equal(res.statusCode, 404)
   assert.equal(res.cookies.has(getActivityCapabilityCookieName('manager', 'live-session')), false)
-  const replacement = sessionMap.get('live-session') as { data?: { activityCapabilities?: unknown } }
+  const replacement = sessionMap.get('live-session') as { mutationRevision?: number; data?: { activityCapabilities?: unknown } }
   assert.equal(replacement.data?.activityCapabilities, undefined, 'the recreated same-type incarnation gets no manager capability')
+  assert.equal(replacement.mutationRevision, 7, 'the mismatched CAS is abandoned, not committed as a no-op revision bump')
 })
 
 void test('session teacher authenticate returns 404 when updateAtomic cannot commit the capability', async (t) => {
@@ -858,8 +860,9 @@ void test('persistent manager capability recovery via updateAtomic does not issu
   assert.equal(res.statusCode, 404)
   assert.equal(setCalls, 0, 'no capability written into the recreated incarnation')
   assert.equal(res.cookies.has(getActivityCapabilityCookieName('manager', 'live-session')), false)
-  const replacement = sessionMap.get('live-session') as { data?: { activityCapabilities?: unknown } }
+  const replacement = sessionMap.get('live-session') as { mutationRevision?: number; data?: { activityCapabilities?: unknown } }
   assert.equal(replacement.data?.activityCapabilities, undefined, 'the recreated same-type incarnation gets no manager capability')
+  assert.equal(replacement.mutationRevision, 9, 'the mismatched CAS is abandoned, not committed as a no-op revision bump')
 })
 
 void test('persistent manager capability recovery does not issue into a session whose id was reused for another activity mid-request', async (t) => {

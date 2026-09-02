@@ -142,6 +142,22 @@ function readSessionCreated(record: Record<string, unknown>): number | null {
   return typeof record.created === 'number' ? record.created : null
 }
 
+/**
+ * Thrown from inside an `updateAtomic` callback when the drafted record is not
+ * the incarnation the request authorized. Returning the draft unchanged is
+ * *not* a no-op: both store implementations still stamp a fresh
+ * `mutationRevision` / `lastActivity` and reset the TTL, so a stale request
+ * would prolong and bump the replacement session. Throwing abandons the CAS;
+ * the caller catches this immediately around the `updateAtomic` call and maps
+ * it to a 404.
+ */
+class SessionIncarnationMismatchError extends Error {
+  constructor() {
+    super('session incarnation changed during the atomic capability write')
+    this.name = 'SessionIncarnationMismatchError'
+  }
+}
+
 function getQueryString(value: unknown): string | null {
   if (typeof value === 'string') {
     return value
@@ -926,15 +942,24 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
       }
       let capabilityToken: string | null = null
       if (sessions.updateAtomic) {
-        const updated = await sessions.updateAtomic(sessionId, (draft) => {
-          // Reset per invocation: updateAtomic re-runs this on a CAS retry, and
-          // a retry that early-returns on a type/incarnation mismatch must not
-          // leave a stale token from an earlier attempt.
-          capabilityToken = null
-          if (!matchesSessionIncarnation(draft, activityName, expectedCreated)) return draft
-          capabilityToken = issueActivityCapability(draft as { data: unknown }, 'manager').token
-          return draft
-        })
+        let updated: unknown = null
+        try {
+          updated = await sessions.updateAtomic(sessionId, (draft) => {
+            // Reset per invocation: updateAtomic re-runs this on a CAS retry.
+            capabilityToken = null
+            if (!matchesSessionIncarnation(draft, activityName, expectedCreated)) {
+              // Abort the CAS instead of returning the draft: a returned draft
+              // still commits (revision bump + TTL reset) against the wrong
+              // incarnation.
+              throw new SessionIncarnationMismatchError()
+            }
+            capabilityToken = issueActivityCapability(draft as { data: unknown }, 'manager').token
+            return draft
+          })
+        } catch (mutationError) {
+          if (!(mutationError instanceof SessionIncarnationMismatchError)) throw mutationError
+          updated = null
+        }
         if (updated == null || capabilityToken == null
           || !matchesSessionIncarnation(updated, activityName, expectedCreated)) {
           res.status(404).json({ error: 'Teacher join is unavailable for this session' })
@@ -1097,15 +1122,24 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
       }
       let capabilityToken: string | null = null
       if (sessions.updateAtomic) {
-        const updated = await sessions.updateAtomic(sessionId, (draft) => {
-          // Reset per invocation: updateAtomic re-runs this on a CAS retry, and
-          // a retry that early-returns on a type/incarnation mismatch must not
-          // leave a stale token from an earlier attempt.
-          capabilityToken = null
-          if (!matchesSessionIncarnation(draft, expectedType, expectedCreated)) return draft
-          capabilityToken = issueActivityCapability(draft as { data: unknown }, 'manager').token
-          return draft
-        })
+        let updated: unknown = null
+        try {
+          updated = await sessions.updateAtomic(sessionId, (draft) => {
+            // Reset per invocation: updateAtomic re-runs this on a CAS retry.
+            capabilityToken = null
+            if (!matchesSessionIncarnation(draft, expectedType, expectedCreated)) {
+              // Abort the CAS instead of returning the draft: a returned draft
+              // still commits (revision bump + TTL reset) against the wrong
+              // incarnation.
+              throw new SessionIncarnationMismatchError()
+            }
+            capabilityToken = issueActivityCapability(draft as { data: unknown }, 'manager').token
+            return draft
+          })
+        } catch (mutationError) {
+          if (!(mutationError instanceof SessionIncarnationMismatchError)) throw mutationError
+          updated = null
+        }
         if (updated == null || capabilityToken == null
           || !matchesSessionIncarnation(updated, expectedType, expectedCreated)) {
           res.status(404).json({ error: 'Active session not found' })

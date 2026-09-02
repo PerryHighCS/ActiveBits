@@ -1339,10 +1339,17 @@ function ensureHeartbeat(
               }
             }
           })
-          if (committed) {
-            broadcastState = applyStopIfReached(committed.data.state)
-            broadcastTelemetry = cloneTelemetry(committed.data.telemetry)
+          if (!committed) {
+            // The session was deleted or is no longer `video-sync` between the
+            // strict read and this mutation. Do not broadcast the pre-mutation
+            // snapshot with a fresh heartbeat timestamp - a client would accept
+            // that ended incarnation's state. Tear the heartbeat down instead.
+            closeSubscribersForMissingSession(sessionId)
+            stopHeartbeat(sessionId)
+            return
           }
+          broadcastState = applyStopIfReached(committed.data.state)
+          broadcastTelemetry = cloneTelemetry(committed.data.telemetry)
         }
 
         const envelope = createEnvelope(sessionId, 'heartbeat', {
@@ -1657,10 +1664,15 @@ export default function setupVideoSyncRoutes(
           }
         }
       }, { expectedCreated: session.created })
-      if (committed) {
-        responseState = applyStopIfReached(committed.data.state)
-        responseTelemetry = committed.data.telemetry
+      if (!committed) {
+        // Deleted or reused for a new incarnation between the strict read and
+        // this persist. Do not serve the stale snapshot as a 200 - a
+        // reconnecting client would accept an ended incarnation's state.
+        res.status(404).json({ error: 'NOT_FOUND', message: 'Session not found' })
+        return
       }
+      responseState = applyStopIfReached(committed.data.state)
+      responseTelemetry = committed.data.telemetry
     }
 
     res.json({

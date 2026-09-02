@@ -997,6 +997,9 @@ export default function VideoSyncManager() {
       setErrorMessage(parsed.message)
       return
     }
+    // An explicit seek supersedes a prior natural end: the next Play must resume
+    // from the sought position (server-projected), not restart from `startSec`.
+    playerEndedRef.current = false
     // A seek carries an explicit position, not a play/pause intent, so it goes
     // straight to `sendCommand` rather than through the intent-flush queue. That
     // skips the queue's transient-auth retry and flush-token ownership guard;
@@ -1844,12 +1847,13 @@ export default function VideoSyncManager() {
           <label className="flex items-center gap-1">
             <span>Seek to</span>
             <input
-              className="w-20 rounded border border-gray-500 bg-black px-2 py-1 text-white"
+              className="w-20 rounded border border-gray-500 bg-black px-2 py-1 text-white disabled:opacity-50"
               type="number"
               min="0"
               step="0.1"
               value={seekPositionInput}
               onChange={(event) => setSeekPositionInput(event.target.value)}
+              disabled={!hasManagerAccess}
               aria-label="Seek to position in seconds"
             />
           </label>

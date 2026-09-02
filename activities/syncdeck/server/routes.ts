@@ -217,6 +217,21 @@ const embeddedKeepaliveTouchStateByStore = new WeakMap<object, {
 
 type ChalkboardCommandName = 'chalkboardStroke' | 'chalkboardState' | 'clearChalkboard' | 'resetChalkboard'
 
+/**
+ * Thrown from inside an `updateAtomic` callback when the drafted record is no
+ * longer the incarnation whose one-time entry token was consumed. Returning the
+ * draft unchanged is not a no-op - both store implementations still stamp a
+ * fresh `mutationRevision` / `lastActivity` and reset the TTL - so a stale
+ * redemption would prolong and bump the replacement session. Throwing abandons
+ * the CAS; the caller catches it and maps it to the endpoint's 404.
+ */
+class EmbeddedManagerIncarnationMismatchError extends Error {
+  constructor() {
+    super('embedded session incarnation changed during the atomic capability write')
+    this.name = 'EmbeddedManagerIncarnationMismatchError'
+  }
+}
+
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
@@ -2242,29 +2257,35 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       }
       try {
         let capabilityToken: string | null = null
-        let incarnationChanged = false
-        const committed = sessions.updateAtomic
-          ? await sessions.updateAtomic(sessionId, (draft) => {
+        if (sessions.updateAtomic) {
+          let committed: SessionRecord | null = null
+          let incarnationChanged = false
+          try {
+            committed = await sessions.updateAtomic(sessionId, (draft) => {
               // Bind to the exact session incarnation whose one-time entry token
               // was just consumed. If the id was deleted/recreated between the
               // strict read above and this mutation, do not mint a manager
-              // capability into the replacement.
+              // capability into the replacement - and abort the CAS rather than
+              // returning the draft, which would still commit a no-op revision
+              // bump + TTL reset against the replacement.
               if (draft.type !== consumedSession.type || draft.created !== consumedSession.created) {
-                incarnationChanged = true
-                return draft
+                throw new EmbeddedManagerIncarnationMismatchError()
               }
               capabilityToken = issueActivityCapability(draft, 'manager').token
               return draft
             })
-          : null
-        if (sessions.updateAtomic && incarnationChanged) {
-          res.status(404).json({ error: 'embedded activity session not found' })
-          return
-        }
-        if (sessions.updateAtomic && (!committed || capabilityToken == null)) {
-          throw new Error('Atomic manager capability persistence failed')
-        }
-        if (!sessions.updateAtomic) {
+          } catch (mutationError) {
+            if (!(mutationError instanceof EmbeddedManagerIncarnationMismatchError)) throw mutationError
+            incarnationChanged = true
+          }
+          if (incarnationChanged) {
+            res.status(404).json({ error: 'embedded activity session not found' })
+            return
+          }
+          if (!committed || capabilityToken == null) {
+            throw new Error('Atomic manager capability persistence failed')
+          }
+        } else {
           capabilityToken = issueActivityCapability(consumedSession, 'manager').token
           await sessions.set(sessionId, consumedSession)
         }

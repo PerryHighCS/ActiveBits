@@ -3126,6 +3126,16 @@ void test('embedded manager capability exchange does not mint a capability into 
     undefined,
     'the algorithm-demo replacement gets no manager capability',
   )
+  assert.equal(
+    storeState.store['child-capability']?.mutationRevision,
+    undefined,
+    'the mismatched CAS is abandoned, not committed as a no-op revision bump on the replacement',
+  )
+  assert.equal(
+    storeState.store['child-capability']?.lastActivity,
+    now + 5_000,
+    'the replacement session TTL/lastActivity is not refreshed by a no-op commit',
+  )
 })
 
 void test('embedded manager capability exchange returns 500 when updateAtomic cannot commit', async () => {

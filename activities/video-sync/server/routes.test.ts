@@ -703,6 +703,37 @@ void test('session get route clears malformed persisted video ids during normali
   assert.equal(persisted.state?.videoId, '')
 })
 
+void test('session get route returns 404 instead of a stale snapshot when its atomic persist finds the id gone', async () => {
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  const session = createVideoSyncSession('s1')
+  // A malformed persisted videoId forces the normalization persist branch.
+  ;(session.data as { state: { videoId: string } }).state.videoId = 'bad-id'
+  const storeState = createSessionStore({ s1: session })
+  const sessions = {
+    ...storeState.sessions,
+    async getStrict(id: string) {
+      const record = storeState.store[id]
+      return record ? structuredClone(record) : null
+    },
+    // The strict read succeeds, but by the compare-and-set the id is gone or
+    // recreated as a new incarnation.
+    async updateAtomic() {
+      return null
+    },
+  }
+  setupVideoSyncRoutes(app, sessions as unknown as Parameters<typeof setupVideoSyncRoutes>[1], ws)
+
+  const handler = app.handlers.get['/api/video-sync/:sessionId/session']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.({ params: { sessionId: 's1' } }, res)
+
+  assert.equal(res.statusCode, 404)
+  assert.deepEqual(res.body, { error: 'NOT_FOUND', message: 'Session not found' })
+})
+
 void test('session get route replaces non-positive persisted server timestamps during normalization', async () => {
   const originalDateNow = Date.now
   Date.now = () => 50_000
@@ -1791,6 +1822,91 @@ void test('natural completion cannot pause playback owned by another manager or 
   assert.equal(state.isPlaying, true)
   assert.equal(state.playbackRevision, 1)
   assert.equal(storeState.published.length, 1)
+})
+
+void test('natural completion from the owning manager at the current revision pauses playback', async () => {
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  const storeState = createSessionStore(
+    { s1: createVideoSyncSession('s1') },
+    { valkeyStore: createMockVideoSyncValkeyStore() },
+  )
+  setupVideoSyncRoutes(app, storeState.sessions, ws)
+  const handler = app.handlers.post['/api/video-sync/:sessionId/command']
+  assert.equal(typeof handler, 'function')
+
+  await handler?.({
+    params: { sessionId: 's1' },
+    body: { type: 'play', commandId: 'manager-a:1', managerId: 'manager-a' },
+  }, createResponse())
+  const revisionAfterPlay = (storeState.store.s1?.data as { state: { playbackRevision: number } }).state.playbackRevision
+
+  const res = createResponse()
+  await handler?.({
+    params: { sessionId: 's1' },
+    body: {
+      type: 'pause',
+      commandId: 'manager-a:ended',
+      managerId: 'manager-a',
+      source: 'natural-ended',
+      expectedPlaybackRevision: revisionAfterPlay,
+    },
+  }, res)
+
+  assert.equal(res.statusCode, 200)
+  const state = (storeState.store.s1?.data as {
+    state: { isPlaying: boolean; playbackRevision: number; controllerId: string }
+  }).state
+  assert.equal(state.isPlaying, false, 'the owning manager natural end paused playback')
+  assert.equal(state.playbackRevision, revisionAfterPlay + 1)
+  assert.equal(state.controllerId, 'manager-a')
+  assert.equal(storeState.published.length, 2, 'play + natural-ended pause both broadcast')
+  const lastMessage = storeState.published[1]?.message as Record<string, unknown>
+  assert.equal(lastMessage.type, 'state-update')
+})
+
+void test('natural completion from the owning manager at a superseded revision is ignored', async () => {
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  const storeState = createSessionStore(
+    { s1: createVideoSyncSession('s1') },
+    { valkeyStore: createMockVideoSyncValkeyStore() },
+  )
+  setupVideoSyncRoutes(app, storeState.sessions, ws)
+  const handler = app.handlers.post['/api/video-sync/:sessionId/command']
+  assert.equal(typeof handler, 'function')
+
+  // Same manager issues two plays; the natural end then arrives stamped with the
+  // first play's (now superseded) revision.
+  await handler?.({
+    params: { sessionId: 's1' },
+    body: { type: 'play', commandId: 'manager-a:1', managerId: 'manager-a' },
+  }, createResponse())
+  const supersededRevision = (storeState.store.s1?.data as { state: { playbackRevision: number } }).state.playbackRevision
+  await handler?.({
+    params: { sessionId: 's1' },
+    body: { type: 'play', commandId: 'manager-a:2', managerId: 'manager-a' },
+  }, createResponse())
+  const currentRevision = (storeState.store.s1?.data as { state: { playbackRevision: number } }).state.playbackRevision
+  assert.equal(currentRevision, supersededRevision + 1)
+
+  const res = createResponse()
+  await handler?.({
+    params: { sessionId: 's1' },
+    body: {
+      type: 'pause',
+      commandId: 'manager-a:ended',
+      managerId: 'manager-a',
+      source: 'natural-ended',
+      expectedPlaybackRevision: supersededRevision,
+    },
+  }, res)
+
+  assert.equal(res.statusCode, 200)
+  const state = (storeState.store.s1?.data as { state: { isPlaying: boolean; playbackRevision: number } }).state
+  assert.equal(state.isPlaying, true, 'the stale natural end did not pause the newer playback')
+  assert.equal(state.playbackRevision, currentRevision, 'playback revision is unchanged by the ignored natural end')
+  assert.equal(storeState.published.length, 2, 'only the two play broadcasts, no pause broadcast')
 })
 
 void test('a natural-ended command must be a pause, not play or seek', async () => {
@@ -3287,6 +3403,90 @@ void test('heartbeat stops and closes subscribers when the backing session disap
 
     assert.deepEqual(recorder.closed, { code: 1008, reason: 'Session not found' })
     assert.deepEqual(clearedTimers, [timerToken])
+  } finally {
+    globalThis.setInterval = originalSetInterval
+    globalThis.clearInterval = originalClearInterval
+  }
+})
+
+void test('heartbeat tears down instead of broadcasting a stale frame when its atomic persist finds the id gone', { concurrency: false }, async () => {
+  const originalSetInterval = globalThis.setInterval
+  const originalClearInterval = globalThis.clearInterval
+  const heartbeatState: { callback: (() => void) | null } = { callback: null }
+  const clearedTimers: unknown[] = []
+  const timerToken = { id: 'heartbeat-token-cas-null' }
+
+  globalThis.setInterval = (((callback: TimerHandler) => {
+    heartbeatState.callback = callback as () => void
+    return timerToken as unknown as ReturnType<typeof setInterval>
+  }) as unknown) as typeof setInterval
+  globalThis.clearInterval = (((timer: ReturnType<typeof setInterval> | undefined) => {
+    clearedTimers.push(timer)
+  }) as unknown) as typeof clearInterval
+
+  try {
+    const app = createMockApp()
+    const ws = createMockWs()
+
+    // A live session whose playhead is past stopSec, so every heartbeat wants to
+    // persist the stop transition and therefore calls
+    // `updateVideoSyncSessionAtomic`. Admission succeeds; the id is then gone
+    // (deleted / recreated as a new incarnation) by the time the heartbeat's
+    // compare-and-set runs, so that call returns null.
+    const liveSession = createVideoSyncSession('s1')
+    ;(liveSession.data as { state: Record<string, unknown> }).state = {
+      ...(liveSession.data as { state: Record<string, unknown> }).state,
+      videoId: 'dQw4w9WgXcQ',
+      startSec: 0,
+      stopSec: 10,
+      positionSec: 100,
+      isPlaying: true,
+      serverTimestampMs: 1_000,
+    }
+
+    let casGone = false
+    const published: Array<{ channel: string; message: Record<string, unknown> }> = []
+    const sessions = {
+      async get() { return cloneSessionRecord(liveSession) },
+      async getStrict() { return cloneSessionRecord(liveSession) },
+      async set() {},
+      async updateAtomic(_id: string, mutate: (session: SessionRecord) => SessionRecord) {
+        if (casGone) return null
+        const draft = cloneSessionRecord(liveSession)
+        return mutate(draft)
+      },
+      valkeyStore: createMockVideoSyncValkeyStore(),
+      async publishBroadcast(channel: string, message: Record<string, unknown>) {
+        published.push({ channel, message })
+      },
+      subscribeToBroadcast() {},
+    }
+
+    setupVideoSyncRoutes(app, sessions as unknown as Parameters<typeof setupVideoSyncRoutes>[1], ws as unknown as WsRouter)
+
+    const handler = ws.registered['/ws/video-sync']
+    assert.equal(typeof handler, 'function')
+
+    const recorder = createMockSocket()
+    handler?.(recorder.socket, new URLSearchParams({ sessionId: 's1', role: 'student' }))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    assert.equal(recorder.closed, null, 'admitted while the session is still live')
+
+    const publishedAfterConnect = published.length
+    casGone = true
+    const runHeartbeat = heartbeatState.callback
+    if (runHeartbeat == null) {
+      throw new Error('Expected heartbeat callback to be registered')
+    }
+    runHeartbeat()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    assert.deepEqual(recorder.closed, { code: 1008, reason: 'Session not found' })
+    assert.deepEqual(clearedTimers, [timerToken])
+    const heartbeatFrames = published
+      .slice(publishedAfterConnect)
+      .filter((entry) => (entry.message as { type?: string }).type === 'heartbeat')
+    assert.equal(heartbeatFrames.length, 0, 'no stale heartbeat frame was broadcast')
   } finally {
     globalThis.setInterval = originalSetInterval
     globalThis.clearInterval = originalClearInterval
