@@ -1794,6 +1794,7 @@ void test('natural completion cannot pause playback owned by another manager or 
 })
 
 void test('a natural-ended command must be a pause, not play or seek', async () => {
+  console.info('[TEST] video-sync command: the play/seek + natural-ended requests below are expected to return 400 INVALID_COMMAND')
   const app = createMockApp()
   const ws = createMockWs() as unknown as WsRouter
   const storeState = createSessionStore(
