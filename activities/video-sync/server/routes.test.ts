@@ -1124,6 +1124,58 @@ void test('session patch accepts youtu.be urls with extra path segments by using
   assert.equal(state.startSec, 45)
 })
 
+void test('session patch retries its atomic write and preserves telemetry advanced by another instance', async () => {
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  let concurrentWriteApplied = false
+  const storeState = createSessionStore(
+    { s1: createVideoSyncSession('s1') },
+    {
+      valkeyStore: createMockVideoSyncValkeyStore(),
+      atomic: true,
+      onAtomicAttempt: (attempt, store) => {
+        if (attempt !== 0 || concurrentWriteApplied) return
+        const record = store.s1
+        if (!record) return
+        concurrentWriteApplied = true
+        record.mutationRevision = 3
+        const data = record.data as {
+          state: Record<string, unknown>
+          telemetry: { autoplay: { blockedCount: number } }
+        }
+        data.telemetry.autoplay.blockedCount = 9
+        data.state = { ...data.state, playbackRevision: 4 }
+      },
+    },
+  )
+  setupVideoSyncRoutes(app, storeState.sessions, ws)
+  const handler = app.handlers.patch['/api/video-sync/:sessionId/session']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.(
+    { params: { sessionId: 's1' }, body: { sourceUrl: 'https://youtu.be/dQw4w9WgXcQ' } },
+    res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  assert.equal(concurrentWriteApplied, true, 'the concurrent-write hook must have fired')
+  const record = storeState.store.s1 as SessionRecord
+  const data = record.data as {
+    state: { videoId: string; playbackRevision: number }
+    telemetry: { autoplay: { blockedCount: number } }
+  }
+  assert.equal(data.state.videoId, 'dQw4w9WgXcQ', 'the config still commits after the retry')
+  assert.equal(data.state.playbackRevision, 5, 'one increment on top of the revision the peer advanced')
+  assert.equal(
+    data.telemetry.autoplay.blockedCount,
+    9,
+    'the retry writes only its two owned counters and keeps the peer-committed blockedCount',
+  )
+  assert.equal(record.mutationRevision, 4)
+  assert.equal(storeState.published.length, 1)
+})
+
 void test('session patch accepts YouTube Education watch urls and prefers education player host', async () => {
   const app = createMockApp()
   const ws = createMockWs() as unknown as WsRouter

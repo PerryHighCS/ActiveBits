@@ -1749,8 +1749,8 @@ export default function VideoSyncManager() {
         </div>
       )}
 
-      <div className="absolute bottom-0 left-0 right-0 z-20 px-4 py-2 bg-black/80 border-t border-white/10 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-gray-200" aria-live="polite">
-        <div className="flex items-center gap-2" aria-label="Instructor playback controls">
+      <div className="absolute bottom-0 left-0 right-0 z-20 px-4 py-2 bg-black/80 border-t border-white/10 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-gray-200">
+        <div className="flex items-center gap-2" role="group" aria-label="Instructor playback controls">
           <Button
             disabled={!hasManagerAccess || state.isPlaying}
             onClick={() => requestExplicitPlayback('play')}
@@ -1772,17 +1772,21 @@ export default function VideoSyncManager() {
               step="0.1"
               value={seekPositionInput}
               onChange={(event) => setSeekPositionInput(event.target.value)}
-              aria-label="Seek position in seconds"
+              aria-label="Seek to position in seconds"
             />
           </label>
           <Button disabled={!hasManagerAccess} onClick={requestExplicitSeek}>Seek</Button>
         </div>
-        <span>Video: {state.videoId || 'Not configured'}</span>
-        <span>Host: {formatVideoSyncPlayerHostLabel(state.videoId ? activePlayerHost : null)}</span>
-        <span>Playing: {state.isPlaying ? 'Yes' : 'No'}</span>
-        <span>Position: {displayPosition.toFixed(2)}s</span>
-        <span>Connections: {telemetry.connections.activeCount}</span>
-        <span>Unsynced students: {telemetry.sync.unsyncedStudents}</span>
+        {/* Only the status text is a live region; the interactive controls above
+            must not be re-announced on every heartbeat re-render. */}
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2" aria-live="polite">
+          <span>Video: {state.videoId || 'Not configured'}</span>
+          <span>Host: {formatVideoSyncPlayerHostLabel(state.videoId ? activePlayerHost : null)}</span>
+          <span>Playing: {state.isPlaying ? 'Yes' : 'No'}</span>
+          <span>Position: {displayPosition.toFixed(2)}s</span>
+          <span>Connections: {telemetry.connections.activeCount}</span>
+          <span>Unsynced students: {telemetry.sync.unsyncedStudents}</span>
+        </div>
       </div>
     </div>
   )

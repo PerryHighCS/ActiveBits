@@ -159,6 +159,12 @@ class InMemorySessionStore implements SessionStore {
       lastActivity: Date.now(),
     })
     this.store[id] = replacement
+    // Read-modify-write, like get()/consumeSessionDataToken(): keep an embedded
+    // child's parent alive across atomic updates that never call get().
+    const embeddedParentSessionId = getEmbeddedParentSessionId(replacement)
+    if (embeddedParentSessionId && embeddedParentSessionId !== id) {
+      await this.touch(embeddedParentSessionId)
+    }
     return replacement
   }
 
@@ -360,6 +366,12 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
     if (!updated) return null
     const normalized = normalizeSessionData(toSessionRecord(updated))
     cache.set(id, normalized, false)
+    // Read-modify-write, like getStrict(): refresh an embedded child's parent so
+    // it does not expire under a caller that only ever calls updateAtomic.
+    const embeddedParentSessionId = getEmbeddedParentSessionId(normalized)
+    if (embeddedParentSessionId && embeddedParentSessionId !== id) {
+      await touch(embeddedParentSessionId)
+    }
     return normalized
   }
 

@@ -981,7 +981,9 @@ function normalizeVideoSyncSessionData(session: SessionRecord): {
     state,
     telemetry,
     processedCommandIds: Array.isArray(rawData.processedCommandIds)
-      ? rawData.processedCommandIds.filter((value): value is string => typeof value === 'string').slice(-128)
+      ? rawData.processedCommandIds
+        .filter((value): value is string => typeof value === 'string')
+        .slice(-MAX_PROCESSED_COMMAND_IDS)
       : [],
   }
 
@@ -1768,7 +1770,13 @@ export default function setupVideoSyncRoutes(
         serverTimestampMs: now,
       }
       if (requestedStandaloneMode != null) latestData.standaloneMode = requestedStandaloneMode
-      latestData.telemetry = telemetryProbe
+      // Write only the two connection counters this route recomputed; a CAS
+      // retry re-runs this callback against a fresh draft, and replacing the
+      // whole telemetry object with the pre-mutation `telemetryProbe` clone
+      // would discard fields another writer committed in that window
+      // (`autoplay.blockedCount`, `sync.lastDriftSec`, ...).
+      latestData.telemetry.connections.activeCount = telemetryProbe.connections.activeCount
+      latestData.telemetry.sync.unsyncedStudents = telemetryProbe.sync.unsyncedStudents
       latestData.telemetry.error = { code: null, message: null }
       configured = true
     })

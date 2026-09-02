@@ -29,6 +29,34 @@ void test('in-memory atomic updates increment mutation revision without mutating
   assert.equal(stale?.data.playback, 'paused')
 })
 
+void test('in-memory atomic update refreshes an embedded child session parent', async (t) => {
+  const sessions = createSessionStore(null, 1_000)
+  t.after(async () => { await sessions.close() })
+
+  const parent = await createSession(sessions)
+  const child = await createSession(sessions)
+  child.data = { embeddedParentSessionId: parent.id, playback: 'paused' }
+  await sessions.set(child.id, child)
+
+  const touched: string[] = []
+  const originalTouch = sessions.touch.bind(sessions)
+  sessions.touch = async (id: string) => {
+    touched.push(id)
+    return originalTouch(id)
+  }
+
+  const updated = await sessions.updateAtomic?.(child.id, (draft) => {
+    draft.data = { ...draft.data, playback: 'playing' }
+    return draft
+  })
+
+  assert.equal(updated?.data.playback, 'playing')
+  assert.ok(
+    touched.includes(parent.id),
+    'updateAtomic on an embedded child must touch its parent so the parent does not expire',
+  )
+})
+
 function valkeyStoreForTest(records: Map<string, SessionRecord>, touches: string[], ttlMs = 1_000, gets: string[] = []): ValkeySessionStore {
   return {
     ttlMs,

@@ -74,6 +74,13 @@ test('Video Sync instructor pause stays paused across multiple heartbeat interva
   await expect(managerStatus).toContainText('Playing: No')
   await expect(secondaryStatus).toContainText('Playing: No')
 
+  // Activity-owned seek: the position it commits propagates to every manager via
+  // the same websocket `state` the status bar renders.
+  await page.getByRole('spinbutton', { name: 'Seek to position in seconds' }).fill('30')
+  await page.getByRole('button', { name: 'Seek', exact: true }).click()
+  await expect(page.getByText('Position:')).toContainText('Position: 30.00s')
+  await expect(secondaryManager.getByText('Position:')).toContainText('Position: 30.00s')
+
   const framesAtPause = heartbeatFrames
   // Wait for >= 2 further heartbeat frames (3s cadence): a stale heartbeat frame
   // must not resume playback on the client.
