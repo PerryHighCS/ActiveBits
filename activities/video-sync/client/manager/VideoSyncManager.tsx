@@ -480,6 +480,37 @@ export function isNaturalPlaybackCompletion(params: {
   return params.currentTimeSec >= params.durationSec - NATURAL_END_PROXIMITY_SEC
 }
 
+/**
+ * Whether an `ENDED` player event should be mirrored to the server as a
+ * `natural-ended` pause. Three guards, all required:
+ * - `isNaturalCompletion`: an `ENDED` event whose playhead is at the media end
+ *   (see {@link isNaturalPlaybackCompletion}).
+ * - `endedRevision` (the revision this player was driving, from
+ *   `playerAppliedRevisionRef`) still matches authoritative state.
+ * - the player's *playback generation* has not advanced since it last entered
+ *   PLAYING. `applyStateToPlayer` bumps the generation on every fresh
+ *   `playVideo()`; `onStateChange` records it on each PLAYING transition. A
+ *   delayed `ENDED` from a superseded playback lands after a new `playVideo()`
+ *   (generation bumped) but before the new PLAYING event (recorded generation
+ *   not yet updated), so the two differ and it is rejected - even when `startSec`
+ *   sits inside the 2s end-proximity window and the revision was reused.
+ */
+export function shouldEmitNaturalEndPause(params: {
+  isNaturalCompletion: boolean
+  endedRevision: number
+  authoritativeRevision: number
+  playbackGenerationAtEnd: number
+  playingGeneration: number
+}): boolean {
+  if (!params.isNaturalCompletion) {
+    return false
+  }
+  if (params.endedRevision !== params.authoritativeRevision) {
+    return false
+  }
+  return params.playbackGenerationAtEnd === params.playingGeneration
+}
+
 export default function VideoSyncManager() {
   const { sessionId } = useParams()
   const navigate = useNavigate()
@@ -519,6 +550,13 @@ export default function VideoSyncManager() {
   // player. A delayed `ENDED` event is mirrored with this captured value, not
   // whatever `latestStateRef` holds when the event finally arrives.
   const playerAppliedRevisionRef = useRef(0)
+  // Monotonic count of playbacks issued to this player: `applyStateToPlayer`
+  // bumps it on every fresh `playVideo()`, and `onStateChange` records the value
+  // seen on each PLAYING transition into `playerPlayingGenerationRef`. An `ENDED`
+  // whose generation no longer matches the last PLAYING generation is a delayed
+  // event from a superseded playback and must not become a `natural-ended` pause.
+  const playerPlaybackGenerationRef = useRef(0)
+  const playerPlayingGenerationRef = useRef(0)
   // Set when this player emitted a natural `ENDED`; a subsequent explicit Play
   // then restarts from `startSec` instead of resuming at the (end) position the
   // server projected for the completed playback.
@@ -621,6 +659,8 @@ export default function VideoSyncManager() {
     desiredPlaybackIntentRef.current = null
     desiredPlaybackPositionRef.current = null
     playerAppliedRevisionRef.current = 0
+    playerPlaybackGenerationRef.current = 0
+    playerPlayingGenerationRef.current = 0
     playerEndedRef.current = false
     playbackFlushRetryCountRef.current = 0
     playbackCommandInFlightRef.current = false
@@ -952,6 +992,10 @@ export default function VideoSyncManager() {
 
     if (nextState.isPlaying) {
       if (playerState !== PLAYING) {
+        // A fresh playback: bump the generation so a delayed `ENDED` from the
+        // previous playback (which fires before the player re-enters PLAYING)
+        // is distinguishable from a genuine completion of this one.
+        playerPlaybackGenerationRef.current += 1
         player.playVideo()
       }
 
@@ -1222,6 +1266,8 @@ export default function VideoSyncManager() {
       desiredPlaybackIntentRef.current = null
       desiredPlaybackPositionRef.current = null
       playerAppliedRevisionRef.current = 0
+      playerPlaybackGenerationRef.current = 0
+      playerPlayingGenerationRef.current = 0
       playerEndedRef.current = false
       playbackFlushRetryCountRef.current = 0
       playbackCommandInFlightRef.current = false
@@ -1256,6 +1302,8 @@ export default function VideoSyncManager() {
       desiredPlaybackIntentRef.current = null
       desiredPlaybackPositionRef.current = null
       playerAppliedRevisionRef.current = 0
+      playerPlaybackGenerationRef.current = 0
+      playerPlayingGenerationRef.current = 0
       playerEndedRef.current = false
       playbackFlushRetryCountRef.current = 0
       playbackCommandInFlightRef.current = false
@@ -1368,32 +1416,36 @@ export default function VideoSyncManager() {
               })
 
               // Playback actually started (possibly after a slow buffer that
-              // tripped the autoplay-blocked check) - retire the affordance.
+              // tripped the autoplay-blocked check) - retire the affordance and
+              // record which playback generation is now live so a later ENDED
+              // can be matched to it.
               if (nextIntent === 'play') {
                 clearManagerAutoplayCheckTimer()
                 setAutoplayBlocked(false)
+                playerPlayingGenerationRef.current = playerPlaybackGenerationRef.current
               }
 
               // The iframe is a projection, never an authority. Only the
               // activity-owned controls below create play/pause/seek commands.
               // Natural completion is the exception, and the server accepts it
               // from any authorized manager at the current playback revision.
-              if (isNaturalCompletion) {
+              const endedRevision = playerAppliedRevisionRef.current
+              if (shouldEmitNaturalEndPause({
+                isNaturalCompletion,
+                endedRevision,
+                authoritativeRevision: latestStateRef.current.playbackRevision ?? 0,
+                playbackGenerationAtEnd: playerPlaybackGenerationRef.current,
+                playingGeneration: playerPlayingGenerationRef.current,
+              })) {
                 playerEndedRef.current = true
-                // Mirror with the revision this player was actually driving, not
-                // whatever landed in `latestStateRef` while the ENDED was in
-                // flight. If a newer authoritative revision has since been
-                // applied, this ENDED is for an outdated playback - drop it and
-                // let the heartbeat reconcile.
-                const endedRevision = playerAppliedRevisionRef.current
-                if (endedRevision === (latestStateRef.current.playbackRevision ?? 0)) {
-                  void sendCommandRef.current('pause', {
-                    positionSec: event.target.getCurrentTime(),
-                    reportErrors: false,
-                    source: 'natural-ended',
-                    expectedPlaybackRevision: endedRevision,
-                  })
-                }
+                void sendCommandRef.current('pause', {
+                  positionSec: event.target.getCurrentTime(),
+                  reportErrors: false,
+                  source: 'natural-ended',
+                  // Mirror the revision this player was actually driving, not
+                  // whatever `latestStateRef` holds now.
+                  expectedPlaybackRevision: endedRevision,
+                })
               }
             },
             onError: () => {
@@ -1431,6 +1483,8 @@ export default function VideoSyncManager() {
       desiredPlaybackIntentRef.current = null
       desiredPlaybackPositionRef.current = null
       playerAppliedRevisionRef.current = 0
+      playerPlaybackGenerationRef.current = 0
+      playerPlayingGenerationRef.current = 0
       playerEndedRef.current = false
       playbackFlushRetryCountRef.current = 0
       playbackCommandInFlightRef.current = false

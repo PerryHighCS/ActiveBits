@@ -3113,6 +3113,7 @@ void test('embedded manager capability exchange does not mint a capability into 
 
   const handler = app.handlers.get['/api/syncdeck/embedded-manager-capability']
   const response = createResponse()
+  console.info('[TEST] Expected embedded-manager-capability 404: the id was reused by a different activity before the atomic write.')
   await handler?.(
     createRequest({}, undefined, {}, {}, { sessionId: 'child-capability', token: 'capability-entry-token' }),
     response,

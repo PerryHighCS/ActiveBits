@@ -2207,6 +2207,8 @@ void test('config route abandons the error-telemetry write when the session id i
   // The validation failure is still reported to the caller, but the
   // error-telemetry persist against the recreated incarnation is abandoned.
   assert.equal(swapped, true, 'the id-reuse hook must have fired')
+  assert.equal(res.statusCode, 400)
+  assert.equal((res.body as { error?: string }).error, 'INVALID_SOURCE_URL')
   const replacementTelemetry = storeState.store.s1?.data as { telemetry: { error: { code: string | null } } }
   assert.equal(replacementTelemetry.telemetry.error.code, null, 'no error written into the replacement session')
   assert.equal(storeState.store.s1?.mutationRevision, 5, 'the abandoned error persist did not bump the revision or extend the TTL')
@@ -3579,7 +3581,7 @@ void test('heartbeat stops and closes subscribers when the backing session disap
   }
 })
 
-void test('heartbeat tears down instead of broadcasting a stale frame when its atomic persist finds the id gone', { concurrency: false }, async () => {
+void test('heartbeat tears down instead of broadcasting a frame for a session id recreated as a new incarnation', { concurrency: false }, async () => {
   const originalSetInterval = globalThis.setInterval
   const originalClearInterval = globalThis.clearInterval
   const heartbeatState: { callback: (() => void) | null } = { callback: null }
@@ -3600,9 +3602,11 @@ void test('heartbeat tears down instead of broadcasting a stale frame when its a
 
     // A live session whose playhead is past stopSec, so every heartbeat wants to
     // persist the stop transition and therefore calls
-    // `updateVideoSyncSessionAtomic`. Admission succeeds; the id is then gone
-    // (deleted / recreated as a new incarnation) by the time the heartbeat's
-    // compare-and-set runs, so that call returns null.
+    // `updateVideoSyncSessionAtomic`. Admission succeeds; the id is then
+    // recreated as a *fresh video-sync incarnation* (same type, new `created`)
+    // by the time the heartbeat's compare-and-set runs, so the
+    // `{ expectedCreated }` guard - not just a null store result - drives the
+    // teardown.
     const liveSession = createVideoSyncSession('s1')
     ;(liveSession.data as { state: Record<string, unknown> }).state = {
       ...(liveSession.data as { state: Record<string, unknown> }).state,
@@ -3613,6 +3617,7 @@ void test('heartbeat tears down instead of broadcasting a stale frame when its a
       isPlaying: true,
       serverTimestampMs: 1_000,
     }
+    const authorizedCreated = liveSession.created
 
     let casGone = false
     const published: Array<{ channel: string; message: Record<string, unknown> }> = []
@@ -3621,7 +3626,14 @@ void test('heartbeat tears down instead of broadcasting a stale frame when its a
       async getStrict() { return cloneSessionRecord(liveSession) },
       async set() {},
       async updateAtomic(_id: string, mutate: (session: SessionRecord) => SessionRecord) {
-        if (casGone) return null
+        if (casGone) {
+          const replacement = createVideoSyncSession('s1')
+          replacement.created = authorizedCreated + 10_000
+          // The atomic wrapper rejects the drafted incarnation (its `created`
+          // no longer matches `expectedCreated`) and throws; the helper maps
+          // that to a null result.
+          return mutate(cloneSessionRecord(replacement))
+        }
         const draft = cloneSessionRecord(liveSession)
         return mutate(draft)
       },

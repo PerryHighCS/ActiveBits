@@ -50,9 +50,12 @@ void test('ValkeySessionStore compareAndSet commits and advances the revision on
   assert.deepEqual((updated?.data as Record<string, unknown>), { a: 'new-a', b: 'new-b' })
   assert.equal((JSON.parse(backing.get('session:s1') as string) as { mutationRevision: number }).mutationRevision, 8)
   assert.match(scripts[0] ?? '', /currentRevision ~= tonumber\(ARGV\[1\]\)/)
-  // The script must SET the replacement verbatim, never cjson.decode/encode it.
+  // The script must SET the replacement verbatim, never re-encode a table:
+  // Redis Lua `cjson` turns an empty array `[]` into `{}`, so any
+  // `cjson.encode(...)` on `current`/`session`/`replacement` would corrupt
+  // fields like `processedCommandIds: []`.
   assert.match(scripts[0] ?? '', /redis\.call\('SET', key, ARGV\[2\]/)
-  assert.doesNotMatch(scripts[0] ?? '', /cjson\.encode\(replacement\)/)
+  assert.doesNotMatch(scripts[0] ?? '', /cjson\.encode\s*\(/)
 })
 
 void test('ValkeySessionStore compareAndSet preserves empty arrays across an atomic write', async () => {

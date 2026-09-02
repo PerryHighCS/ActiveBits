@@ -1342,12 +1342,13 @@ function ensureHeartbeat(
                 playbackRevision: latestData.state.playbackRevision + 1,
               }
             }
-          })
+          }, { expectedCreated: session.created })
           if (!committed) {
-            // The session was deleted or is no longer `video-sync` between the
-            // strict read and this mutation. Do not broadcast the pre-mutation
-            // snapshot with a fresh heartbeat timestamp - a client would accept
-            // that ended incarnation's state. Tear the heartbeat down instead.
+            // The session was deleted, is no longer `video-sync`, or was
+            // recreated as a different incarnation between the strict read and
+            // this mutation. Do not broadcast state with a fresh heartbeat
+            // timestamp - a subscriber admitted against the ended incarnation
+            // would accept it. Tear the heartbeat down instead.
             closeSubscribersForMissingSession(sessionId)
             stopHeartbeat(sessionId)
             return

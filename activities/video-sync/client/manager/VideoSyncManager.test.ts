@@ -10,6 +10,7 @@ import {
     DEFAULT_MANAGER_ACCESS_RETRY_AFTER_MS,
     isManagerAuthorizationClose,
     isNaturalPlaybackCompletion,
+    shouldEmitNaturalEndPause,
     isRetryableManagerAccessStatus,
     parseManagerAccessRetryAfterMs,
     readBootstrapSourceUrl,
@@ -593,6 +594,36 @@ void test('isNaturalPlaybackCompletion only trusts an ENDED event whose playhead
     isNaturalPlaybackCompletion({ isEndedEvent: true, currentTimeSec: 0, durationSec: 0 }),
     true,
     'with an unknown duration the ENDED event is trusted so a real completion is never dropped',
+  )
+})
+
+void test('shouldEmitNaturalEndPause requires a completion, a matching revision, and an unchanged playback generation', () => {
+  const base = {
+    isNaturalCompletion: true,
+    endedRevision: 4,
+    authoritativeRevision: 4,
+    playbackGenerationAtEnd: 2,
+    playingGeneration: 2,
+  }
+  assert.equal(shouldEmitNaturalEndPause(base), true, 'all three guards satisfied -> emit')
+  assert.equal(
+    shouldEmitNaturalEndPause({ ...base, isNaturalCompletion: false }),
+    false,
+    'not an end-of-media ENDED -> never emit',
+  )
+  assert.equal(
+    shouldEmitNaturalEndPause({ ...base, authoritativeRevision: 5 }),
+    false,
+    'a superseded revision -> reject',
+  )
+  assert.equal(
+    // A delayed ENDED from an earlier playback: applyStateToPlayer bumped the
+    // generation for the replay (startSec sits in the 2s end window, so the
+    // proximity check passes and the revision was reused), but onStateChange has
+    // not recorded the new PLAYING generation yet.
+    shouldEmitNaturalEndPause({ ...base, playbackGenerationAtEnd: 3, playingGeneration: 2 }),
+    false,
+    'playback generation advanced since the last PLAYING -> reject the stale ENDED',
   )
 })
 

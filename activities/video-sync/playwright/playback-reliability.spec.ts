@@ -87,6 +87,7 @@ test('Video Sync instructor pause stays paused across multiple heartbeat interva
   await page.getByRole('button', { name: 'Play', exact: true }).click()
   await page.getByRole('button', { name: 'Seek', exact: true }).click()
   await expect(page.getByText('Position:')).toContainText('Position: 45.00s')
+  await expect(secondaryManager.getByText('Position:')).toContainText('Position: 45.00s')
   await expect(managerStatus).toContainText('Playing: No')
   await expect(secondaryStatus).toContainText('Playing: No')
 
