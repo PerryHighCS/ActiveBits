@@ -644,6 +644,20 @@ export default function VideoSyncManager() {
     // `state.stopSec` via their own effect once `state` resets above.
     setSourceUrlInput('')
     setErrorMessage(null)
+    // Drop any playback command the previous session queued: a 120 ms flush
+    // timer that fires after navigation would otherwise POST session A's
+    // intent/position to session B (the refreshed flush callback and
+    // `sendCommand` now both carry B's id). Cleared directly here rather than
+    // waiting on the `setupMode` player-teardown cascade, which lands a render
+    // later.
+    desiredPlaybackIntentRef.current = null
+    desiredPlaybackPositionRef.current = null
+    playbackFlushRetryCountRef.current = 0
+    playbackCommandInFlightRef.current = false
+    if (playbackCommandFlushTimerRef.current != null) {
+      window.clearTimeout(playbackCommandFlushTimerRef.current)
+      playbackCommandFlushTimerRef.current = null
+    }
   }, [sessionId])
 
   useEffect(() => {
@@ -1615,6 +1629,13 @@ export default function VideoSyncManager() {
         bootstrapSourceUrl,
         saveConfig: async (sourceUrl) => saveConfigWithValues(sourceUrl, false, ''),
       })
+      // A route swap while this bootstrap PATCH was pending: `saveConfig`
+      // returned `false` because it was stale, not because it failed. Don't
+      // stamp the new session's auto-start as `failed` and block its own
+      // auto-configure.
+      if (sessionIdRef.current !== sessionId) {
+        return
+      }
       setAutoStartStatus(ok ? 'idle' : 'failed')
     })()
   }, [

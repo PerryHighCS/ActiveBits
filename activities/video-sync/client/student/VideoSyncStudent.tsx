@@ -705,6 +705,12 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
     setIsStandaloneSession(resetState.isStandaloneSession)
     setIsSessionModeResolved(resetState.isSessionModeResolved)
     setErrorMessage(resetState.errorMessage)
+    // This component is reused across a parameter-only route swap. Reset the
+    // incoming-state baseline so `reduceVideoSyncStudentIncomingState` compares
+    // the new session's snapshot/frames against DEFAULT_STATE, not the previous
+    // session's (whose newer `serverTimestampMs` + non-empty `videoId` would
+    // otherwise make every B frame fail the freshness guard).
+    setState(DEFAULT_STATE)
   }, [sessionId])
 
   useEffect(() => {

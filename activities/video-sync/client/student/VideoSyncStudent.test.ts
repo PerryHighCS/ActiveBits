@@ -60,6 +60,37 @@ void test('student rejects a stale heartbeat that would resume playback after a 
   assert.equal(reduceVideoSyncStudentIncomingState(applied, freshPlay), freshPlay)
 })
 
+void test('after a session swap resets state, an older-timestamp new-session frame is accepted', () => {
+  // The `[sessionId]` effect resets `state` to DEFAULT_STATE (empty videoId).
+  // The new session's snapshot must then apply even if its serverTimestampMs is
+  // older than the previous session's, because the empty baseline is the
+  // bootstrap case.
+  const previousSessionApplied: VideoSyncState = {
+    ...BASE_STATE,
+    videoId: 'oldsessionAAA',
+    isPlaying: true,
+    updatedBy: 'instructor',
+    serverTimestampMs: 90_000,
+  }
+  const newSessionOlderFrame: VideoSyncState = {
+    ...BASE_STATE,
+    videoId: 'newsessionBBB',
+    isPlaying: false,
+    updatedBy: 'instructor',
+    serverTimestampMs: 20_000,
+  }
+  // Without the reset, the older frame would be rejected against session A.
+  assert.equal(
+    reduceVideoSyncStudentIncomingState(previousSessionApplied, newSessionOlderFrame),
+    previousSessionApplied,
+  )
+  // With the reset (current === DEFAULT_STATE, empty videoId), it applies.
+  assert.equal(
+    reduceVideoSyncStudentIncomingState(BASE_STATE, newSessionOlderFrame),
+    newSessionOlderFrame,
+  )
+})
+
 void test('hasInstructorPlaybackStarted is false without configured video', () => {
   assert.equal(hasInstructorPlaybackStarted(BASE_STATE), false)
 })
