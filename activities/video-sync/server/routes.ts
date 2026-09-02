@@ -183,6 +183,9 @@ const MAX_TELEMETRY_ERROR_CODE_LENGTH = 64
 const MAX_TELEMETRY_ERROR_MESSAGE_LENGTH = 256
 const MAX_COMMAND_ID_LENGTH = 128
 const MAX_PROCESSED_COMMAND_IDS = 128
+// Slack allowed between a client-reported natural-end position and a configured
+// `stopSec` before the completion is treated as implausible (buffering jitter).
+const NATURAL_END_TOLERANCE_SEC = 2
 const YOUTUBE_VIDEO_ID_PATTERN = /^[A-Za-z0-9_-]{11}$/
 const INVALID_SOURCE_URL_MESSAGE =
   'Only YouTube watch/embed, YouTube Education watch/embed, and youtu.be URLs are supported in v1.'
@@ -1900,12 +1903,31 @@ export default function setupVideoSyncRoutes(
         return
       }
 
-      if (
-        naturalCompletion &&
-        (managerId == null || data.state.controllerId !== managerId || expectedPlaybackRevision !== data.state.playbackRevision)
-      ) {
-        accepted = false
-        return
+      if (naturalCompletion) {
+        // A natural end is accepted from any manager that holds a capability
+        // (the request already passed `hasManagerAuthority`) as long as it
+        // names the current playback revision. Binding it to `controllerId` -
+        // a per-page id - permanently stranded playback as `isPlaying: true`
+        // once the manager that issued Play reloaded, closed, or was
+        // autoplay-blocked and only another manager's player reached the media
+        // end; without a configured `stopSec` the server has no other end
+        // detector. The revision match rejects a stale ENDED from a superseded
+        // playback; the position check rejects an implausible early end.
+        const reportedEndSec = typeof body.positionSec === 'number' && Number.isFinite(body.positionSec)
+          ? clampSeconds(body.positionSec)
+          : null
+        const endIsPlausible = reportedEndSec != null &&
+          reportedEndSec >= data.state.startSec &&
+          (data.state.stopSec == null || reportedEndSec >= data.state.stopSec - NATURAL_END_TOLERANCE_SEC)
+        if (
+          managerId == null ||
+          expectedPlaybackRevision == null ||
+          expectedPlaybackRevision !== data.state.playbackRevision ||
+          !endIsPlausible
+        ) {
+          accepted = false
+          return
+        }
       }
 
       const now = Date.now()

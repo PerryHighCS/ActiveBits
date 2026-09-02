@@ -1342,12 +1342,12 @@ export default function VideoSyncManager() {
               })
               // Natural completion must reach the server or the session stays
               // `isPlaying: true` and heartbeats drive an end-of-video replay
-              // loop. The server accepts it only from the manager that owns the
-              // current playback revision. Require the playhead to be at the
-              // media end too: a delayed `ENDED` from an earlier playback that
-              // lands after this same manager restarted the video near
-              // `startSec` would otherwise pass the revision guard and cancel
-              // the new play.
+              // loop. The server accepts it from any authorized manager whose
+              // command names the current playback revision. Require the
+              // playhead to be at the media end too: a delayed `ENDED` from an
+              // earlier playback that lands after this same manager restarted
+              // the video near `startSec` would otherwise pass the revision
+              // guard and cancel the new play.
               const isNaturalCompletion = isNaturalPlaybackCompletion({
                 isEndedEvent: event.data === states.ENDED,
                 currentTimeSec: event.target.getCurrentTime(),
@@ -1364,7 +1364,7 @@ export default function VideoSyncManager() {
               // The iframe is a projection, never an authority. Only the
               // activity-owned controls below create play/pause/seek commands.
               // Natural completion is the exception, and the server accepts it
-              // only from the manager that owns the current playback revision.
+              // from any authorized manager at the current playback revision.
               if (isNaturalCompletion) {
                 playerEndedRef.current = true
                 // Mirror with the revision this player was actually driving, not

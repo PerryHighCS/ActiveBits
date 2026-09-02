@@ -1792,7 +1792,11 @@ void test('command route de-duplicates a retried command id without advancing pl
   assert.equal(storeState.published.length, 1)
 })
 
-void test('natural completion cannot pause playback owned by another manager or an advanced revision', async () => {
+void test('natural completion from a non-owner manager at the current revision pauses playback', async () => {
+  // The manager that issued Play reloaded / closed / was autoplay-blocked, so
+  // only another manager's player reaches the media end. Its natural-ended
+  // pause must still land - otherwise, with no stopSec, playback is stranded as
+  // isPlaying:true forever.
   const app = createMockApp()
   const ws = createMockWs() as unknown as WsRouter
   const storeState = createSessionStore(
@@ -1807,6 +1811,9 @@ void test('natural completion cannot pause playback owned by another manager or 
     params: { sessionId: 's1' },
     body: { type: 'play', commandId: 'manager-a:1', managerId: 'manager-a' },
   }, createResponse())
+  const revisionAfterPlay = (storeState.store.s1?.data as { state: { playbackRevision: number } }).state.playbackRevision
+
+  const res = createResponse()
   await handler?.({
     params: { sessionId: 's1' },
     body: {
@@ -1814,13 +1821,57 @@ void test('natural completion cannot pause playback owned by another manager or 
       commandId: 'manager-b:ended',
       managerId: 'manager-b',
       source: 'natural-ended',
-      expectedPlaybackRevision: 1,
+      expectedPlaybackRevision: revisionAfterPlay,
+      positionSec: 240,
     },
-  }, createResponse())
+  }, res)
 
+  assert.equal(res.statusCode, 200)
+  const state = (storeState.store.s1?.data as {
+    state: { isPlaying: boolean; playbackRevision: number; controllerId: string }
+  }).state
+  assert.equal(state.isPlaying, false, 'a non-owner natural end at the current revision paused playback')
+  assert.equal(state.playbackRevision, revisionAfterPlay + 1)
+  assert.equal(state.controllerId, 'manager-b')
+  assert.equal(storeState.published.length, 2, 'play + natural-ended pause both broadcast')
+})
+
+void test('natural completion is rejected when its reported position is before startSec', async () => {
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  const session = createVideoSyncSession('s1')
+  ;(session.data as { state: { startSec: number } }).state.startSec = 30
+  const storeState = createSessionStore(
+    { s1: session },
+    { valkeyStore: createMockVideoSyncValkeyStore() },
+  )
+  setupVideoSyncRoutes(app, storeState.sessions, ws)
+  const handler = app.handlers.post['/api/video-sync/:sessionId/command']
+  assert.equal(typeof handler, 'function')
+
+  await handler?.({
+    params: { sessionId: 's1' },
+    body: { type: 'play', commandId: 'manager-a:1', managerId: 'manager-a' },
+  }, createResponse())
+  const revisionAfterPlay = (storeState.store.s1?.data as { state: { playbackRevision: number } }).state.playbackRevision
+
+  const res = createResponse()
+  await handler?.({
+    params: { sessionId: 's1' },
+    body: {
+      type: 'pause',
+      commandId: 'manager-a:ended',
+      managerId: 'manager-a',
+      source: 'natural-ended',
+      expectedPlaybackRevision: revisionAfterPlay,
+      positionSec: 5,
+    },
+  }, res)
+
+  assert.equal(res.statusCode, 200)
   const state = (storeState.store.s1?.data as { state: { isPlaying: boolean; playbackRevision: number } }).state
-  assert.equal(state.isPlaying, true)
-  assert.equal(state.playbackRevision, 1)
+  assert.equal(state.isPlaying, true, 'an implausible early end position is not treated as a completion')
+  assert.equal(state.playbackRevision, revisionAfterPlay)
   assert.equal(storeState.published.length, 1)
 })
 
@@ -1850,6 +1901,7 @@ void test('natural completion from the owning manager at the current revision pa
       managerId: 'manager-a',
       source: 'natural-ended',
       expectedPlaybackRevision: revisionAfterPlay,
+      positionSec: 240,
     },
   }, res)
 
@@ -1899,6 +1951,7 @@ void test('natural completion from the owning manager at a superseded revision i
       managerId: 'manager-a',
       source: 'natural-ended',
       expectedPlaybackRevision: supersededRevision,
+      positionSec: 240,
     },
   }, res)
 
