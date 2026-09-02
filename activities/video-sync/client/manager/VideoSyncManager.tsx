@@ -562,6 +562,12 @@ export default function VideoSyncManager() {
   // buffering) has no recent activation and must not be mirrored as a command.
   const lastUserActivationAtRef = useRef(0)
   const playbackCommandInFlightRef = useRef(false)
+  // Monotonic id issued to each `flushManagerPlaybackIntent` send, and the id
+  // currently permitted to mutate the shared flush refs. A session swap or a
+  // superseding flush moves ownership; a stale completion checks it before
+  // touching `playbackCommandInFlightRef` / the intent refs.
+  const playbackFlushTokenSeqRef = useRef(0)
+  const playbackFlushOwnerRef = useRef(0)
   const playbackCommandFlushTimerRef = useRef<number | null>(null)
   const managerAutoplayCheckTimerRef = useRef<number | null>(null)
   const suppressPlayerEventsRef = useRef(false)
@@ -654,6 +660,9 @@ export default function VideoSyncManager() {
     desiredPlaybackPositionRef.current = null
     playbackFlushRetryCountRef.current = 0
     playbackCommandInFlightRef.current = false
+    // Orphan any in-flight flush from the previous session: when it resolves it
+    // will see it no longer owns the token and touch nothing.
+    playbackFlushOwnerRef.current = 0
     if (playbackCommandFlushTimerRef.current != null) {
       window.clearTimeout(playbackCommandFlushTimerRef.current)
       playbackCommandFlushTimerRef.current = null
@@ -836,16 +845,27 @@ export default function VideoSyncManager() {
     const sentIntent = desiredIntent
     const sentPosition = desiredPlaybackPositionRef.current
 
+    // Claim ownership of the shared flush refs with a unique token. A session
+    // swap (or another flush) resets the owner; a completion that no longer
+    // owns the token must not touch `playbackCommandInFlightRef` or the intent
+    // refs, because a newer flush - possibly for a different session - now holds
+    // them.
+    const flushToken = (playbackFlushTokenSeqRef.current += 1)
+    playbackFlushOwnerRef.current = flushToken
     playbackCommandInFlightRef.current = true
     const result = await sendCommand(sentIntent, {
       positionSec: sentPosition ?? undefined,
       reportErrors: false,
     })
+    if (playbackFlushOwnerRef.current !== flushToken) {
+      return
+    }
+    playbackFlushOwnerRef.current = 0
     playbackCommandInFlightRef.current = false
 
-    // A newer instructor gesture (or a session swap) may have taken ownership of
-    // the shared desired-intent refs while this request was in flight. If so,
-    // never clear them here - just make sure the newer intent gets flushed.
+    // A newer instructor gesture may have taken ownership of the shared
+    // desired-intent refs while this request was in flight. If so, never clear
+    // them here - just make sure the newer intent gets flushed.
     const supersededByNewerIntent =
       desiredPlaybackIntentRef.current !== sentIntent ||
       desiredPlaybackPositionRef.current !== sentPosition
@@ -1191,6 +1211,7 @@ export default function VideoSyncManager() {
       programmaticPlaybackTargetRef.current = null
       playbackFlushRetryCountRef.current = 0
       playbackCommandInFlightRef.current = false
+      playbackFlushOwnerRef.current = 0
       clearPlaybackCommandFlushTimer()
       clearManagerAutoplayCheckTimer()
       setAutoplayBlocked(false)
@@ -1224,6 +1245,7 @@ export default function VideoSyncManager() {
       programmaticPlaybackTargetRef.current = null
       playbackFlushRetryCountRef.current = 0
       playbackCommandInFlightRef.current = false
+      playbackFlushOwnerRef.current = 0
       clearPlaybackCommandFlushTimer()
       clearManagerAutoplayCheckTimer()
       setAutoplayBlocked(false)
@@ -1413,6 +1435,7 @@ export default function VideoSyncManager() {
       programmaticPlaybackTargetRef.current = null
       playbackFlushRetryCountRef.current = 0
       playbackCommandInFlightRef.current = false
+      playbackFlushOwnerRef.current = 0
       clearPlaybackCommandFlushTimer()
       clearManagerAutoplayCheckTimer()
       setAutoplayBlocked(false)
