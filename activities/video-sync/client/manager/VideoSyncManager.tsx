@@ -344,20 +344,6 @@ export function getManagerPlaybackIntentForStateChange(params: {
 }
 
 /**
- * The next value of the programmatic playback target after an `onStateChange`
- * event. The target absorbs exactly one echo of the transition
- * `applyStateToPlayer` requested: once any play-state event has been seen
- * (`nextIntent != null`) it is cleared, so a later same-direction instructor
- * click inside the same suppression window is not also swallowed as an echo.
- */
-export function consumeProgrammaticPlaybackTarget(params: {
-  nextIntent: 'play' | 'pause' | null
-  programmaticTarget: 'play' | 'pause' | null
-}): 'play' | 'pause' | null {
-  return params.nextIntent == null ? params.programmaticTarget : null
-}
-
-/**
  * Bounded retry decision for a playback command that failed to send (a transient
  * 401/403 while the manager capability is mid-refresh). Retries up to
  * `MAX_MANAGER_PLAYBACK_FLUSH_RETRIES`, then gives up and resets the counter.
@@ -489,10 +475,6 @@ export default function VideoSyncManager() {
   const managerInstanceIdRef = useRef(createManagerPlaybackCommandId())
   const desiredPlaybackIntentRef = useRef<'play' | 'pause' | null>(null)
   const desiredPlaybackPositionRef = useRef<number | null>(null)
-  // The play/pause transition `applyStateToPlayer` last requested. Used to tell a
-  // programmatic `onStateChange` echo apart from a real instructor gesture made
-  // inside the suppression window.
-  const programmaticPlaybackTargetRef = useRef<'play' | 'pause' | null>(null)
   const playbackFlushRetryCountRef = useRef(0)
   const playbackCommandInFlightRef = useRef(false)
   // Monotonic id issued to each `flushManagerPlaybackIntent` send, and the id
@@ -902,11 +884,6 @@ export default function VideoSyncManager() {
     const { PLAYING } = resolveYoutubePlayerState(youtubeRef.current)
     const playerState = player.getPlayerState()
 
-    // Record the transition being requested so `onStateChange` can drop only its
-    // own programmatic echo while still capturing an opposing instructor gesture
-    // that lands inside the suppression window.
-    programmaticPlaybackTargetRef.current = nextState.isPlaying ? 'play' : 'pause'
-
     if (nextState.isPlaying) {
       if (playerState !== PLAYING) {
         player.playVideo()
@@ -1168,7 +1145,6 @@ export default function VideoSyncManager() {
       loadedVideoIdRef.current = null
       desiredPlaybackIntentRef.current = null
       desiredPlaybackPositionRef.current = null
-      programmaticPlaybackTargetRef.current = null
       playbackFlushRetryCountRef.current = 0
       playbackCommandInFlightRef.current = false
       playbackFlushOwnerRef.current = 0
@@ -1201,7 +1177,6 @@ export default function VideoSyncManager() {
       loadedVideoIdRef.current = null
       desiredPlaybackIntentRef.current = null
       desiredPlaybackPositionRef.current = null
-      programmaticPlaybackTargetRef.current = null
       playbackFlushRetryCountRef.current = 0
       playbackCommandInFlightRef.current = false
       playbackFlushOwnerRef.current = 0
@@ -1302,11 +1277,6 @@ export default function VideoSyncManager() {
                 setAutoplayBlocked(false)
               }
 
-              programmaticPlaybackTargetRef.current = consumeProgrammaticPlaybackTarget({
-                nextIntent,
-                programmaticTarget: programmaticPlaybackTargetRef.current,
-              })
-
               // The iframe is a projection, never an authority. Only the
               // activity-owned controls below create play/pause/seek commands.
               // Natural completion is the exception, and the server accepts it
@@ -1354,7 +1324,6 @@ export default function VideoSyncManager() {
       loadedVideoIdRef.current = null
       desiredPlaybackIntentRef.current = null
       desiredPlaybackPositionRef.current = null
-      programmaticPlaybackTargetRef.current = null
       playbackFlushRetryCountRef.current = 0
       playbackCommandInFlightRef.current = false
       playbackFlushOwnerRef.current = 0

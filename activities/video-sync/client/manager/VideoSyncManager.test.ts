@@ -13,7 +13,6 @@ import {
     parseManagerAccessRetryAfterMs,
     readBootstrapSourceUrl,
     readEmbeddedBootstrapSourceUrl,
-    consumeProgrammaticPlaybackTarget,
     nextManagerPlaybackFlushRetry,
     readRecoveredPersistentSourceUrl,
     resolveManagerPlaybackFlushOutcome,
@@ -411,12 +410,6 @@ void test('shouldApplyManagerStateUpdate ignores empty late updates after a vide
     ),
     true,
   )
-})
-
-void test('consumeProgrammaticPlaybackTarget keeps the target until a play-state event is seen', () => {
-  assert.equal(consumeProgrammaticPlaybackTarget({ nextIntent: null, programmaticTarget: 'play' }), 'play')
-  assert.equal(consumeProgrammaticPlaybackTarget({ nextIntent: 'play', programmaticTarget: 'play' }), null)
-  assert.equal(consumeProgrammaticPlaybackTarget({ nextIntent: 'pause', programmaticTarget: 'play' }), null)
 })
 
 void test('nextManagerPlaybackFlushRetry retries a failed send to a bound then gives up', () => {
