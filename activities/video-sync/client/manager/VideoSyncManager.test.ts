@@ -15,6 +15,7 @@ import {
     readEmbeddedBootstrapSourceUrl,
     nextManagerPlaybackFlushRetry,
     readRecoveredPersistentSourceUrl,
+    resolveExplicitPlaybackPositionSec,
     resolveManagerPlaybackFlushOutcome,
     resolveManagerSeekRequest,
     sanitizeManagerApiErrorMessage,
@@ -551,6 +552,24 @@ void test('resolveManagerSeekRequest accepts a finite position and rejects empty
   assert.equal(resolveManagerSeekRequest('abc').ok, false)
   assert.equal(resolveManagerSeekRequest('Infinity').ok, false)
   assert.equal(resolveManagerSeekRequest('NaN').ok, false)
+})
+
+void test('resolveExplicitPlaybackPositionSec restarts from startSec only for Play after a natural end', () => {
+  assert.equal(
+    resolveExplicitPlaybackPositionSec({ intent: 'play', playerEnded: true, startSec: 42 }),
+    42,
+    'Play after ENDED replays from startSec',
+  )
+  assert.equal(
+    resolveExplicitPlaybackPositionSec({ intent: 'play', playerEnded: false, startSec: 42 }),
+    null,
+    'an ordinary Play acts at the server-projected position',
+  )
+  assert.equal(
+    resolveExplicitPlaybackPositionSec({ intent: 'pause', playerEnded: true, startSec: 42 }),
+    null,
+    'Pause never carries a position, even after an end',
+  )
 })
 
 void test('parseManagerStopTimeInput rejects invalid stop values before saving config', () => {

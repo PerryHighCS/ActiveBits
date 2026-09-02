@@ -1920,8 +1920,8 @@ void test('command route atomic path accumulates the playback revision across se
   assert.equal(storeState.published.length, 2)
 })
 
-void test('command route abandons the atomic write when the session id is reused for another activity mid-flush', async () => {
-  console.info('[TEST] video-sync command: the session id is swapped to a non-video-sync record mid-flush; the handler is expected to answer 404 without committing a write')
+void test('command route abandons the atomic write when the session id is deleted and recreated mid-flush', async () => {
+  console.info('[TEST] video-sync command: the session id is recreated as a fresh video-sync session mid-flush; the handler is expected to answer 404 without committing a write')
   const app = createMockApp()
   const ws = createMockWs() as unknown as WsRouter
   let swapped = false
@@ -1931,17 +1931,18 @@ void test('command route abandons the atomic write when the session id is reused
       valkeyStore: createMockVideoSyncValkeyStore(),
       atomic: true,
       onAtomicAttempt: (attempt, store) => {
-        // After the first attempt's mutate ran against the video-sync draft,
-        // the id is reused for a syncdeck session and the revision advances, so
-        // the retry's callback sees a non-video-sync record.
+        // After the first attempt's mutate ran against the authorized
+        // incarnation, the id is deleted and recreated as a *different*
+        // video-sync session (fresh `created`), so the retry's callback sees a
+        // record the caller was never authorized against.
         if (attempt !== 0 || swapped) return
         const record = store.s1
         if (!record) return
         swapped = true
-        store.s1 = {
-          id: 's1', type: 'syncdeck', created: record.created,
-          lastActivity: Date.now(), mutationRevision: 5, data: {},
-        }
+        const replacement = createVideoSyncSession('s1')
+        replacement.created = record.created + 10_000
+        replacement.mutationRevision = 5
+        store.s1 = replacement
       },
     },
   )
@@ -1956,9 +1957,9 @@ void test('command route abandons the atomic write when the session id is reused
 
   assert.equal(swapped, true, 'the id-reuse hook must have fired')
   assert.equal(res.statusCode, 404)
-  const record = storeState.store.s1 as SessionRecord
-  assert.equal(record.type, 'syncdeck', 'the reused record is untouched')
-  assert.equal(record.mutationRevision, 5, 'the abandoned atomic attempt did not bump the revision or extend the TTL')
+  const record = storeState.store.s1?.data as { state: { isPlaying: boolean } }
+  assert.equal(record.state.isPlaying, false, 'the replacement session was not mutated')
+  assert.equal(storeState.store.s1?.mutationRevision, 5, 'the abandoned atomic attempt did not bump the revision or extend the TTL')
   assert.equal(storeState.published.length, 0, 'no broadcast for the abandoned command')
 })
 

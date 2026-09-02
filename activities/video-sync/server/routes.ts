@@ -1116,31 +1116,37 @@ async function getVideoSyncSessionWithNormalization(
   }
 }
 
-// Thrown inside the `updateAtomic` callback when the stored record is not a
-// video-sync session, so the compare-and-set is abandoned rather than committing
-// a no-op write that bumps `mutationRevision` and extends the TTL of a
-// wrong-type / reused session id.
-class NotVideoSyncSessionError extends Error {}
+// Thrown inside the `updateAtomic` callback when the stored record is not the
+// video-sync session incarnation the caller authorized (wrong `type`, or a
+// deleted-then-recreated id with a different `created`), so the compare-and-set
+// is abandoned rather than committing a no-op write that bumps
+// `mutationRevision` and extends the TTL of a foreign session.
+class WrongVideoSyncIncarnationError extends Error {}
 
 async function updateVideoSyncSessionAtomic(
   sessions: VideoSyncSessionStore,
   sessionId: string,
   mutate: (session: VideoSyncSession, data: VideoSyncSessionData) => void,
+  options: { expectedCreated?: number } = {},
 ): Promise<{ session: VideoSyncSession; data: VideoSyncSessionData } | null> {
+  const { expectedCreated } = options
+  const isAuthorizedIncarnation = (record: { type?: unknown; created?: unknown }): boolean =>
+    record.type === 'video-sync' && (expectedCreated == null || record.created === expectedCreated)
+
   if (typeof sessions.updateAtomic === 'function') {
     let updated: SessionRecord | null
     try {
       updated = await sessions.updateAtomic(sessionId, (draft) => {
-        if (draft.type !== 'video-sync') throw new NotVideoSyncSessionError()
+        if (!isAuthorizedIncarnation(draft)) throw new WrongVideoSyncIncarnationError()
         const data = ensureVideoSyncSessionData(draft)
         mutate(draft as VideoSyncSession, data)
         return draft
       })
     } catch (error) {
-      if (error instanceof NotVideoSyncSessionError) return null
+      if (error instanceof WrongVideoSyncIncarnationError) return null
       throw error
     }
-    if (!updated || updated.type !== 'video-sync') return null
+    if (!updated || !isAuthorizedIncarnation(updated)) return null
     return {
       session: updated as VideoSyncSession,
       data: ensureVideoSyncSessionData(updated),
@@ -1150,7 +1156,7 @@ async function updateVideoSyncSessionAtomic(
   // Test/minimal store compatibility. Production stores expose updateAtomic;
   // the existing per-process queue still serializes this fallback.
   const session = await getVideoSyncSession(sessions, sessionId, { strict: true })
-  if (!session || session.type !== 'video-sync') return null
+  if (!session || !isAuthorizedIncarnation(session)) return null
   const data = ensureVideoSyncSessionData(session)
   mutate(session, data)
   await sessions.set(session.id, session)
@@ -1560,7 +1566,7 @@ export default function setupVideoSyncRoutes(
           const committed = await updateVideoSyncSessionAtomic(sessions, sessionId, (freshSession) => {
             const capability = issueActivityCapability(freshSession, 'manager')
             capabilityToken = capability.token
-          })
+          }, { expectedCreated: session.created })
           if (!committed || capabilityToken == null) {
             return 'session-missing'
           }
@@ -1650,7 +1656,7 @@ export default function setupVideoSyncRoutes(
             playbackRevision: latestData.state.playbackRevision + 1,
           }
         }
-      })
+      }, { expectedCreated: session.created })
       if (committed) {
         responseState = applyStopIfReached(committed.data.state)
         responseTelemetry = committed.data.telemetry
@@ -1791,7 +1797,7 @@ export default function setupVideoSyncRoutes(
       latestData.telemetry.sync.unsyncedStudents = telemetryProbe.sync.unsyncedStudents
       latestData.telemetry.error = { code: null, message: null }
       configured = true
-    })
+    }, { expectedCreated: session.created })
     if (!committed) {
       res.status(404).json({ error: 'NOT_FOUND', message: 'Session not found' })
       return
@@ -1916,7 +1922,7 @@ export default function setupVideoSyncRoutes(
       if (commandId != null) {
         data.processedCommandIds = [...data.processedCommandIds, commandId].slice(-MAX_PROCESSED_COMMAND_IDS)
       }
-    })
+    }, { expectedCreated: session.created })
     if (!committed) {
       res.status(404).json({ error: 'NOT_FOUND', message: 'Session not found' })
       return

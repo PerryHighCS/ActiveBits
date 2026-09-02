@@ -440,6 +440,22 @@ export function resolveManagerSeekRequest(
   return { ok: true, positionSec }
 }
 
+/**
+ * The `positionSec` an explicit Play/Pause command should carry. Normally
+ * `null` - play/pause acts at the server-projected authoritative position so a
+ * lagging manager cannot rewind the class. The exception is Play after this
+ * player emitted a natural `ENDED`: the server's projected position is the end
+ * of the completed playback, so a plain Play would immediately re-pause (with
+ * `stopSec`) or project past the video (without it). Restart from `startSec`.
+ */
+export function resolveExplicitPlaybackPositionSec(params: {
+  intent: 'play' | 'pause'
+  playerEnded: boolean
+  startSec: number
+}): number | null {
+  return params.intent === 'play' && params.playerEnded ? params.startSec : null
+}
+
 export default function VideoSyncManager() {
   const { sessionId } = useParams()
   const navigate = useNavigate()
@@ -475,6 +491,14 @@ export default function VideoSyncManager() {
   const managerInstanceIdRef = useRef(createManagerPlaybackCommandId())
   const desiredPlaybackIntentRef = useRef<'play' | 'pause' | null>(null)
   const desiredPlaybackPositionRef = useRef<number | null>(null)
+  // The `playbackRevision` of the authoritative state last handed to this
+  // player. A delayed `ENDED` event is mirrored with this captured value, not
+  // whatever `latestStateRef` holds when the event finally arrives.
+  const playerAppliedRevisionRef = useRef(0)
+  // Set when this player emitted a natural `ENDED`; a subsequent explicit Play
+  // then restarts from `startSec` instead of resuming at the (end) position the
+  // server projected for the completed playback.
+  const playerEndedRef = useRef(false)
   const playbackFlushRetryCountRef = useRef(0)
   const playbackCommandInFlightRef = useRef(false)
   // Monotonic id issued to each `flushManagerPlaybackIntent` send, and the id
@@ -571,6 +595,8 @@ export default function VideoSyncManager() {
     // later.
     desiredPlaybackIntentRef.current = null
     desiredPlaybackPositionRef.current = null
+    playerAppliedRevisionRef.current = 0
+    playerEndedRef.current = false
     playbackFlushRetryCountRef.current = 0
     playbackCommandInFlightRef.current = false
     // Orphan any in-flight flush from the previous session: when it resolves it
@@ -865,6 +891,10 @@ export default function VideoSyncManager() {
     }
 
     setErrorMessage((current) => clearManagerPlayerLoadError(current))
+    playerAppliedRevisionRef.current = nextState.playbackRevision ?? 0
+    if (nextState.isPlaying) {
+      playerEndedRef.current = false
+    }
     const desiredPositionSec = computeDesiredPositionSec(nextState)
 
     if (loadedVideoIdRef.current !== nextState.videoId) {
@@ -926,8 +956,14 @@ export default function VideoSyncManager() {
     desiredPlaybackIntentRef.current = intent
     // Play/pause acts at the server-projected authoritative position. Position
     // changes are a separate explicit seek, so a lagging manager cannot rewind
-    // the class merely by pressing pause.
-    desiredPlaybackPositionRef.current = null
+    // the class merely by pressing pause. The one exception: Play after a
+    // natural end restarts from `startSec`, otherwise the server would resume at
+    // the (end) position it projected for the completed playback.
+    desiredPlaybackPositionRef.current = resolveExplicitPlaybackPositionSec({
+      intent,
+      playerEnded: playerEndedRef.current,
+      startSec: latestStateRef.current.startSec,
+    })
     scheduleManagerPlaybackIntentFlush(0)
   }, [scheduleManagerPlaybackIntentFlush])
 
@@ -1145,6 +1181,8 @@ export default function VideoSyncManager() {
       loadedVideoIdRef.current = null
       desiredPlaybackIntentRef.current = null
       desiredPlaybackPositionRef.current = null
+      playerAppliedRevisionRef.current = 0
+      playerEndedRef.current = false
       playbackFlushRetryCountRef.current = 0
       playbackCommandInFlightRef.current = false
       playbackFlushOwnerRef.current = 0
@@ -1177,6 +1215,8 @@ export default function VideoSyncManager() {
       loadedVideoIdRef.current = null
       desiredPlaybackIntentRef.current = null
       desiredPlaybackPositionRef.current = null
+      playerAppliedRevisionRef.current = 0
+      playerEndedRef.current = false
       playbackFlushRetryCountRef.current = 0
       playbackCommandInFlightRef.current = false
       playbackFlushOwnerRef.current = 0
@@ -1291,12 +1331,21 @@ export default function VideoSyncManager() {
               // Natural completion is the exception, and the server accepts it
               // only from the manager that owns the current playback revision.
               if (isNaturalCompletion) {
-                void sendCommandRef.current('pause', {
-                  positionSec: event.target.getCurrentTime(),
-                  reportErrors: false,
-                  source: 'natural-ended',
-                  expectedPlaybackRevision: latestStateRef.current.playbackRevision ?? 0,
-                })
+                playerEndedRef.current = true
+                // Mirror with the revision this player was actually driving, not
+                // whatever landed in `latestStateRef` while the ENDED was in
+                // flight. If a newer authoritative revision has since been
+                // applied, this ENDED is for an outdated playback - drop it and
+                // let the heartbeat reconcile.
+                const endedRevision = playerAppliedRevisionRef.current
+                if (endedRevision === (latestStateRef.current.playbackRevision ?? 0)) {
+                  void sendCommandRef.current('pause', {
+                    positionSec: event.target.getCurrentTime(),
+                    reportErrors: false,
+                    source: 'natural-ended',
+                    expectedPlaybackRevision: endedRevision,
+                  })
+                }
               }
             },
             onError: () => {
@@ -1333,6 +1382,8 @@ export default function VideoSyncManager() {
       loadedVideoIdRef.current = null
       desiredPlaybackIntentRef.current = null
       desiredPlaybackPositionRef.current = null
+      playerAppliedRevisionRef.current = 0
+      playerEndedRef.current = false
       playbackFlushRetryCountRef.current = 0
       playbackCommandInFlightRef.current = false
       playbackFlushOwnerRef.current = 0
