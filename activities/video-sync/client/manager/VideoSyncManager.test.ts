@@ -9,6 +9,7 @@ import {
     parseManagerStopTimeInput,
     DEFAULT_MANAGER_ACCESS_RETRY_AFTER_MS,
     isManagerAuthorizationClose,
+    isNaturalPlaybackCompletion,
     isRetryableManagerAccessStatus,
     parseManagerAccessRetryAfterMs,
     readBootstrapSourceUrl,
@@ -569,6 +570,29 @@ void test('resolveExplicitPlaybackPositionSec restarts from startSec only for Pl
     resolveExplicitPlaybackPositionSec({ intent: 'pause', playerEnded: true, startSec: 42 }),
     null,
     'Pause never carries a position, even after an end',
+  )
+})
+
+void test('isNaturalPlaybackCompletion only trusts an ENDED event whose playhead is at the media end', () => {
+  assert.equal(
+    isNaturalPlaybackCompletion({ isEndedEvent: false, currentTimeSec: 600, durationSec: 600 }),
+    false,
+    'a non-ENDED event is never a completion',
+  )
+  assert.equal(
+    isNaturalPlaybackCompletion({ isEndedEvent: true, currentTimeSec: 599.4, durationSec: 600 }),
+    true,
+    'an ENDED at the end (within the proximity window) is a real completion',
+  )
+  assert.equal(
+    isNaturalPlaybackCompletion({ isEndedEvent: true, currentTimeSec: 5, durationSec: 600 }),
+    false,
+    'a delayed ENDED that lands after a restart near startSec is rejected',
+  )
+  assert.equal(
+    isNaturalPlaybackCompletion({ isEndedEvent: true, currentTimeSec: 0, durationSec: 0 }),
+    true,
+    'with an unknown duration the ENDED event is trusted so a real completion is never dropped',
   )
 })
 

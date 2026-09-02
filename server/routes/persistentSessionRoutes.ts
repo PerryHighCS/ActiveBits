@@ -119,6 +119,29 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
 
+/**
+ * A manager capability is authorized against one specific live-session
+ * incarnation (the `activeSession` read when the teacher code / persistent
+ * credential was checked). If that id is deleted and recreated - even as the
+ * same activity type - during the store/rate-limit/cookie awaits or a CAS
+ * retry, the mutation must not be applied to the replacement. Bind to the
+ * authorized `type` and, when available, its `created` timestamp.
+ */
+function isAuthorizedSessionIncarnation(
+  record: unknown,
+  expectedType: string,
+  expectedCreated: number | null,
+): record is Record<string, unknown> {
+  if (!isPlainObject(record) || record.type !== expectedType) {
+    return false
+  }
+  return expectedCreated == null || record.created === expectedCreated
+}
+
+function readSessionCreated(record: Record<string, unknown>): number | null {
+  return typeof record.created === 'number' ? record.created : null
+}
+
 function getQueryString(value: unknown): string | null {
   if (typeof value === 'string') {
     return value
@@ -892,8 +915,12 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
       // strict read so a transient store outage rejects into the retryable 500
       // below instead of `sessions.get()` mapping it to `null` -> a terminal
       // 404 the client would stop retrying.
+      // The teacher code was verified while `activeSession` was live; bind the
+      // capability to that same incarnation so a delete+recreate of this id
+      // (even as the same activity) in the awaits above cannot inherit it.
+      const authorizedCreated = readSessionCreated(activeSession)
       const freshSession = await getSessionStrict(sessionId)
-      if (!isPlainObject(freshSession) || freshSession.type !== activityName) {
+      if (!isAuthorizedSessionIncarnation(freshSession, activityName, authorizedCreated)) {
         res.status(404).json({ error: 'Teacher join is unavailable for this session' })
         return
       }
@@ -901,14 +928,15 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
       if (sessions.updateAtomic) {
         const updated = await sessions.updateAtomic(sessionId, (draft) => {
           // Reset per invocation: updateAtomic re-runs this on a CAS retry, and
-          // a retry that early-returns on a type mismatch must not leave a stale
-          // token from an earlier attempt.
+          // a retry that early-returns on a type/incarnation mismatch must not
+          // leave a stale token from an earlier attempt.
           capabilityToken = null
-          if (draft.type !== activityName) return draft
+          if (!isAuthorizedSessionIncarnation(draft, activityName, authorizedCreated)) return draft
           capabilityToken = issueActivityCapability(draft as { data: unknown }, 'manager').token
           return draft
         })
-        if (updated == null || capabilityToken == null || (updated as { type?: unknown }).type !== activityName) {
+        if (updated == null || capabilityToken == null
+          || !isAuthorizedSessionIncarnation(updated, activityName, authorizedCreated)) {
           res.status(404).json({ error: 'Teacher join is unavailable for this session' })
           return
         }
@@ -1056,31 +1084,30 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
       // record so a concurrent activity update in that window is not lost when
       // the whole-session snapshot is written back.
       const freshSession = await getSessionStrict(sessionId)
-      if (!isPlainObject(freshSession)) {
-        res.status(404).json({ error: 'Active session not found' })
-        return
-      }
-      // The persistent authorization was established for `activeSession.type`.
-      // If the session ended and its id was reused for a different activity
-      // during the awaits above, do not issue a manager capability into the
-      // replacement.
-      if (freshSession.type !== activeSession.type) {
+      // The persistent authorization was established against this `activeSession`
+      // incarnation. If the session ended and its id was reused during the
+      // awaits above - for a different activity, or even the same activity - do
+      // not issue a manager capability into the replacement. Bind to the
+      // authorized `type` and its `created` timestamp.
+      const expectedType = activeSession.type
+      const authorizedCreated = readSessionCreated(activeSession)
+      if (!isAuthorizedSessionIncarnation(freshSession, expectedType, authorizedCreated)) {
         res.status(404).json({ error: 'Active session not found' })
         return
       }
       let capabilityToken: string | null = null
       if (sessions.updateAtomic) {
-        const expectedType = activeSession.type
         const updated = await sessions.updateAtomic(sessionId, (draft) => {
           // Reset per invocation: updateAtomic re-runs this on a CAS retry, and
-          // a retry that early-returns on a type mismatch must not leave a stale
-          // token from an earlier attempt.
+          // a retry that early-returns on a type/incarnation mismatch must not
+          // leave a stale token from an earlier attempt.
           capabilityToken = null
-          if (draft.type !== expectedType) return draft
+          if (!isAuthorizedSessionIncarnation(draft, expectedType, authorizedCreated)) return draft
           capabilityToken = issueActivityCapability(draft as { data: unknown }, 'manager').token
           return draft
         })
-        if (updated == null || capabilityToken == null || (updated as { type?: unknown }).type !== expectedType) {
+        if (updated == null || capabilityToken == null
+          || !isAuthorizedSessionIncarnation(updated, expectedType, authorizedCreated)) {
           res.status(404).json({ error: 'Active session not found' })
           return
         }

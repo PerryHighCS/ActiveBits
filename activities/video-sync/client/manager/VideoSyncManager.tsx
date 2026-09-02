@@ -456,6 +456,30 @@ export function resolveExplicitPlaybackPositionSec(params: {
   return params.intent === 'play' && params.playerEnded ? params.startSec : null
 }
 
+/**
+ * Whether an `ENDED` player event is a genuine end-of-media completion for the
+ * playback this manager is currently driving - not a delayed `ENDED` from an
+ * earlier playback that lands after the same manager has already restarted the
+ * video at (or near) `startSec`. A real completion leaves the playhead within a
+ * couple of seconds of the media end; a stale one fires while the playhead is
+ * back near the start. When the duration is not yet known (0 / non-finite),
+ * fall back to trusting the event so a real completion is never dropped.
+ */
+export function isNaturalPlaybackCompletion(params: {
+  isEndedEvent: boolean
+  currentTimeSec: number
+  durationSec: number
+}): boolean {
+  if (!params.isEndedEvent) {
+    return false
+  }
+  if (!Number.isFinite(params.durationSec) || params.durationSec <= 0) {
+    return true
+  }
+  const NATURAL_END_PROXIMITY_SEC = 2
+  return params.currentTimeSec >= params.durationSec - NATURAL_END_PROXIMITY_SEC
+}
+
 export default function VideoSyncManager() {
   const { sessionId } = useParams()
   const navigate = useNavigate()
@@ -1316,8 +1340,16 @@ export default function VideoSyncManager() {
               // Natural completion must reach the server or the session stays
               // `isPlaying: true` and heartbeats drive an end-of-video replay
               // loop. The server accepts it only from the manager that owns the
-              // current playback revision.
-              const isNaturalCompletion = event.data === states.ENDED
+              // current playback revision. Require the playhead to be at the
+              // media end too: a delayed `ENDED` from an earlier playback that
+              // lands after this same manager restarted the video near
+              // `startSec` would otherwise pass the revision guard and cancel
+              // the new play.
+              const isNaturalCompletion = isNaturalPlaybackCompletion({
+                isEndedEvent: event.data === states.ENDED,
+                currentTimeSec: event.target.getCurrentTime(),
+                durationSec: event.target.getDuration?.() ?? 0,
+              })
 
               // Playback actually started (possibly after a slow buffer that
               // tripped the autoplay-blocked check) - retire the affordance.
