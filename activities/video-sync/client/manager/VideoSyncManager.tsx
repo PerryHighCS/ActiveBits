@@ -511,6 +511,21 @@ export function shouldEmitNaturalEndPause(params: {
   return params.playbackGenerationAtEnd === params.playingGeneration
 }
 
+/**
+ * Whether a deferred `natural-ended` pause is still worth (re)sending. The
+ * bounded auth-retry keeps trying until this returns false: it is abandoned once
+ * a newer gesture clears `playerEndedRef`, or once authoritative playback moves
+ * past the revision this player was driving - in both cases the server no longer
+ * needs the pause and a late send would name a stale revision.
+ */
+export function shouldSendNaturalEndPause(params: {
+  playerEnded: boolean
+  endedRevision: number
+  authoritativeRevision: number
+}): boolean {
+  return params.playerEnded && params.endedRevision === params.authoritativeRevision
+}
+
 export default function VideoSyncManager() {
   const { sessionId } = useParams()
   const navigate = useNavigate()
@@ -570,6 +585,13 @@ export default function VideoSyncManager() {
   const playbackFlushTokenSeqRef = useRef(0)
   const playbackFlushOwnerRef = useRef(0)
   const playbackCommandFlushTimerRef = useRef<number | null>(null)
+  // Bounded auth-retry for the `natural-ended` pause. That command is emitted
+  // outside the instructor-gesture flush queue (a player event, not a control
+  // click), so it carries its own retry state: a transient 401/403 while the
+  // manager capability is mid-refresh would otherwise drop it and leave the
+  // ended video as `isPlaying: true` for heartbeats to replay.
+  const naturalEndFlushTimerRef = useRef<number | null>(null)
+  const naturalEndRetryCountRef = useRef(0)
   const managerAutoplayCheckTimerRef = useRef<number | null>(null)
   const autoStartAttemptKeyRef = useRef<string | null>(null)
   const managerAccessBootstrapRefreshAttemptsRef = useRef<Map<string, number>>(new Map())
@@ -663,6 +685,7 @@ export default function VideoSyncManager() {
     playerPlayingGenerationRef.current = 0
     playerEndedRef.current = false
     playbackFlushRetryCountRef.current = 0
+    naturalEndRetryCountRef.current = 0
     playbackCommandInFlightRef.current = false
     // Orphan any in-flight flush from the previous session: when it resolves it
     // will see it no longer owns the token and touch nothing.
@@ -670,6 +693,10 @@ export default function VideoSyncManager() {
     if (playbackCommandFlushTimerRef.current != null) {
       window.clearTimeout(playbackCommandFlushTimerRef.current)
       playbackCommandFlushTimerRef.current = null
+    }
+    if (naturalEndFlushTimerRef.current != null) {
+      window.clearTimeout(naturalEndFlushTimerRef.current)
+      naturalEndFlushTimerRef.current = null
     }
   }, [sessionId])
 
@@ -695,6 +722,13 @@ export default function VideoSyncManager() {
     if (playbackCommandFlushTimerRef.current != null) {
       window.clearTimeout(playbackCommandFlushTimerRef.current)
       playbackCommandFlushTimerRef.current = null
+    }
+  }, [])
+
+  const clearNaturalEndFlushTimer = useCallback(() => {
+    if (naturalEndFlushTimerRef.current != null) {
+      window.clearTimeout(naturalEndFlushTimerRef.current)
+      naturalEndFlushTimerRef.current = null
     }
   }, [])
 
@@ -819,6 +853,53 @@ export default function VideoSyncManager() {
   useEffect(() => {
     sendCommandRef.current = sendCommand
   }, [sendCommand])
+
+  // Emits the `natural-ended` pause with a bounded auth-retry. `sendCommand`
+  // returns `retryableAuth` for a transient 401/403; `resolveManagerPlaybackFlushOutcome`
+  // maps that to a bounded retry (shared with the instructor-gesture queue), and
+  // any other failure is dropped for the next heartbeat/state update to
+  // reconcile. Re-entrant via `emitNaturalEndPauseRef` so a scheduled retry runs
+  // the latest closure (a fresh `sendCommand` after access recovered).
+  const emitNaturalEndPauseRef = useRef<(params: { endedRevision: number; positionSec: number }) => void>(() => {})
+  const emitNaturalEndPause = useCallback(async (params: {
+    endedRevision: number
+    positionSec: number
+  }): Promise<void> => {
+    clearNaturalEndFlushTimer()
+    if (!shouldSendNaturalEndPause({
+      playerEnded: playerEndedRef.current,
+      endedRevision: params.endedRevision,
+      authoritativeRevision: latestStateRef.current.playbackRevision ?? 0,
+    })) {
+      naturalEndRetryCountRef.current = 0
+      return
+    }
+
+    const result = await sendCommandRef.current('pause', {
+      positionSec: params.positionSec,
+      reportErrors: false,
+      source: 'natural-ended',
+      // Mirror the revision this player was actually driving, not whatever
+      // `latestStateRef` holds now.
+      expectedPlaybackRevision: params.endedRevision,
+    })
+    const outcome = resolveManagerPlaybackFlushOutcome({
+      result,
+      currentRetryCount: naturalEndRetryCountRef.current,
+    })
+    naturalEndRetryCountRef.current = outcome.nextRetryCount
+    if (outcome.action === 'retry') {
+      naturalEndFlushTimerRef.current = window.setTimeout(() => {
+        emitNaturalEndPauseRef.current(params)
+      }, MANAGER_PLAYBACK_COMMAND_RETRY_DELAY_MS)
+    }
+  }, [clearNaturalEndFlushTimer])
+
+  useEffect(() => {
+    emitNaturalEndPauseRef.current = (params) => {
+      void emitNaturalEndPause(params)
+    }
+  }, [emitNaturalEndPause])
 
   // `flushManagerPlaybackIntent` re-schedules itself (a bounded transient-failure
   // retry, and a follow-up flush when a newer gesture landed mid-send). Those
@@ -1272,7 +1353,9 @@ export default function VideoSyncManager() {
       playbackFlushRetryCountRef.current = 0
       playbackCommandInFlightRef.current = false
       playbackFlushOwnerRef.current = 0
+      naturalEndRetryCountRef.current = 0
       clearPlaybackCommandFlushTimer()
+      clearNaturalEndFlushTimer()
       clearManagerAutoplayCheckTimer()
       setAutoplayBlocked(false)
       playerRef.current?.destroy()
@@ -1308,7 +1391,9 @@ export default function VideoSyncManager() {
       playbackFlushRetryCountRef.current = 0
       playbackCommandInFlightRef.current = false
       playbackFlushOwnerRef.current = 0
+      naturalEndRetryCountRef.current = 0
       clearPlaybackCommandFlushTimer()
+      clearNaturalEndFlushTimer()
       clearManagerAutoplayCheckTimer()
       setAutoplayBlocked(false)
       player.destroy()
@@ -1438,13 +1523,13 @@ export default function VideoSyncManager() {
                 playingGeneration: playerPlayingGenerationRef.current,
               })) {
                 playerEndedRef.current = true
-                void sendCommandRef.current('pause', {
+                naturalEndRetryCountRef.current = 0
+                // Routed through a bounded auth-retry so a transient 401/403
+                // (capability mid-refresh) does not silently drop the pause and
+                // leave the ended video as `isPlaying: true`.
+                emitNaturalEndPauseRef.current({
+                  endedRevision,
                   positionSec: event.target.getCurrentTime(),
-                  reportErrors: false,
-                  source: 'natural-ended',
-                  // Mirror the revision this player was actually driving, not
-                  // whatever `latestStateRef` holds now.
-                  expectedPlaybackRevision: endedRevision,
                 })
               }
             },
@@ -1489,7 +1574,9 @@ export default function VideoSyncManager() {
       playbackFlushRetryCountRef.current = 0
       playbackCommandInFlightRef.current = false
       playbackFlushOwnerRef.current = 0
+      naturalEndRetryCountRef.current = 0
       clearPlaybackCommandFlushTimer()
+      clearNaturalEndFlushTimer()
       clearManagerAutoplayCheckTimer()
       setAutoplayBlocked(false)
       playerRef.current?.destroy()
@@ -1499,6 +1586,7 @@ export default function VideoSyncManager() {
   }, [
     applyStateToPlayer,
     clearManagerAutoplayCheckTimer,
+    clearNaturalEndFlushTimer,
     clearPlaybackCommandFlushTimer,
     scheduleManagerPlaybackIntentFlush,
     setupMode,

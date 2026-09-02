@@ -11,6 +11,7 @@ import {
     isManagerAuthorizationClose,
     isNaturalPlaybackCompletion,
     shouldEmitNaturalEndPause,
+    shouldSendNaturalEndPause,
     isRetryableManagerAccessStatus,
     parseManagerAccessRetryAfterMs,
     readBootstrapSourceUrl,
@@ -624,6 +625,24 @@ void test('shouldEmitNaturalEndPause requires a completion, a matching revision,
     shouldEmitNaturalEndPause({ ...base, playbackGenerationAtEnd: 3, playingGeneration: 2 }),
     false,
     'playback generation advanced since the last PLAYING -> reject the stale ENDED',
+  )
+})
+
+void test('shouldSendNaturalEndPause keeps the bounded auth-retry alive only while the pause still matters', () => {
+  assert.equal(
+    shouldSendNaturalEndPause({ playerEnded: true, endedRevision: 7, authoritativeRevision: 7 }),
+    true,
+    'ended, revision unchanged -> the deferred pause should (re)send',
+  )
+  assert.equal(
+    shouldSendNaturalEndPause({ playerEnded: false, endedRevision: 7, authoritativeRevision: 7 }),
+    false,
+    'a newer gesture cleared the ended flag -> abandon the retry',
+  )
+  assert.equal(
+    shouldSendNaturalEndPause({ playerEnded: true, endedRevision: 7, authoritativeRevision: 8 }),
+    false,
+    'authoritative playback advanced past the ended revision -> abandon the retry',
   )
 })
 

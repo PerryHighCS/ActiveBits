@@ -385,6 +385,7 @@ void test('session teacher authenticate does not issue a cookie when an updateAt
   await startPersistentSession(hash, 'live-session', { id: 'teacher-ws', readyState: 1, send() {} })
 
   const res = createMockRes()
+  console.info('[TEST] Expected teacher-authenticate 404 + incarnation-mismatch log: the id was reused for a different activity during the updateAtomic retry.')
   await handler(createMockReq({ params: { sessionId: 'live-session' }, body: { teacherCode } }), res)
 
   assert.equal(res.statusCode, 404)
@@ -801,6 +802,7 @@ void test('persistent manager capability recovery via updateAtomic does not issu
   await startPersistentSession(hash, 'live-session', { id: 'teacher-ws', readyState: 1, send() {} })
 
   const res = createMockRes()
+  console.info('[TEST] Expected persistent-manager-capability 404 + incarnation-mismatch log: the id was reused for a different activity type before the CAS write.')
   await handler(createMockReq({
     params: { sessionId: 'live-session' },
     cookies: { persistent_sessions: buildCookieValue(activityName, hash, teacherCode) },

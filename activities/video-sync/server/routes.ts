@@ -1650,6 +1650,11 @@ export default function setupVideoSyncRoutes(
       sessionId,
     )
 
+    // Everything the public payload is built from. When a commit happens these
+    // are replaced wholesale with the committed record, so a field a concurrent
+    // config PATCH changed (e.g. `standaloneMode`) is not served stale from the
+    // pre-persist snapshot.
+    let responseData: VideoSyncSessionData = data
     let responseState = projectedState
     let responseTelemetry = projectedTelemetry
 
@@ -1676,6 +1681,7 @@ export default function setupVideoSyncRoutes(
         res.status(404).json({ error: 'NOT_FOUND', message: 'Session not found' })
         return
       }
+      responseData = committed.data
       responseState = applyStopIfReached(committed.data.state)
       responseTelemetry = committed.data.telemetry
     }
@@ -1684,7 +1690,7 @@ export default function setupVideoSyncRoutes(
       id: session.id,
       type: session.type,
       data: toPublicSessionData({
-        ...data,
+        ...responseData,
         state: responseState,
         telemetry: responseTelemetry,
       }),

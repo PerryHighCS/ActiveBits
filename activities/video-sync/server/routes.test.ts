@@ -883,6 +883,65 @@ void test('session get route returns projected playback without persisting ordin
   }
 })
 
+void test('session get route serves the committed record, not the pre-persist snapshot, after a concurrent config commit', async () => {
+  const originalDateNow = Date.now
+  Date.now = () => 30_000
+
+  try {
+    const app = createMockApp()
+    const ws = createMockWs() as unknown as WsRouter
+    const session = createVideoSyncSession('s1')
+    ;(session.data as { standaloneMode: boolean }).standaloneMode = false
+    ;(session.data as { state: Record<string, unknown> }).state = {
+      provider: 'youtube',
+      playerHost: 'youtube-nocookie',
+      videoId: 'dQw4w9WgXcQ',
+      startSec: 0,
+      stopSec: 6,
+      positionSec: 5,
+      isPlaying: true,
+      playbackRate: 1,
+      updatedBy: 'instructor',
+      controllerId: null,
+      playbackRevision: 3,
+      serverTimestampMs: 10_000,
+    }
+    const storeState = createSessionStore({ s1: session })
+
+    let strictGetCalls = 0
+    const sessions = {
+      ...storeState.sessions,
+      async getStrict(id: string) {
+        strictGetCalls += 1
+        const record = await storeState.sessions.get(id)
+        if (record && strictGetCalls >= 2) {
+          // A config PATCH from another instance flipped standaloneMode between
+          // this route's snapshot read and its stop/telemetry persist.
+          ;(record.data as { standaloneMode: boolean }).standaloneMode = true
+          storeState.store.s1 = record
+        }
+        return record
+      },
+    }
+
+    setupVideoSyncRoutes(app, sessions, ws)
+    const handler = app.handlers.get['/api/video-sync/:sessionId/session']
+    assert.equal(typeof handler, 'function')
+
+    const res = createResponse()
+    await handler?.({ params: { sessionId: 's1' } }, res)
+
+    assert.equal(res.statusCode, 200)
+    const payload = res.body as { data?: { standaloneMode?: boolean } }
+    // The public payload must be built from the committed record: a field a
+    // concurrent config commit changed cannot be served stale.
+    assert.equal(payload.data?.standaloneMode, true)
+    assert.ok(strictGetCalls >= 2)
+  } finally {
+    Date.now = originalDateNow
+  }
+})
+
 void test('session get route persists the session when projected playback reaches stopSec', async () => {
   const originalDateNow = Date.now
   const nowMs = 12_000
