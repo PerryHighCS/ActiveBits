@@ -638,6 +638,12 @@ export default function VideoSyncManager() {
     setState(DEFAULT_STATE)
     setTelemetry(EMPTY_TELEMETRY)
     setSetupMode(true)
+    // Also clear the setup-form inputs and any stale banner, so navigating from
+    // a configured session to an unconfigured one does not show (and Save) the
+    // previous session's URL / stop time. `stopSecInput` + `hasStopTime` follow
+    // `state.stopSec` via their own effect once `state` resets above.
+    setSourceUrlInput('')
+    setErrorMessage(null)
   }, [sessionId])
 
   useEffect(() => {
@@ -727,10 +733,15 @@ export default function VideoSyncManager() {
 
       if (!response.ok) {
         const isAuthFailure = response.status === 401 || response.status === 403
+        const failure = (await response.json().catch(() => ({}))) as { message?: string }
+        // Re-check after the body parse too: a route swap during that await must
+        // not land this session's error banner or trigger its revalidate.
+        if (sessionIdRef.current !== sessionId) {
+          return { ok: false, retryableAuth: false }
+        }
         if (isAuthFailure) {
           revalidateManagerAccess()
         }
-        const failure = (await response.json().catch(() => ({}))) as { message?: string }
         const message = sanitizeManagerApiErrorMessage(failure.message, 'Failed to send command')
         if (options?.reportErrors === false) {
           console.error('Video sync command failed:', message)
@@ -808,12 +819,28 @@ export default function VideoSyncManager() {
       return
     }
 
+    const sentIntent = desiredIntent
+    const sentPosition = desiredPlaybackPositionRef.current
+
     playbackCommandInFlightRef.current = true
-    const result = await sendCommand(desiredIntent, {
-      positionSec: desiredPlaybackPositionRef.current ?? undefined,
+    const result = await sendCommand(sentIntent, {
+      positionSec: sentPosition ?? undefined,
       reportErrors: false,
     })
     playbackCommandInFlightRef.current = false
+
+    // A newer instructor gesture (or a session swap) may have taken ownership of
+    // the shared desired-intent refs while this request was in flight. If so,
+    // never clear them here - just make sure the newer intent gets flushed.
+    const supersededByNewerIntent =
+      desiredPlaybackIntentRef.current !== sentIntent ||
+      desiredPlaybackPositionRef.current !== sentPosition
+    const scheduleFollowUpFlush = () => {
+      clearPlaybackCommandFlushTimer()
+      playbackCommandFlushTimerRef.current = window.setTimeout(() => {
+        flushManagerPlaybackIntentRef.current()
+      }, MANAGER_PLAYBACK_COMMAND_FLUSH_DELAY_MS)
+    }
 
     if (!result.ok) {
       const outcome = resolveManagerPlaybackFlushOutcome({
@@ -821,7 +848,7 @@ export default function VideoSyncManager() {
         currentRetryCount: playbackFlushRetryCountRef.current,
       })
       playbackFlushRetryCountRef.current = outcome.nextRetryCount
-      if (outcome.action === 'retry') {
+      if (outcome.action === 'retry' && !supersededByNewerIntent) {
         // A confirmed 401/403 has already triggered `revalidateManagerAccess()`;
         // a short bounded retry lets the restored capability carry the gesture
         // through instead of silently dropping it.
@@ -829,6 +856,10 @@ export default function VideoSyncManager() {
         playbackCommandFlushTimerRef.current = window.setTimeout(() => {
           flushManagerPlaybackIntentRef.current()
         }, MANAGER_PLAYBACK_COMMAND_RETRY_DELAY_MS)
+        return
+      }
+      if (supersededByNewerIntent) {
+        scheduleFollowUpFlush()
         return
       }
       // 'drop': a permanent failure, an ambiguous network/parse error (the
@@ -845,15 +876,16 @@ export default function VideoSyncManager() {
 
     const nextDesiredIntent = desiredPlaybackIntentRef.current
     const nextAuthoritativeIsPlaying = latestStateRef.current.isPlaying
-    if (nextDesiredIntent == null || (nextDesiredIntent === 'play') === nextAuthoritativeIsPlaying) {
+    if (
+      !supersededByNewerIntent &&
+      (nextDesiredIntent == null || (nextDesiredIntent === 'play') === nextAuthoritativeIsPlaying)
+    ) {
       desiredPlaybackIntentRef.current = null
       desiredPlaybackPositionRef.current = null
       return
     }
 
-    playbackCommandFlushTimerRef.current = window.setTimeout(() => {
-      flushManagerPlaybackIntentRef.current()
-    }, MANAGER_PLAYBACK_COMMAND_FLUSH_DELAY_MS)
+    scheduleFollowUpFlush()
   }, [clearPlaybackCommandFlushTimer, sendCommand, setSuppressPlayerEventsForWindow])
 
   useEffect(() => {
@@ -1493,10 +1525,16 @@ export default function VideoSyncManager() {
       }
 
       if (!response.ok) {
-        if (response.status === 401 || response.status === 403) {
+        const isAuthFailure = response.status === 401 || response.status === 403
+        const failure = (await response.json().catch(() => ({}))) as { message?: string }
+        // Re-check after the body parse too: a route swap during that await must
+        // not trigger this session's revalidate or surface its error.
+        if (sessionIdRef.current !== sessionId) {
+          return false
+        }
+        if (isAuthFailure) {
           revalidateManagerAccess()
         }
-        const failure = (await response.json()) as { message?: string }
         throw new Error(sanitizeManagerApiErrorMessage(failure.message, 'Failed to save video config'))
       }
 

@@ -1237,8 +1237,13 @@ function ensureHeartbeat(
         // snapshot; if the re-read below shows another instance committed newer
         // state, we broadcast the projection of *that* instead so a stale
         // stop-transition frame (re-stamped to now, which clients would accept
-        // as newer) cannot pause a concurrent re-play.
+        // as newer) cannot pause a concurrent re-play. `broadcastTelemetry`
+        // likewise becomes the merged latest telemetry after the re-read, so a
+        // concurrently committed `autoplay.blockedCount` / error / drift field
+        // isn't rolled back in the manager UI (`handleEnvelope` applies
+        // heartbeat telemetry unconditionally) until the next tick.
         let broadcastState = heartbeatState
+        let broadcastTelemetry = heartbeatTelemetry
 
         const persistHeartbeatTelemetry = shouldPersistHeartbeatTelemetry(data.telemetry, heartbeatTelemetry)
         const persistHeartbeatStopTransition = shouldPersistHeartbeatState(data.state, heartbeatState)
@@ -1269,12 +1274,15 @@ function ensureHeartbeat(
               broadcastState = applyStopIfReached(latest.data.state)
             }
             await sessions.set(latest.id, latest)
+            // Broadcast the merged latest telemetry (our two owned counters over
+            // whatever else another instance committed since the first read).
+            broadcastTelemetry = cloneTelemetry(latest.data.telemetry)
           }
         }
 
         const envelope = createEnvelope(sessionId, 'heartbeat', {
           state: broadcastState,
-          telemetry: heartbeatTelemetry,
+          telemetry: broadcastTelemetry,
         })
         await broadcastEnvelope(sessions, ws, sessionId, envelope)
         })

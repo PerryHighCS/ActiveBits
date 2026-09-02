@@ -3559,6 +3559,13 @@ void test(`heartbeat stop-reached persist re-reads and does not roll back ${scen
     assert.equal(heartbeatEnvelope.payload?.state?.isPlaying, true)
     assert.equal(heartbeatEnvelope.payload?.state?.serverTimestampMs, 22_000)
     assert.equal(heartbeatEnvelope.payload?.state?.positionSec, scenario.expectedBroadcastPositionSec)
+    // The broadcast telemetry is the merged latest, so the concurrently
+    // committed autoplay.blockedCount is not rolled back in the manager UI
+    // until the next tick.
+    const heartbeatTelemetryPayload = published.at(-1)?.message as {
+      payload?: { telemetry?: { autoplay?: { blockedCount?: number } } }
+    }
+    assert.equal(heartbeatTelemetryPayload.payload?.telemetry?.autoplay?.blockedCount, 4)
     // ...and it is never persisted over the re-play.
     assert.ok(strictReads >= 2, 'expected a strict re-read before the persist')
     const lastSetState = setStates.at(-1)
