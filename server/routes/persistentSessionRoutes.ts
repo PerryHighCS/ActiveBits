@@ -77,6 +77,7 @@ interface SessionStoreLike {
   // Optional; falls back to `get` when the store does not provide it.
   getStrict?(id: string): Promise<unknown | null>
   set?(id: string, session: unknown): Promise<void>
+  updateAtomic?(id: string, mutate: (session: Record<string, unknown>) => Record<string, unknown>): Promise<unknown | null>
 }
 
 interface RequestLike {
@@ -896,9 +897,22 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
         res.status(404).json({ error: 'Teacher join is unavailable for this session' })
         return
       }
-      const capability = issueActivityCapability(freshSession as { data: unknown }, 'manager')
-      await sessions.set(sessionId, freshSession)
-      writeActivityCapabilityCookie(res, sessionId, 'manager', capability.token)
+      let capabilityToken: string | null = null
+      if (sessions.updateAtomic) {
+        const updated = await sessions.updateAtomic(sessionId, (draft) => {
+          if (draft.type !== activityName) return draft
+          capabilityToken = issueActivityCapability(draft as { data: unknown }, 'manager').token
+          return draft
+        })
+        if (updated == null || capabilityToken == null) {
+          res.status(404).json({ error: 'Teacher join is unavailable for this session' })
+          return
+        }
+      } else {
+        capabilityToken = issueActivityCapability(freshSession as { data: unknown }, 'manager').token
+        await sessions.set(sessionId, freshSession)
+      }
+      writeActivityCapabilityCookie(res, sessionId, 'manager', capabilityToken)
     } catch (error) {
       console.error(JSON.stringify({
         event: 'persistent-manager-capability-persistence-failed',
@@ -1050,9 +1064,23 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
         res.status(404).json({ error: 'Active session not found' })
         return
       }
-      const capability = issueActivityCapability(freshSession as { data: unknown }, 'manager')
-      await sessions.set(sessionId, freshSession)
-      writeActivityCapabilityCookie(res, sessionId, 'manager', capability.token)
+      let capabilityToken: string | null = null
+      if (sessions.updateAtomic) {
+        const expectedType = activeSession.type
+        const updated = await sessions.updateAtomic(sessionId, (draft) => {
+          if (draft.type !== expectedType) return draft
+          capabilityToken = issueActivityCapability(draft as { data: unknown }, 'manager').token
+          return draft
+        })
+        if (updated == null || capabilityToken == null) {
+          res.status(404).json({ error: 'Active session not found' })
+          return
+        }
+      } else {
+        capabilityToken = issueActivityCapability(freshSession as { data: unknown }, 'manager').token
+        await sessions.set(sessionId, freshSession)
+      }
+      writeActivityCapabilityCookie(res, sessionId, 'manager', capabilityToken)
       res.json({ success: true, persistentRecoveryAvailable: true })
     } catch (error) {
       console.error(JSON.stringify({

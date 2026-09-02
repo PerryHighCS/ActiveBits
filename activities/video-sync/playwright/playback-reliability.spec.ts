@@ -6,12 +6,10 @@ import { expect, test } from '@playwright/test'
 // to the websocket `state` (independent of the YouTube iframe loading), so the
 // check is stable even where youtube-nocookie.com is unreachable from CI.
 //
-// The instructor's playback controls are the embedded YouTube iframe control
-// bar (cross-origin, external), so play/pause here go through the REST
-// `/command` path rather than iframe clicks; the manager-side echo-suppression /
-// retry logic (Defect 1) is covered by unit tests on the pure helpers.
+// Playback uses activity-owned controls; the YouTube iframe is a projection so
+// buffering/autoplay events from another manager cannot become commands.
 test('Video Sync instructor pause stays paused across multiple heartbeat intervals', async ({ browser }) => {
-  test.skip(test.info().project.name !== 'chromium', 'WebKit request contexts do not retain Set-Cookie responses in this harness.')
+  test.skip(test.info().project.name === 'webkit', 'WebKit rejects the Secure manager cookie on the harness HTTP origin; production Safari runs on HTTPS.')
 
   const context = await browser.newContext()
   const page = await context.newPage()
@@ -56,17 +54,25 @@ test('Video Sync instructor pause stays paused across multiple heartbeat interva
   })
 
   await page.goto(`/manage/video-sync/${encodeURIComponent(sessionId)}`)
+  const secondaryManager = await context.newPage()
+  await secondaryManager.goto(`/manage/video-sync/${encodeURIComponent(sessionId)}`)
 
   // The status-bar span is the only element carrying "Playing:" text; scope to it
   // so the amber autoplay-blocked notice (also aria-live) can't be matched here.
   const managerStatus = page.getByText('Playing:')
+  const secondaryStatus = secondaryManager.getByText('Playing:')
   await expect(managerStatus).toContainText('Playing: No')
+  await expect(secondaryStatus).toContainText('Playing: No')
 
-  expect(await command(`/api/video-sync/${sessionId}/command`, 'POST', { type: 'play' })).toBe(200)
+  // The centered activity-owned button covers YouTube's misleading native play
+  // affordance and is the sole click target over the manager iframe.
+  await page.getByRole('button', { name: 'Play synchronized video' }).click()
   await expect(managerStatus).toContainText('Playing: Yes')
+  await expect(secondaryStatus).toContainText('Playing: Yes')
 
-  expect(await command(`/api/video-sync/${sessionId}/command`, 'POST', { type: 'pause' })).toBe(200)
+  await secondaryManager.getByRole('button', { name: 'Pause', exact: true }).click()
   await expect(managerStatus).toContainText('Playing: No')
+  await expect(secondaryStatus).toContainText('Playing: No')
 
   const framesAtPause = heartbeatFrames
   // Wait for >= 2 further heartbeat frames (3s cadence): a stale heartbeat frame
@@ -76,5 +82,6 @@ test('Video Sync instructor pause stays paused across multiple heartbeat interva
   await expect(page.getByText('Live updates unavailable. Attempting reconnect...')).toHaveCount(0)
 
   await page.close()
+  await secondaryManager.close()
   await context.close()
 })

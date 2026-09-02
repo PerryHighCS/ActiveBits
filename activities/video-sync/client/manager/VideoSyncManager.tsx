@@ -68,10 +68,9 @@ interface ManagerAccessResponse {
 
 type AutoStartStatus = 'idle' | 'starting' | 'failed'
 
-// `retryableAuth` is true only for a confirmed 401/403 (or a capability that is
-// still resolving): the one case where retaining and retrying the playback
-// intent can succeed. Permanent 4xx/5xx and ambiguous network failures are not
-// retryable - replaying a non-idempotent play/pause could rewind the session.
+// `retryableAuth` controls whether the intent queue should retry after this
+// request finishes. An ambiguous transport failure is retried once inside
+// `sendCommand` with the same server-deduplicated command ID instead.
 type SendCommandResult = { ok: true } | { ok: false; retryableAuth: boolean }
 
 const YOUTUBE_MANAGER_LOAD_ERROR = 'YouTube player failed to load. Try a different video URL.'
@@ -86,12 +85,6 @@ const MANAGER_PLAYBACK_COMMAND_FLUSH_DELAY_MS = 120
 const MANAGER_PLAYBACK_COMMAND_RETRY_DELAY_MS = 600
 const MAX_MANAGER_PLAYBACK_FLUSH_RETRIES = 3
 const MAX_MANAGER_API_ERROR_MESSAGE_LENGTH = 160
-// How long after genuine user activation an `onStateChange` still counts as an
-// instructor gesture worth mirroring to the server. Beyond this, a play/pause
-// transition is treated as involuntary (autoplay block, heartbeat-driven seek,
-// buffering) and not echoed back as a command - otherwise two connected manager
-// views ping-pong each other's stuck players into repeated pauses.
-const MANAGER_USER_GESTURE_GRACE_MS = 4_000
 const MANAGER_AUTOPLAY_CHECK_DELAY_MS = 1_200
 const MANAGER_AUTOPLAY_BLOCKED_MESSAGE =
   'This browser blocked playback on the instructor view. Click once to start; playback then follows the shared session.'
@@ -113,11 +106,20 @@ const DEFAULT_STATE: VideoSyncState = {
   isPlaying: false,
   playbackRate: 1,
   updatedBy: 'system',
+  controllerId: null,
+  playbackRevision: 0,
   serverTimestampMs: Date.now(),
 }
 
 function clampNumber(value: number): number {
   return Number.isFinite(value) ? Math.max(0, value) : 0
+}
+
+export function createManagerPlaybackCommandId(): string {
+  if (typeof globalThis.crypto?.randomUUID === 'function') {
+    return globalThis.crypto.randomUUID()
+  }
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
 }
 
 export function readBootstrapSourceUrl(search: string): string | null {
@@ -342,38 +344,6 @@ export function getManagerPlaybackIntentForStateChange(params: {
 }
 
 /**
- * Whether a native `onStateChange` event should be recorded as a fresh
- * instructor playback intent.
- *
- * `applyStateToPlayer` programmatically calls `playVideo()` / `pauseVideo()`,
- * which each fire `onStateChange`; a blunt time-based mute (`suppressed`) is
- * armed around those calls so the echo is not sent straight back to the server
- * as a redundant command. The old guard dropped *every* event while muted,
- * which also discarded a genuine instructor click made inside the window.
- *
- * Instead, only drop the event that matches the transition `applyStateToPlayer`
- * just requested (`programmaticTarget`). An opposite-direction gesture - the
- * instructor hitting pause right after a programmatic play - is still recorded
- * and flushed. `flushManagerPlaybackIntent` independently no-ops a flush whose
- * intent already matches authoritative state, so a recorded echo costs nothing.
- */
-export function resolveManagerStateChangeIntent(params: {
-  suppressed: boolean
-  nextIntent: 'play' | 'pause' | null
-  programmaticTarget: 'play' | 'pause' | null
-}): { record: boolean } {
-  if (params.nextIntent == null) {
-    return { record: false }
-  }
-
-  if (params.suppressed && params.nextIntent === params.programmaticTarget) {
-    return { record: false }
-  }
-
-  return { record: true }
-}
-
-/**
  * The next value of the programmatic playback target after an `onStateChange`
  * event. The target absorbs exactly one echo of the transition
  * `applyStateToPlayer` requested: once any play-state event has been seen
@@ -385,31 +355,6 @@ export function consumeProgrammaticPlaybackTarget(params: {
   programmaticTarget: 'play' | 'pause' | null
 }): 'play' | 'pause' | null {
   return params.nextIntent == null ? params.programmaticTarget : null
-}
-
-/**
- * Whether an `onStateChange` transition is recent enough after genuine user
- * activation to mirror to the server as an instructor command.
- *
- * With several manager views open, a manager whose player cannot reach the
- * authoritative state - autoplay-blocked, mid-seek, buffering - emits
- * involuntary play/pause transitions. Echoing each one back as a command makes
- * the managers fight over playback (the classic symptom: a passive second
- * instructor's view re-pausing the video every few seconds). A real click on the
- * YouTube control bar gives the manager document transient user activation,
- * which propagates from the cross-origin iframe; an involuntary transition does
- * not. Browsers without `navigator.userActivation` keep the prior
- * mirror-always behavior.
- */
-export function isManagerPlaybackGestureRecent(params: {
-  userActivationSupported: boolean
-  msSinceLastUserActivation: number
-  graceMs?: number
-}): boolean {
-  if (!params.userActivationSupported) {
-    return true
-  }
-  return params.msSinceLastUserActivation <= (params.graceMs ?? MANAGER_USER_GESTURE_GRACE_MS)
 }
 
 /**
@@ -429,9 +374,8 @@ export function nextManagerPlaybackFlushRetry(
 /**
  * What `flushManagerPlaybackIntent` should do once `sendCommand` returns.
  * A bounded retry is only ever appropriate for a confirmed auth failure
- * (`retryableAuth`); a permanent 4xx/5xx or an ambiguous network/parse failure
- * is dropped, never replayed, because a `play`/`pause` is not idempotent and a
- * replay at the original position could rewind the session.
+ * (`retryableAuth`); permanent failures are dropped after `sendCommand` has
+ * already performed its safe command-id de-duplicated transport retry.
  */
 export function resolveManagerPlaybackFlushOutcome(params: {
   result: SendCommandResult
@@ -447,32 +391,6 @@ export function resolveManagerPlaybackFlushOutcome(params: {
     }
   }
   return { action: 'drop', nextRetryCount: 0 }
-}
-
-/**
- * Whether an `onStateChange` transition should be mirrored to the server. A
- * natural end-of-video `ENDED` always is (otherwise the session stays
- * `isPlaying: true` and heartbeats drive a replay loop); every other transition
- * must follow recent genuine user activation of the manager document.
- */
-export function shouldMirrorManagerPlaybackTransition(params: {
-  isNaturalCompletion: boolean
-  gestureRecent: boolean
-}): boolean {
-  return params.isNaturalCompletion || params.gestureRecent
-}
-
-function readManagerUserActivation(): { supported: boolean; isActive: boolean } {
-  if (typeof navigator === 'undefined') {
-    return { supported: false, isActive: false }
-  }
-
-  const activation = (navigator as Navigator & { userActivation?: { isActive?: unknown } }).userActivation
-  if (activation == null || typeof activation.isActive !== 'boolean') {
-    return { supported: false, isActive: false }
-  }
-
-  return { supported: true, isActive: activation.isActive }
 }
 
 export function shouldSendManagerPlaybackPositionUpdate(params: {
@@ -544,12 +462,14 @@ export default function VideoSyncManager() {
   const [autoStartStatus, setAutoStartStatus] = useState<AutoStartStatus>('idle')
   const [embeddedBootstrapSourceUrl, setEmbeddedBootstrapSourceUrl] = useState<string | null>(null)
   const [autoplayBlocked, setAutoplayBlocked] = useState(false)
+  const [seekPositionInput, setSeekPositionInput] = useState('0')
 
   const playerContainerRef = useRef<HTMLDivElement | null>(null)
   const playerRef = useRef<YoutubePlayerLike | null>(null)
   const youtubeRef = useRef<YoutubeNamespace | null>(null)
   const loadedVideoIdRef = useRef<string | null>(null)
   const latestStateRef = useRef<VideoSyncState>(DEFAULT_STATE)
+  const managerInstanceIdRef = useRef(createManagerPlaybackCommandId())
   const desiredPlaybackIntentRef = useRef<'play' | 'pause' | null>(null)
   const desiredPlaybackPositionRef = useRef<number | null>(null)
   // The play/pause transition `applyStateToPlayer` last requested. Used to tell a
@@ -557,10 +477,6 @@ export default function VideoSyncManager() {
   // inside the suppression window.
   const programmaticPlaybackTargetRef = useRef<'play' | 'pause' | null>(null)
   const playbackFlushRetryCountRef = useRef(0)
-  // Wall-clock of the last `onStateChange` that fired with genuine document user
-  // activation. An involuntary transition (autoplay block, heartbeat seek,
-  // buffering) has no recent activation and must not be mirrored as a command.
-  const lastUserActivationAtRef = useRef(0)
   const playbackCommandInFlightRef = useRef(false)
   // Monotonic id issued to each `flushManagerPlaybackIntent` send, and the id
   // currently permitted to mutate the shared flush refs. A session swap or a
@@ -570,8 +486,6 @@ export default function VideoSyncManager() {
   const playbackFlushOwnerRef = useRef(0)
   const playbackCommandFlushTimerRef = useRef<number | null>(null)
   const managerAutoplayCheckTimerRef = useRef<number | null>(null)
-  const suppressPlayerEventsRef = useRef(false)
-  const suppressPlayerEventsTimeoutRef = useRef<number | null>(null)
   const autoStartAttemptKeyRef = useRef<string | null>(null)
   const managerAccessBootstrapRefreshAttemptsRef = useRef<Map<string, number>>(new Map())
   // The session id the component is currently mounted for. An async request
@@ -687,26 +601,6 @@ export default function VideoSyncManager() {
     setState(nextState)
   }, [])
 
-  const setSuppressPlayerEventsForWindow = useCallback((ms = 450): void => {
-    suppressPlayerEventsRef.current = true
-    if (suppressPlayerEventsTimeoutRef.current != null) {
-      window.clearTimeout(suppressPlayerEventsTimeoutRef.current)
-    }
-
-    suppressPlayerEventsTimeoutRef.current = window.setTimeout(() => {
-      suppressPlayerEventsRef.current = false
-      suppressPlayerEventsTimeoutRef.current = null
-    }, ms)
-  }, [])
-
-  const clearPlayerEventSuppression = useCallback(() => {
-    suppressPlayerEventsRef.current = false
-    if (suppressPlayerEventsTimeoutRef.current != null) {
-      window.clearTimeout(suppressPlayerEventsTimeoutRef.current)
-      suppressPlayerEventsTimeoutRef.current = null
-    }
-  }, [])
-
   const clearPlaybackCommandFlushTimer = useCallback(() => {
     if (playbackCommandFlushTimerRef.current != null) {
       window.clearTimeout(playbackCommandFlushTimerRef.current)
@@ -723,7 +617,12 @@ export default function VideoSyncManager() {
 
   const sendCommand = useCallback(async (
     command: 'play' | 'pause' | 'seek',
-    options?: { positionSec?: number; reportErrors?: boolean },
+    options?: {
+      positionSec?: number
+      reportErrors?: boolean
+      source?: 'explicit' | 'natural-ended'
+      expectedPlaybackRevision?: number
+    },
   ): Promise<SendCommandResult> => {
     if (!sessionId) {
       return { ok: false, retryableAuth: false }
@@ -736,16 +635,35 @@ export default function VideoSyncManager() {
       return { ok: false, retryableAuth: true }
     }
 
-    const payload: Record<string, unknown> = { type: command }
+    const payload: Record<string, unknown> = {
+      type: command,
+      commandId: createManagerPlaybackCommandId(),
+      managerId: managerInstanceIdRef.current,
+      source: options?.source ?? 'explicit',
+    }
     if (typeof options?.positionSec === 'number' && Number.isFinite(options.positionSec)) {
       payload.positionSec = clampNumber(options.positionSec)
     }
+    if (typeof options?.expectedPlaybackRevision === 'number') {
+      payload.expectedPlaybackRevision = options.expectedPlaybackRevision
+    }
     try {
-      const response = await fetch(`/api/video-sync/${sessionId}/command`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      })
+      const postCommand = async (): Promise<Response> => await fetch(`/api/video-sync/${sessionId}/command`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        })
+      let response: Response
+      try {
+        response = await postCommand()
+      } catch {
+        // The server de-duplicates commandId, so an ambiguous transport failure
+        // is safe to retry once with exactly the same command.
+        if (sessionIdRef.current !== sessionId) {
+          return { ok: false, retryableAuth: false }
+        }
+        response = await postCommand()
+      }
 
       // A route swap to another session happened mid-request; its result -
       // a 401 -> revalidate, an error banner, or a state apply - must not
@@ -800,13 +718,17 @@ export default function VideoSyncManager() {
       } else {
         setErrorMessage(message)
       }
-      // Ambiguous: the POST may have reached the server and committed the
-      // command. Replaying a non-idempotent play/pause with the original
-      // position could rewind the session, so do not treat this as retryable -
-      // the next heartbeat / state-update reconciles the player.
+      // Both attempts failed. The command may still have committed, so leave
+      // reconciliation to the next heartbeat/state update instead of starting
+      // a new queue-level attempt with a different command ID.
       return { ok: false, retryableAuth: false }
     }
   }, [applyManagerStateUpdate, hasManagerAccess, revalidateManagerAccess, sessionId])
+
+  const sendCommandRef = useRef(sendCommand)
+  useEffect(() => {
+    sendCommandRef.current = sendCommand
+  }, [sendCommand])
 
   // `flushManagerPlaybackIntent` re-schedules itself (a bounded transient-failure
   // retry, and a follow-up flush when a newer gesture landed mid-send). Those
@@ -896,18 +818,15 @@ export default function VideoSyncManager() {
         scheduleFollowUpFlush()
         return
       }
-      // 'drop': a permanent failure, an ambiguous network/parse error (the
-      // server may already have applied the command - replaying it at a stale
-      // position would rewind playback), or a spent retry budget. Let the next
-      // heartbeat / state-update reconcile the player.
+      // 'drop': a permanent failure, exhausted transport attempts, or a spent
+      // auth retry budget. Let the next heartbeat/state update reconcile the
+      // player.
       desiredPlaybackIntentRef.current = null
       desiredPlaybackPositionRef.current = null
       return
     }
 
     playbackFlushRetryCountRef.current = 0
-    setSuppressPlayerEventsForWindow(900)
-
     const nextDesiredIntent = desiredPlaybackIntentRef.current
     const nextAuthoritativeIsPlaying = latestStateRef.current.isPlaying
     if (
@@ -920,7 +839,7 @@ export default function VideoSyncManager() {
     }
 
     scheduleFollowUpFlush()
-  }, [clearPlaybackCommandFlushTimer, sendCommand, setSuppressPlayerEventsForWindow])
+  }, [clearPlaybackCommandFlushTimer, sendCommand])
 
   useEffect(() => {
     flushManagerPlaybackIntentRef.current = () => {
@@ -947,8 +866,6 @@ export default function VideoSyncManager() {
     }
 
     setErrorMessage((current) => clearManagerPlayerLoadError(current))
-    setSuppressPlayerEventsForWindow()
-
     const desiredPositionSec = computeDesiredPositionSec(nextState)
 
     if (loadedVideoIdRef.current !== nextState.videoId) {
@@ -995,7 +912,7 @@ export default function VideoSyncManager() {
       player.pauseVideo()
       setAutoplayBlocked(false)
     }
-  }, [clearManagerAutoplayCheckTimer, setSuppressPlayerEventsForWindow])
+  }, [clearManagerAutoplayCheckTimer])
 
   const retryManagerAutoplay = useCallback((): void => {
     if (!playerRef.current) {
@@ -1009,6 +926,25 @@ export default function VideoSyncManager() {
     applyStateToPlayer(latestStateRef.current)
     setAutoplayBlocked(false)
   }, [applyStateToPlayer])
+
+  const requestExplicitPlayback = useCallback((intent: 'play' | 'pause'): void => {
+    playbackFlushRetryCountRef.current = 0
+    desiredPlaybackIntentRef.current = intent
+    // Play/pause acts at the server-projected authoritative position. Position
+    // changes are a separate explicit seek, so a lagging manager cannot rewind
+    // the class merely by pressing pause.
+    desiredPlaybackPositionRef.current = null
+    scheduleManagerPlaybackIntentFlush(0)
+  }, [scheduleManagerPlaybackIntentFlush])
+
+  const requestExplicitSeek = useCallback((): void => {
+    const positionSec = Number.parseFloat(seekPositionInput)
+    if (!Number.isFinite(positionSec)) {
+      setErrorMessage('Seek position must be a finite number of seconds.')
+      return
+    }
+    void sendCommand('seek', { positionSec, reportErrors: true })
+  }, [seekPositionInput, sendCommand])
 
   const fetchSession = useCallback(async (signal?: AbortSignal) => {
     if (!sessionId) return
@@ -1218,7 +1154,6 @@ export default function VideoSyncManager() {
       playerRef.current?.destroy()
       playerRef.current = null
       setActivePlayerHost(null)
-      clearPlayerEventSuppression()
       return
     }
 
@@ -1249,7 +1184,6 @@ export default function VideoSyncManager() {
       clearPlaybackCommandFlushTimer()
       clearManagerAutoplayCheckTimer()
       setAutoplayBlocked(false)
-      clearPlayerEventSuppression()
       player.destroy()
       if (playerRef.current === player) {
         playerRef.current = null
@@ -1299,7 +1233,7 @@ export default function VideoSyncManager() {
           height: '100%',
           host: candidate.hostUrl,
           playerVars: {
-            controls: 1,
+            controls: 0,
             rel: 0,
             modestbranding: 1,
             origin: window.location.origin,
@@ -1331,11 +1265,10 @@ export default function VideoSyncManager() {
                 playingStateValue: states.PLAYING,
                 pausedStateValue: states.PAUSED,
               })
-              // A natural end-of-video `ENDED` normally lands long after the last
-              // user activation, but it must still reach the server or the
-              // session stays `isPlaying: true` and heartbeats drive an
-              // end-of-video replay loop. Exempt it from the gesture-recency
-              // gate below (the programmatic-echo suppression still applies).
+              // Natural completion must reach the server or the session stays
+              // `isPlaying: true` and heartbeats drive an end-of-video replay
+              // loop. The server accepts it only from the manager that owns the
+              // current playback revision.
               const isNaturalCompletion = event.data === states.ENDED
 
               // Playback actually started (possibly after a slow buffer that
@@ -1345,58 +1278,23 @@ export default function VideoSyncManager() {
                 setAutoplayBlocked(false)
               }
 
-              const { record } = resolveManagerStateChangeIntent({
-                suppressed: suppressPlayerEventsRef.current,
-                nextIntent,
-                programmaticTarget: programmaticPlaybackTargetRef.current,
-              })
-
-              // The programmatic target absorbs exactly one echo; clear it once
-              // any play-state event has been seen so a later same-direction
-              // instructor click within the same suppression window is not also
-              // swallowed. (`flushManagerPlaybackIntent` still no-ops a redundant
-              // flush, so a stray second echo costs nothing.)
               programmaticPlaybackTargetRef.current = consumeProgrammaticPlaybackTarget({
                 nextIntent,
                 programmaticTarget: programmaticPlaybackTargetRef.current,
               })
 
-              if (!record) {
-                return
+              // The iframe is a projection, never an authority. Only the
+              // activity-owned controls below create play/pause/seek commands.
+              // Natural completion is the exception, and the server accepts it
+              // only from the manager that owns the current playback revision.
+              if (isNaturalCompletion) {
+                void sendCommandRef.current('pause', {
+                  positionSec: event.target.getCurrentTime(),
+                  reportErrors: false,
+                  source: 'natural-ended',
+                  expectedPlaybackRevision: latestStateRef.current.playbackRevision ?? 0,
+                })
               }
-
-              // Only mirror a transition that follows genuine user activation of
-              // this document. Without this, a manager whose player cannot reach
-              // the shared state (autoplay-blocked, mid-seek, buffering) echoes
-              // its involuntary pauses/plays back as commands, and connected
-              // managers fight over playback. Per the HTML activation
-              // notification steps, a click inside the cross-origin YouTube
-              // iframe propagates its activation timestamp to every ancestor
-              // navigable regardless of origin, so this parent document is
-              // activated by a real control-bar click (only descendants are
-              // origin-filtered). `lastUserActivationAtRef` + the grace window
-              // cover the latency before YouTube posts the onStateChange back.
-              const activation = readManagerUserActivation()
-              if (activation.supported && activation.isActive) {
-                lastUserActivationAtRef.current = Date.now()
-              }
-              const gestureRecent = isManagerPlaybackGestureRecent({
-                userActivationSupported: activation.supported,
-                msSinceLastUserActivation: Date.now() - lastUserActivationAtRef.current,
-              })
-              if (!shouldMirrorManagerPlaybackTransition({ isNaturalCompletion, gestureRecent })) {
-                return
-              }
-
-              const target = event.target
-              const playerPosition = clampNumber(target.getCurrentTime())
-
-              // A fresh instructor gesture: restart the bounded transient-failure
-              // retry budget for the flush that follows.
-              playbackFlushRetryCountRef.current = 0
-              desiredPlaybackIntentRef.current = nextIntent
-              desiredPlaybackPositionRef.current = playerPosition
-              scheduleManagerPlaybackIntentFlush()
             },
             onError: () => {
               if (cancelled || candidateIndex !== activeAttemptIndex) return
@@ -1442,13 +1340,11 @@ export default function VideoSyncManager() {
       playerRef.current?.destroy()
       playerRef.current = null
       setActivePlayerHost(null)
-      clearPlayerEventSuppression()
     }
   }, [
     applyStateToPlayer,
     clearManagerAutoplayCheckTimer,
     clearPlaybackCommandFlushTimer,
-    clearPlayerEventSuppression,
     scheduleManagerPlaybackIntentFlush,
     setupMode,
     state.playerHost,
@@ -1810,8 +1706,8 @@ export default function VideoSyncManager() {
 
       <div className="absolute inset-0 w-full h-full bg-black">
         {state.videoId ? (
-          <div className="w-full h-full">
-            <div ref={playerContainerRef} className="w-full h-full" aria-label="Video Sync manager preview" />
+          <div className="w-full h-full pointer-events-none" aria-hidden="true">
+            <div ref={playerContainerRef} className="w-full h-full" />
           </div>
         ) : (
           <div className="h-full flex items-center justify-center text-sm text-gray-300">
@@ -1819,6 +1715,18 @@ export default function VideoSyncManager() {
           </div>
         )}
       </div>
+
+      {state.videoId && !state.isPlaying && (
+        <button
+          type="button"
+          className="absolute left-1/2 top-1/2 z-10 flex h-24 w-24 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-4 border-white bg-black/95 text-lg font-semibold text-white shadow-2xl disabled:cursor-not-allowed disabled:opacity-60"
+          disabled={!hasManagerAccess}
+          onClick={() => requestExplicitPlayback('play')}
+          aria-label="Play synchronized video"
+        >
+          Play
+        </button>
+      )}
 
       {state.videoId && autoplayBlocked && (
         <div
@@ -1835,6 +1743,33 @@ export default function VideoSyncManager() {
       )}
 
       <div className="absolute bottom-0 left-0 right-0 z-20 px-4 py-2 bg-black/80 border-t border-white/10 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-gray-200" aria-live="polite">
+        <div className="flex items-center gap-2" aria-label="Instructor playback controls">
+          <Button
+            disabled={!hasManagerAccess || state.isPlaying}
+            onClick={() => requestExplicitPlayback('play')}
+          >
+            Play
+          </Button>
+          <Button
+            disabled={!hasManagerAccess || !state.isPlaying}
+            onClick={() => requestExplicitPlayback('pause')}
+          >
+            Pause
+          </Button>
+          <label className="flex items-center gap-1">
+            <span>Seek to</span>
+            <input
+              className="w-20 rounded border border-gray-500 bg-black px-2 py-1 text-white"
+              type="number"
+              min="0"
+              step="0.1"
+              value={seekPositionInput}
+              onChange={(event) => setSeekPositionInput(event.target.value)}
+              aria-label="Seek position in seconds"
+            />
+          </label>
+          <Button disabled={!hasManagerAccess} onClick={requestExplicitSeek}>Seek</Button>
+        </div>
         <span>Video: {state.videoId || 'Not configured'}</span>
         <span>Host: {formatVideoSyncPlayerHostLabel(state.videoId ? activePlayerHost : null)}</span>
         <span>Playing: {state.isPlaying ? 'Yes' : 'No'}</span>

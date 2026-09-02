@@ -823,3 +823,11 @@ that document rather than creating activity-specific authentication payloads.
 - Contract: Instructor-start lifecycle errors use an allowlisted schema of event, operation, requestId, stable errorCode, identity fingerprints, and `sessionFingerprint`; error messages and arbitrary context values are excluded. Error logs never include raw Learn resource identifiers or internal session IDs.
 - Validation: `activities/syncdeck/server/learnIntegration.test.ts` scans both captured info and error lifecycle logs, including a forced instructor-start failure containing sentinel resource, session, URL, and token values.
 - Owner: Codex
+- Date: 2026-09-02
+- Surface: Video Sync REST | websocket | multi-instructor playback
+- Contract: Video Sync playback state carries a monotonic `playbackRevision`, and manager commands carry a bounded unique `commandId` plus a per-page `managerId`. The server commits commands through `SessionStore.updateAtomic`, de-duplicates retries, and accepts a natural-ended pause only from the manager that owns the current revision. The YouTube manager iframe is a projection (`controls: 0`); activity-owned Play/Pause/Seek controls are the normal authority source, and play/pause use the server-projected position so a lagging manager cannot rewind the class.
+- Compatibility constraints: Pre-migration playback state normalizes to revision `0`; missing controller IDs remain valid until the next explicit manager command. Processed command IDs are bounded to the newest 128 entries.
+- Validation rules: Clients order playback first by `playbackRevision`, then use timestamps only within one revision. Telemetry/capability/socket writers must use atomic session mutation and must not persist an independently read whole-session snapshot.
+- Evidence (schema/tests/path): `server/core/sessions.ts`; `server/core/valkeyStore.ts`; `activities/video-sync/server/routes.ts`; `activities/video-sync/client/protocol.ts`; `activities/video-sync/client/syncMath.ts`; Video Sync route/client tests.
+- Follow-up action: Reuse the generic atomic mutation primitive when another activity requires cross-instance read/modify/write safety; do not duplicate activity-specific locking.
+- Owner: Codex

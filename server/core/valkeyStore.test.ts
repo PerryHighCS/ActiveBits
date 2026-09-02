@@ -2,6 +2,35 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { ValkeySessionStore, ValkeyPersistentStore } from './valkeyStore.js'
 
+void test('ValkeySessionStore compareAndSet commits only the expected mutation revision', async () => {
+  let script = ''
+  let args: Array<string | number> = []
+  const store = Object.create(ValkeySessionStore.prototype) as ValkeySessionStore & {
+    client: { eval: (source: string, numKeys: number, ...values: Array<string | number>) => Promise<string> }
+  }
+  Object.defineProperty(store, 'client', {
+    value: {
+      async eval(source: string, _numKeys: number, ...values: Array<string | number>): Promise<string> {
+        script = source
+        args = values
+        return JSON.stringify({ id: 'session-1', mutationRevision: 8, data: { value: 'new' } })
+      },
+    },
+  })
+  Object.defineProperty(store, 'ttlMs', { value: 60_000 })
+
+  const updated = await store.compareAndSet(
+    'session-1',
+    7,
+    { id: 'session-1', mutationRevision: 7, data: { value: 'new' } },
+  )
+
+  assert.deepEqual(updated, { id: 'session-1', mutationRevision: 8, data: { value: 'new' } })
+  assert.match(script, /currentRevision ~= tonumber\(ARGV\[1\]\)/)
+  assert.match(script, /replacement\.mutationRevision = currentRevision \+ 1/)
+  assert.deepEqual(args.slice(0, 2), ['session:session-1', 7])
+})
+
 void test('ValkeySessionStore consume script rejects malformed and expired token expiries atomically', async () => {
   let script = ''
   const store = Object.create(ValkeySessionStore.prototype) as ValkeySessionStore & {

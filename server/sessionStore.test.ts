@@ -11,6 +11,24 @@ import { listenForTest } from './testPortBinding.js'
 
 const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
 
+void test('in-memory atomic updates increment mutation revision without mutating stale snapshots', async (t) => {
+  const sessions = createSessionStore(null, 1_000)
+  t.after(async () => { await sessions.close() })
+  const session = await createSession(sessions)
+  session.data = { playback: 'paused', telemetry: 0 }
+  await sessions.set(session.id, session)
+
+  const stale = await sessions.get(session.id)
+  const updated = await sessions.updateAtomic?.(session.id, (draft) => {
+    draft.data = { ...draft.data, playback: 'playing' }
+    return draft
+  })
+
+  assert.equal(updated?.mutationRevision, 1)
+  assert.equal(updated?.data.playback, 'playing')
+  assert.equal(stale?.data.playback, 'paused')
+})
+
 function valkeyStoreForTest(records: Map<string, SessionRecord>, touches: string[], ttlMs = 1_000, gets: string[] = []): ValkeySessionStore {
   return {
     ttlMs,
@@ -26,6 +44,13 @@ function valkeyStoreForTest(records: Map<string, SessionRecord>, touches: string
     },
     async set(id: string, session: SessionRecord) {
       records.set(id, structuredClone(session))
+    },
+    async compareAndSet(id: string, expectedMutationRevision: number, session: SessionRecord) {
+      const current = records.get(id)
+      if (!current || (current.mutationRevision ?? 0) !== expectedMutationRevision) return null
+      const updated = structuredClone({ ...session, mutationRevision: expectedMutationRevision + 1 })
+      records.set(id, updated)
+      return updated
     },
     async delete(id: string) {
       return records.delete(id)

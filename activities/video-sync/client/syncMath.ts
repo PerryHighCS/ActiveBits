@@ -39,7 +39,7 @@ export function shouldCorrectDrift(
 
 type IncomingStateGuardFields = Pick<
   VideoSyncState,
-  'videoId' | 'updatedBy' | 'serverTimestampMs'
+  'videoId' | 'updatedBy' | 'playbackRevision' | 'serverTimestampMs'
 >
 
 /**
@@ -69,6 +69,12 @@ export function shouldApplyIncomingVideoSyncState(
 ): boolean {
   if (currentState.videoId.length === 0) {
     return true
+  }
+
+  const currentRevision = currentState.playbackRevision ?? 0
+  const nextRevision = nextState.playbackRevision ?? 0
+  if (nextRevision !== currentRevision) {
+    return nextRevision > currentRevision
   }
 
   if (nextState.serverTimestampMs < currentState.serverTimestampMs) {

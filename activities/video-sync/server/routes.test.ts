@@ -367,6 +367,8 @@ function createVideoSyncSession(id: string): SessionRecord {
         isPlaying: false,
         playbackRate: 1,
         updatedBy: 'system',
+        controllerId: null,
+        playbackRevision: 0,
         serverTimestampMs: Date.now(),
       },
       telemetry: {
@@ -375,6 +377,7 @@ function createVideoSyncSession(id: string): SessionRecord {
         sync: { unsyncedStudents: 0, lastDriftSec: null, lastCorrectionResult: 'none' },
         error: { code: null, message: null },
       },
+      processedCommandIds: [],
     },
   }
   const capability = issueActivityCapability(session, 'manager')
@@ -508,7 +511,6 @@ void test('session get route removes a persisted legacy instructor passcode', as
   }
   assert.equal('instructorPasscode' in (payload.data ?? {}), false)
   assert.equal(setCalls, 1)
-
   const persisted = storeState.store.s1?.data as {
     instructorPasscode?: string
   }
@@ -736,6 +738,8 @@ void test('session get route returns projected playback without persisting ordin
         isPlaying: boolean
         playbackRate: 1
         updatedBy: 'instructor' | 'system'
+        controllerId: string | null
+        playbackRevision: number
         serverTimestampMs: number
       }
     }).state = {
@@ -748,6 +752,8 @@ void test('session get route returns projected playback without persisting ordin
       isPlaying: true,
       playbackRate: 1,
       updatedBy: 'instructor',
+      controllerId: null,
+      playbackRevision: 0,
       serverTimestampMs: 10_000,
     }
     const storeState = createSessionStore({ s1: session })
@@ -960,7 +966,7 @@ void test('session get route re-reads before persisting and does not roll back a
     // The concurrent re-play wins; the GET must not roll it back to the
     // projected stop-reached pause.
     assert.equal(payload.data?.state?.isPlaying, true)
-    assert.equal(payload.data?.state?.positionSec, 2)
+    assert.equal(payload.data?.state?.positionSec, 12)
     assert.ok(strictGetCalls >= 2)
     assert.ok(
       setStates.every((entry) => entry.isPlaying === true),
@@ -1323,6 +1329,8 @@ void test('session patch can mark a configured session as standalone', async () 
         isPlaying: false,
         playbackRate: 1,
         updatedBy: 'instructor',
+        controllerId: null,
+        playbackRevision: 1,
         serverTimestampMs: updated.state != null && typeof updated.state === 'object'
           ? (updated.state as { serverTimestampMs?: unknown }).serverTimestampMs
           : undefined,
@@ -1626,6 +1634,70 @@ void test('command route updates playback and emits extensible envelope', async 
   assert.equal(message.type, 'state-update')
 })
 
+void test('command route de-duplicates a retried command id without advancing playback revision', async () => {
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  const storeState = createSessionStore(
+    { s1: createVideoSyncSession('s1') },
+    { valkeyStore: createMockVideoSyncValkeyStore() },
+  )
+  setupVideoSyncRoutes(app, storeState.sessions, ws)
+  const handler = app.handlers.post['/api/video-sync/:sessionId/command']
+  assert.equal(typeof handler, 'function')
+
+  const request = {
+    params: { sessionId: 's1' },
+    body: { type: 'play', commandId: 'manager-a:1', managerId: 'manager-a' },
+  }
+  const first = createResponse()
+  await handler?.(request, first)
+  const second = createResponse()
+  await handler?.(request, second)
+
+  assert.equal(first.statusCode, 200)
+  assert.equal(second.statusCode, 200)
+  const state = (storeState.store.s1?.data as { state: { playbackRevision: number; controllerId: string } }).state
+  assert.equal(state.playbackRevision, 1)
+  assert.equal(state.controllerId, 'manager-a')
+  assert.deepEqual(
+    (storeState.store.s1?.data as { processedCommandIds: string[] }).processedCommandIds,
+    ['manager-a:1'],
+  )
+  assert.equal(storeState.published.length, 1)
+})
+
+void test('natural completion cannot pause playback owned by another manager or an advanced revision', async () => {
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  const storeState = createSessionStore(
+    { s1: createVideoSyncSession('s1') },
+    { valkeyStore: createMockVideoSyncValkeyStore() },
+  )
+  setupVideoSyncRoutes(app, storeState.sessions, ws)
+  const handler = app.handlers.post['/api/video-sync/:sessionId/command']
+  assert.equal(typeof handler, 'function')
+
+  await handler?.({
+    params: { sessionId: 's1' },
+    body: { type: 'play', commandId: 'manager-a:1', managerId: 'manager-a' },
+  }, createResponse())
+  await handler?.({
+    params: { sessionId: 's1' },
+    body: {
+      type: 'pause',
+      commandId: 'manager-b:ended',
+      managerId: 'manager-b',
+      source: 'natural-ended',
+      expectedPlaybackRevision: 1,
+    },
+  }, createResponse())
+
+  const state = (storeState.store.s1?.data as { state: { isPlaying: boolean; playbackRevision: number } }).state
+  assert.equal(state.isPlaying, true)
+  assert.equal(state.playbackRevision, 1)
+  assert.equal(storeState.published.length, 1)
+})
+
 void test('command route answers with a structured 500 when the session write rejects', async () => {
   console.info('[TEST] video-sync command: the session-store write below rejects on purpose; the handler is expected to log command-failed and answer 500 rather than let the rejection escape the mutation')
   const app = createMockApp()
@@ -1704,7 +1776,7 @@ void test('command route mutates from the strict read, not a stale local cache s
   await handler?.({ params: { sessionId: 's1' }, body: { type: 'pause' } }, res)
 
   assert.equal(res.statusCode, 200)
-  assert.equal(strictGetCalls, 1)
+  assert.equal(strictGetCalls, 2)
 
   const persisted = (storeState.store.s1?.data as { state?: { positionSec?: number; isPlaying?: boolean } }).state
   assert.equal(persisted?.isPlaying, false)
@@ -1870,6 +1942,20 @@ void test('manager-access route returns manager access for persistent teacher co
       setCalls += 1
       return storeState.sessions.set(id, updatedSession)
     },
+    async updateAtomic(id: string, mutate: (session: SessionRecord) => SessionRecord) {
+      const latest = await storeState.sessions.get(id)
+      if (!latest) return null
+      const latestData = latest.data as { state: Record<string, unknown> }
+      latestData.state = {
+        ...latestData.state,
+        isPlaying: true,
+        playbackRevision: 7,
+        serverTimestampMs: Date.now(),
+      }
+      const updated = mutate(latest)
+      await this.set(id, updated)
+      return updated
+    },
   }
   const teacherCode = 'persistent-teacher-code'
   const { hash, hashedTeacherCode } = generatePersistentHash('video-sync', teacherCode)
@@ -1906,6 +1992,11 @@ void test('manager-access route returns manager access for persistent teacher co
   assert.equal(res.cookies.length, 1)
   assert.equal(res.cookies[0]?.options.httpOnly, true)
   assert.equal(setCalls, 1)
+  assert.equal(
+    (storeState.store.s1?.data as { state: { playbackRevision: number } }).state.playbackRevision,
+    7,
+    'capability issuance preserves playback committed before the atomic mutation',
+  )
   assert.equal(res.headers['cache-control'], 'no-store', 'cookie-dependent manager-access response is not cacheable')
   await cleanupPersistentSession(hash)
 })

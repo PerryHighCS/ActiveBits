@@ -92,6 +92,20 @@ For live MobCode sessions, the instructor workspace remains `groups.default`. Ne
 - **Session termination**: Teacher can end any session, broadcasting to all connected students
 - **WebSocket notifications**: Students automatically redirected when session ends
 
+### Atomic Session Mutation
+
+`SessionStore.updateAtomic(...)` is the shared optimistic-concurrency boundary for
+read/modify/write operations that must survive horizontal scaling. In-memory
+sessions replace a cloned snapshot under the current mutation revision; Valkey
+sessions use an atomic compare-and-set script and bounded retries. Activity code
+must use this primitive when a write based on a session snapshot could otherwise
+overwrite unrelated state committed by another server instance.
+
+Video Sync additionally carries a monotonic `playbackRevision` in its public
+playback state. Clients order state frames by that revision before considering
+wall-clock timestamps, so server clock skew and reordered pub/sub delivery cannot
+restore an older instructor command.
+
 ## Activity Registration System
 
 ### Activity Containment Boundary

@@ -2241,9 +2241,21 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
         return
       }
       try {
-        const capability = issueActivityCapability(consumedSession, 'manager')
-        await sessions.set(sessionId, consumedSession)
-        writeActivityCapabilityCookie({ cookie: res.cookie.bind(res) }, sessionId, 'manager', capability.token)
+        let capabilityToken: string | null = null
+        const committed = sessions.updateAtomic
+          ? await sessions.updateAtomic(sessionId, (draft) => {
+              capabilityToken = issueActivityCapability(draft, 'manager').token
+              return draft
+            })
+          : null
+        if (sessions.updateAtomic && (!committed || capabilityToken == null)) {
+          throw new Error('Atomic manager capability persistence failed')
+        }
+        if (!sessions.updateAtomic) {
+          capabilityToken = issueActivityCapability(consumedSession, 'manager').token
+          await sessions.set(sessionId, consumedSession)
+        }
+        writeActivityCapabilityCookie({ cookie: res.cookie.bind(res) }, sessionId, 'manager', capabilityToken as string)
       } catch (error) {
         console.error(JSON.stringify({
           activity: 'syncdeck',

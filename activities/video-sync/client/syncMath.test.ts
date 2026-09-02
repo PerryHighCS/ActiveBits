@@ -68,6 +68,15 @@ void test('shouldApplyIncomingVideoSyncState accepts a strictly newer frame', ()
   assert.equal(shouldApplyIncomingVideoSyncState(current, next), true)
 })
 
+void test('playback revision orders commands independently of wall-clock timestamps', () => {
+  const current = createState({ playbackRevision: 4, serverTimestampMs: 9_000, isPlaying: true })
+  const laterCommandFromSkewedClock = createState({ playbackRevision: 5, serverTimestampMs: 2_000, isPlaying: false })
+  const staleFrameWithNewerClock = createState({ playbackRevision: 3, serverTimestampMs: 20_000, isPlaying: false })
+
+  assert.equal(shouldApplyIncomingVideoSyncState(current, laterCommandFromSkewedClock), true)
+  assert.equal(shouldApplyIncomingVideoSyncState(current, staleFrameWithNewerClock), false)
+})
+
 void test('shouldApplyIncomingVideoSyncState keeps an equal-timestamp instructor frame over a system one', () => {
   const current = createState({ serverTimestampMs: 7_000, updatedBy: 'instructor', isPlaying: false })
   const heartbeat = createState({ serverTimestampMs: 7_000, updatedBy: 'system', isPlaying: true })

@@ -74,6 +74,8 @@ const DEFAULT_STATE: VideoSyncState = {
   isPlaying: false,
   playbackRate: 1,
   updatedBy: 'system',
+  controllerId: null,
+  playbackRevision: 0,
   serverTimestampMs: Date.now(),
 }
 

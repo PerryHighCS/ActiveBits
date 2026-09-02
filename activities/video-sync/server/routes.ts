@@ -42,6 +42,8 @@ interface VideoSyncState {
   isPlaying: boolean
   playbackRate: 1
   updatedBy: 'instructor' | 'system'
+  controllerId: string | null
+  playbackRevision: number
   serverTimestampMs: number
 }
 
@@ -67,6 +69,7 @@ interface VideoSyncSessionData extends Record<string, unknown> {
   standaloneMode: boolean
   state: VideoSyncState
   telemetry: VideoSyncTelemetry
+  processedCommandIds: string[]
 }
 
 interface PublicVideoSyncSessionData {
@@ -80,7 +83,7 @@ interface VideoSyncSession extends SessionRecord {
   data: VideoSyncSessionData
 }
 
-interface VideoSyncSessionStore extends Pick<SessionStore, 'get' | 'getStrict' | 'set'> {
+interface VideoSyncSessionStore extends Pick<SessionStore, 'get' | 'getStrict' | 'set' | 'updateAtomic'> {
   publishBroadcast?: (channel: string, message: Record<string, unknown>) => Promise<void>
   subscribeToBroadcast?: (channel: string, handler: (message: unknown) => void) => void
   valkeyStore?: {
@@ -140,6 +143,10 @@ interface VideoSyncSocket extends ActiveBitsWebSocket {
 interface CommandBody {
   type?: unknown
   positionSec?: unknown
+  commandId?: unknown
+  managerId?: unknown
+  source?: unknown
+  expectedPlaybackRevision?: unknown
 }
 
 interface ConfigBody {
@@ -174,6 +181,8 @@ const MAX_UNSYNCED_STUDENTS_PER_SESSION = 200
 const WS_OPEN_READY_STATE = 1
 const MAX_TELEMETRY_ERROR_CODE_LENGTH = 64
 const MAX_TELEMETRY_ERROR_MESSAGE_LENGTH = 256
+const MAX_COMMAND_ID_LENGTH = 128
+const MAX_PROCESSED_COMMAND_IDS = 128
 const YOUTUBE_VIDEO_ID_PATTERN = /^[A-Za-z0-9_-]{11}$/
 const INVALID_SOURCE_URL_MESSAGE =
   'Only YouTube watch/embed, YouTube Education watch/embed, and youtu.be URLs are supported in v1.'
@@ -370,6 +379,8 @@ function createDefaultState(): VideoSyncState {
     isPlaying: false,
     playbackRate: 1,
     updatedBy: 'system',
+    controllerId: null,
+    playbackRevision: 0,
     serverTimestampMs: Date.now(),
   }
 }
@@ -409,6 +420,10 @@ function normalizeState(raw: unknown): VideoSyncState {
       source.updatedBy === 'instructor' || source.updatedBy === 'manager'
         ? 'instructor'
         : 'system',
+    controllerId: typeof source.controllerId === 'string' && source.controllerId.length <= MAX_COMMAND_ID_LENGTH
+      ? source.controllerId
+      : null,
+    playbackRevision: Math.max(0, Math.floor(toFiniteNumber(source.playbackRevision, 0))),
     serverTimestampMs: normalizedServerTimestampMs,
   }
 }
@@ -559,6 +574,12 @@ function normalizeStudentId(value: unknown): string | null {
   const trimmed = value.trim()
   if (trimmed.length === 0 || trimmed.length > 128) return null
   return trimmed
+}
+
+function normalizeCommandId(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const normalized = value.trim()
+  return normalized.length > 0 && normalized.length <= MAX_COMMAND_ID_LENGTH ? normalized : null
 }
 
 function normalizeTelemetryErrorField(value: unknown, maxLength: number): string | null {
@@ -922,11 +943,14 @@ function scheduleUnsyncedStudentsPrune(
         }
 
         const data = ensureVideoSyncSessionData(session)
-        const previousCount = data.telemetry.sync.unsyncedStudents
-        await refreshUnsyncedStudentsCount(sessions as VideoSyncSessionStore, data, sessionId, pruneNowMs)
+        const telemetryProbe = cloneTelemetry(data.telemetry)
+        const probeData = { ...data, telemetry: telemetryProbe }
+        await refreshUnsyncedStudentsCount(sessions as VideoSyncSessionStore, probeData, sessionId, pruneNowMs)
 
-        if (data.telemetry.sync.unsyncedStudents !== previousCount) {
-          await sessions.set(session.id, session)
+        if (telemetryProbe.sync.unsyncedStudents !== data.telemetry.sync.unsyncedStudents) {
+          await updateVideoSyncSessionAtomic(sessions as VideoSyncSessionStore, sessionId, (_draft, latestData) => {
+            latestData.telemetry.sync.unsyncedStudents = telemetryProbe.sync.unsyncedStudents
+          })
         }
       })
 
@@ -956,6 +980,9 @@ function normalizeVideoSyncSessionData(session: SessionRecord): {
     standaloneMode: rawData.standaloneMode === true,
     state,
     telemetry,
+    processedCommandIds: Array.isArray(rawData.processedCommandIds)
+      ? rawData.processedCommandIds.filter((value): value is string => typeof value === 'string').slice(-128)
+      : [],
   }
 
   const changed = !isPlainObject(previousData) || !isDeepStrictEqual(previousData, normalized)
@@ -1085,6 +1112,45 @@ async function getVideoSyncSessionWithNormalization(
     data,
     didNormalizeSessionData,
   }
+}
+
+async function updateVideoSyncSessionAtomic(
+  sessions: VideoSyncSessionStore,
+  sessionId: string,
+  mutate: (session: VideoSyncSession, data: VideoSyncSessionData) => void,
+): Promise<{ session: VideoSyncSession; data: VideoSyncSessionData } | null> {
+  if (typeof sessions.updateAtomic === 'function') {
+    const updated = await sessions.updateAtomic(sessionId, (draft) => {
+      if (draft.type !== 'video-sync') return draft
+      const data = ensureVideoSyncSessionData(draft)
+      mutate(draft as VideoSyncSession, data)
+      return draft
+    })
+    if (!updated || updated.type !== 'video-sync') return null
+    return {
+      session: updated as VideoSyncSession,
+      data: ensureVideoSyncSessionData(updated),
+    }
+  }
+
+  // Test/minimal store compatibility. Production stores expose updateAtomic;
+  // the existing per-process queue still serializes this fallback.
+  const session = await getVideoSyncSession(sessions, sessionId, { strict: true })
+  if (!session) return null
+  const data = ensureVideoSyncSessionData(session)
+  mutate(session, data)
+  await sessions.set(session.id, session)
+  return { session, data }
+}
+
+async function persistVideoSyncErrorAtomic(
+  sessions: VideoSyncSessionStore,
+  sessionId: string,
+  error: VideoSyncTelemetry['error'],
+): Promise<void> {
+  await updateVideoSyncSessionAtomic(sessions, sessionId, (_session, data) => {
+    data.telemetry.error = error
+  })
 }
 
 function upsertSubscriber(sessionId: string, socket: VideoSyncSocket): void {
@@ -1236,50 +1302,26 @@ function ensureHeartbeat(
           sessionId,
         )
 
-        // What this tick broadcasts. Starts as the projection of our strict
-        // snapshot; if the re-read below shows another instance committed newer
-        // state, we broadcast the projection of *that* instead so a stale
-        // stop-transition frame (re-stamped to now, which clients would accept
-        // as newer) cannot pause a concurrent re-play. `broadcastTelemetry`
-        // likewise becomes the merged latest telemetry after the re-read, so a
-        // concurrently committed `autoplay.blockedCount` / error / drift field
-        // isn't rolled back in the manager UI (`handleEnvelope` applies
-        // heartbeat telemetry unconditionally) until the next tick.
         let broadcastState = heartbeatState
         let broadcastTelemetry = heartbeatTelemetry
 
         const persistHeartbeatTelemetry = shouldPersistHeartbeatTelemetry(data.telemetry, heartbeatTelemetry)
         const persistHeartbeatStopTransition = shouldPersistHeartbeatState(data.state, heartbeatState)
         if (persistHeartbeatTelemetry || persistHeartbeatStopTransition) {
-          // Re-read strictly before writing: another instance may have advanced
-          // the session (a pause / re-play) between the strict read above and
-          // this write, and the process-local mutation queue does not serialize
-          // across instances. This narrows - it does not close - that window; a
-          // storage-level revision / compare-and-set primitive is the deferred
-          // full fix, and the client `shouldApplyIncomingVideoSyncState` guard is
-          // the accepted backstop for the residual read-to-publish race.
-          const latest = await getVideoSyncSession(sessions, sessionId, { strict: true })
-          if (latest) {
-            // Write only the two counters the heartbeat owns. Assigning the
-            // whole `heartbeatTelemetry` (a clone of the first strict read) would
-            // roll back any other telemetry field - notably the accumulating
-            // `autoplay.blockedCount` - that another instance committed between
-            // the two reads.
-            latest.data.telemetry.connections.activeCount = heartbeatTelemetry.connections.activeCount
-            latest.data.telemetry.sync.unsyncedStudents = heartbeatTelemetry.sync.unsyncedStudents
-
-            const stateUnchangedSinceSnapshot = isDeepStrictEqual(latest.data.state, data.state)
-            if (persistHeartbeatStopTransition && stateUnchangedSinceSnapshot) {
-              latest.data.state = heartbeatState
-            } else if (!stateUnchangedSinceSnapshot) {
-              // Someone committed a pause / re-play; broadcast their state, not
-              // our stale projection.
-              broadcastState = applyStopIfReached(latest.data.state)
+          const committed = await updateVideoSyncSessionAtomic(sessions, sessionId, (_latest, latestData) => {
+            latestData.telemetry.connections.activeCount = heartbeatTelemetry.connections.activeCount
+            latestData.telemetry.sync.unsyncedStudents = heartbeatTelemetry.sync.unsyncedStudents
+            const projectedLatest = applyStopIfReached(latestData.state)
+            if (shouldPersistHeartbeatState(latestData.state, projectedLatest)) {
+              latestData.state = {
+                ...projectedLatest,
+                playbackRevision: latestData.state.playbackRevision + 1,
+              }
             }
-            await sessions.set(latest.id, latest)
-            // Broadcast the merged latest telemetry (our two owned counters over
-            // whatever else another instance committed since the first read).
-            broadcastTelemetry = cloneTelemetry(latest.data.telemetry)
+          })
+          if (committed) {
+            broadcastState = applyStopIfReached(committed.data.state)
+            broadcastTelemetry = cloneTelemetry(committed.data.telemetry)
           }
         }
 
@@ -1500,13 +1542,15 @@ export default function setupVideoSyncRoutes(
           // a session deleted or replaced on another instance in that window
           // stays visible (rejects -> outer catch -> 500) instead of being
           // recreated by the set() below from a stale cache hit.
-          const freshSession = await getVideoSyncSession(sessions, sessionId, { strict: true })
-          if (!freshSession) {
+          let capabilityToken: string | null = null
+          const committed = await updateVideoSyncSessionAtomic(sessions, sessionId, (freshSession) => {
+            const capability = issueActivityCapability(freshSession, 'manager')
+            capabilityToken = capability.token
+          })
+          if (!committed || capabilityToken == null) {
             return 'session-missing'
           }
-          const capability = issueActivityCapability(freshSession, 'manager')
-          await sessions.set(freshSession.id, freshSession)
-          writeActivityCapabilityCookie(res, sessionId, 'manager', capability.token)
+          writeActivityCapabilityCookie(res, sessionId, 'manager', capabilityToken)
           return 'issued'
         })
       } catch (error) {
@@ -1582,27 +1626,20 @@ export default function setupVideoSyncRoutes(
       shouldPersistHeartbeatState(snapshotState, projectedState) ||
       shouldPersistHeartbeatTelemetry(data.telemetry, projectedTelemetry)
     ) {
-      // Re-read strictly right before writing. `applyStopIfReached` re-stamps
-      // `serverTimestampMs` to now, so an unconditional write-back of this GET's
-      // older projection would clobber a pause / re-play another instance
-      // committed since the read above and re-stamp it "newer". Fold in only the
-      // two heartbeat-owned telemetry counters; overwrite `state` only when the
-      // store still holds our exact snapshot. Same shape as the heartbeat and
-      // websocket persist paths.
-      const { session: latest, data: latestData } = await getVideoSyncSessionWithNormalization(
-        sessions,
-        sessionId,
-        { strict: true },
-      )
-      if (latest && latestData) {
+      const committed = await updateVideoSyncSessionAtomic(sessions, sessionId, (_latest, latestData) => {
         latestData.telemetry.connections.activeCount = projectedTelemetry.connections.activeCount
         latestData.telemetry.sync.unsyncedStudents = projectedTelemetry.sync.unsyncedStudents
-        if (isDeepStrictEqual(latestData.state, snapshotState)) {
-          latestData.state = projectedState
+        const projectedLatest = applyStopIfReached(latestData.state)
+        if (shouldPersistHeartbeatState(latestData.state, projectedLatest)) {
+          latestData.state = {
+            ...projectedLatest,
+            playbackRevision: latestData.state.playbackRevision + 1,
+          }
         }
-        await sessions.set(latest.id, latest)
-        responseState = latestData.state
-        responseTelemetry = latestData.telemetry
+      })
+      if (committed) {
+        responseState = applyStopIfReached(committed.data.state)
+        responseTelemetry = committed.data.telemetry
       }
     }
 
@@ -1626,7 +1663,7 @@ export default function setupVideoSyncRoutes(
     }
 
     await withSessionMutationRoute(res, sessionId, 'session-configure-failed', async () => {
-    const session = await getVideoSyncSession(sessions, sessionId)
+    const session = await getVideoSyncSession(sessions, sessionId, { strict: true })
     if (!session) {
       res.status(404).json({ error: 'NOT_FOUND', message: 'Session not found' })
       return
@@ -1643,7 +1680,7 @@ export default function setupVideoSyncRoutes(
         code: 'CONFIG_LOCKED',
         message: 'Video source is already configured for this session.',
       }
-      await sessions.set(session.id, session)
+      await persistVideoSyncErrorAtomic(sessions, sessionId, data.telemetry.error)
       res.status(409).json({ error: 'CONFIG_LOCKED', message: data.telemetry.error.message })
       return
     }
@@ -1656,7 +1693,7 @@ export default function setupVideoSyncRoutes(
         code: 'INVALID_SOURCE_URL',
         message: INVALID_SOURCE_URL_MESSAGE,
       }
-      await sessions.set(session.id, session)
+      await persistVideoSyncErrorAtomic(sessions, sessionId, data.telemetry.error)
       res.status(400).json({ error: 'INVALID_SOURCE_URL', message: data.telemetry.error.message })
       return
     }
@@ -1673,7 +1710,7 @@ export default function setupVideoSyncRoutes(
         code: 'INVALID_STOP_SEC',
         message: 'stopSec must be a finite number of seconds or omitted.',
       }
-      await sessions.set(session.id, session)
+      await persistVideoSyncErrorAtomic(sessions, sessionId, data.telemetry.error)
       res.status(400).json({ error: 'INVALID_STOP_SEC', message: data.telemetry.error.message })
       return
     }
@@ -1685,7 +1722,7 @@ export default function setupVideoSyncRoutes(
           code: 'INVALID_SOURCE_URL',
           message: INVALID_SOURCE_URL_MESSAGE,
         }
-        await sessions.set(session.id, session)
+        await persistVideoSyncErrorAtomic(sessions, sessionId, data.telemetry.error)
         res.status(400).json({ error: 'INVALID_SOURCE_URL', message: data.telemetry.error.message })
         return
       }
@@ -1695,7 +1732,7 @@ export default function setupVideoSyncRoutes(
           code: 'INVALID_TIME_RANGE',
           message: 'stopSec must be greater than startSec and both must be >= 0.',
         }
-        await sessions.set(session.id, session)
+        await persistVideoSyncErrorAtomic(sessions, sessionId, data.telemetry.error)
         res.status(400).json({ error: 'INVALID_TIME_RANGE', message: data.telemetry.error.message })
         return
       }
@@ -1704,41 +1741,55 @@ export default function setupVideoSyncRoutes(
         code: 'INVALID_VIDEO_ID',
         message: 'Could not determine a valid YouTube video id from sourceUrl.',
       }
-      await sessions.set(session.id, session)
+      await persistVideoSyncErrorAtomic(sessions, sessionId, data.telemetry.error)
       res.status(400).json({ error: 'INVALID_VIDEO_ID', message: data.telemetry.error.message })
       return
     }
 
-    const now = Date.now()
-    data.state = {
-      ...data.state,
-      provider,
-      playerHost: parsedSource.source.playerHost,
-      videoId: parsedSource.source.videoId,
-      startSec: parsedSource.source.startSec,
-      stopSec: parsedSource.source.stopSec,
-      positionSec: parsedSource.source.startSec,
-      isPlaying: false,
-      playbackRate: 1,
-      updatedBy: 'instructor',
-      serverTimestampMs: now,
+    const telemetryProbe = cloneTelemetry(data.telemetry)
+    await updateConnectionTelemetry(sessions, { ...data, telemetry: telemetryProbe }, sessionId)
+    let configured = false
+    const committed = await updateVideoSyncSessionAtomic(sessions, sessionId, (_draft, latestData) => {
+      configured = false
+      if (latestData.state.videoId.length > 0) return
+      const now = Date.now()
+      latestData.state = {
+        ...latestData.state,
+        provider,
+        playerHost: parsedSource.source.playerHost,
+        videoId: parsedSource.source.videoId,
+        startSec: parsedSource.source.startSec,
+        stopSec: parsedSource.source.stopSec,
+        positionSec: parsedSource.source.startSec,
+        isPlaying: false,
+        playbackRate: 1,
+        updatedBy: 'instructor',
+        playbackRevision: latestData.state.playbackRevision + 1,
+        serverTimestampMs: now,
+      }
+      if (requestedStandaloneMode != null) latestData.standaloneMode = requestedStandaloneMode
+      latestData.telemetry = telemetryProbe
+      latestData.telemetry.error = { code: null, message: null }
+      configured = true
+    })
+    if (!committed) {
+      res.status(404).json({ error: 'NOT_FOUND', message: 'Session not found' })
+      return
     }
-    if (requestedStandaloneMode != null) {
-      data.standaloneMode = requestedStandaloneMode
+    if (!configured) {
+      res.status(409).json({ error: 'CONFIG_LOCKED', message: 'Video source is already configured for this session.' })
+      return
     }
-    data.telemetry.error = { code: null, message: null }
-    await updateConnectionTelemetry(sessions, data, sessionId)
-
-    await sessions.set(session.id, session)
+    const committedData = committed.data
 
     const envelope = createEnvelope(sessionId, 'state-update', {
-      state: data.state,
-      telemetry: data.telemetry,
+      state: committedData.state,
+      telemetry: committedData.telemetry,
       reason: 'config-updated',
     })
     await broadcastEnvelope(sessions, ws, sessionId, envelope)
 
-    res.json({ success: true, data: toPublicSessionData(data) })
+    res.json({ success: true, data: toPublicSessionData(committedData) })
     })
   })
 
@@ -1771,58 +1822,85 @@ export default function setupVideoSyncRoutes(
       return
     }
 
-    const data = ensureVideoSyncSessionData(session)
-    const now = Date.now()
-    const currentPosition = computeCurrentPositionSec(data.state, now)
-
-    if (body.type === 'play') {
-      const requested = typeof body.positionSec === 'number' && Number.isFinite(body.positionSec)
-        ? clampSeconds(body.positionSec)
-        : currentPosition
-      const clamped = data.state.stopSec != null ? Math.min(requested, data.state.stopSec) : requested
-      data.state = {
-        ...data.state,
-        positionSec: clamped,
-        isPlaying: true,
-        updatedBy: 'instructor',
-        serverTimestampMs: now,
-      }
-    } else if (body.type === 'pause') {
-      const requested = typeof body.positionSec === 'number' && Number.isFinite(body.positionSec)
-        ? clampSeconds(body.positionSec)
-        : currentPosition
-      const clamped = data.state.stopSec != null ? Math.min(requested, data.state.stopSec) : requested
-      data.state = {
-        ...data.state,
-        positionSec: clamped,
-        isPlaying: false,
-        updatedBy: 'instructor',
-        serverTimestampMs: now,
-      }
-    } else {
-      const requested = typeof body.positionSec === 'number' && Number.isFinite(body.positionSec)
-        ? clampSeconds(body.positionSec)
-        : data.state.startSec
-      const clamped = data.state.stopSec != null ? Math.min(requested, data.state.stopSec) : requested
-      data.state = {
-        ...data.state,
-        positionSec: clamped,
-        isPlaying: false,
-        updatedBy: 'instructor',
-        serverTimestampMs: now,
-      }
+    const commandId = normalizeCommandId(body.commandId)
+    if (body.commandId != null && commandId == null) {
+      res.status(400).json({ error: 'INVALID_COMMAND_ID', message: 'commandId must be a non-empty string of at most 128 characters' })
+      return
     }
+    const managerId = normalizeCommandId(body.managerId)
+    if (body.managerId != null && managerId == null) {
+      res.status(400).json({ error: 'INVALID_MANAGER_ID', message: 'managerId must be a non-empty string of at most 128 characters' })
+      return
+    }
+    const naturalCompletion = body.source === 'natural-ended'
+    const expectedPlaybackRevision = typeof body.expectedPlaybackRevision === 'number' &&
+      Number.isInteger(body.expectedPlaybackRevision) && body.expectedPlaybackRevision >= 0
+      ? body.expectedPlaybackRevision
+      : null
 
-    data.state = applyStopIfReached(data.state, now)
-    await updateConnectionTelemetry(sessions, data, sessionId)
-    await sessions.set(session.id, session)
+    const telemetryProbe = cloneTelemetry(ensureVideoSyncSessionData(session).telemetry)
+    await updateConnectionTelemetry(sessions, {
+      ...ensureVideoSyncSessionData(session),
+      telemetry: telemetryProbe,
+    }, sessionId)
+    const activeCount = telemetryProbe.connections.activeCount
+    const unsyncedStudents = telemetryProbe.sync.unsyncedStudents
+    let duplicate = false
+    let accepted = true
+    const committed = await updateVideoSyncSessionAtomic(sessions, sessionId, (_draft, data) => {
+      duplicate = false
+      accepted = true
+      if (commandId != null && data.processedCommandIds.includes(commandId)) {
+        duplicate = true
+        return
+      }
 
-    const envelope = createEnvelope(sessionId, 'state-update', {
-      state: data.state,
-      telemetry: data.telemetry,
-      reason: body.type,
+      if (
+        naturalCompletion &&
+        (managerId == null || data.state.controllerId !== managerId || expectedPlaybackRevision !== data.state.playbackRevision)
+      ) {
+        accepted = false
+        return
+      }
+
+      const now = Date.now()
+      const currentPosition = computeCurrentPositionSec(data.state, now)
+      const requested = typeof body.positionSec === 'number' && Number.isFinite(body.positionSec)
+        ? clampSeconds(body.positionSec)
+        : body.type === 'seek'
+          ? data.state.startSec
+          : currentPosition
+      const clamped = data.state.stopSec != null ? Math.min(requested, data.state.stopSec) : requested
+      data.state = {
+        ...data.state,
+        positionSec: clamped,
+        isPlaying: body.type === 'play',
+        updatedBy: 'instructor',
+        controllerId: managerId ?? data.state.controllerId,
+        playbackRevision: data.state.playbackRevision + 1,
+        serverTimestampMs: now,
+      }
+      data.state = applyStopIfReached(data.state, now)
+      data.telemetry.connections.activeCount = activeCount
+      data.telemetry.sync.unsyncedStudents = unsyncedStudents
+      if (commandId != null) {
+        data.processedCommandIds = [...data.processedCommandIds, commandId].slice(-MAX_PROCESSED_COMMAND_IDS)
+      }
     })
-    await broadcastEnvelope(sessions, ws, sessionId, envelope)
+    if (!committed) {
+      res.status(404).json({ error: 'NOT_FOUND', message: 'Session not found' })
+      return
+    }
+    const { data } = committed
+
+    if (!duplicate && accepted) {
+      const envelope = createEnvelope(sessionId, 'state-update', {
+        state: data.state,
+        telemetry: data.telemetry,
+        reason: body.type,
+      })
+      await broadcastEnvelope(sessions, ws, sessionId, envelope)
+    }
 
     res.json({ success: true, data: toPublicSessionData(data) })
     })
@@ -1854,13 +1932,7 @@ export default function setupVideoSyncRoutes(
       return
     }
 
-    const data = ensureVideoSyncSessionData(session)
     let unsyncedStudentsCount: number | undefined
-
-    if (body.type === 'autoplay-blocked') {
-      data.telemetry.autoplay.blockedCount += 1
-    }
-
     const studentId = normalizeStudentId(body.studentId)
 
     if (body.type === 'unsync') {
@@ -1870,10 +1942,6 @@ export default function setupVideoSyncRoutes(
           scheduleUnsyncedStudentsPrune(sessions, sessionId)
         }
       }
-      const normalizedDriftSec = normalizeDriftSec(body.driftSec)
-      data.telemetry.sync.lastDriftSec =
-        normalizedDriftSec ?? data.telemetry.sync.lastDriftSec
-      data.telemetry.sync.lastCorrectionResult = 'attempted'
     }
 
     if (body.type === 'sync-correction') {
@@ -1884,33 +1952,46 @@ export default function setupVideoSyncRoutes(
           scheduleUnsyncedStudentsPrune(sessions, sessionId)
         }
       }
-      data.telemetry.sync.lastCorrectionResult =
-        correction === 'success' || correction === 'failed' ? correction : 'attempted'
     }
 
-    if (body.type === 'load-failure') {
-      data.telemetry.sync.lastCorrectionResult = 'failed'
-      const errorCode = normalizeTelemetryErrorField(body.errorCode, MAX_TELEMETRY_ERROR_CODE_LENGTH)
-      const errorMessage = normalizeTelemetryErrorField(body.errorMessage, MAX_TELEMETRY_ERROR_MESSAGE_LENGTH)
-
-      if (errorCode != null || errorMessage != null) {
-        data.telemetry.error = {
-          code: errorCode,
-          message: errorMessage,
+    const activeCount = subscribersBySession.get(sessionId)?.size ?? 0
+    const committed = await updateVideoSyncSessionAtomic(sessions, sessionId, (_draft, latestData) => {
+      latestData.telemetry.connections.activeCount = activeCount
+      if (unsyncedStudentsCount != null) {
+        latestData.telemetry.sync.unsyncedStudents = unsyncedStudentsCount
+      }
+      if (body.type === 'autoplay-blocked') {
+        latestData.telemetry.autoplay.blockedCount += 1
+      } else if (body.type === 'unsync') {
+        const normalizedDriftSec = normalizeDriftSec(body.driftSec)
+        latestData.telemetry.sync.lastDriftSec = normalizedDriftSec ?? latestData.telemetry.sync.lastDriftSec
+        latestData.telemetry.sync.lastCorrectionResult = 'attempted'
+      } else if (body.type === 'sync-correction') {
+        const correction = body.correctionResult
+        latestData.telemetry.sync.lastCorrectionResult =
+          correction === 'success' || correction === 'failed' ? correction : 'attempted'
+      } else {
+        latestData.telemetry.sync.lastCorrectionResult = 'failed'
+        const errorCode = normalizeTelemetryErrorField(body.errorCode, MAX_TELEMETRY_ERROR_CODE_LENGTH)
+        const errorMessage = normalizeTelemetryErrorField(body.errorMessage, MAX_TELEMETRY_ERROR_MESSAGE_LENGTH)
+        if (errorCode != null || errorMessage != null) {
+          latestData.telemetry.error = { code: errorCode, message: errorMessage }
         }
       }
+    })
+    if (!committed) {
+      res.status(404).json({ error: 'NOT_FOUND', message: 'Session not found' })
+      return
     }
-
-    await updateConnectionTelemetry(sessions, data, sessionId, unsyncedStudentsCount)
-    await sessions.set(session.id, session)
+    const telemetry = committed.data.telemetry
 
     const envelope = createEnvelope(sessionId, 'telemetry-update', {
-      telemetry: data.telemetry,
+      telemetry,
       reason: body.type,
     })
     await broadcastEnvelope(sessions, ws, sessionId, envelope)
 
-    res.json({ success: true, telemetry: data.telemetry })
+    res.json({ success: true, telemetry })
     })
   })
 
@@ -1949,9 +2030,17 @@ export default function setupVideoSyncRoutes(
             return
           }
 
-          const currentData = ensureVideoSyncSessionData(currentSession)
-          await updateConnectionTelemetry(sessions, currentData, sessionId)
-          await sessions.set(currentSession.id, currentSession)
+          const telemetryProbe = cloneTelemetry(ensureVideoSyncSessionData(currentSession).telemetry)
+          await updateConnectionTelemetry(sessions, {
+            ...ensureVideoSyncSessionData(currentSession),
+            telemetry: telemetryProbe,
+          }, sessionId)
+          const committed = await updateVideoSyncSessionAtomic(sessions, sessionId, (_draft, latestData) => {
+            latestData.telemetry.connections.activeCount = telemetryProbe.connections.activeCount
+            latestData.telemetry.sync.unsyncedStudents = telemetryProbe.sync.unsyncedStudents
+          })
+          if (!committed) return
+          const currentData = committed.data
 
           const disconnectTelemetryUpdate = createEnvelope(sessionId, 'telemetry-update', {
             telemetry: currentData.telemetry,
@@ -2022,37 +2111,25 @@ export default function setupVideoSyncRoutes(
       ensureHeartbeat(sessions, ws, sessionId)
 
       const data = await withSessionMutation(sessionId, async () => {
-        // Strict: `applyStopIfReached` below re-stamps `serverTimestampMs` to now
-        // and this block persists the result. A cache-backed read on a
-        // multi-instance deploy could resurrect a pre-pause `isPlaying:true`
-        // (still within the 30s local TTL) as a freshly stamped frame that the
-        // client freshness guard would then accept over the real paused state.
         const currentSession = await getVideoSyncSession(sessions, sessionId, { strict: true })
-        if (!currentSession) {
-          return null
-        }
-
-        const snapshotState = ensureVideoSyncSessionData(currentSession).state
-        const projectedState = applyStopIfReached(snapshotState)
-
-        // Re-read strictly right before writing. `withSessionMutation` only
-        // serializes this block per-process, so another instance may have
-        // committed a pause / re-play since the read above. An unconditional
-        // write-back of our re-stamped projection would both clobber their
-        // state in Valkey and look "newer" to the client freshness guard.
-        // Overwrite `state` only when the store still holds our exact snapshot;
-        // otherwise keep - and send - theirs.
-        const latest = await getVideoSyncSession(sessions, sessionId, { strict: true })
-        if (!latest) {
-          return null
-        }
-        const latestData = ensureVideoSyncSessionData(latest)
-        if (isDeepStrictEqual(latestData.state, snapshotState)) {
-          latestData.state = projectedState
-        }
-        await updateConnectionTelemetry(sessions, latestData, sessionId)
-        await sessions.set(latest.id, latest)
-        return latestData
+        if (!currentSession) return null
+        const telemetryProbe = cloneTelemetry(ensureVideoSyncSessionData(currentSession).telemetry)
+        await updateConnectionTelemetry(sessions, {
+          ...ensureVideoSyncSessionData(currentSession),
+          telemetry: telemetryProbe,
+        }, sessionId)
+        const committed = await updateVideoSyncSessionAtomic(sessions, sessionId, (_draft, latestData) => {
+          latestData.telemetry.connections.activeCount = telemetryProbe.connections.activeCount
+          latestData.telemetry.sync.unsyncedStudents = telemetryProbe.sync.unsyncedStudents
+          const projected = applyStopIfReached(latestData.state)
+          if (shouldPersistHeartbeatState(latestData.state, projected)) {
+            latestData.state = {
+              ...projected,
+              playbackRevision: latestData.state.playbackRevision + 1,
+            }
+          }
+        })
+        return committed?.data ?? null
       })
 
       if (!data) {

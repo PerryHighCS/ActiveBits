@@ -69,6 +69,8 @@ export interface SessionStore extends SharedSessionStore<Record<string, unknown>
   // Valkey-backed store can fail a read.
   getStrict?(id: string): Promise<SessionRecord | null>
   set(id: string, session: SessionRecord, ttl?: number | null): Promise<void>
+  compareAndSet?(id: string, expectedMutationRevision: number, session: SessionRecord, ttl?: number | null): Promise<SessionRecord | null>
+  updateAtomic?(id: string, mutate: (session: SessionRecord) => SessionRecord, ttl?: number | null): Promise<SessionRecord | null>
   consumeSessionDataToken?(id: string, field: string, token: string): Promise<SessionRecord | null>
   // Like consumeSessionDataToken, but a backend failure propagates instead of
   // mapping to `null` (indistinguishable from "already consumed / invalid").
@@ -133,6 +135,35 @@ class InMemorySessionStore implements SessionStore {
     this.store[id] = normalizeSessionData(session)
   }
 
+  async compareAndSet(
+    id: string,
+    expectedMutationRevision: number,
+    session: SessionRecord,
+  ): Promise<SessionRecord | null> {
+    const current = this.store[id]
+    if (!current || (current.mutationRevision ?? 0) !== expectedMutationRevision) {
+      return null
+    }
+    const replacement = normalizeSessionData({
+      ...session,
+      mutationRevision: expectedMutationRevision + 1,
+      lastActivity: Date.now(),
+    })
+    this.store[id] = replacement
+    return replacement
+  }
+
+  async updateAtomic(
+    id: string,
+    mutate: (session: SessionRecord) => SessionRecord,
+  ): Promise<SessionRecord | null> {
+    const current = this.store[id]
+    if (!current) return null
+    const expectedRevision = current.mutationRevision ?? 0
+    const draft = structuredClone(current)
+    return await this.compareAndSet(id, expectedRevision, mutate(draft))
+  }
+
   async consumeSessionDataToken(id: string, field: string, token: string): Promise<SessionRecord | null> {
     const session = consumeSessionDataToken(this.store[id], field, token)
     if (!session) {
@@ -140,6 +171,7 @@ class InMemorySessionStore implements SessionStore {
     }
 
     session.lastActivity = Date.now()
+    session.mutationRevision = (session.mutationRevision ?? 0) + 1
     const embeddedParentSessionId = getEmbeddedParentSessionId(session)
     if (embeddedParentSessionId && embeddedParentSessionId !== id) {
       await this.touch(embeddedParentSessionId)
@@ -181,6 +213,7 @@ class InMemorySessionStore implements SessionStore {
     const session = this.store[id]
     if (!session || session.data.expiresAt !== expectedExpiresAt) return null
     session.data = { ...session.data, expiresAt: nextExpiresAt }
+    session.mutationRevision = (session.mutationRevision ?? 0) + 1
     session.lastActivity = Date.now()
     const refreshed = normalizeSessionData(session)
     const embeddedParentSessionId = getEmbeddedParentSessionId(refreshed)
@@ -302,6 +335,37 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
     const normalized = normalizeSessionData(session)
     await valkeyStore.set(id, normalized, ttl)
     cache.set(id, normalized, false)
+  }
+
+  const compareAndSet = async (
+    id: string,
+    expectedMutationRevision: number,
+    session: SessionRecord,
+    ttl: number | null = null,
+  ): Promise<SessionRecord | null> => {
+    cache.invalidate(id)
+    const updated = await valkeyStore.compareAndSet(id, expectedMutationRevision, session, ttl)
+    if (!updated) return null
+    const normalized = normalizeSessionData(toSessionRecord(updated))
+    cache.set(id, normalized, false)
+    return normalized
+  }
+
+  const updateAtomic = async (
+    id: string,
+    mutate: (session: SessionRecord) => SessionRecord,
+    ttl: number | null = null,
+  ): Promise<SessionRecord | null> => {
+    const maxAttempts = 12
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      const current = await getStrict(id)
+      if (!current) return null
+      const expectedRevision = current.mutationRevision ?? 0
+      const draft = structuredClone(current)
+      const updated = await compareAndSet(id, expectedRevision, mutate(draft), ttl)
+      if (updated) return updated
+    }
+    throw new Error(`Atomic session update exhausted retry budget for ${id}`)
   }
 
   const finalizeConsumedToken = async (id: string, consumed: SessionLike | null): Promise<SessionRecord | null> => {
@@ -444,6 +508,8 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
     get,
     getStrict,
     set,
+    compareAndSet,
+    updateAtomic,
     consumeSessionDataToken,
     consumeSessionDataTokenStrict,
     delete: del,

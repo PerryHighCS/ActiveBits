@@ -14,12 +14,9 @@ import {
     readBootstrapSourceUrl,
     readEmbeddedBootstrapSourceUrl,
     consumeProgrammaticPlaybackTarget,
-    isManagerPlaybackGestureRecent,
     nextManagerPlaybackFlushRetry,
     readRecoveredPersistentSourceUrl,
     resolveManagerPlaybackFlushOutcome,
-    resolveManagerStateChangeIntent,
-    shouldMirrorManagerPlaybackTransition,
     sanitizeManagerApiErrorMessage,
     shouldApplyManagerStateUpdate,
     shouldAutoStartBootstrapSource,
@@ -415,33 +412,6 @@ void test('shouldApplyManagerStateUpdate ignores empty late updates after a vide
   )
 })
 
-void test('resolveManagerStateChangeIntent records a real gesture but drops its own programmatic echo', () => {
-  // Not suppressed: any resolved intent is a genuine instructor gesture.
-  assert.deepEqual(
-    resolveManagerStateChangeIntent({ suppressed: false, nextIntent: 'play', programmaticTarget: 'pause' }),
-    { record: true },
-  )
-
-  // Suppressed echo of the transition applyStateToPlayer just requested: drop it.
-  assert.deepEqual(
-    resolveManagerStateChangeIntent({ suppressed: true, nextIntent: 'play', programmaticTarget: 'play' }),
-    { record: false },
-  )
-
-  // Suppressed but opposite to the programmatic target: a real click made inside
-  // the window - this is the dropped-click defect. It must still be recorded.
-  assert.deepEqual(
-    resolveManagerStateChangeIntent({ suppressed: true, nextIntent: 'pause', programmaticTarget: 'play' }),
-    { record: true },
-  )
-
-  // Buffering / cued / unstarted transitions carry no intent.
-  assert.deepEqual(
-    resolveManagerStateChangeIntent({ suppressed: false, nextIntent: null, programmaticTarget: 'play' }),
-    { record: false },
-  )
-})
-
 void test('consumeProgrammaticPlaybackTarget keeps the target until a play-state event is seen', () => {
   assert.equal(consumeProgrammaticPlaybackTarget({ nextIntent: null, programmaticTarget: 'play' }), 'play')
   assert.equal(consumeProgrammaticPlaybackTarget({ nextIntent: 'play', programmaticTarget: 'play' }), null)
@@ -470,69 +440,11 @@ void test('resolveManagerPlaybackFlushOutcome only retries a confirmed auth fail
     resolveManagerPlaybackFlushOutcome({ result: { ok: false, retryableAuth: true }, currentRetryCount: 3 }),
     { action: 'drop', nextRetryCount: 0 },
   )
-  // A permanent 4xx/5xx or an ambiguous network/parse failure: never replay a
-  // non-idempotent play/pause - drop immediately.
+  // A permanent 4xx/5xx after the transport-level idempotent retry is dropped.
   assert.deepEqual(
     resolveManagerPlaybackFlushOutcome({ result: { ok: false, retryableAuth: false }, currentRetryCount: 0 }),
     { action: 'drop', nextRetryCount: 0 },
   )
-})
-
-void test('shouldMirrorManagerPlaybackTransition exempts a natural completion from the gesture gate', () => {
-  // A real end-of-video ENDED lands long after the last click, but must still
-  // reach the server so the session does not stay isPlaying:true.
-  assert.equal(
-    shouldMirrorManagerPlaybackTransition({ isNaturalCompletion: true, gestureRecent: false }),
-    true,
-  )
-  // An involuntary play/pause with no recent activation is still dropped.
-  assert.equal(
-    shouldMirrorManagerPlaybackTransition({ isNaturalCompletion: false, gestureRecent: false }),
-    false,
-  )
-  // A deliberate click is mirrored as before.
-  assert.equal(
-    shouldMirrorManagerPlaybackTransition({ isNaturalCompletion: false, gestureRecent: true }),
-    true,
-  )
-})
-
-void test('isManagerPlaybackGestureRecent only mirrors transitions close to genuine user activation', () => {
-  // Fresh activation -> a real control-bar click: mirror it.
-  assert.equal(
-    isManagerPlaybackGestureRecent({ userActivationSupported: true, msSinceLastUserActivation: 200 }),
-    true,
-  )
-  // Steady-state playback with no interaction for seconds -> involuntary
-  // (autoplay block / heartbeat seek / buffering): do not mirror.
-  assert.equal(
-    isManagerPlaybackGestureRecent({ userActivationSupported: true, msSinceLastUserActivation: 9_000 }),
-    false,
-  )
-  assert.equal(
-    isManagerPlaybackGestureRecent({ userActivationSupported: true, msSinceLastUserActivation: 500, graceMs: 300 }),
-    false,
-  )
-  // Browser without navigator.userActivation keeps the prior mirror-always path.
-  assert.equal(
-    isManagerPlaybackGestureRecent({ userActivationSupported: false, msSinceLastUserActivation: 9_999_999 }),
-    true,
-  )
-})
-
-void test('a consumed programmatic target does not swallow a later same-direction instructor click', () => {
-  // Mirrors the onStateChange sequence: the ref absorbs exactly one echo, then
-  // is cleared, so play -> pause -> play inside one suppression window all land.
-  let programmaticTarget: 'play' | 'pause' | null = 'play'
-  const step = (nextIntent: 'play' | 'pause' | null) => {
-    const result = resolveManagerStateChangeIntent({ suppressed: true, nextIntent, programmaticTarget })
-    programmaticTarget = consumeProgrammaticPlaybackTarget({ nextIntent, programmaticTarget })
-    return result.record
-  }
-
-  assert.equal(step('play'), false) // programmatic echo, dropped
-  assert.equal(step('pause'), true) // instructor pause inside the window
-  assert.equal(step('play'), true) // instructor re-play, same direction as the echo
 })
 
 void test('shouldCorrectManagerPlaybackDrift is lenient while instructor playback is actively running', () => {

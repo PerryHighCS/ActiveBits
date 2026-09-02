@@ -66,6 +66,8 @@ void test('parseVideoSyncStateMessagePayload validates nested state and telemetr
         isPlaying: true,
         playbackRate: 1,
         updatedBy: 'instructor',
+        controllerId: null,
+        playbackRevision: 0,
         serverTimestampMs: 1234,
       },
       telemetry: {
@@ -90,6 +92,8 @@ void test('parseVideoSyncStateMessagePayload validates nested state and telemetr
         isPlaying: true,
         playbackRate: 1,
         updatedBy: 'instructor',
+        controllerId: null,
+        playbackRevision: 0,
         serverTimestampMs: 1234,
       },
       telemetry: {
@@ -145,6 +149,8 @@ void test('parseVideoSyncStateMessagePayload normalizes legacy manager updates t
         isPlaying: true,
         playbackRate: 1,
         updatedBy: 'instructor',
+        controllerId: null,
+        playbackRevision: 0,
         serverTimestampMs: 1234,
       },
       telemetry: undefined,
