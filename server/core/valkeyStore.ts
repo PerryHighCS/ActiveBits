@@ -160,6 +160,12 @@ export class ValkeySessionStore {
     ttlMs: number | null = null,
   ): Promise<SessionLike | null> {
     try {
+      // Build the full replacement (revision + lastActivity stamped) in JS and
+      // hand Lua the finished JSON string. Lua only compares the stored revision
+      // and SETs that string verbatim - it must NOT cjson.decode/encode the
+      // replacement, because Redis Lua cjson turns an empty array `[]` into `{}`,
+      // which would silently retype fields like `processedCommandIds` or
+      // `students` on every atomic whole-record write.
       const script = `
         local key = KEYS[1]
         local currentJson = redis.call('GET', key)
@@ -167,20 +173,20 @@ export class ValkeySessionStore {
         local current = cjson.decode(currentJson)
         local currentRevision = tonumber(current.mutationRevision) or 0
         if currentRevision ~= tonumber(ARGV[1]) then return nil end
-        local replacement = cjson.decode(ARGV[2])
-        replacement.mutationRevision = currentRevision + 1
-        replacement.lastActivity = tonumber(ARGV[3])
-        local updated = cjson.encode(replacement)
-        redis.call('SET', key, updated, 'PX', tonumber(ARGV[4]))
-        return updated
+        redis.call('SET', key, ARGV[2], 'PX', tonumber(ARGV[3]))
+        return ARGV[2]
       `
+      const replacement = {
+        ...session,
+        mutationRevision: expectedMutationRevision + 1,
+        lastActivity: Date.now(),
+      }
       const result = await this.client.eval(
         script,
         1,
         `session:${id}`,
         expectedMutationRevision,
-        JSON.stringify(session),
-        Date.now(),
+        JSON.stringify(replacement),
         ttlMs ?? this.ttlMs,
       )
       return typeof result === 'string' ? JSON.parse(result) as SessionLike : null

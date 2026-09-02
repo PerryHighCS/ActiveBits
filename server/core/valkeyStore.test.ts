@@ -2,10 +2,11 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { ValkeySessionStore, ValkeyPersistentStore } from './valkeyStore.js'
 
-// Faithful JS execution of the `compareAndSet` Lua body: GET -> revision compare
-// against ARGV[1] -> on mismatch return nil -> else re-stamp mutationRevision /
-// lastActivity, SET, return the new JSON. Lets the tests exercise the actual
-// commit / reject / conflict semantics without a live Redis.
+// Faithful JS execution of the `compareAndSet` Lua body: GET -> compare the
+// stored revision against ARGV[1] -> on mismatch return nil -> else SET ARGV[2]
+// verbatim (the replacement JSON is fully built in JS; Lua never re-encodes it)
+// and return it. Lets the tests exercise the commit / reject / conflict / no
+// array-retyping semantics without a live Redis.
 function compareAndSetValkeyStoreForTest(initial: Record<string, unknown> = {}) {
   const backing = new Map<string, string>()
   for (const [key, value] of Object.entries(initial)) {
@@ -20,18 +21,14 @@ function compareAndSetValkeyStoreForTest(initial: Record<string, unknown> = {}) 
     value: {
       async eval(source: string, _numKeys: number, ...values: Array<string | number>): Promise<string | null> {
         scripts.push(source)
-        const [key, expectedRevisionArg, replacementJson, lastActivityArg] = values as [string, string | number, string, string | number]
+        const [key, expectedRevisionArg, replacementJson] = values as [string, string | number, string]
         const currentJson = backing.get(key)
         if (currentJson == null) return null
         const current = JSON.parse(currentJson) as { mutationRevision?: number }
         const currentRevision = Number(current.mutationRevision ?? 0)
         if (currentRevision !== Number(expectedRevisionArg)) return null
-        const replacement = JSON.parse(replacementJson) as Record<string, unknown>
-        replacement.mutationRevision = currentRevision + 1
-        replacement.lastActivity = Number(lastActivityArg)
-        const updated = JSON.stringify(replacement)
-        backing.set(key, updated)
-        return updated
+        backing.set(key, replacementJson)
+        return replacementJson
       },
     },
   })
@@ -53,7 +50,34 @@ void test('ValkeySessionStore compareAndSet commits and advances the revision on
   assert.deepEqual((updated?.data as Record<string, unknown>), { a: 'new-a', b: 'new-b' })
   assert.equal((JSON.parse(backing.get('session:s1') as string) as { mutationRevision: number }).mutationRevision, 8)
   assert.match(scripts[0] ?? '', /currentRevision ~= tonumber\(ARGV\[1\]\)/)
-  assert.match(scripts[0] ?? '', /replacement\.mutationRevision = currentRevision \+ 1/)
+  // The script must SET the replacement verbatim, never cjson.decode/encode it.
+  assert.match(scripts[0] ?? '', /redis\.call\('SET', key, ARGV\[2\]/)
+  assert.doesNotMatch(scripts[0] ?? '', /cjson\.encode\(replacement\)/)
+})
+
+void test('ValkeySessionStore compareAndSet preserves empty arrays across an atomic write', async () => {
+  const { store, backing } = compareAndSetValkeyStoreForTest({
+    'session:s1': {
+      id: 's1',
+      mutationRevision: 3,
+      data: { processedCommandIds: ['x'], students: [] },
+    },
+  })
+
+  const updated = await store.compareAndSet('s1', 3, {
+    id: 's1',
+    data: { processedCommandIds: [], students: [] },
+  })
+
+  // Redis Lua cjson would turn `[]` into `{}`; building the JSON in JS keeps it.
+  assert.deepEqual((updated?.data as { processedCommandIds: unknown; students: unknown }), {
+    processedCommandIds: [],
+    students: [],
+  })
+  const persisted = JSON.parse(backing.get('session:s1') as string) as { data: { processedCommandIds: unknown; students: unknown } }
+  assert.ok(Array.isArray(persisted.data.processedCommandIds))
+  assert.ok(Array.isArray(persisted.data.students))
+  assert.equal(updated?.mutationRevision, 4)
 })
 
 void test('ValkeySessionStore compareAndSet rejects a stale expected revision and leaves the record untouched', async () => {

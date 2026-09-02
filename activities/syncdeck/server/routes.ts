@@ -2242,12 +2242,25 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       }
       try {
         let capabilityToken: string | null = null
+        let incarnationChanged = false
         const committed = sessions.updateAtomic
           ? await sessions.updateAtomic(sessionId, (draft) => {
+              // Bind to the exact session incarnation whose one-time entry token
+              // was just consumed. If the id was deleted/recreated between the
+              // strict read above and this mutation, do not mint a manager
+              // capability into the replacement.
+              if (draft.type !== consumedSession.type || draft.created !== consumedSession.created) {
+                incarnationChanged = true
+                return draft
+              }
               capabilityToken = issueActivityCapability(draft, 'manager').token
               return draft
             })
           : null
+        if (sessions.updateAtomic && incarnationChanged) {
+          res.status(404).json({ error: 'embedded activity session not found' })
+          return
+        }
         if (sessions.updateAtomic && (!committed || capabilityToken == null)) {
           throw new Error('Atomic manager capability persistence failed')
         }

@@ -3082,6 +3082,52 @@ void test('embedded manager capability exchange persists through updateAtomic wh
   assert.equal((storeState.store['child-capability']?.mutationRevision ?? 0) > 4, true, 'the atomic write advanced the revision')
 })
 
+void test('embedded manager capability exchange does not mint a capability into a replacement session', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const now = Date.now()
+  const storeState = createSessionStore({
+    'child-capability': {
+      id: 'child-capability', type: 'video-sync', created: now, lastActivity: now,
+      data: { embeddedManagerEntryToken: { value: 'capability-entry-token', expiresAt: now + 60_000 } },
+    },
+  }, { atomic: true })
+  // The strict read after token consumption still sees the authorized
+  // incarnation; the id is then reused for a different activity before
+  // updateAtomic reads it.
+  const realGetStrict = storeState.sessions.getStrict!.bind(storeState.sessions)
+  let strictReads = 0
+  storeState.sessions.getStrict = async (id: string) => {
+    strictReads += 1
+    const snapshot = await realGetStrict(id)
+    // Flip the id to a different incarnation only after the handler's
+    // post-consume re-read, so token consumption still succeeds first.
+    if (id === 'child-capability' && strictReads >= 2) {
+      storeState.store['child-capability'] = {
+        id: 'child-capability', type: 'algorithm-demo', created: now + 5_000, lastActivity: now + 5_000, data: {},
+      }
+    }
+    return snapshot
+  }
+  setupSyncDeckRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.get['/api/syncdeck/embedded-manager-capability']
+  const response = createResponse()
+  await handler?.(
+    createRequest({}, undefined, {}, {}, { sessionId: 'child-capability', token: 'capability-entry-token' }),
+    response,
+  )
+
+  assert.equal(response.statusCode, 404)
+  assert.deepEqual(response.body, { error: 'embedded activity session not found' })
+  assert.equal(response.cookies.length, 0)
+  assert.equal(
+    (storeState.store['child-capability']?.data as { activityCapabilities?: unknown }).activityCapabilities,
+    undefined,
+    'the algorithm-demo replacement gets no manager capability',
+  )
+})
+
 void test('embedded manager capability exchange returns 500 when updateAtomic cannot commit', async () => {
   const app = createMockApp()
   const ws = createMockWs()
