@@ -437,6 +437,23 @@ export function parseManagerStopTimeInput(params: {
   return { stopSecValue, errorMessage: null }
 }
 
+/**
+ * Validate the instructor "Seek to" text input before it becomes a `seek`
+ * command. A `type="number"` field still permits an empty value, and
+ * `Number.parseFloat('')` is `NaN`, so this guards clearing the field and
+ * clicking Seek as well as any other non-finite entry. Range clamping is the
+ * server's job (`clampSeconds`), so a negative number is passed through here.
+ */
+export function resolveManagerSeekRequest(
+  input: string,
+): { ok: true; positionSec: number } | { ok: false; message: string } {
+  const positionSec = Number.parseFloat(input)
+  if (!Number.isFinite(positionSec)) {
+    return { ok: false, message: 'Seek position must be a finite number of seconds.' }
+  }
+  return { ok: true, positionSec }
+}
+
 export default function VideoSyncManager() {
   const { sessionId } = useParams()
   const navigate = useNavigate()
@@ -938,9 +955,9 @@ export default function VideoSyncManager() {
   }, [scheduleManagerPlaybackIntentFlush])
 
   const requestExplicitSeek = useCallback((): void => {
-    const positionSec = Number.parseFloat(seekPositionInput)
-    if (!Number.isFinite(positionSec)) {
-      setErrorMessage('Seek position must be a finite number of seconds.')
+    const parsed = resolveManagerSeekRequest(seekPositionInput)
+    if (!parsed.ok) {
+      setErrorMessage(parsed.message)
       return
     }
     // A seek carries an explicit position, not a play/pause intent, so it goes
@@ -950,7 +967,7 @@ export default function VideoSyncManager() {
     // mid-request session swap cannot apply the stale result. A dropped seek is
     // reconciled by the next heartbeat / state-update, and the instructor can
     // simply seek again.
-    void sendCommand('seek', { positionSec, reportErrors: true })
+    void sendCommand('seek', { positionSec: parsed.positionSec, reportErrors: true })
   }, [seekPositionInput, sendCommand])
 
   const fetchSession = useCallback(async (signal?: AbortSignal) => {

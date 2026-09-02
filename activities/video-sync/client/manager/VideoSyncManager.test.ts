@@ -17,6 +17,7 @@ import {
     nextManagerPlaybackFlushRetry,
     readRecoveredPersistentSourceUrl,
     resolveManagerPlaybackFlushOutcome,
+    resolveManagerSeekRequest,
     sanitizeManagerApiErrorMessage,
     shouldApplyManagerStateUpdate,
     shouldAutoStartBootstrapSource,
@@ -539,6 +540,24 @@ void test('shouldSendManagerPlaybackPositionUpdate ignores missing or in-toleran
     }),
     false,
   )
+})
+
+void test('resolveManagerSeekRequest accepts a finite position and rejects empty or non-finite input', () => {
+  assert.deepEqual(resolveManagerSeekRequest('30'), { ok: true, positionSec: 30 })
+  assert.deepEqual(resolveManagerSeekRequest('12.5'), { ok: true, positionSec: 12.5 })
+  // Range clamping is the server's job, so a negative value is passed through.
+  assert.deepEqual(resolveManagerSeekRequest('-4'), { ok: true, positionSec: -4 })
+
+  const emptyInput = resolveManagerSeekRequest('')
+  assert.equal(emptyInput.ok, false)
+  assert.equal(
+    emptyInput.ok === false ? emptyInput.message : null,
+    'Seek position must be a finite number of seconds.',
+  )
+  assert.equal(resolveManagerSeekRequest('   ').ok, false)
+  assert.equal(resolveManagerSeekRequest('abc').ok, false)
+  assert.equal(resolveManagerSeekRequest('Infinity').ok, false)
+  assert.equal(resolveManagerSeekRequest('NaN').ok, false)
 })
 
 void test('parseManagerStopTimeInput rejects invalid stop values before saving config', () => {
