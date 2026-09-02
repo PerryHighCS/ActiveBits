@@ -3622,6 +3622,64 @@ void test('event route tracks current unsynced student count', async () => {
   assert.equal(correctionTelemetry.sync.unsyncedStudents, 0)
 })
 
+void test('event route reads authoritative state and never persists a stale cross-instance isPlaying:true', async () => {
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  const committed = createVideoSyncSession('s1')
+  ;(committed.data as { state: { videoId: string; isPlaying: boolean; updatedBy: string; serverTimestampMs: number } }).state = {
+    ...(committed.data as { state: Record<string, unknown> }).state,
+    videoId: 'vid123456789',
+    isPlaying: false,
+    updatedBy: 'instructor',
+    serverTimestampMs: 50_000,
+  } as never
+  const storeState = createSessionStore({ s1: committed })
+
+  let strictGetCalls = 0
+  const setStates: Array<{ isPlaying: boolean }> = []
+  const sessions = {
+    ...storeState.sessions,
+    async get(id: string) {
+      // A peer instance still holds the pre-pause frame in its 30s cache.
+      const snapshot = await storeState.sessions.get(id)
+      if (snapshot) {
+        ;(snapshot.data as { state: { isPlaying: boolean; serverTimestampMs: number } }).state = {
+          ...(snapshot.data as { state: Record<string, unknown> }).state,
+          isPlaying: true,
+          serverTimestampMs: 1_000,
+        } as never
+      }
+      return snapshot
+    },
+    async getStrict(id: string) {
+      strictGetCalls += 1
+      return storeState.sessions.get(id)
+    },
+    async set(id: string, session: SessionRecord) {
+      setStates.push({
+        isPlaying: Boolean((session.data as { state?: { isPlaying?: boolean } }).state?.isPlaying),
+      })
+      return storeState.sessions.set(id, session)
+    },
+  }
+
+  setupVideoSyncRoutes(app, sessions, ws)
+  const handler = app.handlers.post['/api/video-sync/:sessionId/event']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.({ params: { sessionId: 's1' }, body: { type: 'autoplay-blocked' } }, res)
+
+  assert.equal(res.statusCode, 200)
+  assert.ok(strictGetCalls >= 1)
+  assert.equal((res.body as { telemetry: { autoplay: { blockedCount: number } } }).telemetry.autoplay.blockedCount, 1)
+  assert.ok(
+    setStates.every((entry) => entry.isPlaying === false),
+    `expected no persisted isPlaying:true, got ${JSON.stringify(setStates)}`,
+  )
+  assert.equal((storeState.store.s1?.data as { state?: { isPlaying?: boolean } }).state?.isPlaying, false)
+})
+
 void test('event route stores lastDriftSec as a non-negative magnitude', async () => {
   const app = createMockApp()
   const ws = createMockWs() as unknown as WsRouter

@@ -912,7 +912,10 @@ function scheduleUnsyncedStudentsPrune(
 
         pruneStaleUnsyncedStudents(studentMap, pruneNowMs)
 
-        const session = await getVideoSyncSession(sessions, sessionId)
+        // Strict: telemetry-only writer, but the `sessions.set` below persists
+        // the whole record - a cache-backed read could write a stale
+        // `isPlaying: true` back over another instance's committed pause.
+        const session = await getVideoSyncSession(sessions, sessionId, { strict: true })
         if (!session) {
           clearUnsyncedStudentState(sessionId)
           return
@@ -1833,7 +1836,13 @@ export default function setupVideoSyncRoutes(
     }
 
     await withSessionMutationRoute(res, sessionId, 'event-failed', async () => {
-    const session = await getVideoSyncSession(sessions, sessionId)
+    // Strict: this route mutates only telemetry, but `sessions.set` below
+    // persists the whole record. A cache-backed read on a peer holding a
+    // pre-pause snapshot would write `isPlaying: true` back to Valkey, which the
+    // next strict heartbeat would then re-stamp and rebroadcast. The residual
+    // sub-request race writes back `state` with an unchanged (older)
+    // `serverTimestampMs`, which the client freshness guard rejects.
+    const session = await getVideoSyncSession(sessions, sessionId, { strict: true })
     if (!session) {
       res.status(404).json({ error: 'NOT_FOUND', message: 'Session not found' })
       return
@@ -1931,7 +1940,10 @@ export default function setupVideoSyncRoutes(
       removeSubscriber(sessionId, typedSocket)
       void (async () => {
         await withSessionMutation(sessionId, async () => {
-          const currentSession = await getVideoSyncSession(sessions, sessionId)
+          // Strict: only `connections.activeCount` changes here, but the
+          // `sessions.set` below persists the whole record - a cache-backed
+          // read could write a stale `isPlaying: true` back to Valkey.
+          const currentSession = await getVideoSyncSession(sessions, sessionId, { strict: true })
           if (!currentSession) {
             stopHeartbeat(sessionId)
             return
@@ -1952,7 +1964,15 @@ export default function setupVideoSyncRoutes(
           stopHeartbeat(sessionId)
         }
       })().catch((error: unknown) => {
-        console.error('Failed to clean up closed video-sync socket:', error)
+        // A strict read can reject on a Valkey outage; the heartbeat's own
+        // `updateConnectionTelemetry` recomputes `activeCount` from the live
+        // subscriber set on the next tick, so this is self-healing.
+        console.error(JSON.stringify({
+          activity: 'video-sync',
+          event: 'socket-cleanup-failed',
+          sessionId,
+          errorName: error instanceof Error ? error.name : 'unknown',
+        }))
       })
     }
 
