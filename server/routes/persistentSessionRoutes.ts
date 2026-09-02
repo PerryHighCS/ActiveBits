@@ -127,7 +127,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
  * retry, the mutation must not be applied to the replacement. Bind to the
  * authorized `type` and, when available, its `created` timestamp.
  */
-function isAuthorizedSessionIncarnation(
+function matchesSessionIncarnation(
   record: unknown,
   expectedType: string,
   expectedCreated: number | null,
@@ -918,9 +918,9 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
       // The teacher code was verified while `activeSession` was live; bind the
       // capability to that same incarnation so a delete+recreate of this id
       // (even as the same activity) in the awaits above cannot inherit it.
-      const authorizedCreated = readSessionCreated(activeSession)
+      const expectedCreated = readSessionCreated(activeSession)
       const freshSession = await getSessionStrict(sessionId)
-      if (!isAuthorizedSessionIncarnation(freshSession, activityName, authorizedCreated)) {
+      if (!matchesSessionIncarnation(freshSession, activityName, expectedCreated)) {
         res.status(404).json({ error: 'Teacher join is unavailable for this session' })
         return
       }
@@ -931,12 +931,12 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
           // a retry that early-returns on a type/incarnation mismatch must not
           // leave a stale token from an earlier attempt.
           capabilityToken = null
-          if (!isAuthorizedSessionIncarnation(draft, activityName, authorizedCreated)) return draft
+          if (!matchesSessionIncarnation(draft, activityName, expectedCreated)) return draft
           capabilityToken = issueActivityCapability(draft as { data: unknown }, 'manager').token
           return draft
         })
         if (updated == null || capabilityToken == null
-          || !isAuthorizedSessionIncarnation(updated, activityName, authorizedCreated)) {
+          || !matchesSessionIncarnation(updated, activityName, expectedCreated)) {
           res.status(404).json({ error: 'Teacher join is unavailable for this session' })
           return
         }
@@ -1090,8 +1090,8 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
       // not issue a manager capability into the replacement. Bind to the
       // authorized `type` and its `created` timestamp.
       const expectedType = activeSession.type
-      const authorizedCreated = readSessionCreated(activeSession)
-      if (!isAuthorizedSessionIncarnation(freshSession, expectedType, authorizedCreated)) {
+      const expectedCreated = readSessionCreated(activeSession)
+      if (!matchesSessionIncarnation(freshSession, expectedType, expectedCreated)) {
         res.status(404).json({ error: 'Active session not found' })
         return
       }
@@ -1102,12 +1102,12 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
           // a retry that early-returns on a type/incarnation mismatch must not
           // leave a stale token from an earlier attempt.
           capabilityToken = null
-          if (!isAuthorizedSessionIncarnation(draft, expectedType, authorizedCreated)) return draft
+          if (!matchesSessionIncarnation(draft, expectedType, expectedCreated)) return draft
           capabilityToken = issueActivityCapability(draft as { data: unknown }, 'manager').token
           return draft
         })
         if (updated == null || capabilityToken == null
-          || !isAuthorizedSessionIncarnation(updated, expectedType, authorizedCreated)) {
+          || !matchesSessionIncarnation(updated, expectedType, expectedCreated)) {
           res.status(404).json({ error: 'Active session not found' })
           return
         }
