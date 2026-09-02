@@ -1841,6 +1841,13 @@ export default function setupVideoSyncRoutes(
       return
     }
     const naturalCompletion = body.source === 'natural-ended'
+    // `natural-ended` means the video reached its end; it can only pause. Reject
+    // a `play` / `seek` carrying that source before the mutation so it cannot
+    // set `isPlaying: true` via the ownership-gated path below.
+    if (naturalCompletion && body.type !== 'pause') {
+      res.status(400).json({ error: 'INVALID_COMMAND', message: 'A natural-ended command must be a pause.' })
+      return
+    }
     const expectedPlaybackRevision = typeof body.expectedPlaybackRevision === 'number' &&
       Number.isInteger(body.expectedPlaybackRevision) && body.expectedPlaybackRevision >= 0
       ? body.expectedPlaybackRevision

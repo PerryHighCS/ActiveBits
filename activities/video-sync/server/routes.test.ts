@@ -1793,6 +1793,46 @@ void test('natural completion cannot pause playback owned by another manager or 
   assert.equal(storeState.published.length, 1)
 })
 
+void test('a natural-ended command must be a pause, not play or seek', async () => {
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  const storeState = createSessionStore(
+    { s1: createVideoSyncSession('s1') },
+    { valkeyStore: createMockVideoSyncValkeyStore() },
+  )
+  setupVideoSyncRoutes(app, storeState.sessions, ws)
+  const handler = app.handlers.post['/api/video-sync/:sessionId/command']
+  assert.equal(typeof handler, 'function')
+
+  // Establish ownership + revision so only the source/type gate can reject.
+  await handler?.({
+    params: { sessionId: 's1' },
+    body: { type: 'play', commandId: 'manager-a:1', managerId: 'manager-a' },
+  }, createResponse())
+  const revisionAfterPlay = (storeState.store.s1?.data as { state: { playbackRevision: number } }).state.playbackRevision
+
+  for (const type of ['play', 'seek'] as const) {
+    const res = createResponse()
+    await handler?.({
+      params: { sessionId: 's1' },
+      body: {
+        type,
+        commandId: `manager-a:${type}-ended`,
+        managerId: 'manager-a',
+        source: 'natural-ended',
+        expectedPlaybackRevision: revisionAfterPlay,
+      },
+    }, res)
+    assert.equal(res.statusCode, 400, `${type} + natural-ended must be rejected`)
+    assert.equal((res.body as { error?: string }).error, 'INVALID_COMMAND')
+  }
+
+  const state = (storeState.store.s1?.data as { state: { isPlaying: boolean; playbackRevision: number } }).state
+  assert.equal(state.isPlaying, true, 'the rejected commands did not mutate playback')
+  assert.equal(state.playbackRevision, revisionAfterPlay)
+  assert.equal(storeState.published.length, 1, 'only the initial play broadcast')
+})
+
 void test('command route retries its atomic write and does not clobber a revision advanced by another instance', async () => {
   const app = createMockApp()
   const ws = createMockWs() as unknown as WsRouter
