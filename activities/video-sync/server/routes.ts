@@ -1170,10 +1170,11 @@ async function persistVideoSyncErrorAtomic(
   sessions: VideoSyncSessionStore,
   sessionId: string,
   error: VideoSyncTelemetry['error'],
+  options: { expectedCreated?: number } = {},
 ): Promise<void> {
   await updateVideoSyncSessionAtomic(sessions, sessionId, (_session, data) => {
     data.telemetry.error = error
-  })
+  }, options)
 }
 
 function upsertSubscriber(sessionId: string, socket: VideoSyncSocket): void {
@@ -1715,7 +1716,7 @@ export default function setupVideoSyncRoutes(
         code: 'CONFIG_LOCKED',
         message: 'Video source is already configured for this session.',
       }
-      await persistVideoSyncErrorAtomic(sessions, sessionId, data.telemetry.error)
+      await persistVideoSyncErrorAtomic(sessions, sessionId, data.telemetry.error, { expectedCreated: session.created })
       res.status(409).json({ error: 'CONFIG_LOCKED', message: data.telemetry.error.message })
       return
     }
@@ -1728,7 +1729,7 @@ export default function setupVideoSyncRoutes(
         code: 'INVALID_SOURCE_URL',
         message: INVALID_SOURCE_URL_MESSAGE,
       }
-      await persistVideoSyncErrorAtomic(sessions, sessionId, data.telemetry.error)
+      await persistVideoSyncErrorAtomic(sessions, sessionId, data.telemetry.error, { expectedCreated: session.created })
       res.status(400).json({ error: 'INVALID_SOURCE_URL', message: data.telemetry.error.message })
       return
     }
@@ -1745,7 +1746,7 @@ export default function setupVideoSyncRoutes(
         code: 'INVALID_STOP_SEC',
         message: 'stopSec must be a finite number of seconds or omitted.',
       }
-      await persistVideoSyncErrorAtomic(sessions, sessionId, data.telemetry.error)
+      await persistVideoSyncErrorAtomic(sessions, sessionId, data.telemetry.error, { expectedCreated: session.created })
       res.status(400).json({ error: 'INVALID_STOP_SEC', message: data.telemetry.error.message })
       return
     }
@@ -1757,7 +1758,7 @@ export default function setupVideoSyncRoutes(
           code: 'INVALID_SOURCE_URL',
           message: INVALID_SOURCE_URL_MESSAGE,
         }
-        await persistVideoSyncErrorAtomic(sessions, sessionId, data.telemetry.error)
+        await persistVideoSyncErrorAtomic(sessions, sessionId, data.telemetry.error, { expectedCreated: session.created })
         res.status(400).json({ error: 'INVALID_SOURCE_URL', message: data.telemetry.error.message })
         return
       }
@@ -1767,7 +1768,7 @@ export default function setupVideoSyncRoutes(
           code: 'INVALID_TIME_RANGE',
           message: 'stopSec must be greater than startSec and both must be >= 0.',
         }
-        await persistVideoSyncErrorAtomic(sessions, sessionId, data.telemetry.error)
+        await persistVideoSyncErrorAtomic(sessions, sessionId, data.telemetry.error, { expectedCreated: session.created })
         res.status(400).json({ error: 'INVALID_TIME_RANGE', message: data.telemetry.error.message })
         return
       }
@@ -1776,7 +1777,7 @@ export default function setupVideoSyncRoutes(
         code: 'INVALID_VIDEO_ID',
         message: 'Could not determine a valid YouTube video id from sourceUrl.',
       }
-      await persistVideoSyncErrorAtomic(sessions, sessionId, data.telemetry.error)
+      await persistVideoSyncErrorAtomic(sessions, sessionId, data.telemetry.error, { expectedCreated: session.created })
       res.status(400).json({ error: 'INVALID_VIDEO_ID', message: data.telemetry.error.message })
       return
     }
@@ -2048,7 +2049,7 @@ export default function setupVideoSyncRoutes(
           latestData.telemetry.error = { code: errorCode, message: errorMessage }
         }
       }
-    })
+    }, { expectedCreated: session.created })
     if (!committed) {
       res.status(404).json({ error: 'NOT_FOUND', message: 'Session not found' })
       return
@@ -2188,6 +2189,10 @@ export default function setupVideoSyncRoutes(
           ...ensureVideoSyncSessionData(currentSession),
           telemetry: telemetryProbe,
         }, sessionId)
+        // Bind the snapshot persist to the incarnation the socket was authorized
+        // against (`session`, read for `resolveManagerSocketPrincipal` above). A
+        // same-id delete/recreate in the await window would otherwise let a
+        // stale manager socket receive the replacement session's snapshot.
         const committed = await updateVideoSyncSessionAtomic(sessions, sessionId, (_draft, latestData) => {
           latestData.telemetry.connections.activeCount = telemetryProbe.connections.activeCount
           latestData.telemetry.sync.unsyncedStudents = telemetryProbe.sync.unsyncedStudents
@@ -2198,7 +2203,7 @@ export default function setupVideoSyncRoutes(
               playbackRevision: latestData.state.playbackRevision + 1,
             }
           }
-        })
+        }, { expectedCreated: session.created })
         return committed?.data ?? null
       })
 

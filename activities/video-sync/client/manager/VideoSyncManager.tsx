@@ -513,7 +513,7 @@ export default function VideoSyncManager() {
   const loadedVideoIdRef = useRef<string | null>(null)
   const latestStateRef = useRef<VideoSyncState>(DEFAULT_STATE)
   const managerInstanceIdRef = useRef(createManagerPlaybackCommandId())
-  const desiredPlaybackIntentRef = useRef<'play' | 'pause' | null>(null)
+  const desiredPlaybackIntentRef = useRef<'play' | 'pause' | 'seek' | null>(null)
   const desiredPlaybackPositionRef = useRef<number | null>(null)
   // The `playbackRevision` of the authoritative state last handed to this
   // player. A delayed `ENDED` event is mirrored with this captured value, not
@@ -610,6 +610,7 @@ export default function VideoSyncManager() {
     // previous session's URL / stop time. `stopSecInput` + `hasStopTime` follow
     // `state.stopSec` via their own effect once `state` resets above.
     setSourceUrlInput('')
+    setSeekPositionInput('0')
     setErrorMessage(null)
     // Drop any playback command the previous session queued: a 120 ms flush
     // timer that fires after navigation would otherwise POST session A's
@@ -801,12 +802,18 @@ export default function VideoSyncManager() {
 
     const authoritativeState = latestStateRef.current
     const authoritativeIsPlaying = authoritativeState.isPlaying
+    const isSeek = desiredIntent === 'seek'
     const shouldSendPositionUpdate = shouldSendManagerPlaybackPositionUpdate({
       authoritativeState,
       desiredPositionSec: desiredPlaybackPositionRef.current,
     })
 
-    if ((desiredIntent === 'play') === authoritativeIsPlaying && !shouldSendPositionUpdate) {
+    // A seek is an explicit instructor gesture with a target position, so it is
+    // always sent (never collapsed by the drift-tolerance no-op guard). Routing
+    // it through this queue - rather than a bare `sendCommand` - serializes it
+    // after any in-flight play/pause so the server sees commands in gesture
+    // order (a seek is defined to land paused).
+    if (!isSeek && (desiredIntent === 'play') === authoritativeIsPlaying && !shouldSendPositionUpdate) {
       desiredPlaybackIntentRef.current = null
       desiredPlaybackPositionRef.current = null
       playbackFlushRetryCountRef.current = 0
@@ -826,7 +833,9 @@ export default function VideoSyncManager() {
     playbackCommandInFlightRef.current = true
     const result = await sendCommand(sentIntent, {
       positionSec: sentPosition ?? undefined,
-      reportErrors: false,
+      // A seek is an explicit gesture; surface its failure to the instructor.
+      // Queued play/pause stays silent and is reconciled by the next heartbeat.
+      reportErrors: isSeek,
     })
     if (playbackFlushOwnerRef.current !== flushToken) {
       return
@@ -880,7 +889,10 @@ export default function VideoSyncManager() {
     const nextAuthoritativeIsPlaying = latestStateRef.current.isPlaying
     if (
       !supersededByNewerIntent &&
-      (nextDesiredIntent == null || (nextDesiredIntent === 'play') === nextAuthoritativeIsPlaying)
+      (nextDesiredIntent == null ||
+        // A seek that was sent and not superseded is complete - do not re-flush.
+        nextDesiredIntent === 'seek' ||
+        (nextDesiredIntent === 'play') === nextAuthoritativeIsPlaying)
     ) {
       desiredPlaybackIntentRef.current = null
       desiredPlaybackPositionRef.current = null
@@ -997,18 +1009,19 @@ export default function VideoSyncManager() {
       setErrorMessage(parsed.message)
       return
     }
-    // An explicit seek supersedes a prior natural end: the next Play must resume
-    // from the sought position (server-projected), not restart from `startSec`.
+    // An explicit seek supersedes a prior natural end (the next Play resumes
+    // from the sought position, not `startSec`) and any queued play/pause.
+    // Routing it through the shared intent queue serializes it after an
+    // in-flight command so the server applies commands in gesture order (a seek
+    // is defined to land paused), and reuses the queue's flush-token /
+    // session-ownership guard so a mid-request route swap cannot apply a stale
+    // result.
     playerEndedRef.current = false
-    // A seek carries an explicit position, not a play/pause intent, so it goes
-    // straight to `sendCommand` rather than through the intent-flush queue. That
-    // skips the queue's transient-auth retry and flush-token ownership guard;
-    // `sendCommand` still re-checks `sessionIdRef` after every await, so a
-    // mid-request session swap cannot apply the stale result. A dropped seek is
-    // reconciled by the next heartbeat / state-update, and the instructor can
-    // simply seek again.
-    void sendCommand('seek', { positionSec: parsed.positionSec, reportErrors: true })
-  }, [seekPositionInput, sendCommand])
+    playbackFlushRetryCountRef.current = 0
+    desiredPlaybackIntentRef.current = 'seek'
+    desiredPlaybackPositionRef.current = parsed.positionSec
+    scheduleManagerPlaybackIntentFlush(0)
+  }, [scheduleManagerPlaybackIntentFlush, seekPositionInput])
 
   const fetchSession = useCallback(async (signal?: AbortSignal) => {
     if (!sessionId) return

@@ -2132,6 +2132,86 @@ void test('command route abandons the atomic write when the session id is delete
   assert.equal(storeState.published.length, 0, 'no broadcast for the abandoned command')
 })
 
+void test('event route abandons the atomic write when the session id is deleted and recreated mid-flush', async () => {
+  console.info('[TEST] video-sync event: the session id is recreated as a fresh video-sync session mid-flush; the handler is expected to answer 404 without writing telemetry into the replacement')
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  let swapped = false
+  const storeState = createSessionStore(
+    { s1: createVideoSyncSession('s1') },
+    {
+      valkeyStore: createMockVideoSyncValkeyStore(),
+      atomic: true,
+      onAtomicAttempt: (attempt, store) => {
+        if (attempt !== 0 || swapped) return
+        const record = store.s1
+        if (!record) return
+        swapped = true
+        const replacement = createVideoSyncSession('s1')
+        replacement.created = record.created + 10_000
+        replacement.mutationRevision = 5
+        store.s1 = replacement
+      },
+    },
+  )
+  setupVideoSyncRoutes(app, storeState.sessions, ws)
+  const handler = app.handlers.post['/api/video-sync/:sessionId/event']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.({
+    params: { sessionId: 's1' },
+    body: { type: 'autoplay-blocked' },
+  }, res)
+
+  assert.equal(swapped, true, 'the id-reuse hook must have fired')
+  assert.equal(res.statusCode, 404)
+  const replacementTelemetry = storeState.store.s1?.data as { telemetry: { autoplay: { blockedCount: number } } }
+  assert.equal(replacementTelemetry.telemetry.autoplay.blockedCount, 0, 'the replacement session telemetry was not touched')
+  assert.equal(storeState.store.s1?.mutationRevision, 5, 'the abandoned atomic attempt did not bump the revision or extend the TTL')
+  assert.equal(storeState.published.length, 0, 'no telemetry broadcast for the abandoned event')
+})
+
+void test('config route abandons the error-telemetry write when the session id is recreated mid-validation', async () => {
+  console.info('[TEST] video-sync config: an invalid sourceUrl is submitted and the id is recreated mid-flush; the error-telemetry persist must not land on the replacement')
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  let swapped = false
+  const storeState = createSessionStore(
+    { s1: createVideoSyncSession('s1') },
+    {
+      valkeyStore: createMockVideoSyncValkeyStore(),
+      atomic: true,
+      onAtomicAttempt: (attempt, store) => {
+        if (attempt !== 0 || swapped) return
+        const record = store.s1
+        if (!record) return
+        swapped = true
+        const replacement = createVideoSyncSession('s1')
+        replacement.created = record.created + 10_000
+        replacement.mutationRevision = 5
+        store.s1 = replacement
+      },
+    },
+  )
+  setupVideoSyncRoutes(app, storeState.sessions, ws)
+  const handler = app.handlers.patch['/api/video-sync/:sessionId/session']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.({
+    params: { sessionId: 's1' },
+    body: { sourceUrl: '' },
+  }, res)
+
+  // The validation failure is still reported to the caller, but the
+  // error-telemetry persist against the recreated incarnation is abandoned.
+  assert.equal(swapped, true, 'the id-reuse hook must have fired')
+  const replacementTelemetry = storeState.store.s1?.data as { telemetry: { error: { code: string | null } } }
+  assert.equal(replacementTelemetry.telemetry.error.code, null, 'no error written into the replacement session')
+  assert.equal(storeState.store.s1?.mutationRevision, 5, 'the abandoned error persist did not bump the revision or extend the TTL')
+})
+
 void test('command route answers with a structured 500 when the session write rejects', async () => {
   console.info('[TEST] video-sync command: the session-store write below rejects on purpose; the handler is expected to log command-failed and answer 500 rather than let the rejection escape the mutation')
   const app = createMockApp()
@@ -3409,6 +3489,43 @@ void test('invalid websocket session still closes when sending the not-found env
   await new Promise((resolve) => setTimeout(resolve, 0))
 
   assert.deepEqual(recorder.closed, { code: 1008, reason: 'Session not found' })
+})
+
+void test('websocket admission closes 1008 instead of snapshotting a replacement session', { concurrency: false }, async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const storeState = createSessionStore({ 'ws-admit-incarnation': createVideoSyncSession('ws-admit-incarnation') })
+  // The socket authorizes against a readable session, but the admission
+  // snapshot's atomic write reports the id as gone / a new incarnation, so
+  // `updateVideoSyncSessionAtomic` returns null.
+  const sessions = {
+    ...storeState.sessions,
+    async getStrict(id: string) {
+      const record = storeState.store[id]
+      return record ? structuredClone(record) : null
+    },
+    async updateAtomic() {
+      return null
+    },
+  }
+  setupVideoSyncRoutes(app, sessions as unknown as Parameters<typeof setupVideoSyncRoutes>[1], ws as unknown as WsRouter)
+
+  const handler = ws.registered['/ws/video-sync']
+  assert.equal(typeof handler, 'function')
+
+  const recorder = createMockSocket()
+  handler?.(recorder.socket, new URLSearchParams({ sessionId: 'ws-admit-incarnation', role: 'student' }))
+  await new Promise((resolve) => setTimeout(resolve, 0))
+
+  assert.deepEqual(recorder.closed, { code: 1008, reason: 'Session not found' })
+  const snapshots = recorder.sent
+    .map((raw) => JSON.parse(raw) as { type?: string })
+    .filter((msg) => msg.type === 'state-snapshot')
+  assert.equal(snapshots.length, 0, 'no snapshot was sent from the unbound atomic write')
+
+  // Release the leaked subscriber + heartbeat timer this admission created.
+  recorder.emit('close')
+  await new Promise((resolve) => setTimeout(resolve, 0))
 })
 
 void test('heartbeat stops and closes subscribers when the backing session disappears', { concurrency: false }, async () => {
