@@ -13,6 +13,10 @@ export interface Session<TData = Record<string, unknown>> {
 export interface SessionStore<TData = Record<string, unknown>> {
   get(id: string): Promise<Session<TData> | null>
   set(id: string, session: Session<TData>, ttl?: number | null): Promise<void>
+  // `set()` does not bump `mutationRevision`. Once a session type adopts
+  // `updateAtomic`/`compareAndSet` for any write, every writer for that type must
+  // use it, or a plain `set()` will be silently lost against a concurrent
+  // compare-and-set. See `SessionStore` in `server/core/sessions.ts`.
   compareAndSet?(id: string, expectedMutationRevision: number, session: Session<TData>, ttl?: number | null): Promise<Session<TData> | null>
   updateAtomic?(
     id: string,

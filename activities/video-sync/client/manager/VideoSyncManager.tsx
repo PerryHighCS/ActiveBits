@@ -943,6 +943,13 @@ export default function VideoSyncManager() {
       setErrorMessage('Seek position must be a finite number of seconds.')
       return
     }
+    // A seek carries an explicit position, not a play/pause intent, so it goes
+    // straight to `sendCommand` rather than through the intent-flush queue. That
+    // skips the queue's transient-auth retry and flush-token ownership guard;
+    // `sendCommand` still re-checks `sessionIdRef` after every await, so a
+    // mid-request session swap cannot apply the stale result. A dropped seek is
+    // reconciled by the next heartbeat / state-update, and the instructor can
+    // simply seek again.
     void sendCommand('seek', { positionSec, reportErrors: true })
   }, [seekPositionInput, sendCommand])
 

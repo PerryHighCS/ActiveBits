@@ -69,6 +69,15 @@ export interface SessionStore extends SharedSessionStore<Record<string, unknown>
   // Valkey-backed store can fail a read.
   getStrict?(id: string): Promise<SessionRecord | null>
   set(id: string, session: SessionRecord, ttl?: number | null): Promise<void>
+  // Optimistic cross-instance concurrency. `set()` does NOT bump
+  // `mutationRevision`, so once a session type routes any of its writes through
+  // `updateAtomic`/`compareAndSet`, every writer for that type must do the same:
+  // a plain `set()` that lands between an `updateAtomic` read and its
+  // compare-and-set carries the same revision the CAS expects and is therefore
+  // silently overwritten. `compareAndSet` commits only when the stored
+  // `mutationRevision` still equals `expectedMutationRevision`, then stamps
+  // `expectedMutationRevision + 1`; `updateAtomic` re-reads strictly and retries
+  // a bounded number of times on a revision conflict.
   compareAndSet?(id: string, expectedMutationRevision: number, session: SessionRecord, ttl?: number | null): Promise<SessionRecord | null>
   updateAtomic?(id: string, mutate: (session: SessionRecord) => SessionRecord, ttl?: number | null): Promise<SessionRecord | null>
   consumeSessionDataToken?(id: string, field: string, token: string): Promise<SessionRecord | null>
@@ -344,7 +353,10 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
     ttl: number | null = null,
   ): Promise<SessionRecord | null> => {
     cache.invalidate(id)
-    const updated = await valkeyStore.compareAndSet(id, expectedMutationRevision, session, ttl)
+    // Shape the candidate through the same normalizer as set() before it is
+    // persisted; the Valkey CAS script cannot run it.
+    const normalizedInput = normalizeSessionData(session)
+    const updated = await valkeyStore.compareAndSet(id, expectedMutationRevision, normalizedInput, ttl)
     if (!updated) return null
     const normalized = normalizeSessionData(toSessionRecord(updated))
     cache.set(id, normalized, false)

@@ -1871,6 +1871,9 @@ export default function setupVideoSyncRoutes(
           ? data.state.startSec
           : currentPosition
       const clamped = data.state.stopSec != null ? Math.min(requested, data.state.stopSec) : requested
+      // v1: a seek always lands paused. `isPlaying` is true only for an explicit
+      // `play`; `pause` and `seek` both stop, and resuming after a seek is a
+      // separate `play` command.
       data.state = {
         ...data.state,
         positionSec: clamped,

@@ -320,11 +320,53 @@ function createSessionStore(
   options: {
     sharedStore?: Record<string, SessionRecord>
     valkeyStore?: { client: { eval(script: string, numKeys: number, ...args: Array<string | number>): Promise<unknown> } }
+    // Opt-in: expose a revision-checked `getStrict` + `updateAtomic` so a test
+    // exercises `updateVideoSyncSessionAtomic`'s real compare-and-set path
+    // instead of its non-atomic `get` -> mutate -> `set` fallback.
+    atomic?: boolean
+    // Fires once per `updateAtomic` attempt, after `mutate` has run against the
+    // draft but before the compare-and-set check. A test uses it to simulate a
+    // concurrent write from another instance and force the retry loop.
+    onAtomicAttempt?: (attempt: number, store: Record<string, SessionRecord>) => void
   } = {},
 ) {
   const store = options.sharedStore ?? { ...initial }
   const published: Array<{ channel: string; message: Record<string, unknown> }> = []
   const subscriptions: string[] = []
+
+  const atomicApi = options.atomic
+    ? {
+        async getStrict(id: string) {
+          const session = store[id]
+          return session ? cloneSessionRecord(session) : null
+        },
+        async updateAtomic(
+          id: string,
+          mutate: (session: SessionRecord) => SessionRecord,
+        ): Promise<SessionRecord | null> {
+          for (let attempt = 0; attempt < 12; attempt += 1) {
+            const current = store[id]
+            if (!current) return null
+            const expectedRevision = current.mutationRevision ?? 0
+            const draft = cloneSessionRecord(current)
+            const mutated = mutate(draft)
+            options.onAtomicAttempt?.(attempt, store)
+            const live = store[id]
+            if (!live || (live.mutationRevision ?? 0) !== expectedRevision) {
+              continue
+            }
+            const committed = cloneSessionRecord({
+              ...mutated,
+              mutationRevision: expectedRevision + 1,
+              lastActivity: Date.now(),
+            })
+            store[id] = committed
+            return cloneSessionRecord(committed)
+          }
+          throw new Error('[TEST] atomic session update exhausted retry budget')
+        },
+      }
+    : {}
 
   return {
     store,
@@ -338,6 +380,7 @@ function createSessionStore(
       async set(id: string, session: SessionRecord) {
         store[id] = cloneSessionRecord(session)
       },
+      ...atomicApi,
       ...(options.valkeyStore ? { valkeyStore: options.valkeyStore } : {}),
       async publishBroadcast(channel: string, message: Record<string, unknown>) {
         published.push({ channel, message })
@@ -1696,6 +1739,92 @@ void test('natural completion cannot pause playback owned by another manager or 
   assert.equal(state.isPlaying, true)
   assert.equal(state.playbackRevision, 1)
   assert.equal(storeState.published.length, 1)
+})
+
+void test('command route retries its atomic write and does not clobber a revision advanced by another instance', async () => {
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  let concurrentWriteApplied = false
+  const storeState = createSessionStore(
+    { s1: createVideoSyncSession('s1') },
+    {
+      valkeyStore: createMockVideoSyncValkeyStore(),
+      atomic: true,
+      onAtomicAttempt: (attempt, store) => {
+        // Simulate another instance committing a re-play (higher playbackRevision,
+        // different controller) between this request's strict read and its
+        // compare-and-set, exactly once.
+        if (attempt !== 0 || concurrentWriteApplied) return
+        const record = store.s1
+        if (!record) return
+        concurrentWriteApplied = true
+        record.mutationRevision = 5
+        const data = record.data as { state: Record<string, unknown> }
+        data.state = {
+          ...data.state,
+          isPlaying: true,
+          positionSec: 33,
+          controllerId: 'other-instance',
+          playbackRevision: 7,
+          serverTimestampMs: Date.now(),
+        }
+      },
+    },
+  )
+  setupVideoSyncRoutes(app, storeState.sessions, ws)
+  const handler = app.handlers.post['/api/video-sync/:sessionId/command']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.({
+    params: { sessionId: 's1' },
+    body: { type: 'pause', commandId: 'manager-x:1', managerId: 'manager-x' },
+  }, res)
+
+  assert.equal(res.statusCode, 200)
+  assert.equal(concurrentWriteApplied, true, 'the concurrent-write hook must have fired')
+  const record = storeState.store.s1 as SessionRecord
+  const state = (record.data as { state: { isPlaying: boolean; playbackRevision: number; controllerId: string } }).state
+  // The command re-read the concurrently advanced state (revision 7) and applied
+  // on top of it, rather than rolling back to revision 1 from the stale snapshot.
+  assert.equal(state.playbackRevision, 8)
+  assert.equal(state.isPlaying, false)
+  assert.equal(state.controllerId, 'manager-x')
+  assert.equal(record.mutationRevision, 6, 'one bump from the simulated peer, one from the retried commit')
+  assert.equal(storeState.published.length, 1)
+})
+
+void test('command route atomic path accumulates the playback revision across sequential commands', async () => {
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  const storeState = createSessionStore(
+    { s1: createVideoSyncSession('s1') },
+    { valkeyStore: createMockVideoSyncValkeyStore(), atomic: true },
+  )
+  setupVideoSyncRoutes(app, storeState.sessions, ws)
+  const handler = app.handlers.post['/api/video-sync/:sessionId/command']
+  assert.equal(typeof handler, 'function')
+
+  await handler?.({
+    params: { sessionId: 's1' },
+    body: { type: 'play', commandId: 'a:1', managerId: 'manager-a' },
+  }, createResponse())
+  await handler?.({
+    params: { sessionId: 's1' },
+    body: { type: 'pause', commandId: 'b:1', managerId: 'manager-b' },
+  }, createResponse())
+
+  const record = storeState.store.s1 as SessionRecord
+  const data = record.data as {
+    state: { isPlaying: boolean; playbackRevision: number; controllerId: string }
+    processedCommandIds: string[]
+  }
+  assert.equal(data.state.playbackRevision, 2, 'each command re-reads and advances the revision')
+  assert.equal(data.state.isPlaying, false)
+  assert.equal(data.state.controllerId, 'manager-b')
+  assert.deepEqual(data.processedCommandIds, ['a:1', 'b:1'])
+  assert.equal(record.mutationRevision, 2)
+  assert.equal(storeState.published.length, 2)
 })
 
 void test('command route answers with a structured 500 when the session write rejects', async () => {
