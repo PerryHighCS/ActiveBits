@@ -912,11 +912,11 @@ export default function VideoSyncManager() {
     if (!playerRef.current) {
       return
     }
-    // Re-apply authoritative state rather than a bare `playVideo()`: that seeks
-    // the lagging blocked player to the projected server position and arms the
-    // suppression window + programmatic target, so the resulting `PLAYING`
-    // event is treated as our own echo instead of an instructor command that
-    // would rewind every client to this player's stale position.
+    // Re-apply authoritative state rather than a bare `playVideo()`: this seeks
+    // the lagging blocked player to the projected server position before
+    // resuming, so recovery on this view does not diverge from the rest of the
+    // class. Ordinary iframe state changes are projection-only and never become
+    // commands, so no echo suppression is needed.
     applyStateToPlayer(latestStateRef.current)
     setAutoplayBlocked(false)
   }, [applyStateToPlayer])
@@ -1240,6 +1240,15 @@ export default function VideoSyncManager() {
           events: {
             onReady: () => {
               if (cancelled || candidateIndex !== activeAttemptIndex) return
+              // The preview iframe is a projection: keep it out of the tab order
+              // too, not just the accessibility tree. The wrapper is
+              // `aria-hidden`, but a cross-origin iframe stays keyboard-focusable
+              // unless its own `tabindex` is -1.
+              try {
+                player.getIframe?.()?.setAttribute('tabindex', '-1')
+              } catch {
+                // getIframe can throw if the player was torn down mid-init.
+              }
               // A refused education iframe can still complete wrapper setup.
               // Keep the fallback watchdog armed until the player emits state.
               armFallbackTimeout(player)

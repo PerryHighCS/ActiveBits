@@ -23,6 +23,7 @@ export interface YoutubePlayerLike {
   seekTo(seconds: number, allowSeekAhead: boolean): void
   getCurrentTime(): number
   getPlayerState(): number
+  getIframe?(): HTMLIFrameElement | null
   destroy(): void
 }
 

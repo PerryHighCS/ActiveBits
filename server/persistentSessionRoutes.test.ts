@@ -293,6 +293,95 @@ void test('session teacher authenticate fails closed when the store cannot persi
   assert.equal(res.cookies.has(getActivityCapabilityCookieName('manager', 'live-session')), false)
 })
 
+void test('session teacher authenticate persists the capability through updateAtomic', async (t) => {
+  initializePersistentStorage(null)
+  await initializeActivityRegistry()
+  const sessionMap = new Map<string, unknown>()
+  let setCalls = 0
+  const sessions = {
+    get: async (id: string) => {
+      const session = sessionMap.get(id)
+      return session == null ? null : structuredClone(session)
+    },
+    getStrict: async (id: string) => {
+      const session = sessionMap.get(id)
+      return session == null ? null : structuredClone(session)
+    },
+    set: async (id: string, session: unknown) => { setCalls += 1; sessionMap.set(id, structuredClone(session)) },
+    updateAtomic: async (id: string, mutate: (draft: Record<string, unknown>) => Record<string, unknown>) => {
+      const current = sessionMap.get(id) as Record<string, unknown> | undefined
+      if (current == null) return null
+      const draft = structuredClone(current)
+      const mutated = mutate(draft)
+      const committed = { ...mutated, mutationRevision: ((current.mutationRevision as number | undefined) ?? 0) + 1 }
+      sessionMap.set(id, structuredClone(committed))
+      return structuredClone(committed)
+    },
+  }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+  const handler = getRoute(app, 'POST', '/api/session/:sessionId/teacher-authenticate')
+
+  const activityName = 'syncdeck'
+  const teacherCode = 'teacher-secret'
+  const { hash, hashedTeacherCode } = generatePersistentHash(activityName, teacherCode)
+  t.after(async () => cleanupPersistentSession(hash))
+  sessionMap.set('live-session', {
+    id: 'live-session', type: activityName, mutationRevision: 1,
+    data: { instructorPasscode: 'syncdeck-instructor-passcode' },
+  })
+  await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode, 'solo-allowed')
+  await startPersistentSession(hash, 'live-session', { id: 'teacher-ws', readyState: 1, send() {} })
+
+  const res = createMockRes()
+  await handler(createMockReq({ params: { sessionId: 'live-session' }, body: { teacherCode } }), res)
+
+  assert.equal(res.statusCode, 200)
+  assert.equal(setCalls, 0, 'the atomic branch does not fall back to a whole-session set()')
+  assert.equal(res.cookies.has(getActivityCapabilityCookieName('manager', 'live-session')), true)
+  const persisted = sessionMap.get('live-session') as { mutationRevision?: number; data?: { activityCapabilities?: Record<string, unknown> } }
+  assert.ok(persisted.data?.activityCapabilities, 'capability persisted via updateAtomic')
+  assert.equal((persisted.mutationRevision ?? 0) > 1, true, 'the atomic write advanced the revision')
+})
+
+void test('session teacher authenticate returns 404 when updateAtomic cannot commit the capability', async (t) => {
+  initializePersistentStorage(null)
+  await initializeActivityRegistry()
+  const sessionMap = new Map<string, unknown>()
+  const sessions = {
+    get: async (id: string) => {
+      const session = sessionMap.get(id)
+      return session == null ? null : structuredClone(session)
+    },
+    getStrict: async (id: string) => {
+      const session = sessionMap.get(id)
+      return session == null ? null : structuredClone(session)
+    },
+    set: async (id: string, session: unknown) => { sessionMap.set(id, structuredClone(session)) },
+    updateAtomic: async () => null,
+  }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+  const handler = getRoute(app, 'POST', '/api/session/:sessionId/teacher-authenticate')
+
+  const activityName = 'syncdeck'
+  const teacherCode = 'teacher-secret'
+  const { hash, hashedTeacherCode } = generatePersistentHash(activityName, teacherCode)
+  t.after(async () => cleanupPersistentSession(hash))
+  sessionMap.set('live-session', {
+    id: 'live-session', type: activityName, data: { instructorPasscode: 'syncdeck-instructor-passcode' },
+  })
+  await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode, 'solo-allowed')
+  await startPersistentSession(hash, 'live-session', { id: 'teacher-ws', readyState: 1, send() {} })
+
+  const res = createMockRes()
+  console.info('[TEST] Expected teacher-authenticate 404: updateAtomic returns null (session gone during the retry).')
+  await handler(createMockReq({ params: { sessionId: 'live-session' }, body: { teacherCode } }), res)
+
+  assert.equal(res.statusCode, 404)
+  assert.equal(res.cookies.has(getActivityCapabilityCookieName('manager', 'live-session')), false)
+})
+
 void test('persistent manager capability recovery issues a manager cookie for an authenticated live permalink', async (t) => {
   initializePersistentStorage(null)
   const sessionMap = new Map<string, unknown>()
@@ -513,6 +602,113 @@ void test('persistent manager capability recovery issues the capability onto the
     { data?: { activityCapabilities?: Record<string, unknown>; concurrentMarker?: string } } | null
   assert.ok(persisted?.data?.activityCapabilities, 'capability is persisted')
   assert.equal(persisted?.data?.concurrentMarker, 'landed-mid-flight', 'the concurrent update is not clobbered by a stale snapshot write')
+})
+
+void test('persistent manager capability recovery persists the capability through updateAtomic', async (t) => {
+  initializePersistentStorage(null)
+  const sessionMap = new Map<string, unknown>()
+  let setCalls = 0
+  const sessions = {
+    get: async (id: string) => {
+      const session = sessionMap.get(id)
+      return session == null ? null : structuredClone(session)
+    },
+    getStrict: async (id: string) => {
+      const session = sessionMap.get(id)
+      return session == null ? null : structuredClone(session)
+    },
+    set: async (id: string, session: unknown) => { setCalls += 1; sessionMap.set(id, structuredClone(session)) },
+    updateAtomic: async (id: string, mutate: (draft: Record<string, unknown>) => Record<string, unknown>) => {
+      const current = sessionMap.get(id) as Record<string, unknown> | undefined
+      if (current == null) return null
+      const draft = structuredClone(current)
+      const mutated = mutate(draft)
+      const committed = { ...mutated, mutationRevision: ((current.mutationRevision as number | undefined) ?? 0) + 1 }
+      sessionMap.set(id, structuredClone(committed))
+      return structuredClone(committed)
+    },
+  }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+  const handler = getRoute(app, 'POST', '/api/session/:sessionId/persistent-manager-capability')
+
+  const activityName = 'java-format-practice'
+  const teacherCode = 'teacher-secret'
+  const { hash, hashedTeacherCode } = generatePersistentHash(activityName, teacherCode)
+  t.after(async () => cleanupPersistentSession(hash))
+  sessionMap.set('live-session', { id: 'live-session', type: activityName, mutationRevision: 2, data: { students: [] } })
+  await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode)
+  await startPersistentSession(hash, 'live-session', { id: 'teacher-ws', readyState: 1, send() {} })
+
+  const res = createMockRes()
+  await handler(createMockReq({
+    params: { sessionId: 'live-session' },
+    cookies: { persistent_sessions: buildCookieValue(activityName, hash, teacherCode) },
+  }), res)
+
+  assert.equal(res.statusCode, 200)
+  assert.equal(setCalls, 0, 'the atomic branch does not fall back to a whole-session set()')
+  const persisted = await sessions.get('live-session') as
+    { mutationRevision?: number; data?: { activityCapabilities?: Record<string, unknown> } } | null
+  assert.ok(persisted?.data?.activityCapabilities, 'capability persisted via updateAtomic')
+  assert.equal((persisted?.mutationRevision ?? 0) > 2, true, 'the atomic write advanced the revision')
+  assert.equal(res.cookies.has(getActivityCapabilityCookieName('manager', 'live-session')), true)
+})
+
+void test('persistent manager capability recovery via updateAtomic does not issue when the activity type changes during the retry', async (t) => {
+  initializePersistentStorage(null)
+  const sessionMap = new Map<string, unknown>()
+  let getStrictCalls = 0
+  let setCalls = 0
+  const sessions = {
+    get: async (id: string) => {
+      const session = sessionMap.get(id)
+      return session == null ? null : structuredClone(session)
+    },
+    getStrict: async (id: string) => {
+      getStrictCalls += 1
+      // The pre-mutation strict read still sees the authorized activity; the id
+      // is then reused for a different activity before updateAtomic reads it.
+      const session = sessionMap.get(id)
+      if (id === 'live-session' && getStrictCalls >= 1) {
+        sessionMap.set(id, { id: 'live-session', type: 'algorithm-demo', data: {} })
+      }
+      return session == null ? null : structuredClone(session)
+    },
+    set: async (id: string, session: unknown) => { setCalls += 1; sessionMap.set(id, structuredClone(session)) },
+    updateAtomic: async (id: string, mutate: (draft: Record<string, unknown>) => Record<string, unknown>) => {
+      const current = sessionMap.get(id) as Record<string, unknown> | undefined
+      if (current == null) return null
+      const draft = structuredClone(current)
+      const mutated = mutate(draft)
+      sessionMap.set(id, structuredClone(mutated))
+      return structuredClone(mutated)
+    },
+  }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+  const handler = getRoute(app, 'POST', '/api/session/:sessionId/persistent-manager-capability')
+
+  const activityName = 'java-format-practice'
+  const teacherCode = 'teacher-secret'
+  const { hash, hashedTeacherCode } = generatePersistentHash(activityName, teacherCode)
+  t.after(async () => cleanupPersistentSession(hash))
+  sessionMap.set('live-session', { id: 'live-session', type: activityName, data: { students: [] } })
+  await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode)
+  await startPersistentSession(hash, 'live-session', { id: 'teacher-ws', readyState: 1, send() {} })
+
+  const res = createMockRes()
+  await handler(createMockReq({
+    params: { sessionId: 'live-session' },
+    cookies: { persistent_sessions: buildCookieValue(activityName, hash, teacherCode) },
+  }), res)
+
+  assert.equal(res.statusCode, 404)
+  assert.deepEqual(res.jsonBody, { error: 'Active session not found' })
+  assert.equal(setCalls, 0, 'no capability written into the replacement session')
+  assert.equal(res.cookies.has(getActivityCapabilityCookieName('manager', 'live-session')), false)
+  const replacement = sessionMap.get('live-session') as { data?: { activityCapabilities?: unknown } }
+  assert.equal(replacement.data?.activityCapabilities, undefined, 'the algorithm-demo replacement gets no manager capability')
 })
 
 void test('persistent manager capability recovery does not issue into a session whose id was reused for another activity mid-request', async (t) => {
