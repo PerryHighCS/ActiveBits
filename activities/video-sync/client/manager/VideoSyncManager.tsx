@@ -1817,13 +1817,13 @@ export default function VideoSyncManager() {
       )}
 
       {state.videoId && autoplayBlocked && (
-        <div
-          className="absolute bottom-16 right-4 z-20 w-[min(28rem,calc(100vw-2rem))] border border-amber-300 bg-amber-50 text-amber-900 rounded p-3 text-sm"
-          role="status"
-          aria-live="polite"
-          aria-atomic="true"
-        >
-          {MANAGER_AUTOPLAY_BLOCKED_MESSAGE}
+        <div className="absolute bottom-16 right-4 z-20 w-[min(28rem,calc(100vw-2rem))] border border-amber-300 bg-amber-50 text-amber-900 rounded p-3 text-sm">
+          {/* Live region holds only the announcement text; the retry control
+              sits outside it so assistive tech does not re-announce a button
+              as status content. */}
+          <div role="status" aria-live="polite" aria-atomic="true">
+            {MANAGER_AUTOPLAY_BLOCKED_MESSAGE}
+          </div>
           <div className="mt-2">
             <Button onClick={retryManagerAutoplay}>Click to start playback</Button>
           </div>
