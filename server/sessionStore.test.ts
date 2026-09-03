@@ -525,3 +525,134 @@ void test('a strict miss drops the cached copy so a later get() cannot resurrect
   assert.equal(await sessions.getStrict!(live.id), null)
   assert.equal(await sessions.get(live.id), null, 'the deleted session is not resurrected from cache by a later get()')
 })
+
+// A strict read that started before a concurrent commit must not repopulate the
+// read cache with its now-stale snapshot after the commit already refilled it.
+function gatedValkeyStoreForTest(
+  records: Map<string, SessionRecord>,
+  hold: { strict: boolean; cas: boolean },
+  gate: Promise<void>,
+): ValkeySessionStore {
+  return {
+    ttlMs: 1_000,
+    async get(id: string) {
+      const session = records.get(id)
+      return session ? structuredClone(session) : null
+    },
+    async getStrict(id: string) {
+      const session = records.get(id)
+      const snapshot = session ? structuredClone(session) : null
+      if (hold.strict) {
+        hold.strict = false
+        await gate
+      }
+      return snapshot
+    },
+    async set(id: string, session: SessionRecord) {
+      records.set(id, structuredClone(session))
+    },
+    async compareAndSet(id: string, expectedMutationRevision: number, session: SessionRecord) {
+      const current = records.get(id)
+      if (!current || (current.mutationRevision ?? 0) !== expectedMutationRevision) return null
+      const updated = structuredClone({ ...session, mutationRevision: expectedMutationRevision + 1 })
+      records.set(id, updated)
+      if (hold.cas) {
+        hold.cas = false
+        await gate
+      }
+      return updated
+    },
+    async delete(id: string) {
+      return records.delete(id)
+    },
+    async touch(id: string) {
+      return records.has(id)
+    },
+    async getAll() {
+      return Array.from(records.values()).map((session) => structuredClone(session))
+    },
+    async getAllIds() {
+      return Array.from(records.keys())
+    },
+    async refreshSessionExpiry() {
+      return null
+    },
+    async consumeSessionDataToken() {
+      return null
+    },
+    async close() {},
+    subscribeToBroadcast() {},
+    initializePubSub() {},
+    async publishBroadcast() {},
+  } as unknown as ValkeySessionStore
+}
+
+void test('a strict read that raced behind a concurrent commit does not repopulate the cache with its stale snapshot', async (t) => {
+  const records = new Map<string, SessionRecord>()
+  let releaseGate: () => void = () => {}
+  const gate = new Promise<void>((resolve) => { releaseGate = resolve })
+  const hold = { strict: false, cas: false }
+  const sessions = createSessionStore('redis://test', 1_000, gatedValkeyStoreForTest(records, hold, gate))
+  t.after(async () => { await sessions.close() })
+
+  const live = await createSession(sessions)
+  live.data = { playback: 'paused' }
+  await sessions.set(live.id, live)
+  await sessions.get(live.id) // prime the read cache at the pre-commit revision
+
+  // A strict read captures the current (revision 0) snapshot, then stalls.
+  hold.strict = true
+  const stalledStrict = sessions.getStrict!(live.id)
+
+  // A commit lands while that strict read is still in flight and refills the cache.
+  const committed = await sessions.updateAtomic!(live.id, (draft) => {
+    draft.data = { ...draft.data, playback: 'playing' }
+    return draft
+  })
+  assert.equal(committed?.mutationRevision, 1)
+
+  releaseGate()
+  const strictResult = await stalledStrict
+  assert.equal(strictResult?.data.playback, 'paused', 'the strict caller still sees Valkey as of its own read')
+
+  const afterRace = await sessions.get(live.id)
+  assert.equal(afterRace?.mutationRevision, 1, 'ordinary get() still serves the committed revision, not the stale strict snapshot')
+  assert.equal(afterRace?.data.playback, 'playing')
+})
+
+void test('a slower CAS winner does not clobber a cache entry a faster follow-up commit already refilled', async (t) => {
+  const records = new Map<string, SessionRecord>()
+  let releaseGate: () => void = () => {}
+  const gate = new Promise<void>((resolve) => { releaseGate = resolve })
+  const hold = { strict: false, cas: false }
+  const sessions = createSessionStore('redis://test', 1_000, gatedValkeyStoreForTest(records, hold, gate))
+  t.after(async () => { await sessions.close() })
+
+  const live = await createSession(sessions)
+  live.data = { step: 'zero' }
+  await sessions.set(live.id, live)
+  await sessions.get(live.id)
+
+  const baseline = records.get(live.id)!
+
+  // CAS #1 (revision 0 -> 1) commits to the backend but stalls before its cache refill.
+  hold.cas = true
+  const slowCas = sessions.compareAndSet!(live.id, baseline.mutationRevision ?? 0, {
+    ...structuredClone(baseline),
+    data: { step: 'one' },
+  })
+
+  // CAS #2 (revision 1 -> 2) commits and refills the cache first.
+  const fastCas = await sessions.compareAndSet!(live.id, (baseline.mutationRevision ?? 0) + 1, {
+    ...structuredClone(baseline),
+    data: { step: 'two' },
+  })
+  assert.equal(fastCas?.mutationRevision, 2)
+
+  releaseGate()
+  await slowCas
+
+  const afterRace = await sessions.get(live.id)
+  assert.equal(afterRace?.mutationRevision, 2, 'the stale CAS winner did not overwrite the newer cached revision')
+  assert.equal(afterRace?.data.step, 'two')
+})

@@ -106,6 +106,15 @@ export class SessionCache<TSession extends MutableSession = MutableSession> {
   }
 
   /**
+   * Read the cached session without touching LRU order, TTL, or touch state.
+   * Returns a past-TTL entry too (unlike getFresh()); callers use this only to
+   * compare bookkeeping such as a revision counter, never to serve the session.
+   */
+  peek(id: string): TSession | null {
+    return this.cache.get(id)?.session ?? null
+  }
+
+  /**
    * Return a cached session only if its entry is still within the cache TTL.
    */
   getFresh(id: string): TSession | null {

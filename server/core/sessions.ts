@@ -307,6 +307,20 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
     },
   })
 
+  // Repopulate the shared read cache from a record obtained *after* an await
+  // (a strict Valkey read or a committed CAS). A snapshot that raced behind a
+  // concurrent commit must not overwrite a newer revision already in cache, or
+  // plain get() would serve the older revision for the full cache TTL. The
+  // check + set is synchronous, so no commit can interleave between them.
+  const repopulateCacheIfNotStale = (id: string, record: SessionRecord): void => {
+    const cached = cache.peek(id)
+    const cachedRevision = typeof cached?.mutationRevision === 'number' ? cached.mutationRevision : -1
+    const incomingRevision = typeof record.mutationRevision === 'number' ? record.mutationRevision : 0
+    if (incomingRevision >= cachedRevision) {
+      cache.set(id, record, false)
+    }
+  }
+
   const get = async (id: string): Promise<SessionRecord | null> => {
     const session = await cache.get(id, async (sessionId: string) => {
       const loaded = await valkeyStore.get(sessionId)
@@ -332,7 +346,7 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
     const loaded = await valkeyStore.getStrict(id)
     const normalizedSession = loaded ? normalizeSessionData(toSessionRecord(loaded)) : null
     if (normalizedSession) {
-      cache.set(id, normalizedSession, false)
+      repopulateCacheIfNotStale(id, normalizedSession)
       const embeddedParentSessionId = getEmbeddedParentSessionId(normalizedSession)
       if (embeddedParentSessionId && embeddedParentSessionId !== id) {
         await touch(embeddedParentSessionId)
@@ -365,7 +379,9 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
     const updated = await valkeyStore.compareAndSet(id, expectedMutationRevision, normalizedInput, ttl)
     if (!updated) return null
     const normalized = normalizeSessionData(toSessionRecord(updated))
-    cache.set(id, normalized, false)
+    // Guarded: a slower CAS winner (revision N+1) must not clobber a cache entry
+    // a faster follow-up commit (N+2) already refilled while this one awaited.
+    repopulateCacheIfNotStale(id, normalized)
     // Read-modify-write, like getStrict(): refresh an embedded child's parent so
     // it does not expire under a caller that only ever calls updateAtomic.
     const embeddedParentSessionId = getEmbeddedParentSessionId(normalized)
