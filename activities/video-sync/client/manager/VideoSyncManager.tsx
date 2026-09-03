@@ -443,17 +443,38 @@ export function resolveManagerSeekRequest(
 /**
  * The `positionSec` an explicit Play/Pause command should carry. Normally
  * `null` - play/pause acts at the server-projected authoritative position so a
- * lagging manager cannot rewind the class. The exception is Play after this
- * player emitted a natural `ENDED`: the server's projected position is the end
- * of the completed playback, so a plain Play would immediately re-pause (with
- * `stopSec`) or project past the video (without it). Restart from `startSec`.
+ * lagging manager cannot rewind the class. Two exceptions, both a Play that
+ * would otherwise be a no-op, restart from `startSec` instead:
+ *
+ * 1. Play after this player emitted a natural `ENDED` - the server's projected
+ *    position is the end of the completed playback.
+ * 2. Play while authoritative playback is parked at (or past) a configured
+ *    `stopSec`. A mid-video `endSeconds` boundary makes YouTube emit `PAUSED`,
+ *    not `ENDED`, so `playerEnded` stays false; a plain Play then projects from
+ *    `stopSec` and `applyStopIfReached` re-pauses it immediately, leaving a
+ *    bounded clip impossible to replay.
  */
 export function resolveExplicitPlaybackPositionSec(params: {
   intent: 'play' | 'pause'
   playerEnded: boolean
   startSec: number
+  authoritativePositionSec?: number
+  stopSec?: number | null
 }): number | null {
-  return params.intent === 'play' && params.playerEnded ? params.startSec : null
+  if (params.intent !== 'play') {
+    return null
+  }
+  if (params.playerEnded) {
+    return params.startSec
+  }
+  if (
+    params.stopSec != null &&
+    params.authoritativePositionSec != null &&
+    params.authoritativePositionSec >= params.stopSec
+  ) {
+    return params.startSec
+  }
+  return null
 }
 
 /**
@@ -1117,13 +1138,16 @@ export default function VideoSyncManager() {
     desiredPlaybackIntentRef.current = intent
     // Play/pause acts at the server-projected authoritative position. Position
     // changes are a separate explicit seek, so a lagging manager cannot rewind
-    // the class merely by pressing pause. The one exception: Play after a
-    // natural end restarts from `startSec`, otherwise the server would resume at
-    // the (end) position it projected for the completed playback.
+    // the class merely by pressing pause. The exceptions: Play after a natural
+    // end, or Play while parked at a configured `stopSec`, restart from
+    // `startSec` - otherwise the server re-projects the same end/boundary
+    // position and immediately re-pauses.
     desiredPlaybackPositionRef.current = resolveExplicitPlaybackPositionSec({
       intent,
       playerEnded: playerEndedRef.current,
       startSec: latestStateRef.current.startSec,
+      authoritativePositionSec: latestStateRef.current.positionSec,
+      stopSec: latestStateRef.current.stopSec,
     })
     scheduleManagerPlaybackIntentFlush(0)
   }, [scheduleManagerPlaybackIntentFlush])

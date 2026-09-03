@@ -573,6 +573,34 @@ void test('resolveExplicitPlaybackPositionSec restarts from startSec only for Pl
     null,
     'Pause never carries a position, even after an end',
   )
+  assert.equal(
+    resolveExplicitPlaybackPositionSec({
+      intent: 'play', playerEnded: false, startSec: 42, authoritativePositionSec: 90, stopSec: 90,
+    }),
+    42,
+    'Play while parked at a configured stopSec replays from startSec (no ENDED fires for a mid-video boundary)',
+  )
+  assert.equal(
+    resolveExplicitPlaybackPositionSec({
+      intent: 'play', playerEnded: false, startSec: 42, authoritativePositionSec: 95, stopSec: 90,
+    }),
+    42,
+    'a position past stopSec counts as parked at the boundary too',
+  )
+  assert.equal(
+    resolveExplicitPlaybackPositionSec({
+      intent: 'play', playerEnded: false, startSec: 42, authoritativePositionSec: 60, stopSec: 90,
+    }),
+    null,
+    'Play from mid-clip (before stopSec) still resumes at the authoritative position',
+  )
+  assert.equal(
+    resolveExplicitPlaybackPositionSec({
+      intent: 'play', playerEnded: false, startSec: 42, authoritativePositionSec: 500, stopSec: null,
+    }),
+    null,
+    'without a configured stopSec there is no boundary to treat as an end',
+  )
 })
 
 void test('isNaturalPlaybackCompletion only trusts an ENDED event whose playhead is at the media end', () => {
