@@ -107,13 +107,14 @@ based on a session snapshot could otherwise overwrite unrelated state committed
 by another server instance.
 
 The in-process read cache is guarded the same way, without comparing node-local
-wall clocks: an async fill (cache-miss load, strict read, CAS result, finalizer,
-keepalive revalidation) replaces a cached entry only when nothing wrote that
-entry while the caller was awaiting (an identity check against the value it saw
-before its read) or when a same-incarnation `mutationRevision` proves the fill at
-least as new. A result that raced behind a newer commit - or a stalled read of an
-incarnation that was since recreated - therefore cannot roll `get()` back for the
-cache TTL.
+wall clocks. `SessionCache` keeps a monotonic per-id write generation, bumped on
+every set / invalidate / evict / miss; an async fill (cache-miss load, strict
+read, CAS result, finalizer, keepalive revalidation) captures it before its await
+and only publishes when the generation is unchanged, or when a same-incarnation
+`mutationRevision` still proves the fill at least as new. A result that raced
+behind a newer commit, a stalled read of an incarnation that was since recreated,
+or a strict read that completes after a `delete` therefore cannot roll `get()`
+back - or resurrect a deleted session - for the cache TTL.
 
 Video Sync additionally carries a monotonic `playbackRevision` in its public
 playback state. Clients order state frames by that revision before considering

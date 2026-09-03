@@ -35,6 +35,11 @@ export class SessionCache<TSession extends MutableSession = MutableSession> {
   private readonly touchQueue: Set<string>
   private readonly touchFn: ((id: string) => Promise<void>) | null
   private readonly supersedes: ((incoming: TSession, cached: TSession) => boolean) | null
+  // Monotonic per-id write generation. Bumped on every set / invalidate / evict
+  // / miss so an async fill can tell whether the slot it read was mutated,
+  // emptied, or deleted while it was awaiting. Never decremented; pruned only
+  // when the id also leaves the cache via capacity eviction or cleanup().
+  private readonly generation: Map<string, number>
   private readonly flushInterval: NodeJS.Timeout
 
   constructor(options: SessionCacheOptions<TSession> = {}) {
@@ -42,6 +47,7 @@ export class SessionCache<TSession extends MutableSession = MutableSession> {
     this.ttlMs = options.ttlMs ?? 30_000
     this.cache = new Map()
     this.touchQueue = new Set()
+    this.generation = new Map()
     this.touchFn = typeof options.touchFn === 'function' ? options.touchFn : null
     this.supersedes = typeof options.supersedes === 'function' ? options.supersedes : null
 
@@ -63,48 +69,50 @@ export class SessionCache<TSession extends MutableSession = MutableSession> {
       return cached.session
     }
 
-    const seen = cached?.session ?? null
+    const fillToken = this.beginFill(id)
     const session = await fetchFn(id)
 
     if (session) {
-      this.replaceStaleFill(id, session, seen)
+      this.replaceStaleFill(id, session, fillToken)
     } else {
-      this.cache.delete(id)
-      this.touchQueue.delete(id)
+      this.invalidate(id)
     }
 
     return session
   }
 
   /**
-   * Publish the result of an async fill (a cache-miss load, a strict read, a
-   * CAS result, a finalizer). `seen` is the cached session object the caller
-   * observed *before* its await (via `peek`), or `null` if it saw none.
-   *
-   * The write lands only when it cannot roll the cache back:
-   *  - the cache is empty, or still holds exactly `seen` (nothing raced the
-   *    caller's await), or
-   *  - `supersedes(incoming, current)` proves the fill is at least as new by a
-   *    clock-independent comparison.
-   * Otherwise something newer (a commit, or a recreated incarnation the caller
-   * did not read) arrived while the caller was awaiting, and it is kept.
+   * Capture the write generation for `id` immediately before an async fill's
+   * await (after any invalidate the same operation performs). Pass the returned
+   * token to `replaceStaleFill`.
    */
-  replaceStaleFill(id: string, session: TSession, seen: TSession | null): void {
-    const current = this.cache.get(id)?.session ?? null
-    const unchanged = current === seen
-    const provablyNewer = current != null && this.supersedes != null && this.supersedes(session, current)
-    if (current == null || unchanged || provablyNewer) {
-      this.set(id, session, false)
-    }
+  beginFill(id: string): number {
+    return this.generation.get(id) ?? 0
+  }
+
+  private bumpGeneration(id: string): void {
+    this.generation.set(id, (this.generation.get(id) ?? 0) + 1)
   }
 
   /**
-   * Read the cached session without touching LRU order, TTL, or touch state.
-   * Returns a past-TTL entry too (unlike getFresh()); callers use this only to
-   * capture the pre-await baseline for replaceStaleFill().
+   * Publish the result of an async fill (a cache-miss load, a strict read, a
+   * CAS result, a finalizer, a keepalive revalidation). `fillToken` is the value
+   * `beginFill(id)` returned before the caller's await.
+   *
+   * If the generation is unchanged, nothing set / invalidated / deleted / evicted
+   * the slot during the await, so the fill is published. If it moved, the slot
+   * was touched: publish only when a same-incarnation `supersedes` still proves
+   * the fill newer than whatever is cached now - never repopulate an emptied or
+   * deleted slot, and never roll a newer entry back.
    */
-  peek(id: string): TSession | null {
-    return this.cache.get(id)?.session ?? null
+  replaceStaleFill(id: string, session: TSession, fillToken: number): void {
+    if ((this.generation.get(id) ?? 0) !== fillToken) {
+      const current = this.cache.get(id)?.session ?? null
+      if (current == null || this.supersedes == null || !this.supersedes(session, current)) {
+        return
+      }
+    }
+    this.set(id, session, false)
   }
 
   /**
@@ -116,6 +124,7 @@ export class SessionCache<TSession extends MutableSession = MutableSession> {
       if (oldestKey != null) {
         this.cache.delete(oldestKey)
         this.touchQueue.delete(oldestKey)
+        this.generation.delete(oldestKey)
       }
     }
 
@@ -129,6 +138,7 @@ export class SessionCache<TSession extends MutableSession = MutableSession> {
       this.cache.delete(id)
     }
     this.cache.set(id, entry)
+    this.bumpGeneration(id)
 
     if (dirty) {
       this.touchQueue.add(id)
@@ -168,11 +178,14 @@ export class SessionCache<TSession extends MutableSession = MutableSession> {
   }
 
   /**
-   * Invalidate a session in cache.
+   * Invalidate a session in cache. Advances the write generation so an async
+   * fill that read the now-removed value (e.g. a strict read racing a delete)
+   * cannot repopulate the emptied slot when it completes.
    */
   invalidate(id: string): void {
     this.cache.delete(id)
     this.touchQueue.delete(id)
+    this.bumpGeneration(id)
   }
 
   /**
@@ -213,6 +226,11 @@ export class SessionCache<TSession extends MutableSession = MutableSession> {
         this.cache.delete(id)
         this.touchQueue.delete(id)
       }
+    }
+    // Bound the generation map: an id with no live cache entry has no in-flight
+    // fill worth guarding after a full TTL has elapsed.
+    for (const id of this.generation.keys()) {
+      if (!this.cache.has(id)) this.generation.delete(id)
     }
   }
 

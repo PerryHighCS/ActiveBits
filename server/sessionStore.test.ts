@@ -776,6 +776,35 @@ void test('a stalled strict read of an older incarnation does not roll the cache
   assert.equal(afterRace?.created, oldCreated + 10_000)
 })
 
+void test('a strict read that completes after the session is deleted does not repopulate the cache', async (t) => {
+  const records = new Map<string, SessionRecord>()
+  let releaseGate: () => void = () => {}
+  const gate = new Promise<void>((resolve) => { releaseGate = resolve })
+  const hold = { strict: false, cas: false }
+  const sessions = createSessionStore('redis://test', 1_000, gatedValkeyStoreForTest(records, hold, gate))
+  t.after(async () => { await sessions.close() })
+
+  const live = await createSession(sessions)
+  live.data = { gen: 'A' }
+  await sessions.set(live.id, live)
+  sessions.cache!.invalidate(live.id) // start from a cold slot
+
+  // A strict read captures the live session, then stalls.
+  hold.strict = true
+  const stalledStrict = sessions.getStrict!(live.id)
+
+  // The id is deleted (here and in the backend) while that read is in flight.
+  assert.equal(await sessions.delete(live.id), true)
+
+  releaseGate()
+  const strictResult = await stalledStrict
+  assert.equal((strictResult?.data as { gen?: string }).gen, 'A', 'the strict caller sees Valkey as of its own pre-delete read')
+
+  // The stalled fill must not have republished the deleted session into the
+  // emptied slot.
+  assert.equal(await sessions.get(live.id), null, 'get() does not resurrect the deleted session from a late fill')
+})
+
 void test('a strict read adopts a recreated incarnation even when its created is smaller (peer clock skew)', async (t) => {
   const records = new Map<string, SessionRecord>()
   const gate = Promise.resolve()
