@@ -299,27 +299,31 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
       if (!cache.has(id)) linkedSessionRevalidatedAt.delete(id)
     }
   }
+  // Guards every async cache fill (cache-miss loads, strict reads, CAS results,
+  // token/expiry finalizers): a result read/committed *before* a newer write
+  // must not roll the cache back for the TTL. Revisions are only comparable
+  // within one incarnation - a recreated id restarts at revision 0 - so a
+  // different `type`/`created` is always taken as the current record.
+  const cacheEntrySupersedes = (incoming: SessionRecord, cached: SessionRecord): boolean => {
+    const incomingType = typeof incoming.type === 'string' ? incoming.type : null
+    const cachedType = typeof cached.type === 'string' ? cached.type : null
+    const incomingCreated = typeof incoming.created === 'number' ? incoming.created : null
+    const cachedCreated = typeof cached.created === 'number' ? cached.created : null
+    if (incomingType !== cachedType || incomingCreated !== cachedCreated) {
+      return true
+    }
+    const incomingRevision = typeof incoming.mutationRevision === 'number' ? incoming.mutationRevision : 0
+    const cachedRevision = typeof cached.mutationRevision === 'number' ? cached.mutationRevision : 0
+    return incomingRevision >= cachedRevision
+  }
   const cache = new SessionCache<SessionRecord>({
     ttlMs: 30_000,
     maxSize: 1000,
     touchFn: async (id) => {
       await valkeyStore.touch(id)
     },
+    supersedes: cacheEntrySupersedes,
   })
-
-  // Repopulate the shared read cache from a record obtained *after* an await
-  // (a strict Valkey read or a committed CAS). A snapshot that raced behind a
-  // concurrent commit must not overwrite a newer revision already in cache, or
-  // plain get() would serve the older revision for the full cache TTL. The
-  // check + set is synchronous, so no commit can interleave between them.
-  const repopulateCacheIfNotStale = (id: string, record: SessionRecord): void => {
-    const cached = cache.peek(id)
-    const cachedRevision = typeof cached?.mutationRevision === 'number' ? cached.mutationRevision : -1
-    const incomingRevision = typeof record.mutationRevision === 'number' ? record.mutationRevision : 0
-    if (incomingRevision >= cachedRevision) {
-      cache.set(id, record, false)
-    }
-  }
 
   const get = async (id: string): Promise<SessionRecord | null> => {
     const session = await cache.get(id, async (sessionId: string) => {
@@ -346,7 +350,7 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
     const loaded = await valkeyStore.getStrict(id)
     const normalizedSession = loaded ? normalizeSessionData(toSessionRecord(loaded)) : null
     if (normalizedSession) {
-      repopulateCacheIfNotStale(id, normalizedSession)
+      cache.set(id, normalizedSession, false)
       const embeddedParentSessionId = getEmbeddedParentSessionId(normalizedSession)
       if (embeddedParentSessionId && embeddedParentSessionId !== id) {
         await touch(embeddedParentSessionId)
@@ -379,9 +383,10 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
     const updated = await valkeyStore.compareAndSet(id, expectedMutationRevision, normalizedInput, ttl)
     if (!updated) return null
     const normalized = normalizeSessionData(toSessionRecord(updated))
-    // Guarded: a slower CAS winner (revision N+1) must not clobber a cache entry
-    // a faster follow-up commit (N+2) already refilled while this one awaited.
-    repopulateCacheIfNotStale(id, normalized)
+    // `cache.set` is guarded by `cacheEntrySupersedes`: a slower CAS winner
+    // (revision N+1) resolving after a faster follow-up commit (N+2) refilled
+    // the cache does not clobber it.
+    cache.set(id, normalized, false)
     // Read-modify-write, like getStrict(): refresh an embedded child's parent so
     // it does not expire under a caller that only ever calls updateAtomic.
     const embeddedParentSessionId = getEmbeddedParentSessionId(normalized)

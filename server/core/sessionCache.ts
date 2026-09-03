@@ -9,10 +9,19 @@ interface MutableSession {
   [key: string]: unknown
 }
 
-interface SessionCacheOptions {
+interface SessionCacheOptions<TSession extends MutableSession = MutableSession> {
   maxSize?: number
   ttlMs?: number
   touchFn?: ((id: string) => Promise<void>) | null
+  /**
+   * Decide whether a fill/write candidate may replace the entry already cached
+   * for the same id. Returns `true` to accept the replacement. Applied to every
+   * non-`dirty` `set()` (cache-miss fills, strict reads, CAS results, token /
+   * expiry finalizers) so an async result that raced behind a newer committed
+   * write cannot roll the cache back for the TTL. Omitted -> always accept
+   * (previous behavior).
+   */
+  supersedes?: (incoming: TSession, cached: TSession) => boolean
 }
 
 /**
@@ -25,14 +34,16 @@ export class SessionCache<TSession extends MutableSession = MutableSession> {
   private readonly cache: Map<string, CacheEntry<TSession>>
   private readonly touchQueue: Set<string>
   private readonly touchFn: ((id: string) => Promise<void>) | null
+  private readonly supersedes: ((incoming: TSession, cached: TSession) => boolean) | null
   private readonly flushInterval: NodeJS.Timeout
 
-  constructor(options: SessionCacheOptions = {}) {
+  constructor(options: SessionCacheOptions<TSession> = {}) {
     this.maxSize = options.maxSize ?? 1000
     this.ttlMs = options.ttlMs ?? 30_000
     this.cache = new Map()
     this.touchQueue = new Set()
     this.touchFn = typeof options.touchFn === 'function' ? options.touchFn : null
+    this.supersedes = typeof options.supersedes === 'function' ? options.supersedes : null
 
     this.flushInterval = setInterval(() => {
       void this.flushTouches(this.touchFn)
@@ -68,6 +79,16 @@ export class SessionCache<TSession extends MutableSession = MutableSession> {
    * Set/update a session in cache.
    */
   set(id: string, session: TSession, dirty = true): void {
+    if (!dirty && this.supersedes) {
+      const existing = this.cache.get(id)
+      if (existing && !this.supersedes(session, existing.session)) {
+        // A stale async fill (older strict read / CAS result / finalizer) must
+        // not overwrite a newer committed entry, or get() serves the rollback
+        // for the rest of the TTL.
+        return
+      }
+    }
+
     if (!this.cache.has(id) && this.cache.size >= this.maxSize) {
       const oldestKey = this.cache.keys().next().value
       if (oldestKey != null) {
@@ -103,15 +124,6 @@ export class SessionCache<TSession extends MutableSession = MutableSession> {
     cached.timestamp = Date.now()
     this.markRecentlyUsed(id, cached)
     this.touchQueue.add(id)
-  }
-
-  /**
-   * Read the cached session without touching LRU order, TTL, or touch state.
-   * Returns a past-TTL entry too (unlike getFresh()); callers use this only to
-   * compare bookkeeping such as a revision counter, never to serve the session.
-   */
-  peek(id: string): TSession | null {
-    return this.cache.get(id)?.session ?? null
   }
 
   /**

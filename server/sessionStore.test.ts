@@ -526,18 +526,23 @@ void test('a strict miss drops the cached copy so a later get() cannot resurrect
   assert.equal(await sessions.get(live.id), null, 'the deleted session is not resurrected from cache by a later get()')
 })
 
-// A strict read that started before a concurrent commit must not repopulate the
-// read cache with its now-stale snapshot after the commit already refilled it.
+// An async cache fill that started before a concurrent commit must not roll the
+// read cache back to its now-stale snapshot after the commit already refilled it.
 function gatedValkeyStoreForTest(
   records: Map<string, SessionRecord>,
-  hold: { strict: boolean; cas: boolean },
+  hold: { strict: boolean; cas: boolean; plainGet?: boolean },
   gate: Promise<void>,
 ): ValkeySessionStore {
   return {
     ttlMs: 1_000,
     async get(id: string) {
       const session = records.get(id)
-      return session ? structuredClone(session) : null
+      const snapshot = session ? structuredClone(session) : null
+      if (hold.plainGet) {
+        hold.plainGet = false
+        await gate
+      }
+      return snapshot
     },
     async getStrict(id: string) {
       const session = records.get(id)
@@ -655,4 +660,68 @@ void test('a slower CAS winner does not clobber a cache entry a faster follow-up
   const afterRace = await sessions.get(live.id)
   assert.equal(afterRace?.mutationRevision, 2, 'the stale CAS winner did not overwrite the newer cached revision')
   assert.equal(afterRace?.data.step, 'two')
+})
+
+void test('a stale in-flight get() fetch does not overwrite a newer committed cache entry', async (t) => {
+  const records = new Map<string, SessionRecord>()
+  let releaseGate: () => void = () => {}
+  const gate = new Promise<void>((resolve) => { releaseGate = resolve })
+  const hold = { strict: false, cas: false, plainGet: false }
+  const sessions = createSessionStore('redis://test', 1_000, gatedValkeyStoreForTest(records, hold, gate))
+  t.after(async () => { await sessions.close() })
+
+  const live = await createSession(sessions)
+  live.data = { step: 'zero' }
+  await sessions.set(live.id, live)
+  sessions.cache!.invalidate(live.id) // force the next get() to hit the backend loader
+
+  // A cache-miss get() reads revision 0 from the backend, then stalls before it
+  // can populate the cache.
+  hold.plainGet = true
+  const stalledGet = sessions.get(live.id)
+
+  // A commit lands and populates the cache at revision 1 while that read is stalled.
+  const committed = await sessions.updateAtomic!(live.id, (draft) => {
+    draft.data = { ...draft.data, step: 'one' }
+    return draft
+  })
+  assert.equal(committed?.mutationRevision, 1)
+
+  releaseGate()
+  await stalledGet
+
+  const afterRace = await sessions.get(live.id)
+  assert.equal(afterRace?.mutationRevision, 1, 'the stale cache-miss fill did not roll the cache back to revision 0')
+  assert.equal(afterRace?.data.step, 'one')
+})
+
+void test('a strict read of a recreated incarnation replaces a stale higher-revision cache entry', async (t) => {
+  const records = new Map<string, SessionRecord>()
+  const gate = Promise.resolve()
+  const hold = { strict: false, cas: false }
+  const sessions = createSessionStore('redis://test', 1_000, gatedValkeyStoreForTest(records, hold, gate))
+  t.after(async () => { await sessions.close() })
+
+  const live = await createSession(sessions)
+  // Age the cached entry into a high-revision "old incarnation".
+  await sessions.updateAtomic!(live.id, (draft) => { draft.data = { gen: 'old' }; return draft })
+  await sessions.updateAtomic!(live.id, (draft) => { draft.data = { gen: 'old' }; return draft })
+  const cachedOld = await sessions.get(live.id)
+  assert.equal(cachedOld?.mutationRevision, 2)
+
+  // A peer instance deleted and recreated the same id: fresh incarnation, its
+  // revision counter restarts at 0.
+  const oldCreated = records.get(live.id)!.created as number
+  const replacement = structuredClone(records.get(live.id)!)
+  replacement.created = oldCreated + 5_000
+  replacement.mutationRevision = 0
+  replacement.data = { gen: 'new' }
+  records.set(live.id, replacement)
+
+  const strict = await sessions.getStrict!(live.id)
+  assert.equal((strict?.data as { gen?: string }).gen, 'new', 'the strict read returns the recreated incarnation')
+
+  const afterStrict = await sessions.get(live.id)
+  assert.equal((afterStrict?.data as { gen?: string }).gen, 'new', 'get() is not pinned to the stale old incarnation by its higher revision')
+  assert.equal(afterStrict?.created, oldCreated + 5_000)
 })
