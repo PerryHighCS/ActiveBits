@@ -73,9 +73,16 @@ function valkeyStoreForTest(records: Map<string, SessionRecord>, touches: string
     async set(id: string, session: SessionRecord) {
       records.set(id, structuredClone(session))
     },
-    async compareAndSet(id: string, expectedMutationRevision: number, session: SessionRecord) {
+    async compareAndSet(
+      id: string,
+      expectedMutationRevision: number,
+      session: SessionRecord,
+      _ttlMs?: number | null,
+      expectedCreated?: number | null,
+    ) {
       const current = records.get(id)
       if (!current || (current.mutationRevision ?? 0) !== expectedMutationRevision) return null
+      if (expectedCreated != null && typeof current.created === 'number' && current.created !== expectedCreated) return null
       const updated = structuredClone({ ...session, mutationRevision: expectedMutationRevision + 1 })
       records.set(id, updated)
       return updated
@@ -532,6 +539,7 @@ function gatedValkeyStoreForTest(
   records: Map<string, SessionRecord>,
   hold: { strict: boolean; cas: boolean; plainGet?: boolean },
   gate: Promise<void>,
+  onBeforeCas?: () => void,
 ): ValkeySessionStore {
   return {
     ttlMs: 1_000,
@@ -556,9 +564,17 @@ function gatedValkeyStoreForTest(
     async set(id: string, session: SessionRecord) {
       records.set(id, structuredClone(session))
     },
-    async compareAndSet(id: string, expectedMutationRevision: number, session: SessionRecord) {
+    async compareAndSet(
+      id: string,
+      expectedMutationRevision: number,
+      session: SessionRecord,
+      _ttlMs?: number | null,
+      expectedCreated?: number | null,
+    ) {
+      onBeforeCas?.()
       const current = records.get(id)
       if (!current || (current.mutationRevision ?? 0) !== expectedMutationRevision) return null
+      if (expectedCreated != null && typeof current.created === 'number' && current.created !== expectedCreated) return null
       const updated = structuredClone({ ...session, mutationRevision: expectedMutationRevision + 1 })
       records.set(id, updated)
       if (hold.cas) {
@@ -724,4 +740,77 @@ void test('a strict read of a recreated incarnation replaces a stale higher-revi
   const afterStrict = await sessions.get(live.id)
   assert.equal((afterStrict?.data as { gen?: string }).gen, 'new', 'get() is not pinned to the stale old incarnation by its higher revision')
   assert.equal(afterStrict?.created, oldCreated + 5_000)
+})
+
+void test('a stalled strict read of an older incarnation does not roll the cache back over a newer one', async (t) => {
+  const records = new Map<string, SessionRecord>()
+  let releaseGate: () => void = () => {}
+  const gate = new Promise<void>((resolve) => { releaseGate = resolve })
+  const hold = { strict: false, cas: false }
+  const sessions = createSessionStore('redis://test', 1_000, gatedValkeyStoreForTest(records, hold, gate))
+  t.after(async () => { await sessions.close() })
+
+  const live = await createSession(sessions)
+  live.data = { gen: 'A' }
+  await sessions.set(live.id, live)
+  await sessions.get(live.id) // prime cache with incarnation A
+  const oldCreated = records.get(live.id)!.created as number
+
+  // A strict read captures incarnation A, then stalls.
+  hold.strict = true
+  const stalledStrict = sessions.getStrict!(live.id)
+
+  // A peer replaces the id with a newer incarnation B while that read is in flight.
+  const replacement = structuredClone(records.get(live.id)!)
+  replacement.created = oldCreated + 10_000
+  replacement.mutationRevision = 0
+  replacement.data = { gen: 'B' }
+  records.set(live.id, replacement)
+  await sessions.getStrict!(live.id) // a fresh strict read caches B (created > A)
+
+  releaseGate()
+  await stalledStrict
+
+  const afterRace = await sessions.get(live.id)
+  assert.equal((afterRace?.data as { gen?: string }).gen, 'B', 'get() still serves the newer incarnation, not the stalled older snapshot')
+  assert.equal(afterRace?.created, oldCreated + 10_000)
+})
+
+void test('updateAtomic will not commit into a same-id incarnation recreated after its strict read', async (t) => {
+  const records = new Map<string, SessionRecord>()
+  const gate = Promise.resolve()
+  const hold = { strict: false, cas: false }
+  let swapped = false
+  const sessions = createSessionStore('redis://test', 1_000, gatedValkeyStoreForTest(records, hold, gate, () => {
+    if (swapped) return
+    swapped = true
+    // Between updateAtomic's strict read and its CAS, the id is deleted and
+    // recreated as a fresh incarnation whose revision also restarts at 0.
+    const current = records.get('cas-aba')!
+    const b = structuredClone(current)
+    b.created = (current.created as number) + 10_000
+    b.mutationRevision = 0
+    b.data = { gen: 'B' }
+    records.set('cas-aba', b)
+  }))
+  t.after(async () => { await sessions.close() })
+
+  const a = await createSession(sessions)
+  // Re-key the record under a fixed id the onBeforeCas hook can name.
+  const recordA = records.get(a.id)!
+  records.delete(a.id)
+  recordA.data = { gen: 'A' }
+  records.set('cas-aba', recordA)
+
+  const result = await sessions.updateAtomic!('cas-aba', (draft) => {
+    draft.data = { ...(draft.data as Record<string, unknown>), touched: true }
+    return draft
+  })
+
+  assert.equal(swapped, true, 'the recreate hook must have fired')
+  // The revision-matching CAS against incarnation A was refused; updateAtomic
+  // re-read incarnation B and applied the mutation to *it*.
+  assert.equal((result?.data as { gen?: string; touched?: boolean }).gen, 'B', 'the mutation landed on the live incarnation, not the gone one')
+  assert.equal((result?.data as { touched?: boolean }).touched, true)
+  assert.equal(records.get('cas-aba')?.created, (recordA.created as number) + 10_000, 'incarnation B was not overwritten by a mutation derived from A')
 })

@@ -97,9 +97,20 @@ For live MobCode sessions, the instructor workspace remains `groups.default`. Ne
 `SessionStore.updateAtomic(...)` is the shared optimistic-concurrency boundary for
 read/modify/write operations that must survive horizontal scaling. In-memory
 sessions replace a cloned snapshot under the current mutation revision; Valkey
-sessions use an atomic compare-and-set script and bounded retries. Activity code
-must use this primitive when a write based on a session snapshot could otherwise
-overwrite unrelated state committed by another server instance.
+sessions use an atomic compare-and-set script and bounded retries. The compare
+also pins the session **incarnation** (`created`): a same-id delete+recreate
+resets `mutationRevision` to `0`, so the revision check alone has an ABA hole -
+the CAS additionally refuses to commit when the stored record's `created` no
+longer matches the one the attempt read, and `updateAtomic` re-reads instead of
+overwriting the replacement. Activity code must use this primitive when a write
+based on a session snapshot could otherwise overwrite unrelated state committed
+by another server instance.
+
+The in-process read cache is guarded the same way: an async fill (cache-miss
+load, strict read, CAS result, token/expiry finalizer) may only replace a cached
+entry when it is at least as new - `created` first, then `mutationRevision`
+within one incarnation - so a result that raced behind a newer commit cannot roll
+`get()` back for the cache TTL.
 
 Video Sync additionally carries a monotonic `playbackRevision` in its public
 playback state. Clients order state frames by that revision before considering

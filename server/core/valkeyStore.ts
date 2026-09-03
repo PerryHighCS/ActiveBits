@@ -158,14 +158,20 @@ export class ValkeySessionStore {
     expectedMutationRevision: number,
     session: SessionLike,
     ttlMs: number | null = null,
+    expectedCreated: number | null = null,
   ): Promise<SessionLike | null> {
     try {
       // Build the full replacement (revision + lastActivity stamped) in JS and
       // hand Lua the finished JSON string. Lua only compares the stored revision
-      // and SETs that string verbatim - it must NOT cjson.decode/encode the
-      // replacement, because Redis Lua cjson turns an empty array `[]` into `{}`,
-      // which would silently retype fields like `processedCommandIds` or
-      // `students` on every atomic whole-record write.
+      // (and, when given, the stored `created`) and SETs that string verbatim -
+      // it must NOT cjson.decode/encode the replacement, because Redis Lua cjson
+      // turns an empty array `[]` into `{}`, which would silently retype fields
+      // like `processedCommandIds` or `students` on every atomic whole-record
+      // write. `current` is already decoded to read the revision, so the
+      // `created` (incarnation identity) check is free and closes the ABA where
+      // the id is deleted + recreated at the same revision between this caller's
+      // strict read and the EVAL: `mutationRevision` restarts at 0 per
+      // incarnation, `created` does not.
       const script = `
         local key = KEYS[1]
         local currentJson = redis.call('GET', key)
@@ -173,6 +179,7 @@ export class ValkeySessionStore {
         local current = cjson.decode(currentJson)
         local currentRevision = tonumber(current.mutationRevision) or 0
         if currentRevision ~= tonumber(ARGV[1]) then return nil end
+        if ARGV[4] ~= '' and current.created ~= nil and tostring(current.created) ~= ARGV[4] then return nil end
         redis.call('SET', key, ARGV[2], 'PX', tonumber(ARGV[3]))
         return ARGV[2]
       `
@@ -188,6 +195,7 @@ export class ValkeySessionStore {
         expectedMutationRevision,
         JSON.stringify(replacement),
         ttlMs ?? this.ttlMs,
+        expectedCreated == null ? '' : String(expectedCreated),
       )
       return typeof result === 'string' ? JSON.parse(result) as SessionLike : null
     } catch (err) {

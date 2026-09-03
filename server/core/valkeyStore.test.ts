@@ -21,12 +21,19 @@ function compareAndSetValkeyStoreForTest(initial: Record<string, unknown> = {}) 
     value: {
       async eval(source: string, _numKeys: number, ...values: Array<string | number>): Promise<string | null> {
         scripts.push(source)
-        const [key, expectedRevisionArg, replacementJson] = values as [string, string | number, string]
+        const [key, expectedRevisionArg, replacementJson, , expectedCreatedArg] =
+          values as [string, string | number, string, string | number, string | undefined]
         const currentJson = backing.get(key)
         if (currentJson == null) return null
-        const current = JSON.parse(currentJson) as { mutationRevision?: number }
+        const current = JSON.parse(currentJson) as { mutationRevision?: number; created?: number }
         const currentRevision = Number(current.mutationRevision ?? 0)
         if (currentRevision !== Number(expectedRevisionArg)) return null
+        if (
+          expectedCreatedArg != null && expectedCreatedArg !== '' &&
+          current.created != null && String(current.created) !== expectedCreatedArg
+        ) {
+          return null
+        }
         backing.set(key, replacementJson)
         return replacementJson
       },
@@ -56,6 +63,49 @@ void test('ValkeySessionStore compareAndSet commits and advances the revision on
   // fields like `processedCommandIds: []`.
   assert.match(scripts[0] ?? '', /redis\.call\('SET', key, ARGV\[2\]/)
   assert.doesNotMatch(scripts[0] ?? '', /cjson\.encode\s*\(/)
+  // The incarnation identity is part of the atomic comparison so a same-id
+  // delete+recreate at a matching revision cannot ABA past the CAS.
+  assert.match(scripts[0] ?? '', /tostring\(current\.created\) ~= ARGV\[4\]/)
+})
+
+void test('ValkeySessionStore compareAndSet rejects a revision-matching write when the stored incarnation was recreated', async () => {
+  const { store, backing } = compareAndSetValkeyStoreForTest({
+    // The record this caller read (created 1_000) has been replaced in place by
+    // a fresh incarnation (created 5_000) whose revision also restarted at 0.
+    'session:s1': { id: 's1', created: 5_000, mutationRevision: 0, data: { gen: 'B' } },
+  })
+
+  const result = await store.compareAndSet(
+    's1',
+    0,
+    { id: 's1', created: 1_000, mutationRevision: 0, data: { gen: 'mutated-A' } },
+    null,
+    1_000,
+  )
+
+  assert.equal(result, null, 'the CAS must not commit a mutation derived from the gone incarnation')
+  assert.deepEqual(
+    JSON.parse(backing.get('session:s1') as string),
+    { id: 's1', created: 5_000, mutationRevision: 0, data: { gen: 'B' } },
+    'the recreated incarnation is left intact',
+  )
+})
+
+void test('ValkeySessionStore compareAndSet still commits when expectedCreated matches the stored incarnation', async () => {
+  const { store } = compareAndSetValkeyStoreForTest({
+    'session:s1': { id: 's1', created: 1_000, mutationRevision: 4, data: { v: 'old' } },
+  })
+
+  const updated = await store.compareAndSet(
+    's1',
+    4,
+    { id: 's1', created: 1_000, mutationRevision: 4, data: { v: 'new' } },
+    null,
+    1_000,
+  )
+
+  assert.equal(updated?.mutationRevision, 5)
+  assert.deepEqual(updated?.data as Record<string, unknown>, { v: 'new' })
 })
 
 void test('ValkeySessionStore compareAndSet preserves empty arrays across an atomic write', async () => {

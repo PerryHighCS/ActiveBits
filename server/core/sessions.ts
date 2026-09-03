@@ -78,7 +78,10 @@ export interface SessionStore extends SharedSessionStore<Record<string, unknown>
   // `mutationRevision` still equals `expectedMutationRevision`, then stamps
   // `expectedMutationRevision + 1`; `updateAtomic` re-reads strictly and retries
   // a bounded number of times on a revision conflict.
-  compareAndSet?(id: string, expectedMutationRevision: number, session: SessionRecord, ttl?: number | null): Promise<SessionRecord | null>
+  // `expectedCreated`, when provided, also fails the commit if the stored
+  // record's `created` no longer matches - a same-id delete+recreate can reset
+  // `mutationRevision` to 0, so the revision check alone has an ABA hole.
+  compareAndSet?(id: string, expectedMutationRevision: number, session: SessionRecord, ttl?: number | null, expectedCreated?: number | null): Promise<SessionRecord | null>
   updateAtomic?(id: string, mutate: (session: SessionRecord) => SessionRecord, ttl?: number | null): Promise<SessionRecord | null>
   consumeSessionDataToken?(id: string, field: string, token: string): Promise<SessionRecord | null>
   // Like consumeSessionDataToken, but a backend failure propagates instead of
@@ -148,9 +151,17 @@ class InMemorySessionStore implements SessionStore {
     id: string,
     expectedMutationRevision: number,
     session: SessionRecord,
+    _ttl: number | null = null,
+    expectedCreated: number | null = null,
   ): Promise<SessionRecord | null> {
     const current = this.store[id]
     if (!current || (current.mutationRevision ?? 0) !== expectedMutationRevision) {
+      return null
+    }
+    if (expectedCreated != null && typeof current.created === 'number' && current.created !== expectedCreated) {
+      // Same id, revision reset by a delete+recreate: the incarnation this
+      // caller read is gone. (A stored record with no `created` degrades to the
+      // revision-only check, matching the Valkey CAS.)
       return null
     }
     const replacement = normalizeSessionData({
@@ -175,8 +186,9 @@ class InMemorySessionStore implements SessionStore {
     const current = this.store[id]
     if (!current) return null
     const expectedRevision = current.mutationRevision ?? 0
+    const expectedCreated = typeof current.created === 'number' ? current.created : null
     const draft = structuredClone(current)
-    return await this.compareAndSet(id, expectedRevision, mutate(draft))
+    return await this.compareAndSet(id, expectedRevision, mutate(draft), null, expectedCreated)
   }
 
   async consumeSessionDataToken(id: string, field: string, token: string): Promise<SessionRecord | null> {
@@ -301,16 +313,21 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
   }
   // Guards every async cache fill (cache-miss loads, strict reads, CAS results,
   // token/expiry finalizers): a result read/committed *before* a newer write
-  // must not roll the cache back for the TTL. Revisions are only comparable
-  // within one incarnation - a recreated id restarts at revision 0 - so a
-  // different `type`/`created` is always taken as the current record.
+  // must not roll the cache back for the TTL. `created` is the primary ordering
+  // key - a recreated id restarts `mutationRevision` at 0, and it is created
+  // *after* the incarnation it replaces, so a late result from the older
+  // incarnation (smaller `created`) never wins even though its revision may be
+  // higher. `mutationRevision` only breaks ties within one incarnation (equal
+  // `created`), where it is monotonic. Missing `created`/revision -> 0.
+  // Residual: an identical id recreated within the same millisecond yields
+  // equal `created`; that sub-ms same-id reuse is out of scope here (it is the
+  // same assumption the route-level `expectedCreated` incarnation binding
+  // makes) - a truly monotonic per-id token would be the fuller fix.
   const cacheEntrySupersedes = (incoming: SessionRecord, cached: SessionRecord): boolean => {
-    const incomingType = typeof incoming.type === 'string' ? incoming.type : null
-    const cachedType = typeof cached.type === 'string' ? cached.type : null
-    const incomingCreated = typeof incoming.created === 'number' ? incoming.created : null
-    const cachedCreated = typeof cached.created === 'number' ? cached.created : null
-    if (incomingType !== cachedType || incomingCreated !== cachedCreated) {
-      return true
+    const incomingCreated = typeof incoming.created === 'number' ? incoming.created : 0
+    const cachedCreated = typeof cached.created === 'number' ? cached.created : 0
+    if (incomingCreated !== cachedCreated) {
+      return incomingCreated > cachedCreated
     }
     const incomingRevision = typeof incoming.mutationRevision === 'number' ? incoming.mutationRevision : 0
     const cachedRevision = typeof cached.mutationRevision === 'number' ? cached.mutationRevision : 0
@@ -375,12 +392,13 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
     expectedMutationRevision: number,
     session: SessionRecord,
     ttl: number | null = null,
+    expectedCreated: number | null = null,
   ): Promise<SessionRecord | null> => {
     cache.invalidate(id)
     // Shape the candidate through the same normalizer as set() before it is
     // persisted; the Valkey CAS script cannot run it.
     const normalizedInput = normalizeSessionData(session)
-    const updated = await valkeyStore.compareAndSet(id, expectedMutationRevision, normalizedInput, ttl)
+    const updated = await valkeyStore.compareAndSet(id, expectedMutationRevision, normalizedInput, ttl, expectedCreated)
     if (!updated) return null
     const normalized = normalizeSessionData(toSessionRecord(updated))
     // `cache.set` is guarded by `cacheEntrySupersedes`: a slower CAS winner
@@ -406,8 +424,13 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
       const current = await getStrict(id)
       if (!current) return null
       const expectedRevision = current.mutationRevision ?? 0
+      // Bind the CAS to the incarnation this attempt just read: a same-id
+      // delete+recreate that resets the revision to 0 between here and the
+      // commit must fail the CAS (-> re-read, not silently overwrite the
+      // replacement). Absent on pre-migration records (no `created`).
+      const expectedCreated = typeof current.created === 'number' ? current.created : null
       const draft = structuredClone(current)
-      const updated = await compareAndSet(id, expectedRevision, mutate(draft), ttl)
+      const updated = await compareAndSet(id, expectedRevision, mutate(draft), ttl, expectedCreated)
       if (updated) return updated
     }
     throw new Error(`Atomic session update exhausted retry budget for ${id}`)
