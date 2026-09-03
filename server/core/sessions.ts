@@ -311,23 +311,19 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
       if (!cache.has(id)) linkedSessionRevalidatedAt.delete(id)
     }
   }
-  // Guards every async cache fill (cache-miss loads, strict reads, CAS results,
-  // token/expiry finalizers): a result read/committed *before* a newer write
-  // must not roll the cache back for the TTL. `created` is the primary ordering
-  // key - a recreated id restarts `mutationRevision` at 0, and it is created
-  // *after* the incarnation it replaces, so a late result from the older
-  // incarnation (smaller `created`) never wins even though its revision may be
-  // higher. `mutationRevision` only breaks ties within one incarnation (equal
-  // `created`), where it is monotonic. Missing `created`/revision -> 0.
-  // Residual: an identical id recreated within the same millisecond yields
-  // equal `created`; that sub-ms same-id reuse is out of scope here (it is the
-  // same assumption the route-level `expectedCreated` incarnation binding
-  // makes) - a truly monotonic per-id token would be the fuller fix.
+  // Fast-accept for `SessionCache.replaceStaleFill`: only the clock-independent
+  // case - the *same* incarnation (equal `created`), where `mutationRevision` is
+  // monotonic, so a fill at a revision >= the cached one is safe to publish.
+  // `created` is a node-local `Date.now()` from whichever instance created the
+  // id, so it is NOT ordered across incarnations (a replacement minted on a peer
+  // with a lagging clock can carry a *smaller* value). A cross-incarnation
+  // decision is therefore left to `replaceStaleFill`'s identity check: the fill
+  // wins only if nothing else wrote the entry while the caller was awaiting.
   const cacheEntrySupersedes = (incoming: SessionRecord, cached: SessionRecord): boolean => {
-    const incomingCreated = typeof incoming.created === 'number' ? incoming.created : 0
-    const cachedCreated = typeof cached.created === 'number' ? cached.created : 0
-    if (incomingCreated !== cachedCreated) {
-      return incomingCreated > cachedCreated
+    const incomingCreated = typeof incoming.created === 'number' ? incoming.created : null
+    const cachedCreated = typeof cached.created === 'number' ? cached.created : null
+    if (incomingCreated == null || cachedCreated == null || incomingCreated !== cachedCreated) {
+      return false
     }
     const incomingRevision = typeof incoming.mutationRevision === 'number' ? incoming.mutationRevision : 0
     const cachedRevision = typeof cached.mutationRevision === 'number' ? cached.mutationRevision : 0
@@ -364,10 +360,11 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
     // Bypass the cache-miss loader (whose valkey read swallows failures) and
     // read strictly: a backend outage rejects here so recovery routes can keep
     // it retryable instead of treating a cold-cache blip as "no such session".
+    const seen = cache.peek(id)
     const loaded = await valkeyStore.getStrict(id)
     const normalizedSession = loaded ? normalizeSessionData(toSessionRecord(loaded)) : null
     if (normalizedSession) {
-      cache.set(id, normalizedSession, false)
+      cache.replaceStaleFill(id, normalizedSession, seen)
       const embeddedParentSessionId = getEmbeddedParentSessionId(normalizedSession)
       if (embeddedParentSessionId && embeddedParentSessionId !== id) {
         await touch(embeddedParentSessionId)
@@ -394,6 +391,7 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
     ttl: number | null = null,
     expectedCreated: number | null = null,
   ): Promise<SessionRecord | null> => {
+    const seen = cache.peek(id)
     cache.invalidate(id)
     // Shape the candidate through the same normalizer as set() before it is
     // persisted; the Valkey CAS script cannot run it.
@@ -401,10 +399,9 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
     const updated = await valkeyStore.compareAndSet(id, expectedMutationRevision, normalizedInput, ttl, expectedCreated)
     if (!updated) return null
     const normalized = normalizeSessionData(toSessionRecord(updated))
-    // `cache.set` is guarded by `cacheEntrySupersedes`: a slower CAS winner
-    // (revision N+1) resolving after a faster follow-up commit (N+2) refilled
-    // the cache does not clobber it.
-    cache.set(id, normalized, false)
+    // Publish the commit, but not over an entry a faster follow-up commit (N+2)
+    // or a recreated incarnation put here while this CAS was in flight.
+    cache.replaceStaleFill(id, normalized, seen)
     // Read-modify-write, like getStrict(): refresh an embedded child's parent so
     // it does not expire under a caller that only ever calls updateAtomic.
     const embeddedParentSessionId = getEmbeddedParentSessionId(normalized)
@@ -436,12 +433,16 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
     throw new Error(`Atomic session update exhausted retry budget for ${id}`)
   }
 
-  const finalizeConsumedToken = async (id: string, consumed: SessionLike | null): Promise<SessionRecord | null> => {
+  const finalizeConsumedToken = async (
+    id: string,
+    consumed: SessionLike | null,
+    seen: SessionRecord | null,
+  ): Promise<SessionRecord | null> => {
     if (!consumed) {
       return null
     }
     const session = normalizeSessionData(toSessionRecord(consumed))
-    cache.set(id, session, false)
+    cache.replaceStaleFill(id, session, seen)
     const embeddedParentSessionId = getEmbeddedParentSessionId(session)
     if (embeddedParentSessionId && embeddedParentSessionId !== id) {
       await touch(embeddedParentSessionId)
@@ -450,16 +451,18 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
   }
 
   const consumeSessionDataToken = async (id: string, field: string, token: string): Promise<SessionRecord | null> => {
+    const seen = cache.peek(id)
     cache.invalidate(id)
-    return finalizeConsumedToken(id, await valkeyStore.consumeSessionDataToken(id, field, token))
+    return finalizeConsumedToken(id, await valkeyStore.consumeSessionDataToken(id, field, token), seen)
   }
 
   const consumeSessionDataTokenStrict = async (id: string, field: string, token: string): Promise<SessionRecord | null> => {
     // A backend failure rejects here (-> the route's outer catch -> retryable
     // 500) instead of mapping to `null`, which a route treats as a definitive
     // "token invalid / already consumed" 403.
+    const seen = cache.peek(id)
     cache.invalidate(id)
-    return finalizeConsumedToken(id, await valkeyStore.consumeSessionDataTokenStrict(id, field, token))
+    return finalizeConsumedToken(id, await valkeyStore.consumeSessionDataTokenStrict(id, field, token), seen)
   }
 
   const del = async (id: string): Promise<boolean> => {
@@ -475,6 +478,7 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
       return { touched: true, session: cached, fromCache: true }
     }
 
+    const seen = cache.peek(id)
     const touched = await valkeyStore.touch(id)
     if (!touched) {
       return { touched: false, session: null, fromCache: false }
@@ -482,7 +486,7 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
 
     const session = await loadSessionRecord(id)
     if (session) {
-      cache.set(id, session, false)
+      cache.replaceStaleFill(id, session, seen)
     }
 
     return { touched: true, session, fromCache: false }
@@ -497,6 +501,7 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
     // separate from high-frequency keepalive touches, before following the link.
     const now = Date.now()
     const shouldRevalidate = fromCache && (now - (linkedSessionRevalidatedAt.get(id) ?? 0) >= LINKED_SESSION_REVALIDATION_MS)
+    const seenBeforeRevalidate = cache.peek(id)
     const authoritativeSession = shouldRevalidate ? await loadSessionRecord(id) : session
     if (shouldRevalidate) recordLinkedSessionRevalidation(id, now)
     if (shouldRevalidate && !authoritativeSession) {
@@ -505,7 +510,7 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
       return false
     }
     if (shouldRevalidate && authoritativeSession) {
-      cache.set(id, authoritativeSession, false)
+      cache.replaceStaleFill(id, authoritativeSession, seenBeforeRevalidate)
     }
     const linkedSessionId = getLinkedSessionId(authoritativeSession)
     if (linkedSessionId && linkedSessionId !== id) {
@@ -516,11 +521,12 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
   }
 
   const refreshSessionExpiry = async (id: string, expectedExpiresAt: number, nextExpiresAt: number, ttl: number): Promise<SessionRecord | null> => {
+    const seen = cache.peek(id)
     cache.invalidate(id)
     const refreshed = await valkeyStore.refreshSessionExpiry(id, expectedExpiresAt, nextExpiresAt, ttl)
     if (!refreshed) return null
     const session = normalizeSessionData(toSessionRecord(refreshed))
-    cache.set(id, session, false)
+    cache.replaceStaleFill(id, session, seen)
     const embeddedParentSessionId = getEmbeddedParentSessionId(session)
     if (embeddedParentSessionId && embeddedParentSessionId !== id) {
       await touch(embeddedParentSessionId)

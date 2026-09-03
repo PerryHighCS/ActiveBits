@@ -776,6 +776,38 @@ void test('a stalled strict read of an older incarnation does not roll the cache
   assert.equal(afterRace?.created, oldCreated + 10_000)
 })
 
+void test('a strict read adopts a recreated incarnation even when its created is smaller (peer clock skew)', async (t) => {
+  const records = new Map<string, SessionRecord>()
+  const gate = Promise.resolve()
+  const hold = { strict: false, cas: false }
+  const sessions = createSessionStore('redis://test', 1_000, gatedValkeyStoreForTest(records, hold, gate))
+  t.after(async () => { await sessions.close() })
+
+  const live = await createSession(sessions)
+  live.data = { gen: 'A' }
+  await sessions.set(live.id, live)
+  await sessions.updateAtomic!(live.id, (draft) => { draft.data = { gen: 'A' }; return draft })
+  const cachedA = await sessions.get(live.id)
+  assert.equal(cachedA?.mutationRevision, 1)
+
+  // A peer with a lagging clock recreates the id: fresh incarnation, revision
+  // restarted at 0, and a *smaller* `created` than the record it replaced.
+  const replacement = structuredClone(records.get(live.id)!)
+  replacement.created = (records.get(live.id)!.created as number) - 5_000
+  replacement.mutationRevision = 0
+  replacement.data = { gen: 'B' }
+  records.set(live.id, replacement)
+
+  // Nothing races this strict read, so the identity check (not a created
+  // comparison) lets it replace the now-stale cached incarnation A.
+  const strict = await sessions.getStrict!(live.id)
+  assert.equal((strict?.data as { gen?: string }).gen, 'B')
+
+  const after = await sessions.get(live.id)
+  assert.equal((after?.data as { gen?: string }).gen, 'B', 'get() adopts the recreated incarnation despite its smaller created')
+  assert.equal(after?.mutationRevision, 0)
+})
+
 void test('updateAtomic will not commit into a same-id incarnation recreated after its strict read', async (t) => {
   const records = new Map<string, SessionRecord>()
   const gate = Promise.resolve()

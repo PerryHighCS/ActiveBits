@@ -14,12 +14,12 @@ interface SessionCacheOptions<TSession extends MutableSession = MutableSession> 
   ttlMs?: number
   touchFn?: ((id: string) => Promise<void>) | null
   /**
-   * Decide whether a fill/write candidate may replace the entry already cached
-   * for the same id. Returns `true` to accept the replacement. Applied to every
-   * non-`dirty` `set()` (cache-miss fills, strict reads, CAS results, token /
-   * expiry finalizers) so an async result that raced behind a newer committed
-   * write cannot roll the cache back for the TTL. Omitted -> always accept
-   * (previous behavior).
+   * Fast-accept predicate for `replaceStaleFill`: return `true` when `incoming`
+   * is provably at least as new as `cached` by a comparison that does NOT rely
+   * on node-local wall clocks (e.g. a monotonic revision within one session
+   * incarnation). Returning `false` is not "reject" - it falls through to the
+   * identity check (did anything write during the caller's await?). Omitted ->
+   * identity check only.
    */
   supersedes?: (incoming: TSession, cached: TSession) => boolean
 }
@@ -63,10 +63,11 @@ export class SessionCache<TSession extends MutableSession = MutableSession> {
       return cached.session
     }
 
+    const seen = cached?.session ?? null
     const session = await fetchFn(id)
 
     if (session) {
-      this.set(id, session, false)
+      this.replaceStaleFill(id, session, seen)
     } else {
       this.cache.delete(id)
       this.touchQueue.delete(id)
@@ -76,19 +77,40 @@ export class SessionCache<TSession extends MutableSession = MutableSession> {
   }
 
   /**
+   * Publish the result of an async fill (a cache-miss load, a strict read, a
+   * CAS result, a finalizer). `seen` is the cached session object the caller
+   * observed *before* its await (via `peek`), or `null` if it saw none.
+   *
+   * The write lands only when it cannot roll the cache back:
+   *  - the cache is empty, or still holds exactly `seen` (nothing raced the
+   *    caller's await), or
+   *  - `supersedes(incoming, current)` proves the fill is at least as new by a
+   *    clock-independent comparison.
+   * Otherwise something newer (a commit, or a recreated incarnation the caller
+   * did not read) arrived while the caller was awaiting, and it is kept.
+   */
+  replaceStaleFill(id: string, session: TSession, seen: TSession | null): void {
+    const current = this.cache.get(id)?.session ?? null
+    const unchanged = current === seen
+    const provablyNewer = current != null && this.supersedes != null && this.supersedes(session, current)
+    if (current == null || unchanged || provablyNewer) {
+      this.set(id, session, false)
+    }
+  }
+
+  /**
+   * Read the cached session without touching LRU order, TTL, or touch state.
+   * Returns a past-TTL entry too (unlike getFresh()); callers use this only to
+   * capture the pre-await baseline for replaceStaleFill().
+   */
+  peek(id: string): TSession | null {
+    return this.cache.get(id)?.session ?? null
+  }
+
+  /**
    * Set/update a session in cache.
    */
   set(id: string, session: TSession, dirty = true): void {
-    if (!dirty && this.supersedes) {
-      const existing = this.cache.get(id)
-      if (existing && !this.supersedes(session, existing.session)) {
-        // A stale async fill (older strict read / CAS result / finalizer) must
-        // not overwrite a newer committed entry, or get() serves the rollback
-        // for the rest of the TTL.
-        return
-      }
-    }
-
     if (!this.cache.has(id) && this.cache.size >= this.maxSize) {
       const oldestKey = this.cache.keys().next().value
       if (oldestKey != null) {

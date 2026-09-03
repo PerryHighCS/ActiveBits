@@ -106,11 +106,14 @@ overwriting the replacement. Activity code must use this primitive when a write
 based on a session snapshot could otherwise overwrite unrelated state committed
 by another server instance.
 
-The in-process read cache is guarded the same way: an async fill (cache-miss
-load, strict read, CAS result, token/expiry finalizer) may only replace a cached
-entry when it is at least as new - `created` first, then `mutationRevision`
-within one incarnation - so a result that raced behind a newer commit cannot roll
-`get()` back for the cache TTL.
+The in-process read cache is guarded the same way, without comparing node-local
+wall clocks: an async fill (cache-miss load, strict read, CAS result, finalizer,
+keepalive revalidation) replaces a cached entry only when nothing wrote that
+entry while the caller was awaiting (an identity check against the value it saw
+before its read) or when a same-incarnation `mutationRevision` proves the fill at
+least as new. A result that raced behind a newer commit - or a stalled read of an
+incarnation that was since recreated - therefore cannot roll `get()` back for the
+cache TTL.
 
 Video Sync additionally carries a monotonic `playbackRevision` in its public
 playback state. Clients order state frames by that revision before considering
