@@ -4750,8 +4750,8 @@ void test('event and session routes share unsynced student telemetry across simu
   assert.equal((correctionResponse.body as { telemetry: { sync: { unsyncedStudents: number } } }).telemetry.sync.unsyncedStudents, 0)
 })
 
-void test('legacy session unsynced markers survive the scope move once created is persisted', { concurrency: false }, async () => {
-  console.info('[TEST] video-sync unsynced scope: a legacy session (no persisted created) records an unsync marker under the :0 scope, then its first atomic write persists a synthetic created; the count must be folded into the incarnation scope, not dropped')
+void test('legacy session unsynced markers survive the scope move triggered by that session\'s own first persisting write', { concurrency: false }, async () => {
+  console.info('[TEST] video-sync unsynced scope: a legacy session (no persisted created) records an unsync marker under the :0 scope; its own event-route write is the first to persist created, which must fold the marker into the incarnation scope rather than dropping it')
   const app = createMockApp()
   const ws = createMockWs() as unknown as WsRouter
   // A dedicated id: `migratedLegacyUnsyncedScopes` is module-level, so a shared
@@ -4761,6 +4761,60 @@ void test('legacy session unsynced markers survive the scope move once created i
   // A pre-migration record: no persisted identity, so every scope derives as `<id>:0`.
   delete (legacySession as { created?: number }).created
   const storeState = createSessionStore({ [sid]: legacySession }, { valkeyStore: createMockVideoSyncValkeyStore() })
+  // Model `toSessionRecord`'s real behavior: a legacy record is given a
+  // synthetic `created` by the *write* that first persists it (the read that
+  // fed this same request's `expectedCreated: null` synthesizes a value too,
+  // but nothing observable changes until a write actually lands).
+  const sessions = {
+    ...storeState.sessions,
+    async set(id: string, session: SessionRecord) {
+      if (typeof (session as { created?: unknown }).created !== 'number') {
+        (session as { created?: number }).created = 5_000_000
+      }
+      return storeState.sessions.set(id, session)
+    },
+  }
+  setupVideoSyncRoutes(app, sessions, ws)
+
+  const eventHandler = app.handlers.post['/api/video-sync/:sessionId/event']
+  assert.equal(typeof eventHandler, 'function')
+
+  // The marker lands under `<id>:0`; this same request's own atomic write
+  // (inside the /event handler) is the one that persists `created` for the
+  // first time, so `updateVideoSyncSessionAtomic` folds `<id>:0` into
+  // `<id>:5000000` before this response is built.
+  const firstUnsync = createResponse()
+  await eventHandler?.({ params: { sessionId: sid }, body: { type: 'unsync', studentId: 'student-a', driftSec: 1 } }, firstUnsync)
+  assert.equal(firstUnsync.statusCode, 200)
+  assert.equal((firstUnsync.body as { telemetry: { sync: { unsyncedStudents: number } } }).telemetry.sync.unsyncedStudents, 1)
+  assert.equal(
+    typeof (storeState.store[sid] as { created?: unknown }).created,
+    'number',
+    'the event route\'s own write persisted the synthesized created',
+  )
+
+  // A later, separate request: the session now reads as identified
+  // (`created: 5_000_000`), so this request's own scope is `<id>:5000000`
+  // directly - the assertion below only passes if student-a's marker
+  // actually migrated there rather than being stranded under `<id>:0`.
+  const secondUnsync = createResponse()
+  await eventHandler?.({ params: { sessionId: sid }, body: { type: 'unsync', studentId: 'student-b', driftSec: 1 } }, secondUnsync)
+  assert.equal(secondUnsync.statusCode, 200)
+  assert.equal(
+    (secondUnsync.body as { telemetry: { sync: { unsyncedStudents: number } } }).telemetry.sync.unsyncedStudents,
+    2,
+    'student-a (migrated by the first request\'s own write) + student-b',
+  )
+})
+
+void test('a fresh session reusing a legacy id does not inherit that id\'s stale :0 unsynced markers', { concurrency: false }, async () => {
+  console.info('[TEST] video-sync unsynced scope: a legacy incarnation records an unsync marker under <id>:0 and ends without ever persisting created; a brand-new incarnation then reuses the same session id and must not inherit that stale marker just because a later read happens to see it')
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  const sid = 'legacy-id-reuse-no-leak'
+  const legacySession = createVideoSyncSession(sid)
+  delete (legacySession as { created?: number }).created
+  const storeState = createSessionStore({ [sid]: legacySession }, { valkeyStore: createMockVideoSyncValkeyStore() })
   setupVideoSyncRoutes(app, storeState.sessions, ws)
 
   const eventHandler = app.handlers.post['/api/video-sync/:sessionId/event']
@@ -4768,33 +4822,27 @@ void test('legacy session unsynced markers survive the scope move once created i
   assert.equal(typeof eventHandler, 'function')
   assert.equal(typeof sessionHandler, 'function')
 
-  const firstUnsync = createResponse()
-  await eventHandler?.({ params: { sessionId: sid }, body: { type: 'unsync', studentId: 'student-a', driftSec: 1 } }, firstUnsync)
-  assert.equal(firstUnsync.statusCode, 200)
-  assert.equal((firstUnsync.body as { telemetry: { sync: { unsyncedStudents: number } } }).telemetry.sync.unsyncedStudents, 1)
+  // The legacy incarnation records a marker under `<id>:0`. This store never
+  // synthesizes `created` on persist, so the incarnation ends (is replaced
+  // below) without ever getting one - the marker is left stranded under `:0`.
+  const legacyUnsync = createResponse()
+  await eventHandler?.({ params: { sessionId: sid }, body: { type: 'unsync', studentId: 'stale-student', driftSec: 1 } }, legacyUnsync)
+  assert.equal(legacyUnsync.statusCode, 200)
+  assert.equal((legacyUnsync.body as { telemetry: { sync: { unsyncedStudents: number } } }).telemetry.sync.unsyncedStudents, 1)
+  assert.equal(typeof (storeState.store[sid] as { created?: unknown }).created, 'undefined')
 
-  // The first video-sync atomic write persists the synthesized `created`; from
-  // now on `getSessionCreatedIdentity` returns a number and the scope moves to
-  // `<id>:<created>`.
-  ;(storeState.store[sid] as { created?: number }).created = 5_000_000
+  // A brand-new, unrelated incarnation reuses the same id (e.g. the old
+  // session ended and the instructor started a fresh one) - it has a real
+  // `created` from the moment it exists, so no read of it is ever legacy.
+  storeState.store[sid] = createVideoSyncSession(sid)
 
-  const afterPersist = createResponse()
-  await sessionHandler?.({ params: { sessionId: sid } }, afterPersist)
-  assert.equal(afterPersist.statusCode, 200)
+  const freshRead = createResponse()
+  await sessionHandler?.({ params: { sessionId: sid } }, freshRead)
+  assert.equal(freshRead.statusCode, 200)
   assert.equal(
-    (afterPersist.body as { data?: { telemetry?: { sync?: { unsyncedStudents?: number } } } }).data?.telemetry?.sync?.unsyncedStudents,
-    1,
-    'the marker recorded under the :0 scope was folded into the incarnation scope, not lost',
-  )
-
-  // A later unsync for a different student is added on top of the migrated one.
-  const secondUnsync = createResponse()
-  await eventHandler?.({ params: { sessionId: sid }, body: { type: 'unsync', studentId: 'student-b', driftSec: 1 } }, secondUnsync)
-  assert.equal(secondUnsync.statusCode, 200)
-  assert.equal(
-    (secondUnsync.body as { telemetry: { sync: { unsyncedStudents: number } } }).telemetry.sync.unsyncedStudents,
-    2,
-    'student-a (migrated) + student-b',
+    (freshRead.body as { data?: { telemetry?: { sync?: { unsyncedStudents?: number } } } }).data?.telemetry?.sync?.unsyncedStudents,
+    0,
+    'the fresh incarnation must not inherit the old incarnation\'s stale :0 marker',
   )
 })
 

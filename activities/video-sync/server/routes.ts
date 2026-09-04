@@ -1301,6 +1301,8 @@ async function updateVideoSyncSessionAtomic(
   const isAuthorizedIncarnation = (record: { type?: unknown; created?: unknown }): boolean =>
     record.type === 'video-sync' && (expectedCreated == null || record.created === expectedCreated)
 
+  let result: { session: VideoSyncSession; data: VideoSyncSessionData } | null
+
   if (typeof sessions.updateAtomic === 'function') {
     let updated: SessionRecord | null
     try {
@@ -1314,21 +1316,36 @@ async function updateVideoSyncSessionAtomic(
       if (error instanceof WrongVideoSyncIncarnationError) return null
       throw error
     }
-    if (!updated || !isAuthorizedIncarnation(updated)) return null
-    return {
-      session: updated as VideoSyncSession,
-      data: ensureVideoSyncSessionData(updated),
+    result = !updated || !isAuthorizedIncarnation(updated)
+      ? null
+      : { session: updated as VideoSyncSession, data: ensureVideoSyncSessionData(updated) }
+  } else {
+    // Test/minimal store compatibility. Production stores expose updateAtomic;
+    // the existing per-process queue still serializes this fallback.
+    const session = await getVideoSyncSession(sessions, sessionId, { strict: true })
+    if (!session || !isAuthorizedIncarnation(session)) return null
+    const data = ensureVideoSyncSessionData(session)
+    mutate(session, data)
+    await sessions.set(session.id, session)
+    result = { session, data }
+  }
+
+  // `expectedCreated === null` is this call's own proof - from the caller's own
+  // pre-write read, not a later ambient read - that the record was legacy (no
+  // persisted `created`) right before this specific write. Only then can the
+  // `:0` unsynced-student scope be trusted to belong to the SAME incarnation
+  // this write just gave an identity to: a later read of an already-identified
+  // session cannot tell whether leftover `:0` state is its own or belongs to an
+  // unrelated, since-deleted incarnation that happened to reuse the same
+  // session id, so it must not trigger the fold.
+  if (expectedCreated === null && result != null) {
+    const newCreated = getSessionCreatedIdentity(result.session)
+    if (newCreated != null) {
+      await migrateLegacyUnsyncedScope(sessions, sessionId, newCreated)
     }
   }
 
-  // Test/minimal store compatibility. Production stores expose updateAtomic;
-  // the existing per-process queue still serializes this fallback.
-  const session = await getVideoSyncSession(sessions, sessionId, { strict: true })
-  if (!session || !isAuthorizedIncarnation(session)) return null
-  const data = ensureVideoSyncSessionData(session)
-  mutate(session, data)
-  await sessions.set(session.id, session)
-  return { session, data }
+  return result
 }
 
 async function persistVideoSyncErrorAtomic(
@@ -1376,7 +1393,11 @@ async function updateConnectionTelemetry(
     return
   }
 
-  await migrateLegacyUnsyncedScope(sessions, sessionId, createdMs)
+  // The scope migration itself is triggered from `updateVideoSyncSessionAtomic`
+  // (the specific write that persists a legacy record's first `created`), not
+  // from this read: an ambient read here cannot prove `<id>:0` belongs to the
+  // session it is currently looking at rather than an unrelated, since-deleted
+  // incarnation that reused the same id.
   await refreshUnsyncedStudentsCount(sessions, data, unsyncedStudentScope(sessionId, createdMs))
 }
 
@@ -2186,12 +2207,10 @@ export default function setupVideoSyncRoutes(
     // stay isolated from the replacement's (Valkey key self-expires, in-memory
     // entry is swept by its own prune tick).
     const unsyncedScope = unsyncedStudentScope(sessionId, getSessionCreatedIdentity(session) ?? undefined)
-    // Fold any pre-migration `<id>:0` markers into this incarnation scope before
-    // reading/writing, so a legacy session that recorded unsync markers before
-    // its first atomic write persisted `created` does not lose the count here.
-    if (studentId && (body.type === 'unsync' || body.type === 'sync-correction')) {
-      await migrateLegacyUnsyncedScope(sessions, sessionId, getSessionCreatedIdentity(session) ?? undefined)
-    }
+    // If this session is legacy, this handler's own atomic write below (which
+    // persists `created` for the first time) triggers the `<id>:0` ->
+    // `<id>:<created>` fold via `updateVideoSyncSessionAtomic` - after the mark
+    // below, so a marker recorded here is included in the fold.
 
     if (body.type === 'unsync') {
       if (studentId) {
