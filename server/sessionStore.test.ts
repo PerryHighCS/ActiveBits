@@ -130,7 +130,7 @@ function valkeyStoreForTest(records: Map<string, SessionRecord>, touches: string
     ) {
       const current = records.get(id)
       if (!current || (current.mutationRevision ?? 0) !== expectedMutationRevision) return null
-      if (expectedCreated != null && typeof current.created === 'number' && current.created !== expectedCreated) return null
+      if (expectedCreated != null && current.created !== expectedCreated) return null
       const updated = structuredClone({ ...session, mutationRevision: expectedMutationRevision + 1 })
       records.set(id, updated)
       return updated
@@ -622,7 +622,7 @@ function gatedValkeyStoreForTest(
       onBeforeCas?.()
       const current = records.get(id)
       if (!current || (current.mutationRevision ?? 0) !== expectedMutationRevision) return null
-      if (expectedCreated != null && typeof current.created === 'number' && current.created !== expectedCreated) return null
+      if (expectedCreated != null && current.created !== expectedCreated) return null
       const updated = structuredClone({ ...session, mutationRevision: expectedMutationRevision + 1 })
       records.set(id, updated)
       if (hold.cas) {

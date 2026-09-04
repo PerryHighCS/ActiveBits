@@ -1364,7 +1364,7 @@ function ensureHeartbeat(
             telemetry: heartbeatTelemetry,
           },
           sessionId,
-          session.created,
+          getSessionCreatedIdentity(session) ?? undefined,
         )
 
         let broadcastState = heartbeatState
@@ -2058,7 +2058,7 @@ export default function setupVideoSyncRoutes(
     // write below is abandoned for a recreated id, this scope's markers/timer
     // stay isolated from the replacement's (Valkey key self-expires, in-memory
     // entry is swept by its own prune tick).
-    const unsyncedScope = unsyncedStudentScope(sessionId, session.created)
+    const unsyncedScope = unsyncedStudentScope(sessionId, getSessionCreatedIdentity(session) ?? undefined)
 
     if (body.type === 'unsync') {
       if (studentId) {
