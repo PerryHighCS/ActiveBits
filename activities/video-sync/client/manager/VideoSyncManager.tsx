@@ -969,25 +969,35 @@ export default function VideoSyncManager() {
   // called from the player's ENDED handler) from starting while an older
   // episode's `sendCommand` is still in flight - the media element can reach
   // ENDED again after a fresh play/seek. `naturalEndEpisodeOwnerRef` is
-  // checked after every `await` below; a call whose token no longer owns it
-  // must not touch the shared retry count / command id / flush timer, because
-  // a newer episode now owns them.
+  // checked on entry and again after the `await` below; a call whose token no
+  // longer owns it must not touch the shared flush timer / retry count /
+  // command id, because a newer episode now owns them.
   const emitNaturalEndPauseRef = useRef<(params: { endedRevision: number; positionSec: number; episodeToken: number }) => void>(() => {})
   const emitNaturalEndPause = useCallback(async (params: {
     endedRevision: number
     positionSec: number
     episodeToken: number
   }): Promise<void> => {
+    // Ownership is normally already current here - the mint site assigns the
+    // new owner synchronously, immediately before calling this function, so a
+    // superseded episode's queued retry timer is cleared (below) as part of
+    // the newer episode's own first call, before it can fire. Checking again
+    // here makes that guarantee local instead of depending on the caller
+    // always preserving that ordering: a call that somehow runs for a
+    // superseded episode must not touch any shared state, including
+    // `naturalEndFlushTimerRef`, which by then belongs to the current
+    // episode's own scheduled retry.
+    if (naturalEndEpisodeOwnerRef.current !== params.episodeToken) {
+      return
+    }
     clearNaturalEndFlushTimer()
     if (!shouldSendNaturalEndPause({
       playerEnded: playerEndedRef.current,
       endedRevision: params.endedRevision,
       authoritativeRevision: latestStateRef.current.playbackRevision ?? 0,
     })) {
-      if (naturalEndEpisodeOwnerRef.current === params.episodeToken) {
-        naturalEndRetryCountRef.current = 0
-        naturalEndCommandIdRef.current = null
-      }
+      naturalEndRetryCountRef.current = 0
+      naturalEndCommandIdRef.current = null
       return
     }
 

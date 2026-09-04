@@ -1880,3 +1880,10 @@ Use this log for durable findings that future contributors and agents should reu
 - Why it matters: Without episode ownership, a slow/retried older natural-end attempt could silently corrupt a newer one's retry bookkeeping or double-send a pause at a stale revision.
 - Evidence: `activities/video-sync/client/manager/VideoSyncManager.tsx` (`naturalEndEpisodeSeqRef`, `naturalEndEpisodeOwnerRef`, `resolveNaturalEndPauseCompletion`); `activities/video-sync/client/manager/VideoSyncManager.test.ts` ("resolveNaturalEndPauseCompletion ignores a superseded episode's completion regardless of its result").
 - Owner: Claude
+
+- Date: 2026-09-04
+- Area: activities (video-sync) | manager natural-end retry (follow-up)
+- Discovery: CodeRabbit re-flagged `emitNaturalEndPause` after the episode-ownership fix landed: `clearNaturalEndFlushTimer()` ran as the function's first statement, before checking `naturalEndEpisodeOwnerRef`. Traced the claimed race (a superseded episode's queued retry timer firing and clearing a newer episode's timer) and could not reproduce it: the only place ownership changes is the ENDED-handler mint site, which assigns the new owner *before* calling `emitNaturalEndPause`, whose very first statement then runs synchronously (no `await` in between) - so a newer episode's mint always clears an older episode's pending timer atomically as part of taking over, before that older timer could ever fire (`clearTimeout` is unconditional/reliable once called). Added the ownership check as the function's first statement anyway (before `clearNaturalEndFlushTimer()`), since it's free and makes the invariant local/self-contained instead of depending on the mint site always preserving that ordering across future refactors.
+- Why it matters: Distinguishes "verified-safe, hardened for the future" from "was an active bug" - useful context if this code changes again and the guard looks redundant.
+- Evidence: `activities/video-sync/client/manager/VideoSyncManager.tsx` (`emitNaturalEndPause`); PR #365 review thread.
+- Owner: Claude
