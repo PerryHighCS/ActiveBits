@@ -254,9 +254,10 @@ export class SessionCache<TSession extends MutableSession = MutableSession> {
    * Clear all cache and pending flushes.
    */
   clear(): void {
-    for (const id of this.cache.keys()) {
-      this.bumpGeneration(id)
-    }
+    // Clearing a cold cache also invalidates fills that have claimed a
+    // generation but have not published an entry yet.
+    this.writeSeq += 1
+    this.generation.clear()
     this.cache.clear()
     this.touchQueue.clear()
   }

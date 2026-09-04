@@ -56,6 +56,27 @@ void test('in-memory compare-and-set fails closed when an expected incarnation i
   assert.equal((await sessions.get(unidentifiedReplacement.id))?.data.generation, 'unidentified-replacement')
 })
 
+void test('Valkey updateAtomic migrates a legacy record without created using revision-only matching', async (t) => {
+  const records = new Map<string, SessionRecord>()
+  const legacy = {
+    id: 'legacy-session',
+    mutationRevision: 0,
+    data: { status: 'old' },
+  } as unknown as SessionRecord
+  records.set(legacy.id, legacy)
+  const sessions = createSessionStore('redis://test', 1_000, valkeyStoreForTest(records, []))
+  t.after(async () => { await sessions.close() })
+
+  const updated = await sessions.updateAtomic?.(legacy.id, (draft) => {
+    draft.data = { ...draft.data, status: 'updated' }
+    return draft
+  })
+
+  assert.equal(updated?.mutationRevision, 1)
+  assert.equal(updated?.data.status, 'updated')
+  assert.equal(typeof updated?.created, 'number', 'the successful write upgrades the legacy record')
+})
+
 void test('in-memory atomic update refreshes an embedded child session parent', async (t) => {
   const sessions = createSessionStore(null, 1_000)
   t.after(async () => { await sessions.close() })

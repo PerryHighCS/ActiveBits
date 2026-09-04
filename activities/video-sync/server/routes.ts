@@ -995,7 +995,12 @@ function scheduleUnsyncedStudentsPrune(
         scheduleUnsyncedStudentsPrune(sessions, sessionId, createdMs, pruneNowMs)
       }
     })().catch((error: unknown) => {
-      console.error(`Failed to prune stale video-sync unsynced students for session ${sessionId}:`, error)
+      console.error(JSON.stringify({
+        activity: 'video-sync',
+        event: 'unsynced-student-prune-failed',
+        sessionId,
+        errorName: error instanceof Error ? error.name : 'unknown',
+      }))
     })
   }, delayMs)
 

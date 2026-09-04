@@ -296,6 +296,10 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
   }))
   const valkeyStore = providedValkeyStore ?? new ValkeySessionStore(valkeyUrl!, { ttlMs })
   const linkedSessionRevalidatedAt = new Map<string, number>()
+  // `toSessionRecord` supplies a current timestamp for pre-migration records
+  // without `created`. Track those strict-read objects so updateAtomic does not
+  // mistake that synthetic value for a stored incarnation identity.
+  const strictReadLegacyCreated = new WeakSet<SessionRecord>()
   const LINKED_SESSION_REVALIDATION_MS = 5_000
   const MAX_LINKED_SESSION_REVALIDATIONS = 1_000
   const recordLinkedSessionRevalidation = (id: string, timestamp: number): void => {
@@ -367,6 +371,9 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
     const loaded = await valkeyStore.getStrict(id)
     const normalizedSession = loaded ? normalizeSessionData(toSessionRecord(loaded)) : null
     if (normalizedSession) {
+      if (typeof loaded?.created !== 'number') {
+        strictReadLegacyCreated.add(normalizedSession)
+      }
       cache.replaceStaleFill(id, normalizedSession, fillToken)
       const embeddedParentSessionId = getEmbeddedParentSessionId(normalizedSession)
       if (embeddedParentSessionId && embeddedParentSessionId !== id) {
@@ -428,7 +435,9 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
       // delete+recreate that resets the revision to 0 between here and the
       // commit must fail the CAS (-> re-read, not silently overwrite the
       // replacement). Absent on pre-migration records (no `created`).
-      const expectedCreated = typeof current.created === 'number' ? current.created : null
+      const expectedCreated = strictReadLegacyCreated.has(current)
+        ? null
+        : (typeof current.created === 'number' ? current.created : null)
       const draft = structuredClone(current)
       const updated = await compareAndSet(id, expectedRevision, mutate(draft), ttl, expectedCreated)
       if (updated) return updated

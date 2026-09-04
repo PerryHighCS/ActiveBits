@@ -32,6 +32,16 @@ void test('SessionCache.replaceStaleFill keeps the later-started concurrent fill
   assert.deepEqual(cache.getFresh('a'), { created: 2, rev: 0, generation: 'replacement' })
 })
 
+void test('SessionCache.clear invalidates a pending cold fill', () => {
+  const cache = new SessionCache<TestSession>({ ttlMs: 10_000 })
+  const token = cache.beginFill('cold')
+
+  cache.clear()
+  cache.replaceStaleFill('cold', { rev: 1, stale: true }, token)
+
+  assert.equal(cache.getFresh('cold'), null)
+})
+
 void test('SessionCache.replaceStaleFill drops a fill when a set raced the await', () => {
   const cache = new SessionCache<TestSession>({ ttlMs: 10_000 })
   const token = cache.beginFill('a')
