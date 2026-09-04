@@ -36,9 +36,9 @@ export class SessionCache<TSession extends MutableSession = MutableSession> {
   private readonly touchFn: ((id: string) => Promise<void>) | null
   private readonly supersedes: ((incoming: TSession, cached: TSession) => boolean) | null
   // Per-id write generation, taken from a single cache-wide monotonic counter
-  // (`writeSeq`) that advances on every set / invalidate / evict / miss. An
-  // async fill captures the value for its id before its await; if it differs
-  // afterwards, the slot was mutated/emptied/deleted meanwhile. The map may be
+  // (`writeSeq`) that advances on every fill claim, set, invalidate, eviction,
+  // expiry, cleanup, and clear. An async fill claims the value for its id before
+  // its await; if it differs afterwards, a newer fill or mutation won. The map may be
   // pruned freely (capacity eviction, cleanup) because a missing entry reads
   // back as the *current* `writeSeq` - always >= any token ever handed out - so
   // a stale fill for a since-pruned id can never collide back to its old token.
@@ -87,12 +87,14 @@ export class SessionCache<TSession extends MutableSession = MutableSession> {
   }
 
   /**
-   * Capture the write generation for `id` immediately before an async fill's
-   * await (after any invalidate the same operation performs). Pass the returned
-   * token to `replaceStaleFill`.
+   * Claim a fresh generation for an async fill immediately before its await
+   * (after any invalidate the same operation performs). A later-started fill
+   * claims another generation, so an earlier result cannot publish over it.
+   * Pass the returned token to `replaceStaleFill`.
    */
   beginFill(id: string): number {
-    return this.generation.get(id) ?? this.writeSeq
+    this.bumpGeneration(id)
+    return this.generation.get(id)!
   }
 
   private bumpGeneration(id: string): void {

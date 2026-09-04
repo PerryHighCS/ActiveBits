@@ -15,6 +15,23 @@ void test('SessionCache.replaceStaleFill publishes a fill nothing raced', () => 
   assert.deepEqual(cache.getFresh('a'), { rev: 1 })
 })
 
+void test('SessionCache.replaceStaleFill keeps the later-started concurrent fill across an incarnation swap', () => {
+  const cache = new SessionCache<TestSession>({
+    ttlMs: 10_000,
+    supersedes: (incoming, cached) =>
+      incoming.created === cached.created && (incoming.rev ?? 0) > (cached.rev ?? 0),
+  })
+  const oldIncarnationToken = cache.beginFill('a')
+  const replacementIncarnationToken = cache.beginFill('a')
+
+  // The old read completes first but was superseded when the later strict read
+  // began. Its different incarnation cannot prove freshness and is dropped.
+  cache.replaceStaleFill('a', { created: 1, rev: 0, generation: 'old' }, oldIncarnationToken)
+  cache.replaceStaleFill('a', { created: 2, rev: 0, generation: 'replacement' }, replacementIncarnationToken)
+
+  assert.deepEqual(cache.getFresh('a'), { created: 2, rev: 0, generation: 'replacement' })
+})
+
 void test('SessionCache.replaceStaleFill drops a fill when a set raced the await', () => {
   const cache = new SessionCache<TestSession>({ ttlMs: 10_000 })
   const token = cache.beginFill('a')

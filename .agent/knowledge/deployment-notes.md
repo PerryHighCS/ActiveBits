@@ -2,6 +2,12 @@
 
 Track deployment constraints, environment expectations, and operational learnings.
 
+> **Atomic-session errata (2026-09-04):** The authoritative CAS/cache rules are
+> the later “CAS compatibility”, “Cache ordering”, and “Cache fill ownership”
+> clarifications in the 2026-09-02 atomic-session entry. They supersede its
+> earlier wording that a missing stored `created` degrades to revision-only
+> matching or that an equal revision can supersede a raced cache fill.
+
 ## Entry Template
 
 - Date:
@@ -27,6 +33,7 @@ Track deployment constraints, environment expectations, and operational learning
 - Risk: `updateAtomic` adds a `getStrict` per write and, under cross-instance write contention, up to 12 CAS retries (throws `Atomic session update exhausted retry budget` if exhausted — surfaces as a retryable 500 / a skipped-logged heartbeat tick). A Valkey outage stays a retryable 500 or a skipped heartbeat rather than serving stale cache. Residual: shared platform routes `POST /api/session/:sessionId/entry-participant[/consume]` still `get` + mutate + plain `set()` the same session record — a lost-update window with a concurrent playback command, tracked in #313 (see `.agent/knowledge/data-contracts.md`).
 - CAS compatibility clarification: The shared `SessionStore.compareAndSet` signature includes `expectedCreated`. If it is supplied, in-memory and Valkey commits require an exact stored `created` match and reject a record with the field missing; only callers that read an unidentified legacy record omit the argument and use revision-only matching.
 - Cache ordering clarification: after a fill's generation moves, `mutationRevision` must be strictly greater within the same incarnation before it can replace the cache entry. Equal revisions can come from a direct legacy/plain `set()` whole-record write and therefore do not establish freshness.
+- Cache fill ownership clarification: `beginFill(id)` advances and claims a fresh generation before every await. Concurrent fills for one ID never share a token; a later-started replacement-incarnation read prevents an older read from publishing even if the older result returns first.
 - Rollback approach: revert commit 58eed143 (and the follow-up review commits on branch `fix/video-sync-playback-reliability-364`); the `mutationRevision` field is ignored by older code.
 - Evidence (runbook/logs/path): `server/core/sessions.ts`; `server/core/valkeyStore.ts`; `server/core/sessions.ts` + `server/sessionStore.test.ts` + `server/core/valkeyStore.test.ts`; `activities/video-sync/server/routes.ts` + `routes.test.ts` ("command route retries its atomic write…", "session patch retries its atomic write…", "command route atomic path accumulates the playback revision…"); `ARCHITECTURE.md` ("Atomic Session Mutation"); `DEPLOYMENT.md` item 7.
 - Follow-up action: #313 — migrate the remaining shared/whole-session writers (entry-participant routes, MobCode) to `updateAtomic`, or make `set()` participate in revision advancement.
