@@ -239,6 +239,32 @@ function createMockVideoSyncValkeyStore() {
   return {
     client: {
       async eval(script: string, numKeys: number, ...args: Array<string | number>) {
+        if (script.includes('video-sync-unsynced-merge')) {
+          assert.equal(numKeys, 2)
+          const [srcKeyArg, dstKeyArg, nowArg, staleArg, ttlArg] = args
+          const srcKey = String(srcKeyArg)
+          const dstKey = String(dstKeyArg)
+          const nowMs = Number(nowArg)
+          const staleMs = Number(staleArg)
+          const ttlMs = Number(ttlArg)
+          const srcState = readState(srcKey, nowMs)
+          const merged = readState(dstKey, nowMs)
+          for (const [studentId, timestamp] of Object.entries(srcState)) {
+            const existing = merged[studentId]
+            if (existing == null || timestamp > existing) {
+              merged[studentId] = timestamp
+            }
+          }
+          entries.delete(srcKey)
+          for (const [studentId, timestamp] of Object.entries(merged)) {
+            if (nowMs - timestamp > staleMs) {
+              delete merged[studentId]
+            }
+          }
+          writeState(dstKey, merged, ttlMs, nowMs)
+          return Object.keys(merged).length
+        }
+
         assert.equal(numKeys, 1)
         const [keyArg, ...rawArgs] = args
         const key = String(keyArg)
@@ -4722,6 +4748,54 @@ void test('event and session routes share unsynced student telemetry across simu
 
   assert.equal(correctionResponse.statusCode, 200)
   assert.equal((correctionResponse.body as { telemetry: { sync: { unsyncedStudents: number } } }).telemetry.sync.unsyncedStudents, 0)
+})
+
+void test('legacy session unsynced markers survive the scope move once created is persisted', { concurrency: false }, async () => {
+  console.info('[TEST] video-sync unsynced scope: a legacy session (no persisted created) records an unsync marker under the :0 scope, then its first atomic write persists a synthetic created; the count must be folded into the incarnation scope, not dropped')
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  // A dedicated id: `migratedLegacyUnsyncedScopes` is module-level, so a shared
+  // id could already be marked migrated by another test.
+  const sid = 'legacy-unsync-scope-move'
+  const legacySession = createVideoSyncSession(sid)
+  // A pre-migration record: no persisted identity, so every scope derives as `<id>:0`.
+  delete (legacySession as { created?: number }).created
+  const storeState = createSessionStore({ [sid]: legacySession }, { valkeyStore: createMockVideoSyncValkeyStore() })
+  setupVideoSyncRoutes(app, storeState.sessions, ws)
+
+  const eventHandler = app.handlers.post['/api/video-sync/:sessionId/event']
+  const sessionHandler = app.handlers.get['/api/video-sync/:sessionId/session']
+  assert.equal(typeof eventHandler, 'function')
+  assert.equal(typeof sessionHandler, 'function')
+
+  const firstUnsync = createResponse()
+  await eventHandler?.({ params: { sessionId: sid }, body: { type: 'unsync', studentId: 'student-a', driftSec: 1 } }, firstUnsync)
+  assert.equal(firstUnsync.statusCode, 200)
+  assert.equal((firstUnsync.body as { telemetry: { sync: { unsyncedStudents: number } } }).telemetry.sync.unsyncedStudents, 1)
+
+  // The first video-sync atomic write persists the synthesized `created`; from
+  // now on `getSessionCreatedIdentity` returns a number and the scope moves to
+  // `<id>:<created>`.
+  ;(storeState.store[sid] as { created?: number }).created = 5_000_000
+
+  const afterPersist = createResponse()
+  await sessionHandler?.({ params: { sessionId: sid } }, afterPersist)
+  assert.equal(afterPersist.statusCode, 200)
+  assert.equal(
+    (afterPersist.body as { data?: { telemetry?: { sync?: { unsyncedStudents?: number } } } }).data?.telemetry?.sync?.unsyncedStudents,
+    1,
+    'the marker recorded under the :0 scope was folded into the incarnation scope, not lost',
+  )
+
+  // A later unsync for a different student is added on top of the migrated one.
+  const secondUnsync = createResponse()
+  await eventHandler?.({ params: { sessionId: sid }, body: { type: 'unsync', studentId: 'student-b', driftSec: 1 } }, secondUnsync)
+  assert.equal(secondUnsync.statusCode, 200)
+  assert.equal(
+    (secondUnsync.body as { telemetry: { sync: { unsyncedStudents: number } } }).telemetry.sync.unsyncedStudents,
+    2,
+    'student-a (migrated) + student-b',
+  )
 })
 
 void test('event route reuses Valkey unsynced count returned by mutation scripts', async () => {

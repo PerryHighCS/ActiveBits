@@ -198,6 +198,12 @@ const heartbeatInFlightBySession = new Map<string, boolean>()
 const mutationTailsBySession = new Map<string, Promise<void>>()
 const unsyncedStudentsBySession = new Map<string, Map<string, number>>()
 const unsyncedStudentPruneTimersBySession = new Map<string, ReturnType<typeof setTimeout>>()
+// Session ids whose pre-migration unsynced scope (`<id>:0`) has already been
+// folded into the incarnation scope this process run, so the fold runs at most
+// once per session and is not re-attempted on every heartbeat. Cleared on
+// session teardown.
+const migratedLegacyUnsyncedScopes = new Set<string>()
+const MAX_MIGRATED_LEGACY_UNSYNCED_SCOPES = 5_000
 
 interface CookieSessionEntry {
   key: string
@@ -743,6 +749,51 @@ end
 return count
 `
 
+// Folds the pre-migration scope (`<sessionId>:0`, used while a legacy record has
+// no persisted `created`) into the incarnation scope once `created` has been
+// synthesized and persisted by the first atomic write. Merges per-student
+// markers (keeping the newer timestamp), prunes stale entries, then deletes the
+// source key so the merge is one-shot.
+const MERGE_UNSYNCED_STUDENTS_LUA = `
+-- video-sync-unsynced-merge
+local src = KEYS[1]
+local dst = KEYS[2]
+local nowMs = tonumber(ARGV[1])
+local staleMs = tonumber(ARGV[2])
+local ttlMs = tonumber(ARGV[3])
+local srcData = redis.call('GET', src)
+local dstData = redis.call('GET', dst)
+local merged = dstData and cjson.decode(dstData) or {}
+
+if srcData then
+  local srcState = cjson.decode(srcData)
+  for id, timestamp in pairs(srcState) do
+    local existing = merged[id]
+    if existing == nil or tonumber(timestamp) > tonumber(existing) then
+      merged[id] = timestamp
+    end
+  end
+  redis.call('DEL', src)
+end
+
+local count = 0
+for id, timestamp in pairs(merged) do
+  if nowMs - tonumber(timestamp) > staleMs then
+    merged[id] = nil
+  else
+    count = count + 1
+  end
+end
+
+if count == 0 then
+  redis.call('DEL', dst)
+else
+  redis.call('SET', dst, cjson.encode(merged), 'PX', ttlMs)
+end
+
+return count
+`
+
 const COUNT_UNSYNCED_STUDENTS_LUA = `
 -- video-sync-unsynced-count
 local key = KEYS[1]
@@ -828,6 +879,81 @@ function clearAllUnsyncedStudentStateForSession(sessionId: string): void {
   for (const scope of [...unsyncedStudentsBySession.keys()]) {
     if (scope === sessionId || scope.startsWith(prefix)) unsyncedStudentsBySession.delete(scope)
   }
+  migratedLegacyUnsyncedScopes.delete(sessionId)
+}
+
+// A legacy session record carries no persisted `created`, so every unsynced
+// scope derives as `<sessionId>:0` (`getSessionCreatedIdentity` -> null). The
+// first video-sync atomic write persists the synthesized `created`, after which
+// `getSessionCreatedIdentity` returns a number and the scope moves to
+// `<sessionId>:<created>`. Fold any markers/timer left under the `:0` scope into
+// the incarnation scope so the count is not silently lost across that one-time
+// transition. Runs at most once per session per process.
+async function migrateLegacyUnsyncedScope(
+  sessions: Pick<VideoSyncSessionStore, 'valkeyStore' | 'get' | 'set'>,
+  sessionId: string,
+  createdMs: number | undefined,
+  nowMs = Date.now(),
+): Promise<void> {
+  if (createdMs == null || migratedLegacyUnsyncedScopes.has(sessionId)) {
+    return
+  }
+  const legacyScope = unsyncedStudentScope(sessionId, undefined)
+  const incarnationScope = unsyncedStudentScope(sessionId, createdMs)
+  if (legacyScope === incarnationScope) {
+    return
+  }
+  migratedLegacyUnsyncedScopes.add(sessionId)
+  if (migratedLegacyUnsyncedScopes.size > MAX_MIGRATED_LEGACY_UNSYNCED_SCOPES) {
+    const oldest = migratedLegacyUnsyncedScopes.values().next().value
+    if (oldest !== undefined) migratedLegacyUnsyncedScopes.delete(oldest)
+  }
+
+  if (sessions.valkeyStore != null) {
+    try {
+      await sessions.valkeyStore.client.eval(
+        MERGE_UNSYNCED_STUDENTS_LUA,
+        2,
+        getUnsyncedStudentsKey(legacyScope),
+        getUnsyncedStudentsKey(incarnationScope),
+        nowMs,
+        UNSYNC_STALE_MS,
+        UNSYNCED_STUDENTS_KEY_TTL_MS,
+      )
+    } catch (error) {
+      // A failed fold leaves the `:0` key to self-expire via its TTL; the count
+      // re-converges as unsynced students re-report drift. Do not block the
+      // caller's telemetry refresh on it.
+      migratedLegacyUnsyncedScopes.delete(sessionId)
+      console.error(JSON.stringify({
+        activity: 'video-sync',
+        event: 'legacy-unsynced-scope-migration-failed',
+        sessionId,
+        errorName: error instanceof Error ? error.name : 'unknown',
+      }))
+    }
+    return
+  }
+
+  // In-memory backend (tests / non-Valkey deploys): move the map entry and its
+  // prune timer, merging per-student markers by newest timestamp.
+  const legacyMap = unsyncedStudentsBySession.get(legacyScope)
+  if (legacyMap && legacyMap.size > 0) {
+    const target = unsyncedStudentsBySession.get(incarnationScope) ?? new Map<string, number>()
+    for (const [studentId, timestampMs] of legacyMap) {
+      const existing = target.get(studentId)
+      if (existing == null || timestampMs > existing) target.set(studentId, timestampMs)
+    }
+    pruneStaleUnsyncedStudents(target, nowMs)
+    if (target.size > 0) {
+      unsyncedStudentsBySession.set(incarnationScope, target)
+      clearUnsyncedStudentState(legacyScope)
+      scheduleUnsyncedStudentsPrune(sessions, sessionId, createdMs, nowMs)
+      return
+    }
+    unsyncedStudentsBySession.delete(incarnationScope)
+  }
+  clearUnsyncedStudentState(legacyScope)
 }
 
 async function refreshUnsyncedStudentsCount(
@@ -1250,6 +1376,7 @@ async function updateConnectionTelemetry(
     return
   }
 
+  await migrateLegacyUnsyncedScope(sessions, sessionId, createdMs)
   await refreshUnsyncedStudentsCount(sessions, data, unsyncedStudentScope(sessionId, createdMs))
 }
 
@@ -1689,7 +1816,7 @@ export default function setupVideoSyncRoutes(
         telemetry: projectedTelemetry,
       },
       sessionId,
-      session.created,
+      getSessionCreatedIdentity(session) ?? undefined,
     )
 
     // Everything the public payload is built from. When a commit happens these
@@ -1832,7 +1959,7 @@ export default function setupVideoSyncRoutes(
     }
 
     const telemetryProbe = cloneTelemetry(data.telemetry)
-    await updateConnectionTelemetry(sessions, { ...data, telemetry: telemetryProbe }, sessionId, session.created)
+    await updateConnectionTelemetry(sessions, { ...data, telemetry: telemetryProbe }, sessionId, getSessionCreatedIdentity(session) ?? undefined)
     let configured = false
     const committed = await updateVideoSyncSessionAtomic(sessions, sessionId, (_draft, latestData) => {
       configured = false
@@ -1940,7 +2067,7 @@ export default function setupVideoSyncRoutes(
     await updateConnectionTelemetry(sessions, {
       ...ensureVideoSyncSessionData(session),
       telemetry: telemetryProbe,
-    }, sessionId, session.created)
+    }, sessionId, getSessionCreatedIdentity(session) ?? undefined)
     const activeCount = telemetryProbe.connections.activeCount
     const unsyncedStudents = telemetryProbe.sync.unsyncedStudents
     let duplicate = false
@@ -2059,6 +2186,12 @@ export default function setupVideoSyncRoutes(
     // stay isolated from the replacement's (Valkey key self-expires, in-memory
     // entry is swept by its own prune tick).
     const unsyncedScope = unsyncedStudentScope(sessionId, getSessionCreatedIdentity(session) ?? undefined)
+    // Fold any pre-migration `<id>:0` markers into this incarnation scope before
+    // reading/writing, so a legacy session that recorded unsync markers before
+    // its first atomic write persisted `created` does not lose the count here.
+    if (studentId && (body.type === 'unsync' || body.type === 'sync-correction')) {
+      await migrateLegacyUnsyncedScope(sessions, sessionId, getSessionCreatedIdentity(session) ?? undefined)
+    }
 
     if (body.type === 'unsync') {
       if (studentId) {
@@ -2159,7 +2292,7 @@ export default function setupVideoSyncRoutes(
           await updateConnectionTelemetry(sessions, {
             ...ensureVideoSyncSessionData(currentSession),
             telemetry: telemetryProbe,
-          }, sessionId, currentSession.created)
+          }, sessionId, getSessionCreatedIdentity(currentSession) ?? undefined)
           const committed = await updateVideoSyncSessionAtomic(sessions, sessionId, (_draft, latestData) => {
             latestData.telemetry.connections.activeCount = telemetryProbe.connections.activeCount
             latestData.telemetry.sync.unsyncedStudents = telemetryProbe.sync.unsyncedStudents
@@ -2245,7 +2378,7 @@ export default function setupVideoSyncRoutes(
         await updateConnectionTelemetry(sessions, {
           ...ensureVideoSyncSessionData(currentSession),
           telemetry: telemetryProbe,
-        }, sessionId, currentSession.created)
+        }, sessionId, getSessionCreatedIdentity(currentSession) ?? undefined)
         // Bind the snapshot persist to the incarnation the socket was authorized
         // against (`session`, read for `resolveManagerSocketPrincipal` above). A
         // same-id delete/recreate in the await window would otherwise let a
