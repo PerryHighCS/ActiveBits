@@ -158,10 +158,11 @@ class InMemorySessionStore implements SessionStore {
     if (!current || (current.mutationRevision ?? 0) !== expectedMutationRevision) {
       return null
     }
-    if (expectedCreated != null && typeof current.created === 'number' && current.created !== expectedCreated) {
+    if (expectedCreated != null && current.created !== expectedCreated) {
       // Same id, revision reset by a delete+recreate: the incarnation this
-      // caller read is gone. (A stored record with no `created` degrades to the
-      // revision-only check, matching the Valkey CAS.)
+      // caller read is gone. When the caller has an identity, a replacement
+      // with no `created` also fails closed; only a caller that read a legacy
+      // unidentified record degrades to revision-only matching.
       return null
     }
     const replacement = normalizeSessionData({

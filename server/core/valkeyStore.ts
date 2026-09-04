@@ -179,7 +179,7 @@ export class ValkeySessionStore {
         local current = cjson.decode(currentJson)
         local currentRevision = tonumber(current.mutationRevision) or 0
         if currentRevision ~= tonumber(ARGV[1]) then return nil end
-        if ARGV[4] ~= '' and current.created ~= nil and tostring(current.created) ~= ARGV[4] then return nil end
+        if ARGV[4] ~= '' and tostring(current.created) ~= ARGV[4] then return nil end
         redis.call('SET', key, ARGV[2], 'PX', tonumber(ARGV[3]))
         return ARGV[2]
       `

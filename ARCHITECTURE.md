@@ -106,9 +106,14 @@ overwriting the replacement. Activity code must use this primitive when a write
 based on a session snapshot could otherwise overwrite unrelated state committed
 by another server instance.
 
+When a caller supplies the incarnation it read, compare-and-set requires the
+stored record to contain that exact `created` value. A missing stored identity
+fails closed like a mismatch; revision-only compatibility applies only when the
+caller itself read a legacy record without an incarnation.
+
 The in-process read cache is guarded the same way, without comparing node-local
 wall clocks. `SessionCache` stamps each id's write generation from one cache-wide monotonic
-counter, advanced on every set / invalidate / evict / miss; an async fill
+counter, advanced on every set / invalidate / eviction / expiry / clear; an async fill
 (cache-miss load, strict read, CAS result, finalizer, keepalive revalidation)
 captures its id's value before its await and only publishes when it is unchanged,
 or when a same-incarnation `mutationRevision` still proves the fill at least as

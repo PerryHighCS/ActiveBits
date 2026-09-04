@@ -29,6 +29,33 @@ void test('in-memory atomic updates increment mutation revision without mutating
   assert.equal(stale?.data.playback, 'paused')
 })
 
+void test('in-memory compare-and-set fails closed when an expected incarnation is missing from storage', async (t) => {
+  const sessions = createSessionStore(null, 1_000)
+  t.after(async () => { await sessions.close() })
+  const unidentifiedReplacement = {
+    id: 'same-id',
+    mutationRevision: 0,
+    data: { generation: 'unidentified-replacement' },
+  } as unknown as SessionRecord
+  await sessions.set(unidentifiedReplacement.id, unidentifiedReplacement)
+
+  const result = await sessions.compareAndSet?.(
+    unidentifiedReplacement.id,
+    0,
+    {
+      id: unidentifiedReplacement.id,
+      created: 1_000,
+      mutationRevision: 0,
+      data: { generation: 'mutated-identified-session' },
+    },
+    null,
+    1_000,
+  )
+
+  assert.equal(result, null)
+  assert.equal((await sessions.get(unidentifiedReplacement.id))?.data.generation, 'unidentified-replacement')
+})
+
 void test('in-memory atomic update refreshes an embedded child session parent', async (t) => {
   const sessions = createSessionStore(null, 1_000)
   t.after(async () => { await sessions.close() })

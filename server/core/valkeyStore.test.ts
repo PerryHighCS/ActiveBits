@@ -30,7 +30,7 @@ function compareAndSetValkeyStoreForTest(initial: Record<string, unknown> = {}) 
         if (currentRevision !== Number(expectedRevisionArg)) return null
         if (
           expectedCreatedArg != null && expectedCreatedArg !== '' &&
-          current.created != null && String(current.created) !== expectedCreatedArg
+          String(current.created) !== expectedCreatedArg
         ) {
           return null
         }
@@ -88,6 +88,26 @@ void test('ValkeySessionStore compareAndSet rejects a revision-matching write wh
     JSON.parse(backing.get('session:s1') as string),
     { id: 's1', created: 5_000, mutationRevision: 0, data: { gen: 'B' } },
     'the recreated incarnation is left intact',
+  )
+})
+
+void test('ValkeySessionStore compareAndSet fails closed when an expected incarnation is missing from storage', async () => {
+  const { store, backing } = compareAndSetValkeyStoreForTest({
+    'session:s1': { id: 's1', mutationRevision: 0, data: { gen: 'unidentified-replacement' } },
+  })
+
+  const result = await store.compareAndSet(
+    's1',
+    0,
+    { id: 's1', created: 1_000, mutationRevision: 0, data: { gen: 'mutated-identified-session' } },
+    null,
+    1_000,
+  )
+
+  assert.equal(result, null)
+  assert.deepEqual(
+    JSON.parse(backing.get('session:s1') as string),
+    { id: 's1', mutationRevision: 0, data: { gen: 'unidentified-replacement' } },
   )
 })
 
