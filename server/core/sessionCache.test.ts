@@ -32,6 +32,24 @@ void test('SessionCache.replaceStaleFill keeps the later-started concurrent fill
   assert.deepEqual(cache.getFresh('a'), { created: 2, rev: 0, generation: 'replacement' })
 })
 
+void test('SessionCache.replaceStaleFill preserves a later fill claim when an older same-incarnation revision wins first', () => {
+  const cache = new SessionCache<TestSession>({
+    ttlMs: 10_000,
+    supersedes: (incoming, cached) =>
+      incoming.created === cached.created && (incoming.rev ?? 0) > (cached.rev ?? 0),
+  })
+  cache.set('a', { created: 1, rev: 0, generation: 'cached-a' }, false)
+  const oldIncarnationFill = cache.beginFill('a')
+  const replacementIncarnationFill = cache.beginFill('a')
+
+  // F1 is newer than cached A and may refresh it, but F2 began later and owns
+  // the token for recreated B. F1 must not bump away F2's claim.
+  cache.replaceStaleFill('a', { created: 1, rev: 1, generation: 'f1-a' }, oldIncarnationFill)
+  cache.replaceStaleFill('a', { created: 2, rev: 0, generation: 'f2-b' }, replacementIncarnationFill)
+
+  assert.deepEqual(cache.getFresh('a'), { created: 2, rev: 0, generation: 'f2-b' })
+})
+
 void test('SessionCache.clear invalidates a pending cold fill', () => {
   const cache = new SessionCache<TestSession>({ ttlMs: 10_000 })
   const token = cache.beginFill('cold')

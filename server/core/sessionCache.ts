@@ -119,6 +119,12 @@ export class SessionCache<TSession extends MutableSession = MutableSession> {
       if (current == null || this.supersedes == null || !this.supersedes(session, current)) {
         return
       }
+      // This older fill is provably newer than the cached snapshot within the
+      // same incarnation, but a later fill still owns this generation. Refresh
+      // the entry without advancing the generation so that later fill can
+      // publish a recreated incarnation when it completes.
+      this.set(id, session, false, false)
+      return
     }
     this.set(id, session, false)
   }
@@ -136,7 +142,7 @@ export class SessionCache<TSession extends MutableSession = MutableSession> {
   /**
    * Set/update a session in cache.
    */
-  set(id: string, session: TSession, dirty = true): void {
+  set(id: string, session: TSession, dirty = true, advanceGeneration = true): void {
     if (!this.cache.has(id) && this.cache.size >= this.maxSize) {
       const oldestKey = this.cache.keys().next().value
       if (oldestKey != null) {
@@ -160,7 +166,9 @@ export class SessionCache<TSession extends MutableSession = MutableSession> {
       this.cache.delete(id)
     }
     this.cache.set(id, entry)
-    this.bumpGeneration(id)
+    if (advanceGeneration) {
+      this.bumpGeneration(id)
+    }
 
     if (dirty) {
       this.touchQueue.add(id)
