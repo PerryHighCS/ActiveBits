@@ -562,6 +562,24 @@ export function shouldSendNaturalEndPause(params: {
   return params.playerEnded && params.endedRevision === params.authoritativeRevision
 }
 
+/**
+ * The `commandId` to send for a `natural-ended` pause attempt. A retry
+ * (`currentRetryCount > 0`) must reuse the id from the first attempt so the
+ * server de-duplicates the replay against the earlier command; a fresh episode
+ * (`currentRetryCount === 0`, or no id retained) mints a new one. Without this
+ * the retry parameters carry only revision + position, so every attempt got a
+ * fresh server-side id and the de-dup never fired.
+ */
+export function resolveNaturalEndPauseCommandId(params: {
+  currentRetryCount: number
+  activeCommandId: string | null
+}): string {
+  if (params.currentRetryCount > 0 && params.activeCommandId != null) {
+    return params.activeCommandId
+  }
+  return createManagerPlaybackCommandId()
+}
+
 export default function VideoSyncManager() {
   const { sessionId } = useParams()
   const navigate = useNavigate()
@@ -629,6 +647,10 @@ export default function VideoSyncManager() {
   // ended video as `isPlaying: true` for heartbeats to replay.
   const naturalEndFlushTimerRef = useRef<number | null>(null)
   const naturalEndRetryCountRef = useRef(0)
+  // The command id for the natural-end pause currently being (re)sent. Held for
+  // the lifetime of one retry episode so a scheduled retry replays the exact
+  // same command the server can de-duplicate; nulled once the episode resolves.
+  const naturalEndCommandIdRef = useRef<string | null>(null)
   const managerAutoplayCheckTimerRef = useRef<number | null>(null)
   const autoStartAttemptKeyRef = useRef<string | null>(null)
   const managerAccessBootstrapRefreshAttemptsRef = useRef<Map<string, number>>(new Map())
@@ -724,6 +746,7 @@ export default function VideoSyncManager() {
     playerEndedRef.current = false
     playbackFlushRetryCountRef.current = 0
     naturalEndRetryCountRef.current = 0
+    naturalEndCommandIdRef.current = null
     playbackCommandInFlightRef.current = false
     // Orphan any in-flight flush from the previous session: when it resolves it
     // will see it no longer owns the token and touch nothing.
@@ -911,11 +934,19 @@ export default function VideoSyncManager() {
       authoritativeRevision: latestStateRef.current.playbackRevision ?? 0,
     })) {
       naturalEndRetryCountRef.current = 0
+      naturalEndCommandIdRef.current = null
       return
     }
 
+    const commandId = resolveNaturalEndPauseCommandId({
+      currentRetryCount: naturalEndRetryCountRef.current,
+      activeCommandId: naturalEndCommandIdRef.current,
+    })
+    naturalEndCommandIdRef.current = commandId
+
     const result = await sendCommandRef.current('pause', {
       positionSec: params.positionSec,
+      commandId,
       reportErrors: false,
       source: 'natural-ended',
       // Mirror the revision this player was actually driving, not whatever
@@ -931,6 +962,10 @@ export default function VideoSyncManager() {
       naturalEndFlushTimerRef.current = window.setTimeout(() => {
         emitNaturalEndPauseRef.current(params)
       }, MANAGER_PLAYBACK_COMMAND_RETRY_DELAY_MS)
+    } else {
+      // Sent (or permanently dropped): the episode is over, so the next
+      // natural end mints a fresh id instead of replaying this one.
+      naturalEndCommandIdRef.current = null
     }
   }, [clearNaturalEndFlushTimer])
 
@@ -1406,6 +1441,7 @@ export default function VideoSyncManager() {
       playbackCommandInFlightRef.current = false
       playbackFlushOwnerRef.current = 0
       naturalEndRetryCountRef.current = 0
+      naturalEndCommandIdRef.current = null
       clearPlaybackCommandFlushTimer()
       clearNaturalEndFlushTimer()
       clearManagerAutoplayCheckTimer()
@@ -1444,6 +1480,7 @@ export default function VideoSyncManager() {
       playbackCommandInFlightRef.current = false
       playbackFlushOwnerRef.current = 0
       naturalEndRetryCountRef.current = 0
+      naturalEndCommandIdRef.current = null
       clearPlaybackCommandFlushTimer()
       clearNaturalEndFlushTimer()
       clearManagerAutoplayCheckTimer()
@@ -1576,6 +1613,9 @@ export default function VideoSyncManager() {
               })) {
                 playerEndedRef.current = true
                 naturalEndRetryCountRef.current = 0
+                // A fresh natural-end episode: drop any id retained from a
+                // prior one so this pause (and its retries) use a new id.
+                naturalEndCommandIdRef.current = null
                 // Routed through a bounded auth-retry so a transient 401/403
                 // (capability mid-refresh) does not silently drop the pause and
                 // leave the ended video as `isPlaying: true`.
@@ -1627,6 +1667,7 @@ export default function VideoSyncManager() {
       playbackCommandInFlightRef.current = false
       playbackFlushOwnerRef.current = 0
       naturalEndRetryCountRef.current = 0
+      naturalEndCommandIdRef.current = null
       clearPlaybackCommandFlushTimer()
       clearNaturalEndFlushTimer()
       clearManagerAutoplayCheckTimer()

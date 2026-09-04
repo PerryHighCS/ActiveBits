@@ -32,6 +32,7 @@ import {
     shouldRenderManagerHeaderForSession,
     shouldRequestEmbeddedBootstrapRefreshOnDenial,
     shouldSendManagerPlaybackPositionUpdate,
+    resolveNaturalEndPauseCommandId,
 } from './VideoSyncManager.js'
 
 const BASE_STATE: VideoSyncState = {
@@ -687,6 +688,36 @@ void test('shouldSendNaturalEndPause keeps the bounded auth-retry alive only whi
     shouldSendNaturalEndPause({ playerEnded: true, endedRevision: 7, authoritativeRevision: 8 }),
     false,
     'authoritative playback advanced past the ended revision -> abandon the retry',
+  )
+})
+
+void test('resolveNaturalEndPauseCommandId reuses the id across retries and mints a fresh one per episode', () => {
+  // First attempt of an episode: no retained id, retry count 0 -> mint a new id.
+  const firstAttemptId = resolveNaturalEndPauseCommandId({ currentRetryCount: 0, activeCommandId: null })
+  assert.equal(typeof firstAttemptId, 'string')
+  assert.ok(firstAttemptId.length > 0)
+
+  // Bounded retry (count > 0): replay the exact id the first attempt used so the
+  // server de-duplicates it instead of applying a second pause.
+  assert.equal(
+    resolveNaturalEndPauseCommandId({ currentRetryCount: 1, activeCommandId: firstAttemptId }),
+    firstAttemptId,
+  )
+  assert.equal(
+    resolveNaturalEndPauseCommandId({ currentRetryCount: 3, activeCommandId: firstAttemptId }),
+    firstAttemptId,
+  )
+
+  // A retry with no retained id (episode reset mid-flight) still mints one
+  // rather than sending an empty commandId.
+  const recoveredId = resolveNaturalEndPauseCommandId({ currentRetryCount: 2, activeCommandId: null })
+  assert.equal(typeof recoveredId, 'string')
+  assert.ok(recoveredId.length > 0)
+
+  // A brand-new episode (retry count back to 0) does not replay the previous id.
+  assert.notEqual(
+    resolveNaturalEndPauseCommandId({ currentRetryCount: 0, activeCommandId: firstAttemptId }),
+    firstAttemptId,
   )
 })
 
