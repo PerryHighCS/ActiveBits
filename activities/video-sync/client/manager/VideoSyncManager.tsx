@@ -78,10 +78,9 @@ const MISSING_MANAGER_ACCESS_ERROR = 'Manager access is unavailable. Open this s
 const YOUTUBE_HOST_FALLBACK_TIMEOUT_MS = 1_500
 const MANAGER_PLAYING_DRIFT_TOLERANCE_SEC = 2
 const MANAGER_PLAYBACK_COMMAND_FLUSH_DELAY_MS = 120
-// A command rejected for a transient reason (a 401/403 while the manager
-// capability cookie is mid-refresh) keeps its intent and re-flushes a bounded
-// number of times so `revalidateManagerAccess()` can restore authority before
-// the gesture is dropped.
+// A command rejected for a retryable reason (an auth failure while the manager
+// capability cookie is mid-refresh, or a 5xx response) keeps its intent and
+// re-flushes a bounded number of times before the gesture is dropped.
 const MANAGER_PLAYBACK_COMMAND_RETRY_DELAY_MS = 600
 
 export function isRetryablePlaybackCommandFailure(status: number): boolean {
@@ -357,8 +356,8 @@ export function getManagerPlaybackIntentForStateChange(params: {
 }
 
 /**
- * Bounded retry decision for a playback command that failed to send (a transient
- * 401/403 while the manager capability is mid-refresh). Retries up to
+ * Bounded retry decision for a playback command that failed with a retryable
+ * auth or server error. Retries up to
  * `MAX_MANAGER_PLAYBACK_FLUSH_RETRIES`, then gives up and resets the counter.
  */
 export function nextManagerPlaybackFlushRetry(
@@ -549,7 +548,7 @@ export function shouldEmitNaturalEndPause(params: {
 
 /**
  * Whether a deferred `natural-ended` pause is still worth (re)sending. The
- * bounded auth-retry keeps trying until this returns false: it is abandoned once
+ * bounded command retry keeps trying until this returns false: it is abandoned once
  * a newer gesture clears `playerEndedRef`, or once authoritative playback moves
  * past the revision this player was driving - in both cases the server no longer
  * needs the pause and a late send would name a stale revision.
@@ -668,11 +667,11 @@ export default function VideoSyncManager() {
   const playbackFlushTokenSeqRef = useRef(0)
   const playbackFlushOwnerRef = useRef(0)
   const playbackCommandFlushTimerRef = useRef<number | null>(null)
-  // Bounded auth-retry for the `natural-ended` pause. That command is emitted
+  // Bounded retry for the `natural-ended` pause. That command is emitted
   // outside the instructor-gesture flush queue (a player event, not a control
-  // click), so it carries its own retry state: a transient 401/403 while the
-  // manager capability is mid-refresh would otherwise drop it and leave the
-  // ended video as `isPlaying: true` for heartbeats to replay.
+  // click), so it carries its own retry state: a retryable auth or server
+  // failure would otherwise drop it and leave the ended video as `isPlaying:
+  // true` for heartbeats to replay.
   const naturalEndFlushTimerRef = useRef<number | null>(null)
   const naturalEndRetryCountRef = useRef(0)
   // The command id for the natural-end pause currently being (re)sent. Held for
@@ -917,8 +916,8 @@ export default function VideoSyncManager() {
         } else {
           setErrorMessage(message)
         }
-        // Only an auth failure is worth retaining/retrying the intent for; a
-        // permanent 4xx / 5xx is not going to succeed on replay.
+        // Auth failures and 5xx responses retain the intent for bounded retry;
+        // permanent 4xx responses are dropped.
         return { ok: false, retryableAuth: isRetryableFailure }
       }
 
@@ -958,8 +957,8 @@ export default function VideoSyncManager() {
     sendCommandRef.current = sendCommand
   }, [sendCommand])
 
-  // Emits the `natural-ended` pause with a bounded auth-retry. `sendCommand`
-  // returns `retryableAuth` for a transient 401/403; `resolveManagerPlaybackFlushOutcome`
+  // Emits the `natural-ended` pause with a bounded retry. `sendCommand`
+  // returns `retryableAuth` for a retryable auth or server error; `resolveManagerPlaybackFlushOutcome`
   // maps that to a bounded retry (shared with the instructor-gesture queue), and
   // any other failure is dropped for the next heartbeat/state update to
   // reconcile. Re-entrant via `emitNaturalEndPauseRef` so a scheduled retry runs
@@ -1135,8 +1134,7 @@ export default function VideoSyncManager() {
       playbackFlushRetryCountRef.current = outcome.nextRetryCount
       if (outcome.action === 'retry' && !supersededByNewerIntent) {
         // A confirmed 401/403 has already triggered `revalidateManagerAccess()`;
-        // a short bounded retry lets the restored capability carry the gesture
-        // through instead of silently dropping it.
+        // the same bounded retry also absorbs transient 5xx responses.
         clearPlaybackCommandFlushTimer()
         playbackCommandFlushTimerRef.current = window.setTimeout(() => {
           flushManagerPlaybackIntentRef.current()
@@ -1168,7 +1166,6 @@ export default function VideoSyncManager() {
     ) {
       desiredPlaybackIntentRef.current = null
       desiredPlaybackPositionRef.current = null
-      desiredPlaybackCommandIdRef.current = null
       desiredPlaybackCommandIdRef.current = null
       return
     }
@@ -1694,9 +1691,9 @@ export default function VideoSyncManager() {
                 naturalEndCommandIdRef.current = null
                 const episodeToken = (naturalEndEpisodeSeqRef.current += 1)
                 naturalEndEpisodeOwnerRef.current = episodeToken
-                // Routed through a bounded auth-retry so a transient 401/403
-                // (capability mid-refresh) does not silently drop the pause and
-                // leave the ended video as `isPlaying: true`.
+                // Routed through a bounded retry so a retryable auth or server
+                // failure does not silently drop the pause and leave the ended
+                // video as `isPlaying: true`.
                 emitNaturalEndPauseRef.current({
                   endedRevision,
                   positionSec: event.target.getCurrentTime(),
