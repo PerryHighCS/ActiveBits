@@ -655,8 +655,19 @@ function scheduleManagerCapabilityExpiryClose(
   })
 }
 
-function getUnsyncedStudentsKey(sessionId: string): string {
-  return `${UNSYNCED_STUDENTS_KEY_PREFIX}${sessionId}`
+// Auxiliary unsynced-student bookkeeping (the in-memory maps and the Valkey key)
+// is keyed by a per-*incarnation* scope, not the bare session id. A same-id
+// delete+recreate races: an /event whose atomic write is abandoned for the old
+// incarnation must not have its markers read (or blindly deleted) alongside the
+// replacement's. `created` distinguishes incarnations; the old scope's Valkey
+// key self-expires (UNSYNCED_STUDENTS_KEY_TTL_MS) and its in-memory entry is
+// swept by the prune timer.
+function unsyncedStudentScope(sessionId: string, createdMs: number | undefined): string {
+  return `${sessionId}:${typeof createdMs === 'number' ? createdMs : 0}`
+}
+
+function getUnsyncedStudentsKey(scope: string): string {
+  return `${UNSYNCED_STUDENTS_KEY_PREFIX}${scope}`
 }
 
 const UPSERT_UNSYNCED_STUDENT_LUA = `
@@ -765,7 +776,7 @@ return count
 
 async function runValkeyUnsyncedStudentCount(
   sessions: VideoSyncSessionStore,
-  sessionId: string,
+  scope: string,
   script: string,
   args: Array<string | number>,
 ): Promise<number> {
@@ -776,7 +787,7 @@ async function runValkeyUnsyncedStudentCount(
   const result = await sessions.valkeyStore.client.eval(
     script,
     1,
-    getUnsyncedStudentsKey(sessionId),
+    getUnsyncedStudentsKey(scope),
     ...args,
   )
 
@@ -793,69 +804,49 @@ function pruneStaleUnsyncedStudents(studentMap: Map<string, number>, nowMs = Dat
   }
 }
 
-function clearUnsyncedStudentPruneTimer(sessionId: string): void {
-  const existing = unsyncedStudentPruneTimersBySession.get(sessionId)
+function clearUnsyncedStudentPruneTimer(scope: string): void {
+  const existing = unsyncedStudentPruneTimersBySession.get(scope)
   if (!existing) {
     return
   }
 
   clearTimeout(existing)
-  unsyncedStudentPruneTimersBySession.delete(sessionId)
+  unsyncedStudentPruneTimersBySession.delete(scope)
 }
 
-function clearUnsyncedStudentState(sessionId: string): void {
-  clearUnsyncedStudentPruneTimer(sessionId)
-  unsyncedStudentsBySession.delete(sessionId)
+function clearUnsyncedStudentState(scope: string): void {
+  clearUnsyncedStudentPruneTimer(scope)
+  unsyncedStudentsBySession.delete(scope)
 }
 
-const DELETE_UNSYNCED_STUDENTS_LUA = `
--- video-sync-unsynced-delete
-redis.call('DEL', KEYS[1])
-return 1
-`
-
-// Drop the auxiliary unsynced-student bookkeeping (in-memory map + prune timer,
-// and the Valkey key in Valkey mode) for a session id. Used when an /event
-// request's atomic telemetry write is abandoned because the id was deleted or
-// recreated mid-flight: the count this request added is keyed only by
-// `sessionId`, so without this a replacement session's next heartbeat would read
-// and persist it.
-async function discardUnsyncedStudentState(
-  sessions: VideoSyncSessionStore,
-  sessionId: string,
-): Promise<void> {
-  clearUnsyncedStudentState(sessionId)
-  if (sessions.valkeyStore != null) {
-    try {
-      await sessions.valkeyStore.client.eval(DELETE_UNSYNCED_STUDENTS_LUA, 1, getUnsyncedStudentsKey(sessionId))
-    } catch (error) {
-      console.error(JSON.stringify({
-        activity: 'video-sync',
-        event: 'unsynced-students-key-cleanup-failed',
-        sessionId,
-        errorName: error instanceof Error ? error.name : 'unknown',
-      }))
-    }
+// Session-level teardown: drop every incarnation's in-memory scope for this id.
+function clearAllUnsyncedStudentStateForSession(sessionId: string): void {
+  const prefix = `${sessionId}:`
+  for (const scope of [...unsyncedStudentPruneTimersBySession.keys()]) {
+    if (scope === sessionId || scope.startsWith(prefix)) clearUnsyncedStudentPruneTimer(scope)
+  }
+  for (const scope of [...unsyncedStudentsBySession.keys()]) {
+    if (scope === sessionId || scope.startsWith(prefix)) unsyncedStudentsBySession.delete(scope)
   }
 }
 
 async function refreshUnsyncedStudentsCount(
   sessions: VideoSyncSessionStore,
   data: VideoSyncSessionData,
-  sessionId: string,
+  scope: string,
   nowMs = Date.now(),
 ): Promise<void> {
   if (sessions.valkeyStore != null) {
     data.telemetry.sync.unsyncedStudents = await runValkeyUnsyncedStudentCount(
       sessions,
-      sessionId,
+      scope,
       COUNT_UNSYNCED_STUDENTS_LUA,
       [nowMs, UNSYNC_STALE_MS, UNSYNCED_STUDENTS_KEY_TTL_MS],
     )
     return
   }
 
-  const studentMap = unsyncedStudentsBySession.get(sessionId)
+  const studentMap = unsyncedStudentsBySession.get(scope)
   if (!studentMap) {
     data.telemetry.sync.unsyncedStudents = 0
     return
@@ -864,7 +855,7 @@ async function refreshUnsyncedStudentsCount(
   pruneStaleUnsyncedStudents(studentMap, nowMs)
 
   if (studentMap.size === 0) {
-    unsyncedStudentsBySession.delete(sessionId)
+    unsyncedStudentsBySession.delete(scope)
     data.telemetry.sync.unsyncedStudents = 0
     return
   }
@@ -874,20 +865,20 @@ async function refreshUnsyncedStudentsCount(
 
 async function markStudentUnsynced(
   sessions: VideoSyncSessionStore,
-  sessionId: string,
+  scope: string,
   studentId: string,
   nowMs = Date.now(),
 ): Promise<number> {
   if (sessions.valkeyStore != null) {
     return runValkeyUnsyncedStudentCount(
       sessions,
-      sessionId,
+      scope,
       UPSERT_UNSYNCED_STUDENT_LUA,
       [studentId, nowMs, UNSYNC_STALE_MS, MAX_UNSYNCED_STUDENTS_PER_SESSION, UNSYNCED_STUDENTS_KEY_TTL_MS],
     )
   }
 
-  const existing = unsyncedStudentsBySession.get(sessionId)
+  const existing = unsyncedStudentsBySession.get(scope)
   if (existing) {
     pruneStaleUnsyncedStudents(existing, nowMs)
     if (!existing.has(studentId) && existing.size >= MAX_UNSYNCED_STUDENTS_PER_SESSION) {
@@ -897,39 +888,39 @@ async function markStudentUnsynced(
     return existing.size
   }
 
-  unsyncedStudentsBySession.set(sessionId, new Map([[studentId, nowMs]]))
+  unsyncedStudentsBySession.set(scope, new Map([[studentId, nowMs]]))
   return 1
 }
 
 async function clearStudentUnsynced(
   sessions: VideoSyncSessionStore,
-  sessionId: string,
+  scope: string,
   studentId: string,
   nowMs = Date.now(),
 ): Promise<number> {
   if (sessions.valkeyStore != null) {
     return runValkeyUnsyncedStudentCount(
       sessions,
-      sessionId,
+      scope,
       CLEAR_UNSYNCED_STUDENT_LUA,
       [studentId, nowMs, UNSYNC_STALE_MS, UNSYNCED_STUDENTS_KEY_TTL_MS],
     )
   }
 
-  const existing = unsyncedStudentsBySession.get(sessionId)
+  const existing = unsyncedStudentsBySession.get(scope)
   if (!existing) return 0
 
   existing.delete(studentId)
   if (existing.size === 0) {
-    clearUnsyncedStudentState(sessionId)
+    clearUnsyncedStudentState(scope)
     return 0
   }
 
   return existing.size
 }
 
-function getNextUnsyncedStudentPruneDelay(sessionId: string, nowMs = Date.now()): number | null {
-  const studentMap = unsyncedStudentsBySession.get(sessionId)
+function getNextUnsyncedStudentPruneDelay(scope: string, nowMs = Date.now()): number | null {
+  const studentMap = unsyncedStudentsBySession.get(scope)
   if (!studentMap || studentMap.size === 0) {
     return null
   }
@@ -946,21 +937,23 @@ function getNextUnsyncedStudentPruneDelay(sessionId: string, nowMs = Date.now())
 function scheduleUnsyncedStudentsPrune(
   sessions: Pick<VideoSyncSessionStore, 'get' | 'set'>,
   sessionId: string,
+  createdMs: number | undefined,
   nowMs = Date.now(),
 ): void {
-  clearUnsyncedStudentPruneTimer(sessionId)
+  const scope = unsyncedStudentScope(sessionId, createdMs)
+  clearUnsyncedStudentPruneTimer(scope)
 
-  const delayMs = getNextUnsyncedStudentPruneDelay(sessionId, nowMs)
+  const delayMs = getNextUnsyncedStudentPruneDelay(scope, nowMs)
   if (delayMs == null) {
     return
   }
 
   const timer = setTimeout(() => {
-    unsyncedStudentPruneTimersBySession.delete(sessionId)
+    unsyncedStudentPruneTimersBySession.delete(scope)
     void (async () => {
       const pruneNowMs = Date.now()
       await withSessionMutation(sessionId, async () => {
-        const studentMap = unsyncedStudentsBySession.get(sessionId)
+        const studentMap = unsyncedStudentsBySession.get(scope)
         if (!studentMap) {
           return
         }
@@ -971,40 +964,42 @@ function scheduleUnsyncedStudentsPrune(
         // the whole record - a cache-backed read could write a stale
         // `isPlaying: true` back over another instance's committed pause.
         const session = await getVideoSyncSession(sessions, sessionId, { strict: true })
-        if (!session) {
-          clearUnsyncedStudentState(sessionId)
+        if (!session || (createdMs != null && session.created !== createdMs)) {
+          // The id is gone, or was recreated as a different incarnation. This
+          // scope's markers belong to the old one - drop them, do not persist.
+          clearUnsyncedStudentState(scope)
           return
         }
 
         const data = ensureVideoSyncSessionData(session)
         const telemetryProbe = cloneTelemetry(data.telemetry)
         const probeData = { ...data, telemetry: telemetryProbe }
-        await refreshUnsyncedStudentsCount(sessions as VideoSyncSessionStore, probeData, sessionId, pruneNowMs)
+        await refreshUnsyncedStudentsCount(sessions as VideoSyncSessionStore, probeData, scope, pruneNowMs)
 
         if (telemetryProbe.sync.unsyncedStudents !== data.telemetry.sync.unsyncedStudents) {
           const committed = await updateVideoSyncSessionAtomic(sessions as VideoSyncSessionStore, sessionId, (_draft, latestData) => {
             latestData.telemetry.sync.unsyncedStudents = telemetryProbe.sync.unsyncedStudents
-          }, { expectedCreated: session.created })
+          }, { expectedCreated: createdMs })
           if (!committed) {
             // The id was deleted or recreated as a different incarnation between
             // the strict read above and this write. Drop the stale prune
             // bookkeeping instead of committing it to - and rescheduling it
             // against - the replacement session.
-            clearUnsyncedStudentState(sessionId)
+            clearUnsyncedStudentState(scope)
             return
           }
         }
       })
 
-      if ((unsyncedStudentsBySession.get(sessionId)?.size ?? 0) > 0) {
-        scheduleUnsyncedStudentsPrune(sessions, sessionId, pruneNowMs)
+      if ((unsyncedStudentsBySession.get(scope)?.size ?? 0) > 0) {
+        scheduleUnsyncedStudentsPrune(sessions, sessionId, createdMs, pruneNowMs)
       }
     })().catch((error: unknown) => {
       console.error(`Failed to prune stale video-sync unsynced students for session ${sessionId}:`, error)
     })
   }, delayMs)
 
-  unsyncedStudentPruneTimersBySession.set(sessionId, timer)
+  unsyncedStudentPruneTimersBySession.set(scope, timer)
 }
 
 function normalizeVideoSyncSessionData(session: SessionRecord): {
@@ -1240,6 +1235,7 @@ async function updateConnectionTelemetry(
   sessions: VideoSyncSessionStore,
   data: VideoSyncSessionData,
   sessionId: string,
+  createdMs: number | undefined,
   unsyncedStudentsCount?: number,
 ): Promise<void> {
   const sockets = subscribersBySession.get(sessionId)
@@ -1249,7 +1245,7 @@ async function updateConnectionTelemetry(
     return
   }
 
-  await refreshUnsyncedStudentsCount(sessions, data, sessionId)
+  await refreshUnsyncedStudentsCount(sessions, data, unsyncedStudentScope(sessionId, createdMs))
 }
 
 async function broadcastEnvelope(
@@ -1292,7 +1288,7 @@ function stopHeartbeat(sessionId: string): void {
   }
   heartbeatTimers.delete(sessionId)
   heartbeatInFlightBySession.delete(sessionId)
-  clearUnsyncedStudentState(sessionId)
+  clearAllUnsyncedStudentStateForSession(sessionId)
 }
 
 function closeSubscribersForMissingSession(sessionId: string): void {
@@ -1363,6 +1359,7 @@ function ensureHeartbeat(
             telemetry: heartbeatTelemetry,
           },
           sessionId,
+          session.created,
         )
 
         let broadcastState = heartbeatState
@@ -1687,6 +1684,7 @@ export default function setupVideoSyncRoutes(
         telemetry: projectedTelemetry,
       },
       sessionId,
+      session.created,
     )
 
     // Everything the public payload is built from. When a commit happens these
@@ -1829,7 +1827,7 @@ export default function setupVideoSyncRoutes(
     }
 
     const telemetryProbe = cloneTelemetry(data.telemetry)
-    await updateConnectionTelemetry(sessions, { ...data, telemetry: telemetryProbe }, sessionId)
+    await updateConnectionTelemetry(sessions, { ...data, telemetry: telemetryProbe }, sessionId, session.created)
     let configured = false
     const committed = await updateVideoSyncSessionAtomic(sessions, sessionId, (_draft, latestData) => {
       configured = false
@@ -1937,7 +1935,7 @@ export default function setupVideoSyncRoutes(
     await updateConnectionTelemetry(sessions, {
       ...ensureVideoSyncSessionData(session),
       telemetry: telemetryProbe,
-    }, sessionId)
+    }, sessionId, session.created)
     const activeCount = telemetryProbe.connections.activeCount
     const unsyncedStudents = telemetryProbe.sync.unsyncedStudents
     let duplicate = false
@@ -2050,15 +2048,18 @@ export default function setupVideoSyncRoutes(
     }
 
     let unsyncedStudentsCount: number | undefined
-    let mutatedUnsyncedAux = false
     const studentId = normalizeStudentId(body.studentId)
+    // Scope the auxiliary bookkeeping to this session incarnation: if the atomic
+    // write below is abandoned for a recreated id, this scope's markers/timer
+    // stay isolated from the replacement's (Valkey key self-expires, in-memory
+    // entry is swept by its own prune tick).
+    const unsyncedScope = unsyncedStudentScope(sessionId, session.created)
 
     if (body.type === 'unsync') {
       if (studentId) {
-        unsyncedStudentsCount = await markStudentUnsynced(sessions, sessionId, studentId)
-        mutatedUnsyncedAux = true
+        unsyncedStudentsCount = await markStudentUnsynced(sessions, unsyncedScope, studentId)
         if (sessions.valkeyStore == null) {
-          scheduleUnsyncedStudentsPrune(sessions, sessionId)
+          scheduleUnsyncedStudentsPrune(sessions, sessionId, session.created)
         }
       }
     }
@@ -2066,10 +2067,9 @@ export default function setupVideoSyncRoutes(
     if (body.type === 'sync-correction') {
       const correction = body.correctionResult
       if (studentId && correction === 'success') {
-        unsyncedStudentsCount = await clearStudentUnsynced(sessions, sessionId, studentId)
-        mutatedUnsyncedAux = true
+        unsyncedStudentsCount = await clearStudentUnsynced(sessions, unsyncedScope, studentId)
         if (sessions.valkeyStore == null) {
-          scheduleUnsyncedStudentsPrune(sessions, sessionId)
+          scheduleUnsyncedStudentsPrune(sessions, sessionId, session.created)
         }
       }
     }
@@ -2100,13 +2100,6 @@ export default function setupVideoSyncRoutes(
       }
     }, { expectedCreated: session.created })
     if (!committed) {
-      // The id was deleted or recreated as a different incarnation between the
-      // strict read and this write. Any unsynced-student marker this request
-      // added is keyed only by `sessionId`; drop it so a replacement session's
-      // heartbeat cannot inherit and persist it.
-      if (mutatedUnsyncedAux) {
-        await discardUnsyncedStudentState(sessions, sessionId)
-      }
       res.status(404).json({ error: 'NOT_FOUND', message: 'Session not found' })
       return
     }
@@ -2161,7 +2154,7 @@ export default function setupVideoSyncRoutes(
           await updateConnectionTelemetry(sessions, {
             ...ensureVideoSyncSessionData(currentSession),
             telemetry: telemetryProbe,
-          }, sessionId)
+          }, sessionId, currentSession.created)
           const committed = await updateVideoSyncSessionAtomic(sessions, sessionId, (_draft, latestData) => {
             latestData.telemetry.connections.activeCount = telemetryProbe.connections.activeCount
             latestData.telemetry.sync.unsyncedStudents = telemetryProbe.sync.unsyncedStudents
@@ -2247,7 +2240,7 @@ export default function setupVideoSyncRoutes(
         await updateConnectionTelemetry(sessions, {
           ...ensureVideoSyncSessionData(currentSession),
           telemetry: telemetryProbe,
-        }, sessionId)
+        }, sessionId, currentSession.created)
         // Bind the snapshot persist to the incarnation the socket was authorized
         // against (`session`, read for `resolveManagerSocketPrincipal` above). A
         // same-id delete/recreate in the await window would otherwise let a

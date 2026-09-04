@@ -2231,8 +2231,8 @@ void test('event route abandons the atomic write when the session id is deleted 
   assert.equal(storeState.published.length, 0, 'no telemetry broadcast for the abandoned event')
 })
 
-void test('event route drops the unsynced-student marker it added when the atomic write is abandoned for a recreated id', { concurrency: false }, async () => {
-  console.info('[TEST] video-sync event: an unsync marker is added, then the id is recreated mid-flush; the 404 path must discard that marker so the replacement session does not inherit the count')
+void test('event route keeps the abandoned unsync marker isolated from a recreated incarnation', { concurrency: false }, async () => {
+  console.info('[TEST] video-sync event: an unsync marker is added, then the id is recreated mid-flush; the marker is scoped to the old incarnation, so the replacement session does not inherit the count')
   const originalSetTimeout = globalThis.setTimeout
   const originalClearTimeout = globalThis.clearTimeout
   globalThis.setTimeout = (((_cb: TimerHandler) => ({ id: 'evt-aux-prune' } as unknown as ReturnType<typeof setTimeout>)) as unknown) as typeof setTimeout
