@@ -33,6 +33,7 @@ import {
     shouldRequestEmbeddedBootstrapRefreshOnDenial,
     shouldSendManagerPlaybackPositionUpdate,
     resolveNaturalEndPauseCommandId,
+    resolveNaturalEndPauseCompletion,
 } from './VideoSyncManager.js'
 
 const BASE_STATE: VideoSyncState = {
@@ -718,6 +719,44 @@ void test('resolveNaturalEndPauseCommandId reuses the id across retries and mint
   assert.notEqual(
     resolveNaturalEndPauseCommandId({ currentRetryCount: 0, activeCommandId: firstAttemptId }),
     firstAttemptId,
+  )
+})
+
+void test('resolveNaturalEndPauseCompletion ignores a superseded episode\'s completion regardless of its result', () => {
+  // A stale attempt (a newer episode has since claimed ownership) must not
+  // touch retry count / command id / flush timer no matter what its own
+  // `sendCommand` returned - even a "retryable auth failure" result must not
+  // schedule a retry for a dead episode.
+  assert.deepEqual(
+    resolveNaturalEndPauseCompletion({ result: { ok: true }, currentRetryCount: 2, isCurrentEpisode: false }),
+    { action: 'ignore', nextRetryCount: 2 },
+  )
+  assert.deepEqual(
+    resolveNaturalEndPauseCompletion({ result: { ok: false, retryableAuth: true }, currentRetryCount: 0, isCurrentEpisode: false }),
+    { action: 'ignore', nextRetryCount: 0 },
+  )
+})
+
+void test('resolveNaturalEndPauseCompletion defers to the shared flush outcome for the current episode', () => {
+  // Success: stop, reset the retry count.
+  assert.deepEqual(
+    resolveNaturalEndPauseCompletion({ result: { ok: true }, currentRetryCount: 1, isCurrentEpisode: true }),
+    { action: 'stop', nextRetryCount: 0 },
+  )
+  // Retryable auth failure within budget: retry and bump the count.
+  assert.deepEqual(
+    resolveNaturalEndPauseCompletion({ result: { ok: false, retryableAuth: true }, currentRetryCount: 0, isCurrentEpisode: true }),
+    { action: 'retry', nextRetryCount: 1 },
+  )
+  // Retryable auth failure with the budget spent: stop (drop), not retry.
+  assert.deepEqual(
+    resolveNaturalEndPauseCompletion({ result: { ok: false, retryableAuth: true }, currentRetryCount: 3, isCurrentEpisode: true }),
+    { action: 'stop', nextRetryCount: 0 },
+  )
+  // Permanent failure: stop (drop) immediately.
+  assert.deepEqual(
+    resolveNaturalEndPauseCompletion({ result: { ok: false, retryableAuth: false }, currentRetryCount: 0, isCurrentEpisode: true }),
+    { action: 'stop', nextRetryCount: 0 },
   )
 })
 

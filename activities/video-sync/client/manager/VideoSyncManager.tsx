@@ -580,6 +580,34 @@ export function resolveNaturalEndPauseCommandId(params: {
   return createManagerPlaybackCommandId()
 }
 
+/**
+ * What a natural-end attempt should do once its `sendCommand` await resolves.
+ * Nothing prevents a newer episode from starting (and claiming the shared
+ * retry-count / command-id refs for itself) while an older episode's attempt
+ * is still in flight - the media element can reach ENDED again after a fresh
+ * play/seek. `isCurrentEpisode` is false for an attempt whose episode token no
+ * longer matches the current owner; such an attempt must not touch that
+ * shared state at all (`action: 'ignore'`), regardless of what its own
+ * `result` was, because a newer episode now owns it.
+ */
+export function resolveNaturalEndPauseCompletion(params: {
+  result: Parameters<typeof resolveManagerPlaybackFlushOutcome>[0]['result']
+  currentRetryCount: number
+  isCurrentEpisode: boolean
+}): { action: 'retry' | 'stop' | 'ignore'; nextRetryCount: number } {
+  if (!params.isCurrentEpisode) {
+    return { action: 'ignore', nextRetryCount: params.currentRetryCount }
+  }
+  const outcome = resolveManagerPlaybackFlushOutcome({
+    result: params.result,
+    currentRetryCount: params.currentRetryCount,
+  })
+  return {
+    action: outcome.action === 'retry' ? 'retry' : 'stop',
+    nextRetryCount: outcome.nextRetryCount,
+  }
+}
+
 export default function VideoSyncManager() {
   const { sessionId } = useParams()
   const navigate = useNavigate()
@@ -651,6 +679,16 @@ export default function VideoSyncManager() {
   // the lifetime of one retry episode so a scheduled retry replays the exact
   // same command the server can de-duplicate; nulled once the episode resolves.
   const naturalEndCommandIdRef = useRef<string | null>(null)
+  // Monotonic id issued to each natural-end episode, and the id currently
+  // permitted to mutate the shared retry/command-id refs above. Nothing gates
+  // `emitNaturalEndPause` against overlapping episodes - the media element can
+  // reach ENDED again (a fresh play/seek followed by another natural
+  // completion) while an older episode's retry is still awaiting its response
+  // - so a stale completion must check ownership after its `await` before
+  // touching that shared state, the same way `playbackFlushOwnerRef` guards
+  // the instructor-gesture queue.
+  const naturalEndEpisodeSeqRef = useRef(0)
+  const naturalEndEpisodeOwnerRef = useRef(0)
   const managerAutoplayCheckTimerRef = useRef<number | null>(null)
   const autoStartAttemptKeyRef = useRef<string | null>(null)
   const managerAccessBootstrapRefreshAttemptsRef = useRef<Map<string, number>>(new Map())
@@ -747,6 +785,10 @@ export default function VideoSyncManager() {
     playbackFlushRetryCountRef.current = 0
     naturalEndRetryCountRef.current = 0
     naturalEndCommandIdRef.current = null
+    // Invalidate any in-flight natural-end episode from the previous session:
+    // its token can no longer match a fresh mint, so a late completion cannot
+    // clobber the reset state above.
+    naturalEndEpisodeOwnerRef.current = 0
     playbackCommandInFlightRef.current = false
     // Orphan any in-flight flush from the previous session: when it resolves it
     // will see it no longer owns the token and touch nothing.
@@ -922,10 +964,19 @@ export default function VideoSyncManager() {
   // any other failure is dropped for the next heartbeat/state update to
   // reconcile. Re-entrant via `emitNaturalEndPauseRef` so a scheduled retry runs
   // the latest closure (a fresh `sendCommand` after access recovered).
-  const emitNaturalEndPauseRef = useRef<(params: { endedRevision: number; positionSec: number }) => void>(() => {})
+  //
+  // Nothing prevents a *newer* episode (`episodeToken`, minted where this is
+  // called from the player's ENDED handler) from starting while an older
+  // episode's `sendCommand` is still in flight - the media element can reach
+  // ENDED again after a fresh play/seek. `naturalEndEpisodeOwnerRef` is
+  // checked after every `await` below; a call whose token no longer owns it
+  // must not touch the shared retry count / command id / flush timer, because
+  // a newer episode now owns them.
+  const emitNaturalEndPauseRef = useRef<(params: { endedRevision: number; positionSec: number; episodeToken: number }) => void>(() => {})
   const emitNaturalEndPause = useCallback(async (params: {
     endedRevision: number
     positionSec: number
+    episodeToken: number
   }): Promise<void> => {
     clearNaturalEndFlushTimer()
     if (!shouldSendNaturalEndPause({
@@ -933,8 +984,10 @@ export default function VideoSyncManager() {
       endedRevision: params.endedRevision,
       authoritativeRevision: latestStateRef.current.playbackRevision ?? 0,
     })) {
-      naturalEndRetryCountRef.current = 0
-      naturalEndCommandIdRef.current = null
+      if (naturalEndEpisodeOwnerRef.current === params.episodeToken) {
+        naturalEndRetryCountRef.current = 0
+        naturalEndCommandIdRef.current = null
+      }
       return
     }
 
@@ -953,12 +1006,20 @@ export default function VideoSyncManager() {
       // `latestStateRef` holds now.
       expectedPlaybackRevision: params.endedRevision,
     })
-    const outcome = resolveManagerPlaybackFlushOutcome({
+
+    // A newer episode may have started (and claimed the shared refs for
+    // itself) while this attempt awaited its response; `'ignore'` below
+    // leaves retry count / command id / flush timer untouched in that case.
+    const completion = resolveNaturalEndPauseCompletion({
       result,
       currentRetryCount: naturalEndRetryCountRef.current,
+      isCurrentEpisode: naturalEndEpisodeOwnerRef.current === params.episodeToken,
     })
-    naturalEndRetryCountRef.current = outcome.nextRetryCount
-    if (outcome.action === 'retry') {
+    if (completion.action === 'ignore') {
+      return
+    }
+    naturalEndRetryCountRef.current = completion.nextRetryCount
+    if (completion.action === 'retry') {
       naturalEndFlushTimerRef.current = window.setTimeout(() => {
         emitNaturalEndPauseRef.current(params)
       }, MANAGER_PLAYBACK_COMMAND_RETRY_DELAY_MS)
@@ -1442,6 +1503,7 @@ export default function VideoSyncManager() {
       playbackFlushOwnerRef.current = 0
       naturalEndRetryCountRef.current = 0
       naturalEndCommandIdRef.current = null
+      naturalEndEpisodeOwnerRef.current = 0
       clearPlaybackCommandFlushTimer()
       clearNaturalEndFlushTimer()
       clearManagerAutoplayCheckTimer()
@@ -1481,6 +1543,7 @@ export default function VideoSyncManager() {
       playbackFlushOwnerRef.current = 0
       naturalEndRetryCountRef.current = 0
       naturalEndCommandIdRef.current = null
+      naturalEndEpisodeOwnerRef.current = 0
       clearPlaybackCommandFlushTimer()
       clearNaturalEndFlushTimer()
       clearManagerAutoplayCheckTimer()
@@ -1614,14 +1677,20 @@ export default function VideoSyncManager() {
                 playerEndedRef.current = true
                 naturalEndRetryCountRef.current = 0
                 // A fresh natural-end episode: drop any id retained from a
-                // prior one so this pause (and its retries) use a new id.
+                // prior one so this pause (and its retries) use a new id, and
+                // claim ownership with a new token so an older episode's
+                // still-in-flight attempt cannot mutate this episode's state
+                // when it eventually resolves.
                 naturalEndCommandIdRef.current = null
+                const episodeToken = (naturalEndEpisodeSeqRef.current += 1)
+                naturalEndEpisodeOwnerRef.current = episodeToken
                 // Routed through a bounded auth-retry so a transient 401/403
                 // (capability mid-refresh) does not silently drop the pause and
                 // leave the ended video as `isPlaying: true`.
                 emitNaturalEndPauseRef.current({
                   endedRevision,
                   positionSec: event.target.getCurrentTime(),
+                  episodeToken,
                 })
               }
             },
@@ -1668,6 +1737,7 @@ export default function VideoSyncManager() {
       playbackFlushOwnerRef.current = 0
       naturalEndRetryCountRef.current = 0
       naturalEndCommandIdRef.current = null
+      naturalEndEpisodeOwnerRef.current = 0
       clearPlaybackCommandFlushTimer()
       clearNaturalEndFlushTimer()
       clearManagerAutoplayCheckTimer()
