@@ -808,6 +808,37 @@ function clearUnsyncedStudentState(sessionId: string): void {
   unsyncedStudentsBySession.delete(sessionId)
 }
 
+const DELETE_UNSYNCED_STUDENTS_LUA = `
+-- video-sync-unsynced-delete
+redis.call('DEL', KEYS[1])
+return 1
+`
+
+// Drop the auxiliary unsynced-student bookkeeping (in-memory map + prune timer,
+// and the Valkey key in Valkey mode) for a session id. Used when an /event
+// request's atomic telemetry write is abandoned because the id was deleted or
+// recreated mid-flight: the count this request added is keyed only by
+// `sessionId`, so without this a replacement session's next heartbeat would read
+// and persist it.
+async function discardUnsyncedStudentState(
+  sessions: VideoSyncSessionStore,
+  sessionId: string,
+): Promise<void> {
+  clearUnsyncedStudentState(sessionId)
+  if (sessions.valkeyStore != null) {
+    try {
+      await sessions.valkeyStore.client.eval(DELETE_UNSYNCED_STUDENTS_LUA, 1, getUnsyncedStudentsKey(sessionId))
+    } catch (error) {
+      console.error(JSON.stringify({
+        activity: 'video-sync',
+        event: 'unsynced-students-key-cleanup-failed',
+        sessionId,
+        errorName: error instanceof Error ? error.name : 'unknown',
+      }))
+    }
+  }
+}
+
 async function refreshUnsyncedStudentsCount(
   sessions: VideoSyncSessionStore,
   data: VideoSyncSessionData,
@@ -2019,11 +2050,13 @@ export default function setupVideoSyncRoutes(
     }
 
     let unsyncedStudentsCount: number | undefined
+    let mutatedUnsyncedAux = false
     const studentId = normalizeStudentId(body.studentId)
 
     if (body.type === 'unsync') {
       if (studentId) {
         unsyncedStudentsCount = await markStudentUnsynced(sessions, sessionId, studentId)
+        mutatedUnsyncedAux = true
         if (sessions.valkeyStore == null) {
           scheduleUnsyncedStudentsPrune(sessions, sessionId)
         }
@@ -2034,6 +2067,7 @@ export default function setupVideoSyncRoutes(
       const correction = body.correctionResult
       if (studentId && correction === 'success') {
         unsyncedStudentsCount = await clearStudentUnsynced(sessions, sessionId, studentId)
+        mutatedUnsyncedAux = true
         if (sessions.valkeyStore == null) {
           scheduleUnsyncedStudentsPrune(sessions, sessionId)
         }
@@ -2066,6 +2100,13 @@ export default function setupVideoSyncRoutes(
       }
     }, { expectedCreated: session.created })
     if (!committed) {
+      // The id was deleted or recreated as a different incarnation between the
+      // strict read and this write. Any unsynced-student marker this request
+      // added is keyed only by `sessionId`; drop it so a replacement session's
+      // heartbeat cannot inherit and persist it.
+      if (mutatedUnsyncedAux) {
+        await discardUnsyncedStudentState(sessions, sessionId)
+      }
       res.status(404).json({ error: 'NOT_FOUND', message: 'Session not found' })
       return
     }

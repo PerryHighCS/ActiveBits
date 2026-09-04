@@ -2231,6 +2231,58 @@ void test('event route abandons the atomic write when the session id is deleted 
   assert.equal(storeState.published.length, 0, 'no telemetry broadcast for the abandoned event')
 })
 
+void test('event route drops the unsynced-student marker it added when the atomic write is abandoned for a recreated id', { concurrency: false }, async () => {
+  console.info('[TEST] video-sync event: an unsync marker is added, then the id is recreated mid-flush; the 404 path must discard that marker so the replacement session does not inherit the count')
+  const originalSetTimeout = globalThis.setTimeout
+  const originalClearTimeout = globalThis.clearTimeout
+  globalThis.setTimeout = (((_cb: TimerHandler) => ({ id: 'evt-aux-prune' } as unknown as ReturnType<typeof setTimeout>)) as unknown) as typeof setTimeout
+  globalThis.clearTimeout = ((() => { /* no-op */ }) as unknown) as typeof clearTimeout
+
+  try {
+    const app = createMockApp()
+    const ws = createMockWs() as unknown as WsRouter
+    let swapped = false
+    const storeState = createSessionStore(
+      { 'evt-aux': createVideoSyncSession('evt-aux') },
+      {
+        atomic: true,
+        onAtomicAttempt: (attempt, store) => {
+          if (attempt !== 0 || swapped) return
+          const record = store['evt-aux']
+          if (!record) return
+          swapped = true
+          const replacement = createVideoSyncSession('evt-aux')
+          replacement.created = record.created + 10_000
+          replacement.mutationRevision = 5
+          store['evt-aux'] = replacement
+        },
+      },
+    )
+    setupVideoSyncRoutes(app, storeState.sessions, ws)
+    const handler = app.handlers.post['/api/video-sync/:sessionId/event']
+    assert.equal(typeof handler, 'function')
+
+    const abandoned = createResponse()
+    await handler?.({ params: { sessionId: 'evt-aux' }, body: { type: 'unsync', studentId: 'student-a', driftSec: 1 } }, abandoned)
+    assert.equal(swapped, true, 'the id-reuse hook must have fired')
+    assert.equal(abandoned.statusCode, 404)
+
+    // A later unsync for a *different* student on the (now stable) replacement:
+    // the count must be 1 (only student-b), not 2 (leaked student-a).
+    const followUp = createResponse()
+    await handler?.({ params: { sessionId: 'evt-aux' }, body: { type: 'unsync', studentId: 'student-b', driftSec: 1 } }, followUp)
+    assert.equal(followUp.statusCode, 200)
+    assert.equal(
+      (followUp.body as { telemetry: { sync: { unsyncedStudents: number } } }).telemetry.sync.unsyncedStudents,
+      1,
+      'the replacement session does not inherit the abandoned unsync marker',
+    )
+  } finally {
+    globalThis.setTimeout = originalSetTimeout
+    globalThis.clearTimeout = originalClearTimeout
+  }
+})
+
 void test('config route abandons the error-telemetry write when the session id is recreated mid-validation', async () => {
   console.info('[TEST] video-sync config: an invalid sourceUrl is submitted and the id is recreated mid-flush; the error-telemetry persist must not land on the replacement')
   const app = createMockApp()

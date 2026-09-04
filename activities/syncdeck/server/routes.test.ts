@@ -3092,22 +3092,21 @@ void test('embedded manager capability exchange does not mint a capability into 
       data: { embeddedManagerEntryToken: { value: 'capability-entry-token', expiresAt: now + 60_000 } },
     },
   }, { atomic: true })
-  // The strict read after token consumption still sees the authorized
-  // incarnation; the id is then reused for a different activity before
-  // updateAtomic reads it.
-  const realGetStrict = storeState.sessions.getStrict!.bind(storeState.sessions)
-  let strictReads = 0
-  storeState.sessions.getStrict = async (id: string) => {
-    strictReads += 1
-    const snapshot = await realGetStrict(id)
-    // Flip the id to a different incarnation only after the handler's
-    // post-consume re-read, so token consumption still succeeds first.
-    if (id === 'child-capability' && strictReads >= 2) {
+  // Token consumption succeeds against the authorized incarnation; the id is
+  // then deleted + recreated as a different activity in the window between the
+  // atomic consume and the capability compare-and-set. The handler must bind
+  // the CAS to the record the consume returned (created: now), not re-read a
+  // replacement, so the mismatch is rejected.
+  const realUpdateAtomic = storeState.sessions.updateAtomic!.bind(storeState.sessions)
+  let updateAtomicCalls = 0
+  storeState.sessions.updateAtomic = async (id: string, mutate: (session: SessionRecord) => SessionRecord) => {
+    updateAtomicCalls += 1
+    if (id === 'child-capability' && updateAtomicCalls === 1) {
       storeState.store['child-capability'] = {
         id: 'child-capability', type: 'algorithm-demo', created: now + 5_000, lastActivity: now + 5_000, data: {},
       }
     }
-    return snapshot
+    return realUpdateAtomic(id, mutate)
   }
   setupSyncDeckRoutes(app, storeState.sessions, ws)
 

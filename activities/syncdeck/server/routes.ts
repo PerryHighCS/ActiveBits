@@ -2228,16 +2228,15 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
         return
       }
 
-      if (!await consumeEntryToken) {
-        res.status(403).json({ error: 'invalid embedded manager credentials' })
-        return
-      }
-
-      // Re-read after atomic consumption so persisting the capability cannot
-      // resurrect the one-time bootstrap token from the pre-consumption record.
-      const consumedSession = await getSessionStrict(sessionId)
+      // The record the atomic consume returns is the exact incarnation whose
+      // one-time entry token was just validated and removed. Use it directly
+      // rather than a re-read: a re-read could observe a delete+recreate in the
+      // gap and authorize a capability for a session whose token was never
+      // presented. It is also already post-consumption, so persisting the
+      // capability from it cannot resurrect the bootstrap token.
+      const consumedSession = await consumeEntryToken
       if (!consumedSession) {
-        res.status(404).json({ error: 'embedded activity session not found' })
+        res.status(403).json({ error: 'invalid embedded manager credentials' })
         return
       }
       try {
