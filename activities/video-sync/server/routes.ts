@@ -2291,6 +2291,23 @@ export default function setupVideoSyncRoutes(
         sessionId,
         errorName: error instanceof Error ? error.name : 'unknown',
       }))
+      // A failure before the subscription was wired up (e.g. the not-found /
+      // forbidden paths) closes the socket itself and leaves nothing to tear
+      // down here.
+      if (!isSubscribed) {
+        return
+      }
+      // The broadcast subscription + heartbeat are wired up (above) before the
+      // snapshot mutation that can throw here. Without this teardown the socket
+      // stays in `subscribersBySession` and keeps receiving later envelopes
+      // despite never getting an authoritative snapshot. `handleSocketClosed`
+      // is idempotent (guarded by `cleanedUp`) and removes the subscriber,
+      // rebroadcasts the connection count, and stops the now-orphaned
+      // heartbeat; closing the socket lets the client reconnect cleanly.
+      handleSocketClosed()
+      if (typedSocket.readyState === WS_OPEN_READY_STATE) {
+        typedSocket.close(1011, 'Initial snapshot failed')
+      }
     })
   })
 }

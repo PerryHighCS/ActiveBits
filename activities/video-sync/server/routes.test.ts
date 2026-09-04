@@ -3552,6 +3552,53 @@ void test('websocket cleanup runs only once when error is followed by close', as
   assert.equal(disconnectEnvelope.payload?.telemetry?.connections?.activeCount, 0)
 })
 
+void test('websocket initial snapshot failure unsubscribes the socket instead of leaving it in the broadcast set', { concurrency: false }, async () => {
+  console.info('[TEST] video-sync ws admission: the initial-snapshot persist below rejects on purpose; the socket must be removed from the subscriber set and closed, not left able to receive later broadcasts')
+  const app = createMockApp()
+  const ws = createMockWs()
+  const storeState = createSessionStore({ s1: createVideoSyncSession('s1') })
+
+  let setCalls = 0
+  const sessions = {
+    ...storeState.sessions,
+    async set(id: string, session: SessionRecord) {
+      setCalls += 1
+      if (setCalls === 1) {
+        throw new Error('[TEST] initial snapshot persist unavailable')
+      }
+      return storeState.sessions.set(id, session)
+    },
+  }
+
+  setupVideoSyncRoutes(app, sessions, ws as unknown as WsRouter)
+
+  const wsHandler = ws.registered['/ws/video-sync']
+  assert.equal(typeof wsHandler, 'function')
+
+  const recorder = createMockSocket()
+  wsHandler?.(recorder.socket, new URLSearchParams({ sessionId: 's1', role: 'student' }))
+
+  await waitForCondition(() => recorder.closed != null, 1000)
+  assert.deepEqual(recorder.closed, { code: 1011, reason: 'Initial snapshot failed' })
+  // The snapshot never sent; the socket must not be carrying a partial view.
+  assert.deepEqual(recorder.sent, [])
+
+  // A later broadcast must not reach the socket that failed admission.
+  const sentBeforeEvent = recorder.sent.length
+  const eventHandler = app.handlers.post['/api/video-sync/:sessionId/event']
+  const eventRes = createResponse()
+  await eventHandler?.({ params: { sessionId: 's1' }, body: { type: 'autoplay-blocked' } }, eventRes)
+  assert.equal(eventRes.statusCode, 200)
+  assert.equal(recorder.sent.length, sentBeforeEvent, 'the unsubscribed socket received no telemetry broadcast')
+
+  // The abandoned admission also rolled the connection count back to 0.
+  const persisted = storeState.store.s1?.data as { telemetry: { connections: { activeCount: number } } }
+  assert.equal(persisted.telemetry.connections.activeCount, 0)
+
+  recorder.emit('close')
+  await new Promise((resolve) => setTimeout(resolve, 0))
+})
+
 void test('websocket cleanup abandons its telemetry write and broadcast when the session id is recreated mid-flush', { concurrency: false }, async () => {
   console.info('[TEST] video-sync socket cleanup: a subscriber disconnects and the id is recreated as a fresh incarnation during the atomic connection-telemetry write; the old socket must not persist activeCount into - or broadcast for - the replacement')
   const app = createMockApp()
