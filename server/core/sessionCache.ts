@@ -130,6 +130,10 @@ export class SessionCache<TSession extends MutableSession = MutableSession> {
       if (oldestKey != null) {
         this.cache.delete(oldestKey)
         this.touchQueue.delete(oldestKey)
+        // An in-flight fill may have captured this entry's current token. Mark
+        // the eviction before pruning its per-id marker so that fill cannot
+        // repopulate the slot after the capacity removal.
+        this.bumpGeneration(oldestKey)
         this.generation.delete(oldestKey)
       }
     }
@@ -176,6 +180,7 @@ export class SessionCache<TSession extends MutableSession = MutableSession> {
     if (Date.now() - cached.timestamp >= this.ttlMs) {
       this.cache.delete(id)
       this.touchQueue.delete(id)
+      this.bumpGeneration(id)
       return null
     }
 
@@ -231,6 +236,7 @@ export class SessionCache<TSession extends MutableSession = MutableSession> {
       if (now - cached.timestamp > this.ttlMs) {
         this.cache.delete(id)
         this.touchQueue.delete(id)
+        this.bumpGeneration(id)
       }
     }
     // Bound the generation map. Safe even mid-fill: a pruned id's generation
@@ -246,6 +252,9 @@ export class SessionCache<TSession extends MutableSession = MutableSession> {
    * Clear all cache and pending flushes.
    */
   clear(): void {
+    for (const id of this.cache.keys()) {
+      this.bumpGeneration(id)
+    }
     this.cache.clear()
     this.touchQueue.clear()
   }

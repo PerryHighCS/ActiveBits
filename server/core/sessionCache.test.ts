@@ -48,23 +48,23 @@ void test('SessionCache.replaceStaleFill still publishes a same-incarnation newe
 
 void test('SessionCache.replaceStaleFill does not republish a snapshot after the id was capacity-evicted mid-fill', () => {
   const cache = new SessionCache<TestSession>({ ttlMs: 10_000, maxSize: 1 })
-  // A fill for a not-yet-seen id captures its token before its await.
+  cache.set('b', { rev: 1 }, false)
+  // The fill observes the cached entry before its await. Capacity eviction is
+  // the only generation change between that read and the late result.
   const token = cache.beginFill('b')
-  cache.set('b', { rev: 1 }, false) // a concurrent commit caches the fresh value
-  cache.set('c', { rev: 1 }, false) // capacity eviction removes 'b' (and its generation)
+  cache.set('c', { rev: 1 }, false) // capacity eviction removes 'b'
   assert.equal(cache.getFresh('b'), null)
 
-  // The stalled fill completes with the pre-commit snapshot. Its captured token
-  // must not collide back onto a reset generation.
+  // The stalled fill completes with the pre-eviction snapshot.
   cache.replaceStaleFill('b', { rev: 0, stale: true }, token)
   assert.equal(cache.getFresh('b'), null, 'the evicted id is not resurrected by the late fill')
 })
 
 void test('SessionCache.replaceStaleFill does not republish a snapshot after cleanup() pruned the generation mid-fill', () => {
   const cache = new SessionCache<TestSession>({ ttlMs: 1 })
+  cache.set('b', { rev: 1 }, false)
   const token = cache.beginFill('b')
-  cache.set('b', { rev: 1 }, false) // a concurrent commit
-  // Let the entry age past the TTL, then sweep it (and its generation entry).
+  // Let the observed entry age past the TTL, then sweep it (and its generation entry).
   const realNow = Date.now
   try {
     Date.now = () => realNow() + 1_000
@@ -76,6 +76,22 @@ void test('SessionCache.replaceStaleFill does not republish a snapshot after cle
 
   cache.replaceStaleFill('b', { rev: 0, stale: true }, token)
   assert.equal(cache.getFresh('b'), null, 'a stalled fill cannot collide onto a pruned generation after cleanup()')
+})
+
+void test('SessionCache.getFresh expiry invalidates a stalled fill before returning a cache miss', () => {
+  const cache = new SessionCache<TestSession>({ ttlMs: 1 })
+  cache.set('b', { rev: 1 }, false)
+  const token = cache.beginFill('b')
+  const realNow = Date.now
+  try {
+    Date.now = () => realNow() + 1_000
+    assert.equal(cache.getFresh('b'), null)
+  } finally {
+    Date.now = realNow
+  }
+
+  cache.replaceStaleFill('b', { rev: 0, stale: true }, token)
+  assert.equal(cache.getFresh('b'), null, 'an expired read cannot be restored by its stalled fill')
 })
 
 void test('SessionCache.get routes its cache-miss fill through the stale-fill guard', async () => {
