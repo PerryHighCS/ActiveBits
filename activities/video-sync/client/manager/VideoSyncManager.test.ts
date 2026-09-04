@@ -22,6 +22,7 @@ import {
     resolveExplicitPlaybackPositionSec,
     resolveManagerPlaybackFlushOutcome,
     resolveManagerSeekRequest,
+    isRetryablePlaybackCommandFailure,
     sanitizeManagerApiErrorMessage,
     shouldApplyManagerStateUpdate,
     shouldAutoStartBootstrapSource,
@@ -564,6 +565,12 @@ void test('resolveManagerSeekRequest accepts a finite position and rejects empty
   assert.equal(resolveManagerSeekRequest('12junk').ok, false)
   assert.equal(resolveManagerSeekRequest('Infinity').ok, false)
   assert.equal(resolveManagerSeekRequest('NaN').ok, false)
+})
+
+void test('isRetryablePlaybackCommandFailure retries transient server failures but not permanent client failures', () => {
+  assert.equal(isRetryablePlaybackCommandFailure(401), true)
+  assert.equal(isRetryablePlaybackCommandFailure(503), true)
+  assert.equal(isRetryablePlaybackCommandFailure(400), false)
 })
 
 void test('resolveExplicitPlaybackPositionSec restarts from startSec only for Play after a natural end', () => {

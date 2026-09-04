@@ -83,6 +83,10 @@ const MANAGER_PLAYBACK_COMMAND_FLUSH_DELAY_MS = 120
 // number of times so `revalidateManagerAccess()` can restore authority before
 // the gesture is dropped.
 const MANAGER_PLAYBACK_COMMAND_RETRY_DELAY_MS = 600
+
+export function isRetryablePlaybackCommandFailure(status: number): boolean {
+  return status === 401 || status === 403 || status >= 500
+}
 const MAX_MANAGER_PLAYBACK_FLUSH_RETRIES = 3
 const MAX_MANAGER_API_ERROR_MESSAGE_LENGTH = 160
 const MANAGER_AUTOPLAY_CHECK_DELAY_MS = 1_200
@@ -593,6 +597,7 @@ export default function VideoSyncManager() {
   const managerInstanceIdRef = useRef(createManagerPlaybackCommandId())
   const desiredPlaybackIntentRef = useRef<'play' | 'pause' | 'seek' | null>(null)
   const desiredPlaybackPositionRef = useRef<number | null>(null)
+  const desiredPlaybackCommandIdRef = useRef<string | null>(null)
   // The `playbackRevision` of the authoritative state last handed to this
   // player. A delayed `ENDED` event is mirrored with this captured value, not
   // whatever `latestStateRef` holds when the event finally arrives.
@@ -712,6 +717,7 @@ export default function VideoSyncManager() {
     // later.
     desiredPlaybackIntentRef.current = null
     desiredPlaybackPositionRef.current = null
+    desiredPlaybackCommandIdRef.current = null
     playerAppliedRevisionRef.current = 0
     playerPlaybackGenerationRef.current = 0
     playerPlayingGenerationRef.current = 0
@@ -775,6 +781,7 @@ export default function VideoSyncManager() {
     command: 'play' | 'pause' | 'seek',
     options?: {
       positionSec?: number
+      commandId?: string
       reportErrors?: boolean
       source?: 'explicit' | 'natural-ended'
       expectedPlaybackRevision?: number
@@ -793,7 +800,7 @@ export default function VideoSyncManager() {
 
     const payload: Record<string, unknown> = {
       type: command,
-      commandId: createManagerPlaybackCommandId(),
+      commandId: options?.commandId ?? createManagerPlaybackCommandId(),
       managerId: managerInstanceIdRef.current,
       source: options?.source ?? 'explicit',
     }
@@ -829,14 +836,14 @@ export default function VideoSyncManager() {
       }
 
       if (!response.ok) {
-        const isAuthFailure = response.status === 401 || response.status === 403
+        const isRetryableFailure = isRetryablePlaybackCommandFailure(response.status)
         const failure = (await response.json().catch(() => ({}))) as { message?: string }
         // Re-check after the body parse too: a route swap during that await must
         // not land this session's error banner or trigger its revalidate.
         if (sessionIdRef.current !== sessionId) {
           return { ok: false, retryableAuth: false }
         }
-        if (isAuthFailure) {
+        if (response.status === 401 || response.status === 403) {
           revalidateManagerAccess()
         }
         const message = sanitizeManagerApiErrorMessage(failure.message, 'Failed to send command')
@@ -847,7 +854,7 @@ export default function VideoSyncManager() {
         }
         // Only an auth failure is worth retaining/retrying the intent for; a
         // permanent 4xx / 5xx is not going to succeed on replay.
-        return { ok: false, retryableAuth: isAuthFailure }
+        return { ok: false, retryableAuth: isRetryableFailure }
       }
 
       const updated = (await response.json()) as CommandResponse
@@ -969,12 +976,15 @@ export default function VideoSyncManager() {
     if (!isSeek && (desiredIntent === 'play') === authoritativeIsPlaying && !shouldSendPositionUpdate) {
       desiredPlaybackIntentRef.current = null
       desiredPlaybackPositionRef.current = null
+      desiredPlaybackCommandIdRef.current = null
       playbackFlushRetryCountRef.current = 0
       return
     }
 
     const sentIntent = desiredIntent
     const sentPosition = desiredPlaybackPositionRef.current
+    const sentCommandId = desiredPlaybackCommandIdRef.current ?? createManagerPlaybackCommandId()
+    desiredPlaybackCommandIdRef.current = sentCommandId
 
     // Claim ownership of the shared flush refs with a unique token. A session
     // swap (or another flush) resets the owner; a completion that no longer
@@ -986,6 +996,7 @@ export default function VideoSyncManager() {
     playbackCommandInFlightRef.current = true
     const result = await sendCommand(sentIntent, {
       positionSec: sentPosition ?? undefined,
+      commandId: sentCommandId,
       // A seek is an explicit gesture; surface its failure to the instructor.
       // Queued play/pause stays silent and is reconciled by the next heartbeat.
       reportErrors: isSeek,
@@ -1001,7 +1012,8 @@ export default function VideoSyncManager() {
     // them here - just make sure the newer intent gets flushed.
     const supersededByNewerIntent =
       desiredPlaybackIntentRef.current !== sentIntent ||
-      desiredPlaybackPositionRef.current !== sentPosition
+      desiredPlaybackPositionRef.current !== sentPosition ||
+      desiredPlaybackCommandIdRef.current !== sentCommandId
     const scheduleFollowUpFlush = () => {
       clearPlaybackCommandFlushTimer()
       playbackCommandFlushTimerRef.current = window.setTimeout(() => {
@@ -1034,6 +1046,7 @@ export default function VideoSyncManager() {
       // player.
       desiredPlaybackIntentRef.current = null
       desiredPlaybackPositionRef.current = null
+      desiredPlaybackCommandIdRef.current = null
       return
     }
 
@@ -1049,6 +1062,8 @@ export default function VideoSyncManager() {
     ) {
       desiredPlaybackIntentRef.current = null
       desiredPlaybackPositionRef.current = null
+      desiredPlaybackCommandIdRef.current = null
+      desiredPlaybackCommandIdRef.current = null
       return
     }
 
@@ -1147,6 +1162,7 @@ export default function VideoSyncManager() {
   const requestExplicitPlayback = useCallback((intent: 'play' | 'pause'): void => {
     playbackFlushRetryCountRef.current = 0
     desiredPlaybackIntentRef.current = intent
+    desiredPlaybackCommandIdRef.current = createManagerPlaybackCommandId()
     // Play/pause acts at the server-projected authoritative position. Position
     // changes are a separate explicit seek, so a lagging manager cannot rewind
     // the class merely by pressing pause. The exceptions: Play after a natural
@@ -1180,6 +1196,7 @@ export default function VideoSyncManager() {
     playbackFlushRetryCountRef.current = 0
     desiredPlaybackIntentRef.current = 'seek'
     desiredPlaybackPositionRef.current = parsed.positionSec
+    desiredPlaybackCommandIdRef.current = createManagerPlaybackCommandId()
     scheduleManagerPlaybackIntentFlush(0)
   }, [scheduleManagerPlaybackIntentFlush, seekPositionInput])
 
