@@ -35,11 +35,15 @@ export class SessionCache<TSession extends MutableSession = MutableSession> {
   private readonly touchQueue: Set<string>
   private readonly touchFn: ((id: string) => Promise<void>) | null
   private readonly supersedes: ((incoming: TSession, cached: TSession) => boolean) | null
-  // Monotonic per-id write generation. Bumped on every set / invalidate / evict
-  // / miss so an async fill can tell whether the slot it read was mutated,
-  // emptied, or deleted while it was awaiting. Never decremented; pruned only
-  // when the id also leaves the cache via capacity eviction or cleanup().
+  // Per-id write generation, taken from a single cache-wide monotonic counter
+  // (`writeSeq`) that advances on every set / invalidate / evict / miss. An
+  // async fill captures the value for its id before its await; if it differs
+  // afterwards, the slot was mutated/emptied/deleted meanwhile. The map may be
+  // pruned freely (capacity eviction, cleanup) because a missing entry reads
+  // back as the *current* `writeSeq` - always >= any token ever handed out - so
+  // a stale fill for a since-pruned id can never collide back to its old token.
   private readonly generation: Map<string, number>
+  private writeSeq: number
   private readonly flushInterval: NodeJS.Timeout
 
   constructor(options: SessionCacheOptions<TSession> = {}) {
@@ -48,6 +52,7 @@ export class SessionCache<TSession extends MutableSession = MutableSession> {
     this.cache = new Map()
     this.touchQueue = new Set()
     this.generation = new Map()
+    this.writeSeq = 0
     this.touchFn = typeof options.touchFn === 'function' ? options.touchFn : null
     this.supersedes = typeof options.supersedes === 'function' ? options.supersedes : null
 
@@ -87,11 +92,12 @@ export class SessionCache<TSession extends MutableSession = MutableSession> {
    * token to `replaceStaleFill`.
    */
   beginFill(id: string): number {
-    return this.generation.get(id) ?? 0
+    return this.generation.get(id) ?? this.writeSeq
   }
 
   private bumpGeneration(id: string): void {
-    this.generation.set(id, (this.generation.get(id) ?? 0) + 1)
+    this.writeSeq += 1
+    this.generation.set(id, this.writeSeq)
   }
 
   /**
@@ -106,7 +112,7 @@ export class SessionCache<TSession extends MutableSession = MutableSession> {
    * deleted slot, and never roll a newer entry back.
    */
   replaceStaleFill(id: string, session: TSession, fillToken: number): void {
-    if ((this.generation.get(id) ?? 0) !== fillToken) {
+    if ((this.generation.get(id) ?? this.writeSeq) !== fillToken) {
       const current = this.cache.get(id)?.session ?? null
       if (current == null || this.supersedes == null || !this.supersedes(session, current)) {
         return
@@ -227,8 +233,10 @@ export class SessionCache<TSession extends MutableSession = MutableSession> {
         this.touchQueue.delete(id)
       }
     }
-    // Bound the generation map: an id with no live cache entry has no in-flight
-    // fill worth guarding after a full TTL has elapsed.
+    // Bound the generation map. Safe even mid-fill: a pruned id's generation
+    // reads back as the current `writeSeq`, which is >= every token handed out,
+    // so a still-running fill for it will see a mismatch and drop rather than
+    // collide back onto its captured token.
     for (const id of this.generation.keys()) {
       if (!this.cache.has(id)) this.generation.delete(id)
     }

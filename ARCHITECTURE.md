@@ -107,11 +107,13 @@ based on a session snapshot could otherwise overwrite unrelated state committed
 by another server instance.
 
 The in-process read cache is guarded the same way, without comparing node-local
-wall clocks. `SessionCache` keeps a monotonic per-id write generation, bumped on
-every set / invalidate / evict / miss; an async fill (cache-miss load, strict
-read, CAS result, finalizer, keepalive revalidation) captures it before its await
-and only publishes when the generation is unchanged, or when a same-incarnation
-`mutationRevision` still proves the fill at least as new. A result that raced
+wall clocks. `SessionCache` stamps each id's write generation from one cache-wide monotonic
+counter, advanced on every set / invalidate / evict / miss; an async fill
+(cache-miss load, strict read, CAS result, finalizer, keepalive revalidation)
+captures its id's value before its await and only publishes when it is unchanged,
+or when a same-incarnation `mutationRevision` still proves the fill at least as
+new. The per-id map is prunable at any time - a missing entry reads back as the
+current counter, always ahead of any captured token. A result that raced
 behind a newer commit, a stalled read of an incarnation that was since recreated,
 or a strict read that completes after a `delete` therefore cannot roll `get()`
 back - or resurrect a deleted session - for the cache TTL.
