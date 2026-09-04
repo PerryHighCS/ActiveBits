@@ -46,6 +46,7 @@ import {
   resolveActivityPrincipalFromCookies,
   writeActivityCapabilityCookie,
 } from '../core/activityCapabilities.js'
+import { getSessionCreatedIdentity } from '../core/sessions.js'
 
 const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000
 const MAX_TEACHER_CODE_LENGTH = 100
@@ -141,7 +142,7 @@ function matchesSessionIncarnation(
 }
 
 function readSessionCreated(record: Record<string, unknown>): number | null {
-  return typeof record.created === 'number' ? record.created : null
+  return getSessionCreatedIdentity(record)
 }
 
 function getQueryString(value: unknown): string | null {

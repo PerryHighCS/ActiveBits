@@ -29,6 +29,17 @@ export interface SessionRecord extends SharedSession<Record<string, unknown>> {
   [key: string]: unknown
 }
 
+// Legacy records receive a synthetic runtime timestamp so old consumers still
+// see `created: number`; retain the absence of a persisted identity separately
+// so route-level CAS guards do not bind that synthetic value.
+const legacyCreatedSessions = new WeakSet<object>()
+
+export function getSessionCreatedIdentity(session: object | null | undefined): number | null {
+  if (session == null || legacyCreatedSessions.has(session)) return null
+  const created = (session as { created?: unknown }).created
+  return typeof created === 'number' ? created : null
+}
+
 function ensurePlainObject(value: unknown): Record<string, unknown> {
   return value != null && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
 }
@@ -52,7 +63,7 @@ function getLinkedSessionId(session: SessionRecord | SessionLike | null | undefi
 }
 
 function toSessionRecord(session: SessionLike): SessionRecord {
-  return {
+  const record: SessionRecord = {
     ...session,
     id: String(session.id),
     type: typeof session.type === 'string' ? session.type : undefined,
@@ -60,6 +71,8 @@ function toSessionRecord(session: SessionLike): SessionRecord {
     lastActivity: typeof session.lastActivity === 'number' ? session.lastActivity : undefined,
     data: ensurePlainObject(session.data),
   }
+  if (typeof session.created !== 'number') legacyCreatedSessions.add(record)
+  return record
 }
 
 export interface SessionStore extends SharedSessionStore<Record<string, unknown>> {
@@ -371,7 +384,7 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
     const loaded = await valkeyStore.getStrict(id)
     const normalizedSession = loaded ? normalizeSessionData(toSessionRecord(loaded)) : null
     if (normalizedSession) {
-      if (typeof loaded?.created !== 'number') {
+      if (getSessionCreatedIdentity(normalizedSession) == null) {
         strictReadLegacyCreated.add(normalizedSession)
       }
       cache.replaceStaleFill(id, normalizedSession, fillToken)
@@ -439,7 +452,7 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
       // replacement). Absent on pre-migration records (no `created`).
       const expectedCreated = strictReadLegacyCreated.has(current)
         ? null
-        : (typeof current.created === 'number' ? current.created : null)
+        : getSessionCreatedIdentity(current)
       const draft = structuredClone(current)
       const updated = await compareAndSet(id, expectedRevision, mutate(draft), ttl, expectedCreated)
       if (updated) return updated
