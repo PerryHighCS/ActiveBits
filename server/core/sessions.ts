@@ -382,8 +382,10 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
     } else {
       // Strict miss: the record is genuinely gone (a backend failure would have
       // rejected above). Drop any cached copy so a later ordinary get() cannot
-      // resurrect the deleted session from stale cache.
-      cache.invalidate(id)
+      // resurrect the deleted session from stale cache, but only when this
+      // strict read still owns the cache-fill token. A concurrent commit must
+      // not be removed by this late miss.
+      cache.invalidateStaleFill(id, fillToken)
     }
     return normalizedSession
   }
@@ -493,6 +495,7 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
     const fillToken = cache.beginFill(id)
     const touched = await valkeyStore.touch(id)
     if (!touched) {
+      cache.invalidateStaleFill(id, fillToken)
       return { touched: false, session: null, fromCache: false }
     }
 
@@ -513,16 +516,16 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
     // separate from high-frequency keepalive touches, before following the link.
     const now = Date.now()
     const shouldRevalidate = fromCache && (now - (linkedSessionRevalidatedAt.get(id) ?? 0) >= LINKED_SESSION_REVALIDATION_MS)
-    const revalidateFillToken = cache.beginFill(id)
+    const revalidateFillToken = shouldRevalidate ? cache.beginFill(id) : null
     const authoritativeSession = shouldRevalidate ? await loadSessionRecord(id) : session
     if (shouldRevalidate) recordLinkedSessionRevalidation(id, now)
     if (shouldRevalidate && !authoritativeSession) {
-      cache.invalidate(id)
+      cache.invalidateStaleFill(id, revalidateFillToken!)
       linkedSessionRevalidatedAt.delete(id)
       return false
     }
     if (shouldRevalidate && authoritativeSession) {
-      cache.replaceStaleFill(id, authoritativeSession, revalidateFillToken)
+      cache.replaceStaleFill(id, authoritativeSession, revalidateFillToken!)
     }
     const linkedSessionId = getLinkedSessionId(authoritativeSession)
     if (linkedSessionId && linkedSessionId !== id) {

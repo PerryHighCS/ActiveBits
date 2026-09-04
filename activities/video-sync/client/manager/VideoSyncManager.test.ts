@@ -549,6 +549,7 @@ void test('shouldSendManagerPlaybackPositionUpdate ignores missing or in-toleran
 void test('resolveManagerSeekRequest accepts a finite position and rejects empty or non-finite input', () => {
   assert.deepEqual(resolveManagerSeekRequest('30'), { ok: true, positionSec: 30 })
   assert.deepEqual(resolveManagerSeekRequest('12.5'), { ok: true, positionSec: 12.5 })
+  assert.deepEqual(resolveManagerSeekRequest('1e2'), { ok: true, positionSec: 100 })
   // Range clamping is the server's job, so a negative value is passed through.
   assert.deepEqual(resolveManagerSeekRequest('-4'), { ok: true, positionSec: -4 })
 
@@ -560,6 +561,7 @@ void test('resolveManagerSeekRequest accepts a finite position and rejects empty
   )
   assert.equal(resolveManagerSeekRequest('   ').ok, false)
   assert.equal(resolveManagerSeekRequest('abc').ok, false)
+  assert.equal(resolveManagerSeekRequest('12junk').ok, false)
   assert.equal(resolveManagerSeekRequest('Infinity').ok, false)
   assert.equal(resolveManagerSeekRequest('NaN').ok, false)
 })

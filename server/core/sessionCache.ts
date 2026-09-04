@@ -80,7 +80,7 @@ export class SessionCache<TSession extends MutableSession = MutableSession> {
     if (session) {
       this.replaceStaleFill(id, session, fillToken)
     } else {
-      this.invalidate(id)
+      this.invalidateStaleFill(id, fillToken)
     }
 
     return session
@@ -121,6 +121,16 @@ export class SessionCache<TSession extends MutableSession = MutableSession> {
       }
     }
     this.set(id, session, false)
+  }
+
+  /**
+   * Complete a fill that authoritatively found no record. Just like a
+   * successful fill, its absence is only publishable while this operation
+   * still owns the slot: a set/CAS/newer fill during the await must survive.
+   */
+  invalidateStaleFill(id: string, fillToken: number): void {
+    if ((this.generation.get(id) ?? this.writeSeq) !== fillToken) return
+    this.invalidate(id)
   }
 
   /**

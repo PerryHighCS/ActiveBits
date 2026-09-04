@@ -435,15 +435,17 @@ export function parseManagerStopTimeInput(params: {
 /**
  * Validate the instructor "Seek to" text input before it becomes a `seek`
  * command. A `type="number"` field still permits an empty value, and
- * `Number.parseFloat('')` is `NaN`, so this guards clearing the field and
- * clicking Seek as well as any other non-finite entry. Range clamping is the
- * server's job (`clampSeconds`), so a negative number is passed through here.
+ * `Number('')` would be zero, so this separately rejects clearing the field.
+ * `Number` parses the complete trimmed value (including valid exponent input),
+ * rejecting numeric prefixes such as `12junk`. Range clamping is the server's
+ * job (`clampSeconds`), so a negative number is passed through here.
  */
 export function resolveManagerSeekRequest(
   input: string,
 ): { ok: true; positionSec: number } | { ok: false; message: string } {
-  const positionSec = Number.parseFloat(input)
-  if (!Number.isFinite(positionSec)) {
+  const trimmedInput = input.trim()
+  const positionSec = Number(trimmedInput)
+  if (trimmedInput.length === 0 || !Number.isFinite(positionSec)) {
     return { ok: false, message: 'Seek position must be a finite number of seconds.' }
   }
   return { ok: true, positionSec }

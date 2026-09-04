@@ -138,3 +138,19 @@ void test('SessionCache.get routes its cache-miss fill through the stale-fill gu
   await stalled
   assert.deepEqual(cache.getFresh('a'), { rev: 2 }, 'the stalled cache-miss load did not roll the cache back')
 })
+
+void test('SessionCache.get does not let a stale miss invalidate a concurrent write', async () => {
+  const cache = new SessionCache<TestSession>({ ttlMs: 10_000 })
+  let release: () => void = () => {}
+  const gate = new Promise<void>((resolve) => { release = resolve })
+
+  const stalledMiss = cache.get('a', async () => {
+    await gate
+    return null
+  })
+  cache.set('a', { rev: 2 }, false)
+
+  release()
+  await stalledMiss
+  assert.deepEqual(cache.getFresh('a'), { rev: 2 }, 'the stalled miss did not delete the concurrent write')
+})
