@@ -3,6 +3,7 @@ import Redis from 'ioredis'
 export interface SessionLike {
   id: string
   lastActivity?: number
+  mutationRevision?: number
   [key: string]: unknown
 }
 
@@ -152,6 +153,63 @@ export class ValkeySessionStore {
     }
   }
 
+  async compareAndSet(
+    id: string,
+    expectedMutationRevision: number,
+    session: SessionLike,
+    ttlMs: number | null = null,
+    expectedCreated: number | null = null,
+  ): Promise<SessionLike | null> {
+    try {
+      // Build the full replacement (revision + lastActivity stamped) in JS and
+      // hand Lua the finished JSON string. Lua only compares the stored revision
+      // (and, when given, the stored `created`) and SETs that string verbatim -
+      // it must NOT cjson.decode/encode the replacement, because Redis Lua cjson
+      // turns an empty array `[]` into `{}`, which would silently retype fields
+      // like `processedCommandIds` or `students` on every atomic whole-record
+      // write. `current` is already decoded to read the revision, so the
+      // `created` (incarnation identity) check is free and closes the ABA where
+      // the id is deleted + recreated at the same revision between this caller's
+      // strict read and the EVAL: `mutationRevision` restarts at 0 per
+      // incarnation, `created` does not.
+      const script = `
+        local key = KEYS[1]
+        local currentJson = redis.call('GET', key)
+        if not currentJson then return nil end
+        local current = cjson.decode(currentJson)
+        local currentRevision = tonumber(current.mutationRevision) or 0
+        if currentRevision ~= tonumber(ARGV[1]) then return nil end
+        if ARGV[4] ~= '' and tostring(current.created) ~= ARGV[4] then return nil end
+        redis.call('SET', key, ARGV[2], 'PX', tonumber(ARGV[3]))
+        return ARGV[2]
+      `
+      const replacement = {
+        ...session,
+        mutationRevision: expectedMutationRevision + 1,
+        lastActivity: Date.now(),
+      }
+      const result = await this.client.eval(
+        script,
+        1,
+        `session:${id}`,
+        expectedMutationRevision,
+        JSON.stringify(replacement),
+        ttlMs ?? this.ttlMs,
+        expectedCreated == null ? '' : String(expectedCreated),
+      )
+      return typeof result === 'string' ? JSON.parse(result) as SessionLike : null
+    } catch (err) {
+      console.error(JSON.stringify({
+        activity: 'session-store',
+        component: 'valkey-store',
+        event: 'compare-and-set-failed',
+        sessionId: id,
+        error: err instanceof Error ? { name: err.name, message: err.message } : String(err),
+      }))
+      throw err
+    }
+  }
+
   async consumeSessionDataToken(id: string, field: string, token: string): Promise<SessionLike | null> {
     // Non-throwing contract: delegate to the strict variant and swallow a
     // backend failure to `null` for callers that tolerate it.
@@ -200,6 +258,7 @@ export class ValkeySessionStore {
                     end
                 end
                 session.data[field] = nil
+                session.mutationRevision = (tonumber(session.mutationRevision) or 0) + 1
                 session.lastActivity = tonumber(now)
                 local updated = cjson.encode(session)
                 redis.call('SET', key, updated, 'PX', tonumber(ttl))
@@ -263,6 +322,7 @@ export class ValkeySessionStore {
         local session = cjson.decode(data)
         if type(session.data) ~= 'table' or session.data.expiresAt ~= tonumber(ARGV[1]) then return nil end
         session.data.expiresAt = tonumber(ARGV[2])
+        session.mutationRevision = (tonumber(session.mutationRevision) or 0) + 1
         session.lastActivity = tonumber(ARGV[3])
         local updated = cjson.encode(session)
         redis.call('SET', KEYS[1], updated, 'PX', tonumber(ARGV[4]))

@@ -22,7 +22,9 @@ export interface YoutubePlayerLike {
   unMute(): void
   seekTo(seconds: number, allowSeekAhead: boolean): void
   getCurrentTime(): number
+  getDuration?(): number
   getPlayerState(): number
+  getIframe?(): HTMLIFrameElement | null
   destroy(): void
 }
 

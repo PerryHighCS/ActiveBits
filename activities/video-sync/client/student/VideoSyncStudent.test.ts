@@ -16,6 +16,7 @@ import { shouldBlockStudentOverlayKey } from './VideoSyncStudent.js'
 import { shouldConnectVideoSyncStudentRealtime } from './VideoSyncStudent.js'
 import { getVideoSyncStudentIdentityLookup } from './VideoSyncStudent.js'
 import { getVideoSyncStudentSessionModeResetState } from './VideoSyncStudent.js'
+import { reduceVideoSyncStudentIncomingState } from './VideoSyncStudent.js'
 import type { VideoSyncState } from '../protocol.js'
 import type { YoutubePlayerLike } from '../youtubeIframeApi.js'
 
@@ -31,6 +32,64 @@ const BASE_STATE: VideoSyncState = {
   updatedBy: 'system',
   serverTimestampMs: 0,
 }
+
+void test('student rejects a stale heartbeat that would resume playback after a pause', () => {
+  // Both the WS onMessage updater and the loadSession updater run every incoming
+  // frame through `reduceVideoSyncStudentIncomingState`. A heartbeat from a
+  // multi-instance peer carrying pre-pause `isPlaying:true` with an older
+  // serverTimestampMs must not overwrite the applied pause.
+  const applied: VideoSyncState = {
+    ...BASE_STATE,
+    videoId: 'abcdefghijk',
+    isPlaying: false,
+    updatedBy: 'instructor',
+    serverTimestampMs: 12_000,
+  }
+  const staleHeartbeat: VideoSyncState = {
+    ...BASE_STATE,
+    videoId: 'abcdefghijk',
+    isPlaying: true,
+    updatedBy: 'system',
+    serverTimestampMs: 9_000,
+  }
+  // The reducer returns the *current* state, so the setState updater is a no-op
+  // and the student stays paused.
+  assert.equal(reduceVideoSyncStudentIncomingState(applied, staleHeartbeat), applied)
+
+  const freshPlay: VideoSyncState = { ...staleHeartbeat, updatedBy: 'instructor', serverTimestampMs: 15_000 }
+  assert.equal(reduceVideoSyncStudentIncomingState(applied, freshPlay), freshPlay)
+})
+
+void test('after a session swap resets state, an older-timestamp new-session frame is accepted', () => {
+  // The `[sessionId]` effect resets `state` to DEFAULT_STATE (empty videoId).
+  // The new session's snapshot must then apply even if its serverTimestampMs is
+  // older than the previous session's, because the empty baseline is the
+  // bootstrap case.
+  const previousSessionApplied: VideoSyncState = {
+    ...BASE_STATE,
+    videoId: 'oldsessionAAA',
+    isPlaying: true,
+    updatedBy: 'instructor',
+    serverTimestampMs: 90_000,
+  }
+  const newSessionOlderFrame: VideoSyncState = {
+    ...BASE_STATE,
+    videoId: 'newsessionBBB',
+    isPlaying: false,
+    updatedBy: 'instructor',
+    serverTimestampMs: 20_000,
+  }
+  // Without the reset, the older frame would be rejected against session A.
+  assert.equal(
+    reduceVideoSyncStudentIncomingState(previousSessionApplied, newSessionOlderFrame),
+    previousSessionApplied,
+  )
+  // With the reset (current === DEFAULT_STATE, empty videoId), it applies.
+  assert.equal(
+    reduceVideoSyncStudentIncomingState(BASE_STATE, newSessionOlderFrame),
+    newSessionOlderFrame,
+  )
+})
 
 void test('hasInstructorPlaybackStarted is false without configured video', () => {
   assert.equal(hasInstructorPlaybackStarted(BASE_STATE), false)

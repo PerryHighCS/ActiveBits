@@ -18,6 +18,7 @@ import {
   computeDriftSec,
   computeDesiredPositionSec,
   DEFAULT_DRIFT_TOLERANCE_SEC,
+  shouldApplyIncomingVideoSyncState,
   shouldCorrectDrift,
 } from '../syncMath.js'
 import {
@@ -73,7 +74,20 @@ const DEFAULT_STATE: VideoSyncState = {
   isPlaying: false,
   playbackRate: 1,
   updatedBy: 'system',
+  controllerId: null,
+  playbackRevision: 0,
   serverTimestampMs: Date.now(),
+}
+
+// The reducer every incoming-frame `setState` updater runs (websocket
+// `state-update`/`state-snapshot`/`heartbeat` and the initial `loadSession`
+// snapshot). Keeps the stale-frame rejection in one exported, testable place so
+// it cannot be silently dropped from a call site.
+export function reduceVideoSyncStudentIncomingState(
+  current: VideoSyncState,
+  incoming: VideoSyncState,
+): VideoSyncState {
+  return shouldApplyIncomingVideoSyncState(current, incoming) ? incoming : current
 }
 
 export function hasInstructorPlaybackStarted(state: VideoSyncState): boolean {
@@ -509,8 +523,12 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
 
       if (envelope.type === 'state-update' || envelope.type === 'state-snapshot' || envelope.type === 'heartbeat') {
         const payload = parseVideoSyncStateMessagePayload(envelope.payload)
-        if (payload?.state) {
-          setState(payload.state)
+        const nextState = payload?.state
+        if (nextState) {
+          // Reject a stale frame (typically a heartbeat from a multi-instance
+          // peer whose session cache still holds pre-pause state) that would
+          // otherwise resume playback after an instructor pause.
+          setState((current) => reduceVideoSyncStudentIncomingState(current, nextState))
         }
       }
 
@@ -689,6 +707,12 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
     setIsStandaloneSession(resetState.isStandaloneSession)
     setIsSessionModeResolved(resetState.isSessionModeResolved)
     setErrorMessage(resetState.errorMessage)
+    // This component is reused across a parameter-only route swap. Reset the
+    // incoming-state baseline so `reduceVideoSyncStudentIncomingState` compares
+    // the new session's snapshot/frames against DEFAULT_STATE, not the previous
+    // session's (whose newer `serverTimestampMs` + non-empty `videoId` would
+    // otherwise make every B frame fail the freshness guard).
+    setState(DEFAULT_STATE)
   }, [sessionId])
 
   useEffect(() => {
@@ -710,8 +734,9 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
           return
         }
         setIsStandaloneSession(data.data?.standaloneMode === true)
-        if (data.data?.state) {
-          setState(data.data.state)
+        const loadedState = data.data?.state
+        if (loadedState) {
+          setState((current) => reduceVideoSyncStudentIncomingState(current, loadedState))
         }
       } catch {
         if (!cancelled) {

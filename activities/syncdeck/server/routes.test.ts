@@ -131,13 +131,37 @@ function createRequest(
   return { params, body, cookies, headers, query }
 }
 
-function createSessionStore(initial: Record<string, SessionRecord>) {
+function createSessionStore(initial: Record<string, SessionRecord>, options: { atomic?: boolean } = {}) {
   const cloneSession = (session: SessionRecord): SessionRecord => structuredClone(session)
   const store = Object.fromEntries(
     Object.entries(initial).map(([id, session]) => [id, cloneSession(session)]),
   ) as Record<string, SessionRecord>
   const getCalls: string[] = []
   const touchCalls: string[] = []
+  // Opt-in: expose the production `getStrict` + revision-checked `updateAtomic`
+  // so a test exercises the atomic capability-persistence branch instead of the
+  // plain-`get` + `set` fallback.
+  const atomicApi = options.atomic
+    ? {
+        async getStrict(id: string) {
+          const session = store[id]
+          return session ? cloneSession(session) : null
+        },
+        async updateAtomic(id: string, mutate: (session: SessionRecord) => SessionRecord) {
+          const current = store[id]
+          if (!current) return null
+          const draft = cloneSession(current)
+          const mutated = mutate(draft)
+          const committed = cloneSession({
+            ...mutated,
+            mutationRevision: (current.mutationRevision ?? 0) + 1,
+            lastActivity: Date.now(),
+          })
+          store[id] = committed
+          return cloneSession(committed)
+        },
+      }
+    : {}
   const sessions: SessionStore = {
     async get(id: string) {
       getCalls.push(id)
@@ -147,6 +171,7 @@ function createSessionStore(initial: Record<string, SessionRecord>) {
     async set(id: string, session: SessionRecord) {
       store[id] = cloneSession(session)
     },
+    ...atomicApi,
     async consumeSessionDataToken(id: string, field: string, token: string) {
       const session = store[id]
       const consumed = consumeSessionDataToken(session ? cloneSession(session) : null, field, token)
@@ -3024,6 +3049,145 @@ void test('embedded manager capability exchange consumes its token and issues an
   assert.equal(cookie.options.httpOnly, true)
   assert.equal((storeState.store['child-capability']?.data as { embeddedManagerEntryToken?: unknown }).embeddedManagerEntryToken, undefined)
   assert.equal((storeState.store['child-capability']?.data as { activityCapabilities?: unknown }).activityCapabilities != null, true)
+})
+
+void test('embedded manager capability exchange persists through updateAtomic when the store provides it', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const now = Date.now()
+  const storeState = createSessionStore({
+    'child-capability': {
+      id: 'child-capability', type: 'video-sync', created: now, lastActivity: now, mutationRevision: 4,
+      data: {
+        instructorPasscode: 'child-passcode',
+        embeddedManagerEntryToken: { value: 'capability-entry-token', expiresAt: now + 60_000 },
+      },
+    },
+  }, { atomic: true })
+  setupSyncDeckRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.get['/api/syncdeck/embedded-manager-capability']
+  const response = createResponse()
+  await handler?.(
+    createRequest({}, undefined, {}, {}, { sessionId: 'child-capability', token: 'capability-entry-token' }),
+    response,
+  )
+
+  assert.equal(response.statusCode, 200)
+  assert.deepEqual(response.body, { ok: true })
+  assert.equal(response.cookies[0]?.options.httpOnly, true)
+  const persisted = storeState.store['child-capability']?.data as { embeddedManagerEntryToken?: unknown; activityCapabilities?: unknown }
+  assert.equal(persisted.embeddedManagerEntryToken, undefined, 'the one-time token stays consumed')
+  assert.equal(persisted.activityCapabilities != null, true, 'the capability was written via updateAtomic')
+  assert.equal((storeState.store['child-capability']?.mutationRevision ?? 0) > 4, true, 'the atomic write advanced the revision')
+})
+
+void test('embedded manager capability exchange permits a legacy session without a persisted created identity', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const now = Date.now()
+  const storeState = createSessionStore({
+    'legacy-child-capability': {
+      id: 'legacy-child-capability', type: 'video-sync', lastActivity: now, mutationRevision: 4,
+      data: {
+        instructorPasscode: 'child-passcode',
+        embeddedManagerEntryToken: { value: 'legacy-entry-token', expiresAt: now + 60_000 },
+      },
+    } as unknown as SessionRecord,
+  }, { atomic: true })
+  setupSyncDeckRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.get['/api/syncdeck/embedded-manager-capability']
+  const response = createResponse()
+  await handler?.(
+    createRequest({}, undefined, {}, {}, { sessionId: 'legacy-child-capability', token: 'legacy-entry-token' }),
+    response,
+  )
+
+  assert.equal(response.statusCode, 200)
+  assert.equal((storeState.store['legacy-child-capability']?.data as { activityCapabilities?: unknown }).activityCapabilities != null, true)
+})
+
+void test('embedded manager capability exchange does not mint a capability into a replacement session', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const now = Date.now()
+  const storeState = createSessionStore({
+    'child-capability': {
+      id: 'child-capability', type: 'video-sync', created: now, lastActivity: now,
+      data: { embeddedManagerEntryToken: { value: 'capability-entry-token', expiresAt: now + 60_000 } },
+    },
+  }, { atomic: true })
+  // Token consumption succeeds against the authorized incarnation; the id is
+  // then deleted + recreated as a different activity in the window between the
+  // atomic consume and the capability compare-and-set. The handler must bind
+  // the CAS to the record the consume returned (created: now), not re-read a
+  // replacement, so the mismatch is rejected.
+  const realUpdateAtomic = storeState.sessions.updateAtomic!.bind(storeState.sessions)
+  let updateAtomicCalls = 0
+  storeState.sessions.updateAtomic = async (id: string, mutate: (session: SessionRecord) => SessionRecord) => {
+    updateAtomicCalls += 1
+    if (id === 'child-capability' && updateAtomicCalls === 1) {
+      storeState.store['child-capability'] = {
+        id: 'child-capability', type: 'algorithm-demo', created: now + 5_000, lastActivity: now + 5_000, data: {},
+      }
+    }
+    return realUpdateAtomic(id, mutate)
+  }
+  setupSyncDeckRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.get['/api/syncdeck/embedded-manager-capability']
+  const response = createResponse()
+  console.info('[TEST] Expected embedded-manager-capability 404: the id was reused by a different activity before the atomic write.')
+  await handler?.(
+    createRequest({}, undefined, {}, {}, { sessionId: 'child-capability', token: 'capability-entry-token' }),
+    response,
+  )
+
+  assert.equal(response.statusCode, 404)
+  assert.deepEqual(response.body, { error: 'embedded activity session not found' })
+  assert.equal(response.cookies.length, 0)
+  assert.equal(
+    (storeState.store['child-capability']?.data as { activityCapabilities?: unknown }).activityCapabilities,
+    undefined,
+    'the algorithm-demo replacement gets no manager capability',
+  )
+  assert.equal(
+    storeState.store['child-capability']?.mutationRevision,
+    undefined,
+    'the mismatched CAS is abandoned, not committed as a no-op revision bump on the replacement',
+  )
+  assert.equal(
+    storeState.store['child-capability']?.lastActivity,
+    now + 5_000,
+    'the replacement session TTL/lastActivity is not refreshed by a no-op commit',
+  )
+})
+
+void test('embedded manager capability exchange returns 500 when updateAtomic cannot commit', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const now = Date.now()
+  const storeState = createSessionStore({
+    'child-capability': {
+      id: 'child-capability', type: 'video-sync', created: now, lastActivity: now,
+      data: { embeddedManagerEntryToken: { value: 'capability-entry-token', expiresAt: now + 60_000 } },
+    },
+  }, { atomic: true })
+  storeState.sessions.updateAtomic = async () => null
+  setupSyncDeckRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.get['/api/syncdeck/embedded-manager-capability']
+  const response = createResponse()
+  console.info('[TEST] Expected embedded-manager-capability-persistence-failed log: updateAtomic returns null.')
+  await handler?.(
+    createRequest({}, undefined, {}, {}, { sessionId: 'child-capability', token: 'capability-entry-token' }),
+    response,
+  )
+
+  assert.equal(response.statusCode, 500)
+  assert.deepEqual(response.body, { error: 'embedded manager capability unavailable' })
+  assert.equal(response.cookies.length, 0)
 })
 
 void test('embedded manager capability exchange does not issue a cookie when persistence fails', async () => {

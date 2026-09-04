@@ -239,6 +239,32 @@ function createMockVideoSyncValkeyStore() {
   return {
     client: {
       async eval(script: string, numKeys: number, ...args: Array<string | number>) {
+        if (script.includes('video-sync-unsynced-merge')) {
+          assert.equal(numKeys, 2)
+          const [srcKeyArg, dstKeyArg, nowArg, staleArg, ttlArg] = args
+          const srcKey = String(srcKeyArg)
+          const dstKey = String(dstKeyArg)
+          const nowMs = Number(nowArg)
+          const staleMs = Number(staleArg)
+          const ttlMs = Number(ttlArg)
+          const srcState = readState(srcKey, nowMs)
+          const merged = readState(dstKey, nowMs)
+          for (const [studentId, timestamp] of Object.entries(srcState)) {
+            const existing = merged[studentId]
+            if (existing == null || timestamp > existing) {
+              merged[studentId] = timestamp
+            }
+          }
+          entries.delete(srcKey)
+          for (const [studentId, timestamp] of Object.entries(merged)) {
+            if (nowMs - timestamp > staleMs) {
+              delete merged[studentId]
+            }
+          }
+          writeState(dstKey, merged, ttlMs, nowMs)
+          return Object.keys(merged).length
+        }
+
         assert.equal(numKeys, 1)
         const [keyArg, ...rawArgs] = args
         const key = String(keyArg)
@@ -320,11 +346,53 @@ function createSessionStore(
   options: {
     sharedStore?: Record<string, SessionRecord>
     valkeyStore?: { client: { eval(script: string, numKeys: number, ...args: Array<string | number>): Promise<unknown> } }
+    // Opt-in: expose a revision-checked `getStrict` + `updateAtomic` so a test
+    // exercises `updateVideoSyncSessionAtomic`'s real compare-and-set path
+    // instead of its non-atomic `get` -> mutate -> `set` fallback.
+    atomic?: boolean
+    // Fires once per `updateAtomic` attempt, after `mutate` has run against the
+    // draft but before the compare-and-set check. A test uses it to simulate a
+    // concurrent write from another instance and force the retry loop.
+    onAtomicAttempt?: (attempt: number, store: Record<string, SessionRecord>) => void
   } = {},
 ) {
   const store = options.sharedStore ?? { ...initial }
   const published: Array<{ channel: string; message: Record<string, unknown> }> = []
   const subscriptions: string[] = []
+
+  const atomicApi = options.atomic
+    ? {
+        async getStrict(id: string) {
+          const session = store[id]
+          return session ? cloneSessionRecord(session) : null
+        },
+        async updateAtomic(
+          id: string,
+          mutate: (session: SessionRecord) => SessionRecord,
+        ): Promise<SessionRecord | null> {
+          for (let attempt = 0; attempt < 12; attempt += 1) {
+            const current = store[id]
+            if (!current) return null
+            const expectedRevision = current.mutationRevision ?? 0
+            const draft = cloneSessionRecord(current)
+            const mutated = mutate(draft)
+            options.onAtomicAttempt?.(attempt, store)
+            const live = store[id]
+            if (!live || (live.mutationRevision ?? 0) !== expectedRevision) {
+              continue
+            }
+            const committed = cloneSessionRecord({
+              ...mutated,
+              mutationRevision: expectedRevision + 1,
+              lastActivity: Date.now(),
+            })
+            store[id] = committed
+            return cloneSessionRecord(committed)
+          }
+          throw new Error('[TEST] atomic session update exhausted retry budget')
+        },
+      }
+    : {}
 
   return {
     store,
@@ -338,6 +406,7 @@ function createSessionStore(
       async set(id: string, session: SessionRecord) {
         store[id] = cloneSessionRecord(session)
       },
+      ...atomicApi,
       ...(options.valkeyStore ? { valkeyStore: options.valkeyStore } : {}),
       async publishBroadcast(channel: string, message: Record<string, unknown>) {
         published.push({ channel, message })
@@ -367,6 +436,8 @@ function createVideoSyncSession(id: string): SessionRecord {
         isPlaying: false,
         playbackRate: 1,
         updatedBy: 'system',
+        controllerId: null,
+        playbackRevision: 0,
         serverTimestampMs: Date.now(),
       },
       telemetry: {
@@ -375,6 +446,7 @@ function createVideoSyncSession(id: string): SessionRecord {
         sync: { unsyncedStudents: 0, lastDriftSec: null, lastCorrectionResult: 'none' },
         error: { code: null, message: null },
       },
+      processedCommandIds: [],
     },
   }
   const capability = issueActivityCapability(session, 'manager')
@@ -508,7 +580,6 @@ void test('session get route removes a persisted legacy instructor passcode', as
   }
   assert.equal('instructorPasscode' in (payload.data ?? {}), false)
   assert.equal(setCalls, 1)
-
   const persisted = storeState.store.s1?.data as {
     instructorPasscode?: string
   }
@@ -658,6 +729,37 @@ void test('session get route clears malformed persisted video ids during normali
   assert.equal(persisted.state?.videoId, '')
 })
 
+void test('session get route returns 404 instead of a stale snapshot when its atomic persist finds the id gone', async () => {
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  const session = createVideoSyncSession('s1')
+  // A malformed persisted videoId forces the normalization persist branch.
+  ;(session.data as { state: { videoId: string } }).state.videoId = 'bad-id'
+  const storeState = createSessionStore({ s1: session })
+  const sessions = {
+    ...storeState.sessions,
+    async getStrict(id: string) {
+      const record = storeState.store[id]
+      return record ? structuredClone(record) : null
+    },
+    // The strict read succeeds, but by the compare-and-set the id is gone or
+    // recreated as a new incarnation.
+    async updateAtomic() {
+      return null
+    },
+  }
+  setupVideoSyncRoutes(app, sessions as unknown as Parameters<typeof setupVideoSyncRoutes>[1], ws)
+
+  const handler = app.handlers.get['/api/video-sync/:sessionId/session']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.({ params: { sessionId: 's1' } }, res)
+
+  assert.equal(res.statusCode, 404)
+  assert.deepEqual(res.body, { error: 'NOT_FOUND', message: 'Session not found' })
+})
+
 void test('session get route replaces non-positive persisted server timestamps during normalization', async () => {
   const originalDateNow = Date.now
   Date.now = () => 50_000
@@ -736,6 +838,8 @@ void test('session get route returns projected playback without persisting ordin
         isPlaying: boolean
         playbackRate: 1
         updatedBy: 'instructor' | 'system'
+        controllerId: string | null
+        playbackRevision: number
         serverTimestampMs: number
       }
     }).state = {
@@ -748,6 +852,8 @@ void test('session get route returns projected playback without persisting ordin
       isPlaying: true,
       playbackRate: 1,
       updatedBy: 'instructor',
+      controllerId: null,
+      playbackRevision: 0,
       serverTimestampMs: 10_000,
     }
     const storeState = createSessionStore({ s1: session })
@@ -798,6 +904,65 @@ void test('session get route returns projected playback without persisting ordin
     assert.equal(persisted.state?.positionSec, 5)
     assert.equal(persisted.state?.serverTimestampMs, 10_000)
     assert.equal(persisted.state?.isPlaying, true)
+  } finally {
+    Date.now = originalDateNow
+  }
+})
+
+void test('session get route serves the committed record, not the pre-persist snapshot, after a concurrent config commit', async () => {
+  const originalDateNow = Date.now
+  Date.now = () => 30_000
+
+  try {
+    const app = createMockApp()
+    const ws = createMockWs() as unknown as WsRouter
+    const session = createVideoSyncSession('s1')
+    ;(session.data as { standaloneMode: boolean }).standaloneMode = false
+    ;(session.data as { state: Record<string, unknown> }).state = {
+      provider: 'youtube',
+      playerHost: 'youtube-nocookie',
+      videoId: 'dQw4w9WgXcQ',
+      startSec: 0,
+      stopSec: 6,
+      positionSec: 5,
+      isPlaying: true,
+      playbackRate: 1,
+      updatedBy: 'instructor',
+      controllerId: null,
+      playbackRevision: 3,
+      serverTimestampMs: 10_000,
+    }
+    const storeState = createSessionStore({ s1: session })
+
+    let strictGetCalls = 0
+    const sessions = {
+      ...storeState.sessions,
+      async getStrict(id: string) {
+        strictGetCalls += 1
+        const record = await storeState.sessions.get(id)
+        if (record && strictGetCalls >= 2) {
+          // A config PATCH from another instance flipped standaloneMode between
+          // this route's snapshot read and its stop/telemetry persist.
+          ;(record.data as { standaloneMode: boolean }).standaloneMode = true
+          storeState.store.s1 = record
+        }
+        return record
+      },
+    }
+
+    setupVideoSyncRoutes(app, sessions, ws)
+    const handler = app.handlers.get['/api/video-sync/:sessionId/session']
+    assert.equal(typeof handler, 'function')
+
+    const res = createResponse()
+    await handler?.({ params: { sessionId: 's1' } }, res)
+
+    assert.equal(res.statusCode, 200)
+    const payload = res.body as { data?: { standaloneMode?: boolean } }
+    // The public payload must be built from the committed record: a field a
+    // concurrent config commit changed cannot be served stale.
+    assert.equal(payload.data?.standaloneMode, true)
+    assert.ok(strictGetCalls >= 2)
   } finally {
     Date.now = originalDateNow
   }
@@ -883,6 +1048,89 @@ void test('session get route persists the session when projected playback reache
     assert.equal(persisted.state?.positionSec, 6)
     assert.equal(persisted.state?.serverTimestampMs, 12_000)
     assert.equal(persisted.state?.isPlaying, false)
+  } finally {
+    Date.now = originalDateNow
+  }
+})
+
+void test('session get route re-reads before persisting and does not roll back a concurrent remote re-play', async () => {
+  const originalDateNow = Date.now
+  Date.now = () => 30_000
+
+  try {
+    const app = createMockApp()
+    const ws = createMockWs() as unknown as WsRouter
+    const session = createVideoSyncSession('s1')
+    ;(session.data as {
+      state: {
+        provider: 'youtube'
+        videoId: string
+        startSec: number
+        stopSec: number | null
+        positionSec: number
+        isPlaying: boolean
+        playbackRate: 1
+        updatedBy: 'instructor' | 'system'
+        serverTimestampMs: number
+      }
+    }).state = {
+      provider: 'youtube',
+      videoId: 'dQw4w9WgXcQ',
+      startSec: 0,
+      stopSec: 6,
+      positionSec: 5,
+      isPlaying: true,
+      playbackRate: 1,
+      updatedBy: 'instructor',
+      serverTimestampMs: 10_000,
+    }
+    const storeState = createSessionStore({ s1: session })
+
+    let strictGetCalls = 0
+    const setStates: Array<{ isPlaying: boolean; positionSec: number }> = []
+    const sessions = {
+      ...storeState.sessions,
+      async getStrict(id: string) {
+        strictGetCalls += 1
+        const record = await storeState.sessions.get(id)
+        if (record && strictGetCalls >= 2) {
+          // Another instance re-played (past the old stop) between the projection
+          // read and this route's write-back.
+          ;(record.data as { state: { isPlaying: boolean; positionSec: number; stopSec: number | null; serverTimestampMs: number } }).state = {
+            ...(record.data as { state: Record<string, unknown> }).state,
+            isPlaying: true,
+            positionSec: 2,
+            stopSec: null,
+            serverTimestampMs: 20_000,
+          } as never
+        }
+        return record
+      },
+      async set(id: string, updatedSession: SessionRecord) {
+        const s = (updatedSession.data as { state?: { isPlaying?: boolean; positionSec?: number } }).state
+        setStates.push({ isPlaying: Boolean(s?.isPlaying), positionSec: Number(s?.positionSec ?? -1) })
+        return storeState.sessions.set(id, updatedSession)
+      },
+    }
+
+    setupVideoSyncRoutes(app, sessions, ws)
+    const handler = app.handlers.get['/api/video-sync/:sessionId/session']
+    assert.equal(typeof handler, 'function')
+
+    const res = createResponse()
+    await handler?.({ params: { sessionId: 's1' } }, res)
+
+    assert.equal(res.statusCode, 200)
+    const payload = res.body as { data?: { state?: { isPlaying?: boolean; positionSec?: number } } }
+    // The concurrent re-play wins; the GET must not roll it back to the
+    // projected stop-reached pause.
+    assert.equal(payload.data?.state?.isPlaying, true)
+    assert.equal(payload.data?.state?.positionSec, 12)
+    assert.ok(strictGetCalls >= 2)
+    assert.ok(
+      setStates.every((entry) => entry.isPlaying === true),
+      `expected no persisted isPlaying:false stop frame, got ${JSON.stringify(setStates)}`,
+    )
   } finally {
     Date.now = originalDateNow
   }
@@ -990,6 +1238,58 @@ void test('session patch accepts youtu.be urls with extra path segments by using
   const state = updated.state as Record<string, unknown>
   assert.equal(state.videoId, 'dQw4w9WgXcQ')
   assert.equal(state.startSec, 45)
+})
+
+void test('session patch retries its atomic write and preserves telemetry advanced by another instance', async () => {
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  let concurrentWriteApplied = false
+  const storeState = createSessionStore(
+    { s1: createVideoSyncSession('s1') },
+    {
+      valkeyStore: createMockVideoSyncValkeyStore(),
+      atomic: true,
+      onAtomicAttempt: (attempt, store) => {
+        if (attempt !== 0 || concurrentWriteApplied) return
+        const record = store.s1
+        if (!record) return
+        concurrentWriteApplied = true
+        record.mutationRevision = 3
+        const data = record.data as {
+          state: Record<string, unknown>
+          telemetry: { autoplay: { blockedCount: number } }
+        }
+        data.telemetry.autoplay.blockedCount = 9
+        data.state = { ...data.state, playbackRevision: 4 }
+      },
+    },
+  )
+  setupVideoSyncRoutes(app, storeState.sessions, ws)
+  const handler = app.handlers.patch['/api/video-sync/:sessionId/session']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.(
+    { params: { sessionId: 's1' }, body: { sourceUrl: 'https://youtu.be/dQw4w9WgXcQ' } },
+    res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  assert.equal(concurrentWriteApplied, true, 'the concurrent-write hook must have fired')
+  const record = storeState.store.s1 as SessionRecord
+  const data = record.data as {
+    state: { videoId: string; playbackRevision: number }
+    telemetry: { autoplay: { blockedCount: number } }
+  }
+  assert.equal(data.state.videoId, 'dQw4w9WgXcQ', 'the config still commits after the retry')
+  assert.equal(data.state.playbackRevision, 5, 'one increment on top of the revision the peer advanced')
+  assert.equal(
+    data.telemetry.autoplay.blockedCount,
+    9,
+    'the retry writes only its two owned counters and keeps the peer-committed blockedCount',
+  )
+  assert.equal(record.mutationRevision, 4)
+  assert.equal(storeState.published.length, 1)
 })
 
 void test('session patch accepts YouTube Education watch urls and prefers education player host', async () => {
@@ -1240,6 +1540,8 @@ void test('session patch can mark a configured session as standalone', async () 
         isPlaying: false,
         playbackRate: 1,
         updatedBy: 'instructor',
+        controllerId: null,
+        playbackRevision: 1,
         serverTimestampMs: updated.state != null && typeof updated.state === 'object'
           ? (updated.state as { serverTimestampMs?: unknown }).serverTimestampMs
           : undefined,
@@ -1543,6 +1845,512 @@ void test('command route updates playback and emits extensible envelope', async 
   assert.equal(message.type, 'state-update')
 })
 
+void test('command route de-duplicates a retried command id without advancing playback revision', async () => {
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  const storeState = createSessionStore(
+    { s1: createVideoSyncSession('s1') },
+    { valkeyStore: createMockVideoSyncValkeyStore() },
+  )
+  setupVideoSyncRoutes(app, storeState.sessions, ws)
+  const handler = app.handlers.post['/api/video-sync/:sessionId/command']
+  assert.equal(typeof handler, 'function')
+
+  const request = {
+    params: { sessionId: 's1' },
+    body: { type: 'play', commandId: 'manager-a:1', managerId: 'manager-a' },
+  }
+  const first = createResponse()
+  await handler?.(request, first)
+  const second = createResponse()
+  await handler?.(request, second)
+
+  assert.equal(first.statusCode, 200)
+  assert.equal(second.statusCode, 200)
+  const state = (storeState.store.s1?.data as { state: { playbackRevision: number; controllerId: string } }).state
+  assert.equal(state.playbackRevision, 1)
+  assert.equal(state.controllerId, 'manager-a')
+  assert.deepEqual(
+    (storeState.store.s1?.data as { processedCommandIds: string[] }).processedCommandIds,
+    ['manager-a:1'],
+  )
+  assert.equal(storeState.published.length, 1)
+})
+
+void test('natural completion from a non-owner manager at the current revision pauses playback', async () => {
+  // The manager that issued Play reloaded / closed / was autoplay-blocked, so
+  // only another manager's player reaches the media end. Its natural-ended
+  // pause must still land - otherwise, with no stopSec, playback is stranded as
+  // isPlaying:true forever.
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  const storeState = createSessionStore(
+    { s1: createVideoSyncSession('s1') },
+    { valkeyStore: createMockVideoSyncValkeyStore() },
+  )
+  setupVideoSyncRoutes(app, storeState.sessions, ws)
+  const handler = app.handlers.post['/api/video-sync/:sessionId/command']
+  assert.equal(typeof handler, 'function')
+
+  await handler?.({
+    params: { sessionId: 's1' },
+    body: { type: 'play', commandId: 'manager-a:1', managerId: 'manager-a' },
+  }, createResponse())
+  const revisionAfterPlay = (storeState.store.s1?.data as { state: { playbackRevision: number } }).state.playbackRevision
+
+  const res = createResponse()
+  await handler?.({
+    params: { sessionId: 's1' },
+    body: {
+      type: 'pause',
+      commandId: 'manager-b:ended',
+      managerId: 'manager-b',
+      source: 'natural-ended',
+      expectedPlaybackRevision: revisionAfterPlay,
+      positionSec: 240,
+    },
+  }, res)
+
+  assert.equal(res.statusCode, 200)
+  const state = (storeState.store.s1?.data as {
+    state: { isPlaying: boolean; playbackRevision: number; controllerId: string }
+  }).state
+  assert.equal(state.isPlaying, false, 'a non-owner natural end at the current revision paused playback')
+  assert.equal(state.playbackRevision, revisionAfterPlay + 1)
+  assert.equal(state.controllerId, 'manager-b')
+  assert.equal(storeState.published.length, 2, 'play + natural-ended pause both broadcast')
+})
+
+void test('natural completion is rejected when its reported position is before startSec', async () => {
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  const session = createVideoSyncSession('s1')
+  ;(session.data as { state: { startSec: number } }).state.startSec = 30
+  const storeState = createSessionStore(
+    { s1: session },
+    { valkeyStore: createMockVideoSyncValkeyStore() },
+  )
+  setupVideoSyncRoutes(app, storeState.sessions, ws)
+  const handler = app.handlers.post['/api/video-sync/:sessionId/command']
+  assert.equal(typeof handler, 'function')
+
+  await handler?.({
+    params: { sessionId: 's1' },
+    body: { type: 'play', commandId: 'manager-a:1', managerId: 'manager-a' },
+  }, createResponse())
+  const revisionAfterPlay = (storeState.store.s1?.data as { state: { playbackRevision: number } }).state.playbackRevision
+
+  const res = createResponse()
+  await handler?.({
+    params: { sessionId: 's1' },
+    body: {
+      type: 'pause',
+      commandId: 'manager-a:ended',
+      managerId: 'manager-a',
+      source: 'natural-ended',
+      expectedPlaybackRevision: revisionAfterPlay,
+      positionSec: 5,
+    },
+  }, res)
+
+  assert.equal(res.statusCode, 200)
+  const state = (storeState.store.s1?.data as { state: { isPlaying: boolean; playbackRevision: number } }).state
+  assert.equal(state.isPlaying, true, 'an implausible early end position is not treated as a completion')
+  assert.equal(state.playbackRevision, revisionAfterPlay)
+  assert.equal(storeState.published.length, 1)
+})
+
+void test('natural completion from the owning manager at the current revision pauses playback', async () => {
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  const storeState = createSessionStore(
+    { s1: createVideoSyncSession('s1') },
+    { valkeyStore: createMockVideoSyncValkeyStore() },
+  )
+  setupVideoSyncRoutes(app, storeState.sessions, ws)
+  const handler = app.handlers.post['/api/video-sync/:sessionId/command']
+  assert.equal(typeof handler, 'function')
+
+  await handler?.({
+    params: { sessionId: 's1' },
+    body: { type: 'play', commandId: 'manager-a:1', managerId: 'manager-a' },
+  }, createResponse())
+  const revisionAfterPlay = (storeState.store.s1?.data as { state: { playbackRevision: number } }).state.playbackRevision
+
+  const res = createResponse()
+  await handler?.({
+    params: { sessionId: 's1' },
+    body: {
+      type: 'pause',
+      commandId: 'manager-a:ended',
+      managerId: 'manager-a',
+      source: 'natural-ended',
+      expectedPlaybackRevision: revisionAfterPlay,
+      positionSec: 240,
+    },
+  }, res)
+
+  assert.equal(res.statusCode, 200)
+  const state = (storeState.store.s1?.data as {
+    state: { isPlaying: boolean; playbackRevision: number; controllerId: string }
+  }).state
+  assert.equal(state.isPlaying, false, 'the owning manager natural end paused playback')
+  assert.equal(state.playbackRevision, revisionAfterPlay + 1)
+  assert.equal(state.controllerId, 'manager-a')
+  assert.equal(storeState.published.length, 2, 'play + natural-ended pause both broadcast')
+  const lastMessage = storeState.published[1]?.message as Record<string, unknown>
+  assert.equal(lastMessage.type, 'state-update')
+})
+
+void test('natural completion from the owning manager at a superseded revision is ignored', async () => {
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  const storeState = createSessionStore(
+    { s1: createVideoSyncSession('s1') },
+    { valkeyStore: createMockVideoSyncValkeyStore() },
+  )
+  setupVideoSyncRoutes(app, storeState.sessions, ws)
+  const handler = app.handlers.post['/api/video-sync/:sessionId/command']
+  assert.equal(typeof handler, 'function')
+
+  // Same manager issues two plays; the natural end then arrives stamped with the
+  // first play's (now superseded) revision.
+  await handler?.({
+    params: { sessionId: 's1' },
+    body: { type: 'play', commandId: 'manager-a:1', managerId: 'manager-a' },
+  }, createResponse())
+  const supersededRevision = (storeState.store.s1?.data as { state: { playbackRevision: number } }).state.playbackRevision
+  await handler?.({
+    params: { sessionId: 's1' },
+    body: { type: 'play', commandId: 'manager-a:2', managerId: 'manager-a' },
+  }, createResponse())
+  const currentRevision = (storeState.store.s1?.data as { state: { playbackRevision: number } }).state.playbackRevision
+  assert.equal(currentRevision, supersededRevision + 1)
+
+  const res = createResponse()
+  await handler?.({
+    params: { sessionId: 's1' },
+    body: {
+      type: 'pause',
+      commandId: 'manager-a:ended',
+      managerId: 'manager-a',
+      source: 'natural-ended',
+      expectedPlaybackRevision: supersededRevision,
+      positionSec: 240,
+    },
+  }, res)
+
+  assert.equal(res.statusCode, 200)
+  const state = (storeState.store.s1?.data as { state: { isPlaying: boolean; playbackRevision: number } }).state
+  assert.equal(state.isPlaying, true, 'the stale natural end did not pause the newer playback')
+  assert.equal(state.playbackRevision, currentRevision, 'playback revision is unchanged by the ignored natural end')
+  assert.equal(storeState.published.length, 2, 'only the two play broadcasts, no pause broadcast')
+})
+
+void test('a natural-ended command must be a pause, not play or seek', async () => {
+  console.info('[TEST] video-sync command: the play/seek + natural-ended requests below are expected to return 400 INVALID_COMMAND')
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  const storeState = createSessionStore(
+    { s1: createVideoSyncSession('s1') },
+    { valkeyStore: createMockVideoSyncValkeyStore() },
+  )
+  setupVideoSyncRoutes(app, storeState.sessions, ws)
+  const handler = app.handlers.post['/api/video-sync/:sessionId/command']
+  assert.equal(typeof handler, 'function')
+
+  // Establish ownership + revision so only the source/type gate can reject.
+  await handler?.({
+    params: { sessionId: 's1' },
+    body: { type: 'play', commandId: 'manager-a:1', managerId: 'manager-a' },
+  }, createResponse())
+  const revisionAfterPlay = (storeState.store.s1?.data as { state: { playbackRevision: number } }).state.playbackRevision
+
+  for (const type of ['play', 'seek'] as const) {
+    const res = createResponse()
+    await handler?.({
+      params: { sessionId: 's1' },
+      body: {
+        type,
+        commandId: `manager-a:${type}-ended`,
+        managerId: 'manager-a',
+        source: 'natural-ended',
+        expectedPlaybackRevision: revisionAfterPlay,
+      },
+    }, res)
+    assert.equal(res.statusCode, 400, `${type} + natural-ended must be rejected`)
+    assert.equal((res.body as { error?: string }).error, 'INVALID_COMMAND')
+  }
+
+  const state = (storeState.store.s1?.data as { state: { isPlaying: boolean; playbackRevision: number } }).state
+  assert.equal(state.isPlaying, true, 'the rejected commands did not mutate playback')
+  assert.equal(state.playbackRevision, revisionAfterPlay)
+  assert.equal(storeState.published.length, 1, 'only the initial play broadcast')
+})
+
+void test('command route retries its atomic write and does not clobber a revision advanced by another instance', async () => {
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  let concurrentWriteApplied = false
+  const storeState = createSessionStore(
+    { s1: createVideoSyncSession('s1') },
+    {
+      valkeyStore: createMockVideoSyncValkeyStore(),
+      atomic: true,
+      onAtomicAttempt: (attempt, store) => {
+        // Simulate another instance committing a re-play (higher playbackRevision,
+        // different controller) between this request's strict read and its
+        // compare-and-set, exactly once.
+        if (attempt !== 0 || concurrentWriteApplied) return
+        const record = store.s1
+        if (!record) return
+        concurrentWriteApplied = true
+        record.mutationRevision = 5
+        const data = record.data as { state: Record<string, unknown> }
+        data.state = {
+          ...data.state,
+          isPlaying: true,
+          positionSec: 33,
+          controllerId: 'other-instance',
+          playbackRevision: 7,
+          serverTimestampMs: Date.now(),
+        }
+      },
+    },
+  )
+  setupVideoSyncRoutes(app, storeState.sessions, ws)
+  const handler = app.handlers.post['/api/video-sync/:sessionId/command']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.({
+    params: { sessionId: 's1' },
+    body: { type: 'pause', commandId: 'manager-x:1', managerId: 'manager-x' },
+  }, res)
+
+  assert.equal(res.statusCode, 200)
+  assert.equal(concurrentWriteApplied, true, 'the concurrent-write hook must have fired')
+  const record = storeState.store.s1 as SessionRecord
+  const state = (record.data as { state: { isPlaying: boolean; playbackRevision: number; controllerId: string } }).state
+  // The command re-read the concurrently advanced state (revision 7) and applied
+  // on top of it, rather than rolling back to revision 1 from the stale snapshot.
+  assert.equal(state.playbackRevision, 8)
+  assert.equal(state.isPlaying, false)
+  assert.equal(state.controllerId, 'manager-x')
+  assert.equal(record.mutationRevision, 6, 'one bump from the simulated peer, one from the retried commit')
+  assert.equal(storeState.published.length, 1)
+})
+
+void test('command route atomic path accumulates the playback revision across sequential commands', async () => {
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  const storeState = createSessionStore(
+    { s1: createVideoSyncSession('s1') },
+    { valkeyStore: createMockVideoSyncValkeyStore(), atomic: true },
+  )
+  setupVideoSyncRoutes(app, storeState.sessions, ws)
+  const handler = app.handlers.post['/api/video-sync/:sessionId/command']
+  assert.equal(typeof handler, 'function')
+
+  await handler?.({
+    params: { sessionId: 's1' },
+    body: { type: 'play', commandId: 'a:1', managerId: 'manager-a' },
+  }, createResponse())
+  await handler?.({
+    params: { sessionId: 's1' },
+    body: { type: 'pause', commandId: 'b:1', managerId: 'manager-b' },
+  }, createResponse())
+
+  const record = storeState.store.s1 as SessionRecord
+  const data = record.data as {
+    state: { isPlaying: boolean; playbackRevision: number; controllerId: string }
+    processedCommandIds: string[]
+  }
+  assert.equal(data.state.playbackRevision, 2, 'each command re-reads and advances the revision')
+  assert.equal(data.state.isPlaying, false)
+  assert.equal(data.state.controllerId, 'manager-b')
+  assert.deepEqual(data.processedCommandIds, ['a:1', 'b:1'])
+  assert.equal(record.mutationRevision, 2)
+  assert.equal(storeState.published.length, 2)
+})
+
+void test('command route abandons the atomic write when the session id is deleted and recreated mid-flush', async () => {
+  console.info('[TEST] video-sync command: the session id is recreated as a fresh video-sync session mid-flush; the handler is expected to answer 404 without committing a write')
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  let swapped = false
+  const storeState = createSessionStore(
+    { s1: createVideoSyncSession('s1') },
+    {
+      valkeyStore: createMockVideoSyncValkeyStore(),
+      atomic: true,
+      onAtomicAttempt: (attempt, store) => {
+        // After the first attempt's mutate ran against the authorized
+        // incarnation, the id is deleted and recreated as a *different*
+        // video-sync session (fresh `created`), so the retry's callback sees a
+        // record the caller was never authorized against.
+        if (attempt !== 0 || swapped) return
+        const record = store.s1
+        if (!record) return
+        swapped = true
+        const replacement = createVideoSyncSession('s1')
+        replacement.created = record.created + 10_000
+        replacement.mutationRevision = 5
+        store.s1 = replacement
+      },
+    },
+  )
+  setupVideoSyncRoutes(app, storeState.sessions, ws)
+  const handler = app.handlers.post['/api/video-sync/:sessionId/command']
+
+  const res = createResponse()
+  await handler?.({
+    params: { sessionId: 's1' },
+    body: { type: 'play', commandId: 'manager-x:1', managerId: 'manager-x' },
+  }, res)
+
+  assert.equal(swapped, true, 'the id-reuse hook must have fired')
+  assert.equal(res.statusCode, 404)
+  const record = storeState.store.s1?.data as { state: { isPlaying: boolean } }
+  assert.equal(record.state.isPlaying, false, 'the replacement session was not mutated')
+  assert.equal(storeState.store.s1?.mutationRevision, 5, 'the abandoned atomic attempt did not bump the revision or extend the TTL')
+  assert.equal(storeState.published.length, 0, 'no broadcast for the abandoned command')
+})
+
+void test('event route abandons the atomic write when the session id is deleted and recreated mid-flush', async () => {
+  console.info('[TEST] video-sync event: the session id is recreated as a fresh video-sync session mid-flush; the handler is expected to answer 404 without writing telemetry into the replacement')
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  let swapped = false
+  const storeState = createSessionStore(
+    { s1: createVideoSyncSession('s1') },
+    {
+      valkeyStore: createMockVideoSyncValkeyStore(),
+      atomic: true,
+      onAtomicAttempt: (attempt, store) => {
+        if (attempt !== 0 || swapped) return
+        const record = store.s1
+        if (!record) return
+        swapped = true
+        const replacement = createVideoSyncSession('s1')
+        replacement.created = record.created + 10_000
+        replacement.mutationRevision = 5
+        store.s1 = replacement
+      },
+    },
+  )
+  setupVideoSyncRoutes(app, storeState.sessions, ws)
+  const handler = app.handlers.post['/api/video-sync/:sessionId/event']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.({
+    params: { sessionId: 's1' },
+    body: { type: 'autoplay-blocked' },
+  }, res)
+
+  assert.equal(swapped, true, 'the id-reuse hook must have fired')
+  assert.equal(res.statusCode, 404)
+  const replacementTelemetry = storeState.store.s1?.data as { telemetry: { autoplay: { blockedCount: number } } }
+  assert.equal(replacementTelemetry.telemetry.autoplay.blockedCount, 0, 'the replacement session telemetry was not touched')
+  assert.equal(storeState.store.s1?.mutationRevision, 5, 'the abandoned atomic attempt did not bump the revision or extend the TTL')
+  assert.equal(storeState.published.length, 0, 'no telemetry broadcast for the abandoned event')
+})
+
+void test('event route keeps the abandoned unsync marker isolated from a recreated incarnation', { concurrency: false }, async () => {
+  console.info('[TEST] video-sync event: an unsync marker is added, then the id is recreated mid-flush; the marker is scoped to the old incarnation, so the replacement session does not inherit the count')
+  const originalSetTimeout = globalThis.setTimeout
+  const originalClearTimeout = globalThis.clearTimeout
+  globalThis.setTimeout = (((_cb: TimerHandler) => ({ id: 'evt-aux-prune' } as unknown as ReturnType<typeof setTimeout>)) as unknown) as typeof setTimeout
+  globalThis.clearTimeout = ((() => { /* no-op */ }) as unknown) as typeof clearTimeout
+
+  try {
+    const app = createMockApp()
+    const ws = createMockWs() as unknown as WsRouter
+    let swapped = false
+    const storeState = createSessionStore(
+      { 'evt-aux': createVideoSyncSession('evt-aux') },
+      {
+        atomic: true,
+        onAtomicAttempt: (attempt, store) => {
+          if (attempt !== 0 || swapped) return
+          const record = store['evt-aux']
+          if (!record) return
+          swapped = true
+          const replacement = createVideoSyncSession('evt-aux')
+          replacement.created = record.created + 10_000
+          replacement.mutationRevision = 5
+          store['evt-aux'] = replacement
+        },
+      },
+    )
+    setupVideoSyncRoutes(app, storeState.sessions, ws)
+    const handler = app.handlers.post['/api/video-sync/:sessionId/event']
+    assert.equal(typeof handler, 'function')
+
+    const abandoned = createResponse()
+    await handler?.({ params: { sessionId: 'evt-aux' }, body: { type: 'unsync', studentId: 'student-a', driftSec: 1 } }, abandoned)
+    assert.equal(swapped, true, 'the id-reuse hook must have fired')
+    assert.equal(abandoned.statusCode, 404)
+
+    // A later unsync for a *different* student on the (now stable) replacement:
+    // the count must be 1 (only student-b), not 2 (leaked student-a).
+    const followUp = createResponse()
+    await handler?.({ params: { sessionId: 'evt-aux' }, body: { type: 'unsync', studentId: 'student-b', driftSec: 1 } }, followUp)
+    assert.equal(followUp.statusCode, 200)
+    assert.equal(
+      (followUp.body as { telemetry: { sync: { unsyncedStudents: number } } }).telemetry.sync.unsyncedStudents,
+      1,
+      'the replacement session does not inherit the abandoned unsync marker',
+    )
+  } finally {
+    globalThis.setTimeout = originalSetTimeout
+    globalThis.clearTimeout = originalClearTimeout
+  }
+})
+
+void test('config route abandons the error-telemetry write when the session id is recreated mid-validation', async () => {
+  console.info('[TEST] video-sync config: an invalid sourceUrl is submitted and the id is recreated mid-flush; the error-telemetry persist must not land on the replacement')
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  let swapped = false
+  const storeState = createSessionStore(
+    { s1: createVideoSyncSession('s1') },
+    {
+      valkeyStore: createMockVideoSyncValkeyStore(),
+      atomic: true,
+      onAtomicAttempt: (attempt, store) => {
+        if (attempt !== 0 || swapped) return
+        const record = store.s1
+        if (!record) return
+        swapped = true
+        const replacement = createVideoSyncSession('s1')
+        replacement.created = record.created + 10_000
+        replacement.mutationRevision = 5
+        store.s1 = replacement
+      },
+    },
+  )
+  setupVideoSyncRoutes(app, storeState.sessions, ws)
+  const handler = app.handlers.patch['/api/video-sync/:sessionId/session']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.({
+    params: { sessionId: 's1' },
+    body: { sourceUrl: '' },
+  }, res)
+
+  // The validation failure is still reported to the caller, but the
+  // error-telemetry persist against the recreated incarnation is abandoned.
+  assert.equal(swapped, true, 'the id-reuse hook must have fired')
+  assert.equal(res.statusCode, 400)
+  assert.equal((res.body as { error?: string }).error, 'INVALID_SOURCE_URL')
+  const replacementTelemetry = storeState.store.s1?.data as { telemetry: { error: { code: string | null } } }
+  assert.equal(replacementTelemetry.telemetry.error.code, null, 'no error written into the replacement session')
+  assert.equal(storeState.store.s1?.mutationRevision, 5, 'the abandoned error persist did not bump the revision or extend the TTL')
+})
+
 void test('command route answers with a structured 500 when the session write rejects', async () => {
   console.info('[TEST] video-sync command: the session-store write below rejects on purpose; the handler is expected to log command-failed and answer 500 rather than let the rejection escape the mutation')
   const app = createMockApp()
@@ -1557,6 +2365,95 @@ void test('command route answers with a structured 500 when the session write re
 
   setupVideoSyncRoutes(app, sessionsWithFailingSet, ws)
 
+  const handler = app.handlers.post['/api/video-sync/:sessionId/command']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.({ params: { sessionId: 's1' }, body: { type: 'play' } }, res)
+
+  assert.equal(res.statusCode, 500)
+  assert.deepEqual(res.body, {
+    error: 'INTERNAL_ERROR',
+    message: 'This action is temporarily unavailable',
+  })
+})
+
+void test('command route mutates from the strict read, not a stale local cache snapshot', async () => {
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  const committed = createVideoSyncSession('s1')
+  ;(committed.data as {
+    state: { videoId: string; positionSec: number; isPlaying: boolean; updatedBy: string; serverTimestampMs: number }
+  }).state = {
+    ...(committed.data as { state: Record<string, unknown> }).state,
+    videoId: 'vid123456789',
+    positionSec: 5,
+    isPlaying: false,
+    updatedBy: 'instructor',
+    serverTimestampMs: 10_000,
+  } as never
+  const storeState = createSessionStore({ s1: committed }, { valkeyStore: createMockVideoSyncValkeyStore() })
+
+  let strictGetCalls = 0
+  const sessions = {
+    ...storeState.sessions,
+    async get(id: string) {
+      // A peer instance still holds the pre-pause frame in its 30s cache: an
+      // old timestamp so `computeCurrentPositionSec` would fast-forward it well
+      // past the real paused position.
+      const snapshot = await storeState.sessions.get(id)
+      if (snapshot) {
+        ;(snapshot.data as {
+          state: { positionSec: number; isPlaying: boolean; updatedBy: string; serverTimestampMs: number }
+        }).state = {
+          ...(snapshot.data as { state: Record<string, unknown> }).state,
+          positionSec: 900,
+          isPlaying: true,
+          updatedBy: 'instructor',
+          serverTimestampMs: 1_000,
+        } as never
+      }
+      return snapshot
+    },
+    async getStrict(id: string) {
+      strictGetCalls += 1
+      return storeState.sessions.get(id)
+    },
+  }
+
+  setupVideoSyncRoutes(app, sessions, ws)
+  const handler = app.handlers.post['/api/video-sync/:sessionId/command']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.({ params: { sessionId: 's1' }, body: { type: 'pause' } }, res)
+
+  assert.equal(res.statusCode, 200)
+  assert.equal(strictGetCalls, 2)
+
+  const persisted = (storeState.store.s1?.data as { state?: { positionSec?: number; isPlaying?: boolean } }).state
+  assert.equal(persisted?.isPlaying, false)
+  // Anchored to the strict paused position (~5s), not the stale playing
+  // snapshot's 900s+fast-forward.
+  assert.ok((persisted?.positionSec ?? 0) < 100, `expected strict position, got ${persisted?.positionSec ?? 'undefined'}`)
+
+  const broadcast = storeState.published[0]?.message as { payload?: { state?: { positionSec?: number } } }
+  assert.ok((broadcast.payload?.state?.positionSec ?? 0) < 100)
+})
+
+void test('command route stays a retryable 500 when the strict read rejects', async () => {
+  console.info('[TEST] video-sync command: the strict session read below rejects on purpose; the handler must answer 500 (retryable) rather than a misleading 404')
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  const storeState = createSessionStore({ s1: createVideoSyncSession('s1') })
+  const sessions = {
+    ...storeState.sessions,
+    async getStrict(): Promise<never> {
+      throw new Error('[TEST] strict session store read unavailable')
+    },
+  }
+
+  setupVideoSyncRoutes(app, sessions, ws)
   const handler = app.handlers.post['/api/video-sync/:sessionId/command']
   assert.equal(typeof handler, 'function')
 
@@ -1698,6 +2595,20 @@ void test('manager-access route returns manager access for persistent teacher co
       setCalls += 1
       return storeState.sessions.set(id, updatedSession)
     },
+    async updateAtomic(id: string, mutate: (session: SessionRecord) => SessionRecord) {
+      const latest = await storeState.sessions.get(id)
+      if (!latest) return null
+      const latestData = latest.data as { state: Record<string, unknown> }
+      latestData.state = {
+        ...latestData.state,
+        isPlaying: true,
+        playbackRevision: 7,
+        serverTimestampMs: Date.now(),
+      }
+      const updated = mutate(latest)
+      await this.set(id, updated)
+      return updated
+    },
   }
   const teacherCode = 'persistent-teacher-code'
   const { hash, hashedTeacherCode } = generatePersistentHash('video-sync', teacherCode)
@@ -1734,6 +2645,11 @@ void test('manager-access route returns manager access for persistent teacher co
   assert.equal(res.cookies.length, 1)
   assert.equal(res.cookies[0]?.options.httpOnly, true)
   assert.equal(setCalls, 1)
+  assert.equal(
+    (storeState.store.s1?.data as { state: { playbackRevision: number } }).state.playbackRevision,
+    7,
+    'capability issuance preserves playback committed before the atomic mutation',
+  )
   assert.equal(res.headers['cache-control'], 'no-store', 'cookie-dependent manager-access response is not cacheable')
   await cleanupPersistentSession(hash)
 })
@@ -2400,6 +3316,145 @@ void test('instructor websocket admits a valid manager capability without a pass
   await new Promise((resolve) => setTimeout(resolve, 0))
 })
 
+void test('websocket initial snapshot reads authoritative state and never persists or sends a stale cross-instance isPlaying:true', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const committed = createVideoSyncSession('s1')
+  ;(committed.data as {
+    state: { videoId: string; positionSec: number; isPlaying: boolean; updatedBy: string; serverTimestampMs: number }
+  }).state = {
+    ...(committed.data as { state: Record<string, unknown> }).state,
+    videoId: 'vid123456789',
+    positionSec: 12,
+    isPlaying: false,
+    updatedBy: 'instructor',
+    serverTimestampMs: 50_000,
+  } as never
+  const storeState = createSessionStore({ s1: committed }, { valkeyStore: createMockVideoSyncValkeyStore() })
+
+  let strictGetCalls = 0
+  const setStates: Array<{ isPlaying: boolean }> = []
+  const sessions = {
+    ...storeState.sessions,
+    async get(id: string) {
+      // A peer instance still holds the pre-pause frame in its 30s cache.
+      const snapshot = await storeState.sessions.get(id)
+      if (snapshot) {
+        ;(snapshot.data as { state: { isPlaying: boolean; serverTimestampMs: number } }).state = {
+          ...(snapshot.data as { state: Record<string, unknown> }).state,
+          isPlaying: true,
+          serverTimestampMs: 1_000,
+        } as never
+      }
+      return snapshot
+    },
+    async getStrict(id: string) {
+      strictGetCalls += 1
+      return storeState.sessions.get(id)
+    },
+    async set(id: string, session: SessionRecord) {
+      setStates.push({
+        isPlaying: Boolean((session.data as { state?: { isPlaying?: boolean } }).state?.isPlaying),
+      })
+      return storeState.sessions.set(id, session)
+    },
+  }
+
+  setupVideoSyncRoutes(app, sessions, ws as unknown as WsRouter)
+  const handler = ws.registered['/ws/video-sync']
+  assert.equal(typeof handler, 'function')
+
+  const recorder = createMockSocket()
+  handler?.(recorder.socket, new URLSearchParams({ sessionId: 's1', role: 'student' }))
+
+  await waitForCondition(() => recorder.sent.length >= 1, 1000)
+
+  const snapshot = JSON.parse(recorder.sent[0] ?? '{}') as {
+    type?: string
+    payload?: { state?: { isPlaying?: boolean } }
+  }
+  assert.equal(snapshot.type, 'state-snapshot')
+  assert.equal(snapshot.payload?.state?.isPlaying, false)
+  assert.ok(strictGetCalls >= 1)
+  assert.ok(
+    setStates.every((entry) => entry.isPlaying === false),
+    `expected no persisted isPlaying:true, got ${JSON.stringify(setStates)}`,
+  )
+
+  recorder.emit('close')
+  await new Promise((resolve) => setTimeout(resolve, 0))
+})
+
+void test('websocket initial snapshot re-reads before persisting and does not roll back a concurrent remote pause', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const committed = createVideoSyncSession('s1')
+  ;(committed.data as {
+    state: { videoId: string; positionSec: number; isPlaying: boolean; updatedBy: string; serverTimestampMs: number }
+  }).state = {
+    ...(committed.data as { state: Record<string, unknown> }).state,
+    videoId: 'vid123456789',
+    positionSec: 30,
+    isPlaying: true,
+    updatedBy: 'instructor',
+    serverTimestampMs: 40_000,
+  } as never
+  const storeState = createSessionStore({ s1: committed }, { valkeyStore: createMockVideoSyncValkeyStore() })
+
+  let strictGetCalls = 0
+  const setStates: Array<{ isPlaying: boolean }> = []
+  const sessions = {
+    ...storeState.sessions,
+    async getStrict(id: string) {
+      strictGetCalls += 1
+      const record = await storeState.sessions.get(id)
+      if (record && strictGetCalls >= 2) {
+        // Another instance committed a pause between the snapshot read and the
+        // write.
+        ;(record.data as { state: { isPlaying: boolean; positionSec: number; serverTimestampMs: number } }).state = {
+          ...(record.data as { state: Record<string, unknown> }).state,
+          isPlaying: false,
+          positionSec: 33,
+          serverTimestampMs: 41_000,
+        } as never
+      }
+      return record
+    },
+    async set(id: string, session: SessionRecord) {
+      setStates.push({
+        isPlaying: Boolean((session.data as { state?: { isPlaying?: boolean } }).state?.isPlaying),
+      })
+      return storeState.sessions.set(id, session)
+    },
+  }
+
+  setupVideoSyncRoutes(app, sessions, ws as unknown as WsRouter)
+  const handler = ws.registered['/ws/video-sync']
+  assert.equal(typeof handler, 'function')
+
+  const recorder = createMockSocket()
+  handler?.(recorder.socket, new URLSearchParams({ sessionId: 's1', role: 'student' }))
+
+  await waitForCondition(() => recorder.sent.length >= 1, 1000)
+
+  const snapshot = JSON.parse(recorder.sent[0] ?? '{}') as {
+    type?: string
+    payload?: { state?: { isPlaying?: boolean } }
+  }
+  assert.equal(snapshot.type, 'state-snapshot')
+  // The concurrent pause wins; the snapshot must carry it, not our re-stamped
+  // pre-pause projection.
+  assert.equal(snapshot.payload?.state?.isPlaying, false)
+  assert.ok(strictGetCalls >= 2)
+  assert.ok(
+    setStates.every((entry) => entry.isPlaying === false),
+    `expected no persisted isPlaying:true, got ${JSON.stringify(setStates)}`,
+  )
+
+  recorder.emit('close')
+  await new Promise((resolve) => setTimeout(resolve, 0))
+})
+
 void test('instructor websocket is closed 1008 once its manager capability reaches expiry', async () => {
   console.info('[TEST] video-sync websocket: manager capability expiry is expected to close 1008')
   const app = createMockApp()
@@ -2523,6 +3578,102 @@ void test('websocket cleanup runs only once when error is followed by close', as
   assert.equal(disconnectEnvelope.payload?.telemetry?.connections?.activeCount, 0)
 })
 
+void test('websocket initial snapshot failure unsubscribes the socket instead of leaving it in the broadcast set', { concurrency: false }, async () => {
+  console.info('[TEST] video-sync ws admission: the initial-snapshot persist below rejects on purpose; the socket must be removed from the subscriber set and closed, not left able to receive later broadcasts')
+  const app = createMockApp()
+  const ws = createMockWs()
+  const storeState = createSessionStore({ s1: createVideoSyncSession('s1') })
+
+  let setCalls = 0
+  const sessions = {
+    ...storeState.sessions,
+    async set(id: string, session: SessionRecord) {
+      setCalls += 1
+      if (setCalls === 1) {
+        throw new Error('[TEST] initial snapshot persist unavailable')
+      }
+      return storeState.sessions.set(id, session)
+    },
+  }
+
+  setupVideoSyncRoutes(app, sessions, ws as unknown as WsRouter)
+
+  const wsHandler = ws.registered['/ws/video-sync']
+  assert.equal(typeof wsHandler, 'function')
+
+  const recorder = createMockSocket()
+  wsHandler?.(recorder.socket, new URLSearchParams({ sessionId: 's1', role: 'student' }))
+
+  await waitForCondition(() => recorder.closed != null, 1000)
+  assert.deepEqual(recorder.closed, { code: 1011, reason: 'Initial snapshot failed' })
+  // The snapshot never sent; the socket must not be carrying a partial view.
+  assert.deepEqual(recorder.sent, [])
+
+  // A later broadcast must not reach the socket that failed admission.
+  const sentBeforeEvent = recorder.sent.length
+  const eventHandler = app.handlers.post['/api/video-sync/:sessionId/event']
+  const eventRes = createResponse()
+  await eventHandler?.({ params: { sessionId: 's1' }, body: { type: 'autoplay-blocked' } }, eventRes)
+  assert.equal(eventRes.statusCode, 200)
+  assert.equal(recorder.sent.length, sentBeforeEvent, 'the unsubscribed socket received no telemetry broadcast')
+
+  // The abandoned admission also rolled the connection count back to 0.
+  const persisted = storeState.store.s1?.data as { telemetry: { connections: { activeCount: number } } }
+  assert.equal(persisted.telemetry.connections.activeCount, 0)
+
+  recorder.emit('close')
+  await new Promise((resolve) => setTimeout(resolve, 0))
+})
+
+void test('websocket cleanup abandons its telemetry write and broadcast when the session id is recreated mid-flush', { concurrency: false }, async () => {
+  console.info('[TEST] video-sync socket cleanup: a subscriber disconnects and the id is recreated as a fresh incarnation during the atomic connection-telemetry write; the old socket must not persist activeCount into - or broadcast for - the replacement')
+  const app = createMockApp()
+  const ws = createMockWs()
+  let armed = false
+  let swapped = false
+  const storeState = createSessionStore(
+    { 'ws-cleanup-incarnation': createVideoSyncSession('ws-cleanup-incarnation') },
+    {
+      valkeyStore: createMockVideoSyncValkeyStore(),
+      atomic: true,
+      onAtomicAttempt: (attempt, store) => {
+        if (!armed || attempt !== 0 || swapped) return
+        const record = store['ws-cleanup-incarnation']
+        if (!record) return
+        swapped = true
+        const replacement = createVideoSyncSession('ws-cleanup-incarnation')
+        replacement.created = record.created + 10_000
+        replacement.mutationRevision = 5
+        ;(replacement.data as { telemetry: { connections: { activeCount: number } } })
+          .telemetry.connections.activeCount = 9
+        store['ws-cleanup-incarnation'] = replacement
+      },
+    },
+  )
+  setupVideoSyncRoutes(app, storeState.sessions, ws as unknown as WsRouter)
+
+  const handler = ws.registered['/ws/video-sync']
+  assert.equal(typeof handler, 'function')
+
+  const recorder = createMockSocket()
+  handler?.(recorder.socket, new URLSearchParams({ sessionId: 'ws-cleanup-incarnation', role: 'student' }))
+  await new Promise((resolve) => setTimeout(resolve, 0))
+
+  const publishedAfterAdmission = storeState.published.length
+  armed = true
+
+  recorder.emit('close')
+  await new Promise((resolve) => setTimeout(resolve, 0))
+
+  assert.equal(swapped, true, 'the id-reuse hook must have fired during socket cleanup')
+  const replacement = storeState.store['ws-cleanup-incarnation']?.data as {
+    telemetry: { connections: { activeCount: number } }
+  }
+  assert.equal(replacement.telemetry.connections.activeCount, 9, 'the disconnect did not overwrite the replacement session activeCount')
+  assert.equal(storeState.store['ws-cleanup-incarnation']?.mutationRevision, 5, 'the abandoned cleanup write did not bump the replacement revision')
+  assert.equal(storeState.published.length, publishedAfterAdmission, 'no connection-change telemetry broadcast for the replacement session')
+})
+
 void test('invalid websocket session is rejected before subscription side effects are created', async () => {
   const app = createMockApp()
   const ws = createMockWs()
@@ -2575,6 +3726,43 @@ void test('invalid websocket session still closes when sending the not-found env
   assert.deepEqual(recorder.closed, { code: 1008, reason: 'Session not found' })
 })
 
+void test('websocket admission closes 1008 instead of snapshotting a replacement session', { concurrency: false }, async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const storeState = createSessionStore({ 'ws-admit-incarnation': createVideoSyncSession('ws-admit-incarnation') })
+  // The socket authorizes against a readable session, but the admission
+  // snapshot's atomic write reports the id as gone / a new incarnation, so
+  // `updateVideoSyncSessionAtomic` returns null.
+  const sessions = {
+    ...storeState.sessions,
+    async getStrict(id: string) {
+      const record = storeState.store[id]
+      return record ? structuredClone(record) : null
+    },
+    async updateAtomic() {
+      return null
+    },
+  }
+  setupVideoSyncRoutes(app, sessions as unknown as Parameters<typeof setupVideoSyncRoutes>[1], ws as unknown as WsRouter)
+
+  const handler = ws.registered['/ws/video-sync']
+  assert.equal(typeof handler, 'function')
+
+  const recorder = createMockSocket()
+  handler?.(recorder.socket, new URLSearchParams({ sessionId: 'ws-admit-incarnation', role: 'student' }))
+  await new Promise((resolve) => setTimeout(resolve, 0))
+
+  assert.deepEqual(recorder.closed, { code: 1008, reason: 'Session not found' })
+  const snapshots = recorder.sent
+    .map((raw) => JSON.parse(raw) as { type?: string })
+    .filter((msg) => msg.type === 'state-snapshot')
+  assert.equal(snapshots.length, 0, 'no snapshot was sent from the unbound atomic write')
+
+  // Release the leaked subscriber + heartbeat timer this admission created.
+  recorder.emit('close')
+  await new Promise((resolve) => setTimeout(resolve, 0))
+})
+
 void test('heartbeat stops and closes subscribers when the backing session disappears', { concurrency: false }, async () => {
   const originalSetInterval = globalThis.setInterval
   const originalClearInterval = globalThis.clearInterval
@@ -2620,6 +3808,100 @@ void test('heartbeat stops and closes subscribers when the backing session disap
 
     assert.deepEqual(recorder.closed, { code: 1008, reason: 'Session not found' })
     assert.deepEqual(clearedTimers, [timerToken])
+  } finally {
+    globalThis.setInterval = originalSetInterval
+    globalThis.clearInterval = originalClearInterval
+  }
+})
+
+void test('heartbeat tears down instead of broadcasting a frame for a session id recreated as a new incarnation', { concurrency: false }, async () => {
+  const originalSetInterval = globalThis.setInterval
+  const originalClearInterval = globalThis.clearInterval
+  const heartbeatState: { callback: (() => void) | null } = { callback: null }
+  const clearedTimers: unknown[] = []
+  const timerToken = { id: 'heartbeat-token-cas-null' }
+
+  globalThis.setInterval = (((callback: TimerHandler) => {
+    heartbeatState.callback = callback as () => void
+    return timerToken as unknown as ReturnType<typeof setInterval>
+  }) as unknown) as typeof setInterval
+  globalThis.clearInterval = (((timer: ReturnType<typeof setInterval> | undefined) => {
+    clearedTimers.push(timer)
+  }) as unknown) as typeof clearInterval
+
+  try {
+    const app = createMockApp()
+    const ws = createMockWs()
+
+    // A live session whose playhead is past stopSec, so every heartbeat wants to
+    // persist the stop transition and therefore calls
+    // `updateVideoSyncSessionAtomic`. Admission succeeds; the id is then
+    // recreated as a *fresh video-sync incarnation* (same type, new `created`)
+    // by the time the heartbeat's compare-and-set runs, so the
+    // `{ expectedCreated }` guard - not just a null store result - drives the
+    // teardown.
+    const liveSession = createVideoSyncSession('s1')
+    ;(liveSession.data as { state: Record<string, unknown> }).state = {
+      ...(liveSession.data as { state: Record<string, unknown> }).state,
+      videoId: 'dQw4w9WgXcQ',
+      startSec: 0,
+      stopSec: 10,
+      positionSec: 100,
+      isPlaying: true,
+      serverTimestampMs: 1_000,
+    }
+    const authorizedCreated = liveSession.created
+
+    let casGone = false
+    const published: Array<{ channel: string; message: Record<string, unknown> }> = []
+    const sessions = {
+      async get() { return cloneSessionRecord(liveSession) },
+      async getStrict() { return cloneSessionRecord(liveSession) },
+      async set() {},
+      async updateAtomic(_id: string, mutate: (session: SessionRecord) => SessionRecord) {
+        if (casGone) {
+          const replacement = createVideoSyncSession('s1')
+          replacement.created = authorizedCreated + 10_000
+          // The atomic wrapper rejects the drafted incarnation (its `created`
+          // no longer matches `expectedCreated`) and throws; the helper maps
+          // that to a null result.
+          return mutate(cloneSessionRecord(replacement))
+        }
+        const draft = cloneSessionRecord(liveSession)
+        return mutate(draft)
+      },
+      valkeyStore: createMockVideoSyncValkeyStore(),
+      async publishBroadcast(channel: string, message: Record<string, unknown>) {
+        published.push({ channel, message })
+      },
+      subscribeToBroadcast() {},
+    }
+
+    setupVideoSyncRoutes(app, sessions as unknown as Parameters<typeof setupVideoSyncRoutes>[1], ws as unknown as WsRouter)
+
+    const handler = ws.registered['/ws/video-sync']
+    assert.equal(typeof handler, 'function')
+
+    const recorder = createMockSocket()
+    handler?.(recorder.socket, new URLSearchParams({ sessionId: 's1', role: 'student' }))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    assert.equal(recorder.closed, null, 'admitted while the session is still live')
+
+    const publishedAfterConnect = published.length
+    casGone = true
+    const runHeartbeat = heartbeatState.callback
+    if (runHeartbeat == null) {
+      throw new Error('Expected heartbeat callback to be registered')
+    }
+    runHeartbeat()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    assert.deepEqual(recorder.closed, { code: 1008, reason: 'Session not found' })
+    assert.deepEqual(clearedTimers, [timerToken])
+    const heartbeatFrames = published
+      .slice(publishedAfterConnect)
+      .filter((entry) => (entry.message as { type?: string }).type === 'heartbeat')
+    assert.equal(heartbeatFrames.length, 0, 'no stale heartbeat frame was broadcast')
   } finally {
     globalThis.setInterval = originalSetInterval
     globalThis.clearInterval = originalClearInterval
@@ -2919,6 +4201,361 @@ void test('heartbeat persists the session when playback reaches stopSec', { conc
   }
 })
 
+void test('heartbeat reads authoritative state strictly and never rebroadcasts a stale cross-instance isPlaying:true', { concurrency: false }, async () => {
+  const originalSetInterval = globalThis.setInterval
+  const originalClearInterval = globalThis.clearInterval
+  const originalDateNow = Date.now
+  const heartbeatState: { callback: (() => void) | null } = { callback: null }
+  const timerToken = { id: 'heartbeat-token-strict' }
+  let nowMs = 10_000
+
+  globalThis.setInterval = (((callback: TimerHandler) => {
+    heartbeatState.callback = callback as () => void
+    return timerToken as unknown as ReturnType<typeof setInterval>
+  }) as unknown) as typeof setInterval
+  globalThis.clearInterval = (((_timer: ReturnType<typeof setInterval> | undefined) => {
+    // no-op for this test
+  }) as unknown) as typeof clearInterval
+  Date.now = () => nowMs
+
+  try {
+    const app = createMockApp()
+    const ws = createMockWs()
+
+    const playing = {
+      provider: 'youtube' as const,
+      playerHost: 'youtube-nocookie' as const,
+      videoId: 'dQw4w9WgXcQ',
+      startSec: 0,
+      stopSec: null,
+      positionSec: 5,
+      isPlaying: true,
+      playbackRate: 1 as const,
+      updatedBy: 'instructor' as const,
+      serverTimestampMs: 4_000,
+    }
+
+    // What this instance's local session cache still holds (pre-pause).
+    const staleSession = createVideoSyncSession('s1')
+    ;(staleSession.data as { state: typeof playing }).state = { ...playing }
+    // What another instance already committed to Valkey (the pause).
+    const authoritativeSession = cloneSessionRecord(staleSession)
+    ;(authoritativeSession.data as { state: typeof playing }).state = {
+      ...playing,
+      isPlaying: false,
+      positionSec: 6,
+      serverTimestampMs: 5_000,
+    }
+
+    const published: Array<{ channel: string; message: Record<string, unknown> }> = []
+    let setCalls = 0
+    let lastSetIsPlaying: boolean | null = null
+    const sessions = {
+      async get() {
+        return cloneSessionRecord(staleSession)
+      },
+      async getStrict() {
+        return cloneSessionRecord(authoritativeSession)
+      },
+      async set(_id: string, session: SessionRecord) {
+        setCalls += 1
+        lastSetIsPlaying = (session.data as { state: { isPlaying: boolean } }).state.isPlaying
+      },
+      valkeyStore: createMockVideoSyncValkeyStore(),
+      async publishBroadcast(channel: string, message: Record<string, unknown>) {
+        published.push({ channel, message })
+      },
+      subscribeToBroadcast() {},
+    }
+
+    setupVideoSyncRoutes(app, sessions as unknown as Parameters<typeof setupVideoSyncRoutes>[1], ws as unknown as WsRouter)
+
+    const handler = ws.registered['/ws/video-sync']
+    assert.equal(typeof handler, 'function')
+
+    const recorder = createMockSocket()
+    handler?.(recorder.socket, new URLSearchParams({ sessionId: 's1', role: 'student' }))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    const setCallsAfterConnect = setCalls
+
+    nowMs += 3_000
+    const runHeartbeat = heartbeatState.callback
+    if (runHeartbeat == null) {
+      throw new Error('Expected heartbeat callback to be registered')
+    }
+    runHeartbeat()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    const heartbeatEnvelope = published.at(-1)?.message as {
+      type?: string
+      payload?: { state?: { isPlaying?: boolean; serverTimestampMs?: number } }
+    }
+    assert.equal(heartbeatEnvelope.type, 'heartbeat')
+    // The strict read sees the committed pause, not this instance's stale cache.
+    assert.equal(heartbeatEnvelope.payload?.state?.isPlaying, false)
+    assert.equal(heartbeatEnvelope.payload?.state?.serverTimestampMs, 13_000)
+    // Any persist the heartbeat performs must carry the fresh paused state.
+    if (setCalls > setCallsAfterConnect) {
+      assert.equal(lastSetIsPlaying, false)
+    }
+
+    recorder.emit('close')
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  } finally {
+    globalThis.setInterval = originalSetInterval
+    globalThis.clearInterval = originalClearInterval
+    Date.now = originalDateNow
+  }
+})
+
+void test('heartbeat persisting a telemetry-only change does not overwrite stored playback state', { concurrency: false }, async () => {
+  const originalSetInterval = globalThis.setInterval
+  const originalClearInterval = globalThis.clearInterval
+  const originalDateNow = Date.now
+  const heartbeatState: { callback: (() => void) | null } = { callback: null }
+  const timerToken = { id: 'heartbeat-token-telemetry-only' }
+  let nowMs = 10_000
+
+  globalThis.setInterval = (((callback: TimerHandler) => {
+    heartbeatState.callback = callback as () => void
+    return timerToken as unknown as ReturnType<typeof setInterval>
+  }) as unknown) as typeof setInterval
+  globalThis.clearInterval = (((_timer: ReturnType<typeof setInterval> | undefined) => {
+    // no-op for this test
+  }) as unknown) as typeof clearInterval
+  Date.now = () => nowMs
+
+  try {
+    const app = createMockApp()
+    const ws = createMockWs()
+    const session = createVideoSyncSession('s1')
+    ;(session.data as {
+      state: {
+        provider: 'youtube'
+        playerHost: 'youtube-nocookie'
+        videoId: string
+        startSec: number
+        stopSec: number | null
+        positionSec: number
+        isPlaying: boolean
+        playbackRate: 1
+        updatedBy: 'instructor' | 'system'
+        serverTimestampMs: number
+      }
+    }).state = {
+      provider: 'youtube',
+      playerHost: 'youtube-nocookie',
+      videoId: 'dQw4w9WgXcQ',
+      startSec: 0,
+      stopSec: null,
+      positionSec: 5,
+      isPlaying: true,
+      playbackRate: 1,
+      updatedBy: 'instructor',
+      serverTimestampMs: nowMs,
+    }
+    const storeState = createSessionStore({ s1: session }, { valkeyStore: createMockVideoSyncValkeyStore() })
+    // Force a telemetry drift on every heartbeat read so `shouldPersistHeartbeatTelemetry`
+    // is true while playback state is unchanged.
+    const sessions = {
+      ...storeState.sessions,
+      async get(id: string) {
+        const loaded = await storeState.sessions.get(id)
+        if (loaded) {
+          ;(loaded.data as { telemetry: { connections: { activeCount: number } } })
+            .telemetry.connections.activeCount = 99
+        }
+        return loaded
+      },
+    }
+
+    setupVideoSyncRoutes(app, sessions as unknown as Parameters<typeof setupVideoSyncRoutes>[1], ws as unknown as WsRouter)
+
+    const handler = ws.registered['/ws/video-sync']
+    assert.equal(typeof handler, 'function')
+
+    const recorder = createMockSocket()
+    handler?.(recorder.socket, new URLSearchParams({ sessionId: 's1', role: 'student' }))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    const storedAfterConnect = (storeState.store.s1?.data as {
+      state: { serverTimestampMs: number; isPlaying: boolean }
+    }).state
+    const baselineServerTimestampMs = storedAfterConnect.serverTimestampMs
+
+    nowMs += 3_000
+    const runHeartbeat = heartbeatState.callback
+    if (runHeartbeat == null) {
+      throw new Error('Expected heartbeat callback to be registered')
+    }
+    runHeartbeat()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    const persistedState = (storeState.store.s1?.data as {
+      state: { serverTimestampMs: number; isPlaying: boolean }
+      telemetry: { connections: { activeCount: number } }
+    })
+    // Playback state is untouched - not re-stamped with the heartbeat's `now`.
+    assert.equal(persistedState.state.serverTimestampMs, baselineServerTimestampMs)
+    assert.equal(persistedState.state.isPlaying, true)
+    // The telemetry change was still persisted.
+    assert.equal(persistedState.telemetry.connections.activeCount, 1)
+    // Clients still receive the forward-projected position frame.
+    const heartbeatEnvelope = storeState.published.at(-1)?.message as {
+      type?: string
+      payload?: { state?: { serverTimestampMs?: number; isPlaying?: boolean } }
+    }
+    assert.equal(heartbeatEnvelope.type, 'heartbeat')
+    assert.equal(heartbeatEnvelope.payload?.state?.serverTimestampMs, nowMs)
+    assert.equal(heartbeatEnvelope.payload?.state?.isPlaying, true)
+
+    recorder.emit('close')
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  } finally {
+    globalThis.setInterval = originalSetInterval
+    globalThis.clearInterval = originalClearInterval
+    Date.now = originalDateNow
+  }
+})
+
+for (const scenario of [
+  { label: 'a newer', replayServerTimestampMs: 21_000, expectedBroadcastPositionSec: 1 },
+  { label: 'a same-timestamp', replayServerTimestampMs: 20_000, expectedBroadcastPositionSec: 2 },
+] as const) {
+void test(`heartbeat stop-reached persist re-reads and does not roll back ${scenario.label} state from another instance`, { concurrency: false }, async () => {
+  const originalSetInterval = globalThis.setInterval
+  const originalClearInterval = globalThis.clearInterval
+  const originalDateNow = Date.now
+  const heartbeatState: { callback: (() => void) | null } = { callback: null }
+  const timerToken = { id: 'heartbeat-token-cas' }
+  let nowMs = 20_000
+
+  globalThis.setInterval = (((callback: TimerHandler) => {
+    heartbeatState.callback = callback as () => void
+    return timerToken as unknown as ReturnType<typeof setInterval>
+  }) as unknown) as typeof setInterval
+  globalThis.clearInterval = (((_timer: ReturnType<typeof setInterval> | undefined) => {
+    // no-op for this test
+  }) as unknown) as typeof clearInterval
+  Date.now = () => nowMs
+
+  try {
+    const app = createMockApp()
+    const ws = createMockWs()
+
+    const nearStop = {
+      provider: 'youtube' as const,
+      playerHost: 'youtube-nocookie' as const,
+      videoId: 'dQw4w9WgXcQ',
+      startSec: 0,
+      stopSec: 6,
+      positionSec: 5,
+      isPlaying: true,
+      playbackRate: 1 as const,
+      updatedBy: 'instructor' as const,
+      serverTimestampMs: 20_000,
+    }
+    // The heartbeat's first strict read sees playback about to reach `stopSec`.
+    const snapshotSession = createVideoSyncSession('s1')
+    ;(snapshotSession.data as { state: typeof nearStop }).state = { ...nearStop }
+    // By the time the heartbeat is ready to persist the stop-reached pause,
+    // another instance has already committed a fresh re-play (newer timestamp).
+    const replaySession = cloneSessionRecord(snapshotSession)
+    ;(replaySession.data as { state: typeof nearStop }).state = {
+      ...nearStop,
+      positionSec: 0,
+      isPlaying: true,
+      serverTimestampMs: scenario.replayServerTimestampMs,
+    }
+    // Another instance also incremented an accumulating telemetry counter in the
+    // same window; the heartbeat persist must not roll it back.
+    ;(replaySession.data as { telemetry: { autoplay: { blockedCount: number } } })
+      .telemetry.autoplay.blockedCount = 4
+
+    const published: Array<{ channel: string; message: Record<string, unknown> }> = []
+    const setStates: Array<{ isPlaying: boolean; serverTimestampMs: number; blockedCount: number }> = []
+    let strictReads = 0
+    const sessions = {
+      async get() {
+        return cloneSessionRecord(replaySession)
+      },
+      async getStrict() {
+        strictReads += 1
+        return cloneSessionRecord(strictReads === 1 ? snapshotSession : replaySession)
+      },
+      async set(_id: string, session: SessionRecord) {
+        const data = session.data as {
+          state: { isPlaying: boolean; serverTimestampMs: number }
+          telemetry: { autoplay: { blockedCount: number } }
+        }
+        setStates.push({
+          isPlaying: data.state.isPlaying,
+          serverTimestampMs: data.state.serverTimestampMs,
+          blockedCount: data.telemetry.autoplay.blockedCount,
+        })
+      },
+      valkeyStore: createMockVideoSyncValkeyStore(),
+      async publishBroadcast(channel: string, message: Record<string, unknown>) {
+        published.push({ channel, message })
+      },
+      subscribeToBroadcast() {},
+    }
+
+    setupVideoSyncRoutes(app, sessions as unknown as Parameters<typeof setupVideoSyncRoutes>[1], ws as unknown as WsRouter)
+
+    const handler = ws.registered['/ws/video-sync']
+    assert.equal(typeof handler, 'function')
+
+    const recorder = createMockSocket()
+    handler?.(recorder.socket, new URLSearchParams({ sessionId: 's1', role: 'student' }))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    nowMs += 2_000
+    const runHeartbeat = heartbeatState.callback
+    if (runHeartbeat == null) {
+      throw new Error('Expected heartbeat callback to be registered')
+    }
+    runHeartbeat()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    // Having seen the concurrent re-play on the strict re-read, the heartbeat
+    // broadcasts that state projected forward - not its own stale stop frame,
+    // which (re-stamped to now) would have paused clients despite the re-play.
+    const heartbeatEnvelope = published.at(-1)?.message as {
+      type?: string
+      payload?: { state?: { isPlaying?: boolean; serverTimestampMs?: number; positionSec?: number } }
+    }
+    assert.equal(heartbeatEnvelope.type, 'heartbeat')
+    assert.equal(heartbeatEnvelope.payload?.state?.isPlaying, true)
+    assert.equal(heartbeatEnvelope.payload?.state?.serverTimestampMs, 22_000)
+    assert.equal(heartbeatEnvelope.payload?.state?.positionSec, scenario.expectedBroadcastPositionSec)
+    // The broadcast telemetry is the merged latest, so the concurrently
+    // committed autoplay.blockedCount is not rolled back in the manager UI
+    // until the next tick.
+    const heartbeatTelemetryPayload = published.at(-1)?.message as {
+      payload?: { telemetry?: { autoplay?: { blockedCount?: number } } }
+    }
+    assert.equal(heartbeatTelemetryPayload.payload?.telemetry?.autoplay?.blockedCount, 4)
+    // ...and it is never persisted over the re-play.
+    assert.ok(strictReads >= 2, 'expected a strict re-read before the persist')
+    const lastSetState = setStates.at(-1)
+    assert.equal(lastSetState?.isPlaying, true)
+    assert.equal(lastSetState?.serverTimestampMs, scenario.replayServerTimestampMs)
+    // The heartbeat only writes its own two counters; the concurrent
+    // autoplay.blockedCount increment survives.
+    assert.equal(lastSetState?.blockedCount, 4)
+
+    recorder.emit('close')
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  } finally {
+    globalThis.setInterval = originalSetInterval
+    globalThis.clearInterval = originalClearInterval
+    Date.now = originalDateNow
+  }
+})
+}
+
 void test('event route tracks current unsynced student count', async () => {
   const app = createMockApp()
   const ws = createMockWs() as unknown as WsRouter
@@ -2954,6 +4591,64 @@ void test('event route tracks current unsynced student count', async () => {
   assert.equal(correctionResponse.statusCode, 200)
   const correctionTelemetry = (correctionResponse.body as { telemetry: { sync: { unsyncedStudents: number } } }).telemetry
   assert.equal(correctionTelemetry.sync.unsyncedStudents, 0)
+})
+
+void test('event route reads authoritative state and never persists a stale cross-instance isPlaying:true', async () => {
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  const committed = createVideoSyncSession('s1')
+  ;(committed.data as { state: { videoId: string; isPlaying: boolean; updatedBy: string; serverTimestampMs: number } }).state = {
+    ...(committed.data as { state: Record<string, unknown> }).state,
+    videoId: 'vid123456789',
+    isPlaying: false,
+    updatedBy: 'instructor',
+    serverTimestampMs: 50_000,
+  } as never
+  const storeState = createSessionStore({ s1: committed })
+
+  let strictGetCalls = 0
+  const setStates: Array<{ isPlaying: boolean }> = []
+  const sessions = {
+    ...storeState.sessions,
+    async get(id: string) {
+      // A peer instance still holds the pre-pause frame in its 30s cache.
+      const snapshot = await storeState.sessions.get(id)
+      if (snapshot) {
+        ;(snapshot.data as { state: { isPlaying: boolean; serverTimestampMs: number } }).state = {
+          ...(snapshot.data as { state: Record<string, unknown> }).state,
+          isPlaying: true,
+          serverTimestampMs: 1_000,
+        } as never
+      }
+      return snapshot
+    },
+    async getStrict(id: string) {
+      strictGetCalls += 1
+      return storeState.sessions.get(id)
+    },
+    async set(id: string, session: SessionRecord) {
+      setStates.push({
+        isPlaying: Boolean((session.data as { state?: { isPlaying?: boolean } }).state?.isPlaying),
+      })
+      return storeState.sessions.set(id, session)
+    },
+  }
+
+  setupVideoSyncRoutes(app, sessions, ws)
+  const handler = app.handlers.post['/api/video-sync/:sessionId/event']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.({ params: { sessionId: 's1' }, body: { type: 'autoplay-blocked' } }, res)
+
+  assert.equal(res.statusCode, 200)
+  assert.ok(strictGetCalls >= 1)
+  assert.equal((res.body as { telemetry: { autoplay: { blockedCount: number } } }).telemetry.autoplay.blockedCount, 1)
+  assert.ok(
+    setStates.every((entry) => entry.isPlaying === false),
+    `expected no persisted isPlaying:true, got ${JSON.stringify(setStates)}`,
+  )
+  assert.equal((storeState.store.s1?.data as { state?: { isPlaying?: boolean } }).state?.isPlaying, false)
 })
 
 void test('event route stores lastDriftSec as a non-negative magnitude', async () => {
@@ -3055,6 +4750,102 @@ void test('event and session routes share unsynced student telemetry across simu
   assert.equal((correctionResponse.body as { telemetry: { sync: { unsyncedStudents: number } } }).telemetry.sync.unsyncedStudents, 0)
 })
 
+void test('legacy session unsynced markers survive the scope move triggered by that session\'s own first persisting write', { concurrency: false }, async () => {
+  console.info('[TEST] video-sync unsynced scope: a legacy session (no persisted created) records an unsync marker under the :0 scope; its own event-route write is the first to persist created, which must fold the marker into the incarnation scope rather than dropping it')
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  // A dedicated id: `migratedLegacyUnsyncedScopes` is module-level, so a shared
+  // id could already be marked migrated by another test.
+  const sid = 'legacy-unsync-scope-move'
+  const legacySession = createVideoSyncSession(sid)
+  // A pre-migration record: no persisted identity, so every scope derives as `<id>:0`.
+  delete (legacySession as { created?: number }).created
+  const storeState = createSessionStore({ [sid]: legacySession }, { valkeyStore: createMockVideoSyncValkeyStore() })
+  // Model `toSessionRecord`'s real behavior: a legacy record is given a
+  // synthetic `created` by the *write* that first persists it (the read that
+  // fed this same request's `expectedCreated: null` synthesizes a value too,
+  // but nothing observable changes until a write actually lands).
+  const sessions = {
+    ...storeState.sessions,
+    async set(id: string, session: SessionRecord) {
+      if (typeof (session as { created?: unknown }).created !== 'number') {
+        (session as { created?: number }).created = 5_000_000
+      }
+      return storeState.sessions.set(id, session)
+    },
+  }
+  setupVideoSyncRoutes(app, sessions, ws)
+
+  const eventHandler = app.handlers.post['/api/video-sync/:sessionId/event']
+  assert.equal(typeof eventHandler, 'function')
+
+  // The marker lands under `<id>:0`; this same request's own atomic write
+  // (inside the /event handler) is the one that persists `created` for the
+  // first time, so `updateVideoSyncSessionAtomic` folds `<id>:0` into
+  // `<id>:5000000` before this response is built.
+  const firstUnsync = createResponse()
+  await eventHandler?.({ params: { sessionId: sid }, body: { type: 'unsync', studentId: 'student-a', driftSec: 1 } }, firstUnsync)
+  assert.equal(firstUnsync.statusCode, 200)
+  assert.equal((firstUnsync.body as { telemetry: { sync: { unsyncedStudents: number } } }).telemetry.sync.unsyncedStudents, 1)
+  assert.equal(
+    typeof (storeState.store[sid] as { created?: unknown }).created,
+    'number',
+    'the event route\'s own write persisted the synthesized created',
+  )
+
+  // A later, separate request: the session now reads as identified
+  // (`created: 5_000_000`), so this request's own scope is `<id>:5000000`
+  // directly - the assertion below only passes if student-a's marker
+  // actually migrated there rather than being stranded under `<id>:0`.
+  const secondUnsync = createResponse()
+  await eventHandler?.({ params: { sessionId: sid }, body: { type: 'unsync', studentId: 'student-b', driftSec: 1 } }, secondUnsync)
+  assert.equal(secondUnsync.statusCode, 200)
+  assert.equal(
+    (secondUnsync.body as { telemetry: { sync: { unsyncedStudents: number } } }).telemetry.sync.unsyncedStudents,
+    2,
+    'student-a (migrated by the first request\'s own write) + student-b',
+  )
+})
+
+void test('a fresh session reusing a legacy id does not inherit that id\'s stale :0 unsynced markers', { concurrency: false }, async () => {
+  console.info('[TEST] video-sync unsynced scope: a legacy incarnation records an unsync marker under <id>:0 and ends without ever persisting created; a brand-new incarnation then reuses the same session id and must not inherit that stale marker just because a later read happens to see it')
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  const sid = 'legacy-id-reuse-no-leak'
+  const legacySession = createVideoSyncSession(sid)
+  delete (legacySession as { created?: number }).created
+  const storeState = createSessionStore({ [sid]: legacySession }, { valkeyStore: createMockVideoSyncValkeyStore() })
+  setupVideoSyncRoutes(app, storeState.sessions, ws)
+
+  const eventHandler = app.handlers.post['/api/video-sync/:sessionId/event']
+  const sessionHandler = app.handlers.get['/api/video-sync/:sessionId/session']
+  assert.equal(typeof eventHandler, 'function')
+  assert.equal(typeof sessionHandler, 'function')
+
+  // The legacy incarnation records a marker under `<id>:0`. This store never
+  // synthesizes `created` on persist, so the incarnation ends (is replaced
+  // below) without ever getting one - the marker is left stranded under `:0`.
+  const legacyUnsync = createResponse()
+  await eventHandler?.({ params: { sessionId: sid }, body: { type: 'unsync', studentId: 'stale-student', driftSec: 1 } }, legacyUnsync)
+  assert.equal(legacyUnsync.statusCode, 200)
+  assert.equal((legacyUnsync.body as { telemetry: { sync: { unsyncedStudents: number } } }).telemetry.sync.unsyncedStudents, 1)
+  assert.equal(typeof (storeState.store[sid] as { created?: unknown }).created, 'undefined')
+
+  // A brand-new, unrelated incarnation reuses the same id (e.g. the old
+  // session ended and the instructor started a fresh one) - it has a real
+  // `created` from the moment it exists, so no read of it is ever legacy.
+  storeState.store[sid] = createVideoSyncSession(sid)
+
+  const freshRead = createResponse()
+  await sessionHandler?.({ params: { sessionId: sid } }, freshRead)
+  assert.equal(freshRead.statusCode, 200)
+  assert.equal(
+    (freshRead.body as { data?: { telemetry?: { sync?: { unsyncedStudents?: number } } } }).data?.telemetry?.sync?.unsyncedStudents,
+    0,
+    'the fresh incarnation must not inherit the old incarnation\'s stale :0 marker',
+  )
+})
+
 void test('event route reuses Valkey unsynced count returned by mutation scripts', async () => {
   const app = createMockApp()
   const ws = createMockWs() as unknown as WsRouter
@@ -3151,6 +4942,82 @@ void test('event route prunes stale unsynced students without a follow-up heartb
       }
     }
     assert.equal(persisted.telemetry?.sync?.unsyncedStudents, 0)
+  } finally {
+    Date.now = originalDateNow
+    globalThis.setTimeout = originalSetTimeout
+    globalThis.clearTimeout = originalClearTimeout
+  }
+})
+
+void test('unsynced-student prune abandons its telemetry write when the session id is recreated mid-flush', { concurrency: false }, async () => {
+  console.info('[TEST] video-sync unsynced-student prune: the id is recreated as a fresh incarnation during the atomic telemetry write; the stale prune count must not land on - or be rescheduled against - the replacement')
+  const originalDateNow = Date.now
+  const originalSetTimeout = globalThis.setTimeout
+  const originalClearTimeout = globalThis.clearTimeout
+  const timerState: { callback: (() => void) | null } = { callback: null }
+  const timerToken = { id: 'unsync-prune-incarnation-token' }
+  let nowMs = 1_000
+  let armed = false
+  let swapped = false
+
+  Date.now = () => nowMs
+  globalThis.setTimeout = (((callback: TimerHandler) => {
+    timerState.callback = callback as () => void
+    return timerToken as unknown as ReturnType<typeof setTimeout>
+  }) as unknown) as typeof setTimeout
+  globalThis.clearTimeout = (((_timer: ReturnType<typeof setTimeout> | undefined) => {
+    // no-op for this test
+  }) as unknown) as typeof clearTimeout
+
+  try {
+    const app = createMockApp()
+    const ws = createMockWs() as unknown as WsRouter
+    // No `valkeyStore`: the in-process prune timer only runs in that deployment
+    // shape (with Valkey, the key TTL handles expiry).
+    const storeState = createSessionStore(
+      { s1: createVideoSyncSession('s1') },
+      {
+        atomic: true,
+        onAtomicAttempt: (attempt, store) => {
+          if (!armed || attempt !== 0 || swapped) return
+          const record = store.s1
+          if (!record) return
+          swapped = true
+          const replacement = createVideoSyncSession('s1')
+          replacement.created = record.created + 10_000
+          replacement.mutationRevision = 5
+          ;(replacement.data as { telemetry: { sync: { unsyncedStudents: number } } })
+            .telemetry.sync.unsyncedStudents = 7
+          store.s1 = replacement
+        },
+      },
+    )
+
+    setupVideoSyncRoutes(app, storeState.sessions, ws)
+
+    const handler = app.handlers.post['/api/video-sync/:sessionId/event']
+    assert.equal(typeof handler, 'function')
+
+    const unsyncResponse = createResponse()
+    await handler?.(
+      {
+        params: { sessionId: 's1' },
+        body: { type: 'unsync', studentId: 'student-a', driftSec: 1.2 },
+      },
+      unsyncResponse,
+    )
+    assert.equal(unsyncResponse.statusCode, 200)
+    assert.equal(typeof timerState.callback, 'function')
+
+    armed = true
+    nowMs += 20_001
+    timerState.callback?.()
+    await new Promise((resolve) => originalSetTimeout(resolve, 0))
+
+    assert.equal(swapped, true, 'the id-reuse hook must have fired during the prune write')
+    const replacement = storeState.store.s1?.data as { telemetry: { sync: { unsyncedStudents: number } } }
+    assert.equal(replacement.telemetry.sync.unsyncedStudents, 7, 'the abandoned prune did not overwrite the replacement session count')
+    assert.equal(storeState.store.s1?.mutationRevision, 5, 'the abandoned prune write did not bump the replacement revision')
   } finally {
     Date.now = originalDateNow
     globalThis.setTimeout = originalSetTimeout

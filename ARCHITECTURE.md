@@ -92,6 +92,44 @@ For live MobCode sessions, the instructor workspace remains `groups.default`. Ne
 - **Session termination**: Teacher can end any session, broadcasting to all connected students
 - **WebSocket notifications**: Students automatically redirected when session ends
 
+### Atomic Session Mutation
+
+`SessionStore.updateAtomic(...)` is the shared optimistic-concurrency boundary for
+read/modify/write operations that must survive horizontal scaling. In-memory
+sessions replace a cloned snapshot under the current mutation revision; Valkey
+sessions use an atomic compare-and-set script and bounded retries. The compare
+also pins the session **incarnation** (`created`): a same-id delete+recreate
+resets `mutationRevision` to `0`, so the revision check alone has an ABA hole -
+the CAS additionally refuses to commit when the stored record's `created` no
+longer matches the one the attempt read, and `updateAtomic` re-reads instead of
+overwriting the replacement. Activity code must use this primitive when a write
+based on a session snapshot could otherwise overwrite unrelated state committed
+by another server instance.
+
+When a caller supplies the incarnation it read, compare-and-set requires the
+stored record to contain that exact `created` value. A missing stored identity
+fails closed like a mismatch; revision-only compatibility applies only when the
+caller itself read a legacy record without an incarnation.
+
+The in-process read cache is guarded the same way, without comparing node-local
+wall clocks. `SessionCache` stamps each id's write generation from one cache-wide monotonic
+counter, advanced on every set / invalidate / eviction / expiry / clear; an async fill
+(cache-miss load, strict read, CAS result, finalizer, keepalive revalidation)
+claims a fresh per-id value before its await (so a later-started fill supersedes it)
+and only publishes when it is unchanged,
+or when a same-incarnation `mutationRevision` is strictly newer than the cached
+revision. Equal revisions cannot prove freshness because legacy/plain whole-record
+writes retain their revision. The per-id map is prunable at any time - a missing entry reads back as the
+current counter, always ahead of any captured token. A result that raced
+behind a newer commit, a stalled read of an incarnation that was since recreated,
+or a strict read that completes after a `delete` therefore cannot roll `get()`
+back - or resurrect a deleted session - for the cache TTL.
+
+Video Sync additionally carries a monotonic `playbackRevision` in its public
+playback state. Clients order state frames by that revision before considering
+wall-clock timestamps, so server clock skew and reordered pub/sub delivery cannot
+restore an older instructor command.
+
 ## Activity Registration System
 
 ### Activity Containment Boundary

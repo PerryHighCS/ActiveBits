@@ -66,6 +66,8 @@ void test('parseVideoSyncStateMessagePayload validates nested state and telemetr
         isPlaying: true,
         playbackRate: 1,
         updatedBy: 'instructor',
+        controllerId: null,
+        playbackRevision: 0,
         serverTimestampMs: 1234,
       },
       telemetry: {
@@ -90,6 +92,8 @@ void test('parseVideoSyncStateMessagePayload validates nested state and telemetr
         isPlaying: true,
         playbackRate: 1,
         updatedBy: 'instructor',
+        controllerId: null,
+        playbackRevision: 0,
         serverTimestampMs: 1234,
       },
       telemetry: {
@@ -116,6 +120,28 @@ void test('parseVideoSyncStateMessagePayload validates nested state and telemetr
     }),
     null,
   )
+})
+
+void test('parseVideoSyncStateMessagePayload coerces an over-long controllerId to null', () => {
+  const base = {
+    provider: 'youtube',
+    playerHost: 'youtube-nocookie',
+    videoId: 'abcdefghijk',
+    startSec: 0,
+    stopSec: null,
+    positionSec: 0,
+    isPlaying: false,
+    playbackRate: 1,
+    updatedBy: 'instructor',
+    playbackRevision: 3,
+    serverTimestampMs: 1234,
+  }
+
+  const oversized = parseVideoSyncStateMessagePayload({ state: { ...base, controllerId: 'x'.repeat(129) } })
+  assert.equal(oversized?.state?.controllerId, null, 'a >128-char controllerId is dropped, not kept in state')
+
+  const atLimit = parseVideoSyncStateMessagePayload({ state: { ...base, controllerId: 'y'.repeat(128) } })
+  assert.equal(atLimit?.state?.controllerId, 'y'.repeat(128), 'a 128-char controllerId is still accepted')
 })
 
 void test('parseVideoSyncStateMessagePayload normalizes legacy manager updates to instructor', () => {
@@ -145,6 +171,8 @@ void test('parseVideoSyncStateMessagePayload normalizes legacy manager updates t
         isPlaying: true,
         playbackRate: 1,
         updatedBy: 'instructor',
+        controllerId: null,
+        playbackRevision: 0,
         serverTimestampMs: 1234,
       },
       telemetry: undefined,

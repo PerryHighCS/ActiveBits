@@ -21,12 +21,13 @@ import {
   createSession,
   EMBEDDED_CHILD_SESSION_PREFIX,
   generateHexId,
+  getSessionCreatedIdentity,
   type SessionRecord,
   type SessionStore,
 } from 'activebits-server/core/sessions.js'
 import { storeSessionEntryParticipant } from 'activebits-server/core/sessionEntryParticipants.js'
 import { revokeSessionEntryParticipants } from 'activebits-server/core/sessionEntryParticipants.js'
-import { issueActivityCapability, writeActivityCapabilityCookie } from 'activebits-server/core/activityCapabilities.js'
+import { issueActivityCapability, issueManagerCapabilityAtomically, writeActivityCapabilityCookie } from 'activebits-server/core/activityCapabilities.js'
 import { randomBytes, timingSafeEqual } from 'node:crypto'
 import type { ActiveBitsWebSocket, WsRouter } from '../../../types/websocket.js'
 import {
@@ -2228,22 +2229,44 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
         return
       }
 
-      if (!await consumeEntryToken) {
+      // The record the atomic consume returns is the exact incarnation whose
+      // one-time entry token was just validated and removed. Use it directly
+      // rather than a re-read: a re-read could observe a delete+recreate in the
+      // gap and authorize a capability for a session whose token was never
+      // presented. It is also already post-consumption, so persisting the
+      // capability from it cannot resurrect the bootstrap token.
+      const consumedSession = await consumeEntryToken
+      if (!consumedSession) {
         res.status(403).json({ error: 'invalid embedded manager credentials' })
         return
       }
-
-      // Re-read after atomic consumption so persisting the capability cannot
-      // resurrect the one-time bootstrap token from the pre-consumption record.
-      const consumedSession = await getSessionStrict(sessionId)
-      if (!consumedSession) {
-        res.status(404).json({ error: 'embedded activity session not found' })
-        return
-      }
       try {
-        const capability = issueActivityCapability(consumedSession, 'manager')
-        await sessions.set(sessionId, consumedSession)
-        writeActivityCapabilityCookie({ cookie: res.cookie.bind(res) }, sessionId, 'manager', capability.token)
+        let capabilityToken: string
+        // Bind to the exact session incarnation whose one-time entry token was
+        // just consumed. If the id was deleted/recreated between the strict read
+        // above and the compare-and-set, the shared helper aborts the CAS
+        // (sentinel throw, not a no-op draft commit) and reports the mismatch.
+        const capabilityOutcome = await issueManagerCapabilityAtomically(sessions, sessionId, {
+          expectedType: consumedSession.type ?? '',
+          expectedCreated: getSessionCreatedIdentity(consumedSession),
+        })
+        if (capabilityOutcome.status === 'issued') {
+          capabilityToken = capabilityOutcome.token
+        } else if (capabilityOutcome.status === 'no-atomic-store') {
+          capabilityToken = issueActivityCapability(consumedSession, 'manager').token
+          await sessions.set(sessionId, consumedSession)
+        } else if (capabilityOutcome.status === 'incarnation-mismatch') {
+          console.error(JSON.stringify({
+            activity: 'syncdeck',
+            event: 'embedded-manager-capability-incarnation-mismatch',
+            sessionId,
+          }))
+          res.status(404).json({ error: 'embedded activity session not found' })
+          return
+        } else {
+          throw new Error('Atomic manager capability persistence failed')
+        }
+        writeActivityCapabilityCookie({ cookie: res.cookie.bind(res) }, sessionId, 'manager', capabilityToken)
       } catch (error) {
         console.error(JSON.stringify({
           activity: 'syncdeck',

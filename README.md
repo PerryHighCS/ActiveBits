@@ -17,6 +17,8 @@ SyncDeck can embed supported activities inside a presentation; embedded instruct
 SyncDeck also preserves a temporary-session instructor's control after a reload with a bounded, browser-session httpOnly recovery cookie; instructor passcodes are never stored in browser storage.
 Waiting-room display names are remembered for one year in a same-site browser cookie so students can rejoin on later days without retyping them; this cookie contains only the entered name.
 
+Video Sync instructor playback uses the activity-owned Play, Pause, and Seek controls beneath the preview. The embedded YouTube player is a synchronized preview rather than a command source, which keeps additional instructor views from publishing buffering or autoplay state as class commands.
+
 ## Documentation
 
 Start here:

@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto'
+import type { Session } from '../../types/session.js'
 
 export type ActivityPrincipalKind = 'manager' | 'participant'
 
@@ -86,6 +87,90 @@ export function issueActivityCapability(
     delete container.activityCapabilities[entry.id]
   }
   return { id, token }
+}
+
+/**
+ * Outcome of {@link issueManagerCapabilityAtomically}. `token` is set only for
+ * `issued`. A caller maps `incarnation-mismatch` / `not-committed` to a 404 (a
+ * reused session id or a session that ended mid-request) and, for a store with
+ * no `updateAtomic`, handles `no-atomic-store` with its own read+set fallback.
+ */
+export type ManagerCapabilityAtomicOutcome =
+  | { status: 'issued'; token: string }
+  | { status: 'incarnation-mismatch' | 'not-committed' | 'no-atomic-store'; token: null }
+
+class ManagerCapabilityIncarnationMismatchError extends Error {
+  constructor() {
+    super('session incarnation changed during the atomic manager-capability write')
+    this.name = 'ManagerCapabilityIncarnationMismatchError'
+  }
+}
+
+function isAuthorizedCapabilityIncarnation(
+  record: unknown,
+  expectedType: string,
+  expectedCreated: number | null,
+): record is Session {
+  if (!isRecord(record) || record.type !== expectedType) {
+    return false
+  }
+  return expectedCreated == null || record.created === expectedCreated
+}
+
+/** Minimal session store shape that can apply a compare-and-set mutation. */
+export interface AtomicManagerCapabilityStore {
+  updateAtomic?(id: string, mutate: (session: Session) => Session): Promise<Session | null>
+}
+
+/**
+ * Issue a manager capability into one session through a single compare-and-set,
+ * bound to the incarnation the request authorized (`expectedType`, and
+ * `expectedCreated` when the authorizing snapshot carried a `created`).
+ *
+ * On a type/incarnation mismatch the CAS is *aborted* (a sentinel is thrown from
+ * the callback, not the draft returned) so the replacement session is never
+ * committed a no-op revision bump / TTL refresh. The token is reset at the top
+ * of every callback invocation because `updateAtomic` re-runs it on a CAS retry.
+ *
+ * Shared by `persistentSessionRoutes` (`teacher-authenticate`,
+ * `persistent-manager-capability`) and SyncDeck `embedded-manager-capability` so
+ * the guard cannot drift between routes.
+ */
+export async function issueManagerCapabilityAtomically(
+  sessions: AtomicManagerCapabilityStore,
+  sessionId: string,
+  incarnation: { expectedType: string; expectedCreated: number | null },
+): Promise<ManagerCapabilityAtomicOutcome> {
+  if (typeof sessions.updateAtomic !== 'function') {
+    return { status: 'no-atomic-store', token: null }
+  }
+
+  const { expectedType, expectedCreated } = incarnation
+  let token: string | null = null
+  let updated: Session | null
+  try {
+    updated = await sessions.updateAtomic(sessionId, (draft) => {
+      token = null
+      if (!isAuthorizedCapabilityIncarnation(draft, expectedType, expectedCreated)) {
+        throw new ManagerCapabilityIncarnationMismatchError()
+      }
+      token = issueActivityCapability(draft as ActivityCapabilitySessionLike, 'manager').token
+      return draft
+    })
+  } catch (error) {
+    if (error instanceof ManagerCapabilityIncarnationMismatchError) {
+      return { status: 'incarnation-mismatch', token: null }
+    }
+    throw error
+  }
+
+  if (updated == null || token == null) {
+    return { status: 'not-committed', token: null }
+  }
+  if (!isAuthorizedCapabilityIncarnation(updated, expectedType, expectedCreated)) {
+    return { status: 'incarnation-mismatch', token: null }
+  }
+  return { status: 'issued', token }
 }
 
 /** Delivers an already-persisted opaque capability as an httpOnly cookie. */

@@ -6,14 +6,23 @@ import {
     buildManagerWsUrl,
     clearManagerPlayerLoadError,
     getManagerPlaybackIntentForStateChange,
+    isExplicitPlaybackControlDisabled,
     parseManagerStopTimeInput,
     DEFAULT_MANAGER_ACCESS_RETRY_AFTER_MS,
     isManagerAuthorizationClose,
+    isNaturalPlaybackCompletion,
+    shouldEmitNaturalEndPause,
+    shouldSendNaturalEndPause,
     isRetryableManagerAccessStatus,
     parseManagerAccessRetryAfterMs,
     readBootstrapSourceUrl,
     readEmbeddedBootstrapSourceUrl,
+    nextManagerPlaybackFlushRetry,
     readRecoveredPersistentSourceUrl,
+    resolveExplicitPlaybackPositionSec,
+    resolveManagerPlaybackFlushOutcome,
+    resolveManagerSeekRequest,
+    isRetryablePlaybackCommandFailure,
     sanitizeManagerApiErrorMessage,
     shouldApplyManagerStateUpdate,
     shouldAutoStartBootstrapSource,
@@ -23,6 +32,8 @@ import {
     shouldRenderManagerHeaderForSession,
     shouldRequestEmbeddedBootstrapRefreshOnDenial,
     shouldSendManagerPlaybackPositionUpdate,
+    resolveNaturalEndPauseCommandId,
+    resolveNaturalEndPauseCompletion,
 } from './VideoSyncManager.js'
 
 const BASE_STATE: VideoSyncState = {
@@ -85,6 +96,12 @@ void test('shouldRenderManagerHeaderForSession hides the manager header for embe
   assert.equal(shouldRenderManagerHeaderForSession('session-123'), true)
   assert.equal(shouldRenderManagerHeaderForSession('CHILD:parent:abcde:video-sync'), false)
   assert.equal(shouldRenderManagerHeaderForSession(null), true)
+})
+
+void test('explicit playback controls remain enabled during a pending authoritative state change', () => {
+  assert.equal(isExplicitPlaybackControlDisabled({ hasManagerAccess: true, videoId: 'configured-video' }), false)
+  assert.equal(isExplicitPlaybackControlDisabled({ hasManagerAccess: false, videoId: 'configured-video' }), true)
+  assert.equal(isExplicitPlaybackControlDisabled({ hasManagerAccess: true, videoId: '' }), true)
 })
 
 void test('isRetryableManagerAccessStatus retries 5xx and network-shaped failures but not definitive denials', () => {
@@ -409,6 +426,35 @@ void test('shouldApplyManagerStateUpdate ignores empty late updates after a vide
   )
 })
 
+void test('nextManagerPlaybackFlushRetry retries a failed send to a bound then gives up', () => {
+  assert.deepEqual(nextManagerPlaybackFlushRetry(0), { retry: true, nextRetryCount: 1 })
+  assert.deepEqual(nextManagerPlaybackFlushRetry(2), { retry: true, nextRetryCount: 3 })
+  assert.deepEqual(nextManagerPlaybackFlushRetry(3), { retry: false, nextRetryCount: 0 })
+})
+
+void test('resolveManagerPlaybackFlushOutcome only retries a confirmed auth failure', () => {
+  // Success: nothing to do, counter reset.
+  assert.deepEqual(
+    resolveManagerPlaybackFlushOutcome({ result: { ok: true }, currentRetryCount: 2 }),
+    { action: 'done', nextRetryCount: 0 },
+  )
+  // Confirmed 401/403 within budget: retain and retry.
+  assert.deepEqual(
+    resolveManagerPlaybackFlushOutcome({ result: { ok: false, retryableAuth: true }, currentRetryCount: 0 }),
+    { action: 'retry', nextRetryCount: 1 },
+  )
+  // Auth failure but the retry budget is spent: drop, do not loop.
+  assert.deepEqual(
+    resolveManagerPlaybackFlushOutcome({ result: { ok: false, retryableAuth: true }, currentRetryCount: 3 }),
+    { action: 'drop', nextRetryCount: 0 },
+  )
+  // A permanent 4xx/5xx after the transport-level idempotent retry is dropped.
+  assert.deepEqual(
+    resolveManagerPlaybackFlushOutcome({ result: { ok: false, retryableAuth: false }, currentRetryCount: 0 }),
+    { action: 'drop', nextRetryCount: 0 },
+  )
+})
+
 void test('shouldCorrectManagerPlaybackDrift is lenient while instructor playback is actively running', () => {
   assert.equal(shouldCorrectManagerPlaybackDrift(10, 10.6, true), false)
   assert.equal(shouldCorrectManagerPlaybackDrift(10, 11.2, true), false)
@@ -500,6 +546,217 @@ void test('shouldSendManagerPlaybackPositionUpdate ignores missing or in-toleran
       desiredPositionSec: 10.1,
     }),
     false,
+  )
+})
+
+void test('resolveManagerSeekRequest accepts a finite position and rejects empty or non-finite input', () => {
+  assert.deepEqual(resolveManagerSeekRequest('30'), { ok: true, positionSec: 30 })
+  assert.deepEqual(resolveManagerSeekRequest('12.5'), { ok: true, positionSec: 12.5 })
+  assert.deepEqual(resolveManagerSeekRequest('1e2'), { ok: true, positionSec: 100 })
+  // Range clamping is the server's job, so a negative value is passed through.
+  assert.deepEqual(resolveManagerSeekRequest('-4'), { ok: true, positionSec: -4 })
+
+  const emptyInput = resolveManagerSeekRequest('')
+  assert.equal(emptyInput.ok, false)
+  assert.equal(
+    emptyInput.ok === false ? emptyInput.message : null,
+    'Seek position must be a finite number of seconds.',
+  )
+  assert.equal(resolveManagerSeekRequest('   ').ok, false)
+  assert.equal(resolveManagerSeekRequest('abc').ok, false)
+  assert.equal(resolveManagerSeekRequest('12junk').ok, false)
+  assert.equal(resolveManagerSeekRequest('Infinity').ok, false)
+  assert.equal(resolveManagerSeekRequest('NaN').ok, false)
+})
+
+void test('isRetryablePlaybackCommandFailure retries transient server failures but not permanent client failures', () => {
+  assert.equal(isRetryablePlaybackCommandFailure(401), true)
+  assert.equal(isRetryablePlaybackCommandFailure(503), true)
+  assert.equal(isRetryablePlaybackCommandFailure(400), false)
+})
+
+void test('resolveExplicitPlaybackPositionSec restarts from startSec only for Play after a natural end', () => {
+  assert.equal(
+    resolveExplicitPlaybackPositionSec({ intent: 'play', playerEnded: true, startSec: 42 }),
+    42,
+    'Play after ENDED replays from startSec',
+  )
+  assert.equal(
+    resolveExplicitPlaybackPositionSec({ intent: 'play', playerEnded: false, startSec: 42 }),
+    null,
+    'an ordinary Play acts at the server-projected position',
+  )
+  assert.equal(
+    resolveExplicitPlaybackPositionSec({ intent: 'pause', playerEnded: true, startSec: 42 }),
+    null,
+    'Pause never carries a position, even after an end',
+  )
+  assert.equal(
+    resolveExplicitPlaybackPositionSec({
+      intent: 'play', playerEnded: false, startSec: 42, authoritativePositionSec: 90, stopSec: 90,
+    }),
+    42,
+    'Play while parked at a configured stopSec replays from startSec (no ENDED fires for a mid-video boundary)',
+  )
+  assert.equal(
+    resolveExplicitPlaybackPositionSec({
+      intent: 'play', playerEnded: false, startSec: 42, authoritativePositionSec: 95, stopSec: 90,
+    }),
+    42,
+    'a position past stopSec counts as parked at the boundary too',
+  )
+  assert.equal(
+    resolveExplicitPlaybackPositionSec({
+      intent: 'play', playerEnded: false, startSec: 42, authoritativePositionSec: 60, stopSec: 90,
+    }),
+    null,
+    'Play from mid-clip (before stopSec) still resumes at the authoritative position',
+  )
+  assert.equal(
+    resolveExplicitPlaybackPositionSec({
+      intent: 'play', playerEnded: false, startSec: 42, authoritativePositionSec: 500, stopSec: null,
+    }),
+    null,
+    'without a configured stopSec there is no boundary to treat as an end',
+  )
+})
+
+void test('isNaturalPlaybackCompletion only trusts an ENDED event whose playhead is at the media end', () => {
+  assert.equal(
+    isNaturalPlaybackCompletion({ isEndedEvent: false, currentTimeSec: 600, durationSec: 600 }),
+    false,
+    'a non-ENDED event is never a completion',
+  )
+  assert.equal(
+    isNaturalPlaybackCompletion({ isEndedEvent: true, currentTimeSec: 599.4, durationSec: 600 }),
+    true,
+    'an ENDED at the end (within the proximity window) is a real completion',
+  )
+  assert.equal(
+    isNaturalPlaybackCompletion({ isEndedEvent: true, currentTimeSec: 5, durationSec: 600 }),
+    false,
+    'a delayed ENDED that lands after a restart near startSec is rejected',
+  )
+  assert.equal(
+    isNaturalPlaybackCompletion({ isEndedEvent: true, currentTimeSec: 0, durationSec: 0 }),
+    true,
+    'with an unknown duration the ENDED event is trusted so a real completion is never dropped',
+  )
+})
+
+void test('shouldEmitNaturalEndPause requires a completion, a matching revision, and an unchanged playback generation', () => {
+  const base = {
+    isNaturalCompletion: true,
+    endedRevision: 4,
+    authoritativeRevision: 4,
+    playbackGenerationAtEnd: 2,
+    playingGeneration: 2,
+  }
+  assert.equal(shouldEmitNaturalEndPause(base), true, 'all three guards satisfied -> emit')
+  assert.equal(
+    shouldEmitNaturalEndPause({ ...base, isNaturalCompletion: false }),
+    false,
+    'not an end-of-media ENDED -> never emit',
+  )
+  assert.equal(
+    shouldEmitNaturalEndPause({ ...base, authoritativeRevision: 5 }),
+    false,
+    'a superseded revision -> reject',
+  )
+  assert.equal(
+    // A delayed ENDED from an earlier playback: applyStateToPlayer bumped the
+    // generation for the replay (startSec sits in the 2s end window, so the
+    // proximity check passes and the revision was reused), but onStateChange has
+    // not recorded the new PLAYING generation yet.
+    shouldEmitNaturalEndPause({ ...base, playbackGenerationAtEnd: 3, playingGeneration: 2 }),
+    false,
+    'playback generation advanced since the last PLAYING -> reject the stale ENDED',
+  )
+})
+
+void test('shouldSendNaturalEndPause keeps the bounded auth-retry alive only while the pause still matters', () => {
+  assert.equal(
+    shouldSendNaturalEndPause({ playerEnded: true, endedRevision: 7, authoritativeRevision: 7 }),
+    true,
+    'ended, revision unchanged -> the deferred pause should (re)send',
+  )
+  assert.equal(
+    shouldSendNaturalEndPause({ playerEnded: false, endedRevision: 7, authoritativeRevision: 7 }),
+    false,
+    'a newer gesture cleared the ended flag -> abandon the retry',
+  )
+  assert.equal(
+    shouldSendNaturalEndPause({ playerEnded: true, endedRevision: 7, authoritativeRevision: 8 }),
+    false,
+    'authoritative playback advanced past the ended revision -> abandon the retry',
+  )
+})
+
+void test('resolveNaturalEndPauseCommandId reuses the id across retries and mints a fresh one per episode', () => {
+  // First attempt of an episode: no retained id, retry count 0 -> mint a new id.
+  const firstAttemptId = resolveNaturalEndPauseCommandId({ currentRetryCount: 0, activeCommandId: null })
+  assert.equal(typeof firstAttemptId, 'string')
+  assert.ok(firstAttemptId.length > 0)
+
+  // Bounded retry (count > 0): replay the exact id the first attempt used so the
+  // server de-duplicates it instead of applying a second pause.
+  assert.equal(
+    resolveNaturalEndPauseCommandId({ currentRetryCount: 1, activeCommandId: firstAttemptId }),
+    firstAttemptId,
+  )
+  assert.equal(
+    resolveNaturalEndPauseCommandId({ currentRetryCount: 3, activeCommandId: firstAttemptId }),
+    firstAttemptId,
+  )
+
+  // A retry with no retained id (episode reset mid-flight) still mints one
+  // rather than sending an empty commandId.
+  const recoveredId = resolveNaturalEndPauseCommandId({ currentRetryCount: 2, activeCommandId: null })
+  assert.equal(typeof recoveredId, 'string')
+  assert.ok(recoveredId.length > 0)
+
+  // A brand-new episode (retry count back to 0) does not replay the previous id.
+  assert.notEqual(
+    resolveNaturalEndPauseCommandId({ currentRetryCount: 0, activeCommandId: firstAttemptId }),
+    firstAttemptId,
+  )
+})
+
+void test('resolveNaturalEndPauseCompletion ignores a superseded episode\'s completion regardless of its result', () => {
+  // A stale attempt (a newer episode has since claimed ownership) must not
+  // touch retry count / command id / flush timer no matter what its own
+  // `sendCommand` returned - even a "retryable auth failure" result must not
+  // schedule a retry for a dead episode.
+  assert.deepEqual(
+    resolveNaturalEndPauseCompletion({ result: { ok: true }, currentRetryCount: 2, isCurrentEpisode: false }),
+    { action: 'ignore', nextRetryCount: 2 },
+  )
+  assert.deepEqual(
+    resolveNaturalEndPauseCompletion({ result: { ok: false, retryableAuth: true }, currentRetryCount: 0, isCurrentEpisode: false }),
+    { action: 'ignore', nextRetryCount: 0 },
+  )
+})
+
+void test('resolveNaturalEndPauseCompletion defers to the shared flush outcome for the current episode', () => {
+  // Success: stop, reset the retry count.
+  assert.deepEqual(
+    resolveNaturalEndPauseCompletion({ result: { ok: true }, currentRetryCount: 1, isCurrentEpisode: true }),
+    { action: 'stop', nextRetryCount: 0 },
+  )
+  // Retryable auth failure within budget: retry and bump the count.
+  assert.deepEqual(
+    resolveNaturalEndPauseCompletion({ result: { ok: false, retryableAuth: true }, currentRetryCount: 0, isCurrentEpisode: true }),
+    { action: 'retry', nextRetryCount: 1 },
+  )
+  // Retryable auth failure with the budget spent: stop (drop), not retry.
+  assert.deepEqual(
+    resolveNaturalEndPauseCompletion({ result: { ok: false, retryableAuth: true }, currentRetryCount: 3, isCurrentEpisode: true }),
+    { action: 'stop', nextRetryCount: 0 },
+  )
+  // Permanent failure: stop (drop) immediately.
+  assert.deepEqual(
+    resolveNaturalEndPauseCompletion({ result: { ok: false, retryableAuth: false }, currentRetryCount: 0, isCurrentEpisode: true }),
+    { action: 'stop', nextRetryCount: 0 },
   )
 })
 
