@@ -116,8 +116,9 @@ wall clocks. `SessionCache` stamps each id's write generation from one cache-wid
 counter, advanced on every set / invalidate / eviction / expiry / clear; an async fill
 (cache-miss load, strict read, CAS result, finalizer, keepalive revalidation)
 captures its id's value before its await and only publishes when it is unchanged,
-or when a same-incarnation `mutationRevision` still proves the fill at least as
-new. The per-id map is prunable at any time - a missing entry reads back as the
+or when a same-incarnation `mutationRevision` is strictly newer than the cached
+revision. Equal revisions cannot prove freshness because legacy/plain whole-record
+writes retain their revision. The per-id map is prunable at any time - a missing entry reads back as the
 current counter, always ahead of any captured token. A result that raced
 behind a newer commit, a stalled read of an incarnation that was since recreated,
 or a strict read that completes after a `delete` therefore cannot roll `get()`

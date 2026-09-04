@@ -314,7 +314,10 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
   }
   // Tiebreak for `SessionCache.replaceStaleFill` when the write generation moved
   // during a fill's await: publish only for the *same* incarnation (equal
-  // `created`) at `mutationRevision >= cached`, which is monotonic. `created` is
+  // `created`) at a strictly greater `mutationRevision`, which is monotonic.
+  // Equal revisions are not enough: plain whole-record `set()` writers retain
+  // the revision, so an equal-revision result that raced one may be stale.
+  // `created` is
   // a node-local `Date.now()` from whichever instance created the id, so it is
   // NOT ordered across incarnations (a replacement minted on a peer with a
   // lagging clock can carry a *smaller* value) - a cross-incarnation fill that
@@ -327,7 +330,7 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
     }
     const incomingRevision = typeof incoming.mutationRevision === 'number' ? incoming.mutationRevision : 0
     const cachedRevision = typeof cached.mutationRevision === 'number' ? cached.mutationRevision : 0
-    return incomingRevision >= cachedRevision
+    return incomingRevision > cachedRevision
   }
   const cache = new SessionCache<SessionRecord>({
     ttlMs: 30_000,

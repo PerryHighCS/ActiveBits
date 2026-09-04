@@ -6,6 +6,7 @@ import {
     buildManagerWsUrl,
     clearManagerPlayerLoadError,
     getManagerPlaybackIntentForStateChange,
+    isExplicitPlaybackControlDisabled,
     parseManagerStopTimeInput,
     DEFAULT_MANAGER_ACCESS_RETRY_AFTER_MS,
     isManagerAuthorizationClose,
@@ -92,6 +93,12 @@ void test('shouldRenderManagerHeaderForSession hides the manager header for embe
   assert.equal(shouldRenderManagerHeaderForSession('session-123'), true)
   assert.equal(shouldRenderManagerHeaderForSession('CHILD:parent:abcde:video-sync'), false)
   assert.equal(shouldRenderManagerHeaderForSession(null), true)
+})
+
+void test('explicit playback controls remain enabled during a pending authoritative state change', () => {
+  assert.equal(isExplicitPlaybackControlDisabled({ hasManagerAccess: true, videoId: 'configured-video' }), false)
+  assert.equal(isExplicitPlaybackControlDisabled({ hasManagerAccess: false, videoId: 'configured-video' }), true)
+  assert.equal(isExplicitPlaybackControlDisabled({ hasManagerAccess: true, videoId: '' }), true)
 })
 
 void test('isRetryableManagerAccessStatus retries 5xx and network-shaped failures but not definitive denials', () => {

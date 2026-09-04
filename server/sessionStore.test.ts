@@ -668,6 +668,36 @@ void test('a strict read that raced behind a concurrent commit does not repopula
   assert.equal(afterRace?.data.playback, 'playing')
 })
 
+void test('a strict read cannot overwrite an equal-revision plain session write that raced it', async (t) => {
+  const records = new Map<string, SessionRecord>()
+  let releaseGate: () => void = () => {}
+  const gate = new Promise<void>((resolve) => { releaseGate = resolve })
+  const hold = { strict: false, cas: false }
+  const sessions = createSessionStore('redis://test', 1_000, gatedValkeyStoreForTest(records, hold, gate))
+  t.after(async () => { await sessions.close() })
+
+  const live = await createSession(sessions)
+  live.data = { value: 'stale-read' }
+  await sessions.set(live.id, live)
+  await sessions.get(live.id)
+
+  hold.strict = true
+  const stalledStrict = sessions.getStrict!(live.id)
+
+  const plainWrite = structuredClone(records.get(live.id)!)
+  plainWrite.data = { value: 'plain-write' }
+  await sessions.set(live.id, plainWrite)
+
+  releaseGate()
+  await stalledStrict
+
+  assert.equal(
+    (await sessions.get(live.id))?.data.value,
+    'plain-write',
+    'an equal-revision stale fill cannot replace a newer plain write',
+  )
+})
+
 void test('a slower CAS winner does not clobber a cache entry a faster follow-up commit already refilled', async (t) => {
   const records = new Map<string, SessionRecord>()
   let releaseGate: () => void = () => {}
