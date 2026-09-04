@@ -3082,6 +3082,32 @@ void test('embedded manager capability exchange persists through updateAtomic wh
   assert.equal((storeState.store['child-capability']?.mutationRevision ?? 0) > 4, true, 'the atomic write advanced the revision')
 })
 
+void test('embedded manager capability exchange permits a legacy session without a persisted created identity', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const now = Date.now()
+  const storeState = createSessionStore({
+    'legacy-child-capability': {
+      id: 'legacy-child-capability', type: 'video-sync', lastActivity: now, mutationRevision: 4,
+      data: {
+        instructorPasscode: 'child-passcode',
+        embeddedManagerEntryToken: { value: 'legacy-entry-token', expiresAt: now + 60_000 },
+      },
+    } as unknown as SessionRecord,
+  }, { atomic: true })
+  setupSyncDeckRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.get['/api/syncdeck/embedded-manager-capability']
+  const response = createResponse()
+  await handler?.(
+    createRequest({}, undefined, {}, {}, { sessionId: 'legacy-child-capability', token: 'legacy-entry-token' }),
+    response,
+  )
+
+  assert.equal(response.statusCode, 200)
+  assert.equal((storeState.store['legacy-child-capability']?.data as { activityCapabilities?: unknown }).activityCapabilities != null, true)
+})
+
 void test('embedded manager capability exchange does not mint a capability into a replacement session', async () => {
   const app = createMockApp()
   const ws = createMockWs()

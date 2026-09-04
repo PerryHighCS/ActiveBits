@@ -21,6 +21,7 @@ import {
   createSession,
   EMBEDDED_CHILD_SESSION_PREFIX,
   generateHexId,
+  getSessionCreatedIdentity,
   type SessionRecord,
   type SessionStore,
 } from 'activebits-server/core/sessions.js'
@@ -2247,7 +2248,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
         // (sentinel throw, not a no-op draft commit) and reports the mismatch.
         const capabilityOutcome = await issueManagerCapabilityAtomically(sessions, sessionId, {
           expectedType: consumedSession.type ?? '',
-          expectedCreated: typeof consumedSession.created === 'number' ? consumedSession.created : null,
+          expectedCreated: getSessionCreatedIdentity(consumedSession),
         })
         if (capabilityOutcome.status === 'issued') {
           capabilityToken = capabilityOutcome.token
