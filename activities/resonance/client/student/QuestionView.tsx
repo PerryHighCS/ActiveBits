@@ -73,6 +73,7 @@ export default function QuestionView({
   const [draftAnswer, setDraftAnswer] = useState<AnswerPayload | null>(initialAnswer)
   const draftAnswerRef = useRef(draftAnswer)
   const lastSentDraftRef = useRef<AnswerPayload | null>(null)
+  const draftGenerationRef = useRef(0)
   const initialAnswerRef = useRef(initialAnswer)
   const synchronizedInitialAnswerRef = useRef(initialAnswer)
   const submissionAttemptRef = useRef(0)
@@ -145,6 +146,7 @@ export default function QuestionView({
           ? { activeQuestionRunRevision: activeQuestionRunToken }
           : { activeQuestionRunStartedAt: activeQuestionRunToken }),
         editSequence: editSequenceRef.current,
+        draftGeneration: ++draftGenerationRef.current,
         answer: pendingDraft,
       }
       if (saveDraft) {

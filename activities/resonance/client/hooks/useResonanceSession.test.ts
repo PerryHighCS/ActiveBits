@@ -861,3 +861,39 @@ void test('saveDraft retries a failed send after reconnecting within the same ac
     restore()
   }
 })
+
+void test('saveDraft retries an acknowledgement timeout after reconnecting within the same active run', async () => {
+  const restore = installWsTestEnvironment()
+  const { act, render, waitFor } = await import('@testing-library/react')
+
+  try {
+    const captured: { saveDraft: ((payload: Record<string, unknown>) => Promise<boolean>) | null } = { saveDraft: null }
+    function Probe() {
+      const { saveDraft } = useResonanceSession('session-1', 'student-1')
+      captured.saveDraft = saveDraft
+      return null
+    }
+    let rendered!: ReturnType<typeof render>
+    await act(async () => { rendered = render(React.createElement(Probe)); await Promise.resolve() })
+    await waitFor(() => assert.equal(FakeWebSocket.instances.length, 1))
+    const firstSocket = FakeWebSocket.instances[0]!
+    firstSocket.emitMessage({ type: 'resonance:session-state', payload: {
+      sessionId: 'session-1', activeQuestionIds: ['q1'], activeQuestionRunRevision: 3, activeQuestionDeadlineAt: Date.now() + 10_000,
+    } })
+
+    console.info('[TEST] an unacknowledged draft is expected to retry after the socket reconnects')
+    await act(async () => {
+      assert.equal(await captured.saveDraft?.({ studentId: 'student-1', questionId: 'q1', activeQuestionRunRevision: 3, draftGeneration: 1, answer: { type: 'free-response', text: 'Retry after timeout' } }), false)
+    })
+    firstSocket.onclose?.({})
+    await new Promise((resolve) => setTimeout(resolve, 1_100))
+    await waitFor(() => assert.equal(FakeWebSocket.instances.length, 2))
+    const secondSocket = FakeWebSocket.instances[1]!
+    const sent: unknown[] = []
+    secondSocket.send = (message?: unknown) => { sent.push(message) }
+    secondSocket.onopen?.()
+    await waitFor(() => assert.equal(sent.length, 1))
+    assert.equal((JSON.parse(String(sent[0])) as { payload: { answer: { text: string } } }).payload.answer.text, 'Retry after timeout')
+    await act(async () => { rendered.unmount() })
+  } finally { restore() }
+})

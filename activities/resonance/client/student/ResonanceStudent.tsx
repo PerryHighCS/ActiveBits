@@ -26,6 +26,12 @@ interface UnconfirmedDraft {
   retrying: boolean
 }
 
+function resolveDraftGeneration(payload: Record<string, unknown>): number {
+  return typeof payload.draftGeneration === 'number' && Number.isSafeInteger(payload.draftGeneration) && payload.draftGeneration >= 0
+    ? payload.draftGeneration
+    : 0
+}
+
 const UNCONFIRMED_DRAFT_RETRY_INTERVAL_MS = 1_000
 
 interface UnconfirmedDraftContext {
@@ -405,6 +411,8 @@ export default function ResonanceStudent() {
   const recordUnconfirmedDraft = useCallback((payload: Record<string, unknown>) => {
     const key = buildUnconfirmedDraftKey(payload)
     if (key === null) return
+    const current = unconfirmedDraftsRef.current.get(key)
+    if (current && resolveDraftGeneration(current.payload) > resolveDraftGeneration(payload)) return
     unconfirmedDraftsRef.current.set(key, { payload, retrying: false })
     setUnconfirmedDraftVersion((current) => current + 1)
   }, [])

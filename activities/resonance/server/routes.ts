@@ -174,6 +174,7 @@ interface ResonanceSessionData extends Record<string, unknown> {
     updatedAt: number
     activeQuestionRunRevision?: number | null
     editSequence?: number
+    draftGeneration?: number
     answer: Response['answer']
   }>
   annotations: Record<string, InstructorAnnotation>
@@ -731,6 +732,10 @@ function resolveEditSequence(value: unknown): number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : 0
 }
 
+function resolveDraftGeneration(value: unknown): number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : 0
+}
+
 export function resolveSocketStudentId(payloadStudentId: unknown, clientStudentId: string | null | undefined): string | null {
   const studentId = clientStudentId ?? null
   if (!studentId || (typeof payloadStudentId === 'string' && payloadStudentId !== studentId)) {
@@ -832,6 +837,7 @@ function normalizeResponseDrafts(
         : undefined
     const answer = normalizeDraftAnswerPayload(rawDraft.answer, questionsById, questionId)
     const editSequence = resolveEditSequence(rawDraft.editSequence)
+    const draftGeneration = resolveDraftGeneration(rawDraft.draftGeneration)
 
     if (!questionId || !studentId || updatedAt <= 0 || answer === null) {
       continue
@@ -843,6 +849,7 @@ function normalizeResponseDrafts(
       updatedAt,
       ...(activeQuestionRunRevision !== undefined ? { activeQuestionRunRevision } : {}),
       editSequence,
+      draftGeneration,
       answer,
     }
   }
@@ -3123,6 +3130,7 @@ export default function setupResonanceRoutes(
           ? payload.draftId
           : null
         const editSequence = resolveEditSequence(payload.editSequence)
+        const draftGeneration = resolveDraftGeneration(payload.draftGeneration)
 
         // A draft sent just before a submission can arrive here after the
         // submission already recorded a response and cleared the draft (the
@@ -3149,6 +3157,11 @@ export default function setupResonanceRoutes(
         }
 
         const draftKey = buildDraftKey(questionId, studentId)
+        const existingDraft = session.data.responseDrafts[draftKey]
+        if (existingDraft && draftGeneration < (existingDraft.draftGeneration ?? 0)) {
+          if (draftId !== null) sendToSocket(socket, 'resonance:draft-saved', { draftId }, sessionId)
+          return
+        }
         if (payload.answer === null) {
           if (draftKey in session.data.responseDrafts) {
             delete session.data.responseDrafts[draftKey]
@@ -3172,6 +3185,7 @@ export default function setupResonanceRoutes(
           updatedAt: draftUpdatedAt,
           activeQuestionRunRevision: session.data.activeQuestionRunRevision,
           editSequence,
+          draftGeneration,
           answer,
         }
         await sessions.set(sessionId, session)

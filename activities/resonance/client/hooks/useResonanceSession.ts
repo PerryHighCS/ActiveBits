@@ -27,6 +27,12 @@ function getDraftRetryKey(payload: Record<string, unknown>): string | null {
   return questionId === null ? null : `${questionId}:${runToken ?? 'self-paced'}`
 }
 
+function getDraftGeneration(payload: Record<string, unknown>): number {
+  return typeof payload.draftGeneration === 'number' && Number.isSafeInteger(payload.draftGeneration) && payload.draftGeneration >= 0
+    ? payload.draftGeneration
+    : 0
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value != null && typeof value === 'object' && !Array.isArray(value)
 }
@@ -535,6 +541,7 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
     timeoutId: ReturnType<typeof setTimeout>
   }>())
   const queuedDraftRetriesRef = useRef(new Map<string, Record<string, unknown>>())
+  const latestDraftGenerationByKeyRef = useRef(new Map<string, number>())
   const retryDraftSavesRef = useRef(new Map<string, {
     key: string
     timeoutId: ReturnType<typeof setTimeout>
@@ -552,6 +559,7 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
     }
     retryDraftSavesRef.current.clear()
     queuedDraftRetriesRef.current.clear()
+    latestDraftGenerationByKeyRef.current.clear()
     snapshotRef.current = null
     latestActiveQuestionRunRevisionRef.current = null
     setSnapshot(null)
@@ -600,6 +608,18 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
       }
     }
   }, [studentId])
+
+  const queueDraftRetry = useCallback((key: string | null, payload: Record<string, unknown>) => {
+    if (key === null) return
+    const generation = getDraftGeneration(payload)
+    const latest = latestDraftGenerationByKeyRef.current.get(key) ?? -1
+    if (generation < latest) return
+    latestDraftGenerationByKeyRef.current.set(key, generation)
+    const queued = queuedDraftRetriesRef.current.get(key)
+    if (!queued || getDraftGeneration(queued) <= generation) {
+      queuedDraftRetriesRef.current.set(key, payload)
+    }
+  }, [])
 
   const fetchSnapshot = useCallback(async () => {
     if (sessionId === null) return
@@ -803,8 +823,14 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
   const saveDraft = useCallback((payload: Record<string, unknown>): Promise<boolean> => {
     const currentWs = wsRef.current
     const retryKey = getDraftRetryKey(payload)
+    if (retryKey !== null) {
+      latestDraftGenerationByKeyRef.current.set(
+        retryKey,
+        Math.max(latestDraftGenerationByKeyRef.current.get(retryKey) ?? -1, getDraftGeneration(payload)),
+      )
+    }
     if (currentWs?.readyState !== WebSocket.OPEN) {
-      if (retryKey !== null) queuedDraftRetriesRef.current.set(retryKey, payload)
+      queueDraftRetry(retryKey, payload)
       return Promise.resolve(false)
     }
 
@@ -812,7 +838,7 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
     return new Promise((resolve) => {
       const timeoutId = setTimeout(() => {
         pendingDraftSavesRef.current.delete(draftId)
-        if (retryKey !== null) queuedDraftRetriesRef.current.set(retryKey, payload)
+        queueDraftRetry(retryKey, payload)
         resolve(false)
       }, DRAFT_SAVE_ACK_TIMEOUT_MS)
       pendingDraftSavesRef.current.set(draftId, { resolve, timeoutId })
@@ -828,11 +854,11 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
         // draft would silently never be marked/reconciled as unconfirmed.
         clearTimeout(timeoutId)
         pendingDraftSavesRef.current.delete(draftId)
-        if (retryKey !== null) queuedDraftRetriesRef.current.set(retryKey, payload)
+        queueDraftRetry(retryKey, payload)
         resolve(false)
       }
     })
-  }, [])
+  }, [queueDraftRetry])
 
   return { snapshot, loading, error, refresh: fetchSnapshot, sendMessage, saveDraft }
 }
