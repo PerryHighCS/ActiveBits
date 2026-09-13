@@ -56,6 +56,8 @@ function isUsableActivityCapabilityRecord(value: unknown, now: number): value is
     typeof value.id === 'string' &&
     typeof value.tokenHash === 'string' &&
     (value.principalKind === 'manager' || value.principalKind === 'participant') &&
+    typeof value.issuedAt === 'number' &&
+    Number.isFinite(value.issuedAt) &&
     typeof value.expiresAt === 'number' &&
     Number.isFinite(value.expiresAt) &&
     value.expiresAt > now

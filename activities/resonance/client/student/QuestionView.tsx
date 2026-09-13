@@ -86,6 +86,11 @@ export default function QuestionView({
   useEffect(() => {
     if (disabled && hasUnconfirmedDraftRef.current) {
       hasUnconfirmedDraftRef.current = false
+      // Treat the current value as synchronized so the sync effect below
+      // accepts the authoritative `initialAnswer` the parent refreshes to
+      // after reconciling this unconfirmed draft, instead of continuing to
+      // treat it as a dirty local edit forever.
+      synchronizedInitialAnswerRef.current = draftAnswerRef.current
       onDraftUnconfirmed?.(question.id)
     }
   }, [disabled, onDraftUnconfirmed, question.id])
@@ -145,6 +150,7 @@ export default function QuestionView({
             hasUnconfirmedDraftRef.current = true
             if (disabledRef.current || (activeQuestionDeadlineAt !== null && Date.now() >= activeQuestionDeadlineAt)) {
               hasUnconfirmedDraftRef.current = false
+              synchronizedInitialAnswerRef.current = draftAnswerRef.current
               onDraftUnconfirmed?.(question.id)
             }
           }

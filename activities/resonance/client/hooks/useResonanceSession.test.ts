@@ -111,6 +111,48 @@ void test('shouldApplyStudentSessionSnapshot rejects a delayed active legacy sna
   assert.equal(shouldApplyStudentSessionSnapshot(current, delayedLegacy, 2), false)
 })
 
+void test('shouldApplyStudentSessionSnapshot accepts a self-paced fallback that reflects the most recent live run', () => {
+  const current = normalizeStudentSessionSnapshot({
+    sessionId: 'session-1',
+    activeQuestionIds: ['q1'],
+    activeQuestionRunStartedAt: 1_000,
+    activeQuestionRunRevision: 2,
+  })
+  const selfPacedFallback = normalizeStudentSessionSnapshot({
+    sessionId: 'session-1',
+    selfPacedMode: true,
+    activeQuestionIds: ['q1', 'q2'],
+    activeQuestionRunStartedAt: null,
+    activeQuestionRunRevision: null,
+    lastActiveQuestionRunRevision: 2,
+  })
+
+  assert.ok(current)
+  assert.ok(selfPacedFallback)
+  assert.equal(shouldApplyStudentSessionSnapshot(current, selfPacedFallback, 2), true)
+})
+
+void test('shouldApplyStudentSessionSnapshot rejects a self-paced-shaped snapshot from before the observed live run', () => {
+  const current = normalizeStudentSessionSnapshot({
+    sessionId: 'session-1',
+    activeQuestionIds: ['q1'],
+    activeQuestionRunStartedAt: 1_000,
+    activeQuestionRunRevision: 2,
+  })
+  const staleFallback = normalizeStudentSessionSnapshot({
+    sessionId: 'session-1',
+    selfPacedMode: true,
+    activeQuestionIds: ['q1', 'q2'],
+    activeQuestionRunStartedAt: null,
+    activeQuestionRunRevision: null,
+    lastActiveQuestionRunRevision: 1,
+  })
+
+  assert.ok(current)
+  assert.ok(staleFallback)
+  assert.equal(shouldApplyStudentSessionSnapshot(current, staleFallback, 2), false)
+})
+
 void test('shouldApplyStudentSessionSnapshot accepts a legitimate no-active-question state after a live run', () => {
   const current = normalizeStudentSessionSnapshot({
     sessionId: 'session-1',

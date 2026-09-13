@@ -137,6 +137,13 @@ export interface StudentSessionSnapshot {
   activeQuestionRunStartedAt: number | null
   activeQuestionRunRevision: number | null
   activeQuestionDeadlineAt: number | null
+  /**
+   * Highest live-run revision this session has ever assigned, independent of
+   * `activeQuestionRunRevision` resetting to null on self-paced fallback. Lets
+   * clients order a self-paced snapshot against a previously observed live
+   * run without mistaking it for a stale legacy snapshot.
+   */
+  lastActiveQuestionRunRevision: number | null
   reveals: QuestionReveal[]
   reviewedResponses: ReviewedResponse[]
   submittedAnswers: Record<string, AnswerPayload>

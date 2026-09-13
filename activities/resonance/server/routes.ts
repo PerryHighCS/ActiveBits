@@ -1280,6 +1280,8 @@ function buildStudentSnapshotWithMode(
     activeQuestionRunStartedAt: effectiveSelfPacedMode ? null : activeQuestionRunStartedAt,
     activeQuestionRunRevision: effectiveSelfPacedMode ? null : activeQuestionRunRevision,
     activeQuestionDeadlineAt: effectiveSelfPacedMode ? null : activeQuestionDeadlineAt,
+    lastActiveQuestionRunRevision:
+      session.data.lastActiveQuestionRunRevision > 0 ? session.data.lastActiveQuestionRunRevision : null,
     reveals: [
       ...reveals.map((reveal) => buildStudentReveal(reveal, session, viewerStudentId)),
       ...selfPacedReveals,
@@ -2984,6 +2986,30 @@ export default function setupResonanceRoutes(
         const question = session.data.questions.find((entry) => entry.id === questionId) ?? null
         if (!question) return
         if (!isCurrentStagedQuestionAnswerable(session.data, questionId)) return
+
+        // A draft sent just before a submission can arrive here after the
+        // submission already recorded a response and cleared the draft (the
+        // two travel over different connections/transports, so delivery
+        // order isn't guaranteed). Once a response exists for this
+        // question/student in the current run, treat the submission as
+        // authoritative and drop the stale draft rather than resurrecting it
+        // — otherwise timeout finalization could later overwrite the
+        // confirmed answer with this late draft.
+        const hasConfirmedResponseForRun = session.data.responses.some(
+          (response) =>
+            response.questionId === questionId &&
+            response.studentId === studentId &&
+            response.activeQuestionRunRevision === session.data.activeQuestionRunRevision,
+        )
+        if (hasConfirmedResponseForRun) {
+          const staleDraftId = typeof payload.draftId === 'string' && payload.draftId.length <= 128
+            ? payload.draftId
+            : null
+          if (staleDraftId !== null) {
+            sendToSocket(socket, 'resonance:draft-saved', { draftId: staleDraftId }, sessionId)
+          }
+          return
+        }
 
         const draftKey = buildDraftKey(questionId, studentId)
         if (payload.answer === null) {

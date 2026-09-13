@@ -395,6 +395,10 @@ export function normalizeStudentSessionSnapshot(
       typeof data.activeQuestionDeadlineAt === 'number' && Number.isFinite(data.activeQuestionDeadlineAt)
         ? data.activeQuestionDeadlineAt
         : null,
+    lastActiveQuestionRunRevision:
+      typeof data.lastActiveQuestionRunRevision === 'number' && Number.isSafeInteger(data.lastActiveQuestionRunRevision)
+        ? data.lastActiveQuestionRunRevision
+        : null,
     reveals: Array.isArray(data.reveals)
       ? data.reveals
         .map(normalizeQuestionReveal)
@@ -433,7 +437,18 @@ export function shouldApplyStudentSessionSnapshot(
   if (candidate.activeQuestionIds.length === 0) return true
 
   if (candidate.activeQuestionRunRevision === null) {
-    if (latestActiveQuestionRunRevision !== null) return false
+    if (latestActiveQuestionRunRevision !== null) {
+      // A self-paced fallback carries no live run revision of its own, but the
+      // server also stamps the highest live revision it has ever assigned.
+      // Accept the fallback only when that stamp is at least as recent as the
+      // most recent live run this client has observed, so a genuine
+      // live-to-self-paced transition is admitted while a stale legacy
+      // snapshot from before the observed run is still rejected.
+      return (
+        candidate.lastActiveQuestionRunRevision !== null &&
+        candidate.lastActiveQuestionRunRevision >= latestActiveQuestionRunRevision
+      )
+    }
     if (current.activeQuestionIds.length === 0) return true
     const candidateStartedAt = candidate.activeQuestionRunStartedAt
     const currentStartedAt = current.activeQuestionRunStartedAt

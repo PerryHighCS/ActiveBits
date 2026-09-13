@@ -63,9 +63,27 @@ void test('activity capabilities have a bounded lifetime and are rejected once e
 
   // A stored record whose expiry was lost or corrupted is not a valid principal.
   console.info('[TEST] activity capability resolution: a stored record with no expiresAt is expected to be rejected')
-  const caps = session.data.activityCapabilities as Record<string, { expiresAt?: number }>
+  const caps = session.data.activityCapabilities as Record<string, { expiresAt?: number; issuedAt?: number }>
   delete caps[issued.id]!.expiresAt
   assert.equal(resolveActivityCapability(session, 'session-a', 'manager', issued.token, issuedAt + 1), null)
+})
+
+void test('a stored capability with no issuedAt is rejected rather than treated as usable', () => {
+  console.info('[TEST] activity capability resolution: a stored record with no issuedAt is expected to be rejected')
+  const session = { data: {} as Record<string, unknown> }
+  const issuedAt = 1_000
+  const issued = issueActivityCapability(session, 'participant', 'student-1', issuedAt, 60_000)
+
+  const caps = session.data.activityCapabilities as Record<string, { issuedAt?: number }>
+  delete caps[issued.id]!.issuedAt
+
+  // A record missing issuedAt must not resolve as a valid principal...
+  assert.equal(resolveActivityCapability(session, 'session-a', 'participant', issued.token, issuedAt + 1), null)
+
+  // ...nor be treated as usable capacity by the bounded, non-evicting issuance path.
+  const reissued = tryIssueActivityCapability(session, 'participant', 'student-2', issuedAt + 1, 60_000)
+  assert.ok(reissued)
+  assert.equal(Object.keys(session.data.activityCapabilities as Record<string, unknown>).length, 1)
 })
 
 void test('non-evicting capability issuance preserves live principals at capacity', () => {

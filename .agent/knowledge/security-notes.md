@@ -15,6 +15,15 @@ Track security-relevant boundaries, risks, and mitigation decisions.
 
 ## Notes
 
+- Date: 2026-09-13
+- Area: shared activity capability record validation (`server/core/activityCapabilities.ts`)
+- Threat or risk: `isUsableActivityCapabilityRecord` validated `id`, `tokenHash`, `principalKind`, and `expiresAt` but never `issuedAt`. A stored record with a corrupted/missing `issuedAt` (storage bug, manual edit, partial write) was still treated as usable: `resolveActivityCapability` could authenticate it despite the malformed field, and `tryIssueActivityCapability`'s bounded non-evicting path counted it toward `MAX_CAPABILITIES_PER_SESSION` — at capacity it could wrongly block new registrations, and its `undefined`/`NaN` `issuedAt` would sort incorrectly wherever capabilities order by issuance.
+- Control or mitigation: `isUsableActivityCapabilityRecord` now also requires `issuedAt` to be a finite number, matching the existing `expiresAt` check, so a corrupted record is dropped (and evicted by the invalid-record cleanup in `tryIssueActivityCapability`) instead of authenticating or occupying bounded capacity. Found via a Copilot PR review on #372.
+- Residual risk: None identified; this only tightens an existing validation predicate and does not change the capability issuance/hashing model.
+- Validation (test/review/path): `server/core/activityCapabilities.ts`; `server/core/activityCapabilities.test.ts` ("a stored capability with no issuedAt is rejected rather than treated as usable").
+- Follow-up action: none.
+- Owner: Claude
+
 - Date: 2026-09-11
 - Area: Resonance student REST and WebSocket authority
 - Threat or risk: Resonance previously trusted a student ID supplied in a REST body/query or WebSocket URL, allowing a caller who learned another ID to read that student's retained answers/private feedback or mutate their response.

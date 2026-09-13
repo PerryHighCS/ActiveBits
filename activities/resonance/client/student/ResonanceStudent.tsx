@@ -383,6 +383,7 @@ export default function ResonanceStudent() {
       <NameEntryForm
         sessionId={sessionId}
         onRegistered={(id, name) => {
+          persistSessionParticipantIdentity(window.localStorage, sessionId, name, id)
           setStudentId(id)
           setStudentName(name)
           setNameSubmitted(true)
