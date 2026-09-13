@@ -89,6 +89,32 @@ export function issueActivityCapability(
   return { id, token }
 }
 
+/** Issue without displacing another live principal when the bounded store is full. */
+export function tryIssueActivityCapability(
+  session: ActivityCapabilitySessionLike,
+  principalKind: ActivityPrincipalKind,
+  subjectId?: string,
+  now = Date.now(),
+  ttlMs: number = DEFAULT_ACTIVITY_CAPABILITY_TTL_MS,
+): { id: string; token: string } | null {
+  const container = getContainer(session)
+  container.activityCapabilities ??= {}
+  for (const [id, capability] of Object.entries(container.activityCapabilities)) {
+    if (
+      isRecord(capability) &&
+      typeof capability.expiresAt === 'number' &&
+      Number.isFinite(capability.expiresAt) &&
+      capability.expiresAt <= now
+    ) {
+      delete container.activityCapabilities[id]
+    }
+  }
+  if (Object.keys(container.activityCapabilities).length >= MAX_CAPABILITIES_PER_SESSION) {
+    return null
+  }
+  return issueActivityCapability(session, principalKind, subjectId, now, ttlMs)
+}
+
 /**
  * Outcome of {@link issueManagerCapabilityAtomically}. `token` is set only for
  * `issued`. A caller maps `incarnation-mismatch` / `not-committed` to a 404 (a

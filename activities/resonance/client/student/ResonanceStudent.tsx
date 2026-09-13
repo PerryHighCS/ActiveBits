@@ -21,6 +21,10 @@ interface SubmissionAnnouncement {
   message: string
 }
 
+export function shouldRetryRegistrationWithoutStudentId(status: number, studentId: string | null): boolean {
+  return status === 403 && studentId !== null
+}
+
 export function resolveNextSelfPacedQuestionId(params: {
   questionIds: string[]
   submittedQuestionIds: Set<string>
@@ -220,6 +224,17 @@ export default function ResonanceStudent() {
         if (cancelled) return
 
         if (!resp.ok || !data.studentId) {
+          if (shouldRetryRegistrationWithoutStudentId(resp.status, studentId)) {
+            persistSessionParticipantIdentity(
+              window.localStorage,
+              sessionId,
+              studentName,
+              null,
+            )
+            setStudentId(null)
+            setRegisterError(null)
+            return
+          }
           setRegisterError(data.error ?? 'Failed to join session')
           return
         }
@@ -484,6 +499,7 @@ export default function ResonanceStudent() {
                   questionId: activeQuestion.id,
                 })}
                 activeQuestionRunStartedAt={snapshot.activeQuestionRunStartedAt}
+                activeQuestionRunRevision={snapshot.activeQuestionRunRevision}
                 activeQuestionDeadlineAt={snapshot.activeQuestionDeadlineAt}
                 disabled={hasExpired}
                 isSubmitted={submittedQuestionIds.has(activeQuestion.id)}

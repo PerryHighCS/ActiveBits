@@ -51,3 +51,43 @@ test('Resonance binds student REST and WebSocket identity to an httpOnly capabil
   await attackerContext.close()
   await context.close()
 })
+
+test('Resonance replaces a restored direct-entry identity after its capability is lost', async ({ browser }) => {
+  test.skip(test.info().project.name !== 'chromium', 'WebKit request contexts do not retain Set-Cookie responses in this harness.')
+  const context = await browser.newContext()
+  const page = await context.newPage()
+  const created = await page.request.post('/api/resonance/create', { data: {} })
+  expect(created.ok()).toBe(true)
+  const { id: sessionId } = await created.json() as { id: string }
+  await page.goto(`/${encodeURIComponent(sessionId)}`)
+  await page.getByLabel('Your name *').fill('Ada')
+  await page.getByRole('button', { name: 'Join Session' }).click()
+  await expect.poll(async () => (await context.cookies()).some((cookie) =>
+    cookie.name.startsWith('activebits_cap_participant_') && cookie.httpOnly)).toBe(true)
+  const staleStudentId = await page.evaluate((id) => {
+    const stored = window.localStorage.getItem(`session-participant:${id}`)
+    return stored ? (JSON.parse(stored) as { studentId?: string }).studentId : undefined
+  }, sessionId)
+  expect(staleStudentId).toBeTruthy()
+
+  await context.clearCookies()
+  await page.reload()
+  await page.getByRole('button', { name: 'Join Session' }).click()
+
+  await expect.poll(async () => {
+    const currentId = await page.evaluate((id) => {
+      const stored = window.localStorage.getItem(`session-participant:${id}`)
+      return stored ? (JSON.parse(stored) as { studentId?: string }).studentId : undefined
+    }, sessionId)
+    const hasCapability = (await context.cookies()).some((cookie) =>
+      cookie.name.startsWith('activebits_cap_participant_') && cookie.httpOnly)
+    return typeof currentId === 'string' && currentId !== staleStudentId && hasCapability
+  }).toBe(true)
+  const recoveredStudentId = await page.evaluate((id) => {
+    const stored = window.localStorage.getItem(`session-participant:${id}`)
+    return stored ? (JSON.parse(stored) as { studentId?: string }).studentId : undefined
+  }, sessionId)
+  expect(recoveredStudentId).toBeTruthy()
+
+  await context.close()
+})

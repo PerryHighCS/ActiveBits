@@ -386,6 +386,12 @@ export function normalizeStudentSessionSnapshot(
       typeof data.activeQuestionRunStartedAt === 'number' && Number.isFinite(data.activeQuestionRunStartedAt)
         ? data.activeQuestionRunStartedAt
         : null,
+    activeQuestionRunRevision:
+      typeof data.activeQuestionRunRevision === 'number' && Number.isSafeInteger(data.activeQuestionRunRevision)
+        ? data.activeQuestionRunRevision
+        : typeof data.activeQuestionRunStartedAt === 'number' && Number.isFinite(data.activeQuestionRunStartedAt)
+          ? data.activeQuestionRunStartedAt
+          : null,
     activeQuestionDeadlineAt:
       typeof data.activeQuestionDeadlineAt === 'number' && Number.isFinite(data.activeQuestionDeadlineAt)
         ? data.activeQuestionDeadlineAt
@@ -416,18 +422,18 @@ export function normalizeStudentSessionSnapshot(
 export function shouldApplyStudentSessionSnapshot(
   current: StudentSessionSnapshot | null,
   candidate: StudentSessionSnapshot,
-  latestActiveQuestionRunStartedAt: number | null = current?.activeQuestionRunStartedAt ?? null,
+  latestActiveQuestionRunRevision: number | null = current?.activeQuestionRunRevision ?? null,
 ): boolean {
   if (
     current === null ||
     current.sessionId !== candidate.sessionId ||
-    candidate.activeQuestionRunStartedAt === null ||
-    latestActiveQuestionRunStartedAt === null
+    candidate.activeQuestionRunRevision === null ||
+    latestActiveQuestionRunRevision === null
   ) {
     return true
   }
 
-  return candidate.activeQuestionRunStartedAt >= latestActiveQuestionRunStartedAt
+  return candidate.activeQuestionRunRevision >= latestActiveQuestionRunRevision
 }
 
 export function isLatestStudentSnapshotRequest(requestId: number, latestRequestId: number): boolean {
@@ -437,9 +443,9 @@ export function isLatestStudentSnapshotRequest(requestId: number, latestRequestI
 export function selectStudentSessionSnapshot(
   current: StudentSessionSnapshot | null,
   candidate: StudentSessionSnapshot,
-  latestActiveQuestionRunStartedAt?: number | null,
+  latestActiveQuestionRunRevision?: number | null,
 ): { snapshot: StudentSessionSnapshot | null; accepted: boolean } {
-  const accepted = shouldApplyStudentSessionSnapshot(current, candidate, latestActiveQuestionRunStartedAt)
+  const accepted = shouldApplyStudentSessionSnapshot(current, candidate, latestActiveQuestionRunRevision)
   return {
     snapshot: accepted ? candidate : current,
     accepted,
@@ -461,12 +467,12 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
   const mountedRef = useRef(true)
   const latestSnapshotRequestRef = useRef(0)
   const snapshotRef = useRef<StudentSessionSnapshot | null>(null)
-  const latestActiveQuestionRunStartedAtRef = useRef<number | null>(null)
+  const latestActiveQuestionRunRevisionRef = useRef<number | null>(null)
 
   useEffect(() => {
     latestSnapshotRequestRef.current += 1
     snapshotRef.current = null
-    latestActiveQuestionRunStartedAtRef.current = null
+    latestActiveQuestionRunRevisionRef.current = null
     setSnapshot(null)
     setLoading(sessionId !== null)
     setError(null)
@@ -495,11 +501,11 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
       const selection = selectStudentSessionSnapshot(
         snapshotRef.current,
         data,
-        latestActiveQuestionRunStartedAtRef.current,
+        latestActiveQuestionRunRevisionRef.current,
       )
       snapshotRef.current = selection.snapshot
-      if (selection.accepted && data.activeQuestionRunStartedAt !== null) {
-        latestActiveQuestionRunStartedAtRef.current = data.activeQuestionRunStartedAt
+      if (selection.accepted && data.activeQuestionRunRevision !== null) {
+        latestActiveQuestionRunRevisionRef.current = data.activeQuestionRunRevision
       }
       setSnapshot(selection.snapshot)
       setError(null)
@@ -561,13 +567,13 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
               const selection = selectStudentSessionSnapshot(
                 snapshotRef.current,
                 normalized,
-                latestActiveQuestionRunStartedAtRef.current,
+                latestActiveQuestionRunRevisionRef.current,
               )
               if (selection.accepted) {
                 latestSnapshotRequestRef.current += 1
                 snapshotRef.current = selection.snapshot
-                if (normalized.activeQuestionRunStartedAt !== null) {
-                  latestActiveQuestionRunStartedAtRef.current = normalized.activeQuestionRunStartedAt
+                if (normalized.activeQuestionRunRevision !== null) {
+                  latestActiveQuestionRunRevisionRef.current = normalized.activeQuestionRunRevision
                 }
                 setSnapshot(selection.snapshot)
                 setLoading(false)

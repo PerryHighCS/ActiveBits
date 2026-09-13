@@ -11,6 +11,7 @@ interface Props {
   studentId: string
   initialAnswer?: AnswerPayload | null
   activeQuestionRunStartedAt?: number | null
+  activeQuestionRunRevision?: number | null
   activeQuestionDeadlineAt?: number | null
   disabled?: boolean
   isSubmitted?: boolean
@@ -40,6 +41,7 @@ export default function QuestionView({
   studentId,
   initialAnswer = null,
   activeQuestionRunStartedAt = null,
+  activeQuestionRunRevision = null,
   activeQuestionDeadlineAt = null,
   disabled = false,
   isSubmitted = false,
@@ -49,6 +51,7 @@ export default function QuestionView({
   onSubmitted,
   sendMessage,
 }: Props) {
+  const activeQuestionRunToken = activeQuestionRunRevision ?? activeQuestionRunStartedAt
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [draftAnswer, setDraftAnswer] = useState<AnswerPayload | null>(initialAnswer)
@@ -57,11 +60,11 @@ export default function QuestionView({
   const synchronizedInitialAnswerRef = useRef(initialAnswer)
   const submissionAttemptRef = useRef(0)
   const disabledRef = useRef(disabled)
-  const activeQuestionRunStartedAtRef = useRef(activeQuestionRunStartedAt)
-  const draftAnswerRunStartedAtRef = useRef<number | null>(null)
+  const activeQuestionRunRevisionRef = useRef(activeQuestionRunToken)
+  const draftAnswerRunRevisionRef = useRef<number | null>(null)
   initialAnswerRef.current = initialAnswer
   disabledRef.current = disabled
-  activeQuestionRunStartedAtRef.current = activeQuestionRunStartedAt
+  activeQuestionRunRevisionRef.current = activeQuestionRunToken
   const isWaitingForChoices =
     question.type === 'multiple-choice' && question.choicesRevealed === false
 
@@ -69,8 +72,8 @@ export default function QuestionView({
     setDraftAnswer(initialAnswerRef.current)
     lastSentDraftRef.current = initialAnswerRef.current
     synchronizedInitialAnswerRef.current = initialAnswerRef.current
-    draftAnswerRunStartedAtRef.current = null
-  }, [question.id, activeQuestionRunStartedAt, isSubmitted])
+    draftAnswerRunRevisionRef.current = null
+  }, [question.id, activeQuestionRunToken, isSubmitted])
 
   useEffect(() => {
     submissionAttemptRef.current += 1
@@ -79,7 +82,7 @@ export default function QuestionView({
     return () => {
       submissionAttemptRef.current += 1
     }
-  }, [question.id, activeQuestionRunStartedAt, sessionId, studentId])
+  }, [question.id, activeQuestionRunToken, sessionId, studentId])
 
   useEffect(() => {
     if (isSameAnswer(draftAnswer, synchronizedInitialAnswerRef.current)) {
@@ -90,9 +93,9 @@ export default function QuestionView({
   }, [draftAnswer, initialAnswer])
 
   useEffect(() => {
-    const draftAnswerRunStartedAt = draftAnswerRunStartedAtRef.current
+    const draftAnswerRunRevision = draftAnswerRunRevisionRef.current
     if (
-      draftAnswerRunStartedAt !== activeQuestionRunStartedAt ||
+      draftAnswerRunRevision !== activeQuestionRunToken ||
       disabled ||
       isWaitingForChoices ||
       isSubmitted ||
@@ -107,7 +110,9 @@ export default function QuestionView({
       const sent = sendMessage('resonance:update-draft', {
         studentId,
         questionId: question.id,
-        activeQuestionRunStartedAt,
+        ...(activeQuestionRunRevision !== null
+          ? { activeQuestionRunRevision: activeQuestionRunToken }
+          : { activeQuestionRunStartedAt: activeQuestionRunToken }),
         answer: pendingDraft,
       })
       if (sent) {
@@ -131,15 +136,15 @@ export default function QuestionView({
     return () => {
       window.clearTimeout(timeoutId)
       if (
-        activeQuestionRunStartedAtRef.current === activeQuestionRunStartedAt &&
-        draftAnswerRunStartedAt === activeQuestionRunStartedAt &&
+        activeQuestionRunRevisionRef.current === activeQuestionRunToken &&
+        draftAnswerRunRevision === activeQuestionRunToken &&
         !disabledRef.current &&
         !isSameAnswer(pendingDraft, lastSentDraftRef.current)
       ) {
         sendDraft()
       }
     }
-  }, [activeQuestionDeadlineAt, activeQuestionRunStartedAt, disabled, draftAnswer, isSubmitted, isWaitingForChoices, question.id, sendMessage, studentId])
+  }, [activeQuestionDeadlineAt, activeQuestionRunRevision, activeQuestionRunToken, disabled, draftAnswer, isSubmitted, isWaitingForChoices, question.id, sendMessage, studentId])
 
   async function submitAnswer(
     answer: { type: 'free-response'; text: string } | { type: 'multiple-choice'; selectedOptionIds: string[] },
@@ -151,7 +156,7 @@ export default function QuestionView({
     setSubmitting(true)
     setError(null)
     const submissionAttempt = ++submissionAttemptRef.current
-    const submissionRunStartedAt = activeQuestionRunStartedAtRef.current
+    const submissionRunRevision = activeQuestionRunRevisionRef.current
 
     try {
       const resp = await fetch(`/api/resonance/${sessionId}/submit-answer`, {
@@ -160,7 +165,9 @@ export default function QuestionView({
         body: JSON.stringify({
           studentId,
           questionId: question.id,
-          activeQuestionRunStartedAt: submissionRunStartedAt,
+          ...(activeQuestionRunRevision !== null
+            ? { activeQuestionRunRevision: submissionRunRevision }
+            : { activeQuestionRunStartedAt: submissionRunRevision }),
           answer,
         }),
       })
@@ -169,7 +176,7 @@ export default function QuestionView({
 
       if (
         submissionAttempt !== submissionAttemptRef.current ||
-        submissionRunStartedAt !== activeQuestionRunStartedAtRef.current
+        submissionRunRevision !== activeQuestionRunRevisionRef.current
       ) {
         return
       }
@@ -183,18 +190,18 @@ export default function QuestionView({
       onSubmitted?.(question.id, answer)
       setDraftAnswer(answer)
       lastSentDraftRef.current = answer
-      draftAnswerRunStartedAtRef.current = activeQuestionRunStartedAt
+      draftAnswerRunRevisionRef.current = activeQuestionRunToken
     } catch {
       if (
         submissionAttempt === submissionAttemptRef.current &&
-        submissionRunStartedAt === activeQuestionRunStartedAtRef.current
+        submissionRunRevision === activeQuestionRunRevisionRef.current
       ) {
         setError('Network error — please try again')
       }
     } finally {
       if (
         submissionAttempt === submissionAttemptRef.current &&
-        submissionRunStartedAt === activeQuestionRunStartedAtRef.current
+        submissionRunRevision === activeQuestionRunRevisionRef.current
       ) {
         setSubmitting(false)
       }
@@ -216,7 +223,7 @@ export default function QuestionView({
           onDraftChange={(text) => {
             const trimmed = text.trim()
             const answer = trimmed.length > 0 ? { type: 'free-response' as const, text: trimmed } : null
-            draftAnswerRunStartedAtRef.current = activeQuestionRunStartedAt
+            draftAnswerRunRevisionRef.current = activeQuestionRunToken
             setDraftAnswer(answer)
             onDraftChanged?.(question.id, answer)
           }}
@@ -235,7 +242,7 @@ export default function QuestionView({
             const answer = selectedOptionIds.length > 0
               ? { type: 'multiple-choice' as const, selectedOptionIds }
               : null
-            draftAnswerRunStartedAtRef.current = activeQuestionRunStartedAt
+            draftAnswerRunRevisionRef.current = activeQuestionRunToken
             setDraftAnswer(answer)
             onDraftChanged?.(question.id, answer)
           }}

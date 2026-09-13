@@ -7,6 +7,7 @@ import {
   readCookieValue,
   resolveActivityCapability,
   resolveActivityPrincipalFromCookies,
+  tryIssueActivityCapability,
 } from './activityCapabilities.js'
 
 void test('activity capabilities retain only a hash and resolve in their session and role', () => {
@@ -65,4 +66,15 @@ void test('activity capabilities have a bounded lifetime and are rejected once e
   const caps = session.data.activityCapabilities as Record<string, { expiresAt?: number }>
   delete caps[issued.id]!.expiresAt
   assert.equal(resolveActivityCapability(session, 'session-a', 'manager', issued.token, issuedAt + 1), null)
+})
+
+void test('non-evicting capability issuance preserves live principals at capacity', () => {
+  const session = { data: {} as Record<string, unknown> }
+  const first = issueActivityCapability(session, 'participant', 'student-0', 1_000)
+  for (let index = 1; index < 200; index += 1) {
+    issueActivityCapability(session, 'participant', `student-${index}`, 1_000)
+  }
+
+  assert.equal(tryIssueActivityCapability(session, 'participant', 'student-200', 2_000), null)
+  assert.ok(resolveActivityCapability(session, 'session-a', 'participant', first.token, 2_000))
 })

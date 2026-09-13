@@ -6,6 +6,13 @@ import { resolveQuestionStatusBadge } from './ResonanceStudent.js'
 import { resolveSubmissionAnnouncement } from './ResonanceStudent.js'
 import { resolveSelfPacedSubmittedMessage } from './ResonanceStudent.js'
 import { hasActiveQuestionRunRestart } from './ResonanceStudent.js'
+import { shouldRetryRegistrationWithoutStudentId } from './ResonanceStudent.js'
+
+void test('registration retries without a stale restored student id after authorization is lost', () => {
+  assert.equal(shouldRetryRegistrationWithoutStudentId(403, 'student-1'), true)
+  assert.equal(shouldRetryRegistrationWithoutStudentId(403, null), false)
+  assert.equal(shouldRetryRegistrationWithoutStudentId(429, 'student-1'), false)
+})
 
 void test('clearLiveQuestionSubmission unlocks a revisited live question only', () => {
   const submittedQuestionIds = new Set(['q1', 'q2'])

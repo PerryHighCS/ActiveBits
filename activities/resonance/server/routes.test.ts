@@ -384,6 +384,32 @@ void test('student registration issues an httpOnly capability and REST routes en
   }, claimedRegistrationRes)
   assert.equal(claimedRegistrationRes.statusCode, 403)
 
+  const saturatedSession = await sessions.get(session.id)
+  assert.ok(saturatedSession)
+  const existingCapabilityCount = Object.keys(
+    (saturatedSession.data as { activityCapabilities?: Record<string, unknown> }).activityCapabilities ?? {},
+  ).length
+  for (let index = existingCapabilityCount; index < 200; index += 1) {
+    issueActivityCapability(saturatedSession, 'participant', `capacity-student-${index}`)
+  }
+  await sessions.set(session.id, saturatedSession)
+
+  console.info('[TEST] registration at participant capability capacity should return 429 without eviction')
+  const capacityRes = createResponse()
+  await registerHandler?.({
+    params: { sessionId: session.id },
+    body: { name: 'Capacity Student' },
+  }, capacityRes)
+  assert.equal(capacityRes.statusCode, 429)
+
+  const stillAuthenticatedRes = createResponse()
+  await stateHandler?.({
+    params: { sessionId: session.id },
+    query: { studentId: registeredStudentId },
+    cookies: authenticatedCookies,
+  }, stillAuthenticatedRes)
+  assert.equal(stillAuthenticatedRes.statusCode, 200)
+
   await sessions.close()
 })
 
@@ -2837,7 +2863,7 @@ void test('reactivating a question keeps prior answers editable for students and
   )
   assert.equal(firstActivateRes.statusCode, 200)
   const firstActivatedSession = await sessions.get(session.id)
-  const firstRunStartedAt = firstActivatedSession?.data.activeQuestionRunStartedAt
+  const firstRunRevision = firstActivatedSession?.data.activeQuestionRunRevision
 
   const submitRes = createResponse()
   await submitHandler?.(
@@ -2847,7 +2873,7 @@ void test('reactivating a question keeps prior answers editable for students and
       body: {
         studentId: 'student1',
         questionId: 'q1',
-        activeQuestionRunStartedAt: firstRunStartedAt,
+        activeQuestionRunRevision: firstRunRevision,
         answer: {
           type: 'free-response',
           text: 'First run answer',
@@ -2857,7 +2883,6 @@ void test('reactivating a question keeps prior answers editable for students and
     submitRes,
   )
   assert.equal(submitRes.statusCode, 200)
-  await new Promise((resolve) => setTimeout(resolve, 2))
 
   const secondActivateRes = createResponse()
   await activateHandler?.(
@@ -2873,6 +2898,8 @@ void test('reactivating a question keeps prior answers editable for students and
     secondActivateRes,
   )
   assert.equal(secondActivateRes.statusCode, 200)
+  const secondActivatedSession = await sessions.get(session.id)
+  assert.equal(secondActivatedSession?.data.activeQuestionRunRevision, Number(firstRunRevision) + 1)
 
   const staleSubmitRes = createResponse()
   console.info('[TEST] a submission from the previous run should return 409')
@@ -2883,7 +2910,7 @@ void test('reactivating a question keeps prior answers editable for students and
       body: {
         studentId: 'student1',
         questionId: 'q1',
-        activeQuestionRunStartedAt: firstRunStartedAt,
+        activeQuestionRunRevision: firstRunRevision,
         answer: {
           type: 'free-response',
           text: 'Delayed first run answer',

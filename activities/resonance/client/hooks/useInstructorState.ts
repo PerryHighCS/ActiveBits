@@ -146,6 +146,10 @@ export function normalizeInstructorStateSnapshot(
       typeof data.activeQuestionRunStartedAt === 'number' && Number.isFinite(data.activeQuestionRunStartedAt)
         ? data.activeQuestionRunStartedAt
         : null,
+    activeQuestionRunRevision:
+      typeof data.activeQuestionRunRevision === 'number' && Number.isSafeInteger(data.activeQuestionRunRevision)
+        ? data.activeQuestionRunRevision
+        : null,
     activeQuestionDeadlineAt:
       typeof data.activeQuestionDeadlineAt === 'number' && Number.isFinite(data.activeQuestionDeadlineAt)
         ? data.activeQuestionDeadlineAt

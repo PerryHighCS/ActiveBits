@@ -52,6 +52,7 @@ export interface Response {
   questionId: string
   studentId: string
   submittedAt: number
+  activeQuestionRunRevision?: number | null
   answer: AnswerPayload
 }
 
@@ -134,6 +135,7 @@ export interface StudentSessionSnapshot {
   activeQuestions: StudentQuestion[]
   activeQuestionIds: string[]
   activeQuestionRunStartedAt: number | null
+  activeQuestionRunRevision: number | null
   activeQuestionDeadlineAt: number | null
   reveals: QuestionReveal[]
   reviewedResponses: ReviewedResponse[]
@@ -151,6 +153,7 @@ export interface InstructorSessionSnapshot {
   activeQuestionId: string | null
   activeQuestionIds: string[]
   activeQuestionRunStartedAt: number | null
+  activeQuestionRunRevision: number | null
   activeQuestionDeadlineAt: number | null
   students: Student[]
   responses: ResponseWithName[]
