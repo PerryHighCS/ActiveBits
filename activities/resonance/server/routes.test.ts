@@ -362,6 +362,7 @@ void test('student registration issues an httpOnly capability and REST routes en
   }, mismatchedStateRes)
   assert.equal(mismatchedStateRes.statusCode, 403)
 
+  console.info('[TEST] a REST capability must not submit for a different student id')
   const mismatchedSubmitRes = createResponse()
   await submitHandler?.({
     params: { sessionId: session.id },
@@ -427,6 +428,7 @@ void test('student WebSocket identity is derived from its participant capability
       mismatchedCloseCalls.push({ code, reason })
     },
   }
+  console.info('[TEST] a WebSocket capability must not authorize a different student id')
   handler(mismatchedSocket, new URLSearchParams({
     sessionId: session.id,
     role: 'student',

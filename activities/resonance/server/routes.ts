@@ -1836,10 +1836,22 @@ export default function setupResonanceRoutes(
     const body = isPlainObject(req.body) ? req.body : {}
     const studentId = resolveStudentPrincipal(session, sessionId, req.cookies)
     if (!studentId) {
+      console.warn(JSON.stringify({
+        component: 'resonance',
+        event: 'student-answer-submit-denied',
+        sessionId,
+        reason: 'missing-participant-capability',
+      }))
       res.status(403).json({ error: 'participant authentication required' })
       return
     }
     if (typeof body.studentId === 'string' && body.studentId !== studentId) {
+      console.warn(JSON.stringify({
+        component: 'resonance',
+        event: 'student-answer-submit-denied',
+        sessionId,
+        reason: 'student-id-mismatch',
+      }))
       res.status(403).json({ error: 'studentId does not match authenticated participant' })
       return
     }
@@ -1911,6 +1923,14 @@ export default function setupResonanceRoutes(
     const requestedStudentId = typeof req.query?.studentId === 'string' ? req.query.studentId : null
     const authenticatedStudentId = resolveStudentPrincipal(session, sessionId, req.cookies)
     if (requestedStudentId !== null && requestedStudentId !== authenticatedStudentId) {
+      console.warn(JSON.stringify({
+        component: 'resonance',
+        event: 'student-state-denied',
+        sessionId,
+        reason: authenticatedStudentId === null
+          ? 'missing-participant-capability'
+          : 'student-id-mismatch',
+      }))
       res.status(403).json({ error: 'participant authentication required' })
       return
     }
