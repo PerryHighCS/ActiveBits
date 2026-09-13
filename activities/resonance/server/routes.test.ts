@@ -4,6 +4,11 @@ import {
   issueActivityCapability,
 } from 'activebits-server/core/activityCapabilities.js'
 import {
+  acceptEntryParticipant,
+  getSessionParticipantCookieName,
+  issueAcceptedEntryParticipantToken,
+} from 'activebits-server/core/acceptedEntryParticipants.js'
+import {
   generatePersistentHash,
   getOrCreateActivePersistentSession,
   initializePersistentStorage,
@@ -475,6 +480,43 @@ void test('unauthenticated direct registration is rate-limited before it can exh
   assert.equal(limitedResponse.statusCode, 429)
   assert.equal(limitedResponse.headers['Retry-After'], '60')
   assert.equal(Object.keys(((await sessions.get(session.id))?.data as { activityCapabilities?: Record<string, unknown> }).activityCapabilities ?? {}).length, 100)
+  await sessions.close()
+})
+
+void test('a fresh accepted participant takes precedence over a stale capability from a shared browser', async () => {
+  initializePersistentStorage(null)
+  const app = createMockApp()
+  const sessions = createSessionStore(null)
+  const session = createInstructorResonanceSession()
+  const staleCapabilityCookies = issueStudentCookies(session, 'student1')
+  assert.ok(acceptEntryParticipant(session, { participantId: 'student2', displayName: 'Grace Hopper' }))
+  const acceptedToken = issueAcceptedEntryParticipantToken(session, 'student2')
+  assert.ok(acceptedToken)
+  await sessions.set(session.id, session)
+  setupResonanceRoutes(app, sessions, createMockWs())
+
+  const registerHandler = app.handlers.post['/api/resonance/:sessionId/register-student']
+  const response = createResponse()
+  await registerHandler?.({
+    params: { sessionId: session.id },
+    body: { name: 'Grace Hopper', studentId: 'student2' },
+    cookies: {
+      ...staleCapabilityCookies,
+      [getSessionParticipantCookieName(session.id)]: acceptedToken,
+    },
+  }, response)
+  assert.equal(response.statusCode, 200)
+  assert.equal((response.body as { studentId?: string }).studentId, 'student2')
+  assert.equal(response.cookies.length, 1, 'the accepted participant receives its own replacement capability')
+
+  const stateHandler = app.handlers.get['/api/resonance/:sessionId/state']
+  const stateResponse = createResponse()
+  await stateHandler?.({
+    params: { sessionId: session.id },
+    query: { studentId: 'student2' },
+    cookies: { [response.cookies[0]!.name]: response.cookies[0]!.value },
+  }, stateResponse)
+  assert.equal(stateResponse.statusCode, 200)
   await sessions.close()
 })
 

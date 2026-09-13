@@ -1931,7 +1931,9 @@ export default function setupResonanceRoutes(
       session,
       req.cookies?.[getSessionParticipantCookieName(sessionId)],
     )
-    const authorizedId = existingPrincipalId ?? acceptedParticipant?.participantId ?? null
+    // A newly accepted waiting-room participant is fresher than a capability
+    // cookie a shared browser may have retained from a previous student.
+    const authorizedId = acceptedParticipant?.participantId ?? existingPrincipalId ?? null
     if (requestedId !== null && requestedId !== authorizedId) {
       console.warn(JSON.stringify({
         component: 'resonance',
@@ -1974,7 +1976,7 @@ export default function setupResonanceRoutes(
       joinedAt: Date.now(),
     }
 
-    const capability = existingPrincipalId
+    const capability = existingPrincipalId !== null && existingPrincipalId === authorizedId
       ? null
       : tryIssueActivityCapability(session, 'participant', studentId)
     if (!existingPrincipalId && capability === null) {
