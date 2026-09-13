@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type {
   InstructorAnnotation,
   InstructorSessionSnapshot,
@@ -253,6 +253,19 @@ export function useInstructorState(sessionId: string | null, passcode: string | 
   const latestSnapshotRequestRef = useRef(0)
   const snapshotRef = useRef<InstructorStateSnapshot | null>(null)
   const latestActiveQuestionRunRevisionRef = useRef<number | null>(null)
+
+  // This hook instance can be retained while the manager switches sessions.
+  // Reset before passive effects begin the next fetch/socket connection so a
+  // previous session's run watermark cannot reject the next session's first
+  // (lower-numbered) live run, and its snapshot is never painted while reloads.
+  useLayoutEffect(() => {
+    latestSnapshotRequestRef.current += 1
+    snapshotRef.current = null
+    latestActiveQuestionRunRevisionRef.current = null
+    setSnapshot(null)
+    setLoading(true)
+    setError(null)
+  }, [sessionId, passcode])
 
   const fetchSnapshot = useCallback(async () => {
     if (sessionId === null || passcode === null) return

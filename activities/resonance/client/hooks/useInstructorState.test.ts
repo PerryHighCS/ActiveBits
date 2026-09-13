@@ -366,6 +366,75 @@ void test('a queued message from a prior instructor session cannot leak into the
   }
 })
 
+void test('switching instructor sessions resets the run-ordering watermark before the next session activates', async () => {
+  const restore = installInstructorWsTestEnvironment(async (url) => {
+    const sessionId = /\/api\/resonance\/([^/]+)\/responses/.exec(url)?.[1] ?? 'unknown'
+    if (sessionId === 'session-A') {
+      return {
+        ok: true,
+        json: async () => ({
+          sessionId,
+          activeQuestionIds: ['q-old'],
+          activeQuestionRunRevision: 5,
+          lastActiveQuestionRunRevision: 5,
+        }),
+      }
+    }
+    return {
+      ok: true,
+      json: async () => ({
+        sessionId,
+        activeQuestionIds: [],
+        activeQuestionRunRevision: null,
+        lastActiveQuestionRunRevision: null,
+      }),
+    }
+  })
+  const { act, render, waitFor } = await import('@testing-library/react')
+
+  try {
+    const captured: { snapshot: InstructorStateSnapshot | null } = { snapshot: null }
+    function Probe({ sessionId, passcode }: { sessionId: string; passcode: string }) {
+      const { snapshot } = useInstructorState(sessionId, passcode)
+      captured.snapshot = snapshot
+      return null
+    }
+
+    let rendered!: ReturnType<typeof render>
+    await act(async () => {
+      rendered = render(React.createElement(Probe, { sessionId: 'session-A', passcode: 'PASS-A' }))
+    })
+    await waitFor(() => assert.equal(captured.snapshot?.activeQuestionRunRevision, 5))
+
+    await act(async () => {
+      rendered.rerender(React.createElement(Probe, { sessionId: 'session-B', passcode: 'PASS-B' }))
+    })
+    await waitFor(() => assert.equal(captured.snapshot?.sessionId, 'session-B'))
+    assert.equal(captured.snapshot?.activeQuestionRunRevision, null)
+
+    const currentSocket = FakeWebSocket.instances[1]!
+    await act(async () => {
+      currentSocket.emitMessage({
+        type: 'resonance:instructor-state',
+        payload: {
+          sessionId: 'session-B',
+          activeQuestionIds: ['q-new'],
+          activeQuestionRunRevision: 1,
+          lastActiveQuestionRunRevision: 1,
+        },
+      })
+    })
+    assert.equal(captured.snapshot?.activeQuestionRunRevision, 1)
+    assert.deepEqual(captured.snapshot?.activeQuestionIds, ['q-new'])
+
+    await act(async () => {
+      rendered.unmount()
+    })
+  } finally {
+    restore()
+  }
+})
+
 void test('a same-run REST response arriving after a newer WebSocket push does not overwrite it', async () => {
   const pendingFetches: Array<{ resolve: (value: { ok: boolean; json(): Promise<unknown> }) => void }> = []
   const restore = installInstructorWsTestEnvironment((_url) => new Promise((resolve) => {

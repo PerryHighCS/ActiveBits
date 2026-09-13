@@ -887,6 +887,14 @@ that document rather than creating activity-specific authentication payloads.
 - Validation: `activities/resonance/client/student/QuestionInputs.test.tsx` — "QuestionView ignores a REST submission after its session identity changes" exercises the observable behavior (deferred fetch resolves after a `rerender` with a new session/student id; `onSubmitted` never fires). Note: this test cannot isolate the synchronous-guard fix from the pre-existing effect-based fallback, because Testing Library's `act()`-wrapped `rerender()` always flushes passive effects before the test resumes — in this harness both mechanisms already make the assertion pass. The fix is still correct/necessary for the real (non-`act()`-batched) production timing described above.
 - Owner: Claude Sonnet 5
 
+## Resonance instructor session switches reset snapshot ordering
+
+- Date: 2026-09-13
+- Surface: Resonance instructor session snapshot | REST | websocket
+- Contract: `useInstructorState` resets its visible snapshot, in-flight REST request sequence, and `latestActiveQuestionRunRevisionRef` in a layout effect whenever `sessionId` or `passcode` changes. Run revisions are monotonic only within one session, so retaining session A's watermark would otherwise reject session B's valid first live run when its revision is lower.
+- Validation: `activities/resonance/client/hooks/useInstructorState.test.ts` — "switching instructor sessions resets the run-ordering watermark before the next session activates".
+- Owner: Codex
+
 ## Resonance edit-sequence survives a page reload mid-run
 
 - Date: 2026-09-13
