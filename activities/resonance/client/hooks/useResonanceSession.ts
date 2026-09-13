@@ -729,10 +729,20 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
         resolve(false)
       }, DRAFT_SAVE_ACK_TIMEOUT_MS)
       pendingDraftSavesRef.current.set(draftId, { resolve, timeoutId })
-      currentWs.send(JSON.stringify({
-        type: 'resonance:update-draft',
-        payload: { ...payload, draftId },
-      }))
+      try {
+        currentWs.send(JSON.stringify({
+          type: 'resonance:update-draft',
+          payload: { ...payload, draftId },
+        }))
+      } catch {
+        // The socket can close between the readyState check above and this
+        // send (e.g. a connection drop mid-call). An uncaught throw here
+        // would reject this Promise, but callers only attach `.then` — the
+        // draft would silently never be marked/reconciled as unconfirmed.
+        clearTimeout(timeoutId)
+        pendingDraftSavesRef.current.delete(draftId)
+        resolve(false)
+      }
     })
   }, [])
 

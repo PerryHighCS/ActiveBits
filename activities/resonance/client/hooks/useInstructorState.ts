@@ -351,16 +351,26 @@ export function useInstructorState(sessionId: string | null, passcode: string | 
 
     function connect() {
       if (closed || !mountedRef.current) return
-      ws = new WebSocket(wsUrl)
-      wsRef.current = ws
+      const socket = new WebSocket(wsUrl)
+      ws = socket
+      wsRef.current = socket
+
+      // Guard every handler by the specific socket it belongs to (not just
+      // the shared `mountedRef`/`closed` flags): a session/passcode change
+      // resets `mountedRef` to true for the *new* effect before an old
+      // socket's already-in-flight message is dispatched, so a stale handler
+      // could otherwise apply a prior session's instructor data to the new
+      // one. Mirrors the student hook's `isCurrent` guard.
+      const isCurrent = () => !closed && wsRef.current === socket
 
       ws.onopen = () => {
+        if (!isCurrent()) return
         reconnectDelay = 1_000
         stopFallback()
       }
 
       ws.onmessage = (event) => {
-        if (!mountedRef.current) return
+        if (!isCurrent()) return
         try {
           const msg = JSON.parse(String(event.data)) as { type?: string; payload?: unknown }
           if (msg.type === 'resonance:instructor-state' && msg.payload !== undefined) {
@@ -371,8 +381,12 @@ export function useInstructorState(sessionId: string | null, passcode: string | 
                 normalized,
                 latestActiveQuestionRunRevisionRef.current,
               )
-              snapshotRef.current = selection.snapshot
               if (selection.accepted) {
+                // Invalidate any REST fetch already in flight — even one for
+                // the same run revision — so it can't overwrite the response/
+                // progress data this newer push just delivered.
+                latestSnapshotRequestRef.current += 1
+                snapshotRef.current = selection.snapshot
                 const observedRevision = resolveObservedInstructorRunRevision(normalized)
                 if (observedRevision !== null) {
                   latestActiveQuestionRunRevisionRef.current = observedRevision
@@ -399,6 +413,7 @@ export function useInstructorState(sessionId: string | null, passcode: string | 
       }
 
       ws.onclose = () => {
+        if (!isCurrent()) return
         wsRef.current = null
         ws = null
         if (!closed && mountedRef.current) {

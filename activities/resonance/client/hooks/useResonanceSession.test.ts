@@ -735,3 +735,50 @@ void test('a queued message from a prior student identity cannot leak into the n
     restore()
   }
 })
+
+void test('saveDraft resolves false instead of rejecting when the socket throws synchronously on send', async () => {
+  // The socket can close between the readyState check and the send call
+  // below it. QuestionView only attaches `.then` to this Promise (no
+  // `.catch`), so an uncaught rejection here would silently drop the draft
+  // instead of marking/reconciling it as unconfirmed.
+  const restore = installWsTestEnvironment()
+  const { act, render } = await import('@testing-library/react')
+
+  try {
+    const captured: { saveDraft: ((payload: Record<string, unknown>) => Promise<boolean>) | null } = { saveDraft: null }
+    function Probe({ sessionId, studentId }: { sessionId: string; studentId: string }) {
+      const { saveDraft } = useResonanceSession(sessionId, studentId)
+      captured.saveDraft = saveDraft
+      return null
+    }
+
+    let rendered!: ReturnType<typeof render>
+    await act(async () => {
+      rendered = render(React.createElement(Probe, { sessionId: 'session-A', studentId: 'student-A' }))
+    })
+    const socket = FakeWebSocket.instances[0]!
+    socket.send = () => {
+      throw new Error('socket closed mid-send')
+    }
+
+    console.info('[TEST] saveDraft must not reject when the underlying send throws synchronously')
+    let result: boolean | undefined
+    let rejected = false
+    await act(async () => {
+      try {
+        result = await captured.saveDraft?.({ questionId: 'q1', answer: null })
+      } catch {
+        rejected = true
+      }
+    })
+
+    assert.equal(rejected, false)
+    assert.equal(result, false)
+
+    await act(async () => {
+      rendered.unmount()
+    })
+  } finally {
+    restore()
+  }
+})

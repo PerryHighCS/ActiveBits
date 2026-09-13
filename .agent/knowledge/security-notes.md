@@ -446,3 +446,11 @@ Track security-relevant boundaries, risks, and mitigation decisions.
 # Persistent manager capability recovery
 
 - A persistent teacher-cookie authentication proves the teacher's authority but does not itself populate an activity manager capability. Manager clients with capability-gated routes must redeem that verified cookie through the server-side persistent-manager-capability recovery endpoint before opening their manager socket or protected REST calls.
+
+# Resonance instructor WebSocket socket-identity leak (CWE-200)
+
+- Date: 2026-09-13
+- `useInstructorState`'s WS `onopen`/`onmessage`/`onclose` handlers checked only the shared `mountedRef` flag, not the specific socket instance they were attached to. A session/passcode change resets `mountedRef` to `true` for the *new* effect run before an old socket's already-in-flight message is dispatched — a queued `resonance:instructor-state` message from the prior session could then land on the new session's state, and `shouldApplyInstructorSnapshot`/`selectInstructorSnapshot` unconditionally accept a candidate whose `sessionId` differs from `current`'s (by design, for legitimate session switches), so nothing else caught it. Net effect: one instructor's session data could leak into a different instructor session/passcode view in the same tab.
+- Fix: capture the socket instance in a local `const socket = new WebSocket(...)` and gate every handler on `isCurrent = () => !closed && wsRef.current === socket`, mirroring the identical pattern already used in the student hook (`useResonanceSession.ts`), which had this exact class of bug fixed earlier in the same PR review cycle. Whenever adding a new WS-consuming hook in this activity, check it uses per-socket identity guards, not just a shared `mountedRef`.
+- Validation: `activities/resonance/client/hooks/useInstructorState.test.ts` — "a queued message from a prior instructor session cannot leak into the new session" (confirmed to fail with `isCurrent` stubbed to always-true).
+- Owner: Claude Sonnet 5

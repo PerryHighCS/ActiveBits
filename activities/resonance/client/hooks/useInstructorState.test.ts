@@ -1,13 +1,76 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { normalizeInstructorStateSnapshot } from './useInstructorState.js'
+import * as React from 'react'
+import { JSDOM } from 'jsdom'
+import { normalizeInstructorStateSnapshot, useInstructorState } from './useInstructorState.js'
 import { resolveObservedInstructorRunRevision, shouldApplyInstructorSnapshot } from './useInstructorState.js'
 import type { InstructorStateSnapshot } from './useInstructorState.js'
+
+;(globalThis as { React?: typeof React }).React = React
 
 function buildInstructorSnapshot(overrides: Partial<InstructorStateSnapshot>): InstructorStateSnapshot {
   const base = normalizeInstructorStateSnapshot({ sessionId: 'session-1' })
   assert.ok(base)
   return { ...base, ...overrides }
+}
+
+class FakeWebSocket {
+  static instances: FakeWebSocket[] = []
+  static readonly OPEN = 1
+  onopen: (() => void) | null = null
+  onmessage: ((event: { data: string }) => void) | null = null
+  onerror: (() => void) | null = null
+  onclose: ((event: { code?: number }) => void) | null = null
+  readyState = 1
+
+  constructor(public url: string) {
+    FakeWebSocket.instances.push(this)
+  }
+
+  send(): void {}
+
+  close(): void {
+    this.readyState = 3
+  }
+
+  emitMessage(payload: unknown): void {
+    this.onmessage?.({ data: JSON.stringify(payload) })
+  }
+}
+
+function installInstructorWsTestEnvironment(
+  fetchImpl: (url: string) => Promise<{ ok: boolean; status?: number; json(): Promise<unknown> }>,
+): () => void {
+  const dom = new JSDOM('<!doctype html><html><body></body></html>', {
+    url: 'https://activebits.local/',
+  })
+
+  const keys = ['window', 'document', 'navigator', 'WebSocket', 'fetch'] as const
+  const descriptors = new Map<string, PropertyDescriptor | undefined>()
+  for (const key of keys) {
+    descriptors.set(key, Object.getOwnPropertyDescriptor(globalThis, key))
+  }
+
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: dom.window })
+  Object.defineProperty(globalThis, 'document', { configurable: true, value: dom.window.document })
+  Object.defineProperty(globalThis, 'navigator', { configurable: true, value: dom.window.navigator })
+  Object.defineProperty(globalThis, 'WebSocket', { configurable: true, value: FakeWebSocket })
+  Object.defineProperty(globalThis, 'fetch', {
+    configurable: true,
+    value: (url: string) => fetchImpl(url),
+  })
+
+  return () => {
+    for (const [key, descriptor] of descriptors) {
+      if (descriptor) {
+        Object.defineProperty(globalThis, key, descriptor)
+      } else {
+        Reflect.deleteProperty(globalThis, key)
+      }
+    }
+    dom.window.close()
+    FakeWebSocket.instances.length = 0
+  }
 }
 
 void test('normalizeInstructorStateSnapshot rejects array annotations and responseOrderOverrides', () => {
@@ -246,4 +309,140 @@ void test('shouldApplyInstructorSnapshot always accepts a different session', ()
   })
 
   assert.equal(shouldApplyInstructorSnapshot(current, otherSession), true)
+})
+
+void test('a queued message from a prior instructor session cannot leak into the new session', async () => {
+  const restore = installInstructorWsTestEnvironment(async (url) => {
+    const sessionId = /\/api\/resonance\/([^/]+)\/responses/.exec(url)?.[1] ?? 'unknown'
+    return { ok: true, json: async () => ({ sessionId, activeQuestionIds: [] }) }
+  })
+  const { act, render } = await import('@testing-library/react')
+
+  try {
+    const captured: { snapshot: InstructorStateSnapshot | null } = { snapshot: null }
+    function Probe({ sessionId, passcode }: { sessionId: string; passcode: string }) {
+      const { snapshot } = useInstructorState(sessionId, passcode)
+      captured.snapshot = snapshot
+      return null
+    }
+
+    let rendered!: ReturnType<typeof render>
+    await act(async () => {
+      rendered = render(React.createElement(Probe, { sessionId: 'session-A', passcode: 'PASS-A' }))
+    })
+    assert.equal(FakeWebSocket.instances.length, 1, 'exactly one socket opens for the first session')
+    const staleSocket = FakeWebSocket.instances[0]!
+
+    // Switching to a different session/passcode tears down the old effect and
+    // opens a second socket for the new one.
+    await act(async () => {
+      rendered.rerender(React.createElement(Probe, { sessionId: 'session-B', passcode: 'PASS-B' }))
+    })
+    assert.equal(FakeWebSocket.instances.length, 2, 'the session change opens a second socket')
+
+    console.info('[TEST] delivering a message queued on the old instructor socket after the session changed; it must be ignored')
+    await act(async () => {
+      staleSocket.emitMessage({
+        type: 'resonance:instructor-state',
+        payload: { sessionId: 'session-A', activeQuestionIds: ['session-A-secret-question'] },
+      })
+    })
+    assert.notDeepEqual(captured.snapshot?.activeQuestionIds, ['session-A-secret-question'])
+
+    const currentSocket = FakeWebSocket.instances[1]!
+    await act(async () => {
+      currentSocket.emitMessage({
+        type: 'resonance:instructor-state',
+        payload: { sessionId: 'session-B', activeQuestionIds: ['session-B-question'] },
+      })
+    })
+    assert.deepEqual(captured.snapshot?.activeQuestionIds, ['session-B-question'])
+
+    await act(async () => {
+      rendered.unmount()
+    })
+  } finally {
+    restore()
+  }
+})
+
+void test('a same-run REST response arriving after a newer WebSocket push does not overwrite it', async () => {
+  const pendingFetches: Array<{ resolve: (value: { ok: boolean; json(): Promise<unknown> }) => void }> = []
+  const restore = installInstructorWsTestEnvironment((_url) => new Promise((resolve) => {
+    pendingFetches.push({ resolve })
+  }))
+  const { act, render, waitFor } = await import('@testing-library/react')
+
+  try {
+    const captured: { snapshot: InstructorStateSnapshot | null } = { snapshot: null }
+    function Probe({ sessionId, passcode }: { sessionId: string; passcode: string }) {
+      const { snapshot } = useInstructorState(sessionId, passcode)
+      captured.snapshot = snapshot
+      return null
+    }
+
+    let rendered!: ReturnType<typeof render>
+    await act(async () => {
+      rendered = render(React.createElement(Probe, { sessionId: 'session-1', passcode: 'PASS' }))
+    })
+
+    // The initial (mount) REST fetch is left in flight deliberately.
+    await waitFor(() => assert.equal(pendingFetches.length, 1))
+    const socket = FakeWebSocket.instances[0]!
+
+    // A newer WebSocket push for run revision 2 lands first.
+    await act(async () => {
+      socket.emitMessage({
+        type: 'resonance:instructor-state',
+        payload: {
+          sessionId: 'session-1',
+          activeQuestionIds: ['q1'],
+          activeQuestionRunRevision: 2,
+          lastActiveQuestionRunRevision: 2,
+          responses: [{
+            id: 'r-ws',
+            questionId: 'q1',
+            studentId: 'student-1',
+            studentName: 'Ada',
+            submittedAt: 2_000,
+            answer: { type: 'free-response', text: 'From WS' },
+          }],
+        },
+      })
+    })
+    assert.equal(captured.snapshot?.responses[0]?.id, 'r-ws')
+
+    console.info('[TEST] a stale pre-timeout REST response for the same run revision resolves after a newer WebSocket push; it must not overwrite it')
+    await act(async () => {
+      pendingFetches[0]!.resolve({
+        ok: true,
+        json: async () => ({
+          sessionId: 'session-1',
+          activeQuestionIds: ['q1'],
+          activeQuestionRunRevision: 2,
+          lastActiveQuestionRunRevision: 2,
+          responses: [{
+            id: 'r-rest',
+            questionId: 'q1',
+            studentId: 'student-1',
+            studentName: 'Ada',
+            submittedAt: 1_000,
+            answer: { type: 'free-response', text: 'From REST (stale)' },
+          }],
+        }),
+      })
+    })
+
+    assert.equal(
+      captured.snapshot?.responses[0]?.id,
+      'r-ws',
+      'the stale same-revision REST response must not overwrite the newer WebSocket push',
+    )
+
+    await act(async () => {
+      rendered.unmount()
+    })
+  } finally {
+    restore()
+  }
 })
