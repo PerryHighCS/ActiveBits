@@ -714,9 +714,9 @@ void test('QuestionView debounces rapid draft edits without flushing each replac
   }
 })
 
-void test('QuestionView reconciles an unacknowledged draft when the question expires', async () => {
+void test('QuestionView reports an unacknowledged draft to its parent before stack navigation can unmount it', async () => {
   const restoreDomEnvironment = installDomEnvironment()
-  const { fireEvent, render, waitFor } = await import('@testing-library/react')
+  const { act, fireEvent, render, waitFor } = await import('@testing-library/react')
 
   try {
     const question = {
@@ -725,9 +725,9 @@ void test('QuestionView reconciles an unacknowledged draft when the question exp
       text: 'Explain your reasoning.',
       order: 0,
     }
-    let unconfirmedCount = 0
+    const failedDrafts: Record<string, unknown>[] = []
     let saveCount = 0
-    console.info('[TEST] QuestionView reconciliation: saveDraft is expected to report a failed save below')
+    console.info('[TEST] QuestionView draft handoff: saveDraft is expected to report a failed save below')
     const props = {
       question,
       sessionId: 'session-1',
@@ -738,8 +738,8 @@ void test('QuestionView reconciles an unacknowledged draft when the question exp
         saveCount += 1
         return false
       },
-      onDraftUnconfirmed: () => {
-        unconfirmedCount += 1
+      onDraftSaveFailed: (payload: Record<string, unknown>) => {
+        failedDrafts.push(payload)
       },
     }
     const rendered = render(React.createElement(QuestionView, props))
@@ -747,12 +747,21 @@ void test('QuestionView reconciles an unacknowledged draft when the question exp
     fireEvent.change(rendered.getByLabelText(/your answer/i), {
       target: { value: 'Unacknowledged revision' },
     })
+    // This is the cleanup path taken when the student switches to another
+    // active-question tab before the debounce can complete.
+    await act(async () => {
+      rendered.unmount()
+      await Promise.resolve()
+    })
     await waitFor(() => assert.equal(saveCount, 1), { timeout: 1_000 })
-    assert.equal(unconfirmedCount, 0)
-
-    rendered.rerender(React.createElement(QuestionView, { ...props, disabled: true }))
-    await waitFor(() => assert.equal(unconfirmedCount, 1))
-    rendered.unmount()
+    await waitFor(() => assert.equal(failedDrafts.length, 1))
+    assert.deepEqual(failedDrafts[0], {
+      studentId: 'student-1',
+      questionId: 'q1',
+      activeQuestionRunStartedAt: 1_000,
+      editSequence: 1,
+      answer: { type: 'free-response', text: 'Unacknowledged revision' },
+    })
   } finally {
     restoreDomEnvironment()
   }

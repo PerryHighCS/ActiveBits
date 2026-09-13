@@ -29,7 +29,7 @@ interface Props {
    */
   editSequence?: number
   onDraftChanged?(questionId: string, answer: AnswerPayload | null): void
-  onDraftUnconfirmed?(questionId: string): void
+  onDraftSaveFailed?(payload: Record<string, unknown>): void
   onSubmitted?(questionId: string, answer: AnswerPayload): void
   sendMessage?(type: string, payload: unknown): boolean
   saveDraft?(payload: Record<string, unknown>): Promise<boolean>
@@ -62,7 +62,7 @@ export default function QuestionView({
   announceSubmittedMessage = true,
   editSequence = 1,
   onDraftChanged,
-  onDraftUnconfirmed,
+  onDraftSaveFailed,
   onSubmitted,
   sendMessage,
   saveDraft,
@@ -73,7 +73,6 @@ export default function QuestionView({
   const [draftAnswer, setDraftAnswer] = useState<AnswerPayload | null>(initialAnswer)
   const draftAnswerRef = useRef(draftAnswer)
   const lastSentDraftRef = useRef<AnswerPayload | null>(null)
-  const hasUnconfirmedDraftRef = useRef(false)
   const initialAnswerRef = useRef(initialAnswer)
   const synchronizedInitialAnswerRef = useRef(initialAnswer)
   const submissionAttemptRef = useRef(0)
@@ -105,20 +104,7 @@ export default function QuestionView({
     lastSentDraftRef.current = initialAnswerRef.current
     synchronizedInitialAnswerRef.current = initialAnswerRef.current
     draftAnswerRunRevisionRef.current = null
-    hasUnconfirmedDraftRef.current = false
   }, [question.id, activeQuestionRunToken, isSubmitted, sessionId, studentId])
-
-  useEffect(() => {
-    if (disabled && hasUnconfirmedDraftRef.current) {
-      hasUnconfirmedDraftRef.current = false
-      // Treat the current value as synchronized so the sync effect below
-      // accepts the authoritative `initialAnswer` the parent refreshes to
-      // after reconciling this unconfirmed draft, instead of continuing to
-      // treat it as a dirty local edit forever.
-      synchronizedInitialAnswerRef.current = draftAnswerRef.current
-      onDraftUnconfirmed?.(question.id)
-    }
-  }, [disabled, onDraftUnconfirmed, question.id])
 
   useEffect(() => {
     submissionAttemptRef.current += 1
@@ -173,14 +159,11 @@ export default function QuestionView({
           }
           if (saved) {
             lastSentDraftRef.current = pendingDraft
-            hasUnconfirmedDraftRef.current = false
           } else {
-            hasUnconfirmedDraftRef.current = true
-            if (disabledRef.current || (activeQuestionDeadlineAt !== null && Date.now() >= activeQuestionDeadlineAt)) {
-              hasUnconfirmedDraftRef.current = false
-              synchronizedInitialAnswerRef.current = draftAnswerRef.current
-              onDraftUnconfirmed?.(question.id)
-            }
+            // QuestionView is keyed by question ID and unmounts when the
+            // student switches stack tabs. The parent owns retry/reconciliation
+            // so this failed write remains recoverable after that unmount.
+            onDraftSaveFailed?.(payload)
           }
         })
         return
@@ -220,7 +203,7 @@ export default function QuestionView({
         sendDraft()
       }
     }
-  }, [activeQuestionDeadlineAt, activeQuestionRunRevision, activeQuestionRunToken, disabled, draftAnswer, isSubmitted, isWaitingForChoices, onDraftUnconfirmed, question.id, saveDraft, sendMessage, sessionId, studentId])
+  }, [activeQuestionDeadlineAt, activeQuestionRunRevision, activeQuestionRunToken, disabled, draftAnswer, isSubmitted, isWaitingForChoices, onDraftSaveFailed, question.id, saveDraft, sendMessage, sessionId, studentId])
 
   async function submitAnswer(
     answer: { type: 'free-response'; text: string } | { type: 'multiple-choice'; selectedOptionIds: string[] },

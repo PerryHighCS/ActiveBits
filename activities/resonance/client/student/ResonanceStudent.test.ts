@@ -9,6 +9,47 @@ import { hasActiveQuestionRunRestart } from './ResonanceStudent.js'
 import { shouldRetryRegistrationWithoutStudentId } from './ResonanceStudent.js'
 import { advanceEditSequenceForRevisit, resolveCurrentEditSequence } from './ResonanceStudent.js'
 import { seedEditSequenceFromConfirmedResponse } from './ResonanceStudent.js'
+import { buildUnconfirmedDraftKey } from './ResonanceStudent.js'
+import { resolveUnconfirmedDraftDisposition } from './ResonanceStudent.js'
+
+void test('unconfirmed draft keys keep a stack-tab draft scoped to its live run', () => {
+  const answer = { type: 'free-response', text: 'Saved after switching tabs' }
+  assert.equal(
+    buildUnconfirmedDraftKey({ questionId: 'q1', activeQuestionRunRevision: 7, answer }),
+    'q1:7',
+  )
+  assert.equal(
+    buildUnconfirmedDraftKey({ questionId: 'q1', activeQuestionRunStartedAt: 123, answer }),
+    'q1:123',
+  )
+  assert.equal(buildUnconfirmedDraftKey({ questionId: 'q1', answer }), null)
+})
+
+void test('unconfirmed draft retry stops on deadline or an authoritative run change', () => {
+  const payload = {
+    studentId: 'student-1',
+    questionId: 'q1',
+    activeQuestionRunRevision: 7,
+    answer: { type: 'free-response', text: 'Keep this draft' },
+  }
+  const snapshot = {
+    activeQuestionIds: ['q1', 'q2'],
+    activeQuestionRunStartedAt: 1_000,
+    activeQuestionRunRevision: 7,
+    activeQuestionDeadlineAt: 2_000,
+  }
+
+  assert.equal(resolveUnconfirmedDraftDisposition(payload, snapshot, 'student-1', 1_999), 'retry')
+  assert.equal(resolveUnconfirmedDraftDisposition(payload, snapshot, 'student-1', 2_000), 'reconcile')
+  assert.equal(
+    resolveUnconfirmedDraftDisposition(payload, { ...snapshot, activeQuestionRunRevision: 8 }, 'student-1', 1_999),
+    'discard',
+  )
+  assert.equal(
+    resolveUnconfirmedDraftDisposition(payload, { ...snapshot, activeQuestionIds: ['q2'] }, 'student-1', 1_999),
+    'discard',
+  )
+})
 
 void test('registration retries without a stale restored student id after authorization is lost', () => {
   assert.equal(shouldRetryRegistrationWithoutStudentId(403, 'student-1'), true)

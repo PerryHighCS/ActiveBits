@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useParams } from 'react-router'
 import {
   persistSessionParticipantIdentity,
@@ -19,6 +19,55 @@ interface RegisterResponse {
 interface SubmissionAnnouncement {
   id: number
   message: string
+}
+
+interface UnconfirmedDraft {
+  payload: Record<string, unknown>
+  retrying: boolean
+}
+
+const UNCONFIRMED_DRAFT_RETRY_INTERVAL_MS = 1_000
+
+interface UnconfirmedDraftContext {
+  activeQuestionIds: string[]
+  activeQuestionRunStartedAt: number | null
+  activeQuestionRunRevision: number | null
+  activeQuestionDeadlineAt: number | null
+}
+
+export function buildUnconfirmedDraftKey(payload: Record<string, unknown>): string | null {
+  const questionId = typeof payload.questionId === 'string' ? payload.questionId : null
+  const runToken = typeof payload.activeQuestionRunRevision === 'number'
+    ? payload.activeQuestionRunRevision
+    : typeof payload.activeQuestionRunStartedAt === 'number'
+      ? payload.activeQuestionRunStartedAt
+      : null
+  return questionId === null || runToken === null ? null : `${questionId}:${runToken}`
+}
+
+export function resolveUnconfirmedDraftDisposition(
+  payload: Record<string, unknown>,
+  snapshot: UnconfirmedDraftContext,
+  studentId: string,
+  now: number,
+): 'discard' | 'reconcile' | 'retry' {
+  const activeRunToken = snapshot.activeQuestionRunRevision ?? snapshot.activeQuestionRunStartedAt
+  const payloadRunToken = typeof payload.activeQuestionRunRevision === 'number'
+    ? payload.activeQuestionRunRevision
+    : typeof payload.activeQuestionRunStartedAt === 'number'
+      ? payload.activeQuestionRunStartedAt
+      : null
+  const questionId = typeof payload.questionId === 'string' ? payload.questionId : null
+  const isCurrentRun =
+    payload.studentId === studentId &&
+    payloadRunToken === activeRunToken &&
+    questionId !== null &&
+    snapshot.activeQuestionIds.includes(questionId)
+
+  if (!isCurrentRun) return 'discard'
+  return snapshot.activeQuestionDeadlineAt !== null && now >= snapshot.activeQuestionDeadlineAt
+    ? 'reconcile'
+    : 'retry'
 }
 
 export function shouldRetryRegistrationWithoutStudentId(status: number, studentId: string | null): boolean {
@@ -231,6 +280,11 @@ export default function ResonanceStudent() {
   // recorded on a confirmed response and causing a legitimate revisit edit to
   // be dropped as stale. See resolveCurrentEditSequence/advanceEditSequenceForRevisit.
   const editSequenceByKeyRef = useRef<Record<string, number>>({})
+  // Failed writes cannot live in QuestionView: that component is deliberately
+  // remounted on a stack-tab change. Keep them for the student view lifetime,
+  // and discard them when the authoritative active run changes.
+  const unconfirmedDraftsRef = useRef(new Map<string, UnconfirmedDraft>())
+  const [unconfirmedDraftVersion, setUnconfirmedDraftVersion] = useState(0)
 
   useLayoutEffect(() => {
     setIdentityResolved(false)
@@ -335,7 +389,78 @@ export default function ResonanceStudent() {
     previousActiveQuestionRunStartedAtRef.current = null
     hasObservedSnapshotRef.current = false
     editSequenceByKeyRef.current = {}
+    unconfirmedDraftsRef.current.clear()
+    setUnconfirmedDraftVersion((current) => current + 1)
   }, [sessionId, studentId])
+
+  const reconcileUnconfirmedDraft = useCallback((questionId: string) => {
+    setSubmittedAnswers((current) => {
+      const next = { ...current }
+      delete next[questionId]
+      return next
+    })
+    void refresh()
+  }, [refresh])
+
+  const recordUnconfirmedDraft = useCallback((payload: Record<string, unknown>) => {
+    const key = buildUnconfirmedDraftKey(payload)
+    if (key === null) return
+    unconfirmedDraftsRef.current.set(key, { payload, retrying: false })
+    setUnconfirmedDraftVersion((current) => current + 1)
+  }, [])
+
+  useEffect(() => {
+    if (unconfirmedDraftsRef.current.size === 0 || snapshot === null || studentId === null) {
+      return
+    }
+
+    let cancelled = false
+    const retryUnconfirmedDrafts = () => {
+      const now = Date.now()
+      let changed = false
+
+      for (const [key, draft] of unconfirmedDraftsRef.current) {
+        const questionId = typeof draft.payload.questionId === 'string' ? draft.payload.questionId : null
+        const disposition = resolveUnconfirmedDraftDisposition(draft.payload, snapshot, studentId, now)
+
+        if (disposition === 'discard') {
+          unconfirmedDraftsRef.current.delete(key)
+          changed = true
+          continue
+        }
+
+        if (disposition === 'reconcile') {
+          unconfirmedDraftsRef.current.delete(key)
+          changed = true
+          if (questionId !== null) reconcileUnconfirmedDraft(questionId)
+          continue
+        }
+
+        if (draft.retrying) continue
+        draft.retrying = true
+        void saveDraft(draft.payload).then((saved) => {
+          if (cancelled || unconfirmedDraftsRef.current.get(key) !== draft) return
+          if (saved) {
+            unconfirmedDraftsRef.current.delete(key)
+            setUnconfirmedDraftVersion((current) => current + 1)
+            return
+          }
+          draft.retrying = false
+        })
+      }
+
+      if (changed) {
+        setUnconfirmedDraftVersion((current) => current + 1)
+      }
+    }
+
+    retryUnconfirmedDrafts()
+    const intervalId = window.setInterval(retryUnconfirmedDrafts, UNCONFIRMED_DRAFT_RETRY_INTERVAL_MS)
+    return () => {
+      cancelled = true
+      window.clearInterval(intervalId)
+    }
+  }, [reconcileUnconfirmedDraft, saveDraft, snapshot, studentId, unconfirmedDraftVersion])
 
   useEffect(() => {
     const intervalId = window.setInterval(() => {
@@ -610,14 +735,7 @@ export default function ResonanceStudent() {
                     [questionId]: answer,
                   }))
                 }}
-                onDraftUnconfirmed={(questionId) => {
-                  setSubmittedAnswers((current) => {
-                    const next = { ...current }
-                    delete next[questionId]
-                    return next
-                  })
-                  void refresh()
-                }}
+                onDraftSaveFailed={recordUnconfirmedDraft}
                 onSubmitted={(questionId, answer) => {
                   setSubmittedAnswers((current) => ({
                     ...current,

@@ -812,6 +812,7 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
     return new Promise((resolve) => {
       const timeoutId = setTimeout(() => {
         pendingDraftSavesRef.current.delete(draftId)
+        if (retryKey !== null) queuedDraftRetriesRef.current.set(retryKey, payload)
         resolve(false)
       }, DRAFT_SAVE_ACK_TIMEOUT_MS)
       pendingDraftSavesRef.current.set(draftId, { resolve, timeoutId })
