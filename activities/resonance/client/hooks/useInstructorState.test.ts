@@ -176,6 +176,27 @@ void test('normalizeInstructorStateSnapshot filters malformed responses and prog
   )
 })
 
+void test('normalizeInstructorStateSnapshot prefers explicit working progress over a retained response for the same student and question', () => {
+  const result = normalizeInstructorStateSnapshot({
+    sessionId: 'session-1',
+    responses: [{
+      id: 'response-1', questionId: 'q1', studentId: 'student-1', studentName: 'Ada', submittedAt: 1_000,
+      answer: { type: 'free-response', text: 'Original submitted answer' },
+    }],
+    progress: [{
+      questionId: 'q1', studentId: 'student-1', studentName: 'Ada', updatedAt: 2_000,
+      status: 'working', answer: { type: 'free-response', text: 'Newer revisit draft' }, responseId: null,
+    }],
+  })
+
+  assert.ok(result)
+  assert.deepEqual(result.progress, [{
+    questionId: 'q1', studentId: 'student-1', studentName: 'Ada', updatedAt: 2_000,
+    status: 'working', answer: { type: 'free-response', text: 'Newer revisit draft' }, responseId: null,
+  }])
+  assert.equal(result.responses[0]?.id, 'response-1', 'the retained response remains available separately')
+})
+
 void test('normalizeInstructorStateSnapshot filters malformed reveal entries', () => {
   const result = normalizeInstructorStateSnapshot(({
     sessionId: 'session-1',

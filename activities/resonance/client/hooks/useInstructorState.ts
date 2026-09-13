@@ -120,14 +120,17 @@ export function normalizeInstructorStateSnapshot(
   const progressEntries = Array.isArray(data.progress)
     ? data.progress.filter(isValidInstructorProgress)
     : []
-  const submittedKeys = new Set(
-    submittedProgress.map((entry) => `${entry.questionId}:${entry.studentId}`),
+  // The server computes progress from both retained responses and current
+  // drafts. Its explicit entry is authoritative when both share a key: a
+  // higher-sequence revisit draft must display as working, not as the older
+  // retained response's submitted state.
+  const explicitProgressKeys = new Set(
+    progressEntries.map((entry) => `${entry.questionId}:${entry.studentId}`),
   )
-  const workingProgress = progressEntries.filter((entry) => {
-    const key = `${entry.questionId}:${entry.studentId}`
-    return entry.status !== 'submitted' && !submittedKeys.has(key)
-  })
-  const progress = [...submittedProgress, ...workingProgress]
+  const derivedSubmittedProgress = submittedProgress.filter((entry) =>
+    !explicitProgressKeys.has(`${entry.questionId}:${entry.studentId}`),
+  )
+  const progress = [...derivedSubmittedProgress, ...progressEntries]
   const fallbackActiveQuestionId = typeof data.activeQuestionId === 'string' ? data.activeQuestionId : null
   const activeQuestionIds = Array.isArray(data.activeQuestionIds)
     ? data.activeQuestionIds.filter((entry): entry is string => typeof entry === 'string')
