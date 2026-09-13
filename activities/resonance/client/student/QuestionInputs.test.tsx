@@ -211,6 +211,7 @@ void test('QuestionView waits for REST confirmation when draft websocket messagi
       studentId: 'student-1',
       questionId: 'q1',
       activeQuestionRunStartedAt: 1_000,
+      editSequence: 1,
       answer: { type: 'free-response', text: 'Fast path answer' },
     })
 
@@ -526,6 +527,7 @@ void test('QuestionView keeps an unsent draft associated with its original quest
         studentId: 'student-1',
         questionId: 'q1',
         activeQuestionRunStartedAt: 1_000,
+        editSequence: 1,
         answer: { type: 'free-response', text: 'Draft for the first question' },
       }])
     })
@@ -571,6 +573,7 @@ void test('QuestionView flushes an edit made inside the final debounce window be
       studentId: 'student-1',
       questionId: 'q1',
       activeQuestionRunStartedAt: 1_000,
+      editSequence: 1,
       answer: { type: 'free-response', text: 'Last-second revision' },
     })
     rendered.unmount()

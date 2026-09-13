@@ -53,6 +53,15 @@ export interface Response {
   studentId: string
   submittedAt: number
   activeQuestionRunRevision?: number | null
+  /**
+   * Client-assigned monotonic counter for this question/run's editing session,
+   * bumped each time the student starts a fresh edit (initial answer, or
+   * revisiting an already-submitted question in the same run). Lets the server
+   * distinguish a draft queued before this submission (same or lower sequence,
+   * stale) from a legitimate edit made after it (higher sequence) when both
+   * carry the same activeQuestionRunRevision.
+   */
+  editSequence?: number
   answer: AnswerPayload
 }
 

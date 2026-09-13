@@ -68,6 +68,14 @@ export default function QuestionView({
   const disabledRef = useRef(disabled)
   const activeQuestionRunRevisionRef = useRef(activeQuestionRunToken)
   const draftAnswerRunRevisionRef = useRef<number | null>(null)
+  // Bumped each time the question/run/submitted-state combination resets
+  // below (initial mount, a new run, or the student revisiting an
+  // already-submitted question in the same run). Sent with every draft and
+  // submission so the server can tell a draft that predates the current
+  // edit session (stale) from one the student made after resubmitting was
+  // already locked in (a legitimate revision) — both can otherwise carry the
+  // same activeQuestionRunRevision once a response already exists.
+  const editSequenceRef = useRef(0)
   initialAnswerRef.current = initialAnswer
   draftAnswerRef.current = draftAnswer
   disabledRef.current = disabled
@@ -76,6 +84,7 @@ export default function QuestionView({
     question.type === 'multiple-choice' && question.choicesRevealed === false
 
   useEffect(() => {
+    editSequenceRef.current += 1
     setDraftAnswer(initialAnswerRef.current)
     lastSentDraftRef.current = initialAnswerRef.current
     synchronizedInitialAnswerRef.current = initialAnswerRef.current
@@ -133,6 +142,7 @@ export default function QuestionView({
         ...(activeQuestionRunRevision !== null
           ? { activeQuestionRunRevision: activeQuestionRunToken }
           : { activeQuestionRunStartedAt: activeQuestionRunToken }),
+        editSequence: editSequenceRef.current,
         answer: pendingDraft,
       }
       if (saveDraft) {
@@ -210,6 +220,7 @@ export default function QuestionView({
           ...(activeQuestionRunRevision !== null
             ? { activeQuestionRunRevision: submissionRunRevision }
             : { activeQuestionRunStartedAt: submissionRunRevision }),
+          editSequence: editSequenceRef.current,
           answer,
         }),
       })

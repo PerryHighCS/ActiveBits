@@ -94,11 +94,19 @@ interface ResonanceSocket extends ActiveBitsWebSocket {
 const MAX_SET_TIMEOUT_MS = 2_147_483_647
 const DEADLINE_TASK_RETRY_MS = 1_000
 
-function scheduleParticipantCapabilityExpiryClose(
+export function scheduleParticipantCapabilityExpiryClose(
   client: ResonanceSocket,
   session: ResonanceSession,
   capabilityId: string,
 ): void {
+  // The caller reaches here only after awaiting session/self-paced-mode
+  // lookups, so the socket may have already closed. Its 'close' event has
+  // then already fired, so the listener registered below would never run to
+  // clear the timer — leaking a reference to this socket for up to the
+  // capability's whole TTL on every connect/disconnect race. Bail before
+  // arming anything.
+  if (client.readyState !== 1) return
+
   const record = (session.data as { activityCapabilities?: Record<string, { expiresAt?: unknown }> })
     .activityCapabilities?.[capabilityId]
   const expiresAt = record?.expiresAt
@@ -151,6 +159,7 @@ interface ResonanceSessionData extends Record<string, unknown> {
     studentId: string
     updatedAt: number
     activeQuestionRunRevision?: number | null
+    editSequence?: number
     answer: Response['answer']
   }>
   annotations: Record<string, InstructorAnnotation>
@@ -565,6 +574,7 @@ function upsertResponse(
   studentId: string,
   answer: Response['answer'],
   activeQuestionRunRevision: number | null,
+  editSequence = 0,
 ): Response {
   const existing = responses.find(
     (response) => response.questionId === questionId && response.studentId === studentId,
@@ -575,6 +585,7 @@ function upsertResponse(
     existing.answer = answer
     existing.submittedAt = submittedAt
     existing.activeQuestionRunRevision = activeQuestionRunRevision
+    existing.editSequence = editSequence
     return existing
   }
 
@@ -584,6 +595,7 @@ function upsertResponse(
     studentId,
     submittedAt,
     activeQuestionRunRevision,
+    editSequence,
     answer,
   }
   responses.push(response)
@@ -633,6 +645,7 @@ function finalizeActiveQuestionDrafts(
         draft.studentId,
         draft.answer,
         sessionData.activeQuestionRunRevision,
+        draft.editSequence ?? 0,
       )
       finalizedCount += 1
     }
@@ -691,6 +704,10 @@ function buildDraftKey(questionId: string, studentId: string): string {
   return `${questionId}:${studentId}`
 }
 
+function resolveEditSequence(value: unknown): number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : 0
+}
+
 export function resolveSocketStudentId(payloadStudentId: unknown, clientStudentId: string | null | undefined): string | null {
   const studentId = clientStudentId ?? null
   if (!studentId || (typeof payloadStudentId === 'string' && payloadStudentId !== studentId)) {
@@ -740,6 +757,7 @@ function normalizeStoredResponses(
       Number.isSafeInteger(rawResponse.activeQuestionRunRevision)
         ? rawResponse.activeQuestionRunRevision
         : undefined
+    const editSequence = resolveEditSequence(rawResponse.editSequence)
 
     if (!id || !questionId || !studentId || submittedAt <= 0 || answer === null) {
       continue
@@ -751,6 +769,7 @@ function normalizeStoredResponses(
       studentId,
       submittedAt,
       ...(activeQuestionRunRevision !== undefined ? { activeQuestionRunRevision } : {}),
+      editSequence,
       answer,
     })
   }
@@ -787,6 +806,7 @@ function normalizeResponseDrafts(
         ? rawDraft.activeQuestionRunRevision
         : undefined
     const answer = normalizeDraftAnswerPayload(rawDraft.answer, questionsById, questionId)
+    const editSequence = resolveEditSequence(rawDraft.editSequence)
 
     if (!questionId || !studentId || updatedAt <= 0 || answer === null) {
       continue
@@ -797,6 +817,7 @@ function normalizeResponseDrafts(
       studentId,
       updatedAt,
       ...(activeQuestionRunRevision !== undefined ? { activeQuestionRunRevision } : {}),
+      editSequence,
       answer,
     }
   }
@@ -1994,7 +2015,14 @@ export default function setupResonanceRoutes(
       return
     }
 
-    upsertResponse(session.data.responses, questionId, studentId, answer, session.data.activeQuestionRunRevision)
+    upsertResponse(
+      session.data.responses,
+      questionId,
+      studentId,
+      answer,
+      session.data.activeQuestionRunRevision,
+      resolveEditSequence(body.editSequence),
+    )
     delete session.data.responseDrafts[buildDraftKey(questionId, studentId)]
     await sessions.set(sessionId, session)
     void broadcastStudentSessionState(session, sessionId)
@@ -2949,6 +2977,7 @@ export default function setupResonanceRoutes(
           studentId,
           answer,
           session.data.activeQuestionRunRevision,
+          resolveEditSequence(payload.editSequence),
         )
         delete session.data.responseDrafts[buildDraftKey(questionId, studentId)]
         await sessions.set(sessionId, session)
@@ -2990,22 +3019,26 @@ export default function setupResonanceRoutes(
         const draftId = typeof payload.draftId === 'string' && payload.draftId.length <= 128
           ? payload.draftId
           : null
+        const editSequence = resolveEditSequence(payload.editSequence)
 
         // A draft sent just before a submission can arrive here after the
         // submission already recorded a response and cleared the draft (the
         // two travel over different connections/transports, so delivery
-        // order isn't guaranteed). Once a response exists for this
-        // question/student in the current run, treat the submission as
-        // authoritative and drop the stale draft rather than resurrecting it
-        // — otherwise timeout finalization could later overwrite the
-        // confirmed answer with this late draft.
-        const hasConfirmedResponseForRun = session.data.responses.some(
+        // order isn't guaranteed). The revisit flow deliberately allows a
+        // student to reopen an already-submitted question in the same run, so
+        // response existence alone can't distinguish a stale pre-submission
+        // draft from a legitimate post-submission revision — only a draft
+        // whose editSequence hasn't advanced past the confirmed response's is
+        // stale. Otherwise timeout finalization could either overwrite the
+        // confirmed answer with a stale draft, or silently drop a genuine
+        // revision the student made after resubmitting was already locked.
+        const confirmedResponseForRun = session.data.responses.find(
           (response) =>
             response.questionId === questionId &&
             response.studentId === studentId &&
             response.activeQuestionRunRevision === session.data.activeQuestionRunRevision,
         )
-        if (hasConfirmedResponseForRun) {
+        if (confirmedResponseForRun !== undefined && editSequence <= (confirmedResponseForRun.editSequence ?? 0)) {
           if (draftId !== null) {
             sendToSocket(socket, 'resonance:draft-saved', { draftId }, sessionId)
           }
@@ -3035,6 +3068,7 @@ export default function setupResonanceRoutes(
           studentId,
           updatedAt: Date.now(),
           activeQuestionRunRevision: session.data.activeQuestionRunRevision,
+          editSequence,
           answer,
         }
         await sessions.set(sessionId, session)

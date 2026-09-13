@@ -16,6 +16,7 @@ import setupResonanceRoutes, {
   generateImportedQuestionId,
   resolveAnswerabilityErrorMessage,
   resolveSocketStudentId,
+  scheduleParticipantCapabilityExpiryClose,
 } from './routes.js'
 
 interface RouteRequest {
@@ -142,6 +143,44 @@ void test('generateImportedQuestionId falls back when Math.random produces an em
 void test('resolveSocketStudentId rejects student messages that claim another identity', () => {
   assert.equal(resolveSocketStudentId('student2', 'student1'), null)
   assert.equal(resolveSocketStudentId('student1', 'student1'), 'student1')
+})
+
+void test('scheduleParticipantCapabilityExpiryClose does not arm a timer for an already-closed socket', () => {
+  const now = Date.now()
+  const session = {
+    id: 'resonance-session-1',
+    type: 'resonance',
+    created: now,
+    lastActivity: now,
+    data: {
+      activityCapabilities: {
+        cap1: { id: 'cap1', tokenHash: 'hash', principalKind: 'participant', issuedAt: now, expiresAt: now + 60_000 },
+      },
+    },
+  } as unknown as Parameters<typeof scheduleParticipantCapabilityExpiryClose>[1]
+
+  console.info('[TEST] a closed socket must not have an expiry-close timer armed against it')
+  let closeListenerCount = 0
+  const closedSocket = {
+    readyState: 3,
+    close() {},
+    on(event: string) {
+      if (event === 'close') closeListenerCount += 1
+    },
+  } as unknown as Parameters<typeof scheduleParticipantCapabilityExpiryClose>[0]
+  scheduleParticipantCapabilityExpiryClose(closedSocket, session, 'cap1')
+  assert.equal(closeListenerCount, 0, 'a closed socket must not register a close listener or arm a timer')
+
+  let openCloseListenerCount = 0
+  const openSocket = {
+    readyState: 1,
+    close() {},
+    on(event: string) {
+      if (event === 'close') openCloseListenerCount += 1
+    },
+  } as unknown as Parameters<typeof scheduleParticipantCapabilityExpiryClose>[0]
+  scheduleParticipantCapabilityExpiryClose(openSocket, session, 'cap1')
+  assert.equal(openCloseListenerCount, 1, 'an open socket should still arm its expiry-close cleanup')
 })
 
 function createEmbeddedResonanceSession(): SessionRecord {
@@ -590,12 +629,14 @@ void test('a draft that arrives after its submission is dropped instead of resur
       studentId: 'student1',
       questionId: 'q1',
       activeQuestionRunRevision: 1,
+      editSequence: 1,
       answer: { type: 'free-response', text: 'Submitted answer' },
     },
   }, submitRes)
   assert.equal(submitRes.statusCode, 200)
 
-  // ...but a draft queued before the submission was still in flight over the
+  // ...but a draft queued before the submission — same editSequence, since it
+  // was written during the same edit session — was still in flight over the
   // WebSocket and only reaches the server afterward.
   console.info('[TEST] a draft delivered after its own submission must not resurrect a stale answer')
   messageHandlers[0]?.(JSON.stringify({
@@ -605,6 +646,7 @@ void test('a draft that arrives after its submission is dropped instead of resur
       questionId: 'q1',
       draftId: 'late-draft',
       activeQuestionRunRevision: 1,
+      editSequence: 1,
       answer: { type: 'free-response', text: 'Stale pre-submission draft' },
     },
   }))
@@ -621,6 +663,111 @@ void test('a draft that arrives after its submission is dropped instead of resur
   assert.deepEqual(storedData?.responses?.[0]?.answer, {
     type: 'free-response',
     text: 'Submitted answer',
+  })
+
+  await sessions.close()
+})
+
+void test('a draft made after revisiting an already-submitted question in the same run is persisted, not dropped as stale', async () => {
+  const app = createMockApp()
+  const sessions = createSessionStore(null)
+  const session = createMultiQuestionSession()
+  const runStartedAt = Date.now() - 1_000
+  session.data.activeQuestionId = 'q1'
+  session.data.activeQuestionIds = ['q1']
+  session.data.activeQuestionRunStartedAt = runStartedAt
+  session.data.activeQuestionRunRevision = 1
+  session.data.lastActiveQuestionRunRevision = 1
+  const studentCookies = issueStudentCookies(session, 'student1')
+  await sessions.set(session.id, session)
+  const captured = createCapturingMockWs()
+  setupResonanceRoutes(app, sessions, captured.ws)
+
+  const handler = captured.getHandler()
+  const messageHandlers: Array<(message: string) => void> = []
+  const sentMessages: Array<{ type?: string; payload?: { draftId?: string } }> = []
+  assert.ok(handler)
+  handler({
+    readyState: 1,
+    upgradeHeaders: {
+      cookie: Object.entries(studentCookies).map(([name, value]) => `${name}=${value}`).join('; '),
+    },
+    send(message: string) {
+      sentMessages.push(JSON.parse(message) as { type?: string; payload?: { draftId?: string } })
+    },
+    on(event: string, callback: (message: string) => void) {
+      if (event === 'message') messageHandlers.push(callback)
+    },
+    once() {},
+    close() {},
+    terminate() {},
+    ping() {},
+  }, new URLSearchParams({ sessionId: session.id, role: 'student', studentId: 'student1' }), captured.ws.wss)
+  await waitForCondition(() => messageHandlers.length === 1)
+
+  // The student answers and submits once (editSequence 1)...
+  const submitRes = createResponse()
+  await app.handlers.post['/api/resonance/:sessionId/submit-answer']?.({
+    params: { sessionId: session.id },
+    cookies: studentCookies,
+    body: {
+      studentId: 'student1',
+      questionId: 'q1',
+      activeQuestionRunRevision: 1,
+      editSequence: 1,
+      answer: { type: 'free-response', text: 'First answer' },
+    },
+  }, submitRes)
+  assert.equal(submitRes.statusCode, 200)
+
+  // ...then clicks the tab to revisit the same (still-active, same-run)
+  // question — the client bumps its local edit sequence for this new editing
+  // session — and starts typing a revision without resubmitting yet.
+  console.info('[TEST] a post-submission revisit draft in the same run must be persisted, not treated as stale')
+  messageHandlers[0]?.(JSON.stringify({
+    type: 'resonance:update-draft',
+    payload: {
+      studentId: 'student1',
+      questionId: 'q1',
+      draftId: 'revisit-draft',
+      activeQuestionRunRevision: 1,
+      editSequence: 2,
+      answer: { type: 'free-response', text: 'Revised answer, not yet resubmitted' },
+    },
+  }))
+  await waitForCondition(() => sentMessages.some((message) =>
+    message.type === 'resonance:draft-saved' && message.payload?.draftId === 'revisit-draft'
+  ))
+
+  const stored = await sessions.get(session.id)
+  const storedData = stored?.data as {
+    responses?: Array<{ answer?: unknown }>
+    responseDrafts?: Record<string, {
+      questionId?: string
+      studentId?: string
+      activeQuestionRunRevision?: number | null
+      editSequence?: number
+      answer?: unknown
+    }>
+  } | undefined
+  const revisitDraft = storedData?.responseDrafts?.['q1:student1']
+  assert.ok(revisitDraft)
+  assert.deepEqual(
+    { ...revisitDraft, updatedAt: undefined },
+    {
+      questionId: 'q1',
+      studentId: 'student1',
+      updatedAt: undefined,
+      activeQuestionRunRevision: 1,
+      editSequence: 2,
+      answer: { type: 'free-response', text: 'Revised answer, not yet resubmitted' },
+    },
+  )
+  // The confirmed response is untouched until the student resubmits or the
+  // deadline finalizes the pending draft.
+  assert.deepEqual(storedData?.responses?.[0]?.answer, {
+    type: 'free-response',
+    text: 'First answer',
   })
 
   await sessions.close()
