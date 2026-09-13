@@ -7,6 +7,7 @@ import { resolveSubmissionAnnouncement } from './ResonanceStudent.js'
 import { resolveSelfPacedSubmittedMessage } from './ResonanceStudent.js'
 import { hasActiveQuestionRunRestart } from './ResonanceStudent.js'
 import { shouldRetryRegistrationWithoutStudentId } from './ResonanceStudent.js'
+import { advanceEditSequenceForRevisit, resolveCurrentEditSequence } from './ResonanceStudent.js'
 
 void test('registration retries without a stale restored student id after authorization is lost', () => {
   assert.equal(shouldRetryRegistrationWithoutStudentId(403, 'student-1'), true)
@@ -33,6 +34,26 @@ void test('clearLiveQuestionSubmission unlocks a revisited live question only', 
     }),
     submittedQuestionIds,
   )
+})
+
+void test('edit-sequence bookkeeping survives a QuestionView remount, unlike a component-local counter', () => {
+  // QuestionView is keyed by question id, so switching stack tabs away and
+  // back remounts it with a fresh local ref if it owned this counter itself.
+  // ResonanceStudent owns it instead, so a revisit still advances the
+  // sequence past whatever the confirmed response recorded.
+  let byKey: Record<string, number> = {}
+  assert.equal(resolveCurrentEditSequence(byKey, 'q1', 1), 1)
+
+  byKey = advanceEditSequenceForRevisit(byKey, 'q1', 1)
+  assert.equal(resolveCurrentEditSequence(byKey, 'q1', 1), 2)
+
+  // A second revisit (e.g. switching away and back again) advances further.
+  byKey = advanceEditSequenceForRevisit(byKey, 'q1', 1)
+  assert.equal(resolveCurrentEditSequence(byKey, 'q1', 1), 3)
+
+  // A different question, or the same question in a new run, is independent.
+  assert.equal(resolveCurrentEditSequence(byKey, 'q2', 1), 1)
+  assert.equal(resolveCurrentEditSequence(byKey, 'q1', 2), 1)
 })
 
 void test('resolveQuestionAnswer preserves a revised local draft over an older snapshot answer', () => {

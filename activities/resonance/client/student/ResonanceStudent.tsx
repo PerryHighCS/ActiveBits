@@ -62,6 +62,34 @@ export function clearLiveQuestionSubmission(params: {
   return next
 }
 
+/**
+ * Per-question/run edit-sequence bookkeeping, keyed independently of any one
+ * QuestionView mount so it survives that component remounting when the
+ * student switches stack tabs away and back. `runToken` should be the same
+ * activeQuestionRunRevision ?? activeQuestionRunStartedAt value passed to
+ * QuestionView, so a new run naturally starts its own counter at the baseline.
+ */
+export function buildEditSequenceKey(questionId: string, runToken: number | null): string {
+  return `${questionId}:${runToken ?? 'null'}`
+}
+
+export function resolveCurrentEditSequence(
+  editSequenceByKey: Record<string, number>,
+  questionId: string,
+  runToken: number | null,
+): number {
+  return editSequenceByKey[buildEditSequenceKey(questionId, runToken)] ?? 1
+}
+
+export function advanceEditSequenceForRevisit(
+  editSequenceByKey: Record<string, number>,
+  questionId: string,
+  runToken: number | null,
+): Record<string, number> {
+  const key = buildEditSequenceKey(questionId, runToken)
+  return { ...editSequenceByKey, [key]: (editSequenceByKey[key] ?? 1) + 1 }
+}
+
 export function resolveQuestionAnswer(params: {
   localAnswers: Record<string, AnswerPayload | null>
   snapshotAnswers: Record<string, AnswerPayload>
@@ -174,6 +202,12 @@ export default function ResonanceStudent() {
   const previousActiveQuestionRunRevisionRef = useRef<number | null>(null)
   const previousActiveQuestionRunStartedAtRef = useRef<number | null>(null)
   const hasObservedSnapshotRef = useRef(false)
+  // Owned here (not in QuestionView) because QuestionView remounts on every
+  // stack-tab switch (it's keyed by question id): a counter local to it would
+  // reset to its baseline on remount, colliding with the sequence already
+  // recorded on a confirmed response and causing a legitimate revisit edit to
+  // be dropped as stale. See resolveCurrentEditSequence/advanceEditSequenceForRevisit.
+  const editSequenceByKeyRef = useRef<Record<string, number>>({})
 
   useLayoutEffect(() => {
     setIdentityResolved(false)
@@ -277,6 +311,7 @@ export default function ResonanceStudent() {
     previousActiveQuestionRunRevisionRef.current = null
     previousActiveQuestionRunStartedAtRef.current = null
     hasObservedSnapshotRef.current = false
+    editSequenceByKeyRef.current = {}
   }, [sessionId, studentId])
 
   useEffect(() => {
@@ -476,11 +511,20 @@ export default function ResonanceStudent() {
                         key={question.id}
                         type="button"
                         onClick={() => {
+                          const runToken = snapshot.activeQuestionRunRevision ?? snapshot.activeQuestionRunStartedAt
+                          const isRevisit = !snapshot.selfPacedMode && submittedQuestionIds.has(question.id)
                           setSubmittedQuestionIds((current) => clearLiveQuestionSubmission({
                             selfPacedMode: snapshot.selfPacedMode,
                             submittedQuestionIds: current,
                             questionId: question.id,
                           }))
+                          if (isRevisit) {
+                            editSequenceByKeyRef.current = advanceEditSequenceForRevisit(
+                              editSequenceByKeyRef.current,
+                              question.id,
+                              runToken,
+                            )
+                          }
                           setSelectedQuestionId(question.id)
                         }}
                         className={`rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${
@@ -513,6 +557,11 @@ export default function ResonanceStudent() {
                 activeQuestionRunStartedAt={snapshot.activeQuestionRunStartedAt}
                 activeQuestionRunRevision={snapshot.activeQuestionRunRevision}
                 activeQuestionDeadlineAt={snapshot.activeQuestionDeadlineAt}
+                editSequence={resolveCurrentEditSequence(
+                  editSequenceByKeyRef.current,
+                  activeQuestion.id,
+                  snapshot.activeQuestionRunRevision ?? snapshot.activeQuestionRunStartedAt,
+                )}
                 disabled={hasExpired}
                 isSubmitted={submittedQuestionIds.has(activeQuestion.id)}
                 submittedMessage={submittedMessage}

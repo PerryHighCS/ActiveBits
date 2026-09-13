@@ -222,6 +222,63 @@ void test('QuestionView waits for REST confirmation when draft websocket messagi
   }
 })
 
+void test('QuestionView sends whatever editSequence prop it is given, rather than computing its own', async () => {
+  // QuestionView is remounted by its parent on every stack-tab switch (keyed
+  // by question id), so it must not own this counter itself — it has to
+  // trust the value the parent computed and survived the remount with.
+  // Rendering directly with editSequence=3 (simulating a parent that has
+  // already recorded two prior revisits) is the regression check for that.
+  const restoreDomEnvironment = installDomEnvironment()
+  const previousFetch = globalThis.fetch
+  const { fireEvent, render, waitFor } = await import('@testing-library/react')
+
+  try {
+    let submittedBody: unknown = null
+    ;(globalThis as { fetch?: typeof fetch }).fetch = (async (_input, init) => {
+      submittedBody = JSON.parse(String(init?.body)) as unknown
+      return { ok: true, json: async () => ({ ok: true }) } as Response
+    }) as typeof fetch
+
+    const submitted: unknown[] = []
+    const rendered = render(
+      React.createElement(QuestionView, {
+        question: {
+          id: 'q1',
+          type: 'free-response',
+          text: 'Explain your reasoning.',
+          order: 0,
+        },
+        sessionId: 'session-1',
+        studentId: 'student-1',
+        activeQuestionRunStartedAt: 1_000,
+        editSequence: 3,
+        onSubmitted: (questionId, answer) => {
+          submitted.push({ questionId, answer })
+        },
+      }),
+    )
+
+    fireEvent.change(rendered.getByLabelText(/your answer/i), {
+      target: { value: 'Revisited answer' },
+    })
+    fireEvent.click(rendered.getByRole('button', { name: /submit answer/i }))
+
+    await waitFor(() => assert.equal(submitted.length, 1))
+    assert.deepEqual(submittedBody, {
+      studentId: 'student-1',
+      questionId: 'q1',
+      activeQuestionRunStartedAt: 1_000,
+      editSequence: 3,
+      answer: { type: 'free-response', text: 'Revisited answer' },
+    })
+
+    rendered.unmount()
+  } finally {
+    ;(globalThis as { fetch?: typeof fetch }).fetch = previousFetch
+    restoreDomEnvironment()
+  }
+})
+
 void test('QuestionView does not duplicate a manual submission when the question becomes disabled', async () => {
   const restoreDomEnvironment = installDomEnvironment()
   const previousFetch = globalThis.fetch
@@ -531,6 +588,51 @@ void test('QuestionView keeps an unsent draft associated with its original quest
         answer: { type: 'free-response', text: 'Draft for the first question' },
       }])
     })
+
+    rendered.unmount()
+  } finally {
+    restoreDomEnvironment()
+  }
+})
+
+void test('QuestionView discards a pending draft instead of sending it under a new identity', async () => {
+  const restoreDomEnvironment = installDomEnvironment()
+  const { fireEvent, render } = await import('@testing-library/react')
+
+  try {
+    const sentDrafts: Array<{ studentId: string; answer: unknown }> = []
+    const question = { id: 'q1', type: 'free-response' as const, text: 'Explain your reasoning.', order: 0 }
+    const sendMessage = (type: string, payload: unknown) => {
+      if (type === 'resonance:update-draft') {
+        sentDrafts.push(payload as { studentId: string; answer: unknown })
+      }
+      return true
+    }
+    const renderQuestion = (sessionId: string, studentId: string) => React.createElement(QuestionView, {
+      question,
+      sessionId,
+      studentId,
+      activeQuestionRunStartedAt: 1_000,
+      sendMessage,
+    })
+    const rendered = render(renderQuestion('session-1', 'student-1'))
+
+    fireEvent.change(rendered.getByLabelText(/your answer/i), {
+      target: { value: 'Draft under the old identity' },
+    })
+
+    // The participant capability is lost and recovered with a new identity
+    // while this edit is still debouncing. QuestionView isn't remounted for
+    // an identity change (it's keyed only by question id), so the same
+    // instance must discard the pending draft rather than send it under the
+    // new identity.
+    console.info('[TEST] a draft pending when identity changes must not be sent under the new identity')
+    rendered.rerender(renderQuestion('session-2', 'student-2'))
+
+    // Wait comfortably past the debounce delay (1500ms) to give a
+    // wrongly-sent draft every chance to appear.
+    await new Promise((resolve) => setTimeout(resolve, 1_800))
+    assert.deepEqual(sentDrafts, [])
 
     rendered.unmount()
   } finally {

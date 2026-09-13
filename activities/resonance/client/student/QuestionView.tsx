@@ -17,6 +17,17 @@ interface Props {
   isSubmitted?: boolean
   submittedMessage?: string
   announceSubmittedMessage?: boolean
+  /**
+   * Monotonic edit-session counter for this question/run, owned by the
+   * parent so it survives this component remounting (the parent keys
+   * QuestionView by question id, so switching stack tabs away and back
+   * remounts it with fresh local state). The parent bumps it when the
+   * student revisits an already-submitted question in the same run; the
+   * server uses it to tell that legitimate revision apart from a draft that
+   * predates an existing submission. Defaults to 1 (the baseline for a
+   * question's first edit session in a run) when omitted.
+   */
+  editSequence?: number
   onDraftChanged?(questionId: string, answer: AnswerPayload | null): void
   onDraftUnconfirmed?(questionId: string): void
   onSubmitted?(questionId: string, answer: AnswerPayload): void
@@ -49,6 +60,7 @@ export default function QuestionView({
   isSubmitted = false,
   submittedMessage = 'Answer submitted.',
   announceSubmittedMessage = true,
+  editSequence = 1,
   onDraftChanged,
   onDraftUnconfirmed,
   onSubmitted,
@@ -68,29 +80,33 @@ export default function QuestionView({
   const disabledRef = useRef(disabled)
   const activeQuestionRunRevisionRef = useRef(activeQuestionRunToken)
   const draftAnswerRunRevisionRef = useRef<number | null>(null)
-  // Bumped each time the question/run/submitted-state combination resets
-  // below (initial mount, a new run, or the student revisiting an
-  // already-submitted question in the same run). Sent with every draft and
-  // submission so the server can tell a draft that predates the current
-  // edit session (stale) from one the student made after resubmitting was
-  // already locked in (a legitimate revision) — both can otherwise carry the
-  // same activeQuestionRunRevision once a response already exists.
-  const editSequenceRef = useRef(0)
+  // Mirrors the editSequence prop so the debounced draft-push effect and
+  // submitAnswer (both defined below, outside the render body) always read
+  // the current value without needing it in their dependency arrays.
+  const editSequenceRef = useRef(editSequence)
+  // QuestionView isn't remounted on an identity change (it's keyed only by
+  // question id), so an in-flight draft or ack scheduled under a prior
+  // sessionId/studentId (e.g. recovering a lost participant capability mid-
+  // edit) must not be allowed to land under the new identity.
+  const sessionIdRef = useRef(sessionId)
+  const studentIdRef = useRef(studentId)
   initialAnswerRef.current = initialAnswer
   draftAnswerRef.current = draftAnswer
   disabledRef.current = disabled
   activeQuestionRunRevisionRef.current = activeQuestionRunToken
+  editSequenceRef.current = editSequence
+  sessionIdRef.current = sessionId
+  studentIdRef.current = studentId
   const isWaitingForChoices =
     question.type === 'multiple-choice' && question.choicesRevealed === false
 
   useEffect(() => {
-    editSequenceRef.current += 1
     setDraftAnswer(initialAnswerRef.current)
     lastSentDraftRef.current = initialAnswerRef.current
     synchronizedInitialAnswerRef.current = initialAnswerRef.current
     draftAnswerRunRevisionRef.current = null
     hasUnconfirmedDraftRef.current = false
-  }, [question.id, activeQuestionRunToken, isSubmitted])
+  }, [question.id, activeQuestionRunToken, isSubmitted, sessionId, studentId])
 
   useEffect(() => {
     if (disabled && hasUnconfirmedDraftRef.current) {
@@ -149,6 +165,8 @@ export default function QuestionView({
         void saveDraft(payload).then((saved) => {
           if (
             activeQuestionRunRevisionRef.current !== activeQuestionRunToken ||
+            sessionIdRef.current !== sessionId ||
+            studentIdRef.current !== studentId ||
             !isSameAnswer(draftAnswerRef.current, pendingDraft)
           ) {
             return
@@ -190,13 +208,15 @@ export default function QuestionView({
       if (
         activeQuestionRunRevisionRef.current === activeQuestionRunToken &&
         draftAnswerRunRevision === activeQuestionRunToken &&
+        sessionIdRef.current === sessionId &&
+        studentIdRef.current === studentId &&
         !disabledRef.current &&
         !isSameAnswer(pendingDraft, lastSentDraftRef.current)
       ) {
         sendDraft()
       }
     }
-  }, [activeQuestionDeadlineAt, activeQuestionRunRevision, activeQuestionRunToken, disabled, draftAnswer, isSubmitted, isWaitingForChoices, onDraftUnconfirmed, question.id, saveDraft, sendMessage, studentId])
+  }, [activeQuestionDeadlineAt, activeQuestionRunRevision, activeQuestionRunToken, disabled, draftAnswer, isSubmitted, isWaitingForChoices, onDraftUnconfirmed, question.id, saveDraft, sendMessage, sessionId, studentId])
 
   async function submitAnswer(
     answer: { type: 'free-response'; text: string } | { type: 'multiple-choice'; selectedOptionIds: string[] },
