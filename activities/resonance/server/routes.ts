@@ -1977,10 +1977,14 @@ export default function setupResonanceRoutes(
       joinedAt: Date.now(),
     }
 
+    // `loadResonanceSession` can return the cache's mutable record. Prepare
+    // registration changes on a detached copy so a failed store write cannot
+    // consume an accepted-entry handoff only in this process.
+    const registrationSession = structuredClone(session)
     const reusesSelectedCapability = existingPrincipalId !== null && existingPrincipalId === authorizedId
     const capability = reusesSelectedCapability
       ? null
-      : tryIssueActivityCapability(session, 'participant', studentId)
+      : tryIssueActivityCapability(registrationSession, 'participant', studentId)
     if (!reusesSelectedCapability && capability === null) {
       console.warn(JSON.stringify({
         component: 'resonance',
@@ -1991,14 +1995,25 @@ export default function setupResonanceRoutes(
       res.status(429).json({ error: 'session participant capacity reached' })
       return
     }
-    session.data.students[studentId] = student
+    registrationSession.data.students[studentId] = student
     // Accepted-entry handoffs are one-shot. Their consumption and capability
     // issuance persist in this one session write, so a failed write consumes
     // neither and a successful one cannot be replayed.
     if (acceptedParticipant !== null) {
-      revokeAcceptedEntryParticipant(session, studentId)
+      revokeAcceptedEntryParticipant(registrationSession, studentId)
     }
-    await sessions.set(sessionId, session)
+    try {
+      await sessions.set(sessionId, registrationSession)
+    } catch (error) {
+      console.error(JSON.stringify({
+        component: 'resonance',
+        event: 'student-registration-persist-failed',
+        sessionId,
+        error: error instanceof Error ? error.message : 'unknown error',
+      }))
+      res.status(503).json({ error: 'registration temporarily unavailable' })
+      return
+    }
 
     if (capability && res.cookie) {
       writeActivityCapabilityCookie({ cookie: res.cookie.bind(res) }, sessionId, 'participant', capability.token)

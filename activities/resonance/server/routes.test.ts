@@ -1,4 +1,4 @@
-import { createSessionStore, type SessionRecord } from 'activebits-server/core/sessions.js'
+import { createSessionStore, type SessionRecord, type SessionStore } from 'activebits-server/core/sessions.js'
 import {
   getActivityCapabilityCookieName,
   issueActivityCapability,
@@ -535,6 +535,53 @@ void test('a fresh accepted participant takes precedence over a stale capability
     cookies: { [response.cookies[0]!.name]: response.cookies[0]!.value },
   }, stateResponse)
   assert.equal(stateResponse.statusCode, 200)
+  await sessions.close()
+})
+
+void test('a failed accepted-participant registration write leaves its handoff usable for retry', async () => {
+  initializePersistentStorage(null)
+  const app = createMockApp()
+  const sessions = createSessionStore(null)
+  const session = createInstructorResonanceSession()
+  assert.ok(acceptEntryParticipant(session, { participantId: 'student2', displayName: 'Grace Hopper' }))
+  const acceptedToken = issueAcceptedEntryParticipantToken(session, 'student2')
+  assert.ok(acceptedToken)
+  await sessions.set(session.id, session)
+
+  let failNextWrite = true
+  const failingSessions: SessionStore = new Proxy(sessions, {
+    get(target, property) {
+      if (property === 'set') {
+        return async (...args: Parameters<SessionStore['set']>) => {
+          if (failNextWrite) {
+            failNextWrite = false
+            throw new Error('simulated session-store write failure')
+          }
+          await target.set(...args)
+        }
+      }
+      const value = Reflect.get(target, property, target)
+      return typeof value === 'function' ? value.bind(target) : value
+    },
+  })
+  setupResonanceRoutes(app, failingSessions, createMockWs())
+
+  const registerHandler = app.handlers.post['/api/resonance/:sessionId/register-student']
+  const request = {
+    params: { sessionId: session.id },
+    body: { name: 'Grace Hopper', studentId: 'student2' },
+    cookies: { [getSessionParticipantCookieName(session.id)]: acceptedToken },
+  }
+  console.info('[TEST] a failed registration write must not consume the accepted-participant handoff in cache')
+  const failedResponse = createResponse()
+  await registerHandler?.(request, failedResponse)
+  assert.equal(failedResponse.statusCode, 503)
+  assert.equal(failedResponse.cookies.length, 0)
+
+  const retryResponse = createResponse()
+  await registerHandler?.(request, retryResponse)
+  assert.equal(retryResponse.statusCode, 200)
+  assert.equal(retryResponse.cookies.length, 1)
   await sessions.close()
 })
 
