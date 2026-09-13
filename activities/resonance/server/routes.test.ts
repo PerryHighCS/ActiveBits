@@ -230,6 +230,8 @@ function createInstructorResonanceSession(): SessionRecord {
         },
       ],
       activeQuestionId: 'q1',
+      activeQuestionRunStartedAt: now - 1_000,
+      activeQuestionRunRevision: 1,
       students: {
         student1: { studentId: 'student1', name: 'Ada Lovelace', joinedAt: now - 2000 },
         student2: { studentId: 'student2', name: 'Grace Hopper', joinedAt: now - 1500 },
@@ -485,6 +487,7 @@ void test('instructor progress shows a newer revisit draft as working while reta
   data.responses[0]!.activeQuestionRunRevision = 3
   data.responses[0]!.editSequence = 1
   data.responseDrafts['q1:student1'] = { activeQuestionRunRevision: 3, editSequence: 2, updatedAt: 9_999, questionId: 'q1', studentId: 'student1', answer: { type: 'free-response', text: 'Revised but not submitted yet.' } }
+  data.responseDrafts['q1:student2'] = { activeQuestionRunRevision: 2, editSequence: 1, updatedAt: 9_998, questionId: 'q1', studentId: 'student2', answer: { type: 'free-response', text: 'Stale prior-run draft.' } }
   await sessions.set(session.id, session)
   setupResonanceRoutes(app, sessions, createMockWs())
   const responseHandler = app.handlers.get['/api/resonance/:sessionId/responses']
@@ -496,6 +499,9 @@ void test('instructor progress shows a newer revisit draft as working while reta
   assert.equal(revisedProgress?.status, 'working')
   assert.deepEqual(revisedProgress?.answer, { type: 'free-response', text: 'Revised but not submitted yet.' })
   assert.equal(revisedProgress?.responseId, null)
+  const staleProgress = progress.find((entry) => entry.studentId === 'student2')
+  assert.equal(staleProgress?.status, 'idle')
+  assert.equal(staleProgress?.answer, null)
   await sessions.close()
 })
 

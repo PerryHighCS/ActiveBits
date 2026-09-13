@@ -627,13 +627,26 @@ interface DraftFinalizationResult {
   finalizedDraftCount: number
 }
 
+function draftMatchesCurrentRun(
+  sessionData: ResonanceSessionData,
+  draft: ResonanceSessionData['responseDrafts'][string],
+): boolean {
+  const runStartedAt = sessionData.activeQuestionRunStartedAt
+  const runRevision = sessionData.activeQuestionRunRevision
+  return draft.activeQuestionRunRevision !== undefined
+    ? draft.activeQuestionRunRevision === runRevision
+    // Pre-revision drafts remain visible for legacy/self-paced snapshots that
+    // have no run revision. Once a numbered run exists, use the migration
+    // timestamp guard so an older unversioned draft cannot cross into it.
+    : runRevision === null || (runRevision === 1 && runStartedAt !== null && draft.updatedAt >= runStartedAt)
+}
+
 function finalizeActiveQuestionDrafts(
   sessionData: ResonanceSessionData,
   deadlineAt: number,
 ): DraftFinalizationResult {
   const activeQuestionIds = new Set(sessionData.activeQuestionIds)
   const runStartedAt = sessionData.activeQuestionRunStartedAt
-  const runRevision = sessionData.activeQuestionRunRevision
   let changed = false
   let finalizedCount = 0
 
@@ -642,15 +655,11 @@ function finalizeActiveQuestionDrafts(
       continue
     }
 
-    const matchesRun = draft.activeQuestionRunRevision !== undefined
-      ? draft.activeQuestionRunRevision === runRevision
-      : runRevision === 1 && runStartedAt !== null && draft.updatedAt >= runStartedAt
-
     if (
       sessionData.students[draft.studentId] !== undefined &&
       runStartedAt !== null &&
       draft.updatedAt <= deadlineAt &&
-      matchesRun
+      draftMatchesCurrentRun(sessionData, draft)
     ) {
       upsertResponse(
         sessionData.responses,
@@ -1372,6 +1381,7 @@ function buildInstructorSnapshot(session: ResonanceSession) {
   const activeQuestionIdSet = new Set(activeQuestionIds)
   const currentRunSubmittedEditSequences = new Map<string, number>()
   const progressByQuestionStudent = new Map<string, ResponseProgress>()
+  const visibleDraftKeys = new Set<string>()
 
   for (const response of responses) {
     const key = buildDraftKey(response.questionId, response.studentId)
@@ -1394,11 +1404,15 @@ function buildInstructorSnapshot(session: ResonanceSession) {
 
   for (const draft of Object.values(responseDrafts)) {
     const key = buildDraftKey(draft.questionId, draft.studentId)
+    if (!draftMatchesCurrentRun(session.data, draft)) {
+      continue
+    }
     const confirmedEditSequence = currentRunSubmittedEditSequences.get(key)
     if (confirmedEditSequence !== undefined && (draft.editSequence ?? 0) <= confirmedEditSequence) {
       continue
     }
 
+    visibleDraftKeys.add(key)
     progressByQuestionStudent.set(key, {
       questionId: draft.questionId,
       studentId: draft.studentId,
@@ -1413,7 +1427,7 @@ function buildInstructorSnapshot(session: ResonanceSession) {
   for (const question of questions) {
     for (const student of Object.values(students)) {
       const key = buildDraftKey(question.id, student.studentId)
-      if (progressByQuestionStudent.has(key) || responseDrafts[key] !== undefined) {
+      if (progressByQuestionStudent.has(key) || visibleDraftKeys.has(key)) {
         continue
       }
 
