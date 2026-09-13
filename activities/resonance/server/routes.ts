@@ -1976,10 +1976,11 @@ export default function setupResonanceRoutes(
       joinedAt: Date.now(),
     }
 
-    const capability = existingPrincipalId !== null && existingPrincipalId === authorizedId
+    const reusesSelectedCapability = existingPrincipalId !== null && existingPrincipalId === authorizedId
+    const capability = reusesSelectedCapability
       ? null
       : tryIssueActivityCapability(session, 'participant', studentId)
-    if (!existingPrincipalId && capability === null) {
+    if (!reusesSelectedCapability && capability === null) {
       console.warn(JSON.stringify({
         component: 'resonance',
         event: 'student-registration-denied',
@@ -3070,6 +3071,14 @@ export default function setupResonanceRoutes(
           payload.activeQuestionRunStartedAt,
         )) return
         const selfPacedMode = await resolveSelfPacedMode(session, sessions)
+        // This runs after the final await in this handler. A deadline can pass
+        // while resolving an embedded session mode, so validate and timestamp
+        // the write atomically from the handler's point of view.
+        const draftUpdatedAt = Date.now()
+        if (
+          session.data.activeQuestionDeadlineAt !== null &&
+          draftUpdatedAt >= session.data.activeQuestionDeadlineAt
+        ) return
         const availableQuestionIds = resolveStudentAvailableQuestionIds(session, selfPacedMode)
 
         const questionId = typeof payload.questionId === 'string'
@@ -3133,7 +3142,7 @@ export default function setupResonanceRoutes(
         session.data.responseDrafts[draftKey] = {
           questionId,
           studentId,
-          updatedAt: Date.now(),
+          updatedAt: draftUpdatedAt,
           activeQuestionRunRevision: session.data.activeQuestionRunRevision,
           editSequence,
           answer,

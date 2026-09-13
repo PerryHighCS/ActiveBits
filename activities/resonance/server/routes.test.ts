@@ -520,6 +520,34 @@ void test('a fresh accepted participant takes precedence over a stale capability
   await sessions.close()
 })
 
+void test('accepted participant capability replacement fails clearly when the capability store is full', async () => {
+  initializePersistentStorage(null)
+  const app = createMockApp()
+  const sessions = createSessionStore(null)
+  const session = createInstructorResonanceSession()
+  const staleCapabilityCookies = issueStudentCookies(session, 'student1')
+  assert.ok(acceptEntryParticipant(session, { participantId: 'student2', displayName: 'Grace Hopper' }))
+  const acceptedToken = issueAcceptedEntryParticipantToken(session, 'student2')
+  assert.ok(acceptedToken)
+  const capabilityCount = Object.keys((session.data as { activityCapabilities?: Record<string, unknown> }).activityCapabilities ?? {}).length
+  for (let index = capabilityCount; index < 200; index += 1) {
+    issueActivityCapability(session, 'participant', `capacity-student-${index}`)
+  }
+  await sessions.set(session.id, session)
+  setupResonanceRoutes(app, sessions, createMockWs())
+
+  console.info('[TEST] a stale capability must not silently authenticate a fresh accepted participant when replacement capacity is exhausted')
+  const response = createResponse()
+  await app.handlers.post['/api/resonance/:sessionId/register-student']?.({
+    params: { sessionId: session.id },
+    body: { name: 'Grace Hopper', studentId: 'student2' },
+    cookies: { ...staleCapabilityCookies, [getSessionParticipantCookieName(session.id)]: acceptedToken },
+  }, response)
+  assert.equal(response.statusCode, 429)
+  assert.equal(response.cookies.length, 0)
+  await sessions.close()
+})
+
 void test('instructor progress shows a newer revisit draft as working while retaining its confirmed response', async () => {
   const app = createMockApp()
   const sessions = createSessionStore(null)
