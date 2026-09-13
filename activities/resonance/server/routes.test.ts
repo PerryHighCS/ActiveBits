@@ -626,6 +626,87 @@ void test('a draft that arrives after its submission is dropped instead of resur
   await sessions.close()
 })
 
+void test('clearing a draft over the websocket still acknowledges the write, present or absent', async () => {
+  const app = createMockApp()
+  const sessions = createSessionStore(null)
+  const session = createMultiQuestionSession()
+  session.data.activeQuestionId = 'q1'
+  session.data.activeQuestionIds = ['q1']
+  session.data.activeQuestionRunStartedAt = Date.now() - 1_000
+  session.data.activeQuestionRunRevision = 1
+  session.data.lastActiveQuestionRunRevision = 1
+  session.data.responseDrafts = {
+    'q1:student1': {
+      questionId: 'q1',
+      studentId: 'student1',
+      updatedAt: Date.now() - 500,
+      activeQuestionRunRevision: 1,
+      answer: { type: 'free-response', text: 'Draft to be cleared' },
+    },
+  }
+  const studentCookies = issueStudentCookies(session, 'student1')
+  await sessions.set(session.id, session)
+  const captured = createCapturingMockWs()
+  setupResonanceRoutes(app, sessions, captured.ws)
+
+  const handler = captured.getHandler()
+  const messageHandlers: Array<(message: string) => void> = []
+  const sentMessages: Array<{ type?: string; payload?: { draftId?: string } }> = []
+  assert.ok(handler)
+  handler({
+    readyState: 1,
+    upgradeHeaders: {
+      cookie: Object.entries(studentCookies).map(([name, value]) => `${name}=${value}`).join('; '),
+    },
+    send(message: string) {
+      sentMessages.push(JSON.parse(message) as { type?: string; payload?: { draftId?: string } })
+    },
+    on(event: string, callback: (message: string) => void) {
+      if (event === 'message') messageHandlers.push(callback)
+    },
+    once() {},
+    close() {},
+    terminate() {},
+    ping() {},
+  }, new URLSearchParams({ sessionId: session.id, role: 'student', studentId: 'student1' }), captured.ws.wss)
+  await waitForCondition(() => messageHandlers.length === 1)
+
+  console.info('[TEST] clearing an existing draft must still send resonance:draft-saved')
+  messageHandlers[0]?.(JSON.stringify({
+    type: 'resonance:update-draft',
+    payload: {
+      studentId: 'student1',
+      questionId: 'q1',
+      draftId: 'clear-existing',
+      activeQuestionRunRevision: 1,
+      answer: null,
+    },
+  }))
+  await waitForCondition(() => sentMessages.some((message) =>
+    message.type === 'resonance:draft-saved' && message.payload?.draftId === 'clear-existing'
+  ))
+  const storedAfterClear = await sessions.get(session.id)
+  const storedAfterClearData = storedAfterClear?.data as { responseDrafts?: Record<string, unknown> } | undefined
+  assert.equal(storedAfterClearData?.responseDrafts?.['q1:student1'], undefined)
+
+  console.info('[TEST] clearing an already-absent draft (a retried clear) must still send resonance:draft-saved')
+  messageHandlers[0]?.(JSON.stringify({
+    type: 'resonance:update-draft',
+    payload: {
+      studentId: 'student1',
+      questionId: 'q1',
+      draftId: 'clear-already-absent',
+      activeQuestionRunRevision: 1,
+      answer: null,
+    },
+  }))
+  await waitForCondition(() => sentMessages.some((message) =>
+    message.type === 'resonance:draft-saved' && message.payload?.draftId === 'clear-already-absent'
+  ))
+
+  await sessions.close()
+})
+
 void test('server deadline task finalizes and broadcasts drafts without post-deadline client activity', async () => {
   const app = createMockApp()
   const sessions = createSessionStore(null)

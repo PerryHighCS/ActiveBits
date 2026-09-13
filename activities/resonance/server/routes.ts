@@ -2987,6 +2987,10 @@ export default function setupResonanceRoutes(
         if (!question) return
         if (!isCurrentStagedQuestionAnswerable(session.data, questionId)) return
 
+        const draftId = typeof payload.draftId === 'string' && payload.draftId.length <= 128
+          ? payload.draftId
+          : null
+
         // A draft sent just before a submission can arrive here after the
         // submission already recorded a response and cleared the draft (the
         // two travel over different connections/transports, so delivery
@@ -3002,11 +3006,8 @@ export default function setupResonanceRoutes(
             response.activeQuestionRunRevision === session.data.activeQuestionRunRevision,
         )
         if (hasConfirmedResponseForRun) {
-          const staleDraftId = typeof payload.draftId === 'string' && payload.draftId.length <= 128
-            ? payload.draftId
-            : null
-          if (staleDraftId !== null) {
-            sendToSocket(socket, 'resonance:draft-saved', { draftId: staleDraftId }, sessionId)
+          if (draftId !== null) {
+            sendToSocket(socket, 'resonance:draft-saved', { draftId }, sessionId)
           }
           return
         }
@@ -3017,6 +3018,11 @@ export default function setupResonanceRoutes(
             delete session.data.responseDrafts[draftKey]
             await sessions.set(sessionId, session)
             broadcastToRole('resonance:instructor-state', buildInstructorSnapshot(session), sessionId, true)
+          }
+          // Ack even when the draft was already absent, so a retried clear is
+          // idempotent instead of timing out and being reported as a failed save.
+          if (draftId !== null) {
+            sendToSocket(socket, 'resonance:draft-saved', { draftId }, sessionId)
           }
           return
         }
@@ -3033,9 +3039,6 @@ export default function setupResonanceRoutes(
         }
         await sessions.set(sessionId, session)
         broadcastToRole('resonance:instructor-state', buildInstructorSnapshot(session), sessionId, true)
-        const draftId = typeof payload.draftId === 'string' && payload.draftId.length <= 128
-          ? payload.draftId
-          : null
         if (draftId !== null) {
           sendToSocket(socket, 'resonance:draft-saved', { draftId }, sessionId)
         }

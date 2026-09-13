@@ -431,19 +431,16 @@ export function shouldApplyStudentSessionSnapshot(
     return true
   }
 
-  // Idle snapshots remain valid after a live revision; they represent the
-  // authoritative transition after a question closes. Active legacy snapshots
-  // cannot supersede a run once an explicit monotonic revision was observed.
-  if (candidate.activeQuestionIds.length === 0) return true
-
   if (candidate.activeQuestionRunRevision === null) {
     if (latestActiveQuestionRunRevision !== null) {
-      // A self-paced fallback carries no live run revision of its own, but the
-      // server also stamps the highest live revision it has ever assigned.
-      // Accept the fallback only when that stamp is at least as recent as the
-      // most recent live run this client has observed, so a genuine
-      // live-to-self-paced transition is admitted while a stale legacy
-      // snapshot from before the observed run is still rejected.
+      // A self-paced fallback or idle (no active questions) snapshot carries
+      // no live run revision of its own, but the server also stamps the
+      // highest live revision it has ever assigned. Accept the candidate only
+      // when that stamp is at least as recent as the most recent live run
+      // this client has observed, so a genuine live-to-self-paced/idle
+      // transition is admitted while a stale legacy snapshot — or a delayed
+      // idle snapshot generated before a newer run already started — is
+      // still rejected instead of blanking the current live question.
       return (
         candidate.lastActiveQuestionRunRevision !== null &&
         candidate.lastActiveQuestionRunRevision >= latestActiveQuestionRunRevision

@@ -221,6 +221,26 @@ void test('shouldApplyStudentSessionSnapshot rejects a self-paced-shaped snapsho
   assert.equal(shouldApplyStudentSessionSnapshot(current, staleFallback, 2), false)
 })
 
+void test('shouldApplyStudentSessionSnapshot rejects a delayed idle snapshot from before a newer run already started', () => {
+  const current = normalizeStudentSessionSnapshot({
+    sessionId: 'session-1',
+    activeQuestionIds: ['q2'],
+    activeQuestionRunStartedAt: 2_000,
+    activeQuestionRunRevision: 2,
+  })
+  const delayedIdle = normalizeStudentSessionSnapshot({
+    sessionId: 'session-1',
+    activeQuestionIds: [],
+    activeQuestionRunStartedAt: null,
+    activeQuestionRunRevision: null,
+    lastActiveQuestionRunRevision: 1,
+  })
+
+  assert.ok(current)
+  assert.ok(delayedIdle)
+  assert.equal(shouldApplyStudentSessionSnapshot(current, delayedIdle, 2), false)
+})
+
 void test('shouldApplyStudentSessionSnapshot accepts a legitimate no-active-question state after a live run', () => {
   const current = normalizeStudentSessionSnapshot({
     sessionId: 'session-1',
@@ -236,6 +256,26 @@ void test('shouldApplyStudentSessionSnapshot accepts a legitimate no-active-ques
   assert.ok(current)
   assert.ok(noActiveQuestion)
   assert.equal(shouldApplyStudentSessionSnapshot(current, noActiveQuestion), true)
+})
+
+void test('shouldApplyStudentSessionSnapshot accepts an idle snapshot that reflects the observed run ending', () => {
+  const current = normalizeStudentSessionSnapshot({
+    sessionId: 'session-1',
+    activeQuestionIds: ['q1'],
+    activeQuestionRunStartedAt: 2_000,
+    activeQuestionRunRevision: 2,
+  })
+  const idleAfterRun = normalizeStudentSessionSnapshot({
+    sessionId: 'session-1',
+    activeQuestionIds: [],
+    activeQuestionRunStartedAt: null,
+    activeQuestionRunRevision: null,
+    lastActiveQuestionRunRevision: 2,
+  })
+
+  assert.ok(current)
+  assert.ok(idleAfterRun)
+  assert.equal(shouldApplyStudentSessionSnapshot(current, idleAfterRun, 2), true)
 })
 
 void test('shouldApplyStudentSessionSnapshot rejects an older live run after an idle snapshot', () => {
