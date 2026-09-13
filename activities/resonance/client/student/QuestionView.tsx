@@ -211,6 +211,10 @@ export default function QuestionView({
         sessionIdRef.current === sessionId &&
         studentIdRef.current === studentId &&
         !disabledRef.current &&
+        // On a draft value change React runs this cleanup before scheduling
+        // the next debounce. The ref already holds the newer value, so do not
+        // flush the previous keystroke; reserve flushing for actual unmount.
+        isSameAnswer(draftAnswerRef.current, pendingDraft) &&
         !isSameAnswer(pendingDraft, lastSentDraftRef.current)
       ) {
         sendDraft()

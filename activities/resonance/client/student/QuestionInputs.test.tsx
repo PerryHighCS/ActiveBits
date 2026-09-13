@@ -684,6 +684,36 @@ void test('QuestionView flushes an edit made inside the final debounce window be
   }
 })
 
+void test('QuestionView debounces rapid draft edits without flushing each replaced value', async () => {
+  const restoreDomEnvironment = installDomEnvironment()
+  const { fireEvent, render, waitFor } = await import('@testing-library/react')
+
+  try {
+    const sentDrafts: Array<{ answer?: unknown }> = []
+    const rendered = render(
+      React.createElement(QuestionView, {
+        question: { id: 'q1', type: 'free-response', text: 'Explain your reasoning.', order: 0 },
+        sessionId: 'session-1',
+        studentId: 'student-1',
+        activeQuestionRunStartedAt: 1_000,
+        sendMessage: (type: string, payload: unknown) => {
+          if (type === 'resonance:update-draft') sentDrafts.push(payload as { answer?: unknown })
+          return true
+        },
+      }),
+    )
+    const textarea = rendered.getByLabelText(/your answer/i)
+    fireEvent.change(textarea, { target: { value: 'First' } })
+    fireEvent.change(textarea, { target: { value: 'Final' } })
+
+    await waitFor(() => assert.equal(sentDrafts.length, 1), { timeout: 2_500 })
+    assert.deepEqual(sentDrafts[0]?.answer, { type: 'free-response', text: 'Final' })
+    rendered.unmount()
+  } finally {
+    restoreDomEnvironment()
+  }
+})
+
 void test('QuestionView reconciles an unacknowledged draft when the question expires', async () => {
   const restoreDomEnvironment = installDomEnvironment()
   const { fireEvent, render, waitFor } = await import('@testing-library/react')
