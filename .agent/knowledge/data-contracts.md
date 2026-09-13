@@ -895,6 +895,14 @@ that document rather than creating activity-specific authentication payloads.
 - Validation: `activities/resonance/client/hooks/useInstructorState.test.ts` — "switching instructor sessions resets the run-ordering watermark before the next session activates".
 - Owner: Codex
 
+## Resonance direct-registration admission and draft progress
+
+- Date: 2026-09-13
+- Surface: Resonance registration | instructor progress | websocket lifecycle
+- Contract: Direct name entry with no participant principal is limited to 20 capability-mint attempts per minute for each session and trusted-proxy `req.ip`; accepted waiting-room participants and authenticated reloads bypass that bucket. A rate-limit backend failure returns 503 rather than failing open. Instructor progress shows a same-run draft as `working` when its `editSequence` exceeds the confirmed response's sequence, retaining the confirmed response for review. Both Resonance socket hooks defer initial `connect()` to a cancellable microtask so React Strict Mode's discarded effect cannot open a transient connection.
+- Validation: `activities/resonance/server/routes.test.ts`; `activities/resonance/client/hooks/useInstructorState.test.ts`; `activities/resonance/client/hooks/useResonanceSession.test.ts`.
+- Owner: Codex
+
 ## Resonance edit-sequence survives a page reload mid-run
 
 - Date: 2026-09-13

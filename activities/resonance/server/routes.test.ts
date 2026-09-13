@@ -25,6 +25,7 @@ interface RouteRequest {
   headers?: Record<string, string | undefined>
   body?: unknown
   query?: Record<string, unknown>
+  ip?: unknown
 }
 
 interface JsonResponse {
@@ -341,6 +342,7 @@ void test('resolveAnswerabilityErrorMessage distinguishes staged submission fail
 })
 
 void test('student registration issues an httpOnly capability and REST routes enforce its identity', async () => {
+  initializePersistentStorage(null)
   const app = createMockApp()
   const sessions = createSessionStore(null)
   const session = createInstructorResonanceSession()
@@ -449,6 +451,51 @@ void test('student registration issues an httpOnly capability and REST routes en
   }, stillAuthenticatedRes)
   assert.equal(stillAuthenticatedRes.statusCode, 200)
 
+  await sessions.close()
+})
+
+void test('unauthenticated direct registration is rate-limited before it can exhaust participant capabilities', async () => {
+  initializePersistentStorage(null)
+  const app = createMockApp()
+  const sessions = createSessionStore(null)
+  const session = createInstructorResonanceSession()
+  await sessions.set(session.id, session)
+  setupResonanceRoutes(app, sessions, createMockWs())
+  const registerHandler = app.handlers.post['/api/resonance/:sessionId/register-student']
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const response = createResponse()
+    await registerHandler?.({ params: { sessionId: session.id }, body: { name: `Direct Student ${attempt}` }, ip: '203.0.113.7' }, response)
+    assert.equal(response.statusCode, 200)
+  }
+  console.info('[TEST] repeated unauthenticated direct registrations must be limited before capability capacity is exhausted')
+  const limitedResponse = createResponse()
+  await registerHandler?.({ params: { sessionId: session.id }, body: { name: 'One Too Many' }, ip: '203.0.113.7' }, limitedResponse)
+  assert.equal(limitedResponse.statusCode, 429)
+  assert.equal(limitedResponse.headers['Retry-After'], '60')
+  assert.equal(Object.keys(((await sessions.get(session.id))?.data as { activityCapabilities?: Record<string, unknown> }).activityCapabilities ?? {}).length, 20)
+  await sessions.close()
+})
+
+void test('instructor progress shows a newer revisit draft as working while retaining its confirmed response', async () => {
+  const app = createMockApp()
+  const sessions = createSessionStore(null)
+  const session = createInstructorResonanceSession()
+  const data = session.data as unknown as { activeQuestionRunRevision?: number; responses: Array<{ activeQuestionRunRevision?: number; editSequence?: number }>; responseDrafts: Record<string, { activeQuestionRunRevision?: number; editSequence?: number; [key: string]: unknown }> }
+  data.activeQuestionRunRevision = 3
+  data.responses[0]!.activeQuestionRunRevision = 3
+  data.responses[0]!.editSequence = 1
+  data.responseDrafts['q1:student1'] = { activeQuestionRunRevision: 3, editSequence: 2, updatedAt: 9_999, questionId: 'q1', studentId: 'student1', answer: { type: 'free-response', text: 'Revised but not submitted yet.' } }
+  await sessions.set(session.id, session)
+  setupResonanceRoutes(app, sessions, createMockWs())
+  const responseHandler = app.handlers.get['/api/resonance/:sessionId/responses']
+  const response = createResponse()
+  await responseHandler?.({ params: { sessionId: session.id }, headers: { 'x-instructor-passcode': 'TEACH123' } }, response)
+  assert.equal(response.statusCode, 200)
+  const progress = (response.body as { progress: Array<{ studentId: string; status: string; answer: unknown; responseId: string | null }> }).progress
+  const revisedProgress = progress.find((entry) => entry.studentId === 'student1')
+  assert.equal(revisedProgress?.status, 'working')
+  assert.deepEqual(revisedProgress?.answer, { type: 'free-response', text: 'Revised but not submitted yet.' })
+  assert.equal(revisedProgress?.responseId, null)
   await sessions.close()
 })
 

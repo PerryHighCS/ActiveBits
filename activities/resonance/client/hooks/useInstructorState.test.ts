@@ -366,6 +366,23 @@ void test('a queued message from a prior instructor session cannot leak into the
   }
 })
 
+void test('Strict Mode opens only the retained instructor socket', async () => {
+  const restore = installInstructorWsTestEnvironment(async () => ({ ok: true, json: async () => ({ sessionId: 'session-1', activeQuestionIds: [] }) }))
+  const { act, render, waitFor } = await import('@testing-library/react')
+  try {
+    function Probe() { useInstructorState('session-1', 'PASS'); return null }
+    let rendered!: ReturnType<typeof render>
+    await act(async () => {
+      rendered = render(React.createElement(React.StrictMode, null, React.createElement(Probe)))
+      await Promise.resolve()
+    })
+    await waitFor(() => assert.equal(FakeWebSocket.instances.length, 1))
+    await act(async () => { rendered.unmount() })
+  } finally {
+    restore()
+  }
+})
+
 void test('switching instructor sessions resets the run-ordering watermark before the next session activates', async () => {
   const restore = installInstructorWsTestEnvironment(async (url) => {
     const sessionId = /\/api\/resonance\/([^/]+)\/responses/.exec(url)?.[1] ?? 'unknown'

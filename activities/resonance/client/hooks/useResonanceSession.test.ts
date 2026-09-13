@@ -736,6 +736,23 @@ void test('a queued message from a prior student identity cannot leak into the n
   }
 })
 
+void test('Strict Mode opens only the retained student socket', async () => {
+  const restore = installWsTestEnvironment()
+  const { act, render, waitFor } = await import('@testing-library/react')
+  try {
+    function Probe() { useResonanceSession('session-1', 'student-1'); return null }
+    let rendered!: ReturnType<typeof render>
+    await act(async () => {
+      rendered = render(React.createElement(React.StrictMode, null, React.createElement(Probe)))
+      await Promise.resolve()
+    })
+    await waitFor(() => assert.equal(FakeWebSocket.instances.length, 1))
+    await act(async () => { rendered.unmount() })
+  } finally {
+    restore()
+  }
+})
+
 void test('saveDraft resolves false instead of rejecting when the socket throws synchronously on send', async () => {
   // The socket can close between the readyState check and the send call
   // below it. QuestionView only attaches `.then` to this Promise (no

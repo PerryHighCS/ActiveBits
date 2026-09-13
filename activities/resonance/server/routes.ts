@@ -16,6 +16,7 @@ import { registerActivityReportBuilder } from '../../../server/activities/activi
 import {
   findHashBySessionId,
   generatePersistentHash,
+  recordRateLimitAttemptStrict,
   verifyTeacherCodeWithHash,
 } from 'activebits-server/core/persistentSessions.js'
 import type { ActiveBitsWebSocket, WsRouter } from '../../../types/websocket.js'
@@ -58,6 +59,7 @@ interface RouteRequest {
   cookies?: Record<string, unknown>
   headers?: Record<string, string | undefined>
   query?: Record<string, unknown>
+  ip?: unknown
 }
 
 interface ResonanceRouteApp {
@@ -93,6 +95,14 @@ interface ResonanceSocket extends ActiveBitsWebSocket {
 
 const MAX_SET_TIMEOUT_MS = 2_147_483_647
 const DEADLINE_TASK_RETRY_MS = 1_000
+const MAX_UNAUTHENTICATED_DIRECT_REGISTRATIONS_PER_MINUTE = 20
+
+function getRegistrationRateLimitKey(sessionId: string, ip: unknown): string {
+  // Express derives req.ip from trusted proxy configuration. A raw forwarding
+  // header is caller-controlled and must not create separate limiter buckets.
+  const clientAddress = typeof ip === 'string' && ip.length > 0 ? ip : 'unknown'
+  return `resonance:direct-registration:${sessionId}:${clientAddress}`
+}
 
 export function scheduleParticipantCapabilityExpiryClose(
   client: ResonanceSocket,
@@ -1357,7 +1367,7 @@ function buildInstructorSnapshot(session: ResonanceSession) {
   } =
     session.data
   const activeQuestionIdSet = new Set(activeQuestionIds)
-  const currentRunSubmittedKeys = new Set<string>()
+  const currentRunSubmittedEditSequences = new Map<string, number>()
   const progressByQuestionStudent = new Map<string, ResponseProgress>()
 
   for (const response of responses) {
@@ -1365,7 +1375,7 @@ function buildInstructorSnapshot(session: ResonanceSession) {
     const staleActiveResponse = isStaleActiveResponse(session.data, response, activeQuestionIdSet)
 
     if (!staleActiveResponse) {
-      currentRunSubmittedKeys.add(key)
+      currentRunSubmittedEditSequences.set(key, response.editSequence ?? 0)
     }
 
     progressByQuestionStudent.set(key, {
@@ -1381,7 +1391,8 @@ function buildInstructorSnapshot(session: ResonanceSession) {
 
   for (const draft of Object.values(responseDrafts)) {
     const key = buildDraftKey(draft.questionId, draft.studentId)
-    if (currentRunSubmittedKeys.has(key)) {
+    const confirmedEditSequence = currentRunSubmittedEditSequences.get(key)
+    if (confirmedEditSequence !== undefined && (draft.editSequence ?? 0) <= confirmedEditSequence) {
       continue
     }
 
@@ -1913,6 +1924,30 @@ export default function setupResonanceRoutes(
       }))
       res.status(403).json({ error: 'participant authentication required' })
       return
+    }
+    if (authorizedId === null) {
+      try {
+        const rateLimit = await recordRateLimitAttemptStrict(
+          getRegistrationRateLimitKey(sessionId, req.ip),
+          MAX_UNAUTHENTICATED_DIRECT_REGISTRATIONS_PER_MINUTE,
+        )
+        if (!rateLimit.allowed) {
+          console.warn(JSON.stringify({
+            component: 'resonance', event: 'student-registration-denied', sessionId,
+            reason: 'direct-registration-rate-limited', attempts: rateLimit.attempts,
+          }))
+          res.setHeader?.('Retry-After', '60')
+          res.status(429).json({ error: 'too many registration attempts; try again shortly' })
+          return
+        }
+      } catch (error) {
+        console.error(JSON.stringify({
+          component: 'resonance', event: 'student-registration-rate-limit-failed', sessionId,
+          error: error instanceof Error ? error.message : 'unknown error',
+        }))
+        res.status(503).json({ error: 'registration temporarily unavailable' })
+        return
+      }
     }
     const studentId = authorizedId ?? `s_${Math.random().toString(36).slice(2, 12)}`
 

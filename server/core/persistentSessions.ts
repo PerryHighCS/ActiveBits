@@ -555,12 +555,20 @@ export async function recordTeacherCodeAttempt(rateLimitKey: string): Promise<{ 
  * retryable 5xx rather than an open brute-force window.
  */
 export async function recordTeacherCodeAttemptStrict(rateLimitKey: string): Promise<{ allowed: boolean; attempts: number }> {
+  return await recordRateLimitAttemptStrict(rateLimitKey, MAX_ATTEMPTS)
+}
+
+/** Record a security-sensitive request against the shared persistent limiter. */
+export async function recordRateLimitAttemptStrict(
+  rateLimitKey: string,
+  maxAttempts: number,
+): Promise<{ allowed: boolean; attempts: number }> {
   const increment = persistentStore.incrementAttemptsStrict
     ? persistentStore.incrementAttemptsStrict.bind(persistentStore)
     : persistentStore.incrementAttempts.bind(persistentStore)
   const attempts = await increment(rateLimitKey)
   return {
-    allowed: attempts <= MAX_ATTEMPTS,
+    allowed: attempts <= maxAttempts,
     attempts,
   }
 }

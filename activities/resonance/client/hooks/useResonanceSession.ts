@@ -695,7 +695,11 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
       }
     }
 
-    connect()
+    // Strict Mode discards its first effect setup. Deferring construction lets
+    // that cleanup cancel before it opens a socket that immediately closes.
+    queueMicrotask(() => {
+      if (!closed) connect()
+    })
 
     return () => {
       closed = true
