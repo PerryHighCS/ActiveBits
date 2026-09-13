@@ -95,7 +95,10 @@ interface ResonanceSocket extends ActiveBitsWebSocket {
 
 const MAX_SET_TIMEOUT_MS = 2_147_483_647
 const DEADLINE_TASK_RETRY_MS = 1_000
-const MAX_UNAUTHENTICATED_DIRECT_REGISTRATIONS_PER_MINUTE = 20
+// A classroom commonly shares one NAT address, so this must accommodate a
+// whole class joining together while still leaving half the 200-record pool
+// unavailable to one unauthenticated burst.
+const MAX_UNAUTHENTICATED_DIRECT_REGISTRATIONS_PER_MINUTE = 100
 
 function getRegistrationRateLimitKey(sessionId: string, ip: unknown): string {
   // Express derives req.ip from trusted proxy configuration. A raw forwarding

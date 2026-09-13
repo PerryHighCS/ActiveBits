@@ -462,7 +462,7 @@ void test('unauthenticated direct registration is rate-limited before it can exh
   await sessions.set(session.id, session)
   setupResonanceRoutes(app, sessions, createMockWs())
   const registerHandler = app.handlers.post['/api/resonance/:sessionId/register-student']
-  for (let attempt = 0; attempt < 20; attempt += 1) {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
     const response = createResponse()
     await registerHandler?.({ params: { sessionId: session.id }, body: { name: `Direct Student ${attempt}` }, ip: '203.0.113.7' }, response)
     assert.equal(response.statusCode, 200)
@@ -472,7 +472,7 @@ void test('unauthenticated direct registration is rate-limited before it can exh
   await registerHandler?.({ params: { sessionId: session.id }, body: { name: 'One Too Many' }, ip: '203.0.113.7' }, limitedResponse)
   assert.equal(limitedResponse.statusCode, 429)
   assert.equal(limitedResponse.headers['Retry-After'], '60')
-  assert.equal(Object.keys(((await sessions.get(session.id))?.data as { activityCapabilities?: Record<string, unknown> }).activityCapabilities ?? {}).length, 20)
+  assert.equal(Object.keys(((await sessions.get(session.id))?.data as { activityCapabilities?: Record<string, unknown> }).activityCapabilities ?? {}).length, 100)
   await sessions.close()
 })
 

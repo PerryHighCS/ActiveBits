@@ -899,7 +899,7 @@ that document rather than creating activity-specific authentication payloads.
 
 - Date: 2026-09-13
 - Surface: Resonance registration | instructor progress | websocket lifecycle
-- Contract: Direct name entry with no participant principal is limited to 20 capability-mint attempts per minute for each session and trusted-proxy `req.ip`; accepted waiting-room participants and authenticated reloads bypass that bucket. A rate-limit backend failure returns 503 rather than failing open. Instructor progress shows a same-run draft as `working` when its `editSequence` exceeds the confirmed response's sequence, retaining the confirmed response for review. Both Resonance socket hooks defer initial `connect()` to a cancellable microtask so React Strict Mode's discarded effect cannot open a transient connection.
+- Contract: Direct name entry with no participant principal is limited to 100 capability-mint attempts per minute for each session and trusted-proxy `req.ip`, allowing a classroom behind one NAT to join together while retaining half of the 200-record capability pool against one burst; accepted waiting-room participants and authenticated reloads bypass that bucket. A rate-limit backend failure returns 503 rather than failing open. Instructor progress shows a same-run draft as `working` when its `editSequence` exceeds the confirmed response's sequence, retaining the confirmed response for review. Both Resonance socket hooks defer initial `connect()` to a cancellable microtask so React Strict Mode's discarded effect cannot open a transient connection.
 - Validation: `activities/resonance/server/routes.test.ts`; `activities/resonance/client/hooks/useInstructorState.test.ts`; `activities/resonance/client/hooks/useResonanceSession.test.ts`.
 - Owner: Codex
 
