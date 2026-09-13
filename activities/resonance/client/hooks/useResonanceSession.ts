@@ -583,16 +583,25 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
 
     function connect() {
       if (closed || !mountedRef.current) return
-      ws = new WebSocket(wsUrl)
-      wsRef.current = ws
+      const socket = new WebSocket(wsUrl)
+      ws = socket
+      wsRef.current = socket
+
+      // Guard every handler by the specific socket it belongs to (not just the
+      // shared `mountedRef`/`closed` flags): a session/student change resets
+      // `mountedRef` to true for the *new* effect before an old socket's
+      // already-in-flight message is dispatched, so a stale handler could
+      // otherwise apply another participant's queued state to the new one.
+      const isCurrent = () => !closed && wsRef.current === socket
 
       ws.onopen = () => {
+        if (!isCurrent()) return
         reconnectDelay = 1_000
         stopFallback()
       }
 
       ws.onmessage = (event) => {
-        if (!mountedRef.current) return
+        if (!isCurrent()) return
         try {
           const msg = JSON.parse(String(event.data)) as { type?: string; payload?: unknown }
           if (msg.type === 'resonance:session-state' && msg.payload !== undefined) {
@@ -643,6 +652,7 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
       }
 
       ws.onclose = () => {
+        if (!isCurrent()) return
         wsRef.current = null
         ws = null
         if (!closed && mountedRef.current) {

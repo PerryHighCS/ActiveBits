@@ -1,12 +1,80 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import * as React from 'react'
+import { JSDOM } from 'jsdom'
 import {
   isLatestStudentSnapshotRequest,
   normalizeStudentSessionSnapshot,
   selectStudentSessionSnapshot,
   shouldApplyStudentSessionSnapshot,
+  useResonanceSession,
 } from './useResonanceSession.js'
 import type { StudentSessionSnapshot } from '../../shared/types.js'
+
+;(globalThis as { React?: typeof React }).React = React
+
+class FakeWebSocket {
+  static instances: FakeWebSocket[] = []
+  static readonly OPEN = 1
+  onopen: (() => void) | null = null
+  onmessage: ((event: { data: string }) => void) | null = null
+  onerror: (() => void) | null = null
+  onclose: ((event: { code?: number }) => void) | null = null
+  readyState = 1
+
+  constructor(public url: string) {
+    FakeWebSocket.instances.push(this)
+  }
+
+  send(): void {}
+
+  close(): void {
+    this.readyState = 3
+  }
+
+  emitMessage(payload: unknown): void {
+    this.onmessage?.({ data: JSON.stringify(payload) })
+  }
+}
+
+function installWsTestEnvironment(): () => void {
+  const dom = new JSDOM('<!doctype html><html><body></body></html>', {
+    url: 'https://activebits.local/',
+  })
+
+  const keys = ['window', 'document', 'navigator', 'WebSocket', 'fetch'] as const
+  const descriptors = new Map<string, PropertyDescriptor | undefined>()
+  for (const key of keys) {
+    descriptors.set(key, Object.getOwnPropertyDescriptor(globalThis, key))
+  }
+
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: dom.window })
+  Object.defineProperty(globalThis, 'document', { configurable: true, value: dom.window.document })
+  Object.defineProperty(globalThis, 'navigator', { configurable: true, value: dom.window.navigator })
+  Object.defineProperty(globalThis, 'WebSocket', { configurable: true, value: FakeWebSocket })
+  Object.defineProperty(globalThis, 'fetch', {
+    configurable: true,
+    value: async (url: string) => {
+      const sessionId = /\/api\/resonance\/([^/]+)\/state/.exec(url)?.[1] ?? 'unknown'
+      return {
+        ok: true,
+        json: async () => ({ sessionId, activeQuestionIds: [] }),
+      }
+    },
+  })
+
+  return () => {
+    for (const [key, descriptor] of descriptors) {
+      if (descriptor) {
+        Object.defineProperty(globalThis, key, descriptor)
+      } else {
+        Reflect.deleteProperty(globalThis, key)
+      }
+    }
+    dom.window.close()
+    FakeWebSocket.instances.length = 0
+  }
+}
 
 void test('normalizeStudentSessionSnapshot rejects array submittedAnswers payloads', () => {
   const result = normalizeStudentSessionSnapshot(({
@@ -474,4 +542,56 @@ void test('normalizeStudentSessionSnapshot drops malformed reveal viewerResponse
 
   assert.ok(result)
   assert.deepEqual(result.reveals, [])
+})
+
+void test('a queued message from a prior student identity cannot leak into the new identity', async () => {
+  const restore = installWsTestEnvironment()
+  const { act, render } = await import('@testing-library/react')
+
+  try {
+    const captured: { snapshot: StudentSessionSnapshot | null } = { snapshot: null }
+    function Probe({ sessionId, studentId }: { sessionId: string; studentId: string }) {
+      const { snapshot } = useResonanceSession(sessionId, studentId)
+      captured.snapshot = snapshot
+      return null
+    }
+
+    let rendered!: ReturnType<typeof render>
+    await act(async () => {
+      rendered = render(React.createElement(Probe, { sessionId: 'session-A', studentId: 'student-A' }))
+    })
+    assert.equal(FakeWebSocket.instances.length, 1, 'exactly one socket opens for the first identity')
+    const staleSocket = FakeWebSocket.instances[0]!
+
+    // Switching identity (e.g. a new student registering in the same tab) tears
+    // down the old effect and opens a second socket for the new identity.
+    await act(async () => {
+      rendered.rerender(React.createElement(Probe, { sessionId: 'session-B', studentId: 'student-B' }))
+    })
+    assert.equal(FakeWebSocket.instances.length, 2, 'the identity change opens a second socket')
+
+    console.info('[TEST] delivering a message queued on the old socket after the identity changed; it must be ignored')
+    await act(async () => {
+      staleSocket.emitMessage({
+        type: 'resonance:session-state',
+        payload: { sessionId: 'session-A', activeQuestionIds: ['session-A-secret-question'] },
+      })
+    })
+    assert.notDeepEqual(captured.snapshot?.activeQuestionIds, ['session-A-secret-question'])
+
+    const currentSocket = FakeWebSocket.instances[1]!
+    await act(async () => {
+      currentSocket.emitMessage({
+        type: 'resonance:session-state',
+        payload: { sessionId: 'session-B', activeQuestionIds: ['session-B-question'] },
+      })
+    })
+    assert.deepEqual(captured.snapshot?.activeQuestionIds, ['session-B-question'])
+
+    await act(async () => {
+      rendered.unmount()
+    })
+  } finally {
+    restore()
+  }
 })

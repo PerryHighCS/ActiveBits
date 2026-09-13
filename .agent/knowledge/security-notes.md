@@ -16,6 +16,15 @@ Track security-relevant boundaries, risks, and mitigation decisions.
 ## Notes
 
 - Date: 2026-09-13
+- Area: Resonance student WebSocket lifecycle (`activities/resonance/client/hooks/useResonanceSession.ts`)
+- Threat or risk: The WS effect guarded every socket handler with a shared `mountedRef` that the *next* effect run resets to `true` at the top of its own body. When the session/student identity changed (e.g. a new student registering in the same tab, or a SyncDeck embedded re-launch), a message already in flight on the *old* socket could be dispatched after the new effect had already reset `mountedRef` and pointed `wsRef.current` at the new socket. The stale handler's `!mountedRef.current` check no longer blocked it, so the old identity's queued `resonance:session-state` payload (another participant's retained answers/state) could be applied under the new identity — CWE-200 exposure of sensitive information to an unauthorized actor, found by CodeRabbit's security scan on PR #372.
+- Control or mitigation: Each socket's handlers now close over that specific socket instance and check `!closed && wsRef.current === socket` (`isCurrent()`) instead of the shared `mountedRef`. `closed` is a `let` local to that effect invocation (set only by that invocation's cleanup), so a stale handler from a torn-down effect can never read a falsely-reset value the way the shared ref could.
+- Residual risk: None identified for this specific race; `mountedRef` is still used (correctly) for the REST fetch path, which has its own independent `latestSnapshotRequestRef` invalidation.
+- Validation (test/review/path): `activities/resonance/client/hooks/useResonanceSession.ts`; `activities/resonance/client/hooks/useResonanceSession.test.ts` ("a queued message from a prior student identity cannot leak into the new identity" — fails without the fix, passes with it).
+- Follow-up action: none.
+- Owner: Claude
+
+- Date: 2026-09-13
 - Area: shared activity capability record validation (`server/core/activityCapabilities.ts`)
 - Threat or risk: `isUsableActivityCapabilityRecord` validated `id`, `tokenHash`, `principalKind`, and `expiresAt` but never `issuedAt`. A stored record with a corrupted/missing `issuedAt` (storage bug, manual edit, partial write) was still treated as usable: `resolveActivityCapability` could authenticate it despite the malformed field, and `tryIssueActivityCapability`'s bounded non-evicting path counted it toward `MAX_CAPABILITIES_PER_SESSION` — at capacity it could wrongly block new registrations, and its `undefined`/`NaN` `issuedAt` would sort incorrectly wherever capabilities order by issuance.
 - Control or mitigation: `isUsableActivityCapabilityRecord` now also requires `issuedAt` to be a finite number, matching the existing `expiresAt` check, so a corrupted record is dropped (and evicted by the invalid-record cleanup in `tryIssueActivityCapability`) instead of authenticating or occupying bounded capacity. Found via a Copilot PR review on #372.

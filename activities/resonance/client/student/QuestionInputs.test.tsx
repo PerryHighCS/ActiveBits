@@ -592,6 +592,7 @@ void test('QuestionView reconciles an unacknowledged draft when the question exp
     }
     let unconfirmedCount = 0
     let saveCount = 0
+    console.info('[TEST] QuestionView reconciliation: saveDraft is expected to report a failed save below')
     const props = {
       question,
       sessionId: 'session-1',
