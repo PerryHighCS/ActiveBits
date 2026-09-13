@@ -849,7 +849,7 @@ function normalizeResponseDrafts(
       updatedAt,
       ...(activeQuestionRunRevision !== undefined ? { activeQuestionRunRevision } : {}),
       editSequence,
-      draftGeneration,
+      ...(draftGeneration > 0 ? { draftGeneration } : {}),
       answer,
     }
   }
@@ -3185,7 +3185,7 @@ export default function setupResonanceRoutes(
           updatedAt: draftUpdatedAt,
           activeQuestionRunRevision: session.data.activeQuestionRunRevision,
           editSequence,
-          draftGeneration,
+          ...(draftGeneration > 0 ? { draftGeneration } : {}),
           answer,
         }
         await sessions.set(sessionId, session)

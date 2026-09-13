@@ -585,6 +585,7 @@ void test('QuestionView keeps an unsent draft associated with its original quest
         questionId: 'q1',
         activeQuestionRunStartedAt: 1_000,
         editSequence: 1,
+        draftGeneration: 1,
         answer: { type: 'free-response', text: 'Draft for the first question' },
       }])
     })
@@ -676,6 +677,7 @@ void test('QuestionView flushes an edit made inside the final debounce window be
       questionId: 'q1',
       activeQuestionRunStartedAt: 1_000,
       editSequence: 1,
+      draftGeneration: 1,
       answer: { type: 'free-response', text: 'Last-second revision' },
     })
     rendered.unmount()
@@ -760,6 +762,7 @@ void test('QuestionView reports an unacknowledged draft to its parent before sta
       questionId: 'q1',
       activeQuestionRunStartedAt: 1_000,
       editSequence: 1,
+      draftGeneration: 1,
       answer: { type: 'free-response', text: 'Unacknowledged revision' },
     })
   } finally {
