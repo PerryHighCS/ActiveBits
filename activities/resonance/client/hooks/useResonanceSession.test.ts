@@ -799,3 +799,65 @@ void test('saveDraft resolves false instead of rejecting when the socket throws 
     restore()
   }
 })
+
+void test('saveDraft retries a failed send after reconnecting within the same active run', async () => {
+  const restore = installWsTestEnvironment()
+  const { act, render, waitFor } = await import('@testing-library/react')
+
+  try {
+    const captured: { saveDraft: ((payload: Record<string, unknown>) => Promise<boolean>) | null } = { saveDraft: null }
+    function Probe() {
+      const { saveDraft } = useResonanceSession('session-1', 'student-1')
+      captured.saveDraft = saveDraft
+      return null
+    }
+
+    let rendered!: ReturnType<typeof render>
+    await act(async () => {
+      rendered = render(React.createElement(Probe))
+      await Promise.resolve()
+    })
+    await waitFor(() => assert.equal(FakeWebSocket.instances.length, 1))
+    const firstSocket = FakeWebSocket.instances[0]!
+    firstSocket.emitMessage({
+      type: 'resonance:session-state',
+      payload: {
+        sessionId: 'session-1',
+        activeQuestionIds: ['q1'],
+        activeQuestionRunRevision: 3,
+        activeQuestionDeadlineAt: Date.now() + 10_000,
+      },
+    })
+    firstSocket.send = () => {
+      throw new Error('socket closed mid-send')
+    }
+
+    console.info('[TEST] a failed draft send is expected to retry after the socket reconnects')
+    await act(async () => {
+      assert.equal(await captured.saveDraft?.({
+        studentId: 'student-1',
+        questionId: 'q1',
+        activeQuestionRunRevision: 3,
+        answer: { type: 'free-response', text: 'Retry me' },
+      }), false)
+    })
+
+    firstSocket.onclose?.({})
+    await new Promise((resolve) => setTimeout(resolve, 1_100))
+    await waitFor(() => assert.equal(FakeWebSocket.instances.length, 2))
+    const secondSocket = FakeWebSocket.instances[1]!
+    const sent: unknown[] = []
+    secondSocket.send = (message?: unknown) => { sent.push(message) }
+    secondSocket.onopen?.()
+
+    await waitFor(() => assert.equal(sent.length, 1))
+    const sentMessage = JSON.parse(String(sent[0])) as { payload?: { draftId?: string; answer?: { text?: string } } }
+    assert.equal(sentMessage.payload?.answer?.text, 'Retry me')
+    assert.equal(typeof sentMessage.payload?.draftId, 'string')
+    secondSocket.emitMessage({ type: 'resonance:draft-saved', payload: { draftId: sentMessage.payload?.draftId } })
+
+    await act(async () => { rendered.unmount() })
+  } finally {
+    restore()
+  }
+})
