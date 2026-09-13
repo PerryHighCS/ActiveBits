@@ -1286,6 +1286,71 @@ void test('server deadline task retries after a strict session read failure', as
   await sessions.close()
 })
 
+void test('server deadline task retries after a finalization write failure without mutating its cached session', async () => {
+  const app = createMockApp()
+  const sessions = createSessionStore(null)
+  const session = createMultiQuestionSession()
+  let now = 1_000
+  session.data.activeQuestionId = 'q1'
+  session.data.activeQuestionIds = ['q1']
+  session.data.activeQuestionRunStartedAt = 800
+  session.data.activeQuestionDeadlineAt = 1_100
+  session.data.responseDrafts = {
+    'q1:student1': {
+      questionId: 'q1',
+      studentId: 'student1',
+      updatedAt: 1_050,
+      answer: { type: 'free-response', text: 'Persist me after retry' },
+    },
+  }
+  await sessions.set(session.id, session)
+
+  const originalSet = sessions.set.bind(sessions)
+  let failNextWrite = true
+  sessions.set = async (...args) => {
+    if (failNextWrite) {
+      failNextWrite = false
+      throw new Error('simulated deadline finalization write failure')
+    }
+    await originalSet(...args)
+  }
+  const scheduled: Array<{ callback: () => void; delayMs: number; cancelled: boolean }> = []
+  setupResonanceRoutes(app, sessions, createMockWs(), {
+    now: () => now,
+    schedule(callback, delayMs) {
+      const handle = { callback, delayMs, cancelled: false, unref() {} }
+      scheduled.push(handle)
+      return handle
+    },
+    cancel(handle) {
+      ;(handle as { cancelled: boolean }).cancelled = true
+    },
+  })
+
+  await app.handlers.get['/api/resonance/:sessionId/state']?.(
+    { params: { sessionId: session.id } },
+    createResponse(),
+  )
+  now = 1_100
+  console.info('[TEST] a failed deadline finalization write is expected and must leave the retry armed')
+  scheduled[0]?.callback()
+  await waitForCondition(() => scheduled.length === 2)
+  assert.equal(scheduled[1]?.delayMs, 1_000)
+  const afterFailedWrite = await sessions.get(session.id)
+  assert.deepEqual(afterFailedWrite?.data.activeQuestionIds, ['q1'])
+  assert.equal(Array.isArray(afterFailedWrite?.data.responses) && afterFailedWrite.data.responses.length, 0)
+
+  now = 2_100
+  scheduled[1]?.callback()
+  await waitForCondition(async () => {
+    const stored = await sessions.get(session.id)
+    return Array.isArray(stored?.data.responses) && stored.data.responses.length === 1
+  })
+  assert.deepEqual((await sessions.get(session.id))?.data.activeQuestionIds, [])
+
+  await sessions.close()
+})
+
 void test('timed live runs finalize persisted drafts for every active question', async () => {
   const sessions = createSessionStore(null)
   const session = createMultiQuestionSession()

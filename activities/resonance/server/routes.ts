@@ -1677,10 +1677,15 @@ export default function setupResonanceRoutes(
     const readSession = strict && sessions.getStrict
       ? sessions.getStrict.bind(sessions)
       : sessions.get.bind(sessions)
-    const session = asResonanceSession(await readSession(sessionId))
-    if (!session) {
+    const loadedSession = asResonanceSession(await readSession(sessionId))
+    if (!loadedSession) {
       return null
     }
+
+    // SessionCache returns its live value by reference. Work on a detached
+    // copy so a failed timeout-finalization write cannot make local reads look
+    // expired and cancel the retry while durable storage still has the run.
+    const session = structuredClone(loadedSession)
 
     const hadSelfPacedMode = session.data.selfPacedMode === true
     const resolvedSelfPacedMode =
