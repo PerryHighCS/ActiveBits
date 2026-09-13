@@ -1,5 +1,9 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import * as React from 'react'
+import { JSDOM } from 'jsdom'
+import { MemoryRouter, Route, Routes } from 'react-router'
+import ResonanceStudent from './ResonanceStudent.js'
 import { resolveNextSelfPacedQuestionId } from './ResonanceStudent.js'
 import { clearLiveQuestionSubmission, resolveQuestionAnswer } from './ResonanceStudent.js'
 import { resolveQuestionStatusBadge } from './ResonanceStudent.js'
@@ -11,6 +15,88 @@ import { advanceEditSequenceForRevisit, resolveCurrentEditSequence } from './Res
 import { seedEditSequenceFromConfirmedResponse } from './ResonanceStudent.js'
 import { buildUnconfirmedDraftKey } from './ResonanceStudent.js'
 import { resolveUnconfirmedDraftDisposition } from './ResonanceStudent.js'
+
+;(globalThis as { React?: typeof React }).React = React
+
+class StudentTestWebSocket {
+  static instances: StudentTestWebSocket[] = []
+  static readonly OPEN = 1
+  onopen: (() => void) | null = null
+  onmessage: ((event: { data: string }) => void) | null = null
+  onclose: (() => void) | null = null
+  readyState = 1
+  shouldFailDraft = true
+  sent: string[] = []
+
+  constructor() { StudentTestWebSocket.instances.push(this) }
+  send(message: string): void {
+    if (this.shouldFailDraft && message.includes('resonance:update-draft')) throw new Error('offline draft send')
+    this.sent.push(message)
+  }
+  close(): void { this.readyState = 3 }
+  emit(payload: unknown): void { this.onmessage?.({ data: JSON.stringify(payload) }) }
+}
+
+function installStudentDom() {
+  const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'https://activebits.local/' })
+  const descriptors = new Map<string, PropertyDescriptor | undefined>()
+  for (const key of ['window', 'document', 'navigator', 'WebSocket', 'fetch'] as const) {
+    descriptors.set(key, Object.getOwnPropertyDescriptor(globalThis, key))
+  }
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: dom.window })
+  Object.defineProperty(globalThis, 'document', { configurable: true, value: dom.window.document })
+  Object.defineProperty(globalThis, 'navigator', { configurable: true, value: dom.window.navigator })
+  Object.defineProperty(globalThis, 'WebSocket', { configurable: true, value: StudentTestWebSocket })
+  Object.defineProperty(globalThis, 'fetch', { configurable: true, value: async (url: string, init?: RequestInit) => {
+    if (init?.method === 'POST' && url.includes('register-student')) return { ok: true, json: async () => ({ studentId: 'student-1', name: 'Ari' }) }
+    return { ok: true, json: async () => ({ sessionId: 'session-1', activeQuestionIds: [] }) }
+  } })
+  return () => {
+    for (const [key, descriptor] of descriptors) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor)
+      else Reflect.deleteProperty(globalThis, key)
+    }
+    dom.window.close()
+    StudentTestWebSocket.instances.length = 0
+  }
+}
+
+void test('mounted student retains a failed Q1 autosave across a Q2 tab remount and retries it', async () => {
+  const restore = installStudentDom()
+  const { act, fireEvent, render, waitFor } = await import('@testing-library/react')
+  try {
+    window.localStorage.setItem('student-name-session-1', 'Ari')
+    window.localStorage.setItem('student-id-session-1', 'student-1')
+    const rendered = render(React.createElement(MemoryRouter, { initialEntries: ['/session-1'] },
+      React.createElement(Routes, null, React.createElement(Route, { path: '/:sessionId', element: React.createElement(ResonanceStudent) })),
+    ))
+    await waitFor(() => assert.equal(StudentTestWebSocket.instances.length, 1))
+    const socket = StudentTestWebSocket.instances[0]!
+    await act(async () => {
+      socket.emit({ type: 'resonance:session-state', payload: {
+        sessionId: 'session-1', activeQuestionIds: ['q1', 'q2'], activeQuestionRunRevision: 7,
+        activeQuestionDeadlineAt: Date.now() + 10_000,
+        activeQuestions: [
+          { id: 'q1', type: 'free-response', text: 'First', order: 1 },
+          { id: 'q2', type: 'free-response', text: 'Second', order: 2 },
+        ],
+      } })
+    })
+    const input = await waitFor(() => rendered.getByLabelText(/your answer/i) as HTMLTextAreaElement)
+    fireEvent.change(input, { target: { value: 'retain me' } })
+    await new Promise((resolve) => setTimeout(resolve, 600))
+    // Q1's child is keyed and unmounts as the student changes stack tabs.
+    fireEvent.click(rendered.getByRole('button', { name: /q2/i }))
+    socket.shouldFailDraft = false
+    console.info('[TEST] a failed Q1 autosave must be retried by the mounted parent after Q2 remounts')
+    await waitFor(() => assert.ok(socket.sent.some((message) => message.includes('retain me'))), { timeout: 2_500 })
+    const retry = JSON.parse(socket.sent.find((message) => message.includes('retain me'))!) as { payload: { draftId: string } }
+    await act(async () => { socket.emit({ type: 'resonance:draft-saved', payload: { draftId: retry.payload.draftId } }) })
+    rendered.unmount()
+  } finally {
+    restore()
+  }
+})
 
 void test('unconfirmed draft keys keep a stack-tab draft scoped to its live run', () => {
   const answer = { type: 'free-response', text: 'Saved after switching tabs' }
