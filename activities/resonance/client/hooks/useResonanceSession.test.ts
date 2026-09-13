@@ -5,6 +5,7 @@ import { JSDOM } from 'jsdom'
 import {
   isLatestStudentSnapshotRequest,
   normalizeStudentSessionSnapshot,
+  resolveObservedRunRevision,
   selectStudentSessionSnapshot,
   shouldApplyStudentSessionSnapshot,
   useResonanceSession,
@@ -276,6 +277,70 @@ void test('shouldApplyStudentSessionSnapshot accepts an idle snapshot that refle
   assert.ok(current)
   assert.ok(idleAfterRun)
   assert.equal(shouldApplyStudentSessionSnapshot(current, idleAfterRun, 2), true)
+})
+
+void test('resolveObservedRunRevision prefers lastActiveQuestionRunRevision over the live revision', () => {
+  const idleAfterRuns = normalizeStudentSessionSnapshot({
+    sessionId: 'session-1',
+    activeQuestionIds: [],
+    activeQuestionRunStartedAt: null,
+    activeQuestionRunRevision: null,
+    lastActiveQuestionRunRevision: 5,
+  })
+  const liveWithoutLastRevision = normalizeStudentSessionSnapshot({
+    sessionId: 'session-1',
+    activeQuestionIds: ['q1'],
+    activeQuestionRunStartedAt: 1_000,
+    activeQuestionRunRevision: 3,
+  })
+  const neverLive = normalizeStudentSessionSnapshot({
+    sessionId: 'session-1',
+    activeQuestionIds: [],
+    activeQuestionRunStartedAt: null,
+  })
+
+  assert.ok(idleAfterRuns)
+  assert.ok(liveWithoutLastRevision)
+  assert.ok(neverLive)
+  assert.equal(resolveObservedRunRevision(idleAfterRuns), 5)
+  assert.equal(resolveObservedRunRevision(liveWithoutLastRevision), 3)
+  assert.equal(resolveObservedRunRevision(neverLive), null)
+})
+
+void test('shouldApplyStudentSessionSnapshot seeds its watermark from an idle current snapshot instead of leaving it null', () => {
+  // The client's first-ever accepted snapshot is idle, but it already
+  // reflects that 5 live runs have happened (a late-joining student, or a
+  // page refresh after activity that predates this client). Without seeding
+  // the watermark from lastActiveQuestionRunRevision, an out-of-order
+  // delivery of an earlier live run (revision 3) would otherwise be accepted
+  // and restore a long-closed question.
+  const idleAfterFiveRuns = normalizeStudentSessionSnapshot({
+    sessionId: 'session-1',
+    activeQuestionIds: [],
+    activeQuestionRunStartedAt: null,
+    activeQuestionRunRevision: null,
+    lastActiveQuestionRunRevision: 5,
+  })
+  const staleEarlierLiveRun = normalizeStudentSessionSnapshot({
+    sessionId: 'session-1',
+    activeQuestionIds: ['q1'],
+    activeQuestionRunStartedAt: 1_000,
+    activeQuestionRunRevision: 3,
+  })
+  const newerLiveRun = normalizeStudentSessionSnapshot({
+    sessionId: 'session-1',
+    activeQuestionIds: ['q2'],
+    activeQuestionRunStartedAt: 4_000,
+    activeQuestionRunRevision: 6,
+  })
+
+  assert.ok(idleAfterFiveRuns)
+  assert.ok(staleEarlierLiveRun)
+  assert.ok(newerLiveRun)
+  // No explicit watermark argument — this exercises the default parameter
+  // that must seed itself from the current snapshot.
+  assert.equal(shouldApplyStudentSessionSnapshot(idleAfterFiveRuns, staleEarlierLiveRun), false)
+  assert.equal(shouldApplyStudentSessionSnapshot(idleAfterFiveRuns, newerLiveRun), true)
 })
 
 void test('shouldApplyStudentSessionSnapshot rejects an older live run after an idle snapshot', () => {

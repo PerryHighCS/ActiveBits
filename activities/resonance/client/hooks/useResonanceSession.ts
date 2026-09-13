@@ -425,7 +425,7 @@ export function normalizeStudentSessionSnapshot(
 export function shouldApplyStudentSessionSnapshot(
   current: StudentSessionSnapshot | null,
   candidate: StudentSessionSnapshot,
-  latestActiveQuestionRunRevision: number | null = current?.activeQuestionRunRevision ?? null,
+  latestActiveQuestionRunRevision: number | null = current ? resolveObservedRunRevision(current) : null,
 ): boolean {
   if (current === null || current.sessionId !== candidate.sessionId) {
     return true
@@ -459,6 +459,19 @@ export function shouldApplyStudentSessionSnapshot(
 
 export function isLatestStudentSnapshotRequest(requestId: number, latestRequestId: number): boolean {
   return requestId === latestRequestId
+}
+
+/**
+ * The highest live-run revision a snapshot reflects, for advancing the
+ * client's ordering watermark. `lastActiveQuestionRunRevision` is the
+ * server's monotonic max and already subsumes `activeQuestionRunRevision`
+ * (which resets to null on self-paced/idle); prefer it so an idle/self-paced
+ * snapshot that's the first one a client observes still seeds the watermark,
+ * rather than leaving it null and letting an out-of-order delivery of an
+ * earlier live snapshot be wrongly accepted afterward.
+ */
+export function resolveObservedRunRevision(snapshot: StudentSessionSnapshot): number | null {
+  return snapshot.lastActiveQuestionRunRevision ?? snapshot.activeQuestionRunRevision
 }
 
 export function selectStudentSessionSnapshot(
@@ -535,8 +548,11 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
         latestActiveQuestionRunRevisionRef.current,
       )
       snapshotRef.current = selection.snapshot
-      if (selection.accepted && data.activeQuestionRunRevision !== null) {
-        latestActiveQuestionRunRevisionRef.current = data.activeQuestionRunRevision
+      if (selection.accepted) {
+        const observedRevision = resolveObservedRunRevision(data)
+        if (observedRevision !== null) {
+          latestActiveQuestionRunRevisionRef.current = observedRevision
+        }
       }
       setSnapshot(selection.snapshot)
       setError(null)
@@ -612,8 +628,9 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
               if (selection.accepted) {
                 latestSnapshotRequestRef.current += 1
                 snapshotRef.current = selection.snapshot
-                if (normalized.activeQuestionRunRevision !== null) {
-                  latestActiveQuestionRunRevisionRef.current = normalized.activeQuestionRunRevision
+                const observedRevision = resolveObservedRunRevision(normalized)
+                if (observedRevision !== null) {
+                  latestActiveQuestionRunRevisionRef.current = observedRevision
                 }
                 setSnapshot(selection.snapshot)
                 setLoading(false)
