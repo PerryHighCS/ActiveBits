@@ -3158,7 +3158,9 @@ export default function setupResonanceRoutes(
 
         const draftKey = buildDraftKey(questionId, studentId)
         const existingDraft = session.data.responseDrafts[draftKey]
-        if (existingDraft && draftGeneration < (existingDraft.draftGeneration ?? 0)) {
+        const existingDraftIsCurrentRun =
+          existingDraft?.activeQuestionRunRevision === session.data.activeQuestionRunRevision
+        if (existingDraftIsCurrentRun && draftGeneration < (existingDraft.draftGeneration ?? 0)) {
           if (draftId !== null) sendToSocket(socket, 'resonance:draft-saved', { draftId }, sessionId)
           return
         }
@@ -3179,17 +3181,53 @@ export default function setupResonanceRoutes(
         const answer = validateAnswerPayload(payload.answer, question)
         if (!answer) return
 
-        session.data.responseDrafts[draftKey] = {
-          questionId,
-          studentId,
-          updatedAt: draftUpdatedAt,
-          activeQuestionRunRevision: session.data.activeQuestionRunRevision,
-          editSequence,
-          ...(draftGeneration > 0 ? { draftGeneration } : {}),
-          answer,
+        let persistedSession: ResonanceSession | null = null
+        if (sessions.updateAtomic) {
+          const updated = await sessions.updateAtomic(sessionId, (current) => {
+            const currentSession = current as ResonanceSession
+            currentSession.data = normalizeSessionData(currentSession.data)
+            if (!matchesActiveQuestionRun(
+              currentSession.data,
+              payload.activeQuestionRunRevision,
+              payload.activeQuestionRunStartedAt,
+            )) return currentSession
+            const currentDraft = currentSession.data.responseDrafts[draftKey]
+            const currentDraftIsSameRun =
+              currentDraft?.activeQuestionRunRevision === currentSession.data.activeQuestionRunRevision
+            if (currentDraftIsSameRun && draftGeneration < (currentDraft.draftGeneration ?? 0)) return currentSession
+            currentSession.data.responseDrafts[draftKey] = {
+              questionId,
+              studentId,
+              updatedAt: draftUpdatedAt,
+              activeQuestionRunRevision: currentSession.data.activeQuestionRunRevision,
+              editSequence,
+              ...(draftGeneration > 0 ? { draftGeneration } : {}),
+              answer,
+            }
+            persistedSession = currentSession
+            return currentSession
+          })
+          if (updated !== null && persistedSession !== null) {
+            persistedSession = updated as ResonanceSession
+          } else {
+            persistedSession = null
+          }
+        } else {
+          session.data.responseDrafts[draftKey] = {
+            questionId,
+            studentId,
+            updatedAt: draftUpdatedAt,
+            activeQuestionRunRevision: session.data.activeQuestionRunRevision,
+            editSequence,
+            ...(draftGeneration > 0 ? { draftGeneration } : {}),
+            answer,
+          }
+          await sessions.set(sessionId, session)
+          persistedSession = session
         }
-        await sessions.set(sessionId, session)
-        broadcastToRole('resonance:instructor-state', buildInstructorSnapshot(session), sessionId, true)
+        if (persistedSession !== null) {
+          broadcastToRole('resonance:instructor-state', buildInstructorSnapshot(persistedSession), sessionId, true)
+        }
         if (draftId !== null) {
           sendToSocket(socket, 'resonance:draft-saved', { draftId }, sessionId)
         }

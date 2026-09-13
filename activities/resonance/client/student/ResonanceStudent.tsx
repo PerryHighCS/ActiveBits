@@ -24,6 +24,7 @@ interface SubmissionAnnouncement {
 interface UnconfirmedDraft {
   payload: Record<string, unknown>
   retrying: boolean
+  deadlineAt: number | null
 }
 
 function resolveDraftGeneration(payload: Record<string, unknown>): number {
@@ -286,6 +287,7 @@ export default function ResonanceStudent() {
   // recorded on a confirmed response and causing a legitimate revisit edit to
   // be dropped as stale. See resolveCurrentEditSequence/advanceEditSequenceForRevisit.
   const editSequenceByKeyRef = useRef<Record<string, number>>({})
+  const draftGenerationByKeyRef = useRef<Record<string, number>>({})
   // Failed writes cannot live in QuestionView: that component is deliberately
   // remounted on a stack-tab change. Keep them for the student view lifetime,
   // and discard them when the authoritative active run changes.
@@ -395,6 +397,7 @@ export default function ResonanceStudent() {
     previousActiveQuestionRunStartedAtRef.current = null
     hasObservedSnapshotRef.current = false
     editSequenceByKeyRef.current = {}
+    draftGenerationByKeyRef.current = {}
     unconfirmedDraftsRef.current.clear()
     setUnconfirmedDraftVersion((current) => current + 1)
   }, [sessionId, studentId])
@@ -413,9 +416,12 @@ export default function ResonanceStudent() {
     if (key === null) return
     const current = unconfirmedDraftsRef.current.get(key)
     if (current && resolveDraftGeneration(current.payload) > resolveDraftGeneration(payload)) return
-    unconfirmedDraftsRef.current.set(key, { payload, retrying: false })
+    const deadlineAt = typeof payload.activeQuestionDeadlineAt === 'number'
+      ? payload.activeQuestionDeadlineAt
+      : snapshot?.activeQuestionDeadlineAt ?? null
+    unconfirmedDraftsRef.current.set(key, { payload, retrying: false, deadlineAt })
     setUnconfirmedDraftVersion((current) => current + 1)
-  }, [])
+  }, [snapshot])
 
   useEffect(() => {
     if (unconfirmedDraftsRef.current.size === 0 || snapshot === null || studentId === null) {
@@ -434,6 +440,9 @@ export default function ResonanceStudent() {
         if (disposition === 'discard') {
           unconfirmedDraftsRef.current.delete(key)
           changed = true
+          if (draft.deadlineAt !== null && now >= draft.deadlineAt && questionId !== null) {
+            reconcileUnconfirmedDraft(questionId)
+          }
           continue
         }
 
@@ -447,7 +456,11 @@ export default function ResonanceStudent() {
         if (draft.retrying) continue
         draft.retrying = true
         void saveDraft(draft.payload).then((saved) => {
-          if (cancelled || unconfirmedDraftsRef.current.get(key) !== draft) return
+          if (unconfirmedDraftsRef.current.get(key) !== draft) return
+          if (cancelled) {
+            draft.retrying = false
+            return
+          }
           if (saved) {
             unconfirmedDraftsRef.current.delete(key)
             setUnconfirmedDraftVersion((current) => current + 1)
@@ -732,6 +745,15 @@ export default function ResonanceStudent() {
                   activeQuestion.id,
                   snapshot.activeQuestionRunRevision ?? snapshot.activeQuestionRunStartedAt,
                 )}
+                nextDraftGeneration={() => {
+                  const key = buildEditSequenceKey(
+                    activeQuestion.id,
+                    snapshot.activeQuestionRunRevision ?? snapshot.activeQuestionRunStartedAt,
+                  )
+                  const next = (draftGenerationByKeyRef.current[key] ?? 0) + 1
+                  draftGenerationByKeyRef.current[key] = next
+                  return next
+                }}
                 disabled={hasExpired}
                 isSubmitted={submittedQuestionIds.has(activeQuestion.id)}
                 submittedMessage={submittedMessage}

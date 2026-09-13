@@ -672,7 +672,8 @@ void test('QuestionView flushes an edit made inside the final debounce window be
     })
 
     await waitFor(() => assert.equal(sentDrafts.length, 1), { timeout: 1_000 })
-    assert.deepEqual(sentDrafts[0], {
+    const { activeQuestionDeadlineAt: _deadlineAt, ...lastSecondPayload } = sentDrafts[0] as Record<string, unknown>
+    assert.deepEqual(lastSecondPayload, {
       studentId: 'student-1',
       questionId: 'q1',
       activeQuestionRunStartedAt: 1_000,
@@ -757,7 +758,8 @@ void test('QuestionView reports an unacknowledged draft to its parent before sta
     })
     await waitFor(() => assert.equal(saveCount, 1), { timeout: 1_000 })
     await waitFor(() => assert.equal(failedDrafts.length, 1))
-    assert.deepEqual(failedDrafts[0], {
+    const { activeQuestionDeadlineAt: _deadlineAt, ...failedDraftPayload } = failedDrafts[0]!
+    assert.deepEqual(failedDraftPayload, {
       studentId: 'student-1',
       questionId: 'q1',
       activeQuestionRunStartedAt: 1_000,

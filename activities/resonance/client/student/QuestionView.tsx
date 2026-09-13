@@ -28,6 +28,7 @@ interface Props {
    * question's first edit session in a run) when omitted.
    */
   editSequence?: number
+  nextDraftGeneration?(): number
   onDraftChanged?(questionId: string, answer: AnswerPayload | null): void
   onDraftSaveFailed?(payload: Record<string, unknown>): void
   onSubmitted?(questionId: string, answer: AnswerPayload): void
@@ -61,6 +62,7 @@ export default function QuestionView({
   submittedMessage = 'Answer submitted.',
   announceSubmittedMessage = true,
   editSequence = 1,
+  nextDraftGeneration,
   onDraftChanged,
   onDraftSaveFailed,
   onSubmitted,
@@ -145,8 +147,9 @@ export default function QuestionView({
         ...(activeQuestionRunRevision !== null
           ? { activeQuestionRunRevision: activeQuestionRunToken }
           : { activeQuestionRunStartedAt: activeQuestionRunToken }),
+        ...(activeQuestionDeadlineAt !== null ? { activeQuestionDeadlineAt } : {}),
         editSequence: editSequenceRef.current,
-        draftGeneration: ++draftGenerationRef.current,
+        draftGeneration: nextDraftGeneration?.() ?? ++draftGenerationRef.current,
         answer: pendingDraft,
       }
       if (saveDraft) {
@@ -205,7 +208,7 @@ export default function QuestionView({
         sendDraft()
       }
     }
-  }, [activeQuestionDeadlineAt, activeQuestionRunRevision, activeQuestionRunToken, disabled, draftAnswer, isSubmitted, isWaitingForChoices, onDraftSaveFailed, question.id, saveDraft, sendMessage, sessionId, studentId])
+  }, [activeQuestionDeadlineAt, activeQuestionRunRevision, activeQuestionRunToken, disabled, draftAnswer, isSubmitted, isWaitingForChoices, nextDraftGeneration, onDraftSaveFailed, question.id, saveDraft, sendMessage, sessionId, studentId])
 
   async function submitAnswer(
     answer: { type: 'free-response'; text: string } | { type: 'multiple-choice'; selectedOptionIds: string[] },
