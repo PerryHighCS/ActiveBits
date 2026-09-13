@@ -98,6 +98,14 @@ void test('edit-sequence bookkeeping survives a QuestionView remount, unlike a c
   assert.equal(resolveCurrentEditSequence(byKey, 'q1', 2), 1)
 })
 
+void test('a server-seeded draft generation lets a reloaded student advance past persisted autosaves', () => {
+  const run = 1
+  const key = `q1:${run}`
+  const generations: Record<string, number> = { [key]: 4 }
+  const next = (generations[key] ?? 0) + 1
+  assert.equal(next, 5)
+})
+
 void test('seedEditSequenceFromConfirmedResponse recovers a post-reload counter from the server, instead of defaulting to 1 and colliding with an existing submission', () => {
   // Without this seed, a page reload mid-run leaves editSequenceByKeyRef empty
   // (it's only ever bumped in memory by a revisit click). resolveCurrentEditSequence

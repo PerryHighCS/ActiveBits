@@ -1054,6 +1054,31 @@ void test('a draft made after revisiting an already-submitted question in the sa
   const preserved = (await sessions.get(session.id))?.data as { responseDrafts?: Record<string, { answer?: unknown; draftGeneration?: number }> }
   assert.equal(preserved.responseDrafts?.['q1:student1']?.draftGeneration, 2)
   assert.deepEqual(preserved.responseDrafts?.['q1:student1']?.answer, { type: 'free-response', text: 'Revised answer, not yet resubmitted' })
+  console.info('[TEST] a clear tombstone must prevent an older delayed draft from recreating the cleared value')
+  messageHandlers[0]?.(JSON.stringify({
+    type: 'resonance:update-draft',
+    payload: {
+      studentId: 'student1', questionId: 'q1', draftId: 'clear-generation-three',
+      activeQuestionRunRevision: 1, editSequence: 2, draftGeneration: 3, answer: null,
+    },
+  }))
+  await waitForCondition(() => sentMessages.some((message) =>
+    message.type === 'resonance:draft-saved' && message.payload?.draftId === 'clear-generation-three'
+  ))
+  messageHandlers[0]?.(JSON.stringify({
+    type: 'resonance:update-draft',
+    payload: {
+      studentId: 'student1', questionId: 'q1', draftId: 'stale-after-clear',
+      activeQuestionRunRevision: 1, editSequence: 2, draftGeneration: 2,
+      answer: { type: 'free-response', text: 'Must not resurrect' },
+    },
+  }))
+  await waitForCondition(() => sentMessages.some((message) =>
+    message.type === 'resonance:draft-saved' && message.payload?.draftId === 'stale-after-clear'
+  ))
+  const afterClear = (await sessions.get(session.id))?.data as { responseDrafts?: Record<string, unknown>; responseDraftGenerations?: Record<string, { draftGeneration?: number }> }
+  assert.equal(afterClear.responseDrafts?.['q1:student1'], undefined)
+  assert.equal(afterClear.responseDraftGenerations?.['q1:student1']?.draftGeneration, 3)
   // The confirmed response is untouched until the student resubmits or the
   // deadline finalizes the pending draft.
   assert.deepEqual(storedData?.responses?.[0]?.answer, {

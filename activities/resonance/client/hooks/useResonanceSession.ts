@@ -437,6 +437,13 @@ export function normalizeStudentSessionSnapshot(
           ),
         )
       : {},
+    draftGenerations: isRecord(data.draftGenerations)
+      ? Object.fromEntries(
+          Object.entries(data.draftGenerations).filter(
+            (entry): entry is [string, number] => typeof entry[1] === 'number' && Number.isSafeInteger(entry[1]) && entry[1] >= 0,
+          ),
+        )
+      : {},
     revealedQuestions: Array.isArray(data.revealedQuestions)
       ? data.revealedQuestions
         .map(normalizeStudentQuestion)
@@ -544,6 +551,7 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
   const latestDraftGenerationByKeyRef = useRef(new Map<string, number>())
   const retryDraftSavesRef = useRef(new Map<string, {
     key: string
+    generation: number
     timeoutId: ReturnType<typeof setTimeout>
   }>())
 
@@ -596,7 +604,7 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
       const timeoutId = setTimeout(() => {
         retryDraftSavesRef.current.delete(draftId)
       }, DRAFT_SAVE_ACK_TIMEOUT_MS)
-      retryDraftSavesRef.current.set(draftId, { key, timeoutId })
+      retryDraftSavesRef.current.set(draftId, { key, generation: getDraftGeneration(payload), timeoutId })
       try {
         currentWs.send(JSON.stringify({
           type: 'resonance:update-draft',
@@ -749,7 +757,10 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
               if (retry) {
                 clearTimeout(retry.timeoutId)
                 retryDraftSavesRef.current.delete(draftId)
-                queuedDraftRetriesRef.current.delete(retry.key)
+                const queued = queuedDraftRetriesRef.current.get(retry.key)
+                if (queued && getDraftGeneration(queued) <= retry.generation) {
+                  queuedDraftRetriesRef.current.delete(retry.key)
+                }
               }
             }
           } else if (

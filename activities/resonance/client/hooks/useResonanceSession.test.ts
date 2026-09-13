@@ -108,6 +108,15 @@ void test('normalizeStudentSessionSnapshot keeps object submittedAnswers payload
   assert.equal(result.selfPacedMode, false)
 })
 
+void test('normalizeStudentSessionSnapshot preserves server-seeded draft generations for a reload', () => {
+  const result = normalizeStudentSessionSnapshot({
+    sessionId: 'session-1',
+    draftGenerations: { q1: 4, malformed: -1 },
+  })
+  assert.ok(result)
+  assert.deepEqual(result.draftGenerations, { q1: 4 })
+})
+
 void test('normalizeStudentSessionSnapshot keeps selfPacedMode when provided', () => {
   const result = normalizeStudentSessionSnapshot({
     sessionId: 'session-1',

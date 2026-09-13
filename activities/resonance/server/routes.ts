@@ -177,6 +177,14 @@ interface ResonanceSessionData extends Record<string, unknown> {
     draftGeneration?: number
     answer: Response['answer']
   }>
+  // Retain the generation after a clear so a delayed older write cannot
+  // recreate the draft. Entries are scoped by run revision.
+  responseDraftGenerations: Record<string, {
+    questionId: string
+    studentId: string
+    activeQuestionRunRevision?: number | null
+    draftGeneration: number
+  }>
   annotations: Record<string, InstructorAnnotation>
   reveals: QuestionReveal[]
   sharedResponseReactions: Record<string, Record<string, string>>
@@ -857,6 +865,31 @@ function normalizeResponseDrafts(
   return drafts
 }
 
+function normalizeResponseDraftGenerations(value: unknown): ResonanceSessionData['responseDraftGenerations'] {
+  if (!isPlainObject(value)) return {}
+  const generations: ResonanceSessionData['responseDraftGenerations'] = {}
+  for (const [key, rawGeneration] of Object.entries(value)) {
+    if (!isPlainObject(rawGeneration)) continue
+    const questionId = typeof rawGeneration.questionId === 'string' ? rawGeneration.questionId : ''
+    const studentId = typeof rawGeneration.studentId === 'string' ? rawGeneration.studentId : ''
+    const draftGeneration = resolveDraftGeneration(rawGeneration.draftGeneration)
+    if (!questionId || !studentId || draftGeneration === 0) continue
+    const activeQuestionRunRevision = rawGeneration.activeQuestionRunRevision === null
+      ? null
+      : typeof rawGeneration.activeQuestionRunRevision === 'number' &&
+          Number.isSafeInteger(rawGeneration.activeQuestionRunRevision) && rawGeneration.activeQuestionRunRevision > 0
+        ? rawGeneration.activeQuestionRunRevision
+        : undefined
+    generations[key] = {
+      questionId,
+      studentId,
+      ...(activeQuestionRunRevision !== undefined ? { activeQuestionRunRevision } : {}),
+      draftGeneration,
+    }
+  }
+  return generations
+}
+
 function normalizeSharedResponseReactions(value: unknown): Record<string, number> {
   if (!isPlainObject(value)) {
     return {}
@@ -1123,6 +1156,7 @@ function normalizeSessionData(data: unknown): ResonanceSessionData {
     students: isPlainObject(source.students) ? (source.students as Record<string, Student>) : {},
     responses: normalizeStoredResponses(source.responses, questions),
     responseDrafts: normalizeResponseDrafts(source.responseDrafts, questions),
+    responseDraftGenerations: normalizeResponseDraftGenerations(source.responseDraftGenerations),
     annotations: isPlainObject(source.annotations)
       ? (source.annotations as Record<string, InstructorAnnotation>)
       : {},
@@ -1308,6 +1342,17 @@ function buildStudentSnapshotWithMode(
             .filter((response) => response.studentId === viewerStudentId)
             .map((response) => [response.questionId, response.editSequence ?? 0] satisfies [string, number]),
         )
+  const draftGenerations = viewerStudentId === null || session.data.activeQuestionRunRevision === null
+    ? {}
+    : Object.fromEntries(
+        Object.entries(session.data.responseDraftGenerations)
+          .flatMap(([, generation]) => {
+            return generation.studentId === viewerStudentId &&
+              generation.activeQuestionRunRevision === session.data.activeQuestionRunRevision
+              ? [[generation.questionId, generation.draftGeneration] satisfies [string, number]]
+              : []
+          }),
+      )
   const reviewedResponses =
     viewerStudentId === null
       ? []
@@ -1350,6 +1395,7 @@ function buildStudentSnapshotWithMode(
     reviewedResponses,
     submittedAnswers,
     submittedResponseEditSequences,
+    draftGenerations,
     revealedQuestions,
   }
 }
@@ -3157,44 +3203,48 @@ export default function setupResonanceRoutes(
         }
 
         const draftKey = buildDraftKey(questionId, studentId)
-        const existingDraft = session.data.responseDrafts[draftKey]
-        const existingDraftIsCurrentRun =
-          existingDraft?.activeQuestionRunRevision === session.data.activeQuestionRunRevision
-        if (existingDraftIsCurrentRun && draftGeneration < (existingDraft.draftGeneration ?? 0)) {
-          if (draftId !== null) sendToSocket(socket, 'resonance:draft-saved', { draftId }, sessionId)
+        const answer = payload.answer === null ? null : validateAnswerPayload(payload.answer, question)
+        if (payload.answer !== null && !answer) return
+        // Draft ordering is a cross-connection guarantee. A read/modify/write
+        // fallback could commit an older handler after a newer one, so fail
+        // safely on stores that cannot provide the required CAS primitive.
+        if (typeof sessions.updateAtomic !== 'function') {
+          console.error(JSON.stringify({ event: 'resonance.draft-save-unavailable', sessionId, studentId, questionId }))
           return
         }
-        if (payload.answer === null) {
-          if (draftKey in session.data.responseDrafts) {
-            delete session.data.responseDrafts[draftKey]
-            await sessions.set(sessionId, session)
-            broadcastToRole('resonance:instructor-state', buildInstructorSnapshot(session), sessionId, true)
-          }
-          // Ack even when the draft was already absent, so a retried clear is
-          // idempotent instead of timing out and being reported as a failed save.
-          if (draftId !== null) {
-            sendToSocket(socket, 'resonance:draft-saved', { draftId }, sessionId)
-          }
-          return
-        }
-
-        const answer = validateAnswerPayload(payload.answer, question)
-        if (!answer) return
 
         let persistedSession: ResonanceSession | null = null
-        if (sessions.updateAtomic) {
-          const updated = await sessions.updateAtomic(sessionId, (current) => {
-            const currentSession = current as ResonanceSession
-            currentSession.data = normalizeSessionData(currentSession.data)
-            if (!matchesActiveQuestionRun(
-              currentSession.data,
-              payload.activeQuestionRunRevision,
-              payload.activeQuestionRunStartedAt,
-            )) return currentSession
-            const currentDraft = currentSession.data.responseDrafts[draftKey]
-            const currentDraftIsSameRun =
-              currentDraft?.activeQuestionRunRevision === currentSession.data.activeQuestionRunRevision
-            if (currentDraftIsSameRun && draftGeneration < (currentDraft.draftGeneration ?? 0)) return currentSession
+        const updated = await sessions.updateAtomic(sessionId, (current) => {
+          const currentSession = current as ResonanceSession
+          currentSession.data = normalizeSessionData(currentSession.data)
+          if (!matchesActiveQuestionRun(
+            currentSession.data,
+            payload.activeQuestionRunRevision,
+            payload.activeQuestionRunStartedAt,
+          )) return currentSession
+
+          const currentDraft = currentSession.data.responseDrafts[draftKey]
+          const currentGeneration = currentSession.data.responseDraftGenerations[draftKey]
+          const generationForCurrentRun = currentGeneration?.activeQuestionRunRevision === currentSession.data.activeQuestionRunRevision
+            ? currentGeneration.draftGeneration
+            : 0
+          const storedGeneration = Math.max(
+            currentDraft?.activeQuestionRunRevision === currentSession.data.activeQuestionRunRevision
+              ? currentDraft.draftGeneration ?? 0
+              : 0,
+            generationForCurrentRun,
+          )
+          if (draftGeneration < storedGeneration) return currentSession
+
+          currentSession.data.responseDraftGenerations[draftKey] = {
+            questionId,
+            studentId,
+            activeQuestionRunRevision: currentSession.data.activeQuestionRunRevision,
+            draftGeneration,
+          }
+          if (answer === null) {
+            delete currentSession.data.responseDrafts[draftKey]
+          } else {
             currentSession.data.responseDrafts[draftKey] = {
               questionId,
               studentId,
@@ -3204,27 +3254,12 @@ export default function setupResonanceRoutes(
               ...(draftGeneration > 0 ? { draftGeneration } : {}),
               answer,
             }
-            persistedSession = currentSession
-            return currentSession
-          })
-          if (updated !== null && persistedSession !== null) {
-            persistedSession = updated as ResonanceSession
-          } else {
-            persistedSession = null
           }
-        } else {
-          session.data.responseDrafts[draftKey] = {
-            questionId,
-            studentId,
-            updatedAt: draftUpdatedAt,
-            activeQuestionRunRevision: session.data.activeQuestionRunRevision,
-            editSequence,
-            ...(draftGeneration > 0 ? { draftGeneration } : {}),
-            answer,
-          }
-          await sessions.set(sessionId, session)
-          persistedSession = session
-        }
+          persistedSession = currentSession
+          return currentSession
+        })
+        if (updated !== null && persistedSession !== null) persistedSession = updated as ResonanceSession
+        else persistedSession = null
         if (persistedSession !== null) {
           broadcastToRole('resonance:instructor-state', buildInstructorSnapshot(persistedSession), sessionId, true)
         }

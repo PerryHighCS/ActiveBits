@@ -440,9 +440,6 @@ export default function ResonanceStudent() {
         if (disposition === 'discard') {
           unconfirmedDraftsRef.current.delete(key)
           changed = true
-          if (draft.deadlineAt !== null && now >= draft.deadlineAt && questionId !== null) {
-            reconcileUnconfirmedDraft(questionId)
-          }
           continue
         }
 
@@ -457,13 +454,9 @@ export default function ResonanceStudent() {
         draft.retrying = true
         void saveDraft(draft.payload).then((saved) => {
           if (unconfirmedDraftsRef.current.get(key) !== draft) return
-          if (cancelled) {
-            draft.retrying = false
-            return
-          }
           if (saved) {
             unconfirmedDraftsRef.current.delete(key)
-            setUnconfirmedDraftVersion((current) => current + 1)
+            if (!cancelled) setUnconfirmedDraftVersion((current) => current + 1)
             return
           }
           draft.retrying = false
@@ -482,6 +475,14 @@ export default function ResonanceStudent() {
       window.clearInterval(intervalId)
     }
   }, [reconcileUnconfirmedDraft, saveDraft, snapshot, studentId, unconfirmedDraftVersion])
+
+  useEffect(() => {
+    if (snapshot?.activeQuestionRunRevision === null || snapshot?.activeQuestionRunRevision === undefined) return
+    for (const [questionId, generation] of Object.entries(snapshot.draftGenerations)) {
+      const key = buildEditSequenceKey(questionId, snapshot.activeQuestionRunRevision)
+      draftGenerationByKeyRef.current[key] = Math.max(draftGenerationByKeyRef.current[key] ?? 0, generation)
+    }
+  }, [snapshot])
 
   useEffect(() => {
     const intervalId = window.setInterval(() => {

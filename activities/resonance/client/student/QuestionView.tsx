@@ -168,6 +168,9 @@ export default function QuestionView({
             // QuestionView is keyed by question ID and unmounts when the
             // student switches stack tabs. The parent owns retry/reconciliation
             // so this failed write remains recoverable after that unmount.
+            // Mark this attempt handled before handing it off. The callback
+            // updates parent state, which may remount this keyed component.
+            lastSentDraftRef.current = pendingDraft
             onDraftSaveFailed?.(payload)
           }
         })
