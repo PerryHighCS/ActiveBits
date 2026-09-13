@@ -169,6 +169,8 @@ void test('hasActiveQuestionRunRestart ignores the initial live snapshot but det
     hasActiveQuestionRunRestart({
       hasObservedSnapshot: false,
       activeQuestionIds: ['q1'],
+      activeQuestionRunRevision: 1,
+      previousActiveQuestionRunRevision: null,
       activeQuestionRunStartedAt: 2_000,
       previousActiveQuestionRunStartedAt: null,
     }),
@@ -178,8 +180,24 @@ void test('hasActiveQuestionRunRestart ignores the initial live snapshot but det
     hasActiveQuestionRunRestart({
       hasObservedSnapshot: true,
       activeQuestionIds: ['q1'],
+      activeQuestionRunRevision: 1,
+      previousActiveQuestionRunRevision: null,
       activeQuestionRunStartedAt: 2_000,
       previousActiveQuestionRunStartedAt: null,
+    }),
+    true,
+  )
+})
+
+void test('hasActiveQuestionRunRestart detects a new revision when activation timestamps match', () => {
+  assert.equal(
+    hasActiveQuestionRunRestart({
+      hasObservedSnapshot: true,
+      activeQuestionIds: ['q1'],
+      activeQuestionRunRevision: 2,
+      previousActiveQuestionRunRevision: 1,
+      activeQuestionRunStartedAt: 2_000,
+      previousActiveQuestionRunStartedAt: 2_000,
     }),
     true,
   )

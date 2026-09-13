@@ -688,6 +688,13 @@ that document rather than creating activity-specific authentication payloads.
 - Contract: `StudentSessionSnapshot` now includes `selfPacedMode: boolean`. For Resonance launched from a standalone SyncDeck parent, this flag reflects the effective fallback mode, not just session origin: it is `true` only while no instructor-activated run is active. In that mode, `activeQuestions`/`activeQuestionIds` fall back to the full question set, and once the viewer has submitted every question the snapshot synthesizes MCQ reveal entries with `correctOptionIds` and `viewerResponse` even though no instructor explicitly shared results.
 - Compatibility constraints: Live teacher-led Resonance sessions keep the previous semantics: only `activeQuestionIds` are askable, and MCQ correctness is still hidden until the instructor shares results. Self-paced reveals do not include shared-response percentages or peer data.
 
+- Date: 2026-09-13
+- Surface: Resonance student writes | timed draft finalization | client submission state
+- Contract: Teacher-led answer and draft writes identify an activation with the monotonic `activeQuestionRunRevision`; persisted drafts retain that revision and deadline finalization only promotes drafts from the current revision. Revision-less persisted drafts use the timestamp fallback only for migrated revision-1 runs. Self-paced sessions intentionally use a null run revision and null start timestamp, and the server accepts that null/null token before separately checking that the requested question is available. The student client also keys reactivation clearing of its submitted lock by revision, with the start timestamp retained only as a legacy fallback.
+- Validation rules: Cover self-paced REST submission and WebSocket draft persistence with null run tokens, reject prior-revision drafts when two activations share a timestamp, and clear the client submission lock when timestamps match but revisions differ.
+- Evidence (schema/tests/path): `activities/resonance/server/routes.ts`; `activities/resonance/server/routes.test.ts`; `activities/resonance/client/student/ResonanceStudent.tsx`; `activities/resonance/client/student/ResonanceStudent.test.ts`
+- Owner: Codex
+
 - Date: 2026-04-20
 - Surface: persistent-session websocket | activity config
 - Contract: Activity configs can declare `createSessionBootstrap.selectedOptionsToSessionData` to copy specific persistent-link `selectedOptions` keys onto top-level live `session.data` when a teacher starts a persistent session from the waiting-room websocket. SyncDeck opts in for `presentationUrl` so live manager/student flows recover the authoritative deck URL from session state.

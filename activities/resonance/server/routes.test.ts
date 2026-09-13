@@ -466,6 +466,77 @@ void test('student WebSocket identity is derived from its participant capability
   await sessions.close()
 })
 
+void test('self-paced students can persist drafts and submit without an active run token', async () => {
+  const app = createMockApp()
+  const sessions = createSessionStore(null)
+  const session = createMultiQuestionSession()
+  session.data.selfPacedMode = true
+  const studentCookies = issueStudentCookies(session, 'student1')
+  await sessions.set(session.id, session)
+  const captured = createCapturingMockWs()
+  setupResonanceRoutes(app, sessions, captured.ws)
+
+  const handler = captured.getHandler()
+  const messageHandlers: Array<(message: string) => void> = []
+  assert.ok(handler)
+  handler({
+    readyState: 1,
+    upgradeHeaders: {
+      cookie: Object.entries(studentCookies).map(([name, value]) => `${name}=${value}`).join('; '),
+    },
+    send() {},
+    on(event: string, callback: (message: string) => void) {
+      if (event === 'message') messageHandlers.push(callback)
+    },
+    once() {},
+    close() {},
+    terminate() {},
+    ping() {},
+  }, new URLSearchParams({ sessionId: session.id, role: 'student', studentId: 'student1' }), captured.ws.wss)
+  await waitForCondition(() => messageHandlers.length === 1)
+
+  messageHandlers[0]?.(JSON.stringify({
+    type: 'resonance:update-draft',
+    payload: {
+      studentId: 'student1',
+      questionId: 'q1',
+      activeQuestionRunStartedAt: null,
+      answer: { type: 'free-response', text: 'Self-paced draft' },
+    },
+  }))
+  await waitForCondition(async () => {
+    const stored = await sessions.get(session.id)
+    const storedData = stored?.data as { responseDrafts?: Record<string, unknown> } | undefined
+    return storedData?.responseDrafts?.['q1:student1'] !== undefined
+  })
+
+  const submitRes = createResponse()
+  await app.handlers.post['/api/resonance/:sessionId/submit-answer']?.({
+    params: { sessionId: session.id },
+    cookies: studentCookies,
+    body: {
+      studentId: 'student1',
+      questionId: 'q1',
+      activeQuestionRunStartedAt: null,
+      answer: { type: 'free-response', text: 'Self-paced answer' },
+    },
+  }, submitRes)
+
+  assert.equal(submitRes.statusCode, 200)
+  const stored = await sessions.get(session.id)
+  const storedData = stored?.data as {
+    responses?: Array<{ answer?: unknown }>
+    responseDrafts?: Record<string, unknown>
+  } | undefined
+  assert.deepEqual(storedData?.responses?.[0]?.answer, {
+    type: 'free-response',
+    text: 'Self-paced answer',
+  })
+  assert.equal(storedData?.responseDrafts?.['q1:student1'], undefined)
+
+  await sessions.close()
+})
+
 void test('server deadline task finalizes and broadcasts drafts without post-deadline client activity', async () => {
   const app = createMockApp()
   const sessions = createSessionStore(null)
@@ -692,6 +763,41 @@ void test('timed live runs finalize persisted drafts for every active question',
       { questionId: 'q2', answer: { type: 'multiple-choice', selectedOptionIds: ['q2_b'] } },
     ],
   )
+
+  await sessions.close()
+})
+
+void test('timed live runs discard a prior-revision draft with the same activation timestamp', async () => {
+  const sessions = createSessionStore(null)
+  const session = createMultiQuestionSession()
+  const sharedTimestamp = Date.now() - 2_000
+  session.data.activeQuestionId = 'q1'
+  session.data.activeQuestionIds = ['q1']
+  session.data.activeQuestionRunStartedAt = sharedTimestamp
+  session.data.activeQuestionRunRevision = 2
+  session.data.lastActiveQuestionRunRevision = 2
+  session.data.activeQuestionDeadlineAt = Date.now() - 1_000
+  session.data.responseDrafts = {
+    'q1:student1': {
+      questionId: 'q1',
+      studentId: 'student1',
+      updatedAt: sharedTimestamp,
+      activeQuestionRunRevision: 1,
+      answer: { type: 'free-response', text: 'Draft from prior run' },
+    },
+  }
+  await sessions.set(session.id, session)
+
+  const app = createMockApp()
+  setupResonanceRoutes(app, sessions, createMockWs())
+  await app.handlers.get['/api/resonance/:sessionId/state']?.(
+    { params: { sessionId: session.id } },
+    createResponse(),
+  )
+
+  const stored = await sessions.get(session.id)
+  assert.deepEqual(stored?.data.responses, [])
+  assert.deepEqual(stored?.data.responseDrafts, {})
 
   await sessions.close()
 })

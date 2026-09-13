@@ -150,6 +150,7 @@ interface ResonanceSessionData extends Record<string, unknown> {
     questionId: string
     studentId: string
     updatedAt: number
+    activeQuestionRunRevision?: number | null
     answer: Response['answer']
   }>
   annotations: Record<string, InstructorAnnotation>
@@ -497,6 +498,14 @@ function matchesActiveQuestionRun(
   if (typeof revision === 'number' && Number.isSafeInteger(revision)) {
     return revision === sessionData.activeQuestionRunRevision
   }
+  if (
+    revision == null &&
+    legacyStartedAt == null &&
+    sessionData.activeQuestionRunRevision === null &&
+    sessionData.activeQuestionRunStartedAt === null
+  ) {
+    return true
+  }
   return sessionData.activeQuestionRunRevision === 1 && legacyStartedAt === sessionData.activeQuestionRunStartedAt
 }
 
@@ -599,6 +608,7 @@ function finalizeActiveQuestionDrafts(
 ): DraftFinalizationResult {
   const activeQuestionIds = new Set(sessionData.activeQuestionIds)
   const runStartedAt = sessionData.activeQuestionRunStartedAt
+  const runRevision = sessionData.activeQuestionRunRevision
   let changed = false
   let finalizedCount = 0
 
@@ -607,11 +617,15 @@ function finalizeActiveQuestionDrafts(
       continue
     }
 
+    const matchesRun = draft.activeQuestionRunRevision !== undefined
+      ? draft.activeQuestionRunRevision === runRevision
+      : runRevision === 1 && runStartedAt !== null && draft.updatedAt >= runStartedAt
+
     if (
       sessionData.students[draft.studentId] !== undefined &&
       runStartedAt !== null &&
       draft.updatedAt <= deadlineAt &&
-      draft.updatedAt >= runStartedAt
+      matchesRun
     ) {
       upsertResponse(
         sessionData.responses,
@@ -765,6 +779,13 @@ function normalizeResponseDrafts(
     const updatedAt = typeof rawDraft.updatedAt === 'number' && Number.isFinite(rawDraft.updatedAt)
       ? Math.round(rawDraft.updatedAt)
       : 0
+    const activeQuestionRunRevision = rawDraft.activeQuestionRunRevision === null
+      ? null
+      : typeof rawDraft.activeQuestionRunRevision === 'number' &&
+          Number.isSafeInteger(rawDraft.activeQuestionRunRevision) &&
+          rawDraft.activeQuestionRunRevision > 0
+        ? rawDraft.activeQuestionRunRevision
+        : undefined
     const answer = normalizeDraftAnswerPayload(rawDraft.answer, questionsById, questionId)
 
     if (!questionId || !studentId || updatedAt <= 0 || answer === null) {
@@ -775,6 +796,7 @@ function normalizeResponseDrafts(
       questionId,
       studentId,
       updatedAt,
+      ...(activeQuestionRunRevision !== undefined ? { activeQuestionRunRevision } : {}),
       answer,
     }
   }
@@ -2979,6 +3001,7 @@ export default function setupResonanceRoutes(
           questionId,
           studentId,
           updatedAt: Date.now(),
+          activeQuestionRunRevision: session.data.activeQuestionRunRevision,
           answer,
         }
         await sessions.set(sessionId, session)

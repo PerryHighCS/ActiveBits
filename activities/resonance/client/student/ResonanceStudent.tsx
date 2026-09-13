@@ -118,14 +118,19 @@ export function resolveQuestionStatusBadge(selfPacedMode: boolean): {
 export function hasActiveQuestionRunRestart(params: {
   hasObservedSnapshot: boolean
   activeQuestionIds: string[]
+  activeQuestionRunRevision: number | null
+  previousActiveQuestionRunRevision: number | null
   activeQuestionRunStartedAt: number | null
   previousActiveQuestionRunStartedAt: number | null
 }): boolean {
+  const runChanged = params.activeQuestionRunRevision !== null
+    ? params.activeQuestionRunRevision !== params.previousActiveQuestionRunRevision
+    : params.activeQuestionRunStartedAt !== params.previousActiveQuestionRunStartedAt
+
   return (
     params.hasObservedSnapshot &&
     params.activeQuestionIds.length > 0 &&
-    params.activeQuestionRunStartedAt !== null &&
-    params.activeQuestionRunStartedAt !== params.previousActiveQuestionRunStartedAt
+    runChanged
   )
 }
 
@@ -166,6 +171,7 @@ export default function ResonanceStudent() {
   const [countdownNow, setCountdownNow] = useState(() => Date.now())
 
   const previousActiveQuestionIdsRef = useRef<string[]>([])
+  const previousActiveQuestionRunRevisionRef = useRef<number | null>(null)
   const previousActiveQuestionRunStartedAtRef = useRef<number | null>(null)
   const hasObservedSnapshotRef = useRef(false)
 
@@ -268,6 +274,7 @@ export default function ResonanceStudent() {
     setSubmittedAnswers({})
     setSubmissionAnnouncement(null)
     previousActiveQuestionIdsRef.current = []
+    previousActiveQuestionRunRevisionRef.current = null
     previousActiveQuestionRunStartedAtRef.current = null
     hasObservedSnapshotRef.current = false
   }, [sessionId, studentId])
@@ -302,6 +309,7 @@ export default function ResonanceStudent() {
       })
       const availableIds = snapshot.activeQuestions.map((question) => question.id)
       previousActiveQuestionIdsRef.current = availableIds
+      previousActiveQuestionRunRevisionRef.current = snapshot.activeQuestionRunRevision
       previousActiveQuestionRunStartedAtRef.current = snapshot.activeQuestionRunStartedAt
       hasObservedSnapshotRef.current = true
 
@@ -324,6 +332,8 @@ export default function ResonanceStudent() {
     const didRunRestart = hasActiveQuestionRunRestart({
       hasObservedSnapshot,
       activeQuestionIds: activeIds,
+      activeQuestionRunRevision: snapshot.activeQuestionRunRevision,
+      previousActiveQuestionRunRevision: previousActiveQuestionRunRevisionRef.current,
       activeQuestionRunStartedAt: activeRunStartedAt,
       previousActiveQuestionRunStartedAt: previousActiveQuestionRunStartedAtRef.current,
     })
@@ -339,6 +349,7 @@ export default function ResonanceStudent() {
     }
     hasObservedSnapshotRef.current = true
     previousActiveQuestionIdsRef.current = activeIds
+    previousActiveQuestionRunRevisionRef.current = snapshot.activeQuestionRunRevision
     previousActiveQuestionRunStartedAtRef.current = activeRunStartedAt
 
     if (activeIds.length === 0) {
