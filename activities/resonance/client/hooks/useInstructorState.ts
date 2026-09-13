@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type {
   InstructorAnnotation,
   InstructorSessionSnapshot,
@@ -120,14 +120,17 @@ export function normalizeInstructorStateSnapshot(
   const progressEntries = Array.isArray(data.progress)
     ? data.progress.filter(isValidInstructorProgress)
     : []
-  const submittedKeys = new Set(
-    submittedProgress.map((entry) => `${entry.questionId}:${entry.studentId}`),
+  // The server computes progress from both retained responses and current
+  // drafts. Its explicit entry is authoritative when both share a key: a
+  // higher-sequence revisit draft must display as working, not as the older
+  // retained response's submitted state.
+  const explicitProgressKeys = new Set(
+    progressEntries.map((entry) => `${entry.questionId}:${entry.studentId}`),
   )
-  const workingProgress = progressEntries.filter((entry) => {
-    const key = `${entry.questionId}:${entry.studentId}`
-    return entry.status !== 'submitted' && !submittedKeys.has(key)
-  })
-  const progress = [...submittedProgress, ...workingProgress]
+  const derivedSubmittedProgress = submittedProgress.filter((entry) =>
+    !explicitProgressKeys.has(`${entry.questionId}:${entry.studentId}`),
+  )
+  const progress = [...derivedSubmittedProgress, ...progressEntries]
   const fallbackActiveQuestionId = typeof data.activeQuestionId === 'string' ? data.activeQuestionId : null
   const activeQuestionIds = Array.isArray(data.activeQuestionIds)
     ? data.activeQuestionIds.filter((entry): entry is string => typeof entry === 'string')
@@ -146,9 +149,17 @@ export function normalizeInstructorStateSnapshot(
       typeof data.activeQuestionRunStartedAt === 'number' && Number.isFinite(data.activeQuestionRunStartedAt)
         ? data.activeQuestionRunStartedAt
         : null,
+    activeQuestionRunRevision:
+      typeof data.activeQuestionRunRevision === 'number' && Number.isSafeInteger(data.activeQuestionRunRevision)
+        ? data.activeQuestionRunRevision
+        : null,
     activeQuestionDeadlineAt:
       typeof data.activeQuestionDeadlineAt === 'number' && Number.isFinite(data.activeQuestionDeadlineAt)
         ? data.activeQuestionDeadlineAt
+        : null,
+    lastActiveQuestionRunRevision:
+      typeof data.lastActiveQuestionRunRevision === 'number' && Number.isSafeInteger(data.lastActiveQuestionRunRevision)
+        ? data.lastActiveQuestionRunRevision
         : null,
     students: Array.isArray(data.students) ? data.students : [],
     responses,
@@ -165,6 +176,74 @@ export function normalizeInstructorStateSnapshot(
 }
 
 /**
+ * The highest live-run revision a snapshot reflects, for advancing the
+ * client's ordering watermark. Mirrors `resolveObservedRunRevision` for
+ * students: `lastActiveQuestionRunRevision` is the server's monotonic max and
+ * already subsumes `activeQuestionRunRevision` (which resets to null once a
+ * run ends).
+ */
+export function resolveObservedInstructorRunRevision(snapshot: InstructorStateSnapshot): number | null {
+  return snapshot.lastActiveQuestionRunRevision ?? snapshot.activeQuestionRunRevision
+}
+
+/**
+ * Reject a delayed instructor snapshot that would restore an earlier run than
+ * one already observed. A REST `/responses` request begun just before a
+ * timeout finalizes can resolve after the WS `resonance:instructor-state`
+ * broadcast for that finalization — without this check, `setSnapshot` would
+ * apply that stale pre-expiry data unconditionally and, since REST polling is
+ * stopped while the socket is open, the stale view could persist indefinitely.
+ */
+export function shouldApplyInstructorSnapshot(
+  current: InstructorStateSnapshot | null,
+  candidate: InstructorStateSnapshot,
+  latestActiveQuestionRunRevision: number | null = current ? resolveObservedInstructorRunRevision(current) : null,
+): boolean {
+  if (current === null || current.sessionId !== candidate.sessionId) {
+    return true
+  }
+
+  if (latestActiveQuestionRunRevision === null) return true
+
+  if (candidate.activeQuestionRunRevision === null) {
+    // An ended-run/idle candidate carries no live revision of its own, but
+    // still stamps the highest live revision it has ever assigned. Accept it
+    // only when that stamp is at least as recent as what's already observed.
+    return (
+      candidate.lastActiveQuestionRunRevision !== null &&
+      candidate.lastActiveQuestionRunRevision >= latestActiveQuestionRunRevision
+    )
+  }
+
+  if (current.activeQuestionRunRevision === null) {
+    // `current` already reflects the end of the run at
+    // `latestActiveQuestionRunRevision`. A live candidate at or below that
+    // watermark isn't a new activation — it's a delayed message from the run
+    // that just ended — since a genuine next activation always gets a
+    // strictly higher revision (see nextActiveQuestionRunRevision).
+    return candidate.activeQuestionRunRevision > latestActiveQuestionRunRevision
+  }
+
+  return candidate.activeQuestionRunRevision >= latestActiveQuestionRunRevision
+}
+
+export function isLatestInstructorSnapshotRequest(requestId: number, latestRequestId: number): boolean {
+  return requestId === latestRequestId
+}
+
+export function selectInstructorSnapshot(
+  current: InstructorStateSnapshot | null,
+  candidate: InstructorStateSnapshot,
+  latestActiveQuestionRunRevision?: number | null,
+): { snapshot: InstructorStateSnapshot | null; accepted: boolean } {
+  const accepted = shouldApplyInstructorSnapshot(current, candidate, latestActiveQuestionRunRevision)
+  return {
+    snapshot: accepted ? candidate : current,
+    accepted,
+  }
+}
+
+/**
  * Connects to the Resonance WebSocket as an instructor for real-time session state.
  * Falls back to REST polling while the WebSocket is reconnecting.
  */
@@ -174,14 +253,33 @@ export function useInstructorState(sessionId: string | null, passcode: string | 
   const [error, setError] = useState<string | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
   const mountedRef = useRef(true)
+  const latestSnapshotRequestRef = useRef(0)
+  const snapshotRef = useRef<InstructorStateSnapshot | null>(null)
+  const latestActiveQuestionRunRevisionRef = useRef<number | null>(null)
+
+  // This hook instance can be retained while the manager switches sessions.
+  // Reset before passive effects begin the next fetch/socket connection so a
+  // previous session's run watermark cannot reject the next session's first
+  // (lower-numbered) live run, and its snapshot is never painted while reloads.
+  useLayoutEffect(() => {
+    latestSnapshotRequestRef.current += 1
+    wsRef.current = null
+    snapshotRef.current = null
+    latestActiveQuestionRunRevisionRef.current = null
+    setSnapshot(null)
+    setLoading(true)
+    setError(null)
+  }, [sessionId, passcode])
 
   const fetchSnapshot = useCallback(async () => {
     if (sessionId === null || passcode === null) return
+    const requestId = latestSnapshotRequestRef.current + 1
+    latestSnapshotRequestRef.current = requestId
     try {
       const resp = await fetch(`/api/resonance/${sessionId}/responses`, {
         headers: { 'X-Instructor-Passcode': passcode },
       })
-      if (!mountedRef.current) return
+      if (!mountedRef.current || !isLatestInstructorSnapshotRequest(requestId, latestSnapshotRequestRef.current)) return
       if (resp.status === 403) {
         setError('Invalid instructor passcode')
         setLoading(false)
@@ -206,18 +304,32 @@ export function useInstructorState(sessionId: string | null, passcode: string | 
         reveals: QuestionReveal[]
         responseOrderOverrides: Record<string, string[]>
       }
-      if (!mountedRef.current) return
+      if (!mountedRef.current || !isLatestInstructorSnapshotRequest(requestId, latestSnapshotRequestRef.current)) return
       const normalized = normalizeInstructorStateSnapshot(data)
       if (!normalized) {
         setError('Could not load session data')
         setLoading(false)
         return
       }
-      setSnapshot(normalized)
+      const selection = selectInstructorSnapshot(
+        snapshotRef.current,
+        normalized,
+        latestActiveQuestionRunRevisionRef.current,
+      )
+      snapshotRef.current = selection.snapshot
+      if (selection.accepted) {
+        const observedRevision = resolveObservedInstructorRunRevision(normalized)
+        if (observedRevision !== null) {
+          latestActiveQuestionRunRevisionRef.current = observedRevision
+        }
+      }
+      setSnapshot(selection.snapshot)
       setError(null)
       setLoading(false)
     } catch {
-      if (mountedRef.current) setError('Network error — retrying…')
+      if (mountedRef.current && isLatestInstructorSnapshotRequest(requestId, latestSnapshotRequestRef.current)) {
+        setError('Network error — retrying…')
+      }
     }
   }, [sessionId, passcode])
 
@@ -256,22 +368,48 @@ export function useInstructorState(sessionId: string | null, passcode: string | 
 
     function connect() {
       if (closed || !mountedRef.current) return
-      ws = new WebSocket(wsUrl)
-      wsRef.current = ws
+      const socket = new WebSocket(wsUrl)
+      ws = socket
+      wsRef.current = socket
+
+      // Guard every handler by the specific socket it belongs to (not just
+      // the shared `mountedRef`/`closed` flags): a session/passcode change
+      // resets `mountedRef` to true for the *new* effect before an old
+      // socket's already-in-flight message is dispatched, so a stale handler
+      // could otherwise apply a prior session's instructor data to the new
+      // one. Mirrors the student hook's `isCurrent` guard.
+      const isCurrent = () => !closed && wsRef.current === socket
 
       ws.onopen = () => {
+        if (!isCurrent()) return
         reconnectDelay = 1_000
         stopFallback()
       }
 
       ws.onmessage = (event) => {
-        if (!mountedRef.current) return
+        if (!isCurrent()) return
         try {
           const msg = JSON.parse(String(event.data)) as { type?: string; payload?: unknown }
           if (msg.type === 'resonance:instructor-state' && msg.payload !== undefined) {
             const normalized = normalizeInstructorStateSnapshot(msg.payload as Partial<InstructorStateSnapshot>)
             if (normalized) {
-              setSnapshot(normalized)
+              const selection = selectInstructorSnapshot(
+                snapshotRef.current,
+                normalized,
+                latestActiveQuestionRunRevisionRef.current,
+              )
+              if (selection.accepted) {
+                // Invalidate any REST fetch already in flight — even one for
+                // the same run revision — so it can't overwrite the response/
+                // progress data this newer push just delivered.
+                latestSnapshotRequestRef.current += 1
+                snapshotRef.current = selection.snapshot
+                const observedRevision = resolveObservedInstructorRunRevision(normalized)
+                if (observedRevision !== null) {
+                  latestActiveQuestionRunRevisionRef.current = observedRevision
+                }
+              }
+              setSnapshot(selection.snapshot)
             }
             setLoading(false)
             setError(null)
@@ -292,6 +430,7 @@ export function useInstructorState(sessionId: string | null, passcode: string | 
       }
 
       ws.onclose = () => {
+        if (!isCurrent()) return
         wsRef.current = null
         ws = null
         if (!closed && mountedRef.current) {
@@ -302,7 +441,11 @@ export function useInstructorState(sessionId: string | null, passcode: string | 
       }
     }
 
-    connect()
+    // Strict Mode discards its first effect setup. Deferring construction lets
+    // that cleanup cancel before it opens a socket that immediately closes.
+    queueMicrotask(() => {
+      if (!closed) connect()
+    })
 
     return () => {
       closed = true

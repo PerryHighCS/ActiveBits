@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useParams } from 'react-router'
 import {
   persistSessionParticipantIdentity,
@@ -19,6 +19,10 @@ interface RegisterResponse {
 interface SubmissionAnnouncement {
   id: number
   message: string
+}
+
+export function shouldRetryRegistrationWithoutStudentId(status: number, studentId: string | null): boolean {
+  return status === 403 && studentId !== null
 }
 
 export function resolveNextSelfPacedQuestionId(params: {
@@ -42,6 +46,81 @@ export function resolveNextSelfPacedQuestionId(params: {
   }
 
   return currentIndex >= 0 ? currentQuestionId : questionIds[0] ?? null
+}
+
+export function clearLiveQuestionSubmission(params: {
+  selfPacedMode: boolean
+  submittedQuestionIds: Set<string>
+  questionId: string
+}): Set<string> {
+  if (params.selfPacedMode || !params.submittedQuestionIds.has(params.questionId)) {
+    return params.submittedQuestionIds
+  }
+
+  const next = new Set(params.submittedQuestionIds)
+  next.delete(params.questionId)
+  return next
+}
+
+/**
+ * Per-question/run edit-sequence bookkeeping, keyed independently of any one
+ * QuestionView mount so it survives that component remounting when the
+ * student switches stack tabs away and back. `runToken` should be the same
+ * activeQuestionRunRevision ?? activeQuestionRunStartedAt value passed to
+ * QuestionView, so a new run naturally starts its own counter at the baseline.
+ */
+export function buildEditSequenceKey(questionId: string, runToken: number | null): string {
+  return `${questionId}:${runToken ?? 'null'}`
+}
+
+export function resolveCurrentEditSequence(
+  editSequenceByKey: Record<string, number>,
+  questionId: string,
+  runToken: number | null,
+): number {
+  return editSequenceByKey[buildEditSequenceKey(questionId, runToken)] ?? 1
+}
+
+export function advanceEditSequenceForRevisit(
+  editSequenceByKey: Record<string, number>,
+  questionId: string,
+  runToken: number | null,
+): Record<string, number> {
+  const key = buildEditSequenceKey(questionId, runToken)
+  return { ...editSequenceByKey, [key]: (editSequenceByKey[key] ?? 1) + 1 }
+}
+
+/**
+ * This in-memory counter has no local history to build on right after a page
+ * reload, so it would otherwise default a post-reload revision to sequence 1
+ * — colliding with (or trailing) a confirmed response the server already has
+ * at sequence 1+, and having the revision silently dropped as stale by the
+ * server's draft guard. Seed the counter from the server-confirmed response's
+ * own editSequence (floor = confirmed + 1) whenever it would otherwise leave
+ * a lower value in place; never lowers an already-advanced local counter.
+ */
+export function seedEditSequenceFromConfirmedResponse(
+  editSequenceByKey: Record<string, number>,
+  questionId: string,
+  runToken: number | null,
+  confirmedEditSequence: number,
+): Record<string, number> {
+  const key = buildEditSequenceKey(questionId, runToken)
+  const floor = confirmedEditSequence + 1
+  if ((editSequenceByKey[key] ?? 1) >= floor) {
+    return editSequenceByKey
+  }
+  return { ...editSequenceByKey, [key]: floor }
+}
+
+export function resolveQuestionAnswer(params: {
+  localAnswers: Record<string, AnswerPayload | null>
+  snapshotAnswers: Record<string, AnswerPayload>
+  questionId: string
+}): AnswerPayload | null {
+  return Object.prototype.hasOwnProperty.call(params.localAnswers, params.questionId)
+    ? params.localAnswers[params.questionId] ?? null
+    : params.snapshotAnswers[params.questionId] ?? null
 }
 
 export function resolveSelfPacedSubmittedMessage(params: {
@@ -90,33 +169,19 @@ export function resolveQuestionStatusBadge(selfPacedMode: boolean): {
 export function hasActiveQuestionRunRestart(params: {
   hasObservedSnapshot: boolean
   activeQuestionIds: string[]
+  activeQuestionRunRevision: number | null
+  previousActiveQuestionRunRevision: number | null
   activeQuestionRunStartedAt: number | null
   previousActiveQuestionRunStartedAt: number | null
 }): boolean {
+  const runChanged = params.activeQuestionRunRevision !== null
+    ? params.activeQuestionRunRevision !== params.previousActiveQuestionRunRevision
+    : params.activeQuestionRunStartedAt !== params.previousActiveQuestionRunStartedAt
+
   return (
     params.hasObservedSnapshot &&
     params.activeQuestionIds.length > 0 &&
-    params.activeQuestionRunStartedAt !== null &&
-    params.activeQuestionRunStartedAt !== params.previousActiveQuestionRunStartedAt
-  )
-}
-
-export function shouldUseLocalSubmittedAnswer(params: {
-  questionId: string
-  selfPacedMode: boolean
-  hasObservedSnapshot: boolean
-  activeQuestionIds: string[]
-  activeQuestionRunStartedAt: number | null
-  previousActiveQuestionIds: string[]
-  previousActiveQuestionRunStartedAt: number | null
-}): boolean {
-  if (params.selfPacedMode || !params.hasObservedSnapshot) {
-    return true
-  }
-
-  return (
-    params.previousActiveQuestionIds.includes(params.questionId) &&
-    !hasActiveQuestionRunRestart(params)
+    runChanged
   )
 }
 
@@ -152,18 +217,33 @@ export default function ResonanceStudent() {
   const [registerError, setRegisterError] = useState<string | null>(null)
   const [selectedQuestionId, setSelectedQuestionId] = useState<string | null>(null)
   const [submittedQuestionIds, setSubmittedQuestionIds] = useState<Set<string>>(new Set())
-  const [submittedAnswers, setSubmittedAnswers] = useState<Record<string, AnswerPayload>>({})
+  const [submittedAnswers, setSubmittedAnswers] = useState<Record<string, AnswerPayload | null>>({})
   const [submissionAnnouncement, setSubmissionAnnouncement] = useState<SubmissionAnnouncement | null>(null)
   const [countdownNow, setCountdownNow] = useState(() => Date.now())
 
-  const mountedRef = useRef(true)
   const previousActiveQuestionIdsRef = useRef<string[]>([])
+  const previousActiveQuestionRunRevisionRef = useRef<number | null>(null)
   const previousActiveQuestionRunStartedAtRef = useRef<number | null>(null)
   const hasObservedSnapshotRef = useRef(false)
+  // Owned here (not in QuestionView) because QuestionView remounts on every
+  // stack-tab switch (it's keyed by question id): a counter local to it would
+  // reset to its baseline on remount, colliding with the sequence already
+  // recorded on a confirmed response and causing a legitimate revisit edit to
+  // be dropped as stale. See resolveCurrentEditSequence/advanceEditSequenceForRevisit.
+  const editSequenceByKeyRef = useRef<Record<string, number>>({})
+
+  useLayoutEffect(() => {
+    setIdentityResolved(false)
+    setStudentName(null)
+    setStudentId(null)
+    setNameSubmitted(false)
+    setRegistered(false)
+    setRegisterError(null)
+  }, [sessionId])
 
   useEffect(() => {
     if (!sessionId) return
-    mountedRef.current = true
+    let cancelled = false
 
     void (async () => {
       try {
@@ -174,7 +254,7 @@ export default function ResonanceStudent() {
           localStorage: window.localStorage,
           sessionStorage: window.sessionStorage,
         })
-        if (!mountedRef.current) return
+        if (cancelled) return
 
         setStudentName(identity.studentName)
         setStudentId(identity.studentId)
@@ -182,17 +262,18 @@ export default function ResonanceStudent() {
       } catch {
         // Identity resolution failing is non-fatal; fall through to NameEntryForm.
       } finally {
-        if (mountedRef.current) setIdentityResolved(true)
+        if (!cancelled) setIdentityResolved(true)
       }
     })()
 
     return () => {
-      mountedRef.current = false
+      cancelled = true
     }
   }, [sessionId])
 
   useEffect(() => {
     if (!sessionId || !nameSubmitted || registered || studentName === null) return
+    let cancelled = false
 
     void (async () => {
       try {
@@ -203,9 +284,20 @@ export default function ResonanceStudent() {
         })
 
         const data = (await resp.json()) as RegisterResponse
-        if (!mountedRef.current) return
+        if (cancelled) return
 
         if (!resp.ok || !data.studentId) {
+          if (shouldRetryRegistrationWithoutStudentId(resp.status, studentId)) {
+            persistSessionParticipantIdentity(
+              window.localStorage,
+              sessionId,
+              studentName,
+              null,
+            )
+            setStudentId(null)
+            setRegisterError(null)
+            return
+          }
           setRegisterError(data.error ?? 'Failed to join session')
           return
         }
@@ -219,15 +311,31 @@ export default function ResonanceStudent() {
         )
         setRegistered(true)
       } catch {
-        if (mountedRef.current) setRegisterError('Network error — could not join session')
+        if (!cancelled) setRegisterError('Network error — could not join session')
       }
     })()
+
+    return () => {
+      cancelled = true
+    }
   }, [sessionId, nameSubmitted, registered, studentName, studentId])
 
-  const { snapshot, loading: sessionLoading, error: sessionError, sendMessage } = useResonanceSession(
+  const { snapshot, loading: sessionLoading, error: sessionError, refresh, sendMessage, saveDraft } = useResonanceSession(
     registered && sessionId ? sessionId : null,
     studentId,
   )
+
+  useLayoutEffect(() => {
+    setSelectedQuestionId(null)
+    setSubmittedQuestionIds(new Set())
+    setSubmittedAnswers({})
+    setSubmissionAnnouncement(null)
+    previousActiveQuestionIdsRef.current = []
+    previousActiveQuestionRunRevisionRef.current = null
+    previousActiveQuestionRunStartedAtRef.current = null
+    hasObservedSnapshotRef.current = false
+    editSequenceByKeyRef.current = {}
+  }, [sessionId, studentId])
 
   useEffect(() => {
     const intervalId = window.setInterval(() => {
@@ -259,6 +367,7 @@ export default function ResonanceStudent() {
       })
       const availableIds = snapshot.activeQuestions.map((question) => question.id)
       previousActiveQuestionIdsRef.current = availableIds
+      previousActiveQuestionRunRevisionRef.current = snapshot.activeQuestionRunRevision
       previousActiveQuestionRunStartedAtRef.current = snapshot.activeQuestionRunStartedAt
       hasObservedSnapshotRef.current = true
 
@@ -275,24 +384,33 @@ export default function ResonanceStudent() {
     const activeRunStartedAt = snapshot.activeQuestionRunStartedAt
     const activeIds = snapshot.activeQuestions.map((question) => question.id)
     const previousActiveIds = previousActiveQuestionIdsRef.current
+
+    const runToken = snapshot.activeQuestionRunRevision ?? activeRunStartedAt
+    for (const questionId of activeIds) {
+      const confirmedEditSequence = snapshot.submittedResponseEditSequences[questionId]
+      if (confirmedEditSequence !== undefined) {
+        editSequenceByKeyRef.current = seedEditSequenceFromConfirmedResponse(
+          editSequenceByKeyRef.current,
+          questionId,
+          runToken,
+          confirmedEditSequence,
+        )
+      }
+    }
+
     const reactivatedIds = hasObservedSnapshot
       ? activeIds.filter((questionId) => !previousActiveIds.includes(questionId))
       : []
     const didRunRestart = hasActiveQuestionRunRestart({
       hasObservedSnapshot,
       activeQuestionIds: activeIds,
+      activeQuestionRunRevision: snapshot.activeQuestionRunRevision,
+      previousActiveQuestionRunRevision: previousActiveQuestionRunRevisionRef.current,
       activeQuestionRunStartedAt: activeRunStartedAt,
       previousActiveQuestionRunStartedAt: previousActiveQuestionRunStartedAtRef.current,
     })
 
     if (reactivatedIds.length > 0 || didRunRestart) {
-      setSubmittedAnswers((current) => {
-        const next = { ...current }
-        for (const questionId of didRunRestart ? activeIds : reactivatedIds) {
-          delete next[questionId]
-        }
-        return next
-      })
       setSubmittedQuestionIds((current) => {
         const next = new Set(current)
         for (const questionId of didRunRestart ? activeIds : reactivatedIds) {
@@ -303,6 +421,7 @@ export default function ResonanceStudent() {
     }
     hasObservedSnapshotRef.current = true
     previousActiveQuestionIdsRef.current = activeIds
+    previousActiveQuestionRunRevisionRef.current = snapshot.activeQuestionRunRevision
     previousActiveQuestionRunStartedAtRef.current = activeRunStartedAt
 
     if (activeIds.length === 0) {
@@ -336,6 +455,7 @@ export default function ResonanceStudent() {
       <NameEntryForm
         sessionId={sessionId}
         onRegistered={(id, name) => {
+          persistSessionParticipantIdentity(window.localStorage, sessionId, name, id)
           setStudentId(id)
           setStudentName(name)
           setNameSubmitted(true)
@@ -361,15 +481,6 @@ export default function ResonanceStudent() {
 
   const activeQuestions = snapshot?.activeQuestions ?? []
   const activeQuestion = activeQuestions.find((question) => question.id === selectedQuestionId) ?? activeQuestions[0] ?? null
-  const useLocalSubmittedAnswer = snapshot !== null && activeQuestion !== null && shouldUseLocalSubmittedAnswer({
-    questionId: activeQuestion.id,
-    selfPacedMode: snapshot.selfPacedMode,
-    hasObservedSnapshot: hasObservedSnapshotRef.current,
-    activeQuestionIds: activeQuestions.map((question) => question.id),
-    activeQuestionRunStartedAt: snapshot.activeQuestionRunStartedAt,
-    previousActiveQuestionIds: previousActiveQuestionIdsRef.current,
-    previousActiveQuestionRunStartedAt: previousActiveQuestionRunStartedAtRef.current,
-  })
   const activeDeadlineAt = snapshot?.activeQuestionDeadlineAt ?? null
   const hasExpired = activeDeadlineAt !== null && activeDeadlineAt <= countdownNow
   const liveCountdown = formatRemainingTime(activeDeadlineAt, countdownNow)
@@ -436,7 +547,23 @@ export default function ResonanceStudent() {
                       <button
                         key={question.id}
                         type="button"
-                        onClick={() => setSelectedQuestionId(question.id)}
+                        onClick={() => {
+                          const runToken = snapshot.activeQuestionRunRevision ?? snapshot.activeQuestionRunStartedAt
+                          const isRevisit = !snapshot.selfPacedMode && submittedQuestionIds.has(question.id)
+                          setSubmittedQuestionIds((current) => clearLiveQuestionSubmission({
+                            selfPacedMode: snapshot.selfPacedMode,
+                            submittedQuestionIds: current,
+                            questionId: question.id,
+                          }))
+                          if (isRevisit) {
+                            editSequenceByKeyRef.current = advanceEditSequenceForRevisit(
+                              editSequenceByKeyRef.current,
+                              question.id,
+                              runToken,
+                            )
+                          }
+                          setSelectedQuestionId(question.id)
+                        }}
                         className={`rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${
                           isSelected
                             ? 'border-indigo-400 bg-indigo-50 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300'
@@ -459,16 +586,38 @@ export default function ResonanceStudent() {
                 question={activeQuestion}
                 sessionId={sessionId}
                 studentId={studentId}
-                initialAnswer={
-                  snapshot.submittedAnswers[activeQuestion.id] ??
-                  (useLocalSubmittedAnswer ? submittedAnswers[activeQuestion.id] : null) ??
-                  null
-                }
+                initialAnswer={resolveQuestionAnswer({
+                  localAnswers: submittedAnswers,
+                  snapshotAnswers: snapshot.submittedAnswers,
+                  questionId: activeQuestion.id,
+                })}
                 activeQuestionRunStartedAt={snapshot.activeQuestionRunStartedAt}
+                activeQuestionRunRevision={snapshot.activeQuestionRunRevision}
+                activeQuestionDeadlineAt={snapshot.activeQuestionDeadlineAt}
+                editSequence={resolveCurrentEditSequence(
+                  editSequenceByKeyRef.current,
+                  activeQuestion.id,
+                  snapshot.activeQuestionRunRevision ?? snapshot.activeQuestionRunStartedAt,
+                )}
                 disabled={hasExpired}
                 isSubmitted={submittedQuestionIds.has(activeQuestion.id)}
                 submittedMessage={submittedMessage}
                 announceSubmittedMessage={!snapshot.selfPacedMode}
+                saveDraft={saveDraft}
+                onDraftChanged={(questionId, answer) => {
+                  setSubmittedAnswers((current) => ({
+                    ...current,
+                    [questionId]: answer,
+                  }))
+                }}
+                onDraftUnconfirmed={(questionId) => {
+                  setSubmittedAnswers((current) => {
+                    const next = { ...current }
+                    delete next[questionId]
+                    return next
+                  })
+                  void refresh()
+                }}
                 onSubmitted={(questionId, answer) => {
                   setSubmittedAnswers((current) => ({
                     ...current,

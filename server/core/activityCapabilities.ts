@@ -50,6 +50,20 @@ function hashCapability(token: string): string {
   return createHash('sha256').update(token).digest('base64url')
 }
 
+function isUsableActivityCapabilityRecord(value: unknown, now: number): value is ActivityCapabilityRecord {
+  return (
+    isRecord(value) &&
+    typeof value.id === 'string' &&
+    typeof value.tokenHash === 'string' &&
+    (value.principalKind === 'manager' || value.principalKind === 'participant') &&
+    typeof value.issuedAt === 'number' &&
+    Number.isFinite(value.issuedAt) &&
+    typeof value.expiresAt === 'number' &&
+    Number.isFinite(value.expiresAt) &&
+    value.expiresAt > now
+  )
+}
+
 function cookieScope(sessionId: string): string {
   return Buffer.from(sessionId, 'utf8').toString('base64url')
 }
@@ -87,6 +101,27 @@ export function issueActivityCapability(
     delete container.activityCapabilities[entry.id]
   }
   return { id, token }
+}
+
+/** Issue without displacing another live principal when the bounded store is full. */
+export function tryIssueActivityCapability(
+  session: ActivityCapabilitySessionLike,
+  principalKind: ActivityPrincipalKind,
+  subjectId?: string,
+  now = Date.now(),
+  ttlMs: number = DEFAULT_ACTIVITY_CAPABILITY_TTL_MS,
+): { id: string; token: string } | null {
+  const container = getContainer(session)
+  container.activityCapabilities ??= {}
+  for (const [id, capability] of Object.entries(container.activityCapabilities)) {
+    if (!isUsableActivityCapabilityRecord(capability, now)) {
+      delete container.activityCapabilities[id]
+    }
+  }
+  if (Object.keys(container.activityCapabilities).length >= MAX_CAPABILITIES_PER_SESSION) {
+    return null
+  }
+  return issueActivityCapability(session, principalKind, subjectId, now, ttlMs)
 }
 
 /**
@@ -201,9 +236,7 @@ export function resolveActivityCapability(
   if (!isRecord(capabilities)) return null
   const tokenHash = hashCapability(token)
   for (const value of Object.values(capabilities)) {
-    if (!isRecord(value) || value.tokenHash !== tokenHash || value.principalKind !== principalKind || typeof value.id !== 'string') continue
-    // A capability without a finite, unreached expiry is not a valid principal.
-    if (typeof value.expiresAt !== 'number' || !Number.isFinite(value.expiresAt) || value.expiresAt <= now) return null
+    if (!isUsableActivityCapabilityRecord(value, now) || value.tokenHash !== tokenHash || value.principalKind !== principalKind) continue
     return {
       kind: principalKind,
       sessionId,

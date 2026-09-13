@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { isValidStudentReactionEmoji } from '../../shared/emojiSet.js'
 import { getMcqSelectionMode } from '../../shared/mcq.js'
 import type {
@@ -15,6 +15,17 @@ import type {
 } from '../../shared/types.js'
 
 const FALLBACK_POLL_INTERVAL_MS = 15_000
+const DRAFT_SAVE_ACK_TIMEOUT_MS = 2_000
+
+function getDraftRetryKey(payload: Record<string, unknown>): string | null {
+  const questionId = typeof payload.questionId === 'string' ? payload.questionId : null
+  const runToken = typeof payload.activeQuestionRunRevision === 'number'
+    ? payload.activeQuestionRunRevision
+    : typeof payload.activeQuestionRunStartedAt === 'number'
+      ? payload.activeQuestionRunStartedAt
+      : null
+  return questionId === null ? null : `${questionId}:${runToken ?? 'self-paced'}`
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value != null && typeof value === 'object' && !Array.isArray(value)
@@ -386,9 +397,17 @@ export function normalizeStudentSessionSnapshot(
       typeof data.activeQuestionRunStartedAt === 'number' && Number.isFinite(data.activeQuestionRunStartedAt)
         ? data.activeQuestionRunStartedAt
         : null,
+    activeQuestionRunRevision:
+      typeof data.activeQuestionRunRevision === 'number' && Number.isSafeInteger(data.activeQuestionRunRevision)
+        ? data.activeQuestionRunRevision
+        : null,
     activeQuestionDeadlineAt:
       typeof data.activeQuestionDeadlineAt === 'number' && Number.isFinite(data.activeQuestionDeadlineAt)
         ? data.activeQuestionDeadlineAt
+        : null,
+    lastActiveQuestionRunRevision:
+      typeof data.lastActiveQuestionRunRevision === 'number' && Number.isSafeInteger(data.lastActiveQuestionRunRevision)
+        ? data.lastActiveQuestionRunRevision
         : null,
     reveals: Array.isArray(data.reveals)
       ? data.reveals
@@ -404,6 +423,14 @@ export function normalizeStudentSessionSnapshot(
       isRecord(data.submittedAnswers)
         ? (data.submittedAnswers as StudentSessionSnapshot['submittedAnswers'])
         : {},
+    submittedResponseEditSequences: isRecord(data.submittedResponseEditSequences)
+      ? Object.fromEntries(
+          Object.entries(data.submittedResponseEditSequences).filter(
+            (entry): entry is [string, number] =>
+              typeof entry[1] === 'number' && Number.isSafeInteger(entry[1]) && entry[1] >= 0,
+          ),
+        )
+      : {},
     revealedQuestions: Array.isArray(data.revealedQuestions)
       ? data.revealedQuestions
         .map(normalizeStudentQuestion)
@@ -416,30 +443,70 @@ export function normalizeStudentSessionSnapshot(
 export function shouldApplyStudentSessionSnapshot(
   current: StudentSessionSnapshot | null,
   candidate: StudentSessionSnapshot,
-  latestActiveQuestionRunStartedAt: number | null = current?.activeQuestionRunStartedAt ?? null,
+  latestActiveQuestionRunRevision: number | null = current ? resolveObservedRunRevision(current) : null,
 ): boolean {
-  if (
-    current === null ||
-    current.sessionId !== candidate.sessionId ||
-    candidate.activeQuestionRunStartedAt === null ||
-    latestActiveQuestionRunStartedAt === null
-  ) {
+  if (current === null || current.sessionId !== candidate.sessionId) {
     return true
   }
 
-  return candidate.activeQuestionRunStartedAt >= latestActiveQuestionRunStartedAt
+  if (candidate.activeQuestionRunRevision === null) {
+    if (latestActiveQuestionRunRevision !== null) {
+      // A self-paced fallback or idle (no active questions) snapshot carries
+      // no live run revision of its own, but the server also stamps the
+      // highest live revision it has ever assigned. Accept the candidate only
+      // when that stamp is at least as recent as the most recent live run
+      // this client has observed, so a genuine live-to-self-paced/idle
+      // transition is admitted while a stale legacy snapshot — or a delayed
+      // idle snapshot generated before a newer run already started — is
+      // still rejected instead of blanking the current live question.
+      return (
+        candidate.lastActiveQuestionRunRevision !== null &&
+        candidate.lastActiveQuestionRunRevision >= latestActiveQuestionRunRevision
+      )
+    }
+    if (current.activeQuestionIds.length === 0) return true
+    const candidateStartedAt = candidate.activeQuestionRunStartedAt
+    const currentStartedAt = current.activeQuestionRunStartedAt
+    return candidateStartedAt === null || currentStartedAt === null || candidateStartedAt >= currentStartedAt
+  }
+
+  if (latestActiveQuestionRunRevision === null) return true
+
+  if (current.activeQuestionRunRevision === null) {
+    // `current` already reflects the end of the run at `latestActiveQuestionRunRevision`
+    // (an idle/self-paced snapshot admitted above). A live candidate at or
+    // below that watermark isn't a new activation — it's a delayed message
+    // from the run that just ended — since a genuine next activation always
+    // gets a strictly higher revision (see nextActiveQuestionRunRevision).
+    return candidate.activeQuestionRunRevision > latestActiveQuestionRunRevision
+  }
+
+  return candidate.activeQuestionRunRevision >= latestActiveQuestionRunRevision
 }
 
 export function isLatestStudentSnapshotRequest(requestId: number, latestRequestId: number): boolean {
   return requestId === latestRequestId
 }
 
+/**
+ * The highest live-run revision a snapshot reflects, for advancing the
+ * client's ordering watermark. `lastActiveQuestionRunRevision` is the
+ * server's monotonic max and already subsumes `activeQuestionRunRevision`
+ * (which resets to null on self-paced/idle); prefer it so an idle/self-paced
+ * snapshot that's the first one a client observes still seeds the watermark,
+ * rather than leaving it null and letting an out-of-order delivery of an
+ * earlier live snapshot be wrongly accepted afterward.
+ */
+export function resolveObservedRunRevision(snapshot: StudentSessionSnapshot): number | null {
+  return snapshot.lastActiveQuestionRunRevision ?? snapshot.activeQuestionRunRevision
+}
+
 export function selectStudentSessionSnapshot(
   current: StudentSessionSnapshot | null,
   candidate: StudentSessionSnapshot,
-  latestActiveQuestionRunStartedAt?: number | null,
+  latestActiveQuestionRunRevision?: number | null,
 ): { snapshot: StudentSessionSnapshot | null; accepted: boolean } {
-  const accepted = shouldApplyStudentSessionSnapshot(current, candidate, latestActiveQuestionRunStartedAt)
+  const accepted = shouldApplyStudentSessionSnapshot(current, candidate, latestActiveQuestionRunRevision)
   return {
     snapshot: accepted ? candidate : current,
     accepted,
@@ -461,16 +528,78 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
   const mountedRef = useRef(true)
   const latestSnapshotRequestRef = useRef(0)
   const snapshotRef = useRef<StudentSessionSnapshot | null>(null)
-  const latestActiveQuestionRunStartedAtRef = useRef<number | null>(null)
+  const latestActiveQuestionRunRevisionRef = useRef<number | null>(null)
+  const draftSaveSequenceRef = useRef(0)
+  const pendingDraftSavesRef = useRef(new Map<string, {
+    resolve(saved: boolean): void
+    timeoutId: ReturnType<typeof setTimeout>
+  }>())
+  const queuedDraftRetriesRef = useRef(new Map<string, Record<string, unknown>>())
+  const retryDraftSavesRef = useRef(new Map<string, {
+    key: string
+    timeoutId: ReturnType<typeof setTimeout>
+  }>())
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     latestSnapshotRequestRef.current += 1
+    for (const pending of pendingDraftSavesRef.current.values()) {
+      clearTimeout(pending.timeoutId)
+      pending.resolve(false)
+    }
+    pendingDraftSavesRef.current.clear()
+    for (const pending of retryDraftSavesRef.current.values()) {
+      clearTimeout(pending.timeoutId)
+    }
+    retryDraftSavesRef.current.clear()
+    queuedDraftRetriesRef.current.clear()
     snapshotRef.current = null
-    latestActiveQuestionRunStartedAtRef.current = null
+    latestActiveQuestionRunRevisionRef.current = null
     setSnapshot(null)
     setLoading(sessionId !== null)
     setError(null)
   }, [sessionId, studentId])
+
+  const flushQueuedDraftRetries = useCallback(() => {
+    const currentWs = wsRef.current
+    const currentSnapshot = snapshotRef.current
+    if (currentWs?.readyState !== WebSocket.OPEN || currentSnapshot === null) return
+
+    const activeRunToken = currentSnapshot.activeQuestionRunRevision ?? currentSnapshot.activeQuestionRunStartedAt
+    for (const [key, payload] of queuedDraftRetriesRef.current) {
+      const payloadRunToken = typeof payload.activeQuestionRunRevision === 'number'
+        ? payload.activeQuestionRunRevision
+        : typeof payload.activeQuestionRunStartedAt === 'number'
+          ? payload.activeQuestionRunStartedAt
+          : null
+      const questionId = typeof payload.questionId === 'string' ? payload.questionId : null
+      const isEligible =
+        payload.studentId === studentId &&
+        payloadRunToken === activeRunToken &&
+        questionId !== null &&
+        currentSnapshot.activeQuestionIds.includes(questionId) &&
+        (currentSnapshot.activeQuestionDeadlineAt === null || Date.now() < currentSnapshot.activeQuestionDeadlineAt)
+      if (!isEligible) {
+        queuedDraftRetriesRef.current.delete(key)
+        continue
+      }
+      if ([...retryDraftSavesRef.current.values()].some((pending) => pending.key === key)) continue
+
+      const draftId = `draft-retry-${++draftSaveSequenceRef.current}`
+      const timeoutId = setTimeout(() => {
+        retryDraftSavesRef.current.delete(draftId)
+      }, DRAFT_SAVE_ACK_TIMEOUT_MS)
+      retryDraftSavesRef.current.set(draftId, { key, timeoutId })
+      try {
+        currentWs.send(JSON.stringify({
+          type: 'resonance:update-draft',
+          payload: { ...payload, draftId },
+        }))
+      } catch {
+        clearTimeout(timeoutId)
+        retryDraftSavesRef.current.delete(draftId)
+      }
+    }
+  }, [studentId])
 
   const fetchSnapshot = useCallback(async () => {
     if (sessionId === null) return
@@ -495,11 +624,14 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
       const selection = selectStudentSessionSnapshot(
         snapshotRef.current,
         data,
-        latestActiveQuestionRunStartedAtRef.current,
+        latestActiveQuestionRunRevisionRef.current,
       )
       snapshotRef.current = selection.snapshot
-      if (selection.accepted && data.activeQuestionRunStartedAt !== null) {
-        latestActiveQuestionRunStartedAtRef.current = data.activeQuestionRunStartedAt
+      if (selection.accepted) {
+        const observedRevision = resolveObservedRunRevision(data)
+        if (observedRevision !== null) {
+          latestActiveQuestionRunRevisionRef.current = observedRevision
+        }
       }
       setSnapshot(selection.snapshot)
       setError(null)
@@ -543,16 +675,26 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
 
     function connect() {
       if (closed || !mountedRef.current) return
-      ws = new WebSocket(wsUrl)
-      wsRef.current = ws
+      const socket = new WebSocket(wsUrl)
+      ws = socket
+      wsRef.current = socket
+
+      // Guard every handler by the specific socket it belongs to (not just the
+      // shared `mountedRef`/`closed` flags): a session/student change resets
+      // `mountedRef` to true for the *new* effect before an old socket's
+      // already-in-flight message is dispatched, so a stale handler could
+      // otherwise apply another participant's queued state to the new one.
+      const isCurrent = () => !closed && wsRef.current === socket
 
       ws.onopen = () => {
+        if (!isCurrent()) return
         reconnectDelay = 1_000
         stopFallback()
+        flushQueuedDraftRetries()
       }
 
       ws.onmessage = (event) => {
-        if (!mountedRef.current) return
+        if (!isCurrent()) return
         try {
           const msg = JSON.parse(String(event.data)) as { type?: string; payload?: unknown }
           if (msg.type === 'resonance:session-state' && msg.payload !== undefined) {
@@ -561,17 +703,33 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
               const selection = selectStudentSessionSnapshot(
                 snapshotRef.current,
                 normalized,
-                latestActiveQuestionRunStartedAtRef.current,
+                latestActiveQuestionRunRevisionRef.current,
               )
               if (selection.accepted) {
                 latestSnapshotRequestRef.current += 1
                 snapshotRef.current = selection.snapshot
-                if (normalized.activeQuestionRunStartedAt !== null) {
-                  latestActiveQuestionRunStartedAtRef.current = normalized.activeQuestionRunStartedAt
+                const observedRevision = resolveObservedRunRevision(normalized)
+                if (observedRevision !== null) {
+                  latestActiveQuestionRunRevisionRef.current = observedRevision
                 }
                 setSnapshot(selection.snapshot)
                 setLoading(false)
                 setError(null)
+              }
+            }
+          } else if (msg.type === 'resonance:draft-saved' && isRecord(msg.payload)) {
+            const draftId = typeof msg.payload.draftId === 'string' ? msg.payload.draftId : null
+            const pending = draftId !== null ? pendingDraftSavesRef.current.get(draftId) : undefined
+            if (pending && draftId !== null) {
+              clearTimeout(pending.timeoutId)
+              pendingDraftSavesRef.current.delete(draftId)
+              pending.resolve(true)
+            } else if (draftId !== null) {
+              const retry = retryDraftSavesRef.current.get(draftId)
+              if (retry) {
+                clearTimeout(retry.timeoutId)
+                retryDraftSavesRef.current.delete(draftId)
+                queuedDraftRetriesRef.current.delete(retry.key)
               }
             }
           } else if (
@@ -595,8 +753,13 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
       }
 
       ws.onclose = () => {
+        if (!isCurrent()) return
         wsRef.current = null
         ws = null
+        for (const pending of retryDraftSavesRef.current.values()) {
+          clearTimeout(pending.timeoutId)
+        }
+        retryDraftSavesRef.current.clear()
         if (!closed && mountedRef.current) {
           reconnectTimeoutId = setTimeout(connect, reconnectDelay)
           reconnectDelay = Math.min(reconnectDelay * 2, 30_000)
@@ -606,7 +769,11 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
       }
     }
 
-    connect()
+    // Strict Mode discards its first effect setup. Deferring construction lets
+    // that cleanup cancel before it opens a socket that immediately closes.
+    queueMicrotask(() => {
+      if (!closed) connect()
+    })
 
     return () => {
       closed = true
@@ -616,7 +783,11 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
       if (ws !== null) ws.close()
       wsRef.current = null
     }
-  }, [sessionId, studentId, fetchSnapshot])
+  }, [sessionId, studentId, fetchSnapshot, flushQueuedDraftRetries])
+
+  useEffect(() => {
+    flushQueuedDraftRetries()
+  }, [flushQueuedDraftRetries, snapshot])
 
   /** Send a message to the server via the WebSocket. Returns true if sent. */
   const sendMessage = useCallback((type: string, payload: unknown): boolean => {
@@ -628,5 +799,39 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
     return false
   }, [])
 
-  return { snapshot, loading, error, refresh: fetchSnapshot, sendMessage }
+  /** Persist a draft and resolve only once the server acknowledges its write. */
+  const saveDraft = useCallback((payload: Record<string, unknown>): Promise<boolean> => {
+    const currentWs = wsRef.current
+    const retryKey = getDraftRetryKey(payload)
+    if (currentWs?.readyState !== WebSocket.OPEN) {
+      if (retryKey !== null) queuedDraftRetriesRef.current.set(retryKey, payload)
+      return Promise.resolve(false)
+    }
+
+    const draftId = `draft-${++draftSaveSequenceRef.current}`
+    return new Promise((resolve) => {
+      const timeoutId = setTimeout(() => {
+        pendingDraftSavesRef.current.delete(draftId)
+        resolve(false)
+      }, DRAFT_SAVE_ACK_TIMEOUT_MS)
+      pendingDraftSavesRef.current.set(draftId, { resolve, timeoutId })
+      try {
+        currentWs.send(JSON.stringify({
+          type: 'resonance:update-draft',
+          payload: { ...payload, draftId },
+        }))
+      } catch {
+        // The socket can close between the readyState check above and this
+        // send (e.g. a connection drop mid-call). An uncaught throw here
+        // would reject this Promise, but callers only attach `.then` — the
+        // draft would silently never be marked/reconciled as unconfirmed.
+        clearTimeout(timeoutId)
+        pendingDraftSavesRef.current.delete(draftId)
+        if (retryKey !== null) queuedDraftRetriesRef.current.set(retryKey, payload)
+        resolve(false)
+      }
+    })
+  }, [])
+
+  return { snapshot, loading, error, refresh: fetchSnapshot, sendMessage, saveDraft }
 }

@@ -1,4 +1,13 @@
-import { createSessionStore, type SessionRecord } from 'activebits-server/core/sessions.js'
+import { createSessionStore, type SessionRecord, type SessionStore } from 'activebits-server/core/sessions.js'
+import {
+  getActivityCapabilityCookieName,
+  issueActivityCapability,
+} from 'activebits-server/core/activityCapabilities.js'
+import {
+  acceptEntryParticipant,
+  getSessionParticipantCookieName,
+  issueAcceptedEntryParticipantToken,
+} from 'activebits-server/core/acceptedEntryParticipants.js'
 import {
   generatePersistentHash,
   getOrCreateActivePersistentSession,
@@ -12,6 +21,7 @@ import setupResonanceRoutes, {
   generateImportedQuestionId,
   resolveAnswerabilityErrorMessage,
   resolveSocketStudentId,
+  scheduleParticipantCapabilityExpiryClose,
 } from './routes.js'
 
 interface RouteRequest {
@@ -20,6 +30,7 @@ interface RouteRequest {
   headers?: Record<string, string | undefined>
   body?: unknown
   query?: Record<string, unknown>
+  ip?: unknown
 }
 
 interface JsonResponse {
@@ -32,14 +43,20 @@ type RouteHandler = (req: RouteRequest, res: JsonResponse) => Promise<void> | vo
 interface MockResponse {
   statusCode: number
   body: unknown
+  cookies: Array<{ name: string; value: string; options: Record<string, unknown> }>
+  headers: Record<string, string>
   status(code: number): MockResponse
   json(payload: unknown): MockResponse
+  cookie(name: string, value: string, options: Record<string, unknown>): void
+  setHeader(name: string, value: string): void
 }
 
 function createResponse(): MockResponse {
   return {
     statusCode: 200,
     body: null,
+    cookies: [],
+    headers: {},
     status(code: number) {
       this.statusCode = code
       return this
@@ -48,6 +65,19 @@ function createResponse(): MockResponse {
       this.body = payload
       return this
     },
+    cookie(name, value, options) {
+      this.cookies.push({ name, value, options })
+    },
+    setHeader(name, value) {
+      this.headers[name] = value
+    },
+  }
+}
+
+function issueStudentCookies(session: SessionRecord, studentId: string): Record<string, string> {
+  const capability = issueActivityCapability(session, 'participant', studentId)
+  return {
+    [getActivityCapabilityCookieName('participant', session.id)]: capability.token,
   }
 }
 
@@ -78,6 +108,33 @@ function createMockWs(): WsRouter {
   }
 }
 
+function createCapturingMockWs(): {
+  ws: WsRouter
+  getHandler(): Parameters<WsRouter['register']>[1] | null
+} {
+  let handler: Parameters<WsRouter['register']>[1] | null = null
+  return {
+    ws: {
+      wss: {
+        clients: new Set(),
+        close() {},
+      },
+      register(_path, nextHandler) {
+        handler = nextHandler
+      },
+    },
+    getHandler: () => handler,
+  }
+}
+
+async function waitForCondition(predicate: () => boolean | Promise<boolean>): Promise<void> {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    if (await predicate()) return
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  }
+  assert.fail('condition was not satisfied')
+}
+
 void test('generateImportedQuestionId falls back when Math.random produces an empty suffix', () => {
   assert.equal(
     generateImportedQuestionId(
@@ -92,6 +149,44 @@ void test('generateImportedQuestionId falls back when Math.random produces an em
 void test('resolveSocketStudentId rejects student messages that claim another identity', () => {
   assert.equal(resolveSocketStudentId('student2', 'student1'), null)
   assert.equal(resolveSocketStudentId('student1', 'student1'), 'student1')
+})
+
+void test('scheduleParticipantCapabilityExpiryClose does not arm a timer for an already-closed socket', () => {
+  const now = Date.now()
+  const session = {
+    id: 'resonance-session-1',
+    type: 'resonance',
+    created: now,
+    lastActivity: now,
+    data: {
+      activityCapabilities: {
+        cap1: { id: 'cap1', tokenHash: 'hash', principalKind: 'participant', issuedAt: now, expiresAt: now + 60_000 },
+      },
+    },
+  } as unknown as Parameters<typeof scheduleParticipantCapabilityExpiryClose>[1]
+
+  console.info('[TEST] a closed socket must not have an expiry-close timer armed against it')
+  let closeListenerCount = 0
+  const closedSocket = {
+    readyState: 3,
+    close() {},
+    on(event: string) {
+      if (event === 'close') closeListenerCount += 1
+    },
+  } as unknown as Parameters<typeof scheduleParticipantCapabilityExpiryClose>[0]
+  scheduleParticipantCapabilityExpiryClose(closedSocket, session, 'cap1')
+  assert.equal(closeListenerCount, 0, 'a closed socket must not register a close listener or arm a timer')
+
+  let openCloseListenerCount = 0
+  const openSocket = {
+    readyState: 1,
+    close() {},
+    on(event: string) {
+      if (event === 'close') openCloseListenerCount += 1
+    },
+  } as unknown as Parameters<typeof scheduleParticipantCapabilityExpiryClose>[0]
+  scheduleParticipantCapabilityExpiryClose(openSocket, session, 'cap1')
+  assert.equal(openCloseListenerCount, 1, 'an open socket should still arm its expiry-close cleanup')
 })
 
 function createEmbeddedResonanceSession(): SessionRecord {
@@ -140,6 +235,8 @@ function createInstructorResonanceSession(): SessionRecord {
         },
       ],
       activeQuestionId: 'q1',
+      activeQuestionRunStartedAt: now - 1_000,
+      activeQuestionRunRevision: 1,
       students: {
         student1: { studentId: 'student1', name: 'Ada Lovelace', joinedAt: now - 2000 },
         student2: { studentId: 'student2', name: 'Grace Hopper', joinedAt: now - 1500 },
@@ -249,6 +346,1116 @@ void test('resolveAnswerabilityErrorMessage distinguishes staged submission fail
   assert.equal(resolveAnswerabilityErrorMessage('expired'), 'time is up for this question')
   assert.equal(resolveAnswerabilityErrorMessage('inactive'), 'question is not active')
   assert.equal(resolveAnswerabilityErrorMessage('choices-hidden'), 'choices have not been revealed')
+})
+
+void test('student registration issues an httpOnly capability and REST routes enforce its identity', async () => {
+  initializePersistentStorage(null)
+  const app = createMockApp()
+  const sessions = createSessionStore(null)
+  const session = createInstructorResonanceSession()
+  await sessions.set(session.id, session)
+  setupResonanceRoutes(app, sessions, createMockWs())
+
+  const registerHandler = app.handlers.post['/api/resonance/:sessionId/register-student']
+  const stateHandler = app.handlers.get['/api/resonance/:sessionId/state']
+  const submitHandler = app.handlers.post['/api/resonance/:sessionId/submit-answer']
+  const registerRes = createResponse()
+  await registerHandler?.(
+    { params: { sessionId: session.id }, body: { name: 'New Student' } },
+    registerRes,
+  )
+
+  assert.equal(registerRes.statusCode, 200)
+  const registeredStudentId = (registerRes.body as { studentId?: string }).studentId
+  assert.ok(registeredStudentId)
+  assert.equal(registerRes.cookies.length, 1)
+  assert.equal(registerRes.cookies[0]?.options.httpOnly, true)
+  assert.equal(registerRes.cookies[0]?.options.sameSite, 'lax')
+  assert.equal(registerRes.headers['Cache-Control'], 'no-store')
+  const authenticatedCookies = {
+    [registerRes.cookies[0]!.name]: registerRes.cookies[0]!.value,
+  }
+
+  const capabilityCountBeforeReload = Object.keys(
+    ((await sessions.get(session.id))?.data as { activityCapabilities?: Record<string, unknown> })
+      .activityCapabilities ?? {},
+  ).length
+  const reloadRes = createResponse()
+  await registerHandler?.({
+    params: { sessionId: session.id },
+    body: { name: 'New Student', studentId: registeredStudentId },
+    cookies: authenticatedCookies,
+  }, reloadRes)
+  assert.equal(reloadRes.statusCode, 200)
+  assert.equal(reloadRes.cookies.length, 0, 'an authenticated reload reuses its existing capability')
+  assert.equal(Object.keys(
+    ((await sessions.get(session.id))?.data as { activityCapabilities?: Record<string, unknown> })
+      .activityCapabilities ?? {},
+  ).length, capabilityCountBeforeReload)
+
+  const stateRes = createResponse()
+  await stateHandler?.({
+    params: { sessionId: session.id },
+    query: { studentId: registeredStudentId },
+    cookies: authenticatedCookies,
+  }, stateRes)
+  assert.equal(stateRes.statusCode, 200)
+
+  console.info('[TEST] a capability must not authorize a different student id')
+  const mismatchedStateRes = createResponse()
+  await stateHandler?.({
+    params: { sessionId: session.id },
+    query: { studentId: 'student1' },
+    cookies: authenticatedCookies,
+  }, mismatchedStateRes)
+  assert.equal(mismatchedStateRes.statusCode, 403)
+
+  console.info('[TEST] a REST capability must not submit for a different student id')
+  const mismatchedSubmitRes = createResponse()
+  await submitHandler?.({
+    params: { sessionId: session.id },
+    cookies: authenticatedCookies,
+    body: {
+      studentId: 'student1',
+      questionId: 'q1',
+      activeQuestionRunStartedAt: null,
+      answer: { type: 'free-response', text: 'Not my answer' },
+    },
+  }, mismatchedSubmitRes)
+  assert.equal(mismatchedSubmitRes.statusCode, 403)
+
+  console.info('[TEST] an unauthenticated caller cannot claim an existing student during registration')
+  const claimedRegistrationRes = createResponse()
+  await registerHandler?.({
+    params: { sessionId: session.id },
+    body: { name: 'Ada Lovelace', studentId: 'student1' },
+  }, claimedRegistrationRes)
+  assert.equal(claimedRegistrationRes.statusCode, 403)
+
+  const saturatedSession = await sessions.get(session.id)
+  assert.ok(saturatedSession)
+  const existingCapabilityCount = Object.keys(
+    (saturatedSession.data as { activityCapabilities?: Record<string, unknown> }).activityCapabilities ?? {},
+  ).length
+  for (let index = existingCapabilityCount; index < 200; index += 1) {
+    issueActivityCapability(saturatedSession, 'participant', `capacity-student-${index}`)
+  }
+  await sessions.set(session.id, saturatedSession)
+
+  console.info('[TEST] registration at participant capability capacity should return 429 without eviction')
+  const capacityRes = createResponse()
+  await registerHandler?.({
+    params: { sessionId: session.id },
+    body: { name: 'Capacity Student' },
+  }, capacityRes)
+  assert.equal(capacityRes.statusCode, 429)
+
+  const stillAuthenticatedRes = createResponse()
+  await stateHandler?.({
+    params: { sessionId: session.id },
+    query: { studentId: registeredStudentId },
+    cookies: authenticatedCookies,
+  }, stillAuthenticatedRes)
+  assert.equal(stillAuthenticatedRes.statusCode, 200)
+
+  await sessions.close()
+})
+
+void test('unauthenticated direct registration is rate-limited before it can exhaust participant capabilities', async () => {
+  initializePersistentStorage(null)
+  const app = createMockApp()
+  const sessions = createSessionStore(null)
+  const session = createInstructorResonanceSession()
+  await sessions.set(session.id, session)
+  setupResonanceRoutes(app, sessions, createMockWs())
+  const registerHandler = app.handlers.post['/api/resonance/:sessionId/register-student']
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const response = createResponse()
+    await registerHandler?.({ params: { sessionId: session.id }, body: { name: `Direct Student ${attempt}` }, ip: '203.0.113.7' }, response)
+    assert.equal(response.statusCode, 200)
+  }
+  console.info('[TEST] repeated unauthenticated direct registrations must be limited before capability capacity is exhausted')
+  const limitedResponse = createResponse()
+  await registerHandler?.({ params: { sessionId: session.id }, body: { name: 'One Too Many' }, ip: '203.0.113.7' }, limitedResponse)
+  assert.equal(limitedResponse.statusCode, 429)
+  assert.equal(limitedResponse.headers['Retry-After'], '60')
+  assert.equal(Object.keys(((await sessions.get(session.id))?.data as { activityCapabilities?: Record<string, unknown> }).activityCapabilities ?? {}).length, 100)
+  await sessions.close()
+})
+
+void test('a fresh accepted participant takes precedence over a stale capability from a shared browser', async () => {
+  initializePersistentStorage(null)
+  const app = createMockApp()
+  const sessions = createSessionStore(null)
+  const session = createInstructorResonanceSession()
+  const staleCapabilityCookies = issueStudentCookies(session, 'student1')
+  assert.ok(acceptEntryParticipant(session, { participantId: 'student2', displayName: 'Grace Hopper' }))
+  const acceptedToken = issueAcceptedEntryParticipantToken(session, 'student2')
+  assert.ok(acceptedToken)
+  await sessions.set(session.id, session)
+  setupResonanceRoutes(app, sessions, createMockWs())
+
+  const registerHandler = app.handlers.post['/api/resonance/:sessionId/register-student']
+  const response = createResponse()
+  await registerHandler?.({
+    params: { sessionId: session.id },
+    body: { name: 'Grace Hopper', studentId: 'student2' },
+    cookies: {
+      ...staleCapabilityCookies,
+      [getSessionParticipantCookieName(session.id)]: acceptedToken,
+    },
+  }, response)
+  assert.equal(response.statusCode, 200)
+  assert.equal((response.body as { studentId?: string }).studentId, 'student2')
+  assert.equal(response.cookies.length, 1, 'the accepted participant receives its own replacement capability')
+
+  const capabilityCountAfterRegistration = Object.keys(
+    ((await sessions.get(session.id))?.data as { activityCapabilities?: Record<string, unknown> }).activityCapabilities ?? {},
+  ).length
+  console.info('[TEST] a consumed accepted-entry token must not mint another capability on replay')
+  const replayResponse = createResponse()
+  await registerHandler?.({
+    params: { sessionId: session.id },
+    body: { name: 'Grace Hopper', studentId: 'student2' },
+    cookies: {
+      ...staleCapabilityCookies,
+      [getSessionParticipantCookieName(session.id)]: acceptedToken,
+    },
+  }, replayResponse)
+  assert.equal(replayResponse.statusCode, 403)
+  assert.equal(Object.keys(
+    ((await sessions.get(session.id))?.data as { activityCapabilities?: Record<string, unknown> }).activityCapabilities ?? {},
+  ).length, capabilityCountAfterRegistration)
+
+  const stateHandler = app.handlers.get['/api/resonance/:sessionId/state']
+  const stateResponse = createResponse()
+  await stateHandler?.({
+    params: { sessionId: session.id },
+    query: { studentId: 'student2' },
+    cookies: { [response.cookies[0]!.name]: response.cookies[0]!.value },
+  }, stateResponse)
+  assert.equal(stateResponse.statusCode, 200)
+  await sessions.close()
+})
+
+void test('a failed accepted-participant registration write leaves its handoff usable for retry', async () => {
+  initializePersistentStorage(null)
+  const app = createMockApp()
+  const sessions = createSessionStore(null)
+  const session = createInstructorResonanceSession()
+  assert.ok(acceptEntryParticipant(session, { participantId: 'student2', displayName: 'Grace Hopper' }))
+  const acceptedToken = issueAcceptedEntryParticipantToken(session, 'student2')
+  assert.ok(acceptedToken)
+  await sessions.set(session.id, session)
+
+  let failNextWrite = true
+  const failingSessions: SessionStore = new Proxy(sessions, {
+    get(target, property) {
+      if (property === 'set') {
+        return async (...args: Parameters<SessionStore['set']>) => {
+          if (failNextWrite) {
+            failNextWrite = false
+            throw new Error('simulated session-store write failure')
+          }
+          await target.set(...args)
+        }
+      }
+      const value = Reflect.get(target, property, target)
+      return typeof value === 'function' ? value.bind(target) : value
+    },
+  })
+  setupResonanceRoutes(app, failingSessions, createMockWs())
+
+  const registerHandler = app.handlers.post['/api/resonance/:sessionId/register-student']
+  const request = {
+    params: { sessionId: session.id },
+    body: { name: 'Grace Hopper', studentId: 'student2' },
+    cookies: { [getSessionParticipantCookieName(session.id)]: acceptedToken },
+  }
+  console.info('[TEST] a failed registration write must not consume the accepted-participant handoff in cache')
+  const failedResponse = createResponse()
+  await registerHandler?.(request, failedResponse)
+  assert.equal(failedResponse.statusCode, 503)
+  assert.equal(failedResponse.cookies.length, 0)
+
+  const retryResponse = createResponse()
+  await registerHandler?.(request, retryResponse)
+  assert.equal(retryResponse.statusCode, 200)
+  assert.equal(retryResponse.cookies.length, 1)
+  await sessions.close()
+})
+
+void test('accepted participant capability replacement fails clearly when the capability store is full', async () => {
+  initializePersistentStorage(null)
+  const app = createMockApp()
+  const sessions = createSessionStore(null)
+  const session = createInstructorResonanceSession()
+  const staleCapabilityCookies = issueStudentCookies(session, 'student1')
+  assert.ok(acceptEntryParticipant(session, { participantId: 'student2', displayName: 'Grace Hopper' }))
+  const acceptedToken = issueAcceptedEntryParticipantToken(session, 'student2')
+  assert.ok(acceptedToken)
+  const capabilityCount = Object.keys((session.data as { activityCapabilities?: Record<string, unknown> }).activityCapabilities ?? {}).length
+  for (let index = capabilityCount; index < 200; index += 1) {
+    issueActivityCapability(session, 'participant', `capacity-student-${index}`)
+  }
+  await sessions.set(session.id, session)
+  setupResonanceRoutes(app, sessions, createMockWs())
+
+  console.info('[TEST] a stale capability must not silently authenticate a fresh accepted participant when replacement capacity is exhausted')
+  const response = createResponse()
+  await app.handlers.post['/api/resonance/:sessionId/register-student']?.({
+    params: { sessionId: session.id },
+    body: { name: 'Grace Hopper', studentId: 'student2' },
+    cookies: { ...staleCapabilityCookies, [getSessionParticipantCookieName(session.id)]: acceptedToken },
+  }, response)
+  assert.equal(response.statusCode, 429)
+  assert.equal(response.cookies.length, 0)
+  await sessions.close()
+})
+
+void test('instructor progress shows a newer revisit draft as working while retaining its confirmed response', async () => {
+  const app = createMockApp()
+  const sessions = createSessionStore(null)
+  const session = createInstructorResonanceSession()
+  const data = session.data as unknown as { activeQuestionRunRevision?: number; responses: Array<{ activeQuestionRunRevision?: number; editSequence?: number }>; responseDrafts: Record<string, { activeQuestionRunRevision?: number; editSequence?: number; [key: string]: unknown }> }
+  data.activeQuestionRunRevision = 3
+  data.responses[0]!.activeQuestionRunRevision = 3
+  data.responses[0]!.editSequence = 1
+  data.responseDrafts['q1:student1'] = { activeQuestionRunRevision: 3, editSequence: 2, updatedAt: 9_999, questionId: 'q1', studentId: 'student1', answer: { type: 'free-response', text: 'Revised but not submitted yet.' } }
+  data.responseDrafts['q1:student2'] = { activeQuestionRunRevision: 2, editSequence: 1, updatedAt: 9_998, questionId: 'q1', studentId: 'student2', answer: { type: 'free-response', text: 'Stale prior-run draft.' } }
+  await sessions.set(session.id, session)
+  setupResonanceRoutes(app, sessions, createMockWs())
+  const responseHandler = app.handlers.get['/api/resonance/:sessionId/responses']
+  const response = createResponse()
+  await responseHandler?.({ params: { sessionId: session.id }, headers: { 'x-instructor-passcode': 'TEACH123' } }, response)
+  assert.equal(response.statusCode, 200)
+  const progress = (response.body as { progress: Array<{ studentId: string; status: string; answer: unknown; responseId: string | null }> }).progress
+  const revisedProgress = progress.find((entry) => entry.studentId === 'student1')
+  assert.equal(revisedProgress?.status, 'working')
+  assert.deepEqual(revisedProgress?.answer, { type: 'free-response', text: 'Revised but not submitted yet.' })
+  assert.equal(revisedProgress?.responseId, null)
+  const staleProgress = progress.find((entry) => entry.studentId === 'student2')
+  assert.equal(staleProgress?.status, 'idle')
+  assert.equal(staleProgress?.answer, null)
+  await sessions.close()
+})
+
+void test('student WebSocket identity is derived from its participant capability', async () => {
+  const app = createMockApp()
+  const sessions = createSessionStore(null)
+  const session = createInstructorResonanceSession()
+  const studentCookies = issueStudentCookies(session, 'student1')
+  await sessions.set(session.id, session)
+  const captured = createCapturingMockWs()
+  setupResonanceRoutes(app, sessions, captured.ws)
+  const handler = captured.getHandler()
+  assert.ok(handler)
+
+  const cookieHeader = Object.entries(studentCookies).map(([name, value]) => `${name}=${value}`).join('; ')
+  const sentMessages: Array<{ type?: string }> = []
+  const closeCalls: Array<{ code?: number; reason?: string }> = []
+  const socket = {
+    readyState: 1,
+    upgradeHeaders: { cookie: cookieHeader },
+    send(message: string) {
+      sentMessages.push(JSON.parse(message) as { type?: string })
+    },
+    on() {},
+    once() {},
+    close(code?: number, reason?: string) {
+      closeCalls.push({ code, reason })
+    },
+    terminate() {},
+    ping() {},
+  }
+  handler(socket, new URLSearchParams({ sessionId: session.id, role: 'student', studentId: 'student1' }), captured.ws.wss)
+  await waitForCondition(() => sentMessages.some((message) => message.type === 'resonance:session-state'))
+  assert.deepEqual(closeCalls, [])
+  assert.equal((socket as { studentId?: string }).studentId, 'student1')
+
+  const mismatchedCloseCalls: Array<{ code?: number; reason?: string }> = []
+  const mismatchedSocket = {
+    ...socket,
+    send() {},
+    close(code?: number, reason?: string) {
+      mismatchedCloseCalls.push({ code, reason })
+    },
+  }
+  console.info('[TEST] a WebSocket capability must not authorize a different student id')
+  handler(mismatchedSocket, new URLSearchParams({
+    sessionId: session.id,
+    role: 'student',
+    studentId: 'student2',
+  }), captured.ws.wss)
+  await waitForCondition(() => mismatchedCloseCalls.length > 0)
+  assert.deepEqual(mismatchedCloseCalls, [{ code: 1008, reason: 'participant authentication required' }])
+
+  await sessions.close()
+})
+
+void test('self-paced students can persist drafts and submit without an active run token', async () => {
+  const app = createMockApp()
+  const sessions = createSessionStore(null)
+  const session = createMultiQuestionSession()
+  session.data.selfPacedMode = true
+  const studentCookies = issueStudentCookies(session, 'student1')
+  await sessions.set(session.id, session)
+  const captured = createCapturingMockWs()
+  setupResonanceRoutes(app, sessions, captured.ws)
+
+  const handler = captured.getHandler()
+  const messageHandlers: Array<(message: string) => void> = []
+  const sentMessages: Array<{ type?: string; payload?: { draftId?: string } }> = []
+  assert.ok(handler)
+  handler({
+    readyState: 1,
+    upgradeHeaders: {
+      cookie: Object.entries(studentCookies).map(([name, value]) => `${name}=${value}`).join('; '),
+    },
+    send(message: string) {
+      sentMessages.push(JSON.parse(message) as { type?: string; payload?: { draftId?: string } })
+    },
+    on(event: string, callback: (message: string) => void) {
+      if (event === 'message') messageHandlers.push(callback)
+    },
+    once() {},
+    close() {},
+    terminate() {},
+    ping() {},
+  }, new URLSearchParams({ sessionId: session.id, role: 'student', studentId: 'student1' }), captured.ws.wss)
+  await waitForCondition(() => messageHandlers.length === 1)
+
+  messageHandlers[0]?.(JSON.stringify({
+    type: 'resonance:update-draft',
+    payload: {
+      studentId: 'student1',
+      questionId: 'q1',
+      draftId: 'draft-1',
+      activeQuestionRunStartedAt: null,
+      answer: { type: 'free-response', text: 'Self-paced draft' },
+    },
+  }))
+  await waitForCondition(async () => {
+    const stored = await sessions.get(session.id)
+    const storedData = stored?.data as { responseDrafts?: Record<string, unknown> } | undefined
+    return storedData?.responseDrafts?.['q1:student1'] !== undefined
+  })
+  await waitForCondition(() => sentMessages.some((message) =>
+    message.type === 'resonance:draft-saved' && message.payload?.draftId === 'draft-1'
+  ))
+
+  const submitRes = createResponse()
+  await app.handlers.post['/api/resonance/:sessionId/submit-answer']?.({
+    params: { sessionId: session.id },
+    cookies: studentCookies,
+    body: {
+      studentId: 'student1',
+      questionId: 'q1',
+      activeQuestionRunStartedAt: null,
+      answer: { type: 'free-response', text: 'Self-paced answer' },
+    },
+  }, submitRes)
+
+  assert.equal(submitRes.statusCode, 200)
+  const stored = await sessions.get(session.id)
+  const storedData = stored?.data as {
+    responses?: Array<{ answer?: unknown }>
+    responseDrafts?: Record<string, unknown>
+  } | undefined
+  assert.deepEqual(storedData?.responses?.[0]?.answer, {
+    type: 'free-response',
+    text: 'Self-paced answer',
+  })
+  assert.equal(storedData?.responseDrafts?.['q1:student1'], undefined)
+
+  await sessions.close()
+})
+
+void test('a self-paced draft that arrives after its submission is dropped, not resurrected by a lost null run revision', async () => {
+  // Self-paced responses are stored with activeQuestionRunRevision explicitly
+  // null (there's no live run). Every session read re-normalizes stored data
+  // (normalizeStoredResponses), which used to coerce that null to undefined —
+  // so the very next read after a submission broke the stale-draft guard's
+  // `response.activeQuestionRunRevision === session.data.activeQuestionRunRevision`
+  // comparison (undefined !== null) and let a late pre-submission draft
+  // resurrect an already-submitted self-paced answer.
+  const app = createMockApp()
+  const sessions = createSessionStore(null)
+  const session = createMultiQuestionSession()
+  session.data.selfPacedMode = true
+  const studentCookies = issueStudentCookies(session, 'student1')
+  await sessions.set(session.id, session)
+  const captured = createCapturingMockWs()
+  setupResonanceRoutes(app, sessions, captured.ws)
+
+  const handler = captured.getHandler()
+  const messageHandlers: Array<(message: string) => void> = []
+  const sentMessages: Array<{ type?: string; payload?: { draftId?: string } }> = []
+  assert.ok(handler)
+  handler({
+    readyState: 1,
+    upgradeHeaders: {
+      cookie: Object.entries(studentCookies).map(([name, value]) => `${name}=${value}`).join('; '),
+    },
+    send(message: string) {
+      sentMessages.push(JSON.parse(message) as { type?: string; payload?: { draftId?: string } })
+    },
+    on(event: string, callback: (message: string) => void) {
+      if (event === 'message') messageHandlers.push(callback)
+    },
+    once() {},
+    close() {},
+    terminate() {},
+    ping() {},
+  }, new URLSearchParams({ sessionId: session.id, role: 'student', studentId: 'student1' }), captured.ws.wss)
+  await waitForCondition(() => messageHandlers.length === 1)
+
+  // A self-paced session read (e.g. the WS connection handshake above)
+  // re-normalizes stored data at least once before the submission below, just
+  // like it would on any subsequent request in production.
+  const submitRes = createResponse()
+  await app.handlers.post['/api/resonance/:sessionId/submit-answer']?.({
+    params: { sessionId: session.id },
+    cookies: studentCookies,
+    body: {
+      studentId: 'student1',
+      questionId: 'q1',
+      activeQuestionRunStartedAt: null,
+      editSequence: 1,
+      answer: { type: 'free-response', text: 'Submitted answer' },
+    },
+  }, submitRes)
+  assert.equal(submitRes.statusCode, 200)
+
+  console.info('[TEST] a self-paced draft delivered after its own submission must not resurrect a stale answer')
+  messageHandlers[0]?.(JSON.stringify({
+    type: 'resonance:update-draft',
+    payload: {
+      studentId: 'student1',
+      questionId: 'q1',
+      draftId: 'late-self-paced-draft',
+      activeQuestionRunStartedAt: null,
+      editSequence: 1,
+      answer: { type: 'free-response', text: 'Stale pre-submission draft' },
+    },
+  }))
+  await waitForCondition(() => sentMessages.some((message) =>
+    message.type === 'resonance:draft-saved' && message.payload?.draftId === 'late-self-paced-draft'
+  ))
+
+  const stored = await sessions.get(session.id)
+  const storedData = stored?.data as {
+    responses?: Array<{ answer?: unknown }>
+    responseDrafts?: Record<string, unknown>
+  } | undefined
+  assert.equal(Object.keys(storedData?.responseDrafts ?? {}).length, 0)
+  assert.deepEqual(storedData?.responses?.[0]?.answer, {
+    type: 'free-response',
+    text: 'Submitted answer',
+  })
+
+  await sessions.close()
+})
+
+void test('a draft that arrives after its submission is dropped instead of resurrecting a stale answer', async () => {
+  const app = createMockApp()
+  const sessions = createSessionStore(null)
+  const session = createMultiQuestionSession()
+  const runStartedAt = Date.now() - 1_000
+  session.data.activeQuestionId = 'q1'
+  session.data.activeQuestionIds = ['q1']
+  session.data.activeQuestionRunStartedAt = runStartedAt
+  session.data.activeQuestionRunRevision = 1
+  session.data.lastActiveQuestionRunRevision = 1
+  const studentCookies = issueStudentCookies(session, 'student1')
+  await sessions.set(session.id, session)
+  const captured = createCapturingMockWs()
+  setupResonanceRoutes(app, sessions, captured.ws)
+
+  const handler = captured.getHandler()
+  const messageHandlers: Array<(message: string) => void> = []
+  const sentMessages: Array<{ type?: string; payload?: { draftId?: string } }> = []
+  assert.ok(handler)
+  handler({
+    readyState: 1,
+    upgradeHeaders: {
+      cookie: Object.entries(studentCookies).map(([name, value]) => `${name}=${value}`).join('; '),
+    },
+    send(message: string) {
+      sentMessages.push(JSON.parse(message) as { type?: string; payload?: { draftId?: string } })
+    },
+    on(event: string, callback: (message: string) => void) {
+      if (event === 'message') messageHandlers.push(callback)
+    },
+    once() {},
+    close() {},
+    terminate() {},
+    ping() {},
+  }, new URLSearchParams({ sessionId: session.id, role: 'student', studentId: 'student1' }), captured.ws.wss)
+  await waitForCondition(() => messageHandlers.length === 1)
+
+  // The manual REST submission completes first...
+  const submitRes = createResponse()
+  await app.handlers.post['/api/resonance/:sessionId/submit-answer']?.({
+    params: { sessionId: session.id },
+    cookies: studentCookies,
+    body: {
+      studentId: 'student1',
+      questionId: 'q1',
+      activeQuestionRunRevision: 1,
+      editSequence: 1,
+      answer: { type: 'free-response', text: 'Submitted answer' },
+    },
+  }, submitRes)
+  assert.equal(submitRes.statusCode, 200)
+
+  // ...but a draft queued before the submission — same editSequence, since it
+  // was written during the same edit session — was still in flight over the
+  // WebSocket and only reaches the server afterward.
+  console.info('[TEST] a draft delivered after its own submission must not resurrect a stale answer')
+  messageHandlers[0]?.(JSON.stringify({
+    type: 'resonance:update-draft',
+    payload: {
+      studentId: 'student1',
+      questionId: 'q1',
+      draftId: 'late-draft',
+      activeQuestionRunRevision: 1,
+      editSequence: 1,
+      answer: { type: 'free-response', text: 'Stale pre-submission draft' },
+    },
+  }))
+  await waitForCondition(() => sentMessages.some((message) =>
+    message.type === 'resonance:draft-saved' && message.payload?.draftId === 'late-draft'
+  ))
+
+  const stored = await sessions.get(session.id)
+  const storedData = stored?.data as {
+    responses?: Array<{ answer?: unknown }>
+    responseDrafts?: Record<string, unknown>
+  } | undefined
+  assert.equal(Object.keys(storedData?.responseDrafts ?? {}).length, 0)
+  assert.deepEqual(storedData?.responses?.[0]?.answer, {
+    type: 'free-response',
+    text: 'Submitted answer',
+  })
+
+  await sessions.close()
+})
+
+void test('a draft made after revisiting an already-submitted question in the same run is persisted, not dropped as stale', async () => {
+  const app = createMockApp()
+  const sessions = createSessionStore(null)
+  const session = createMultiQuestionSession()
+  const runStartedAt = Date.now() - 1_000
+  session.data.activeQuestionId = 'q1'
+  session.data.activeQuestionIds = ['q1']
+  session.data.activeQuestionRunStartedAt = runStartedAt
+  session.data.activeQuestionRunRevision = 1
+  session.data.lastActiveQuestionRunRevision = 1
+  const studentCookies = issueStudentCookies(session, 'student1')
+  await sessions.set(session.id, session)
+  const captured = createCapturingMockWs()
+  setupResonanceRoutes(app, sessions, captured.ws)
+
+  const handler = captured.getHandler()
+  const messageHandlers: Array<(message: string) => void> = []
+  const sentMessages: Array<{ type?: string; payload?: { draftId?: string } }> = []
+  assert.ok(handler)
+  handler({
+    readyState: 1,
+    upgradeHeaders: {
+      cookie: Object.entries(studentCookies).map(([name, value]) => `${name}=${value}`).join('; '),
+    },
+    send(message: string) {
+      sentMessages.push(JSON.parse(message) as { type?: string; payload?: { draftId?: string } })
+    },
+    on(event: string, callback: (message: string) => void) {
+      if (event === 'message') messageHandlers.push(callback)
+    },
+    once() {},
+    close() {},
+    terminate() {},
+    ping() {},
+  }, new URLSearchParams({ sessionId: session.id, role: 'student', studentId: 'student1' }), captured.ws.wss)
+  await waitForCondition(() => messageHandlers.length === 1)
+
+  // The student answers and submits once (editSequence 1)...
+  const submitRes = createResponse()
+  await app.handlers.post['/api/resonance/:sessionId/submit-answer']?.({
+    params: { sessionId: session.id },
+    cookies: studentCookies,
+    body: {
+      studentId: 'student1',
+      questionId: 'q1',
+      activeQuestionRunRevision: 1,
+      editSequence: 1,
+      answer: { type: 'free-response', text: 'First answer' },
+    },
+  }, submitRes)
+  assert.equal(submitRes.statusCode, 200)
+
+  // ...then clicks the tab to revisit the same (still-active, same-run)
+  // question — the client bumps its local edit sequence for this new editing
+  // session — and starts typing a revision without resubmitting yet.
+  console.info('[TEST] a post-submission revisit draft in the same run must be persisted, not treated as stale')
+  messageHandlers[0]?.(JSON.stringify({
+    type: 'resonance:update-draft',
+    payload: {
+      studentId: 'student1',
+      questionId: 'q1',
+      draftId: 'revisit-draft',
+      activeQuestionRunRevision: 1,
+      editSequence: 2,
+      answer: { type: 'free-response', text: 'Revised answer, not yet resubmitted' },
+    },
+  }))
+  await waitForCondition(() => sentMessages.some((message) =>
+    message.type === 'resonance:draft-saved' && message.payload?.draftId === 'revisit-draft'
+  ))
+
+  const stored = await sessions.get(session.id)
+  const storedData = stored?.data as {
+    responses?: Array<{ answer?: unknown }>
+    responseDrafts?: Record<string, {
+      questionId?: string
+      studentId?: string
+      activeQuestionRunRevision?: number | null
+      editSequence?: number
+      answer?: unknown
+    }>
+  } | undefined
+  const revisitDraft = storedData?.responseDrafts?.['q1:student1']
+  assert.ok(revisitDraft)
+  assert.deepEqual(
+    { ...revisitDraft, updatedAt: undefined },
+    {
+      questionId: 'q1',
+      studentId: 'student1',
+      updatedAt: undefined,
+      activeQuestionRunRevision: 1,
+      editSequence: 2,
+      answer: { type: 'free-response', text: 'Revised answer, not yet resubmitted' },
+    },
+  )
+  // The confirmed response is untouched until the student resubmits or the
+  // deadline finalizes the pending draft.
+  assert.deepEqual(storedData?.responses?.[0]?.answer, {
+    type: 'free-response',
+    text: 'First answer',
+  })
+
+  await sessions.close()
+})
+
+void test('clearing a draft over the websocket still acknowledges the write, present or absent', async () => {
+  const app = createMockApp()
+  const sessions = createSessionStore(null)
+  const session = createMultiQuestionSession()
+  session.data.activeQuestionId = 'q1'
+  session.data.activeQuestionIds = ['q1']
+  session.data.activeQuestionRunStartedAt = Date.now() - 1_000
+  session.data.activeQuestionRunRevision = 1
+  session.data.lastActiveQuestionRunRevision = 1
+  session.data.responseDrafts = {
+    'q1:student1': {
+      questionId: 'q1',
+      studentId: 'student1',
+      updatedAt: Date.now() - 500,
+      activeQuestionRunRevision: 1,
+      answer: { type: 'free-response', text: 'Draft to be cleared' },
+    },
+  }
+  const studentCookies = issueStudentCookies(session, 'student1')
+  await sessions.set(session.id, session)
+  const captured = createCapturingMockWs()
+  setupResonanceRoutes(app, sessions, captured.ws)
+
+  const handler = captured.getHandler()
+  const messageHandlers: Array<(message: string) => void> = []
+  const sentMessages: Array<{ type?: string; payload?: { draftId?: string } }> = []
+  assert.ok(handler)
+  handler({
+    readyState: 1,
+    upgradeHeaders: {
+      cookie: Object.entries(studentCookies).map(([name, value]) => `${name}=${value}`).join('; '),
+    },
+    send(message: string) {
+      sentMessages.push(JSON.parse(message) as { type?: string; payload?: { draftId?: string } })
+    },
+    on(event: string, callback: (message: string) => void) {
+      if (event === 'message') messageHandlers.push(callback)
+    },
+    once() {},
+    close() {},
+    terminate() {},
+    ping() {},
+  }, new URLSearchParams({ sessionId: session.id, role: 'student', studentId: 'student1' }), captured.ws.wss)
+  await waitForCondition(() => messageHandlers.length === 1)
+
+  console.info('[TEST] clearing an existing draft must still send resonance:draft-saved')
+  messageHandlers[0]?.(JSON.stringify({
+    type: 'resonance:update-draft',
+    payload: {
+      studentId: 'student1',
+      questionId: 'q1',
+      draftId: 'clear-existing',
+      activeQuestionRunRevision: 1,
+      answer: null,
+    },
+  }))
+  await waitForCondition(() => sentMessages.some((message) =>
+    message.type === 'resonance:draft-saved' && message.payload?.draftId === 'clear-existing'
+  ))
+  const storedAfterClear = await sessions.get(session.id)
+  const storedAfterClearData = storedAfterClear?.data as { responseDrafts?: Record<string, unknown> } | undefined
+  assert.equal(storedAfterClearData?.responseDrafts?.['q1:student1'], undefined)
+
+  console.info('[TEST] clearing an already-absent draft (a retried clear) must still send resonance:draft-saved')
+  messageHandlers[0]?.(JSON.stringify({
+    type: 'resonance:update-draft',
+    payload: {
+      studentId: 'student1',
+      questionId: 'q1',
+      draftId: 'clear-already-absent',
+      activeQuestionRunRevision: 1,
+      answer: null,
+    },
+  }))
+  await waitForCondition(() => sentMessages.some((message) =>
+    message.type === 'resonance:draft-saved' && message.payload?.draftId === 'clear-already-absent'
+  ))
+
+  await sessions.close()
+})
+
+void test('server deadline task finalizes and broadcasts drafts without post-deadline client activity', async () => {
+  const app = createMockApp()
+  const sessions = createSessionStore(null)
+  const session = createMultiQuestionSession()
+  let now = 1_000
+  session.data.activeQuestionId = 'q1'
+  session.data.activeQuestionIds = ['q1']
+  session.data.activeQuestionRunStartedAt = 800
+  session.data.activeQuestionDeadlineAt = 1_100
+  session.data.responseDrafts = {
+    'q1:student1': {
+      questionId: 'q1',
+      studentId: 'student1',
+      updatedAt: 1_050,
+      answer: { type: 'free-response', text: 'Saved before time ran out' },
+    },
+  }
+  await sessions.set(session.id, session)
+
+  const scheduled: Array<{ callback: () => void; delayMs: number; cancelled: boolean }> = []
+  const ws = createMockWs()
+  const messages: Array<{ type?: string }> = []
+  ;(ws.wss.clients as Set<unknown>).add({
+    readyState: 1,
+    sessionId: session.id,
+    isInstructor: true,
+    send(message: string) {
+      messages.push(JSON.parse(message) as { type?: string })
+    },
+  })
+  setupResonanceRoutes(app, sessions, ws, {
+    now: () => now,
+    schedule(callback, delayMs) {
+      const handle = { callback, delayMs, cancelled: false, unref() {} }
+      scheduled.push(handle)
+      return handle
+    },
+    cancel(handle) {
+      ;(handle as { cancelled: boolean }).cancelled = true
+    },
+  })
+
+  const stateHandler = app.handlers.get['/api/resonance/:sessionId/state']
+  await stateHandler?.({ params: { sessionId: session.id } }, createResponse())
+  assert.equal(scheduled.length, 1)
+  assert.equal(scheduled[0]?.delayMs, 100)
+
+  now = 1_100
+  scheduled[0]?.callback()
+  await waitForCondition(async () => {
+    const stored = await sessions.get(session.id)
+    return Array.isArray(stored?.data.responses) && stored.data.responses.length === 1
+  })
+  const stored = await sessions.get(session.id)
+  assert.deepEqual(stored?.data.activeQuestionIds, [])
+  assert.deepEqual(stored?.data.responseDrafts, {})
+  assert.equal(messages.some((message) => message.type === 'resonance:instructor-state'), true)
+
+  await sessions.close()
+})
+
+void test('server deadline task segments delays above the Node timer maximum', async () => {
+  const app = createMockApp()
+  const sessions = createSessionStore(null)
+  const session = createMultiQuestionSession()
+  let now = 1_000
+  session.data.activeQuestionId = 'q1'
+  session.data.activeQuestionIds = ['q1']
+  session.data.activeQuestionRunStartedAt = now
+  session.data.activeQuestionDeadlineAt = now + 2_147_483_647 + 500
+  await sessions.set(session.id, session)
+
+  const scheduled: Array<{ callback: () => void; delayMs: number; cancelled: boolean }> = []
+  setupResonanceRoutes(app, sessions, createMockWs(), {
+    now: () => now,
+    schedule(callback, delayMs) {
+      const handle = { callback, delayMs, cancelled: false, unref() {} }
+      scheduled.push(handle)
+      return handle
+    },
+    cancel(handle) {
+      ;(handle as { cancelled: boolean }).cancelled = true
+    },
+  })
+
+  await app.handlers.get['/api/resonance/:sessionId/state']?.(
+    { params: { sessionId: session.id } },
+    createResponse(),
+  )
+  assert.equal(scheduled[0]?.delayMs, 2_147_483_647)
+
+  now += 2_147_483_647
+  scheduled[0]?.callback()
+  assert.equal(scheduled[1]?.delayMs, 500)
+
+  await sessions.close()
+})
+
+void test('server deadline task retries after a strict session read failure', async () => {
+  const app = createMockApp()
+  const sessions = createSessionStore(null)
+  const session = createMultiQuestionSession()
+  let now = 1_000
+  session.data.activeQuestionId = 'q1'
+  session.data.activeQuestionIds = ['q1']
+  session.data.activeQuestionRunStartedAt = 800
+  session.data.activeQuestionDeadlineAt = 1_100
+  session.data.responseDrafts = {
+    'q1:student1': {
+      questionId: 'q1',
+      studentId: 'student1',
+      updatedAt: 1_050,
+      answer: { type: 'free-response', text: 'Retry this persisted draft' },
+    },
+  }
+  await sessions.set(session.id, session)
+
+  let strictReads = 0
+  sessions.getStrict = async (sessionId) => {
+    strictReads += 1
+    if (strictReads === 1) throw new Error('simulated Valkey read failure')
+    return sessions.get(sessionId)
+  }
+  const scheduled: Array<{ callback: () => void; delayMs: number; cancelled: boolean }> = []
+  setupResonanceRoutes(app, sessions, createMockWs(), {
+    now: () => now,
+    schedule(callback, delayMs) {
+      const handle = { callback, delayMs, cancelled: false, unref() {} }
+      scheduled.push(handle)
+      return handle
+    },
+    cancel(handle) {
+      ;(handle as { cancelled: boolean }).cancelled = true
+    },
+  })
+
+  await app.handlers.get['/api/resonance/:sessionId/state']?.(
+    { params: { sessionId: session.id } },
+    createResponse(),
+  )
+  now = 1_100
+  console.info('[TEST] a transient strict deadline read failure is expected and must re-arm the task')
+  scheduled[0]?.callback()
+  await waitForCondition(() => scheduled.length === 2)
+  assert.equal(scheduled[1]?.delayMs, 1_000)
+  assert.deepEqual((await sessions.get(session.id))?.data.responses, [])
+
+  now = 2_100
+  scheduled[1]?.callback()
+  await waitForCondition(async () => {
+    const stored = await sessions.get(session.id)
+    return Array.isArray(stored?.data.responses) && stored.data.responses.length === 1
+  })
+  assert.equal(strictReads, 2)
+
+  await sessions.close()
+})
+
+void test('server deadline task retries after a finalization write failure without mutating its cached session', async () => {
+  const app = createMockApp()
+  const sessions = createSessionStore(null)
+  const session = createMultiQuestionSession()
+  let now = 1_000
+  session.data.activeQuestionId = 'q1'
+  session.data.activeQuestionIds = ['q1']
+  session.data.activeQuestionRunStartedAt = 800
+  session.data.activeQuestionDeadlineAt = 1_100
+  session.data.responseDrafts = {
+    'q1:student1': {
+      questionId: 'q1',
+      studentId: 'student1',
+      updatedAt: 1_050,
+      answer: { type: 'free-response', text: 'Persist me after retry' },
+    },
+  }
+  await sessions.set(session.id, session)
+
+  const originalSet = sessions.set.bind(sessions)
+  let failNextWrite = true
+  sessions.set = async (...args) => {
+    if (failNextWrite) {
+      failNextWrite = false
+      throw new Error('simulated deadline finalization write failure')
+    }
+    await originalSet(...args)
+  }
+  const scheduled: Array<{ callback: () => void; delayMs: number; cancelled: boolean }> = []
+  setupResonanceRoutes(app, sessions, createMockWs(), {
+    now: () => now,
+    schedule(callback, delayMs) {
+      const handle = { callback, delayMs, cancelled: false, unref() {} }
+      scheduled.push(handle)
+      return handle
+    },
+    cancel(handle) {
+      ;(handle as { cancelled: boolean }).cancelled = true
+    },
+  })
+
+  await app.handlers.get['/api/resonance/:sessionId/state']?.(
+    { params: { sessionId: session.id } },
+    createResponse(),
+  )
+  now = 1_100
+  console.info('[TEST] a failed deadline finalization write is expected and must leave the retry armed')
+  scheduled[0]?.callback()
+  await waitForCondition(() => scheduled.length === 2)
+  assert.equal(scheduled[1]?.delayMs, 1_000)
+  const afterFailedWrite = await sessions.get(session.id)
+  assert.deepEqual(afterFailedWrite?.data.activeQuestionIds, ['q1'])
+  assert.equal(Array.isArray(afterFailedWrite?.data.responses) && afterFailedWrite.data.responses.length, 0)
+
+  now = 2_100
+  scheduled[1]?.callback()
+  await waitForCondition(async () => {
+    const stored = await sessions.get(session.id)
+    return Array.isArray(stored?.data.responses) && stored.data.responses.length === 1
+  })
+  assert.deepEqual((await sessions.get(session.id))?.data.activeQuestionIds, [])
+
+  await sessions.close()
+})
+
+void test('timed live runs finalize persisted drafts for every active question', async () => {
+  const sessions = createSessionStore(null)
+  const session = createMultiQuestionSession()
+  const now = Date.now()
+  session.data.activeQuestionId = 'q1'
+  session.data.activeQuestionIds = ['q1', 'q2']
+  session.data.activeQuestionRunStartedAt = now - 10_000
+  session.data.activeQuestionDeadlineAt = now - 1_000
+  session.data.responseDrafts = {
+    'q1:student1': {
+      questionId: 'q1',
+      studentId: 'student1',
+      updatedAt: now - 2_000,
+      answer: { type: 'free-response', text: 'First persisted draft' },
+    },
+    'q2:student1': {
+      questionId: 'q2',
+      studentId: 'student1',
+      updatedAt: now - 2_000,
+      answer: { type: 'multiple-choice', selectedOptionIds: ['q2_b'] },
+    },
+  }
+  await sessions.set(session.id, session)
+
+  const app = createMockApp()
+  const ws = createMockWs()
+  const studentMessages: Array<{ type?: string }> = []
+  const instructorMessages: Array<{ type?: string }> = []
+  ;(ws.wss.clients as Set<unknown>).add({
+    readyState: 1,
+    sessionId: session.id,
+    isInstructor: false,
+    studentId: 'student1',
+    send(message: string) {
+      studentMessages.push(JSON.parse(message) as { type?: string })
+    },
+  })
+  ;(ws.wss.clients as Set<unknown>).add({
+    readyState: 1,
+    sessionId: session.id,
+    isInstructor: true,
+    send(message: string) {
+      instructorMessages.push(JSON.parse(message) as { type?: string })
+    },
+  })
+  setupResonanceRoutes(app, sessions, ws)
+  const stateHandler = app.handlers.get['/api/resonance/:sessionId/state']
+  const stateRes = createResponse()
+  await stateHandler?.({ params: { sessionId: session.id } }, stateRes)
+
+  const stored = await sessions.get(session.id)
+  const storedData = stored?.data as {
+    activeQuestionIds: string[]
+    responseDrafts: Record<string, unknown>
+    responses: Array<{ questionId: string; answer: unknown }>
+  } | undefined
+  assert.equal(stateRes.statusCode, 200)
+  assert.ok(studentMessages.some((message) => message.type === 'resonance:session-state'))
+  assert.ok(instructorMessages.some((message) => message.type === 'resonance:instructor-state'))
+  assert.deepEqual(storedData?.activeQuestionIds, [])
+  assert.equal(Object.keys(storedData?.responseDrafts ?? {}).length, 0)
+  assert.deepEqual(
+    storedData?.responses.map((response) => ({ questionId: response.questionId, answer: response.answer })),
+    [
+      { questionId: 'q1', answer: { type: 'free-response', text: 'First persisted draft' } },
+      { questionId: 'q2', answer: { type: 'multiple-choice', selectedOptionIds: ['q2_b'] } },
+    ],
+  )
+
+  await sessions.close()
+})
+
+void test('timed live runs discard a prior-revision draft with the same activation timestamp', async () => {
+  const sessions = createSessionStore(null)
+  const session = createMultiQuestionSession()
+  const sharedTimestamp = Date.now() - 2_000
+  session.data.activeQuestionId = 'q1'
+  session.data.activeQuestionIds = ['q1']
+  session.data.activeQuestionRunStartedAt = sharedTimestamp
+  session.data.activeQuestionRunRevision = 2
+  session.data.lastActiveQuestionRunRevision = 2
+  session.data.activeQuestionDeadlineAt = Date.now() - 1_000
+  session.data.responseDrafts = {
+    'q1:student1': {
+      questionId: 'q1',
+      studentId: 'student1',
+      updatedAt: sharedTimestamp,
+      activeQuestionRunRevision: 1,
+      answer: { type: 'free-response', text: 'Draft from prior run' },
+    },
+  }
+  await sessions.set(session.id, session)
+
+  const app = createMockApp()
+  setupResonanceRoutes(app, sessions, createMockWs())
+  await app.handlers.get['/api/resonance/:sessionId/state']?.(
+    { params: { sessionId: session.id } },
+    createResponse(),
+  )
+
+  const stored = await sessions.get(session.id)
+  assert.deepEqual(stored?.data.responses, [])
+  assert.deepEqual(stored?.data.responseDrafts, {})
+
+  await sessions.close()
 })
 
 void test('embedded resonance sessions auto-activate all questions when embedded launch requests it', async () => {
@@ -513,7 +1720,6 @@ void test('self-paced embedded resonance sessions expose all questions to studen
   await stateHandler?.(
     {
       params: { sessionId: childSession.id },
-      query: { studentId: 'student1' },
     },
     response,
   )
@@ -597,6 +1803,7 @@ void test('self-paced embedded resonance sessions reveal MCQ correctness after t
       },
     },
   ]
+  const studentCookies = issueStudentCookies(session, 'student1')
   await sessions.set(session.id, session)
 
   setupResonanceRoutes(app, sessions, ws)
@@ -609,6 +1816,7 @@ void test('self-paced embedded resonance sessions reveal MCQ correctness after t
     {
       params: { sessionId: session.id },
       query: { studentId: 'student1' },
+      cookies: studentCookies,
     },
     response,
   )
@@ -693,6 +1901,7 @@ void test('student state normalizes legacy reveal answers that still use selecte
       },
     },
   ]
+  const studentCookies = issueStudentCookies(session, 'student1')
   await sessions.set(session.id, session)
 
   setupResonanceRoutes(app, sessions, ws)
@@ -705,6 +1914,7 @@ void test('student state normalizes legacy reveal answers that still use selecte
     {
       params: { sessionId: session.id },
       query: { studentId: 'student1' },
+      cookies: studentCookies,
     },
     response,
   )
@@ -863,6 +2073,7 @@ void test('self-paced embedded resonance sessions still surface annotated review
   session.data.activeQuestionId = null
   session.data.activeQuestionIds = []
   session.data.activeQuestionDeadlineAt = null
+  const studentCookies = issueStudentCookies(session, 'student1')
   await sessions.set(session.id, session)
 
   setupResonanceRoutes(app, sessions, ws)
@@ -877,6 +2088,7 @@ void test('self-paced embedded resonance sessions still surface annotated review
       query: {
         studentId: 'student1',
       },
+      cookies: studentCookies,
     },
     response,
   )
@@ -961,6 +2173,7 @@ void test('self-paced embedded resonance sessions switch back to live-run snapsh
       emoji: '💡',
     },
   }
+  const studentCookies = issueStudentCookies(session, 'student1')
   await sessions.set(session.id, session)
 
   setupResonanceRoutes(app, sessions, ws)
@@ -975,6 +2188,7 @@ void test('self-paced embedded resonance sessions switch back to live-run snapsh
       query: {
         studentId: 'student1',
       },
+      cookies: studentCookies,
     },
     response,
   )
@@ -1358,7 +2572,6 @@ void test('self-paced sessions created from raw multi-question payloads expose t
   await stateHandler?.(
     {
       params: { sessionId: createdBody.id },
-      query: { studentId: 'student1' },
     },
     stateRes,
   )
@@ -1432,6 +2645,43 @@ void test('student state exposes multiple-choice selectionMode based on the auth
     { id: 'q1', selectionMode: 'single' },
     { id: 'q2', selectionMode: 'multiple' },
   ])
+
+  await sessions.close()
+})
+
+void test('responses route reports the highest-ever run revision even after the active run ends', async () => {
+  // The instructor client needs this watermark to order a delayed pre-timeout
+  // snapshot against the finalized (revision-null) state, the same way
+  // students already do — see shouldApplyInstructorSnapshot.
+  const app = createMockApp()
+  const ws = createMockWs()
+  const sessions = createSessionStore(null)
+  const session = createInstructorResonanceSession()
+  session.data.activeQuestionIds = []
+  session.data.activeQuestionRunRevision = null
+  session.data.lastActiveQuestionRunRevision = 3
+  await sessions.set(session.id, session)
+
+  setupResonanceRoutes(app, sessions, ws)
+
+  const handler = app.handlers.get['/api/resonance/:sessionId/responses']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.(
+    {
+      params: { sessionId: session.id },
+      headers: {
+        'x-instructor-passcode': 'TEACH123',
+      },
+    },
+    res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  const body = res.body as { activeQuestionRunRevision?: number | null; lastActiveQuestionRunRevision?: number | null }
+  assert.equal(body.activeQuestionRunRevision, null)
+  assert.equal(body.lastActiveQuestionRunRevision, 3)
 
   await sessions.close()
 })
@@ -1627,6 +2877,7 @@ void test('activate-question route can activate all questions with a shared coun
   const ws = createMockWs()
   const sessions = createSessionStore(null)
   const session = createMultiQuestionSession()
+  const studentCookies = issueStudentCookies(session, 'student1')
   await sessions.set(session.id, session)
 
   setupResonanceRoutes(app, sessions, ws)
@@ -1655,6 +2906,7 @@ void test('activate-question route can activate all questions with a shared coun
   assert.equal(activateRes.statusCode, 200)
   const activateBody = activateRes.body as {
     activeQuestionIds?: string[]
+    activeQuestionRunStartedAt?: number | null
     activeQuestionDeadlineAt?: number | null
   }
   assert.deepEqual(activateBody.activeQuestionIds, ['q1', 'q2'])
@@ -1672,6 +2924,7 @@ void test('activate-question route can activate all questions with a shared coun
   const stateBody = stateRes.body as {
     activeQuestionIds?: string[]
     activeQuestions?: Array<{ id: string }>
+    activeQuestionRunStartedAt?: number | null
     activeQuestionDeadlineAt?: number | null
   }
   assert.deepEqual(stateBody.activeQuestionIds, ['q1', 'q2'])
@@ -1682,9 +2935,11 @@ void test('activate-question route can activate all questions with a shared coun
   await submitHandler?.(
     {
       params: { sessionId: session.id },
+      cookies: studentCookies,
       body: {
         studentId: 'student1',
         questionId: 'q2',
+        activeQuestionRunStartedAt: stateBody.activeQuestionRunStartedAt,
         answer: {
           type: 'multiple-choice',
           selectedOptionIds: ['q2_b'],
@@ -1711,6 +2966,7 @@ void test('staged activate-question hides MCQ choices until reveal and then acce
   const ws = createMockWs()
   const sessions = createSessionStore(null)
   const session = createMultiQuestionSession()
+  const studentCookies = issueStudentCookies(session, 'student1')
   await sessions.set(session.id, session)
 
   setupResonanceRoutes(app, sessions, ws)
@@ -1775,9 +3031,11 @@ void test('staged activate-question hides MCQ choices until reveal and then acce
   await submitHandler?.(
     {
       params: { sessionId: session.id },
+      cookies: studentCookies,
       body: {
         studentId: 'student1',
         questionId: 'q2',
+        activeQuestionRunStartedAt: stagedRunStartedAt,
         answer: {
           type: 'multiple-choice',
           selectedOptionIds: ['q2_b'],
@@ -1839,23 +3097,39 @@ void test('staged activate-question hides MCQ choices until reveal and then acce
   assert.equal(visibleState.activeQuestions?.[0]?.choicesRevealed, true)
   assert.equal(visibleState.activeQuestions?.[0]?.options?.length, 2)
 
+  const expiredRunStartedAt = Date.now() - 3_000
   const expiredSession = await sessions.get(session.id)
   if (expiredSession) {
+    expiredSession.data.activeQuestionRunStartedAt = expiredRunStartedAt
+    const responseDrafts = expiredSession.data.responseDrafts as Record<string, unknown>
+    responseDrafts['q2:student1'] = {
+      questionId: 'q2',
+      studentId: 'student1',
+      updatedAt: Date.now() - 2_000,
+      answer: {
+        type: 'multiple-choice',
+        selectedOptionIds: ['q2_b'],
+      },
+    }
     expiredSession.data.activeQuestionDeadlineAt = Date.now() - 1_000
     await sessions.set(session.id, expiredSession)
   }
 
   const expiredSubmitRes = createResponse()
+  console.info('[TEST] submitting after expiry should return 409 after finalizing the persisted draft')
   await submitHandler?.(
     {
       params: { sessionId: session.id },
+      cookies: studentCookies,
       body: {
         studentId: 'student1',
         questionId: 'q2',
+        activeQuestionRunStartedAt: expiredRunStartedAt,
         answer: {
           type: 'multiple-choice',
           selectedOptionIds: ['q2_b'],
         },
+        autoSubmit: true,
       },
     },
     expiredSubmitRes,
@@ -1863,6 +3137,17 @@ void test('staged activate-question hides MCQ choices until reveal and then acce
 
   assert.equal(expiredSubmitRes.statusCode, 409)
   assert.deepEqual(expiredSubmitRes.body, { error: 'time is up for this question' })
+  const finalizedSession = await sessions.get(session.id)
+  const finalizedData = finalizedSession?.data as {
+    responses: Array<{ questionId: string; studentId: string; answer: unknown }>
+    responseDrafts: Record<string, unknown>
+  } | undefined
+  assert.deepEqual(
+    finalizedData?.responses.find((response) =>
+      response.questionId === 'q2' && response.studentId === 'student1')?.answer,
+    { type: 'multiple-choice', selectedOptionIds: ['q2_b'] },
+  )
+  assert.equal(finalizedData?.responseDrafts['q2:student1'], undefined)
 
   const resetDeadlineSession = await sessions.get(session.id)
   if (resetDeadlineSession) {
@@ -1874,9 +3159,11 @@ void test('staged activate-question hides MCQ choices until reveal and then acce
   await submitHandler?.(
     {
       params: { sessionId: session.id },
+      cookies: studentCookies,
       body: {
         studentId: 'student1',
         questionId: 'q2',
+        activeQuestionRunStartedAt: expiredRunStartedAt,
         answer: {
           type: 'multiple-choice',
           selectedOptionIds: ['q2_b'],
@@ -2177,6 +3464,7 @@ void test('submit-answer route broadcasts an updated instructor snapshot to inst
   const ws = createMockWs()
   const sessions = createSessionStore(null)
   const session = createMultiQuestionSession()
+  const studentCookies = issueStudentCookies(session, 'student1')
   await sessions.set(session.id, session)
 
   const instructorMessages: Array<{ type?: string; payload?: unknown }> = []
@@ -2211,14 +3499,18 @@ void test('submit-answer route broadcasts an updated instructor snapshot to inst
   )
 
   assert.equal(activateRes.statusCode, 200)
+  const activatedSession = await sessions.get(session.id)
+  const activeQuestionRunStartedAt = activatedSession?.data.activeQuestionRunStartedAt
 
   const submitRes = createResponse()
   await submitHandler?.(
     {
       params: { sessionId: session.id },
+      cookies: studentCookies,
       body: {
         studentId: 'student1',
         questionId: 'q1',
+        activeQuestionRunStartedAt,
         answer: {
           type: 'free-response',
           text: 'Updated live answer',
@@ -2296,6 +3588,7 @@ void test('submit-answer route updates an existing response when a question is r
       persistentHash: null,
     },
   }
+  const studentCookies = issueStudentCookies(session, 'student1')
   await sessions.set(session.id, session)
 
   setupResonanceRoutes(app, sessions, ws)
@@ -2307,9 +3600,11 @@ void test('submit-answer route updates an existing response when a question is r
   await submitHandler?.(
     {
       params: { sessionId: session.id },
+      cookies: studentCookies,
       body: {
         studentId: 'student1',
         questionId: 'q1',
+        activeQuestionRunStartedAt: null,
         answer: {
           type: 'free-response',
           text: 'Revised answer',
@@ -2333,11 +3628,12 @@ void test('submit-answer route updates an existing response when a question is r
   await sessions.close()
 })
 
-void test('reactivating a question marks prior answers as working instead of submitted in the instructor snapshot', async () => {
+void test('reactivating a question keeps prior answers editable for students and marks them working for instructors', async () => {
   const app = createMockApp()
   const ws = createMockWs()
   const sessions = createSessionStore(null)
   const session = createMultiQuestionSession()
+  const studentCookies = issueStudentCookies(session, 'student1')
   await sessions.set(session.id, session)
 
   setupResonanceRoutes(app, sessions, ws)
@@ -2365,14 +3661,18 @@ void test('reactivating a question marks prior answers as working instead of sub
     firstActivateRes,
   )
   assert.equal(firstActivateRes.statusCode, 200)
+  const firstActivatedSession = await sessions.get(session.id)
+  const firstRunRevision = firstActivatedSession?.data.activeQuestionRunRevision
 
   const submitRes = createResponse()
   await submitHandler?.(
     {
       params: { sessionId: session.id },
+      cookies: studentCookies,
       body: {
         studentId: 'student1',
         questionId: 'q1',
+        activeQuestionRunRevision: firstRunRevision,
         answer: {
           type: 'free-response',
           text: 'First run answer',
@@ -2382,7 +3682,6 @@ void test('reactivating a question marks prior answers as working instead of sub
     submitRes,
   )
   assert.equal(submitRes.statusCode, 200)
-  await new Promise((resolve) => setTimeout(resolve, 2))
 
   const secondActivateRes = createResponse()
   await activateHandler?.(
@@ -2398,19 +3697,48 @@ void test('reactivating a question marks prior answers as working instead of sub
     secondActivateRes,
   )
   assert.equal(secondActivateRes.statusCode, 200)
+  const secondActivatedSession = await sessions.get(session.id)
+  assert.equal(secondActivatedSession?.data.activeQuestionRunRevision, Number(firstRunRevision) + 1)
+
+  const staleSubmitRes = createResponse()
+  console.info('[TEST] a submission from the previous run should return 409')
+  await submitHandler?.(
+    {
+      params: { sessionId: session.id },
+      cookies: studentCookies,
+      body: {
+        studentId: 'student1',
+        questionId: 'q1',
+        activeQuestionRunRevision: firstRunRevision,
+        answer: {
+          type: 'free-response',
+          text: 'Delayed first run answer',
+        },
+      },
+    },
+    staleSubmitRes,
+  )
+  assert.equal(staleSubmitRes.statusCode, 409)
+  assert.deepEqual(staleSubmitRes.body, { error: 'question run changed' })
 
   const studentStateRes = createResponse()
   await stateHandler?.(
     {
       params: { sessionId: session.id },
       query: { studentId: 'student1' },
+      cookies: studentCookies,
     },
     studentStateRes,
   )
   assert.equal(studentStateRes.statusCode, 200)
   assert.deepEqual(
     (studentStateRes.body as { submittedAnswers?: Record<string, unknown> }).submittedAnswers,
-    {},
+    {
+      q1: {
+        type: 'free-response',
+        text: 'First run answer',
+      },
+    },
   )
 
   const responsesRes = createResponse()
@@ -2679,6 +4007,7 @@ void test('student state includes the viewer response and marks when their share
       persistentHash: null,
     },
   }
+  const studentCookies = issueStudentCookies(session, 'student1')
   await sessions.set(session.id, session)
 
   setupResonanceRoutes(app, sessions, ws)
@@ -2693,6 +4022,7 @@ void test('student state includes the viewer response and marks when their share
       query: {
         studentId: 'student1',
       },
+      cookies: studentCookies,
     },
     res,
   )
@@ -2791,6 +4121,7 @@ void test('annotate-response route updates the student viewer response emoji for
       persistentHash: null,
     },
   }
+  const studentCookies = issueStudentCookies(session, 'student1')
   await sessions.set(session.id, session)
 
   setupResonanceRoutes(app, sessions, ws)
@@ -2826,6 +4157,7 @@ void test('annotate-response route updates the student viewer response emoji for
       query: {
         studentId: 'student1',
       },
+      cookies: studentCookies,
     },
     stateRes,
   )
@@ -2912,6 +4244,7 @@ void test('student state sanitizes malformed stored reveal reactions', async () 
       persistentHash: null,
     },
   }
+  const studentCookies = issueStudentCookies(session, 'student1')
   await sessions.set(session.id, session)
 
   setupResonanceRoutes(app, sessions, ws)
@@ -2926,6 +4259,7 @@ void test('student state sanitizes malformed stored reveal reactions', async () 
       query: {
         studentId: 'student1',
       },
+      cookies: studentCookies,
     },
     res,
   )
@@ -2995,6 +4329,7 @@ void test('student state includes reviewed responses for annotated answers that 
       persistentHash: null,
     },
   }
+  const studentCookies = issueStudentCookies(session, 'student1')
   await sessions.set(session.id, session)
 
   setupResonanceRoutes(app, sessions, ws)
@@ -3009,6 +4344,7 @@ void test('student state includes reviewed responses for annotated answers that 
       query: {
         studentId: 'student1',
       },
+      cookies: studentCookies,
     },
     res,
   )
@@ -3082,6 +4418,7 @@ void test('student state hides reviewed responses for annotated answers when the
       persistentHash: null,
     },
   }
+  const studentCookies = issueStudentCookies(session, 'student1')
   await sessions.set(session.id, session)
 
   setupResonanceRoutes(app, sessions, ws)
@@ -3096,6 +4433,7 @@ void test('student state hides reviewed responses for annotated answers when the
       query: {
         studentId: 'student1',
       },
+      cookies: studentCookies,
     },
     res,
   )
@@ -3107,6 +4445,92 @@ void test('student state hides reviewed responses for annotated answers when the
   }
   assert.deepEqual(body.reviewedResponses, [])
   assert.equal(body.submittedAnswers?.q1?.text, 'My answer')
+
+  await sessions.close()
+})
+
+void test('student state reports each confirmed response\'s editSequence, so a reloaded client can seed its counter past it', async () => {
+  // A client that reloads mid-run has no in-memory edit-sequence bookkeeping
+  // (that counter only ever lived in a ref) and would otherwise default a
+  // post-reload revision to sequence 1. If a confirmed response is already at
+  // sequence 1+, that revision would be silently dropped as stale by the
+  // update-draft/submit-answer guard below. submittedResponseEditSequences
+  // lets the client seed its local counter from the server's authoritative
+  // value instead of guessing 1.
+  const app = createMockApp()
+  const ws = createMockWs()
+  const sessions = createSessionStore(null)
+  const now = Date.now()
+  const session: SessionRecord = {
+    id: 'resonance-session-reload-edit-sequence',
+    type: 'resonance',
+    created: now,
+    lastActivity: now,
+    data: {
+      instructorPasscode: 'TEACH123',
+      questions: [
+        {
+          id: 'q1',
+          type: 'free-response',
+          text: 'Explain your reasoning.',
+          order: 0,
+        },
+      ],
+      activeQuestionId: 'q1',
+      activeQuestionIds: ['q1'],
+      activeQuestionRunStartedAt: now - 5_000,
+      activeQuestionRunRevision: 1,
+      activeQuestionDeadlineAt: null,
+      students: {
+        student1: { studentId: 'student1', name: 'Ada Lovelace', joinedAt: now - 1_000 },
+      },
+      responses: [
+        {
+          id: 'r1',
+          questionId: 'q1',
+          studentId: 'student1',
+          submittedAt: now - 500,
+          activeQuestionRunRevision: 1,
+          editSequence: 2,
+          answer: {
+            type: 'free-response',
+            text: 'Revised before reload',
+          },
+        },
+      ],
+      responseDrafts: {},
+      annotations: {},
+      reveals: [],
+      sharedResponseReactions: {},
+      responseOrderOverrides: {},
+      persistentHash: null,
+    },
+  }
+  const studentCookies = issueStudentCookies(session, 'student1')
+  await sessions.set(session.id, session)
+
+  setupResonanceRoutes(app, sessions, ws)
+
+  const stateHandler = app.handlers.get['/api/resonance/:sessionId/state']
+  assert.equal(typeof stateHandler, 'function')
+
+  const res = createResponse()
+  await stateHandler?.(
+    {
+      params: { sessionId: session.id },
+      query: {
+        studentId: 'student1',
+      },
+      cookies: studentCookies,
+    },
+    res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  const body = res.body as {
+    submittedResponseEditSequences?: Record<string, number>
+  }
+  assert.equal(body.submittedResponseEditSequences?.q1, 2)
 
   await sessions.close()
 })

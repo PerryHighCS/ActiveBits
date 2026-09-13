@@ -296,6 +296,18 @@ through activity-specific props.
   authoritative “live run” fields. For example, Resonance now normalizes multi-question runs
   with `activeQuestionIds` plus a shared `activeQuestionDeadlineAt`, while still backfilling
   `activeQuestionId` for compatibility with older snapshots.
+- Resonance registers students by exchanging a waiting-room identity (or direct name entry) for
+  the shared opaque participant capability stored in an httpOnly, session-scoped cookie. Student
+  REST projections/mutations and WebSocket admission derive identity from that capability; URL
+  and body student IDs are never authority. Live runs use a persisted monotonic revision for
+  snapshot ordering and draft/submission admission, while their separate start timestamp remains
+  the timing boundary. Timed runs install a server-owned deadline task when loaded or activated so
+  persisted drafts are finalized and broadcast without client activity. Draft clients treat a
+  WebSocket write as persisted only after the server returns a correlated `resonance:draft-saved`
+  acknowledgement; an unacknowledged deadline-window draft is reconciled from the student snapshot.
+  Direct-name registrations without an accepted-participant or capability principal are limited by
+  session and trusted-proxy client IP before they mint capability records; a newer same-run draft
+  takes precedence over its older confirmed response in instructor progress until submitted.
 - Embedded instructor iframes receive a short-lived, server-issued manager-entry token only after
   the authenticated parent start response arrives. Credentialed children exchange it atomically for
   the child passcode and replace the iframe URL to remove the attempted token whether the exchange

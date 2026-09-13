@@ -11,15 +11,32 @@ interface Props {
   studentId: string
   initialAnswer?: AnswerPayload | null
   activeQuestionRunStartedAt?: number | null
+  activeQuestionRunRevision?: number | null
+  activeQuestionDeadlineAt?: number | null
   disabled?: boolean
   isSubmitted?: boolean
   submittedMessage?: string
   announceSubmittedMessage?: boolean
+  /**
+   * Monotonic edit-session counter for this question/run, owned by the
+   * parent so it survives this component remounting (the parent keys
+   * QuestionView by question id, so switching stack tabs away and back
+   * remounts it with fresh local state). The parent bumps it when the
+   * student revisits an already-submitted question in the same run; the
+   * server uses it to tell that legitimate revision apart from a draft that
+   * predates an existing submission. Defaults to 1 (the baseline for a
+   * question's first edit session in a run) when omitted.
+   */
+  editSequence?: number
+  onDraftChanged?(questionId: string, answer: AnswerPayload | null): void
+  onDraftUnconfirmed?(questionId: string): void
   onSubmitted?(questionId: string, answer: AnswerPayload): void
   sendMessage?(type: string, payload: unknown): boolean
+  saveDraft?(payload: Record<string, unknown>): Promise<boolean>
 }
 
 const DRAFT_PUSH_DELAY_MS = 1500
+const DRAFT_DEADLINE_BUFFER_MS = 100
 
 function isSameAnswer(left: AnswerPayload | null, right: AnswerPayload | null): boolean {
   if (left === right) return true
@@ -37,23 +54,49 @@ export default function QuestionView({
   studentId,
   initialAnswer = null,
   activeQuestionRunStartedAt = null,
+  activeQuestionRunRevision = null,
+  activeQuestionDeadlineAt = null,
   disabled = false,
   isSubmitted = false,
   submittedMessage = 'Answer submitted.',
   announceSubmittedMessage = true,
+  editSequence = 1,
+  onDraftChanged,
+  onDraftUnconfirmed,
   onSubmitted,
   sendMessage,
+  saveDraft,
 }: Props) {
+  const activeQuestionRunToken = activeQuestionRunRevision ?? activeQuestionRunStartedAt
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [draftAnswer, setDraftAnswer] = useState<AnswerPayload | null>(initialAnswer)
+  const draftAnswerRef = useRef(draftAnswer)
   const lastSentDraftRef = useRef<AnswerPayload | null>(null)
+  const hasUnconfirmedDraftRef = useRef(false)
   const initialAnswerRef = useRef(initialAnswer)
   const synchronizedInitialAnswerRef = useRef(initialAnswer)
-  const activeQuestionRunStartedAtRef = useRef(activeQuestionRunStartedAt)
-  const draftAnswerRunStartedAtRef = useRef(activeQuestionRunStartedAt)
+  const submissionAttemptRef = useRef(0)
+  const disabledRef = useRef(disabled)
+  const activeQuestionRunRevisionRef = useRef(activeQuestionRunToken)
+  const draftAnswerRunRevisionRef = useRef<number | null>(null)
+  // Mirrors the editSequence prop so the debounced draft-push effect and
+  // submitAnswer (both defined below, outside the render body) always read
+  // the current value without needing it in their dependency arrays.
+  const editSequenceRef = useRef(editSequence)
+  // QuestionView isn't remounted on an identity change (it's keyed only by
+  // question id), so an in-flight draft or ack scheduled under a prior
+  // sessionId/studentId (e.g. recovering a lost participant capability mid-
+  // edit) must not be allowed to land under the new identity.
+  const sessionIdRef = useRef(sessionId)
+  const studentIdRef = useRef(studentId)
   initialAnswerRef.current = initialAnswer
-  activeQuestionRunStartedAtRef.current = activeQuestionRunStartedAt
+  draftAnswerRef.current = draftAnswer
+  disabledRef.current = disabled
+  activeQuestionRunRevisionRef.current = activeQuestionRunToken
+  editSequenceRef.current = editSequence
+  sessionIdRef.current = sessionId
+  studentIdRef.current = studentId
   const isWaitingForChoices =
     question.type === 'multiple-choice' && question.choicesRevealed === false
 
@@ -61,7 +104,30 @@ export default function QuestionView({
     setDraftAnswer(initialAnswerRef.current)
     lastSentDraftRef.current = initialAnswerRef.current
     synchronizedInitialAnswerRef.current = initialAnswerRef.current
-  }, [question.id, activeQuestionRunStartedAt, isSubmitted])
+    draftAnswerRunRevisionRef.current = null
+    hasUnconfirmedDraftRef.current = false
+  }, [question.id, activeQuestionRunToken, isSubmitted, sessionId, studentId])
+
+  useEffect(() => {
+    if (disabled && hasUnconfirmedDraftRef.current) {
+      hasUnconfirmedDraftRef.current = false
+      // Treat the current value as synchronized so the sync effect below
+      // accepts the authoritative `initialAnswer` the parent refreshes to
+      // after reconciling this unconfirmed draft, instead of continuing to
+      // treat it as a dirty local edit forever.
+      synchronizedInitialAnswerRef.current = draftAnswerRef.current
+      onDraftUnconfirmed?.(question.id)
+    }
+  }, [disabled, onDraftUnconfirmed, question.id])
+
+  useEffect(() => {
+    submissionAttemptRef.current += 1
+    setSubmitting(false)
+    setError(null)
+    return () => {
+      submissionAttemptRef.current += 1
+    }
+  }, [question.id, activeQuestionRunToken, sessionId, studentId])
 
   useEffect(() => {
     if (isSameAnswer(draftAnswer, synchronizedInitialAnswerRef.current)) {
@@ -72,12 +138,13 @@ export default function QuestionView({
   }, [draftAnswer, initialAnswer])
 
   useEffect(() => {
-    const draftAnswerRunStartedAt = draftAnswerRunStartedAtRef.current
+    const draftAnswerRunRevision = draftAnswerRunRevisionRef.current
     if (
-      draftAnswerRunStartedAt !== activeQuestionRunStartedAt ||
+      draftAnswerRunRevision !== activeQuestionRunToken ||
+      disabled ||
       isWaitingForChoices ||
       isSubmitted ||
-      !sendMessage ||
+      (!saveDraft && !sendMessage) ||
       isSameAnswer(draftAnswer, lastSentDraftRef.current)
     ) {
       return
@@ -85,63 +152,113 @@ export default function QuestionView({
 
     const pendingDraft = draftAnswer
     const sendDraft = () => {
-      const sent = sendMessage('resonance:update-draft', {
+      const payload = {
         studentId,
         questionId: question.id,
+        ...(activeQuestionRunRevision !== null
+          ? { activeQuestionRunRevision: activeQuestionRunToken }
+          : { activeQuestionRunStartedAt: activeQuestionRunToken }),
+        editSequence: editSequenceRef.current,
         answer: pendingDraft,
-      })
-      if (sent) {
+      }
+      if (saveDraft) {
+        void saveDraft(payload).then((saved) => {
+          if (
+            activeQuestionRunRevisionRef.current !== activeQuestionRunToken ||
+            sessionIdRef.current !== sessionId ||
+            studentIdRef.current !== studentId ||
+            !isSameAnswer(draftAnswerRef.current, pendingDraft)
+          ) {
+            return
+          }
+          if (saved) {
+            lastSentDraftRef.current = pendingDraft
+            hasUnconfirmedDraftRef.current = false
+          } else {
+            hasUnconfirmedDraftRef.current = true
+            if (disabledRef.current || (activeQuestionDeadlineAt !== null && Date.now() >= activeQuestionDeadlineAt)) {
+              hasUnconfirmedDraftRef.current = false
+              synchronizedInitialAnswerRef.current = draftAnswerRef.current
+              onDraftUnconfirmed?.(question.id)
+            }
+          }
+        })
+        return
+      }
+      if (sendMessage?.('resonance:update-draft', payload)) {
         lastSentDraftRef.current = pendingDraft
       }
     }
 
+    const remainingBeforeDeadline = activeQuestionDeadlineAt === null
+      ? null
+      : activeQuestionDeadlineAt - Date.now()
+    if (remainingBeforeDeadline !== null && remainingBeforeDeadline <= 0) {
+      return
+    }
+    const pushDelayMs = remainingBeforeDeadline === null
+      ? DRAFT_PUSH_DELAY_MS
+      : Math.max(0, Math.min(DRAFT_PUSH_DELAY_MS, remainingBeforeDeadline - DRAFT_DEADLINE_BUFFER_MS))
     const timeoutId = window.setTimeout(() => {
       sendDraft()
-    }, DRAFT_PUSH_DELAY_MS)
+    }, pushDelayMs)
 
     return () => {
       window.clearTimeout(timeoutId)
       if (
-        activeQuestionRunStartedAtRef.current === activeQuestionRunStartedAt &&
-        draftAnswerRunStartedAt === activeQuestionRunStartedAt &&
+        activeQuestionRunRevisionRef.current === activeQuestionRunToken &&
+        draftAnswerRunRevision === activeQuestionRunToken &&
+        sessionIdRef.current === sessionId &&
+        studentIdRef.current === studentId &&
+        !disabledRef.current &&
+        // On a draft value change React runs this cleanup before scheduling
+        // the next debounce. The ref already holds the newer value, so do not
+        // flush the previous keystroke; reserve flushing for actual unmount.
+        isSameAnswer(draftAnswerRef.current, pendingDraft) &&
         !isSameAnswer(pendingDraft, lastSentDraftRef.current)
       ) {
         sendDraft()
       }
     }
-  }, [activeQuestionRunStartedAt, draftAnswer, isSubmitted, isWaitingForChoices, question.id, sendMessage, studentId])
+  }, [activeQuestionDeadlineAt, activeQuestionRunRevision, activeQuestionRunToken, disabled, draftAnswer, isSubmitted, isWaitingForChoices, onDraftUnconfirmed, question.id, saveDraft, sendMessage, sessionId, studentId])
 
-  async function submitAnswer(answer: { type: 'free-response'; text: string } | { type: 'multiple-choice'; selectedOptionIds: string[] }) {
+  async function submitAnswer(
+    answer: { type: 'free-response'; text: string } | { type: 'multiple-choice'; selectedOptionIds: string[] },
+  ) {
     if (disabled || isSubmitted || isWaitingForChoices) {
       return
     }
 
     setSubmitting(true)
     setError(null)
-
-    const sentViaWs = sendMessage?.('resonance:submit-answer', {
-      studentId,
-      questionId: question.id,
-      answer,
-    }) ?? false
-
-    if (sentViaWs) {
-      onSubmitted?.(question.id, answer)
-      setDraftAnswer(answer)
-      lastSentDraftRef.current = answer
-      draftAnswerRunStartedAtRef.current = activeQuestionRunStartedAt
-      setSubmitting(false)
-      return
-    }
+    const submissionAttempt = ++submissionAttemptRef.current
+    const submissionRunRevision = activeQuestionRunRevisionRef.current
 
     try {
       const resp = await fetch(`/api/resonance/${sessionId}/submit-answer`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ studentId, questionId: question.id, answer }),
+        body: JSON.stringify({
+          studentId,
+          questionId: question.id,
+          ...(activeQuestionRunRevision !== null
+            ? { activeQuestionRunRevision: submissionRunRevision }
+            : { activeQuestionRunStartedAt: submissionRunRevision }),
+          editSequence: editSequenceRef.current,
+          answer,
+        }),
       })
 
       const data = (await resp.json()) as { ok?: boolean; error?: string }
+
+      if (
+        submissionAttempt !== submissionAttemptRef.current ||
+        submissionRunRevision !== activeQuestionRunRevisionRef.current ||
+        sessionIdRef.current !== sessionId ||
+        studentIdRef.current !== studentId
+      ) {
+        return
+      }
 
       if (!resp.ok) {
         setError(data.error ?? 'Submission failed — please try again')
@@ -152,11 +269,25 @@ export default function QuestionView({
       onSubmitted?.(question.id, answer)
       setDraftAnswer(answer)
       lastSentDraftRef.current = answer
-      draftAnswerRunStartedAtRef.current = activeQuestionRunStartedAt
+      draftAnswerRunRevisionRef.current = activeQuestionRunToken
     } catch {
-      setError('Network error — please try again')
+      if (
+        submissionAttempt === submissionAttemptRef.current &&
+        submissionRunRevision === activeQuestionRunRevisionRef.current &&
+        sessionIdRef.current === sessionId &&
+        studentIdRef.current === studentId
+      ) {
+        setError('Network error — please try again')
+      }
     } finally {
-      setSubmitting(false)
+      if (
+        submissionAttempt === submissionAttemptRef.current &&
+        submissionRunRevision === activeQuestionRunRevisionRef.current &&
+        sessionIdRef.current === sessionId &&
+        studentIdRef.current === studentId
+      ) {
+        setSubmitting(false)
+      }
     }
   }
 
@@ -174,8 +305,10 @@ export default function QuestionView({
           value={draftAnswer?.type === 'free-response' ? draftAnswer.text : ''}
           onDraftChange={(text) => {
             const trimmed = text.trim()
-            draftAnswerRunStartedAtRef.current = activeQuestionRunStartedAt
-            setDraftAnswer(trimmed.length > 0 ? { type: 'free-response', text: trimmed } : null)
+            const answer = trimmed.length > 0 ? { type: 'free-response' as const, text: trimmed } : null
+            draftAnswerRunRevisionRef.current = activeQuestionRunToken
+            setDraftAnswer(answer)
+            onDraftChanged?.(question.id, answer)
           }}
           onSubmit={(text) => submitAnswer({ type: 'free-response', text })}
           submitting={submitting || disabled}
@@ -189,8 +322,12 @@ export default function QuestionView({
           selectionMode={question.selectionMode}
           value={draftAnswer?.type === 'multiple-choice' ? draftAnswer.selectedOptionIds : []}
           onDraftChange={(selectedOptionIds) => {
-            draftAnswerRunStartedAtRef.current = activeQuestionRunStartedAt
-            setDraftAnswer(selectedOptionIds.length > 0 ? { type: 'multiple-choice', selectedOptionIds } : null)
+            const answer = selectedOptionIds.length > 0
+              ? { type: 'multiple-choice' as const, selectedOptionIds }
+              : null
+            draftAnswerRunRevisionRef.current = activeQuestionRunToken
+            setDraftAnswer(answer)
+            onDraftChanged?.(question.id, answer)
           }}
           onSubmit={(selectedOptionIds) => submitAnswer({ type: 'multiple-choice', selectedOptionIds })}
           submitting={submitting || disabled}

@@ -15,6 +15,33 @@ Track security-relevant boundaries, risks, and mitigation decisions.
 
 ## Notes
 
+- Date: 2026-09-13
+- Area: Resonance student WebSocket lifecycle (`activities/resonance/client/hooks/useResonanceSession.ts`)
+- Threat or risk: The WS effect guarded every socket handler with a shared `mountedRef` that the *next* effect run resets to `true` at the top of its own body. When the session/student identity changed (e.g. a new student registering in the same tab, or a SyncDeck embedded re-launch), a message already in flight on the *old* socket could be dispatched after the new effect had already reset `mountedRef` and pointed `wsRef.current` at the new socket. The stale handler's `!mountedRef.current` check no longer blocked it, so the old identity's queued `resonance:session-state` payload (another participant's retained answers/state) could be applied under the new identity — CWE-200 exposure of sensitive information to an unauthorized actor, found by CodeRabbit's security scan on PR #372.
+- Control or mitigation: Each socket's handlers now close over that specific socket instance and check `!closed && wsRef.current === socket` (`isCurrent()`) instead of the shared `mountedRef`. `closed` is a `let` local to that effect invocation (set only by that invocation's cleanup), so a stale handler from a torn-down effect can never read a falsely-reset value the way the shared ref could.
+- Residual risk: None identified for this specific race; `mountedRef` is still used (correctly) for the REST fetch path, which has its own independent `latestSnapshotRequestRef` invalidation.
+- Validation (test/review/path): `activities/resonance/client/hooks/useResonanceSession.ts`; `activities/resonance/client/hooks/useResonanceSession.test.ts` ("a queued message from a prior student identity cannot leak into the new identity" — fails without the fix, passes with it).
+- Follow-up action: none.
+- Owner: Claude
+
+- Date: 2026-09-13
+- Area: shared activity capability record validation (`server/core/activityCapabilities.ts`)
+- Threat or risk: `isUsableActivityCapabilityRecord` validated `id`, `tokenHash`, `principalKind`, and `expiresAt` but never `issuedAt`. A stored record with a corrupted/missing `issuedAt` (storage bug, manual edit, partial write) was still treated as usable: `resolveActivityCapability` could authenticate it despite the malformed field, and `tryIssueActivityCapability`'s bounded non-evicting path counted it toward `MAX_CAPABILITIES_PER_SESSION` — at capacity it could wrongly block new registrations, and its `undefined`/`NaN` `issuedAt` would sort incorrectly wherever capabilities order by issuance.
+- Control or mitigation: `isUsableActivityCapabilityRecord` now also requires `issuedAt` to be a finite number, matching the existing `expiresAt` check, so a corrupted record is dropped (and evicted by the invalid-record cleanup in `tryIssueActivityCapability`) instead of authenticating or occupying bounded capacity. Found via a Copilot PR review on #372.
+- Residual risk: None identified; this only tightens an existing validation predicate and does not change the capability issuance/hashing model.
+- Validation (test/review/path): `server/core/activityCapabilities.ts`; `server/core/activityCapabilities.test.ts` ("a stored capability with no issuedAt is rejected rather than treated as usable").
+- Follow-up action: none.
+- Owner: Claude
+
+- Date: 2026-09-11
+- Area: Resonance student REST and WebSocket authority
+- Threat or risk: Resonance previously trusted a student ID supplied in a REST body/query or WebSocket URL, allowing a caller who learned another ID to read that student's retained answers/private feedback or mutate their response.
+- Control or mitigation: Registration now issues the shared opaque participant capability as an httpOnly, session-scoped cookie. REST state/submission handlers and WebSocket admission resolve the authoritative student from that cookie and reject mismatched client hints. REST denials log only a structured event, session ID, and non-sensitive reason (`missing-participant-capability` or `student-id-mismatch`), never a capability value. Registration reclaims expired capabilities but fails with 429 at the bounded capacity rather than evicting a live principal; clients discard a stale restored ID after a 403 and retry without claiming it. Waiting-room IDs additionally require the accepted-entry participant credential; direct entry receives a server-generated ID.
+- Residual risk: Resonance session mutations remain whole-record writes under the single-writer deployment constraint pending the complete #313 atomic migration. The shared waiting-room participant-token mint boundary remains tracked separately under #352. This is intentionally a clean cutover with no pre-deployment live-session credential migration.
+- Validation (test/review/path): `activities/resonance/server/routes.ts`; `activities/resonance/server/routes.test.ts`; `activities/resonance/playwright/auth.spec.ts`; #341.
+- Follow-up action: Close #341 when PR #372 merges.
+- Owner: Codex
+
 - Date: 2026-08-29
 - Area: shared activity runtime authority boundary
 - Threat or risk: Activities independently treated session IDs, request participant IDs,
@@ -419,3 +446,11 @@ Track security-relevant boundaries, risks, and mitigation decisions.
 # Persistent manager capability recovery
 
 - A persistent teacher-cookie authentication proves the teacher's authority but does not itself populate an activity manager capability. Manager clients with capability-gated routes must redeem that verified cookie through the server-side persistent-manager-capability recovery endpoint before opening their manager socket or protected REST calls.
+
+# Resonance instructor WebSocket socket-identity leak (CWE-200)
+
+- Date: 2026-09-13
+- `useInstructorState`'s WS `onopen`/`onmessage`/`onclose` handlers checked only the shared `mountedRef` flag, not the specific socket instance they were attached to. A session/passcode change resets `mountedRef` to `true` for the *new* effect run before an old socket's already-in-flight message is dispatched — a queued `resonance:instructor-state` message from the prior session could then land on the new session's state, and `shouldApplyInstructorSnapshot`/`selectInstructorSnapshot` unconditionally accept a candidate whose `sessionId` differs from `current`'s (by design, for legitimate session switches), so nothing else caught it. Net effect: one instructor's session data could leak into a different instructor session/passcode view in the same tab.
+- Fix: capture the socket instance in a local `const socket = new WebSocket(...)` and gate every handler on `isCurrent = () => !closed && wsRef.current === socket`, mirroring the identical pattern already used in the student hook (`useResonanceSession.ts`), which had this exact class of bug fixed earlier in the same PR review cycle. Whenever adding a new WS-consuming hook in this activity, check it uses per-socket identity guards, not just a shared `mountedRef`.
+- Validation: `activities/resonance/client/hooks/useInstructorState.test.ts` — "a queued message from a prior instructor session cannot leak into the new session" (confirmed to fail with `isCurrent` stubbed to always-true).
+- Owner: Claude Sonnet 5

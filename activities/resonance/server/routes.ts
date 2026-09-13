@@ -1,10 +1,23 @@
 import { timingSafeEqual } from 'crypto'
 import { createSession, type SessionRecord, type SessionStore } from 'activebits-server/core/sessions.js'
 import { registerSessionNormalizer } from 'activebits-server/core/sessionNormalization.js'
+import {
+  getActivityCapabilityCookieName,
+  tryIssueActivityCapability,
+  readCookieValue,
+  resolveActivityPrincipalFromCookies,
+  writeActivityCapabilityCookie,
+} from 'activebits-server/core/activityCapabilities.js'
+import {
+  getSessionParticipantCookieName,
+  revokeAcceptedEntryParticipant,
+  resolveAcceptedEntryParticipantToken,
+} from 'activebits-server/core/acceptedEntryParticipants.js'
 import { registerActivityReportBuilder } from '../../../server/activities/activityReportRegistry.js'
 import {
   findHashBySessionId,
   generatePersistentHash,
+  recordRateLimitAttemptStrict,
   verifyTeacherCodeWithHash,
 } from 'activebits-server/core/persistentSessions.js'
 import type { ActiveBitsWebSocket, WsRouter } from '../../../types/websocket.js'
@@ -47,6 +60,7 @@ interface RouteRequest {
   cookies?: Record<string, unknown>
   headers?: Record<string, string | undefined>
   query?: Record<string, unknown>
+  ip?: unknown
 }
 
 interface ResonanceRouteApp {
@@ -54,10 +68,85 @@ interface ResonanceRouteApp {
   post(path: string, handler: (req: RouteRequest, res: JsonResponse) => void | Promise<void>): void
 }
 
+interface DeadlineTaskHandle {
+  unref?(): void
+}
+
+interface DeadlineTaskRunner {
+  now(): number
+  schedule(callback: () => void, delayMs: number): DeadlineTaskHandle
+  cancel(handle: DeadlineTaskHandle): void
+}
+
+const defaultDeadlineTaskRunner: DeadlineTaskRunner = {
+  now: Date.now,
+  schedule(callback, delayMs) {
+    return setTimeout(callback, delayMs)
+  },
+  cancel(handle) {
+    clearTimeout(handle as ReturnType<typeof setTimeout>)
+  },
+}
+
 interface ResonanceSocket extends ActiveBitsWebSocket {
   sessionId?: string | null
   isInstructor?: boolean
   studentId?: string | null
+}
+
+const MAX_SET_TIMEOUT_MS = 2_147_483_647
+const DEADLINE_TASK_RETRY_MS = 1_000
+// A classroom commonly shares one NAT address, so this must accommodate a
+// whole class joining together while still leaving half the 200-record pool
+// unavailable to one unauthenticated burst.
+const MAX_UNAUTHENTICATED_DIRECT_REGISTRATIONS_PER_MINUTE = 100
+
+function getRegistrationRateLimitKey(sessionId: string, ip: unknown): string {
+  // Express derives req.ip from trusted proxy configuration. A raw forwarding
+  // header is caller-controlled and must not create separate limiter buckets.
+  const clientAddress = typeof ip === 'string' && ip.length > 0 ? ip : 'unknown'
+  return `resonance:direct-registration:${sessionId}:${clientAddress}`
+}
+
+export function scheduleParticipantCapabilityExpiryClose(
+  client: ResonanceSocket,
+  session: ResonanceSession,
+  capabilityId: string,
+): void {
+  // The caller reaches here only after awaiting session/self-paced-mode
+  // lookups, so the socket may have already closed. Its 'close' event has
+  // then already fired, so the listener registered below would never run to
+  // clear the timer — leaking a reference to this socket for up to the
+  // capability's whole TTL on every connect/disconnect race. Bail before
+  // arming anything.
+  if (client.readyState !== 1) return
+
+  const record = (session.data as { activityCapabilities?: Record<string, { expiresAt?: unknown }> })
+    .activityCapabilities?.[capabilityId]
+  const expiresAt = record?.expiresAt
+  if (typeof expiresAt !== 'number' || !Number.isFinite(expiresAt)) return
+
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const closeExpired = (): void => {
+    try {
+      client.close(1008, 'participant authentication required')
+    } catch {
+      // Socket is already closing.
+    }
+  }
+  const arm = (): void => {
+    const remaining = expiresAt - Date.now()
+    if (remaining <= 0) {
+      closeExpired()
+      return
+    }
+    timer = setTimeout(remaining <= MAX_SET_TIMEOUT_MS ? closeExpired : arm, Math.min(remaining, MAX_SET_TIMEOUT_MS))
+    timer.unref?.()
+  }
+  arm()
+  client.on('close', () => {
+    if (timer) clearTimeout(timer)
+  })
 }
 
 // ---------------------------------------------------------------------------
@@ -73,6 +162,8 @@ interface ResonanceSessionData extends Record<string, unknown> {
   activeQuestionId: string | null
   activeQuestionIds: string[]
   activeQuestionRunStartedAt: number | null
+  activeQuestionRunRevision: number | null
+  lastActiveQuestionRunRevision: number
   activeQuestionDeadlineAt: number | null
   embeddedAutoActivatedAt?: number | null
   students: Record<string, Student>
@@ -81,6 +172,8 @@ interface ResonanceSessionData extends Record<string, unknown> {
     questionId: string
     studentId: string
     updatedAt: number
+    activeQuestionRunRevision?: number | null
+    editSequence?: number
     answer: Response['answer']
   }>
   annotations: Record<string, InstructorAnnotation>
@@ -315,30 +408,43 @@ function setActiveQuestions(
   sessionData: ResonanceSessionData,
   questionIds: string[],
   runStartedAt: number | null,
+  runRevision: number | null,
   deadlineAt: number | null,
 ): void {
   sessionData.stagedRun = null
   sessionData.activeQuestionIds = questionIds
   sessionData.activeQuestionId = questionIds[0] ?? null
   sessionData.activeQuestionRunStartedAt = questionIds.length > 0 ? runStartedAt : null
+  sessionData.activeQuestionRunRevision = questionIds.length > 0 ? runRevision : null
+  if (runRevision !== null) sessionData.lastActiveQuestionRunRevision = runRevision
   sessionData.activeQuestionDeadlineAt = questionIds.length > 0 ? deadlineAt : null
 }
 
 function clearActiveQuestions(sessionData: ResonanceSessionData): void {
-  setActiveQuestions(sessionData, [], null, null)
+  setActiveQuestions(sessionData, [], null, null, null)
 }
 
 function setStagedActiveQuestion(
   sessionData: ResonanceSessionData,
   stagedRun: StagedRunState,
   runStartedAt: number | null,
+  runRevision: number | null,
   deadlineAt: number | null,
 ): void {
   sessionData.stagedRun = stagedRun
   sessionData.activeQuestionIds = stagedRun.currentQuestionId ? [stagedRun.currentQuestionId] : []
   sessionData.activeQuestionId = stagedRun.currentQuestionId
   sessionData.activeQuestionRunStartedAt = runStartedAt
+  sessionData.activeQuestionRunRevision = runRevision
+  if (runRevision !== null) sessionData.lastActiveQuestionRunRevision = runRevision
   sessionData.activeQuestionDeadlineAt = deadlineAt
+}
+
+function nextActiveQuestionRunRevision(sessionData: ResonanceSessionData): number {
+  return Math.max(
+    sessionData.lastActiveQuestionRunRevision,
+    sessionData.activeQuestionRunRevision ?? 0,
+  ) + 1
 }
 
 function clearStagedRun(sessionData: ResonanceSessionData): void {
@@ -407,6 +513,25 @@ function getQuestionAnswerability(sessionData: ResonanceSessionData, questionId:
     : { ok: false, reason: 'choices-hidden' }
 }
 
+function matchesActiveQuestionRun(
+  sessionData: ResonanceSessionData,
+  revision: unknown,
+  legacyStartedAt: unknown,
+): boolean {
+  if (typeof revision === 'number' && Number.isSafeInteger(revision)) {
+    return revision === sessionData.activeQuestionRunRevision
+  }
+  if (
+    revision == null &&
+    legacyStartedAt == null &&
+    sessionData.activeQuestionRunRevision === null &&
+    sessionData.activeQuestionRunStartedAt === null
+  ) {
+    return true
+  }
+  return sessionData.activeQuestionRunRevision === 1 && legacyStartedAt === sessionData.activeQuestionRunStartedAt
+}
+
 export function resolveAnswerabilityErrorMessage(reason: 'expired' | 'choices-hidden' | 'inactive'): string {
   switch (reason) {
     case 'expired':
@@ -436,10 +561,12 @@ function startStagedRun(
   const currentQuestion = getQuestionById(sessionData.questions, stagedRun.currentQuestionId)
   const choicesRevealed = currentQuestion?.type !== 'multiple-choice'
   const nextRun = { ...stagedRun, choicesRevealed }
+  const runRevision = nextActiveQuestionRunRevision(sessionData)
   setStagedActiveQuestion(
     sessionData,
     nextRun,
     now,
+    runRevision,
     choicesRevealed ? buildSingleQuestionDeadline(currentQuestion, now) : null,
   )
   return nextRun
@@ -460,6 +587,8 @@ function upsertResponse(
   questionId: string,
   studentId: string,
   answer: Response['answer'],
+  activeQuestionRunRevision: number | null,
+  editSequence = 0,
 ): Response {
   const existing = responses.find(
     (response) => response.questionId === questionId && response.studentId === studentId,
@@ -469,6 +598,8 @@ function upsertResponse(
   if (existing) {
     existing.answer = answer
     existing.submittedAt = submittedAt
+    existing.activeQuestionRunRevision = activeQuestionRunRevision
+    existing.editSequence = editSequence
     return existing
   }
 
@@ -477,6 +608,8 @@ function upsertResponse(
     questionId,
     studentId,
     submittedAt,
+    activeQuestionRunRevision,
+    editSequence,
     answer,
   }
   responses.push(response)
@@ -490,18 +623,87 @@ function clearAllReveals(sessionData: ResonanceSessionData): QuestionReveal[] {
   return removedReveals
 }
 
-function expireActiveQuestionRunIfNeeded(session: ResonanceSession): boolean {
-  if (session.data.stagedRun !== null) {
-    return false
+interface DraftFinalizationResult {
+  changed: boolean
+  finalizedDraftCount: number
+}
+
+function draftMatchesCurrentRun(
+  sessionData: ResonanceSessionData,
+  draft: ResonanceSessionData['responseDrafts'][string],
+): boolean {
+  const runStartedAt = sessionData.activeQuestionRunStartedAt
+  const runRevision = sessionData.activeQuestionRunRevision
+  return draft.activeQuestionRunRevision !== undefined
+    ? draft.activeQuestionRunRevision === runRevision
+    // Pre-revision drafts remain visible for legacy/self-paced snapshots that
+    // have no run revision. Once a numbered run exists, use the migration
+    // timestamp guard so an older unversioned draft cannot cross into it.
+    : runRevision === null || (runRevision === 1 && runStartedAt !== null && draft.updatedAt >= runStartedAt)
+}
+
+function finalizeActiveQuestionDrafts(
+  sessionData: ResonanceSessionData,
+  deadlineAt: number,
+): DraftFinalizationResult {
+  const activeQuestionIds = new Set(sessionData.activeQuestionIds)
+  const runStartedAt = sessionData.activeQuestionRunStartedAt
+  let changed = false
+  let finalizedCount = 0
+
+  for (const [draftKey, draft] of Object.entries(sessionData.responseDrafts)) {
+    if (!activeQuestionIds.has(draft.questionId)) {
+      continue
+    }
+
+    if (
+      sessionData.students[draft.studentId] !== undefined &&
+      runStartedAt !== null &&
+      draft.updatedAt <= deadlineAt &&
+      draftMatchesCurrentRun(sessionData, draft)
+    ) {
+      upsertResponse(
+        sessionData.responses,
+        draft.questionId,
+        draft.studentId,
+        draft.answer,
+        sessionData.activeQuestionRunRevision,
+        draft.editSequence ?? 0,
+      )
+      finalizedCount += 1
+    }
+    delete sessionData.responseDrafts[draftKey]
+    changed = true
   }
 
+  return { changed, finalizedDraftCount: finalizedCount }
+}
+
+function expireActiveQuestionRunIfNeeded(
+  session: ResonanceSession,
+  now = Date.now(),
+): DraftFinalizationResult {
   const deadlineAt = session.data.activeQuestionDeadlineAt
-  if (deadlineAt === null || Date.now() < deadlineAt) {
-    return false
+  if (deadlineAt === null || now < deadlineAt) {
+    return { changed: false, finalizedDraftCount: 0 }
+  }
+
+  const result = finalizeActiveQuestionDrafts(session.data, deadlineAt)
+  const { finalizedDraftCount } = result
+  if (finalizedDraftCount > 0) {
+    console.info(JSON.stringify({
+      component: 'resonance',
+      event: 'drafts-finalized-at-timeout',
+      sessionId: session.id,
+      finalizedDraftCount,
+    }))
+  }
+  if (session.data.stagedRun !== null) {
+    return result
   }
 
   clearActiveQuestions(session.data)
-  return true
+  return { changed: true, finalizedDraftCount }
 }
 
 function resolveRequestedActiveQuestionIds(body: Record<string, unknown>): string[] | null | undefined {
@@ -523,6 +725,10 @@ function resolveRequestedActiveQuestionIds(body: Record<string, unknown>): strin
 
 function buildDraftKey(questionId: string, studentId: string): string {
   return `${questionId}:${studentId}`
+}
+
+function resolveEditSequence(value: unknown): number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : 0
 }
 
 export function resolveSocketStudentId(payloadStudentId: unknown, clientStudentId: string | null | undefined): string | null {
@@ -569,6 +775,14 @@ function normalizeStoredResponses(
         ? Math.round(rawResponse.submittedAt)
         : 0
     const answer = normalizeDraftAnswerPayload(rawResponse.answer, questionsById, questionId)
+    const activeQuestionRunRevision = rawResponse.activeQuestionRunRevision === null
+      ? null
+      : typeof rawResponse.activeQuestionRunRevision === 'number' &&
+          Number.isSafeInteger(rawResponse.activeQuestionRunRevision) &&
+          rawResponse.activeQuestionRunRevision > 0
+        ? rawResponse.activeQuestionRunRevision
+        : undefined
+    const editSequence = resolveEditSequence(rawResponse.editSequence)
 
     if (!id || !questionId || !studentId || submittedAt <= 0 || answer === null) {
       continue
@@ -579,6 +793,8 @@ function normalizeStoredResponses(
       questionId,
       studentId,
       submittedAt,
+      ...(activeQuestionRunRevision !== undefined ? { activeQuestionRunRevision } : {}),
+      editSequence,
       answer,
     })
   }
@@ -607,7 +823,15 @@ function normalizeResponseDrafts(
     const updatedAt = typeof rawDraft.updatedAt === 'number' && Number.isFinite(rawDraft.updatedAt)
       ? Math.round(rawDraft.updatedAt)
       : 0
+    const activeQuestionRunRevision = rawDraft.activeQuestionRunRevision === null
+      ? null
+      : typeof rawDraft.activeQuestionRunRevision === 'number' &&
+          Number.isSafeInteger(rawDraft.activeQuestionRunRevision) &&
+          rawDraft.activeQuestionRunRevision > 0
+        ? rawDraft.activeQuestionRunRevision
+        : undefined
     const answer = normalizeDraftAnswerPayload(rawDraft.answer, questionsById, questionId)
+    const editSequence = resolveEditSequence(rawDraft.editSequence)
 
     if (!questionId || !studentId || updatedAt <= 0 || answer === null) {
       continue
@@ -617,6 +841,8 @@ function normalizeResponseDrafts(
       questionId,
       studentId,
       updatedAt,
+      ...(activeQuestionRunRevision !== undefined ? { activeQuestionRunRevision } : {}),
+      editSequence,
       answer,
     }
   }
@@ -798,6 +1024,20 @@ function normalizeSessionData(data: unknown): ResonanceSessionData {
     Number.isFinite(source.activeQuestionRunStartedAt)
       ? Math.round(source.activeQuestionRunStartedAt)
       : null
+  let activeQuestionRunRevision =
+    activeQuestionIds.length > 0 &&
+    typeof source.activeQuestionRunRevision === 'number' &&
+    Number.isSafeInteger(source.activeQuestionRunRevision) &&
+    source.activeQuestionRunRevision > 0
+      ? source.activeQuestionRunRevision
+      : activeQuestionIds.length > 0 ? 1 : null
+  let lastActiveQuestionRunRevision =
+    typeof source.lastActiveQuestionRunRevision === 'number' &&
+    Number.isSafeInteger(source.lastActiveQuestionRunRevision) &&
+    source.lastActiveQuestionRunRevision >= 0
+      ? source.lastActiveQuestionRunRevision
+      : activeQuestionRunRevision ?? 0
+  lastActiveQuestionRunRevision = Math.max(lastActiveQuestionRunRevision, activeQuestionRunRevision ?? 0)
   let activeQuestionDeadlineAt =
     activeQuestionIds.length > 0 ? normalizeActiveQuestionDeadlineAt(source.activeQuestionDeadlineAt) : null
   let stagedRun = presentationMode === 'staged'
@@ -815,6 +1055,8 @@ function normalizeSessionData(data: unknown): ResonanceSessionData {
     && questions.length > 0
   ) {
     const runStartedAt = Date.now()
+    const runRevision = lastActiveQuestionRunRevision + 1
+    lastActiveQuestionRunRevision = runRevision
     const orderedQuestionIds = questions.map((question) => question.id)
     if (presentationMode === 'staged') {
       stagedRun = createStagedRunState(orderedQuestionIds)
@@ -825,12 +1067,14 @@ function normalizeSessionData(data: unknown): ResonanceSessionData {
       }
       activeQuestionIds = stagedRun?.currentQuestionId ? [stagedRun.currentQuestionId] : []
       activeQuestionRunStartedAt = activeQuestionIds.length > 0 ? runStartedAt : null
+      activeQuestionRunRevision = activeQuestionIds.length > 0 ? runRevision : null
       activeQuestionDeadlineAt = startsImmediately ? buildSingleQuestionDeadline(currentQuestion, runStartedAt) : null
       embeddedAutoActivatedAt = activeQuestionIds.length > 0 ? runStartedAt : null
     } else {
       const run = buildActiveQuestionRun(questions, orderedQuestionIds, runStartedAt)
       activeQuestionIds = run.questionIds
       activeQuestionRunStartedAt = run.questionIds.length > 0 ? runStartedAt : null
+      activeQuestionRunRevision = run.questionIds.length > 0 ? runRevision : null
       activeQuestionDeadlineAt = run.questionIds.length > 0 ? run.deadlineAt : null
       embeddedAutoActivatedAt = run.questionIds.length > 0 ? runStartedAt : null
     }
@@ -841,6 +1085,10 @@ function normalizeSessionData(data: unknown): ResonanceSessionData {
     activeQuestionIds = stagedRun.currentQuestionId ? [stagedRun.currentQuestionId] : []
     if (activeQuestionIds.length > 0 && activeQuestionRunStartedAt === null) {
       activeQuestionRunStartedAt = Date.now()
+    }
+    if (activeQuestionIds.length > 0 && activeQuestionRunRevision === null) {
+      activeQuestionRunRevision = lastActiveQuestionRunRevision + 1
+      lastActiveQuestionRunRevision = activeQuestionRunRevision
     }
     if (currentQuestion?.type === 'multiple-choice' && !stagedRun.choicesRevealed) {
       activeQuestionDeadlineAt = null
@@ -861,6 +1109,8 @@ function normalizeSessionData(data: unknown): ResonanceSessionData {
     activeQuestionId: stagedRun?.currentQuestionId ?? activeQuestionIds[0] ?? null,
     activeQuestionIds,
     activeQuestionRunStartedAt,
+    activeQuestionRunRevision,
+    lastActiveQuestionRunRevision,
     activeQuestionDeadlineAt,
     ...(embeddedAutoActivatedAt !== null ? { embeddedAutoActivatedAt } : {}),
     students: isPlainObject(source.students) ? (source.students as Record<string, Student>) : {},
@@ -1014,7 +1264,7 @@ function buildStudentSnapshotWithMode(
   viewerStudentId: string | null,
   selfPacedMode: boolean,
 ) {
-  const { activeQuestionId, activeQuestionIds, activeQuestionRunStartedAt, activeQuestionDeadlineAt, questions, reveals } = session.data
+  const { activeQuestionId, activeQuestionIds, activeQuestionRunStartedAt, activeQuestionRunRevision, activeQuestionDeadlineAt, questions, reveals } = session.data
   const effectiveSelfPacedMode = selfPacedMode && activeQuestionIds.length === 0
   const fallbackQuestionIds = effectiveSelfPacedMode
     ? questions.map((question) => question.id)
@@ -1040,11 +1290,16 @@ function buildStudentSnapshotWithMode(
       ? {}
       : Object.fromEntries(
           session.data.responses
-            .filter((response) =>
-              response.studentId === viewerStudentId &&
-              !isStaleActiveResponse(session.data, response, liveActiveQuestionIdSet),
-            )
+            .filter((response) => response.studentId === viewerStudentId)
             .map((response) => [response.questionId, response.answer] satisfies [string, Response['answer']]),
+        )
+  const submittedResponseEditSequences =
+    viewerStudentId === null
+      ? {}
+      : Object.fromEntries(
+          session.data.responses
+            .filter((response) => response.studentId === viewerStudentId)
+            .map((response) => [response.questionId, response.editSequence ?? 0] satisfies [string, number]),
         )
   const reviewedResponses =
     viewerStudentId === null
@@ -1077,13 +1332,17 @@ function buildStudentSnapshotWithMode(
     activeQuestions,
     activeQuestionIds: fallbackQuestionIds,
     activeQuestionRunStartedAt: effectiveSelfPacedMode ? null : activeQuestionRunStartedAt,
+    activeQuestionRunRevision: effectiveSelfPacedMode ? null : activeQuestionRunRevision,
     activeQuestionDeadlineAt: effectiveSelfPacedMode ? null : activeQuestionDeadlineAt,
+    lastActiveQuestionRunRevision:
+      session.data.lastActiveQuestionRunRevision > 0 ? session.data.lastActiveQuestionRunRevision : null,
     reveals: [
       ...reveals.map((reveal) => buildStudentReveal(reveal, session, viewerStudentId)),
       ...selfPacedReveals,
     ],
     reviewedResponses,
     submittedAnswers,
+    submittedResponseEditSequences,
     revealedQuestions,
   }
 }
@@ -1095,8 +1354,10 @@ function isStaleActiveResponse(
 ): boolean {
   return (
     (activeQuestionIdSet?.has(response.questionId) ?? sessionData.activeQuestionIds.includes(response.questionId)) &&
-    sessionData.activeQuestionRunStartedAt !== null &&
-    response.submittedAt < sessionData.activeQuestionRunStartedAt
+    sessionData.activeQuestionRunRevision !== null &&
+    (response.activeQuestionRunRevision !== undefined
+      ? response.activeQuestionRunRevision !== sessionData.activeQuestionRunRevision
+      : sessionData.activeQuestionRunStartedAt !== null && response.submittedAt < sessionData.activeQuestionRunStartedAt)
   )
 }
 
@@ -1108,6 +1369,7 @@ function buildInstructorSnapshot(session: ResonanceSession) {
     activeQuestionId,
     activeQuestionIds,
     activeQuestionRunStartedAt,
+    activeQuestionRunRevision,
     activeQuestionDeadlineAt,
     students,
     responses,
@@ -1118,15 +1380,16 @@ function buildInstructorSnapshot(session: ResonanceSession) {
   } =
     session.data
   const activeQuestionIdSet = new Set(activeQuestionIds)
-  const currentRunSubmittedKeys = new Set<string>()
+  const currentRunSubmittedEditSequences = new Map<string, number>()
   const progressByQuestionStudent = new Map<string, ResponseProgress>()
+  const visibleDraftKeys = new Set<string>()
 
   for (const response of responses) {
     const key = buildDraftKey(response.questionId, response.studentId)
     const staleActiveResponse = isStaleActiveResponse(session.data, response, activeQuestionIdSet)
 
     if (!staleActiveResponse) {
-      currentRunSubmittedKeys.add(key)
+      currentRunSubmittedEditSequences.set(key, response.editSequence ?? 0)
     }
 
     progressByQuestionStudent.set(key, {
@@ -1142,10 +1405,15 @@ function buildInstructorSnapshot(session: ResonanceSession) {
 
   for (const draft of Object.values(responseDrafts)) {
     const key = buildDraftKey(draft.questionId, draft.studentId)
-    if (currentRunSubmittedKeys.has(key)) {
+    if (!draftMatchesCurrentRun(session.data, draft)) {
+      continue
+    }
+    const confirmedEditSequence = currentRunSubmittedEditSequences.get(key)
+    if (confirmedEditSequence !== undefined && (draft.editSequence ?? 0) <= confirmedEditSequence) {
       continue
     }
 
+    visibleDraftKeys.add(key)
     progressByQuestionStudent.set(key, {
       questionId: draft.questionId,
       studentId: draft.studentId,
@@ -1160,7 +1428,7 @@ function buildInstructorSnapshot(session: ResonanceSession) {
   for (const question of questions) {
     for (const student of Object.values(students)) {
       const key = buildDraftKey(question.id, student.studentId)
-      if (progressByQuestionStudent.has(key) || responseDrafts[key] !== undefined) {
+      if (progressByQuestionStudent.has(key) || visibleDraftKeys.has(key)) {
         continue
       }
 
@@ -1194,7 +1462,10 @@ function buildInstructorSnapshot(session: ResonanceSession) {
     activeQuestionId,
     activeQuestionIds,
     activeQuestionRunStartedAt,
+    activeQuestionRunRevision,
     activeQuestionDeadlineAt,
+    lastActiveQuestionRunRevision:
+      session.data.lastActiveQuestionRunRevision > 0 ? session.data.lastActiveQuestionRunRevision : null,
     students: Object.values(students),
     responses: orderedResponses.map((r) => ({
       ...r,
@@ -1243,6 +1514,31 @@ function verifyInstructorPasscode(expected: string, candidate: string): boolean 
 function checkInstructorAuth(req: RouteRequest, session: ResonanceSession): boolean {
   const header = req.headers?.['x-instructor-passcode']
   return typeof header === 'string' && verifyInstructorPasscode(session.data.instructorPasscode, header)
+}
+
+function resolveStudentPrincipal(
+  session: ResonanceSession,
+  sessionId: string,
+  cookies: Record<string, unknown> | undefined,
+): string | null {
+  const principal = resolveActivityPrincipalFromCookies(session, sessionId, 'participant', cookies)
+  return principal?.subjectId && session.data.students[principal.subjectId]
+    ? principal.subjectId
+    : null
+}
+
+function resolveWebSocketStudentPrincipal(
+  session: ResonanceSession,
+  sessionId: string,
+  cookieHeader: unknown,
+): { studentId: string; capabilityId: string } | null {
+  const cookieName = getActivityCapabilityCookieName('participant', sessionId)
+  const principal = resolveActivityPrincipalFromCookies(session, sessionId, 'participant', {
+    [cookieName]: readCookieValue(cookieHeader, cookieName),
+  })
+  return principal?.subjectId && session.data.students[principal.subjectId]
+    ? { studentId: principal.subjectId, capabilityId: principal.capabilityId }
+    : null
 }
 
 async function resolveSelfPacedMode(
@@ -1310,23 +1606,102 @@ export default function setupResonanceRoutes(
   app: ResonanceRouteApp,
   sessions: SessionStore,
   ws: WsRouter,
+  deadlineTaskRunner: DeadlineTaskRunner = defaultDeadlineTaskRunner,
 ): void {
-  async function loadResonanceSession(sessionId: string): Promise<ResonanceSession | null> {
-    const session = asResonanceSession(await sessions.get(sessionId))
-    if (!session) {
+  const deadlineTasks = new Map<string, {
+    deadlineAt: number
+    runStartedAt: number | null
+    handle: DeadlineTaskHandle
+  }>()
+
+  function armDeadlineTask(
+    sessionId: string,
+    deadlineAt: number,
+    runStartedAt: number | null,
+    delayMs: number,
+  ): void {
+    const handle = deadlineTaskRunner.schedule(() => {
+      const current = deadlineTasks.get(sessionId)
+      if (!current || current.handle !== handle) return
+
+      const remaining = deadlineAt - deadlineTaskRunner.now()
+      if (remaining > 0) {
+        deadlineTasks.delete(sessionId)
+        armDeadlineTask(sessionId, deadlineAt, runStartedAt, remaining)
+        return
+      }
+
+      void loadResonanceSession(sessionId, true).then((loaded) => {
+        if (loaded !== null) return
+        const latest = deadlineTasks.get(sessionId)
+        if (latest?.handle === handle) deadlineTasks.delete(sessionId)
+      }).catch((error) => {
+        console.error(JSON.stringify({
+          component: 'resonance',
+          event: 'deadline-task-failed',
+          sessionId,
+          error: String(error),
+        }))
+        const latest = deadlineTasks.get(sessionId)
+        if (latest?.handle !== handle) return
+        deadlineTasks.delete(sessionId)
+        armDeadlineTask(sessionId, deadlineAt, runStartedAt, DEADLINE_TASK_RETRY_MS)
+      })
+    }, Math.min(Math.max(0, delayMs), MAX_SET_TIMEOUT_MS))
+    handle.unref?.()
+    deadlineTasks.set(sessionId, { deadlineAt, runStartedAt, handle })
+  }
+
+  function reconcileDeadlineTask(session: ResonanceSession): void {
+    const existing = deadlineTasks.get(session.id)
+    const deadlineAt = session.data.activeQuestionDeadlineAt
+    const runStartedAt = session.data.activeQuestionRunStartedAt
+    if (deadlineAt === null || deadlineAt <= deadlineTaskRunner.now()) {
+      if (existing) {
+        deadlineTaskRunner.cancel(existing.handle)
+        deadlineTasks.delete(session.id)
+      }
+      return
+    }
+    if (existing?.deadlineAt === deadlineAt && existing.runStartedAt === runStartedAt) {
+      return
+    }
+    if (existing) {
+      deadlineTaskRunner.cancel(existing.handle)
+    }
+
+    armDeadlineTask(session.id, deadlineAt, runStartedAt, deadlineAt - deadlineTaskRunner.now())
+  }
+
+  async function loadResonanceSession(sessionId: string, strict = false): Promise<ResonanceSession | null> {
+    const readSession = strict && sessions.getStrict
+      ? sessions.getStrict.bind(sessions)
+      : sessions.get.bind(sessions)
+    const loadedSession = asResonanceSession(await readSession(sessionId))
+    if (!loadedSession) {
       return null
     }
+
+    // SessionCache returns its live value by reference. Work on a detached
+    // copy so a failed timeout-finalization write cannot make local reads look
+    // expired and cancel the retry while durable storage still has the run.
+    const session = structuredClone(loadedSession)
 
     const hadSelfPacedMode = session.data.selfPacedMode === true
     const resolvedSelfPacedMode =
       hadSelfPacedMode
         ? true
         : await resolveSelfPacedMode(session, sessions)
-    if (expireActiveQuestionRunIfNeeded(session)) {
+    const expiration = expireActiveQuestionRunIfNeeded(session, deadlineTaskRunner.now())
+    if (expiration.changed) {
       await sessions.set(sessionId, session)
+      await broadcastStudentSessionState(session, sessionId)
+      broadcastToRole('resonance:instructor-state', buildInstructorSnapshot(session), sessionId, true)
     } else if (!hadSelfPacedMode && resolvedSelfPacedMode && session.data.selfPacedMode === true) {
       await sessions.set(sessionId, session)
     }
+
+    reconcileDeadlineTask(session)
 
     return session
   }
@@ -1553,12 +1928,53 @@ export default function setupResonanceRoutes(
       return
     }
 
-    // Accept a client-provided studentId (from entry participant handoff) or generate one.
     const body = isPlainObject(req.body) ? req.body : {}
     const requestedId = typeof body.studentId === 'string' && /^[\w-]+$/.test(body.studentId)
       ? body.studentId
       : null
-    const studentId = requestedId ?? `s_${Math.random().toString(36).slice(2, 12)}`
+    const existingPrincipalId = resolveStudentPrincipal(session, sessionId, req.cookies)
+    const acceptedParticipant = resolveAcceptedEntryParticipantToken(
+      session,
+      req.cookies?.[getSessionParticipantCookieName(sessionId)],
+    )
+    // A newly accepted waiting-room participant is fresher than a capability
+    // cookie a shared browser may have retained from a previous student.
+    const authorizedId = acceptedParticipant?.participantId ?? existingPrincipalId ?? null
+    if (requestedId !== null && requestedId !== authorizedId) {
+      console.warn(JSON.stringify({
+        component: 'resonance',
+        event: 'student-registration-denied',
+        sessionId,
+        reason: 'student-id-mismatch',
+      }))
+      res.status(403).json({ error: 'participant authentication required' })
+      return
+    }
+    if (authorizedId === null) {
+      try {
+        const rateLimit = await recordRateLimitAttemptStrict(
+          getRegistrationRateLimitKey(sessionId, req.ip),
+          MAX_UNAUTHENTICATED_DIRECT_REGISTRATIONS_PER_MINUTE,
+        )
+        if (!rateLimit.allowed) {
+          console.warn(JSON.stringify({
+            component: 'resonance', event: 'student-registration-denied', sessionId,
+            reason: 'direct-registration-rate-limited', attempts: rateLimit.attempts,
+          }))
+          res.setHeader?.('Retry-After', '60')
+          res.status(429).json({ error: 'too many registration attempts; try again shortly' })
+          return
+        }
+      } catch (error) {
+        console.error(JSON.stringify({
+          component: 'resonance', event: 'student-registration-rate-limit-failed', sessionId,
+          error: error instanceof Error ? error.message : 'unknown error',
+        }))
+        res.status(503).json({ error: 'registration temporarily unavailable' })
+        return
+      }
+    }
+    const studentId = authorizedId ?? `s_${Math.random().toString(36).slice(2, 12)}`
 
     const student: Student = {
       studentId,
@@ -1566,10 +1982,54 @@ export default function setupResonanceRoutes(
       joinedAt: Date.now(),
     }
 
-    session.data.students[studentId] = student
-    await sessions.set(sessionId, session)
+    // `loadResonanceSession` can return the cache's mutable record. Prepare
+    // registration changes on a detached copy so a failed store write cannot
+    // consume an accepted-entry handoff only in this process.
+    const registrationSession = structuredClone(session)
+    const reusesSelectedCapability = existingPrincipalId !== null && existingPrincipalId === authorizedId
+    const capability = reusesSelectedCapability
+      ? null
+      : tryIssueActivityCapability(registrationSession, 'participant', studentId)
+    if (!reusesSelectedCapability && capability === null) {
+      console.warn(JSON.stringify({
+        component: 'resonance',
+        event: 'student-registration-denied',
+        sessionId,
+        reason: 'participant-capacity-reached',
+      }))
+      res.status(429).json({ error: 'session participant capacity reached' })
+      return
+    }
+    registrationSession.data.students[studentId] = student
+    // Accepted-entry handoffs are one-shot. Their consumption and capability
+    // issuance persist in this one session write, so a failed write consumes
+    // neither and a successful one cannot be replayed.
+    if (acceptedParticipant !== null) {
+      revokeAcceptedEntryParticipant(registrationSession, studentId)
+    }
+    try {
+      await sessions.set(sessionId, registrationSession)
+    } catch (error) {
+      console.error(JSON.stringify({
+        component: 'resonance',
+        event: 'student-registration-persist-failed',
+        sessionId,
+        error: error instanceof Error ? error.message : 'unknown error',
+      }))
+      res.status(503).json({ error: 'registration temporarily unavailable' })
+      return
+    }
 
-    console.info('[resonance] Student registered', { sessionId, studentId, name: validated.name })
+    if (capability && res.cookie) {
+      writeActivityCapabilityCookie({ cookie: res.cookie.bind(res) }, sessionId, 'participant', capability.token)
+    }
+    res.setHeader?.('Cache-Control', 'no-store')
+    console.info(JSON.stringify({
+      component: 'resonance',
+      event: 'student-registered',
+      sessionId,
+      studentId,
+    }))
     res.json({ studentId, name: validated.name })
   })
 
@@ -1589,9 +2049,29 @@ export default function setupResonanceRoutes(
     }
 
     const body = isPlainObject(req.body) ? req.body : {}
-    const studentId = typeof body.studentId === 'string' ? body.studentId : null
-    if (!studentId || !session.data.students[studentId]) {
-      res.status(400).json({ error: 'invalid studentId' })
+    const studentId = resolveStudentPrincipal(session, sessionId, req.cookies)
+    if (!studentId) {
+      console.warn(JSON.stringify({
+        component: 'resonance',
+        event: 'student-answer-submit-denied',
+        sessionId,
+        reason: 'missing-participant-capability',
+      }))
+      res.status(403).json({ error: 'participant authentication required' })
+      return
+    }
+    if (typeof body.studentId === 'string' && body.studentId !== studentId) {
+      console.warn(JSON.stringify({
+        component: 'resonance',
+        event: 'student-answer-submit-denied',
+        sessionId,
+        reason: 'student-id-mismatch',
+      }))
+      res.status(403).json({ error: 'studentId does not match authenticated participant' })
+      return
+    }
+    if (!matchesActiveQuestionRun(session.data, body.activeQuestionRunRevision, body.activeQuestionRunStartedAt)) {
+      res.status(409).json({ error: 'question run changed' })
       return
     }
 
@@ -1630,7 +2110,14 @@ export default function setupResonanceRoutes(
       return
     }
 
-    upsertResponse(session.data.responses, questionId, studentId, answer)
+    upsertResponse(
+      session.data.responses,
+      questionId,
+      studentId,
+      answer,
+      session.data.activeQuestionRunRevision,
+      resolveEditSequence(body.editSequence),
+    )
     delete session.data.responseDrafts[buildDraftKey(questionId, studentId)]
     await sessions.set(sessionId, session)
     void broadcastStudentSessionState(session, sessionId)
@@ -1656,8 +2143,22 @@ export default function setupResonanceRoutes(
     }
 
     const requestedStudentId = typeof req.query?.studentId === 'string' ? req.query.studentId : null
+    const authenticatedStudentId = resolveStudentPrincipal(session, sessionId, req.cookies)
+    if (requestedStudentId !== null && requestedStudentId !== authenticatedStudentId) {
+      console.warn(JSON.stringify({
+        component: 'resonance',
+        event: 'student-state-denied',
+        sessionId,
+        reason: authenticatedStudentId === null
+          ? 'missing-participant-capability'
+          : 'student-id-mismatch',
+      }))
+      res.status(403).json({ error: 'participant authentication required' })
+      return
+    }
     const selfPacedMode = await resolveSelfPacedMode(session, sessions)
-    res.json(buildStudentSnapshotWithMode(session, requestedStudentId, selfPacedMode))
+    res.setHeader?.('Cache-Control', 'no-store')
+    res.json(buildStudentSnapshotWithMode(session, authenticatedStudentId, selfPacedMode))
   })
 
   // GET /api/resonance/:sessionId/responses
@@ -1724,7 +2225,13 @@ export default function setupResonanceRoutes(
         startStagedRun(session.data, orderedQuestionIds, runStartedAt)
       } else {
         const run = buildActiveQuestionRun(session.data.questions, orderedQuestionIds, runStartedAt)
-        setActiveQuestions(session.data, run.questionIds, runStartedAt, run.deadlineAt)
+        setActiveQuestions(
+          session.data,
+          run.questionIds,
+          runStartedAt,
+          nextActiveQuestionRunRevision(session.data),
+          run.deadlineAt,
+        )
       }
     } else {
       clearActiveQuestions(session.data)
@@ -1735,6 +2242,7 @@ export default function setupResonanceRoutes(
       return
     }
     await sessions.set(sessionId, session)
+    reconcileDeadlineTask(session)
 
     console.info('[resonance] Question activation updated', {
       sessionId,
@@ -1803,9 +2311,11 @@ export default function setupResonanceRoutes(
       session.data,
       nextRun,
       session.data.activeQuestionRunStartedAt ?? now,
+      session.data.activeQuestionRunRevision,
       buildSingleQuestionDeadline(question, now),
     )
     await sessions.set(sessionId, session)
+    reconcileDeadlineTask(session)
 
     console.info('[resonance] Staged choices revealed', {
       sessionId,
@@ -1863,6 +2373,7 @@ export default function setupResonanceRoutes(
     if (nextQuestionId === null) {
       clearStagedRun(session.data)
       await sessions.set(sessionId, session)
+      reconcileDeadlineTask(session)
       console.info('[resonance] Staged run completed', { sessionId })
       broadcastToRole('resonance:question-activated', buildActivationPayload(session.data), sessionId, true)
       void broadcastStudentSessionState(session, sessionId)
@@ -1892,9 +2403,11 @@ export default function setupResonanceRoutes(
       session.data,
       nextRun,
       now,
+      nextActiveQuestionRunRevision(session.data),
       choicesRevealed ? buildSingleQuestionDeadline(nextQuestion, now) : null,
     )
     await sessions.set(sessionId, session)
+    reconcileDeadlineTask(session)
 
     console.info('[resonance] Staged question advanced', {
       sessionId,
@@ -2297,10 +2810,17 @@ export default function setupResonanceRoutes(
             startStagedRun(session.data, orderedQuestionIds, runStartedAt)
           } else {
             const run = buildActiveQuestionRun(session.data.questions, orderedQuestionIds, runStartedAt)
-            setActiveQuestions(session.data, run.questionIds, runStartedAt, run.deadlineAt)
+            setActiveQuestions(
+              session.data,
+              run.questionIds,
+              runStartedAt,
+              nextActiveQuestionRunRevision(session.data),
+              run.deadlineAt,
+            )
           }
         }
         await sessions.set(sessionId, session)
+        reconcileDeadlineTask(session)
         console.info('[resonance] WS activate-question', {
           sessionId,
           activeQuestionIds: session.data.activeQuestionIds,
@@ -2323,9 +2843,11 @@ export default function setupResonanceRoutes(
           session.data,
           { ...stagedRun, choicesRevealed: true },
           session.data.activeQuestionRunStartedAt ?? now,
+          session.data.activeQuestionRunRevision,
           buildSingleQuestionDeadline(question, now),
         )
         await sessions.set(sessionId, session)
+        reconcileDeadlineTask(session)
         console.info('[resonance] WS reveal choices', { sessionId, questionId: question.id })
         broadcastToRole('resonance:question-activated', buildActivationPayload(session.data), sessionId, true)
         void broadcastStudentSessionState(session, sessionId)
@@ -2356,10 +2878,12 @@ export default function setupResonanceRoutes(
               completedQuestionIds,
             },
             now,
+            nextActiveQuestionRunRevision(session.data),
             choicesRevealed ? buildSingleQuestionDeadline(nextQuestion, now) : null,
           )
         }
         await sessions.set(sessionId, session)
+        reconcileDeadlineTask(session)
         console.info('[resonance] WS advance staged question', {
           sessionId,
           activeQuestionId: session.data.activeQuestionId,
@@ -2515,11 +3039,17 @@ export default function setupResonanceRoutes(
     payload: Record<string, unknown>,
     sessionId: string,
     clientStudentId: string | null | undefined,
+    socket: ResonanceSocket,
   ): Promise<void> {
     switch (type) {
       case 'resonance:submit-answer': {
         const studentId = resolveSocketStudentId(payload.studentId, clientStudentId)
         if (!studentId || !session.data.students[studentId]) return
+        if (!matchesActiveQuestionRun(
+          session.data,
+          payload.activeQuestionRunRevision,
+          payload.activeQuestionRunStartedAt,
+        )) return
         const requestedQuestionId = typeof payload.questionId === 'string' ? payload.questionId : null
         const selfPacedMode = await resolveSelfPacedMode(session, sessions)
         const availableQuestionIds = resolveStudentAvailableQuestionIds(session, selfPacedMode)
@@ -2532,10 +3062,18 @@ export default function setupResonanceRoutes(
         if (!questionId || !availableQuestionIds.includes(questionId)) return
         const activeQuestion = session.data.questions.find((q) => q.id === questionId) ?? null
         if (!activeQuestion) return
-        if (!isCurrentStagedQuestionAnswerable(session.data, questionId)) return
+        const answerability = getQuestionAnswerability(session.data, questionId)
+        if (!answerability.ok) return
         const answer = validateAnswerPayload(payload.answer, activeQuestion)
         if (!answer) return
-        const response = upsertResponse(session.data.responses, questionId, studentId, answer)
+        const response = upsertResponse(
+          session.data.responses,
+          questionId,
+          studentId,
+          answer,
+          session.data.activeQuestionRunRevision,
+          resolveEditSequence(payload.editSequence),
+        )
         delete session.data.responseDrafts[buildDraftKey(questionId, studentId)]
         await sessions.set(sessionId, session)
         console.info('[resonance] WS submit-answer', {
@@ -2554,7 +3092,20 @@ export default function setupResonanceRoutes(
       case 'resonance:update-draft': {
         const studentId = resolveSocketStudentId(payload.studentId, clientStudentId)
         if (!studentId || !session.data.students[studentId]) return
+        if (!matchesActiveQuestionRun(
+          session.data,
+          payload.activeQuestionRunRevision,
+          payload.activeQuestionRunStartedAt,
+        )) return
         const selfPacedMode = await resolveSelfPacedMode(session, sessions)
+        // This runs after the final await in this handler. A deadline can pass
+        // while resolving an embedded session mode, so validate and timestamp
+        // the write atomically from the handler's point of view.
+        const draftUpdatedAt = Date.now()
+        if (
+          session.data.activeQuestionDeadlineAt !== null &&
+          draftUpdatedAt >= session.data.activeQuestionDeadlineAt
+        ) return
         const availableQuestionIds = resolveStudentAvailableQuestionIds(session, selfPacedMode)
 
         const questionId = typeof payload.questionId === 'string'
@@ -2568,13 +3119,34 @@ export default function setupResonanceRoutes(
         if (!question) return
         if (!isCurrentStagedQuestionAnswerable(session.data, questionId)) return
 
-        const alreadyAnswered = session.data.responses.some(
+        const draftId = typeof payload.draftId === 'string' && payload.draftId.length <= 128
+          ? payload.draftId
+          : null
+        const editSequence = resolveEditSequence(payload.editSequence)
+
+        // A draft sent just before a submission can arrive here after the
+        // submission already recorded a response and cleared the draft (the
+        // two travel over different connections/transports, so delivery
+        // order isn't guaranteed). The revisit flow deliberately allows a
+        // student to reopen an already-submitted question in the same run, so
+        // response existence alone can't distinguish a stale pre-submission
+        // draft from a legitimate post-submission revision — only a draft
+        // whose editSequence hasn't advanced past the confirmed response's is
+        // stale. Otherwise timeout finalization could either overwrite the
+        // confirmed answer with a stale draft, or silently drop a genuine
+        // revision the student made after resubmitting was already locked.
+        const confirmedResponseForRun = session.data.responses.find(
           (response) =>
             response.questionId === questionId &&
             response.studentId === studentId &&
-            !isStaleActiveResponse(session.data, response),
+            response.activeQuestionRunRevision === session.data.activeQuestionRunRevision,
         )
-        if (alreadyAnswered) return
+        if (confirmedResponseForRun !== undefined && editSequence <= (confirmedResponseForRun.editSequence ?? 0)) {
+          if (draftId !== null) {
+            sendToSocket(socket, 'resonance:draft-saved', { draftId }, sessionId)
+          }
+          return
+        }
 
         const draftKey = buildDraftKey(questionId, studentId)
         if (payload.answer === null) {
@@ -2582,6 +3154,11 @@ export default function setupResonanceRoutes(
             delete session.data.responseDrafts[draftKey]
             await sessions.set(sessionId, session)
             broadcastToRole('resonance:instructor-state', buildInstructorSnapshot(session), sessionId, true)
+          }
+          // Ack even when the draft was already absent, so a retried clear is
+          // idempotent instead of timing out and being reported as a failed save.
+          if (draftId !== null) {
+            sendToSocket(socket, 'resonance:draft-saved', { draftId }, sessionId)
           }
           return
         }
@@ -2592,11 +3169,16 @@ export default function setupResonanceRoutes(
         session.data.responseDrafts[draftKey] = {
           questionId,
           studentId,
-          updatedAt: Date.now(),
+          updatedAt: draftUpdatedAt,
+          activeQuestionRunRevision: session.data.activeQuestionRunRevision,
+          editSequence,
           answer,
         }
         await sessions.set(sessionId, session)
         broadcastToRole('resonance:instructor-state', buildInstructorSnapshot(session), sessionId, true)
+        if (draftId !== null) {
+          sendToSocket(socket, 'resonance:draft-saved', { draftId }, sessionId)
+        }
         break
       }
 
@@ -2697,11 +3279,11 @@ export default function setupResonanceRoutes(
 
   ws.register('/ws/resonance', (socket, queryParams) => {
     const client = socket as ResonanceSocket
-    client.sessionId = queryParams.get('sessionId') ?? null
+    const sessionId = queryParams.get('sessionId') ?? null
+    client.sessionId = null
     client.isInstructor = false
-    client.studentId = queryParams.get('studentId') ?? null
+    client.studentId = null
 
-    const sessionId = client.sessionId
     if (!sessionId) {
       socket.close(1008, 'missing sessionId')
       return
@@ -2725,9 +3307,32 @@ export default function setupResonanceRoutes(
           socket.close(1008, 'invalid instructor passcode')
           return
         }
+        client.sessionId = sessionId
         client.isInstructor = true
         sendToSocket(client, 'resonance:instructor-state', buildInstructorSnapshot(session), sessionId)
       } else {
+        const authenticatedPrincipal = resolveWebSocketStudentPrincipal(
+          session,
+          sessionId,
+          client.upgradeHeaders?.cookie,
+        )
+        const requestedStudentId = queryParams.get('studentId')
+        if (
+          authenticatedPrincipal === null ||
+          (requestedStudentId !== null && requestedStudentId !== authenticatedPrincipal.studentId)
+        ) {
+          console.warn(JSON.stringify({
+            component: 'resonance',
+            event: 'student-websocket-denied',
+            sessionId,
+            reason: 'missing-or-mismatched-participant-capability',
+          }))
+          socket.close(1008, 'participant authentication required')
+          return
+        }
+        client.sessionId = sessionId
+        client.studentId = authenticatedPrincipal.studentId
+        scheduleParticipantCapabilityExpiryClose(client, session, authenticatedPrincipal.capabilityId)
         const selfPacedMode = await resolveSelfPacedMode(session, sessions)
         sendToSocket(
           client,
@@ -2761,7 +3366,7 @@ export default function setupResonanceRoutes(
             if (client.isInstructor) {
               await handleInstructorWsMessage(sess, msgType, msgPayload, sessionId)
             } else {
-              await handleStudentWsMessage(sess, msgType, msgPayload, sessionId, client.studentId)
+              await handleStudentWsMessage(sess, msgType, msgPayload, sessionId, client.studentId, client)
             }
           } catch (err) {
             console.error('[resonance] WS message handler error', { sessionId, err })
