@@ -156,6 +156,16 @@ export interface StudentSessionSnapshot {
   reveals: QuestionReveal[]
   reviewedResponses: ReviewedResponse[]
   submittedAnswers: Record<string, AnswerPayload>
+  /**
+   * The `editSequence` recorded on each confirmed response in `submittedAnswers`.
+   * A client that reloads mid-run has no local edit-sequence bookkeeping (that
+   * counter lives only in memory), so without this it would default a
+   * post-reload revision to sequence 1 — colliding with (or trailing) the
+   * confirmed response already at sequence 1+ and having the revision silently
+   * dropped as stale by the server's draft guard. Clients seed their local
+   * counter from this value on reload instead of assuming 1.
+   */
+  submittedResponseEditSequences: Record<string, number>
   /** Student-safe versions of revealed questions, so clients can show option text alongside reveal data. */
   revealedQuestions: StudentQuestion[]
 }

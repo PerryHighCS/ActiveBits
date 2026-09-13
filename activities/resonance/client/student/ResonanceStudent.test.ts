@@ -8,6 +8,7 @@ import { resolveSelfPacedSubmittedMessage } from './ResonanceStudent.js'
 import { hasActiveQuestionRunRestart } from './ResonanceStudent.js'
 import { shouldRetryRegistrationWithoutStudentId } from './ResonanceStudent.js'
 import { advanceEditSequenceForRevisit, resolveCurrentEditSequence } from './ResonanceStudent.js'
+import { seedEditSequenceFromConfirmedResponse } from './ResonanceStudent.js'
 
 void test('registration retries without a stale restored student id after authorization is lost', () => {
   assert.equal(shouldRetryRegistrationWithoutStudentId(403, 'student-1'), true)
@@ -53,6 +54,34 @@ void test('edit-sequence bookkeeping survives a QuestionView remount, unlike a c
 
   // A different question, or the same question in a new run, is independent.
   assert.equal(resolveCurrentEditSequence(byKey, 'q2', 1), 1)
+  assert.equal(resolveCurrentEditSequence(byKey, 'q1', 2), 1)
+})
+
+void test('seedEditSequenceFromConfirmedResponse recovers a post-reload counter from the server, instead of defaulting to 1 and colliding with an existing submission', () => {
+  // Without this seed, a page reload mid-run leaves editSequenceByKeyRef empty
+  // (it's only ever bumped in memory by a revisit click). resolveCurrentEditSequence
+  // would then default the next autosave to sequence 1 — but the confirmed
+  // response from *before* the reload is already at sequence 1, so the
+  // server's stale-draft guard (editSequence <= confirmed.editSequence) would
+  // silently drop the reloaded student's revision.
+  let byKey: Record<string, number> = {}
+  byKey = seedEditSequenceFromConfirmedResponse(byKey, 'q1', 1, 1)
+  assert.equal(resolveCurrentEditSequence(byKey, 'q1', 1), 2)
+
+  // A higher confirmed sequence (the student had already revisited before
+  // reloading) seeds a correspondingly higher floor.
+  byKey = seedEditSequenceFromConfirmedResponse(byKey, 'q2', 1, 3)
+  assert.equal(resolveCurrentEditSequence(byKey, 'q2', 1), 4)
+
+  // Seeding never lowers a counter already advanced further locally this
+  // session (e.g. a revisit click already happened before the next snapshot
+  // arrived and re-seeds from the same confirmed value).
+  byKey = advanceEditSequenceForRevisit(byKey, 'q2', 1)
+  assert.equal(resolveCurrentEditSequence(byKey, 'q2', 1), 5)
+  byKey = seedEditSequenceFromConfirmedResponse(byKey, 'q2', 1, 3)
+  assert.equal(resolveCurrentEditSequence(byKey, 'q2', 1), 5)
+
+  // A different run token is an independent counter, unaffected by seeding.
   assert.equal(resolveCurrentEditSequence(byKey, 'q1', 2), 1)
 })
 

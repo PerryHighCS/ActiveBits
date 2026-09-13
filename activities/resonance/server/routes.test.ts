@@ -4072,3 +4072,89 @@ void test('student state hides reviewed responses for annotated answers when the
 
   await sessions.close()
 })
+
+void test('student state reports each confirmed response\'s editSequence, so a reloaded client can seed its counter past it', async () => {
+  // A client that reloads mid-run has no in-memory edit-sequence bookkeeping
+  // (that counter only ever lived in a ref) and would otherwise default a
+  // post-reload revision to sequence 1. If a confirmed response is already at
+  // sequence 1+, that revision would be silently dropped as stale by the
+  // update-draft/submit-answer guard below. submittedResponseEditSequences
+  // lets the client seed its local counter from the server's authoritative
+  // value instead of guessing 1.
+  const app = createMockApp()
+  const ws = createMockWs()
+  const sessions = createSessionStore(null)
+  const now = Date.now()
+  const session: SessionRecord = {
+    id: 'resonance-session-reload-edit-sequence',
+    type: 'resonance',
+    created: now,
+    lastActivity: now,
+    data: {
+      instructorPasscode: 'TEACH123',
+      questions: [
+        {
+          id: 'q1',
+          type: 'free-response',
+          text: 'Explain your reasoning.',
+          order: 0,
+        },
+      ],
+      activeQuestionId: 'q1',
+      activeQuestionIds: ['q1'],
+      activeQuestionRunStartedAt: now - 5_000,
+      activeQuestionRunRevision: 1,
+      activeQuestionDeadlineAt: null,
+      students: {
+        student1: { studentId: 'student1', name: 'Ada Lovelace', joinedAt: now - 1_000 },
+      },
+      responses: [
+        {
+          id: 'r1',
+          questionId: 'q1',
+          studentId: 'student1',
+          submittedAt: now - 500,
+          activeQuestionRunRevision: 1,
+          editSequence: 2,
+          answer: {
+            type: 'free-response',
+            text: 'Revised before reload',
+          },
+        },
+      ],
+      responseDrafts: {},
+      annotations: {},
+      reveals: [],
+      sharedResponseReactions: {},
+      responseOrderOverrides: {},
+      persistentHash: null,
+    },
+  }
+  const studentCookies = issueStudentCookies(session, 'student1')
+  await sessions.set(session.id, session)
+
+  setupResonanceRoutes(app, sessions, ws)
+
+  const stateHandler = app.handlers.get['/api/resonance/:sessionId/state']
+  assert.equal(typeof stateHandler, 'function')
+
+  const res = createResponse()
+  await stateHandler?.(
+    {
+      params: { sessionId: session.id },
+      query: {
+        studentId: 'student1',
+      },
+      cookies: studentCookies,
+    },
+    res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  const body = res.body as {
+    submittedResponseEditSequences?: Record<string, number>
+  }
+  assert.equal(body.submittedResponseEditSequences?.q1, 2)
+
+  await sessions.close()
+})

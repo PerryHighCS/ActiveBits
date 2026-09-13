@@ -1268,6 +1268,14 @@ function buildStudentSnapshotWithMode(
             .filter((response) => response.studentId === viewerStudentId)
             .map((response) => [response.questionId, response.answer] satisfies [string, Response['answer']]),
         )
+  const submittedResponseEditSequences =
+    viewerStudentId === null
+      ? {}
+      : Object.fromEntries(
+          session.data.responses
+            .filter((response) => response.studentId === viewerStudentId)
+            .map((response) => [response.questionId, response.editSequence ?? 0] satisfies [string, number]),
+        )
   const reviewedResponses =
     viewerStudentId === null
       ? []
@@ -1309,6 +1317,7 @@ function buildStudentSnapshotWithMode(
     ],
     reviewedResponses,
     submittedAnswers,
+    submittedResponseEditSequences,
     revealedQuestions,
   }
 }

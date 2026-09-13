@@ -90,6 +90,29 @@ export function advanceEditSequenceForRevisit(
   return { ...editSequenceByKey, [key]: (editSequenceByKey[key] ?? 1) + 1 }
 }
 
+/**
+ * This in-memory counter has no local history to build on right after a page
+ * reload, so it would otherwise default a post-reload revision to sequence 1
+ * — colliding with (or trailing) a confirmed response the server already has
+ * at sequence 1+, and having the revision silently dropped as stale by the
+ * server's draft guard. Seed the counter from the server-confirmed response's
+ * own editSequence (floor = confirmed + 1) whenever it would otherwise leave
+ * a lower value in place; never lowers an already-advanced local counter.
+ */
+export function seedEditSequenceFromConfirmedResponse(
+  editSequenceByKey: Record<string, number>,
+  questionId: string,
+  runToken: number | null,
+  confirmedEditSequence: number,
+): Record<string, number> {
+  const key = buildEditSequenceKey(questionId, runToken)
+  const floor = confirmedEditSequence + 1
+  if ((editSequenceByKey[key] ?? 1) >= floor) {
+    return editSequenceByKey
+  }
+  return { ...editSequenceByKey, [key]: floor }
+}
+
 export function resolveQuestionAnswer(params: {
   localAnswers: Record<string, AnswerPayload | null>
   snapshotAnswers: Record<string, AnswerPayload>
@@ -361,6 +384,20 @@ export default function ResonanceStudent() {
     const activeRunStartedAt = snapshot.activeQuestionRunStartedAt
     const activeIds = snapshot.activeQuestions.map((question) => question.id)
     const previousActiveIds = previousActiveQuestionIdsRef.current
+
+    const runToken = snapshot.activeQuestionRunRevision ?? activeRunStartedAt
+    for (const questionId of activeIds) {
+      const confirmedEditSequence = snapshot.submittedResponseEditSequences[questionId]
+      if (confirmedEditSequence !== undefined) {
+        editSequenceByKeyRef.current = seedEditSequenceFromConfirmedResponse(
+          editSequenceByKeyRef.current,
+          questionId,
+          runToken,
+          confirmedEditSequence,
+        )
+      }
+    }
+
     const reactivatedIds = hasObservedSnapshot
       ? activeIds.filter((questionId) => !previousActiveIds.includes(questionId))
       : []
