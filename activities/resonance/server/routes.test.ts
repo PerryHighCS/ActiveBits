@@ -1006,6 +1006,7 @@ void test('a draft made after revisiting an already-submitted question in the sa
       draftId: 'revisit-draft',
       activeQuestionRunRevision: 1,
       editSequence: 2,
+      draftGeneration: 2,
       answer: { type: 'free-response', text: 'Revised answer, not yet resubmitted' },
     },
   }))
@@ -1034,9 +1035,25 @@ void test('a draft made after revisiting an already-submitted question in the sa
       updatedAt: undefined,
       activeQuestionRunRevision: 1,
       editSequence: 2,
+      draftGeneration: 2,
       answer: { type: 'free-response', text: 'Revised answer, not yet resubmitted' },
     },
   )
+  console.info('[TEST] a delayed lower-generation draft must be acknowledged without replacing the newer persisted draft')
+  messageHandlers[0]?.(JSON.stringify({
+    type: 'resonance:update-draft',
+    payload: {
+      studentId: 'student1', questionId: 'q1', draftId: 'stale-generation-draft',
+      activeQuestionRunRevision: 1, editSequence: 2, draftGeneration: 1,
+      answer: { type: 'free-response', text: 'Older delayed draft' },
+    },
+  }))
+  await waitForCondition(() => sentMessages.some((message) =>
+    message.type === 'resonance:draft-saved' && message.payload?.draftId === 'stale-generation-draft'
+  ))
+  const preserved = (await sessions.get(session.id))?.data as { responseDrafts?: Record<string, { answer?: unknown; draftGeneration?: number }> }
+  assert.equal(preserved.responseDrafts?.['q1:student1']?.draftGeneration, 2)
+  assert.deepEqual(preserved.responseDrafts?.['q1:student1']?.answer, { type: 'free-response', text: 'Revised answer, not yet resubmitted' })
   // The confirmed response is untouched until the student resubmits or the
   // deadline finalizes the pending draft.
   assert.deepEqual(storedData?.responses?.[0]?.answer, {
