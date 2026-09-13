@@ -462,6 +462,15 @@ export function shouldApplyStudentSessionSnapshot(
 
   if (latestActiveQuestionRunRevision === null) return true
 
+  if (current.activeQuestionRunRevision === null) {
+    // `current` already reflects the end of the run at `latestActiveQuestionRunRevision`
+    // (an idle/self-paced snapshot admitted above). A live candidate at or
+    // below that watermark isn't a new activation — it's a delayed message
+    // from the run that just ended — since a genuine next activation always
+    // gets a strictly higher revision (see nextActiveQuestionRunRevision).
+    return candidate.activeQuestionRunRevision > latestActiveQuestionRunRevision
+  }
+
   return candidate.activeQuestionRunRevision >= latestActiveQuestionRunRevision
 }
 

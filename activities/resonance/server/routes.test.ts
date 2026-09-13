@@ -583,6 +583,92 @@ void test('self-paced students can persist drafts and submit without an active r
   await sessions.close()
 })
 
+void test('a self-paced draft that arrives after its submission is dropped, not resurrected by a lost null run revision', async () => {
+  // Self-paced responses are stored with activeQuestionRunRevision explicitly
+  // null (there's no live run). Every session read re-normalizes stored data
+  // (normalizeStoredResponses), which used to coerce that null to undefined —
+  // so the very next read after a submission broke the stale-draft guard's
+  // `response.activeQuestionRunRevision === session.data.activeQuestionRunRevision`
+  // comparison (undefined !== null) and let a late pre-submission draft
+  // resurrect an already-submitted self-paced answer.
+  const app = createMockApp()
+  const sessions = createSessionStore(null)
+  const session = createMultiQuestionSession()
+  session.data.selfPacedMode = true
+  const studentCookies = issueStudentCookies(session, 'student1')
+  await sessions.set(session.id, session)
+  const captured = createCapturingMockWs()
+  setupResonanceRoutes(app, sessions, captured.ws)
+
+  const handler = captured.getHandler()
+  const messageHandlers: Array<(message: string) => void> = []
+  const sentMessages: Array<{ type?: string; payload?: { draftId?: string } }> = []
+  assert.ok(handler)
+  handler({
+    readyState: 1,
+    upgradeHeaders: {
+      cookie: Object.entries(studentCookies).map(([name, value]) => `${name}=${value}`).join('; '),
+    },
+    send(message: string) {
+      sentMessages.push(JSON.parse(message) as { type?: string; payload?: { draftId?: string } })
+    },
+    on(event: string, callback: (message: string) => void) {
+      if (event === 'message') messageHandlers.push(callback)
+    },
+    once() {},
+    close() {},
+    terminate() {},
+    ping() {},
+  }, new URLSearchParams({ sessionId: session.id, role: 'student', studentId: 'student1' }), captured.ws.wss)
+  await waitForCondition(() => messageHandlers.length === 1)
+
+  // A self-paced session read (e.g. the WS connection handshake above)
+  // re-normalizes stored data at least once before the submission below, just
+  // like it would on any subsequent request in production.
+  const submitRes = createResponse()
+  await app.handlers.post['/api/resonance/:sessionId/submit-answer']?.({
+    params: { sessionId: session.id },
+    cookies: studentCookies,
+    body: {
+      studentId: 'student1',
+      questionId: 'q1',
+      activeQuestionRunStartedAt: null,
+      editSequence: 1,
+      answer: { type: 'free-response', text: 'Submitted answer' },
+    },
+  }, submitRes)
+  assert.equal(submitRes.statusCode, 200)
+
+  console.info('[TEST] a self-paced draft delivered after its own submission must not resurrect a stale answer')
+  messageHandlers[0]?.(JSON.stringify({
+    type: 'resonance:update-draft',
+    payload: {
+      studentId: 'student1',
+      questionId: 'q1',
+      draftId: 'late-self-paced-draft',
+      activeQuestionRunStartedAt: null,
+      editSequence: 1,
+      answer: { type: 'free-response', text: 'Stale pre-submission draft' },
+    },
+  }))
+  await waitForCondition(() => sentMessages.some((message) =>
+    message.type === 'resonance:draft-saved' && message.payload?.draftId === 'late-self-paced-draft'
+  ))
+
+  const stored = await sessions.get(session.id)
+  const storedData = stored?.data as {
+    responses?: Array<{ answer?: unknown }>
+    responseDrafts?: Record<string, unknown>
+  } | undefined
+  assert.equal(Object.keys(storedData?.responseDrafts ?? {}).length, 0)
+  assert.deepEqual(storedData?.responses?.[0]?.answer, {
+    type: 'free-response',
+    text: 'Submitted answer',
+  })
+
+  await sessions.close()
+})
+
 void test('a draft that arrives after its submission is dropped instead of resurrecting a stale answer', async () => {
   const app = createMockApp()
   const sessions = createSessionStore(null)
@@ -2306,6 +2392,43 @@ void test('student state exposes multiple-choice selectionMode based on the auth
     { id: 'q1', selectionMode: 'single' },
     { id: 'q2', selectionMode: 'multiple' },
   ])
+
+  await sessions.close()
+})
+
+void test('responses route reports the highest-ever run revision even after the active run ends', async () => {
+  // The instructor client needs this watermark to order a delayed pre-timeout
+  // snapshot against the finalized (revision-null) state, the same way
+  // students already do — see shouldApplyInstructorSnapshot.
+  const app = createMockApp()
+  const ws = createMockWs()
+  const sessions = createSessionStore(null)
+  const session = createInstructorResonanceSession()
+  session.data.activeQuestionIds = []
+  session.data.activeQuestionRunRevision = null
+  session.data.lastActiveQuestionRunRevision = 3
+  await sessions.set(session.id, session)
+
+  setupResonanceRoutes(app, sessions, ws)
+
+  const handler = app.handlers.get['/api/resonance/:sessionId/responses']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.(
+    {
+      params: { sessionId: session.id },
+      headers: {
+        'x-instructor-passcode': 'TEACH123',
+      },
+    },
+    res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  const body = res.body as { activeQuestionRunRevision?: number | null; lastActiveQuestionRunRevision?: number | null }
+  assert.equal(body.activeQuestionRunRevision, null)
+  assert.equal(body.lastActiveQuestionRunRevision, 3)
 
   await sessions.close()
 })

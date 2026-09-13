@@ -279,6 +279,41 @@ void test('shouldApplyStudentSessionSnapshot accepts an idle snapshot that refle
   assert.equal(shouldApplyStudentSessionSnapshot(current, idleAfterRun, 2), true)
 })
 
+void test('shouldApplyStudentSessionSnapshot rejects a delayed live snapshot from the run that just ended, even at the same revision', () => {
+  // The idle snapshot below is itself the acceptance that run 2 just ended
+  // (see the "reflects the observed run ending" test above). A live-shaped
+  // candidate that still reports revision 2 isn't a new activation — it's a
+  // message queued before that ending was observed — because a genuine next
+  // activation always gets a strictly higher revision than any prior one
+  // (see nextActiveQuestionRunRevision on the server). Only `>` a legitimate
+  // reactivation, not `>=`, distinguishes it from this stale duplicate.
+  const idleAfterRun = normalizeStudentSessionSnapshot({
+    sessionId: 'session-1',
+    activeQuestionIds: [],
+    activeQuestionRunStartedAt: null,
+    activeQuestionRunRevision: null,
+    lastActiveQuestionRunRevision: 2,
+  })
+  const delayedSameRevision = normalizeStudentSessionSnapshot({
+    sessionId: 'session-1',
+    activeQuestionIds: ['q1'],
+    activeQuestionRunStartedAt: 2_000,
+    activeQuestionRunRevision: 2,
+  })
+  const genuineNextActivation = normalizeStudentSessionSnapshot({
+    sessionId: 'session-1',
+    activeQuestionIds: ['q2'],
+    activeQuestionRunStartedAt: 3_000,
+    activeQuestionRunRevision: 3,
+  })
+
+  assert.ok(idleAfterRun)
+  assert.ok(delayedSameRevision)
+  assert.ok(genuineNextActivation)
+  assert.equal(shouldApplyStudentSessionSnapshot(idleAfterRun, delayedSameRevision, 2), false)
+  assert.equal(shouldApplyStudentSessionSnapshot(idleAfterRun, genuineNextActivation, 2), true)
+})
+
 void test('resolveObservedRunRevision prefers lastActiveQuestionRunRevision over the live revision', () => {
   const idleAfterRuns = normalizeStudentSessionSnapshot({
     sessionId: 'session-1',

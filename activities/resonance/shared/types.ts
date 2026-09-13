@@ -181,6 +181,13 @@ export interface InstructorSessionSnapshot {
   activeQuestionRunStartedAt: number | null
   activeQuestionRunRevision: number | null
   activeQuestionDeadlineAt: number | null
+  /**
+   * Highest live-run revision this session has ever assigned, independent of
+   * `activeQuestionRunRevision` resetting to null once a run ends. Lets an
+   * instructor client order an ended-run snapshot against a delayed message
+   * from the run that just ended, the same way `StudentSessionSnapshot` does.
+   */
+  lastActiveQuestionRunRevision: number | null
   students: Student[]
   responses: ResponseWithName[]
   progress: ResponseProgress[]

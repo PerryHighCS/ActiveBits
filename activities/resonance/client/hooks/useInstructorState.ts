@@ -154,6 +154,10 @@ export function normalizeInstructorStateSnapshot(
       typeof data.activeQuestionDeadlineAt === 'number' && Number.isFinite(data.activeQuestionDeadlineAt)
         ? data.activeQuestionDeadlineAt
         : null,
+    lastActiveQuestionRunRevision:
+      typeof data.lastActiveQuestionRunRevision === 'number' && Number.isSafeInteger(data.lastActiveQuestionRunRevision)
+        ? data.lastActiveQuestionRunRevision
+        : null,
     students: Array.isArray(data.students) ? data.students : [],
     responses,
     progress,
@@ -169,6 +173,74 @@ export function normalizeInstructorStateSnapshot(
 }
 
 /**
+ * The highest live-run revision a snapshot reflects, for advancing the
+ * client's ordering watermark. Mirrors `resolveObservedRunRevision` for
+ * students: `lastActiveQuestionRunRevision` is the server's monotonic max and
+ * already subsumes `activeQuestionRunRevision` (which resets to null once a
+ * run ends).
+ */
+export function resolveObservedInstructorRunRevision(snapshot: InstructorStateSnapshot): number | null {
+  return snapshot.lastActiveQuestionRunRevision ?? snapshot.activeQuestionRunRevision
+}
+
+/**
+ * Reject a delayed instructor snapshot that would restore an earlier run than
+ * one already observed. A REST `/responses` request begun just before a
+ * timeout finalizes can resolve after the WS `resonance:instructor-state`
+ * broadcast for that finalization — without this check, `setSnapshot` would
+ * apply that stale pre-expiry data unconditionally and, since REST polling is
+ * stopped while the socket is open, the stale view could persist indefinitely.
+ */
+export function shouldApplyInstructorSnapshot(
+  current: InstructorStateSnapshot | null,
+  candidate: InstructorStateSnapshot,
+  latestActiveQuestionRunRevision: number | null = current ? resolveObservedInstructorRunRevision(current) : null,
+): boolean {
+  if (current === null || current.sessionId !== candidate.sessionId) {
+    return true
+  }
+
+  if (latestActiveQuestionRunRevision === null) return true
+
+  if (candidate.activeQuestionRunRevision === null) {
+    // An ended-run/idle candidate carries no live revision of its own, but
+    // still stamps the highest live revision it has ever assigned. Accept it
+    // only when that stamp is at least as recent as what's already observed.
+    return (
+      candidate.lastActiveQuestionRunRevision !== null &&
+      candidate.lastActiveQuestionRunRevision >= latestActiveQuestionRunRevision
+    )
+  }
+
+  if (current.activeQuestionRunRevision === null) {
+    // `current` already reflects the end of the run at
+    // `latestActiveQuestionRunRevision`. A live candidate at or below that
+    // watermark isn't a new activation — it's a delayed message from the run
+    // that just ended — since a genuine next activation always gets a
+    // strictly higher revision (see nextActiveQuestionRunRevision).
+    return candidate.activeQuestionRunRevision > latestActiveQuestionRunRevision
+  }
+
+  return candidate.activeQuestionRunRevision >= latestActiveQuestionRunRevision
+}
+
+export function isLatestInstructorSnapshotRequest(requestId: number, latestRequestId: number): boolean {
+  return requestId === latestRequestId
+}
+
+export function selectInstructorSnapshot(
+  current: InstructorStateSnapshot | null,
+  candidate: InstructorStateSnapshot,
+  latestActiveQuestionRunRevision?: number | null,
+): { snapshot: InstructorStateSnapshot | null; accepted: boolean } {
+  const accepted = shouldApplyInstructorSnapshot(current, candidate, latestActiveQuestionRunRevision)
+  return {
+    snapshot: accepted ? candidate : current,
+    accepted,
+  }
+}
+
+/**
  * Connects to the Resonance WebSocket as an instructor for real-time session state.
  * Falls back to REST polling while the WebSocket is reconnecting.
  */
@@ -178,14 +250,19 @@ export function useInstructorState(sessionId: string | null, passcode: string | 
   const [error, setError] = useState<string | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
   const mountedRef = useRef(true)
+  const latestSnapshotRequestRef = useRef(0)
+  const snapshotRef = useRef<InstructorStateSnapshot | null>(null)
+  const latestActiveQuestionRunRevisionRef = useRef<number | null>(null)
 
   const fetchSnapshot = useCallback(async () => {
     if (sessionId === null || passcode === null) return
+    const requestId = latestSnapshotRequestRef.current + 1
+    latestSnapshotRequestRef.current = requestId
     try {
       const resp = await fetch(`/api/resonance/${sessionId}/responses`, {
         headers: { 'X-Instructor-Passcode': passcode },
       })
-      if (!mountedRef.current) return
+      if (!mountedRef.current || !isLatestInstructorSnapshotRequest(requestId, latestSnapshotRequestRef.current)) return
       if (resp.status === 403) {
         setError('Invalid instructor passcode')
         setLoading(false)
@@ -210,18 +287,32 @@ export function useInstructorState(sessionId: string | null, passcode: string | 
         reveals: QuestionReveal[]
         responseOrderOverrides: Record<string, string[]>
       }
-      if (!mountedRef.current) return
+      if (!mountedRef.current || !isLatestInstructorSnapshotRequest(requestId, latestSnapshotRequestRef.current)) return
       const normalized = normalizeInstructorStateSnapshot(data)
       if (!normalized) {
         setError('Could not load session data')
         setLoading(false)
         return
       }
-      setSnapshot(normalized)
+      const selection = selectInstructorSnapshot(
+        snapshotRef.current,
+        normalized,
+        latestActiveQuestionRunRevisionRef.current,
+      )
+      snapshotRef.current = selection.snapshot
+      if (selection.accepted) {
+        const observedRevision = resolveObservedInstructorRunRevision(normalized)
+        if (observedRevision !== null) {
+          latestActiveQuestionRunRevisionRef.current = observedRevision
+        }
+      }
+      setSnapshot(selection.snapshot)
       setError(null)
       setLoading(false)
     } catch {
-      if (mountedRef.current) setError('Network error — retrying…')
+      if (mountedRef.current && isLatestInstructorSnapshotRequest(requestId, latestSnapshotRequestRef.current)) {
+        setError('Network error — retrying…')
+      }
     }
   }, [sessionId, passcode])
 
@@ -275,7 +366,19 @@ export function useInstructorState(sessionId: string | null, passcode: string | 
           if (msg.type === 'resonance:instructor-state' && msg.payload !== undefined) {
             const normalized = normalizeInstructorStateSnapshot(msg.payload as Partial<InstructorStateSnapshot>)
             if (normalized) {
-              setSnapshot(normalized)
+              const selection = selectInstructorSnapshot(
+                snapshotRef.current,
+                normalized,
+                latestActiveQuestionRunRevisionRef.current,
+              )
+              snapshotRef.current = selection.snapshot
+              if (selection.accepted) {
+                const observedRevision = resolveObservedInstructorRunRevision(normalized)
+                if (observedRevision !== null) {
+                  latestActiveQuestionRunRevisionRef.current = observedRevision
+                }
+              }
+              setSnapshot(selection.snapshot)
             }
             setLoading(false)
             setError(null)

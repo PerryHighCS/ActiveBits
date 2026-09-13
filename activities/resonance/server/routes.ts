@@ -752,9 +752,11 @@ function normalizeStoredResponses(
         ? Math.round(rawResponse.submittedAt)
         : 0
     const answer = normalizeDraftAnswerPayload(rawResponse.answer, questionsById, questionId)
-    const activeQuestionRunRevision =
-      typeof rawResponse.activeQuestionRunRevision === 'number' &&
-      Number.isSafeInteger(rawResponse.activeQuestionRunRevision)
+    const activeQuestionRunRevision = rawResponse.activeQuestionRunRevision === null
+      ? null
+      : typeof rawResponse.activeQuestionRunRevision === 'number' &&
+          Number.isSafeInteger(rawResponse.activeQuestionRunRevision) &&
+          rawResponse.activeQuestionRunRevision > 0
         ? rawResponse.activeQuestionRunRevision
         : undefined
     const editSequence = resolveEditSequence(rawResponse.editSequence)
@@ -1433,6 +1435,8 @@ function buildInstructorSnapshot(session: ResonanceSession) {
     activeQuestionRunStartedAt,
     activeQuestionRunRevision,
     activeQuestionDeadlineAt,
+    lastActiveQuestionRunRevision:
+      session.data.lastActiveQuestionRunRevision > 0 ? session.data.lastActiveQuestionRunRevision : null,
     students: Object.values(students),
     responses: orderedResponses.map((r) => ({
       ...r,
