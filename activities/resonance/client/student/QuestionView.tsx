@@ -249,7 +249,9 @@ export default function QuestionView({
 
       if (
         submissionAttempt !== submissionAttemptRef.current ||
-        submissionRunRevision !== activeQuestionRunRevisionRef.current
+        submissionRunRevision !== activeQuestionRunRevisionRef.current ||
+        sessionIdRef.current !== sessionId ||
+        studentIdRef.current !== studentId
       ) {
         return
       }
@@ -267,14 +269,18 @@ export default function QuestionView({
     } catch {
       if (
         submissionAttempt === submissionAttemptRef.current &&
-        submissionRunRevision === activeQuestionRunRevisionRef.current
+        submissionRunRevision === activeQuestionRunRevisionRef.current &&
+        sessionIdRef.current === sessionId &&
+        studentIdRef.current === studentId
       ) {
         setError('Network error — please try again')
       }
     } finally {
       if (
         submissionAttempt === submissionAttemptRef.current &&
-        submissionRunRevision === activeQuestionRunRevisionRef.current
+        submissionRunRevision === activeQuestionRunRevisionRef.current &&
+        sessionIdRef.current === sessionId &&
+        studentIdRef.current === studentId
       ) {
         setSubmitting(false)
       }
