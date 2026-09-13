@@ -478,13 +478,16 @@ void test('self-paced students can persist drafts and submit without an active r
 
   const handler = captured.getHandler()
   const messageHandlers: Array<(message: string) => void> = []
+  const sentMessages: Array<{ type?: string; payload?: { draftId?: string } }> = []
   assert.ok(handler)
   handler({
     readyState: 1,
     upgradeHeaders: {
       cookie: Object.entries(studentCookies).map(([name, value]) => `${name}=${value}`).join('; '),
     },
-    send() {},
+    send(message: string) {
+      sentMessages.push(JSON.parse(message) as { type?: string; payload?: { draftId?: string } })
+    },
     on(event: string, callback: (message: string) => void) {
       if (event === 'message') messageHandlers.push(callback)
     },
@@ -500,6 +503,7 @@ void test('self-paced students can persist drafts and submit without an active r
     payload: {
       studentId: 'student1',
       questionId: 'q1',
+      draftId: 'draft-1',
       activeQuestionRunStartedAt: null,
       answer: { type: 'free-response', text: 'Self-paced draft' },
     },
@@ -509,6 +513,9 @@ void test('self-paced students can persist drafts and submit without an active r
     const storedData = stored?.data as { responseDrafts?: Record<string, unknown> } | undefined
     return storedData?.responseDrafts?.['q1:student1'] !== undefined
   })
+  await waitForCondition(() => sentMessages.some((message) =>
+    message.type === 'resonance:draft-saved' && message.payload?.draftId === 'draft-1'
+  ))
 
   const submitRes = createResponse()
   await app.handlers.post['/api/resonance/:sessionId/submit-answer']?.({

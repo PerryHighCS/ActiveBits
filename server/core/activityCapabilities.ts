@@ -50,6 +50,18 @@ function hashCapability(token: string): string {
   return createHash('sha256').update(token).digest('base64url')
 }
 
+function isUsableActivityCapabilityRecord(value: unknown, now: number): value is ActivityCapabilityRecord {
+  return (
+    isRecord(value) &&
+    typeof value.id === 'string' &&
+    typeof value.tokenHash === 'string' &&
+    (value.principalKind === 'manager' || value.principalKind === 'participant') &&
+    typeof value.expiresAt === 'number' &&
+    Number.isFinite(value.expiresAt) &&
+    value.expiresAt > now
+  )
+}
+
 function cookieScope(sessionId: string): string {
   return Buffer.from(sessionId, 'utf8').toString('base64url')
 }
@@ -100,12 +112,7 @@ export function tryIssueActivityCapability(
   const container = getContainer(session)
   container.activityCapabilities ??= {}
   for (const [id, capability] of Object.entries(container.activityCapabilities)) {
-    if (
-      isRecord(capability) &&
-      typeof capability.expiresAt === 'number' &&
-      Number.isFinite(capability.expiresAt) &&
-      capability.expiresAt <= now
-    ) {
+    if (!isUsableActivityCapabilityRecord(capability, now)) {
       delete container.activityCapabilities[id]
     }
   }
@@ -227,9 +234,7 @@ export function resolveActivityCapability(
   if (!isRecord(capabilities)) return null
   const tokenHash = hashCapability(token)
   for (const value of Object.values(capabilities)) {
-    if (!isRecord(value) || value.tokenHash !== tokenHash || value.principalKind !== principalKind || typeof value.id !== 'string') continue
-    // A capability without a finite, unreached expiry is not a valid principal.
-    if (typeof value.expiresAt !== 'number' || !Number.isFinite(value.expiresAt) || value.expiresAt <= now) return null
+    if (!isUsableActivityCapabilityRecord(value, now) || value.tokenHash !== tokenHash || value.principalKind !== principalKind) continue
     return {
       kind: principalKind,
       sessionId,

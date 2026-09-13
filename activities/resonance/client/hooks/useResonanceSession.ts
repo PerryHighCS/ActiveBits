@@ -15,6 +15,7 @@ import type {
 } from '../../shared/types.js'
 
 const FALLBACK_POLL_INTERVAL_MS = 15_000
+const DRAFT_SAVE_ACK_TIMEOUT_MS = 2_000
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value != null && typeof value === 'object' && !Array.isArray(value)
@@ -389,9 +390,7 @@ export function normalizeStudentSessionSnapshot(
     activeQuestionRunRevision:
       typeof data.activeQuestionRunRevision === 'number' && Number.isSafeInteger(data.activeQuestionRunRevision)
         ? data.activeQuestionRunRevision
-        : typeof data.activeQuestionRunStartedAt === 'number' && Number.isFinite(data.activeQuestionRunStartedAt)
-          ? data.activeQuestionRunStartedAt
-          : null,
+        : null,
     activeQuestionDeadlineAt:
       typeof data.activeQuestionDeadlineAt === 'number' && Number.isFinite(data.activeQuestionDeadlineAt)
         ? data.activeQuestionDeadlineAt
@@ -424,14 +423,24 @@ export function shouldApplyStudentSessionSnapshot(
   candidate: StudentSessionSnapshot,
   latestActiveQuestionRunRevision: number | null = current?.activeQuestionRunRevision ?? null,
 ): boolean {
-  if (
-    current === null ||
-    current.sessionId !== candidate.sessionId ||
-    candidate.activeQuestionRunRevision === null ||
-    latestActiveQuestionRunRevision === null
-  ) {
+  if (current === null || current.sessionId !== candidate.sessionId) {
     return true
   }
+
+  // Idle snapshots remain valid after a live revision; they represent the
+  // authoritative transition after a question closes. Active legacy snapshots
+  // cannot supersede a run once an explicit monotonic revision was observed.
+  if (candidate.activeQuestionIds.length === 0) return true
+
+  if (candidate.activeQuestionRunRevision === null) {
+    if (latestActiveQuestionRunRevision !== null) return false
+    if (current.activeQuestionIds.length === 0) return true
+    const candidateStartedAt = candidate.activeQuestionRunStartedAt
+    const currentStartedAt = current.activeQuestionRunStartedAt
+    return candidateStartedAt === null || currentStartedAt === null || candidateStartedAt >= currentStartedAt
+  }
+
+  if (latestActiveQuestionRunRevision === null) return true
 
   return candidate.activeQuestionRunRevision >= latestActiveQuestionRunRevision
 }
@@ -468,9 +477,19 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
   const latestSnapshotRequestRef = useRef(0)
   const snapshotRef = useRef<StudentSessionSnapshot | null>(null)
   const latestActiveQuestionRunRevisionRef = useRef<number | null>(null)
+  const draftSaveSequenceRef = useRef(0)
+  const pendingDraftSavesRef = useRef(new Map<string, {
+    resolve(saved: boolean): void
+    timeoutId: ReturnType<typeof setTimeout>
+  }>())
 
   useEffect(() => {
     latestSnapshotRequestRef.current += 1
+    for (const pending of pendingDraftSavesRef.current.values()) {
+      clearTimeout(pending.timeoutId)
+      pending.resolve(false)
+    }
+    pendingDraftSavesRef.current.clear()
     snapshotRef.current = null
     latestActiveQuestionRunRevisionRef.current = null
     setSnapshot(null)
@@ -580,6 +599,14 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
                 setError(null)
               }
             }
+          } else if (msg.type === 'resonance:draft-saved' && isRecord(msg.payload)) {
+            const draftId = typeof msg.payload.draftId === 'string' ? msg.payload.draftId : null
+            const pending = draftId !== null ? pendingDraftSavesRef.current.get(draftId) : undefined
+            if (pending && draftId !== null) {
+              clearTimeout(pending.timeoutId)
+              pendingDraftSavesRef.current.delete(draftId)
+              pending.resolve(true)
+            }
           } else if (
             msg.type === 'resonance:results-shared' ||
             msg.type === 'resonance:sharing-stopped' ||
@@ -634,5 +661,24 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
     return false
   }, [])
 
-  return { snapshot, loading, error, refresh: fetchSnapshot, sendMessage }
+  /** Persist a draft and resolve only once the server acknowledges its write. */
+  const saveDraft = useCallback((payload: Record<string, unknown>): Promise<boolean> => {
+    const currentWs = wsRef.current
+    if (currentWs?.readyState !== WebSocket.OPEN) return Promise.resolve(false)
+
+    const draftId = `draft-${++draftSaveSequenceRef.current}`
+    return new Promise((resolve) => {
+      const timeoutId = setTimeout(() => {
+        pendingDraftSavesRef.current.delete(draftId)
+        resolve(false)
+      }, DRAFT_SAVE_ACK_TIMEOUT_MS)
+      pendingDraftSavesRef.current.set(draftId, { resolve, timeoutId })
+      currentWs.send(JSON.stringify({
+        type: 'resonance:update-draft',
+        payload: { ...payload, draftId },
+      }))
+    })
+  }, [])
+
+  return { snapshot, loading, error, refresh: fetchSnapshot, sendMessage, saveDraft }
 }

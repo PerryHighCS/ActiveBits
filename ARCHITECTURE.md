@@ -302,7 +302,9 @@ through activity-specific props.
   and body student IDs are never authority. Live runs use a persisted monotonic revision for
   snapshot ordering and draft/submission admission, while their separate start timestamp remains
   the timing boundary. Timed runs install a server-owned deadline task when loaded or activated so
-  persisted drafts are finalized and broadcast without client activity.
+  persisted drafts are finalized and broadcast without client activity. Draft clients treat a
+  WebSocket write as persisted only after the server returns a correlated `resonance:draft-saved`
+  acknowledgement; an unacknowledged deadline-window draft is reconciled from the student snapshot.
 - Embedded instructor iframes receive a short-lived, server-issued manager-entry token only after
   the authenticated parent start response arrives. Credentialed children exchange it atomically for
   the child passcode and replace the iframe URL to remove the attempted token whether the exchange

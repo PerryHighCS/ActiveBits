@@ -2914,6 +2914,7 @@ export default function setupResonanceRoutes(
     payload: Record<string, unknown>,
     sessionId: string,
     clientStudentId: string | null | undefined,
+    socket: ResonanceSocket,
   ): Promise<void> {
     switch (type) {
       case 'resonance:submit-answer': {
@@ -3006,6 +3007,12 @@ export default function setupResonanceRoutes(
         }
         await sessions.set(sessionId, session)
         broadcastToRole('resonance:instructor-state', buildInstructorSnapshot(session), sessionId, true)
+        const draftId = typeof payload.draftId === 'string' && payload.draftId.length <= 128
+          ? payload.draftId
+          : null
+        if (draftId !== null) {
+          sendToSocket(socket, 'resonance:draft-saved', { draftId }, sessionId)
+        }
         break
       }
 
@@ -3193,7 +3200,7 @@ export default function setupResonanceRoutes(
             if (client.isInstructor) {
               await handleInstructorWsMessage(sess, msgType, msgPayload, sessionId)
             } else {
-              await handleStudentWsMessage(sess, msgType, msgPayload, sessionId, client.studentId)
+              await handleStudentWsMessage(sess, msgType, msgPayload, sessionId, client.studentId, client)
             }
           } catch (err) {
             console.error('[resonance] WS message handler error', { sessionId, err })

@@ -263,7 +263,7 @@ export default function ResonanceStudent() {
     }
   }, [sessionId, nameSubmitted, registered, studentName, studentId])
 
-  const { snapshot, loading: sessionLoading, error: sessionError, sendMessage } = useResonanceSession(
+  const { snapshot, loading: sessionLoading, error: sessionError, refresh, sendMessage, saveDraft } = useResonanceSession(
     registered && sessionId ? sessionId : null,
     studentId,
   )
@@ -516,11 +516,20 @@ export default function ResonanceStudent() {
                 isSubmitted={submittedQuestionIds.has(activeQuestion.id)}
                 submittedMessage={submittedMessage}
                 announceSubmittedMessage={!snapshot.selfPacedMode}
+                saveDraft={saveDraft}
                 onDraftChanged={(questionId, answer) => {
                   setSubmittedAnswers((current) => ({
                     ...current,
                     [questionId]: answer,
                   }))
+                }}
+                onDraftUnconfirmed={(questionId) => {
+                  setSubmittedAnswers((current) => {
+                    const next = { ...current }
+                    delete next[questionId]
+                    return next
+                  })
+                  void refresh()
                 }}
                 onSubmitted={(questionId, answer) => {
                   setSubmittedAnswers((current) => ({

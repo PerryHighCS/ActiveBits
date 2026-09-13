@@ -78,3 +78,16 @@ void test('non-evicting capability issuance preserves live principals at capacit
   assert.equal(tryIssueActivityCapability(session, 'participant', 'student-200', 2_000), null)
   assert.ok(resolveActivityCapability(session, 'session-a', 'participant', first.token, 2_000))
 })
+
+void test('non-evicting capability issuance removes invalid records before capacity checks', () => {
+  const session = { data: {
+    activityCapabilities: Object.fromEntries(
+      Array.from({ length: 200 }, (_, index) => [`invalid-${index}`, { id: `invalid-${index}` }]),
+    ),
+  } as Record<string, unknown> }
+
+  const issued = tryIssueActivityCapability(session, 'participant', 'student-1', 1_000)
+  assert.ok(issued)
+  const capabilities = session.data.activityCapabilities as Record<string, unknown>
+  assert.deepEqual(Object.keys(capabilities), [issued.id])
+})

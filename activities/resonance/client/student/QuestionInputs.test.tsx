@@ -579,6 +579,49 @@ void test('QuestionView flushes an edit made inside the final debounce window be
   }
 })
 
+void test('QuestionView reconciles an unacknowledged draft when the question expires', async () => {
+  const restoreDomEnvironment = installDomEnvironment()
+  const { fireEvent, render, waitFor } = await import('@testing-library/react')
+
+  try {
+    const question = {
+      id: 'q1',
+      type: 'free-response' as const,
+      text: 'Explain your reasoning.',
+      order: 0,
+    }
+    let unconfirmedCount = 0
+    let saveCount = 0
+    const props = {
+      question,
+      sessionId: 'session-1',
+      studentId: 'student-1',
+      activeQuestionRunStartedAt: 1_000,
+      activeQuestionDeadlineAt: Date.now() + 300,
+      saveDraft: async () => {
+        saveCount += 1
+        return false
+      },
+      onDraftUnconfirmed: () => {
+        unconfirmedCount += 1
+      },
+    }
+    const rendered = render(React.createElement(QuestionView, props))
+
+    fireEvent.change(rendered.getByLabelText(/your answer/i), {
+      target: { value: 'Unacknowledged revision' },
+    })
+    await waitFor(() => assert.equal(saveCount, 1), { timeout: 1_000 })
+    assert.equal(unconfirmedCount, 0)
+
+    rendered.rerender(React.createElement(QuestionView, { ...props, disabled: true }))
+    await waitFor(() => assert.equal(unconfirmedCount, 1))
+    rendered.unmount()
+  } finally {
+    restoreDomEnvironment()
+  }
+})
+
 void test('QuestionView shows only the stem for staged MCQs before choices are revealed', async () => {
   const restoreDomEnvironment = installDomEnvironment()
   const { render } = await import('@testing-library/react')

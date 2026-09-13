@@ -18,8 +18,10 @@ interface Props {
   submittedMessage?: string
   announceSubmittedMessage?: boolean
   onDraftChanged?(questionId: string, answer: AnswerPayload | null): void
+  onDraftUnconfirmed?(questionId: string): void
   onSubmitted?(questionId: string, answer: AnswerPayload): void
   sendMessage?(type: string, payload: unknown): boolean
+  saveDraft?(payload: Record<string, unknown>): Promise<boolean>
 }
 
 const DRAFT_PUSH_DELAY_MS = 1500
@@ -48,14 +50,18 @@ export default function QuestionView({
   submittedMessage = 'Answer submitted.',
   announceSubmittedMessage = true,
   onDraftChanged,
+  onDraftUnconfirmed,
   onSubmitted,
   sendMessage,
+  saveDraft,
 }: Props) {
   const activeQuestionRunToken = activeQuestionRunRevision ?? activeQuestionRunStartedAt
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [draftAnswer, setDraftAnswer] = useState<AnswerPayload | null>(initialAnswer)
+  const draftAnswerRef = useRef(draftAnswer)
   const lastSentDraftRef = useRef<AnswerPayload | null>(null)
+  const hasUnconfirmedDraftRef = useRef(false)
   const initialAnswerRef = useRef(initialAnswer)
   const synchronizedInitialAnswerRef = useRef(initialAnswer)
   const submissionAttemptRef = useRef(0)
@@ -63,6 +69,7 @@ export default function QuestionView({
   const activeQuestionRunRevisionRef = useRef(activeQuestionRunToken)
   const draftAnswerRunRevisionRef = useRef<number | null>(null)
   initialAnswerRef.current = initialAnswer
+  draftAnswerRef.current = draftAnswer
   disabledRef.current = disabled
   activeQuestionRunRevisionRef.current = activeQuestionRunToken
   const isWaitingForChoices =
@@ -73,7 +80,15 @@ export default function QuestionView({
     lastSentDraftRef.current = initialAnswerRef.current
     synchronizedInitialAnswerRef.current = initialAnswerRef.current
     draftAnswerRunRevisionRef.current = null
+    hasUnconfirmedDraftRef.current = false
   }, [question.id, activeQuestionRunToken, isSubmitted])
+
+  useEffect(() => {
+    if (disabled && hasUnconfirmedDraftRef.current) {
+      hasUnconfirmedDraftRef.current = false
+      onDraftUnconfirmed?.(question.id)
+    }
+  }, [disabled, onDraftUnconfirmed, question.id])
 
   useEffect(() => {
     submissionAttemptRef.current += 1
@@ -99,7 +114,7 @@ export default function QuestionView({
       disabled ||
       isWaitingForChoices ||
       isSubmitted ||
-      !sendMessage ||
+      (!saveDraft && !sendMessage) ||
       isSameAnswer(draftAnswer, lastSentDraftRef.current)
     ) {
       return
@@ -107,15 +122,36 @@ export default function QuestionView({
 
     const pendingDraft = draftAnswer
     const sendDraft = () => {
-      const sent = sendMessage('resonance:update-draft', {
+      const payload = {
         studentId,
         questionId: question.id,
         ...(activeQuestionRunRevision !== null
           ? { activeQuestionRunRevision: activeQuestionRunToken }
           : { activeQuestionRunStartedAt: activeQuestionRunToken }),
         answer: pendingDraft,
-      })
-      if (sent) {
+      }
+      if (saveDraft) {
+        void saveDraft(payload).then((saved) => {
+          if (
+            activeQuestionRunRevisionRef.current !== activeQuestionRunToken ||
+            !isSameAnswer(draftAnswerRef.current, pendingDraft)
+          ) {
+            return
+          }
+          if (saved) {
+            lastSentDraftRef.current = pendingDraft
+            hasUnconfirmedDraftRef.current = false
+          } else {
+            hasUnconfirmedDraftRef.current = true
+            if (disabledRef.current || (activeQuestionDeadlineAt !== null && Date.now() >= activeQuestionDeadlineAt)) {
+              hasUnconfirmedDraftRef.current = false
+              onDraftUnconfirmed?.(question.id)
+            }
+          }
+        })
+        return
+      }
+      if (sendMessage?.('resonance:update-draft', payload)) {
         lastSentDraftRef.current = pendingDraft
       }
     }
@@ -144,7 +180,7 @@ export default function QuestionView({
         sendDraft()
       }
     }
-  }, [activeQuestionDeadlineAt, activeQuestionRunRevision, activeQuestionRunToken, disabled, draftAnswer, isSubmitted, isWaitingForChoices, question.id, sendMessage, studentId])
+  }, [activeQuestionDeadlineAt, activeQuestionRunRevision, activeQuestionRunToken, disabled, draftAnswer, isSubmitted, isWaitingForChoices, onDraftUnconfirmed, question.id, saveDraft, sendMessage, studentId])
 
   async function submitAnswer(
     answer: { type: 'free-response'; text: string } | { type: 'multiple-choice'; selectedOptionIds: string[] },

@@ -92,6 +92,25 @@ void test('shouldApplyStudentSessionSnapshot rejects an older revision when two 
   assert.equal(shouldApplyStudentSessionSnapshot(current, delayed), false)
 })
 
+void test('shouldApplyStudentSessionSnapshot rejects a delayed active legacy snapshot after an explicit revision', () => {
+  const current = normalizeStudentSessionSnapshot({
+    sessionId: 'session-1',
+    activeQuestionIds: ['q1'],
+    activeQuestionRunStartedAt: 1_000,
+    activeQuestionRunRevision: 2,
+  })
+  const delayedLegacy = normalizeStudentSessionSnapshot({
+    sessionId: 'session-1',
+    activeQuestionIds: ['q2'],
+    activeQuestionRunStartedAt: 2_000,
+  })
+
+  assert.ok(current)
+  assert.ok(delayedLegacy)
+  assert.equal(delayedLegacy.activeQuestionRunRevision, null)
+  assert.equal(shouldApplyStudentSessionSnapshot(current, delayedLegacy, 2), false)
+})
+
 void test('shouldApplyStudentSessionSnapshot accepts a legitimate no-active-question state after a live run', () => {
   const current = normalizeStudentSessionSnapshot({
     sessionId: 'session-1',
