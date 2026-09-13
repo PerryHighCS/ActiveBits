@@ -10,6 +10,7 @@ import {
 } from 'activebits-server/core/activityCapabilities.js'
 import {
   getSessionParticipantCookieName,
+  revokeAcceptedEntryParticipant,
   resolveAcceptedEntryParticipantToken,
 } from 'activebits-server/core/acceptedEntryParticipants.js'
 import { registerActivityReportBuilder } from '../../../server/activities/activityReportRegistry.js'
@@ -1991,6 +1992,12 @@ export default function setupResonanceRoutes(
       return
     }
     session.data.students[studentId] = student
+    // Accepted-entry handoffs are one-shot. Their consumption and capability
+    // issuance persist in this one session write, so a failed write consumes
+    // neither and a successful one cannot be replayed.
+    if (acceptedParticipant !== null) {
+      revokeAcceptedEntryParticipant(session, studentId)
+    }
     await sessions.set(sessionId, session)
 
     if (capability && res.cookie) {

@@ -509,6 +509,24 @@ void test('a fresh accepted participant takes precedence over a stale capability
   assert.equal((response.body as { studentId?: string }).studentId, 'student2')
   assert.equal(response.cookies.length, 1, 'the accepted participant receives its own replacement capability')
 
+  const capabilityCountAfterRegistration = Object.keys(
+    ((await sessions.get(session.id))?.data as { activityCapabilities?: Record<string, unknown> }).activityCapabilities ?? {},
+  ).length
+  console.info('[TEST] a consumed accepted-entry token must not mint another capability on replay')
+  const replayResponse = createResponse()
+  await registerHandler?.({
+    params: { sessionId: session.id },
+    body: { name: 'Grace Hopper', studentId: 'student2' },
+    cookies: {
+      ...staleCapabilityCookies,
+      [getSessionParticipantCookieName(session.id)]: acceptedToken,
+    },
+  }, replayResponse)
+  assert.equal(replayResponse.statusCode, 403)
+  assert.equal(Object.keys(
+    ((await sessions.get(session.id))?.data as { activityCapabilities?: Record<string, unknown> }).activityCapabilities ?? {},
+  ).length, capabilityCountAfterRegistration)
+
   const stateHandler = app.handlers.get['/api/resonance/:sessionId/state']
   const stateResponse = createResponse()
   await stateHandler?.({

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { isValidStudentReactionEmoji } from '../../shared/emojiSet.js'
 import { getMcqSelectionMode } from '../../shared/mcq.js'
 import type {
@@ -525,7 +525,7 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
     timeoutId: ReturnType<typeof setTimeout>
   }>())
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     latestSnapshotRequestRef.current += 1
     for (const pending of pendingDraftSavesRef.current.values()) {
       clearTimeout(pending.timeoutId)

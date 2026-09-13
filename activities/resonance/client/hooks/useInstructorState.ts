@@ -260,6 +260,7 @@ export function useInstructorState(sessionId: string | null, passcode: string | 
   // (lower-numbered) live run, and its snapshot is never painted while reloads.
   useLayoutEffect(() => {
     latestSnapshotRequestRef.current += 1
+    wsRef.current = null
     snapshotRef.current = null
     latestActiveQuestionRunRevisionRef.current = null
     setSnapshot(null)
