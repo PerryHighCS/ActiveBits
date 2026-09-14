@@ -40,6 +40,11 @@ interface UnconfirmedDraftContext {
   activeQuestionRunStartedAt: number | null
   activeQuestionRunRevision: number | null
   activeQuestionDeadlineAt: number | null
+  lastActiveQuestionRunRevision?: number | null
+}
+
+function isSameDraftAnswer(left: unknown, right: unknown): boolean {
+  return JSON.stringify(left) === JSON.stringify(right)
 }
 
 export function buildUnconfirmedDraftKey(payload: Record<string, unknown>): string | null {
@@ -420,6 +425,15 @@ export default function ResonanceStudent() {
     void refresh()
   }, [refresh])
 
+  const discardUnconfirmedDraft = useCallback((questionId: string, payload: Record<string, unknown>) => {
+    setSubmittedAnswers((current) => {
+      if (!isSameDraftAnswer(current[questionId], payload.answer)) return current
+      const next = { ...current }
+      delete next[questionId]
+      return next
+    })
+  }, [])
+
   const recordUnconfirmedDraft = useCallback((payload: Record<string, unknown>) => {
     const key = buildUnconfirmedDraftKey(payload)
     if (key === null) return
@@ -449,6 +463,17 @@ export default function ResonanceStudent() {
         if (disposition === 'discard') {
           unconfirmedDraftsRef.current.delete(key)
           changed = true
+          const payloadRunRevision = typeof draft.payload.activeQuestionRunRevision === 'number'
+            ? draft.payload.activeQuestionRunRevision
+            : null
+          const expiredRunJustEnded = draft.deadlineAt !== null && now >= draft.deadlineAt &&
+            snapshot.activeQuestionRunRevision === null &&
+            snapshot.lastActiveQuestionRunRevision === payloadRunRevision
+          if (questionId !== null && expiredRunJustEnded) {
+            reconcileUnconfirmedDraft(questionId)
+          } else if (questionId !== null) {
+            discardUnconfirmedDraft(questionId, draft.payload)
+          }
           continue
         }
 
@@ -483,7 +508,7 @@ export default function ResonanceStudent() {
       cancelled = true
       window.clearInterval(intervalId)
     }
-  }, [reconcileUnconfirmedDraft, saveDraft, snapshot, studentId, unconfirmedDraftVersion])
+  }, [discardUnconfirmedDraft, reconcileUnconfirmedDraft, saveDraft, snapshot, studentId, unconfirmedDraftVersion])
 
   useEffect(() => {
     if (snapshot?.activeQuestionRunRevision === null || snapshot?.activeQuestionRunRevision === undefined) return

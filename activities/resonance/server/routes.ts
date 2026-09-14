@@ -1342,7 +1342,7 @@ function buildStudentSnapshotWithMode(
             .filter((response) => response.studentId === viewerStudentId)
             .map((response) => [response.questionId, response.editSequence ?? 0] satisfies [string, number]),
         )
-  const draftGenerations = viewerStudentId === null || session.data.activeQuestionRunRevision === null
+  const draftGenerations = viewerStudentId === null
     ? {}
     : Object.fromEntries(
         Object.entries(session.data.responseDraftGenerations)
