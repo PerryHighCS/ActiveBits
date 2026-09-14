@@ -1573,6 +1573,104 @@ void test('timed live runs finalize persisted drafts for every active question',
   await sessions.close()
 })
 
+void test('a student who never submits before the deadline keeps their answer editable after the instructor reactivates', async () => {
+  // The incident this whole draft-persistence effort was built to fix: a
+  // student runs out of time mid-answer without clicking Submit, and the
+  // instructor reactivates the question to give another round. The
+  // student's in-progress work must not be lost. This chains the two halves
+  // that are otherwise only tested separately — deadline finalization
+  // (draft -> response) and reactivation carry-forward (response stays
+  // editable) — to prove the actual end-to-end story holds.
+  const app = createMockApp()
+  const ws = createMockWs()
+  const sessions = createSessionStore(null)
+  const session = createMultiQuestionSession()
+  const studentCookies = issueStudentCookies(session, 'student1')
+  await sessions.set(session.id, session)
+
+  setupResonanceRoutes(app, sessions, ws)
+  const activateHandler = app.handlers.post['/api/resonance/:sessionId/activate-question']
+  const stateHandler = app.handlers.get['/api/resonance/:sessionId/state']
+  const responsesHandler = app.handlers.get['/api/resonance/:sessionId/responses']
+  const instructorHeaders = { 'x-instructor-passcode': 'TEACH123' }
+
+  console.info('[TEST] the instructor activates q1 and the student autosaves a draft but never submits')
+  const firstActivateRes = createResponse()
+  await activateHandler?.(
+    { params: { sessionId: session.id }, headers: instructorHeaders, body: { questionId: 'q1' } },
+    firstActivateRes,
+  )
+  assert.equal(firstActivateRes.statusCode, 200)
+
+  const activeSession = await sessions.get(session.id)
+  assert.ok(activeSession)
+  const activeSessionData = activeSession.data as {
+    responseDrafts: Record<string, unknown>
+    activeQuestionRunRevision: number | null
+    activeQuestionDeadlineAt: number | null
+  }
+  // Force the deadline into the past instead of waiting out the question's
+  // real responseTimeLimitMs, matching the other deadline-finalization
+  // tests — the draft must have been saved before that (backdated) deadline,
+  // not after it, or it's correctly treated as a late arrival.
+  const backdatedDeadline = Date.now() - 1_000
+  activeSessionData.responseDrafts['q1:student1'] = {
+    questionId: 'q1',
+    studentId: 'student1',
+    updatedAt: backdatedDeadline - 1_000,
+    activeQuestionRunRevision: activeSessionData.activeQuestionRunRevision,
+    answer: { type: 'free-response', text: 'Unfinished when time ran out' },
+  }
+  activeSessionData.activeQuestionDeadlineAt = backdatedDeadline
+  await sessions.set(session.id, activeSession)
+
+  console.info('[TEST] the deadline passes: the draft must be finalized into a real submitted response')
+  const finalizeRes = createResponse()
+  await stateHandler?.({ params: { sessionId: session.id }, query: { studentId: 'student1' }, cookies: studentCookies }, finalizeRes)
+  assert.equal(finalizeRes.statusCode, 200)
+  const finalizedSession = await sessions.get(session.id)
+  const finalizedSessionData = finalizedSession?.data as {
+    responses: Array<{ questionId: string; answer: unknown }>
+    responseDrafts: Record<string, unknown>
+  } | undefined
+  assert.deepEqual(
+    finalizedSessionData?.responses.map((r) => ({ questionId: r.questionId, answer: r.answer })),
+    [{ questionId: 'q1', answer: { type: 'free-response', text: 'Unfinished when time ran out' } }],
+  )
+  assert.equal(Object.keys(finalizedSessionData?.responseDrafts ?? {}).length, 0)
+
+  console.info('[TEST] the instructor reactivates q1 for another round')
+  const reactivateRes = createResponse()
+  await activateHandler?.(
+    { params: { sessionId: session.id }, headers: instructorHeaders, body: { questionId: 'q1' } },
+    reactivateRes,
+  )
+  assert.equal(reactivateRes.statusCode, 200)
+
+  console.info('[TEST] the student must still see their finalized answer as an editable starting point')
+  const studentStateRes = createResponse()
+  await stateHandler?.({ params: { sessionId: session.id }, query: { studentId: 'student1' }, cookies: studentCookies }, studentStateRes)
+  assert.equal(studentStateRes.statusCode, 200)
+  assert.deepEqual(
+    (studentStateRes.body as { submittedAnswers?: Record<string, unknown> }).submittedAnswers,
+    { q1: { type: 'free-response', text: 'Unfinished when time ran out' } },
+  )
+
+  const instructorProgressRes = createResponse()
+  await responsesHandler?.({ params: { sessionId: session.id }, headers: instructorHeaders }, instructorProgressRes)
+  assert.equal(instructorProgressRes.statusCode, 200)
+  const progress = (instructorProgressRes.body as {
+    progress?: Array<{ questionId?: string; studentId?: string; status?: string; answer?: { text?: string } }>
+  }).progress
+  assert.ok(progress?.some((entry) =>
+    entry.questionId === 'q1' &&
+    entry.studentId === 'student1' &&
+    entry.status === 'working' &&
+    entry.answer?.text === 'Unfinished when time ran out'))
+
+  await sessions.close()
+})
+
 void test('timed live runs discard a prior-revision draft with the same activation timestamp', async () => {
   const sessions = createSessionStore(null)
   const session = createMultiQuestionSession()
