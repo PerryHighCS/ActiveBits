@@ -279,6 +279,7 @@ export default function ResonanceStudent() {
   const [selectedQuestionId, setSelectedQuestionId] = useState<string | null>(null)
   const [submittedQuestionIds, setSubmittedQuestionIds] = useState<Set<string>>(new Set())
   const [submittedAnswers, setSubmittedAnswers] = useState<Record<string, AnswerPayload | null>>({})
+  const [draftResetVersions, setDraftResetVersions] = useState<Record<string, number>>({})
   const [submissionAnnouncement, setSubmissionAnnouncement] = useState<SubmissionAnnouncement | null>(null)
   const [countdownNow, setCountdownNow] = useState(() => Date.now())
 
@@ -405,6 +406,7 @@ export default function ResonanceStudent() {
     setSelectedQuestionId(null)
     setSubmittedQuestionIds(new Set())
     setSubmittedAnswers({})
+    setDraftResetVersions({})
     setSubmissionAnnouncement(null)
     previousActiveQuestionIdsRef.current = []
     previousActiveQuestionRunRevisionRef.current = null
@@ -422,6 +424,10 @@ export default function ResonanceStudent() {
       delete next[questionId]
       return next
     })
+    setDraftResetVersions((current) => ({
+      ...current,
+      [questionId]: (current[questionId] ?? 0) + 1,
+    }))
     void refresh()
   }, [refresh])
 
@@ -781,6 +787,7 @@ export default function ResonanceStudent() {
                   snapshot.activeQuestionRunRevision ?? snapshot.activeQuestionRunStartedAt,
                 )}
                 nextDraftGeneration={nextDraftGeneration}
+                draftResetVersion={draftResetVersions[activeQuestion.id] ?? 0}
                 disabled={hasExpired}
                 isSubmitted={submittedQuestionIds.has(activeQuestion.id)}
                 submittedMessage={submittedMessage}

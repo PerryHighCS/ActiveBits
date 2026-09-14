@@ -29,6 +29,7 @@ interface Props {
    */
   editSequence?: number
   nextDraftGeneration?(questionId: string, activeQuestionRunToken: number | null): number
+  draftResetVersion?: number
   onDraftChanged?(questionId: string, answer: AnswerPayload | null): void
   onDraftSaveFailed?(payload: Record<string, unknown>): void
   onSubmitted?(questionId: string, answer: AnswerPayload): void
@@ -63,6 +64,7 @@ export default function QuestionView({
   announceSubmittedMessage = true,
   editSequence = 1,
   nextDraftGeneration,
+  draftResetVersion = 0,
   onDraftChanged,
   onDraftSaveFailed,
   onSubmitted,
@@ -107,7 +109,7 @@ export default function QuestionView({
     lastSentDraftRef.current = initialAnswerRef.current
     synchronizedInitialAnswerRef.current = initialAnswerRef.current
     draftAnswerRunRevisionRef.current = null
-  }, [question.id, activeQuestionRunToken, isSubmitted, sessionId, studentId])
+  }, [draftResetVersion, question.id, activeQuestionRunToken, isSubmitted, sessionId, studentId])
 
   useEffect(() => {
     submissionAttemptRef.current += 1
