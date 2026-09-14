@@ -351,6 +351,7 @@ export default function ResonanceStudent() {
   // remounted on a stack-tab change. Keep them for the student view lifetime,
   // and discard them when the authoritative active run changes.
   const unconfirmedDraftsRef = useRef(new Map<string, UnconfirmedDraft>())
+  const acknowledgedDraftGenerationByKeyRef = useRef(new Map<string, number>())
   const [unconfirmedDraftVersion, setUnconfirmedDraftVersion] = useState(0)
   // Stable across countdown renders: QuestionView includes this callback in
   // its autosave effect dependencies, so an inline callback would flush the
@@ -368,6 +369,8 @@ export default function ResonanceStudent() {
   // particular generation is now durably persisted, and either should clear
   // a same-or-older retained entry rather than leaving it to keep retrying.
   const clearRetainedDraftIfSuperseded = useCallback((key: string, generation: number) => {
+    const acknowledged = acknowledgedDraftGenerationByKeyRef.current.get(key) ?? 0
+    acknowledgedDraftGenerationByKeyRef.current.set(key, Math.max(acknowledged, generation))
     const retained = unconfirmedDraftsRef.current.get(key)
     if (retained && resolveDraftGeneration(retained.payload) <= generation) {
       unconfirmedDraftsRef.current.delete(key)
@@ -483,6 +486,7 @@ export default function ResonanceStudent() {
     hasObservedSnapshotRef.current = false
     editSequenceByKeyRef.current = {}
     draftGenerationByKeyRef.current = {}
+    acknowledgedDraftGenerationByKeyRef.current.clear()
     submittedAnswerRunRef.current = {}
     unconfirmedDraftsRef.current.clear()
     setUnconfirmedDraftVersion((current) => current + 1)
@@ -543,6 +547,7 @@ export default function ResonanceStudent() {
     const key = buildUnconfirmedDraftKey(payload)
     if (key === null) return
     if (isPayloadSupersededBySubmission(payload)) return
+    if (resolveDraftGeneration(payload) <= (acknowledgedDraftGenerationByKeyRef.current.get(key) ?? 0)) return
     const current = unconfirmedDraftsRef.current.get(key)
     if (current && resolveDraftGeneration(current.payload) > resolveDraftGeneration(payload)) return
     const deadlineAt = typeof payload.activeQuestionDeadlineAt === 'number'
