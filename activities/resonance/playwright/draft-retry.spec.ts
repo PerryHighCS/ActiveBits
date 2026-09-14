@@ -118,21 +118,23 @@ test('a failed autosave retained after a stack-tab switch still reaches the serv
     data: { questionIds: ['q1', 'q2'] },
   })).ok()).toBe(true)
 
-  let droppedFirstDraft = false
+  let q1DraftAttempts = 0
+  let allowQ1Drafts = false
   await page.routeWebSocket(/\/ws\/resonance/, (clientWs) => {
     const serverWs = clientWs.connectToServer()
     serverWs.onMessage((message) => clientWs.send(message))
     clientWs.onMessage((message) => {
       const text = typeof message === 'string' ? message : message.toString('utf-8')
-      // Swallow (never forward, never ack) only the first Q1 draft, and
-      // never close the socket — unlike the sibling test above, this
+      // Swallow every Q1 draft until Q1 unmounts, and never close the socket — unlike the sibling test above, this
       // deliberately keeps the connection alive so the hook's own
       // reconnect-on-open replay path (flushQueuedDraftRetries) never gets
       // a chance to fire, isolating the parent-level retry effect instead.
-      if (!droppedFirstDraft && text.includes('resonance:update-draft') && text.includes('"questionId":"q1"')) {
-        droppedFirstDraft = true
-        console.info('[TEST] silently dropping the first Q1 draft update (socket stays open)')
-        return
+      if (text.includes('resonance:update-draft') && text.includes('"questionId":"q1"')) {
+        q1DraftAttempts += 1
+        if (!allowQ1Drafts) {
+          console.info('[TEST] silently dropping a Q1 draft update until Q1 is unmounted')
+          return
+        }
       }
       serverWs.send(message)
     })
@@ -146,19 +148,21 @@ test('a failed autosave retained after a stack-tab switch still reaches the serv
   const answerText = 'Retained across a stack-tab switch'
   await page.getByLabel('Your answer').fill(answerText)
 
-  await expect.poll(() => droppedFirstDraft, {
-    message: 'expected the first Q1 draft-save attempt to be intercepted and dropped',
+  await expect.poll(() => q1DraftAttempts, {
+    message: 'expected Q1 to attempt a save before the tab switch',
     timeout: 5_000,
-  }).toBe(true)
+  }).toBeGreaterThanOrEqual(1)
 
-  // The ack timeout (2s) must elapse before the parent learns the save
-  // failed and retains it — switch tabs only after that, so the switch
-  // genuinely unmounts a QuestionView that already handed off a failed
-  // draft rather than racing the ack.
-  await page.waitForTimeout(2_500)
+  // The second attempt proves the parent received the unacknowledged save
+  // and started its own retained-draft retry before Q1 unmounts.
+  await expect.poll(() => q1DraftAttempts, {
+    message: 'expected the parent-owned Q1 retry before the tab switch',
+    timeout: 6_000,
+  }).toBeGreaterThanOrEqual(2)
 
   await page.getByRole('button', { name: 'Q2' }).click()
   await expect(page.getByText('A second, unrelated question.')).toBeVisible()
+  allowQ1Drafts = true
 
   await expect.poll(async () => {
     const res = await page.request.get(`/api/resonance/${encodeURIComponent(sessionId)}/responses`, {
