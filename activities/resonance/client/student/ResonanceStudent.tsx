@@ -631,6 +631,30 @@ export default function ResonanceStudent() {
         return next
       })
     }
+
+    if (didRunRestart) {
+      // resolveQuestionAnswer always prefers a submittedAnswers entry over
+      // the server snapshot. Without this, a run-7 answer (confirmed or a
+      // still-undischarged failed draft) stays displayed — and resubmittable
+      // — under the new run-8 token until the stale-run retry/discard cycle
+      // eventually clears it. Drop entries whose recorded run doesn't match
+      // the new run immediately, so QuestionView can't resurface or resend
+      // them in the meantime.
+      setSubmittedAnswers((current) => {
+        let changed = false
+        const next = { ...current }
+        for (const questionId of activeIds) {
+          if (
+            Object.prototype.hasOwnProperty.call(next, questionId) &&
+            submittedAnswerRunRef.current[questionId] !== runToken
+          ) {
+            delete next[questionId]
+            changed = true
+          }
+        }
+        return changed ? next : current
+      })
+    }
     hasObservedSnapshotRef.current = true
     previousActiveQuestionIdsRef.current = activeIds
     previousActiveQuestionRunRevisionRef.current = snapshot.activeQuestionRunRevision

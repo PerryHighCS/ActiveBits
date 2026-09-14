@@ -241,6 +241,59 @@ void test('a stale-run discard cannot delete a same-text legitimate answer typed
   }
 })
 
+void test('a stale local answer from a previous run cannot be redisplayed or resubmitted after a run restart', async () => {
+  // resolveQuestionAnswer always prefers submittedAnswers over the server
+  // snapshot for display. Without clearing a stale-run entry as soon as a
+  // run restart is observed, a run-7 answer would still be shown — and
+  // resubmittable — under the run-8 token until the unrelated retry/discard
+  // cycle eventually got around to it.
+  const restore = installStudentDom()
+  const { act, fireEvent, render, waitFor } = await import('@testing-library/react')
+  try {
+    window.localStorage.setItem('student-name-session-1', 'Ari')
+    window.localStorage.setItem('student-id-session-1', 'student-1')
+    const rendered = render(React.createElement(MemoryRouter, { initialEntries: ['/session-1'] },
+      React.createElement(Routes, null, React.createElement(Route, { path: '/:sessionId', element: React.createElement(ResonanceStudent) })),
+    ))
+    await waitFor(() => assert.equal(StudentTestWebSocket.instances.length, 1))
+    const socket = StudentTestWebSocket.instances[0]!
+    socket.shouldFailDraft = false
+    await act(async () => {
+      socket.emit({ type: 'resonance:session-state', payload: {
+        sessionId: 'session-1', activeQuestionIds: ['q1'], activeQuestionRunRevision: 7,
+        activeQuestionDeadlineAt: Date.now() + 30_000,
+        activeQuestions: [{ id: 'q1', type: 'free-response', text: 'First', order: 1 }],
+      } })
+    })
+    const input = await waitFor(() => rendered.getByLabelText(/your answer/i) as HTMLTextAreaElement)
+    fireEvent.change(input, { target: { value: 'leftover from run 7' } })
+
+    console.info('[TEST] the run-7 answer is cached locally as soon as it is typed')
+    await waitFor(() => assert.equal(
+      (rendered.getByLabelText(/your answer/i) as HTMLTextAreaElement).value,
+      'leftover from run 7',
+    ))
+
+    console.info('[TEST] a run restart for the same question must not carry the run-7 answer into run 8')
+    await act(async () => {
+      socket.emit({ type: 'resonance:session-state', payload: {
+        sessionId: 'session-1', activeQuestionIds: ['q1'], activeQuestionRunRevision: 8,
+        activeQuestionDeadlineAt: Date.now() + 30_000,
+        activeQuestions: [{ id: 'q1', type: 'free-response', text: 'First', order: 1 }],
+      } })
+    })
+
+    assert.notEqual(
+      (rendered.getByLabelText(/your answer/i) as HTMLTextAreaElement).value,
+      'leftover from run 7',
+    )
+
+    rendered.unmount()
+  } finally {
+    restore()
+  }
+})
+
 void test('a retry succeeding after its effect is superseded still stops the replacement interval', async () => {
   // The retained-draft retry effect re-runs whenever `snapshot` changes
   // (e.g. an unrelated broadcast). If an in-flight retry from the *old*
