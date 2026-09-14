@@ -294,6 +294,60 @@ void test('a stale local answer from a previous run cannot be redisplayed or res
   }
 })
 
+void test('a successful submission clears a retained failed autosave instead of leaving it to retry forever', async () => {
+  // Copilot's finding: submission goes over REST, independent of the
+  // WebSocket, so a REST submit can succeed while the socket is still down.
+  // Self-paced questions have no deadline and never leave activeQuestionIds,
+  // so resolveUnconfirmedDraftDisposition's only exit for a retained draft is
+  // a matching submittedResponseEditSequences entry from a *later* snapshot —
+  // without clearing it immediately on submission success, the 1-second retry
+  // loop keeps calling saveDraft for an already-submitted answer until the
+  // next snapshot happens to arrive. This isn't a correctness bug (the server
+  // acks a stale draft-save as a no-op once it sees the confirmed response),
+  // but it's wasted, avoidable churn onSubmitted can prevent immediately.
+  const restore = installStudentDom()
+  const { act, fireEvent, render, waitFor } = await import('@testing-library/react')
+  try {
+    window.localStorage.setItem('student-name-session-1', 'Ari')
+    window.localStorage.setItem('student-id-session-1', 'student-1')
+    const rendered = render(React.createElement(MemoryRouter, { initialEntries: ['/session-1'] },
+      React.createElement(Routes, null, React.createElement(Route, { path: '/:sessionId', element: React.createElement(ResonanceStudent) })),
+    ))
+    await waitFor(() => assert.equal(StudentTestWebSocket.instances.length, 1))
+    const socket = StudentTestWebSocket.instances[0]!
+    // shouldFailDraft stays at its default `true`: the WebSocket is
+    // unavailable for the whole test, so every draft-save attempt fails and
+    // only the REST submission can succeed.
+    await act(async () => {
+      socket.emit({ type: 'resonance:session-state', payload: {
+        sessionId: 'session-1', selfPacedMode: true, activeQuestionIds: ['q1'],
+        activeQuestions: [{ id: 'q1', type: 'free-response', text: 'Self-paced only', order: 1 }],
+      } })
+    })
+
+    console.info('[TEST] an autosave fails while the socket is down and is retained for retry')
+    const input = await waitFor(() => rendered.getByLabelText(/your answer/i) as HTMLTextAreaElement)
+    fireEvent.change(input, { target: { value: 'typed while offline' } })
+    await waitFor(() => assert.ok(socket.draftAttempts > 0), { timeout: 2_500 })
+
+    console.info('[TEST] the answer is submitted successfully over REST while the socket is still down')
+    socket.sent.length = 0
+    const attemptsBeforeSubmit = socket.draftAttempts
+    fireEvent.click(rendered.getByRole('button', { name: /submit answer/i }))
+    await waitFor(() => assert.equal(rendered.queryByRole('button', { name: /submit answer/i }), null))
+
+    console.info('[TEST] the retry loop must not keep resending the now-superseded retained draft')
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 1_200))
+    })
+    assert.equal(socket.draftAttempts, attemptsBeforeSubmit)
+
+    rendered.unmount()
+  } finally {
+    restore()
+  }
+})
+
 void test('a stale local answer cannot resurface when its question drops out of the active set and is reactivated later', async () => {
   // CodeRabbit flagged that the run-restart cleanup loop only walks
   // `activeIds`, so a question with a cached local answer that goes

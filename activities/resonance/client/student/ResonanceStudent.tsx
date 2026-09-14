@@ -868,12 +868,36 @@ export default function ResonanceStudent() {
                 }}
                 onDraftSaveFailed={recordUnconfirmedDraft}
                 onSubmitted={(questionId, answer) => {
-                  submittedAnswerRunRef.current[questionId] =
-                    snapshot.activeQuestionRunRevision ?? snapshot.activeQuestionRunStartedAt
+                  const runToken = snapshot.activeQuestionRunRevision ?? snapshot.activeQuestionRunStartedAt
+                  submittedAnswerRunRef.current[questionId] = runToken
                   setSubmittedAnswers((current) => ({
                     ...current,
                     [questionId]: answer,
                   }))
+                  // A retained failed-autosave for this question (e.g. the
+                  // WebSocket was down when this submission went through over
+                  // REST) is now redundant. Self-paced questions have no
+                  // deadline and never leave activeQuestionIds, so without
+                  // this the 1-second retry loop would otherwise keep
+                  // resending it until the next snapshot happens to carry a
+                  // matching submittedResponseEditSequences entry.
+                  const retainedDraftKey = buildUnconfirmedDraftKey({
+                    questionId,
+                    activeQuestionRunRevision: snapshot.activeQuestionRunRevision,
+                    activeQuestionRunStartedAt: snapshot.activeQuestionRunStartedAt,
+                  })
+                  const retainedDraft = retainedDraftKey !== null
+                    ? unconfirmedDraftsRef.current.get(retainedDraftKey)
+                    : undefined
+                  if (retainedDraft && retainedDraftKey !== null) {
+                    const retainedEditSequence =
+                      typeof retainedDraft.payload.editSequence === 'number' ? retainedDraft.payload.editSequence : 0
+                    const submittedEditSequence = resolveCurrentEditSequence(editSequenceByKeyRef.current, questionId, runToken)
+                    if (retainedEditSequence <= submittedEditSequence) {
+                      unconfirmedDraftsRef.current.delete(retainedDraftKey)
+                      setUnconfirmedDraftVersion((current) => current + 1)
+                    }
+                  }
                   setSubmittedQuestionIds((current) => {
                     const nextSubmittedQuestionIds = new Set(current)
                     nextSubmittedQuestionIds.add(questionId)
