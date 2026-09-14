@@ -77,7 +77,9 @@ export default function QuestionView({
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [draftAnswer, setDraftAnswer] = useState<AnswerPayload | null>(initialAnswer)
+  const [draftRetryVersion, setDraftRetryVersion] = useState(0)
   const draftAnswerRef = useRef(draftAnswer)
+  const mountedRef = useRef(true)
   const lastSentDraftRef = useRef<AnswerPayload | null>(null)
   const draftGenerationRef = useRef(0)
   const initialAnswerRef = useRef(initialAnswer)
@@ -105,6 +107,11 @@ export default function QuestionView({
   studentIdRef.current = studentId
   const isWaitingForChoices =
     question.type === 'multiple-choice' && question.choicesRevealed === false
+
+  useEffect(() => {
+    mountedRef.current = true
+    return () => { mountedRef.current = false }
+  }, [])
 
   useEffect(() => {
     setDraftAnswer(initialAnswerRef.current)
@@ -195,6 +202,12 @@ export default function QuestionView({
           if (!isCurrentRun || isSameAnswer(draftAnswerRef.current, pendingDraft)) {
             lastSentDraftRef.current = pendingDraft
             onDraftSaveFailed?.(payload)
+          } else if (isCurrentRun && mountedRef.current) {
+            // The current value (including an intentional clear) superseded
+            // this failed in-flight draft. Mark the old value as sent and
+            // restart the effect so the current value is persisted next.
+            lastSentDraftRef.current = pendingDraft
+            setDraftRetryVersion((current) => current + 1)
           }
         })
         return
@@ -234,7 +247,7 @@ export default function QuestionView({
         sendDraft()
       }
     }
-  }, [activeQuestionDeadlineAt, activeQuestionRunRevision, activeQuestionRunToken, disabled, draftAnswer, isSubmitted, isWaitingForChoices, nextDraftGeneration, onDraftSaveFailed, onDraftSaved, question.id, saveDraft, sendMessage, sessionId, studentId])
+  }, [activeQuestionDeadlineAt, activeQuestionRunRevision, activeQuestionRunToken, disabled, draftAnswer, draftRetryVersion, isSubmitted, isWaitingForChoices, nextDraftGeneration, onDraftSaveFailed, onDraftSaved, question.id, saveDraft, sendMessage, sessionId, studentId])
 
   async function submitAnswer(
     answer: { type: 'free-response'; text: string } | { type: 'multiple-choice'; selectedOptionIds: string[] },
