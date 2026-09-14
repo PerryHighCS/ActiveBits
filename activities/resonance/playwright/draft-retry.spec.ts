@@ -48,6 +48,7 @@ test('a draft dropped mid-send is durably persisted after the client reconnects 
         // Simulate the connection dying with this message in flight: the
         // real server never receives it, and the client must notice (via
         // its ack timeout) and requeue it for the next connection.
+        console.info('[TEST] dropping the first draft update by closing the WebSocket')
         void clientWs.close()
         return
       }

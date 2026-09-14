@@ -294,6 +294,74 @@ void test('a stale local answer from a previous run cannot be redisplayed or res
   }
 })
 
+void test('a stale local answer cannot resurface when its question drops out of the active set and is reactivated later', async () => {
+  // CodeRabbit flagged that the run-restart cleanup loop only walks
+  // `activeIds`, so a question with a cached local answer that goes
+  // *inactive* (not merely restarted while staying active) would be skipped
+  // and could resurface once reactivated. That premise doesn't hold: every
+  // server-side path that adds a question back into the active set also
+  // stamps a fresh activeQuestionRunRevision (see setActiveQuestions /
+  // setStagedActiveQuestion in routes.ts), so the reactivation itself is
+  // always its own run restart, and q1 is back in `activeIds` at exactly the
+  // moment the cleanup loop runs for that new revision. This proves the
+  // existing activeIds-scoped loop already covers the "went inactive, then
+  // reactivated" case, not just the "stayed active" case the other test above
+  // covers.
+  const restore = installStudentDom()
+  const { act, fireEvent, render, waitFor } = await import('@testing-library/react')
+  try {
+    window.localStorage.setItem('student-name-session-1', 'Ari')
+    window.localStorage.setItem('student-id-session-1', 'student-1')
+    const rendered = render(React.createElement(MemoryRouter, { initialEntries: ['/session-1'] },
+      React.createElement(Routes, null, React.createElement(Route, { path: '/:sessionId', element: React.createElement(ResonanceStudent) })),
+    ))
+    await waitFor(() => assert.equal(StudentTestWebSocket.instances.length, 1))
+    const socket = StudentTestWebSocket.instances[0]!
+    socket.shouldFailDraft = false
+    await act(async () => {
+      socket.emit({ type: 'resonance:session-state', payload: {
+        sessionId: 'session-1', activeQuestionIds: ['q1'], activeQuestionRunRevision: 7,
+        activeQuestionDeadlineAt: Date.now() + 30_000,
+        activeQuestions: [{ id: 'q1', type: 'free-response', text: 'First', order: 1 }],
+      } })
+    })
+    const input = await waitFor(() => rendered.getByLabelText(/your answer/i) as HTMLTextAreaElement)
+    fireEvent.change(input, { target: { value: 'leftover from run 7' } })
+
+    console.info('[TEST] q1 is cached locally, then run 8 deactivates it in favor of q2')
+    await waitFor(() => assert.equal(
+      (rendered.getByLabelText(/your answer/i) as HTMLTextAreaElement).value,
+      'leftover from run 7',
+    ))
+    await act(async () => {
+      socket.emit({ type: 'resonance:session-state', payload: {
+        sessionId: 'session-1', activeQuestionIds: ['q2'], activeQuestionRunRevision: 8,
+        activeQuestionDeadlineAt: Date.now() + 30_000,
+        activeQuestions: [{ id: 'q2', type: 'free-response', text: 'Second', order: 2 }],
+      } })
+    })
+    await waitFor(() => assert.equal(rendered.getByText('Second').textContent, 'Second'))
+
+    console.info('[TEST] run 9 reactivates q1: the run-7 answer must not resurface')
+    await act(async () => {
+      socket.emit({ type: 'resonance:session-state', payload: {
+        sessionId: 'session-1', activeQuestionIds: ['q1'], activeQuestionRunRevision: 9,
+        activeQuestionDeadlineAt: Date.now() + 30_000,
+        activeQuestions: [{ id: 'q1', type: 'free-response', text: 'First', order: 1 }],
+      } })
+    })
+
+    await waitFor(() => assert.equal(
+      (rendered.getByLabelText(/your answer/i) as HTMLTextAreaElement).value,
+      '',
+    ))
+
+    rendered.unmount()
+  } finally {
+    restore()
+  }
+})
+
 void test('a retry succeeding after its effect is superseded still stops the replacement interval', async () => {
   // The retained-draft retry effect re-runs whenever `snapshot` changes
   // (e.g. an unrelated broadcast). If an in-flight retry from the *old*
