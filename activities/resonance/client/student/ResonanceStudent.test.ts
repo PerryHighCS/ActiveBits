@@ -186,6 +186,150 @@ void test('a save that fails after its run ends is handed off and cannot leak a 
   }
 })
 
+void test('a stale-run discard cannot delete a same-text legitimate answer typed in the new run', async () => {
+  // discardUnconfirmedDraft used to compare only answer content. A run-7
+  // failed draft and a run-8 local edit that happen to contain the same
+  // text/selection must not be conflated: the discard has to require the
+  // cached answer's own recorded run to match the stale payload's run
+  // before deleting it.
+  const restore = installStudentDom()
+  const { act, fireEvent, render, waitFor } = await import('@testing-library/react')
+  try {
+    window.localStorage.setItem('student-name-session-1', 'Ari')
+    window.localStorage.setItem('student-id-session-1', 'student-1')
+    const rendered = render(React.createElement(MemoryRouter, { initialEntries: ['/session-1'] },
+      React.createElement(Routes, null, React.createElement(Route, { path: '/:sessionId', element: React.createElement(ResonanceStudent) })),
+    ))
+    await waitFor(() => assert.equal(StudentTestWebSocket.instances.length, 1))
+    const socket = StudentTestWebSocket.instances[0]!
+    socket.shouldFailDraft = false
+    await act(async () => {
+      socket.emit({ type: 'resonance:session-state', payload: {
+        sessionId: 'session-1', activeQuestionIds: ['q1'], activeQuestionRunRevision: 7,
+        activeQuestionDeadlineAt: Date.now() + 30_000,
+        activeQuestions: [{ id: 'q1', type: 'free-response', text: 'First', order: 1 }],
+      } })
+    })
+    const input = await waitFor(() => rendered.getByLabelText(/your answer/i) as HTMLTextAreaElement)
+    fireEvent.change(input, { target: { value: '42' } })
+
+    console.info('[TEST] a run-7 draft of "42" is sent but never acknowledged')
+    await waitFor(() => assert.equal(socket.draftAttempts, 1), { timeout: 2_000 })
+
+    await act(async () => {
+      socket.emit({ type: 'resonance:session-state', payload: {
+        sessionId: 'session-1', activeQuestionIds: ['q1'], activeQuestionRunRevision: 8,
+        activeQuestionDeadlineAt: Date.now() + 30_000,
+        activeQuestions: [{ id: 'q1', type: 'free-response', text: 'First', order: 1 }],
+      } })
+    })
+
+    console.info('[TEST] a run-8 edit that happens to also read "42" must survive the run-7 discard')
+    fireEvent.change(rendered.getByLabelText(/your answer/i), { target: { value: '42x' } })
+    fireEvent.change(rendered.getByLabelText(/your answer/i), { target: { value: '42' } })
+
+    // Let the stale run-7 save finally time out and get discarded.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 2_100))
+    })
+
+    assert.equal((rendered.getByLabelText(/your answer/i) as HTMLTextAreaElement).value, '42')
+
+    rendered.unmount()
+  } finally {
+    restore()
+  }
+})
+
+void test('a retry succeeding after its effect is superseded still stops the replacement interval', async () => {
+  // The retained-draft retry effect re-runs whenever `snapshot` changes
+  // (e.g. an unrelated broadcast). If an in-flight retry from the *old*
+  // effect instance succeeds after that instance was superseded, deleting
+  // the map entry used to skip bumping unconfirmedDraftVersion when the old
+  // instance's own `cancelled` flag was set — so the *new*, currently active
+  // effect (which depends on that same counter) never learned the map was
+  // empty and kept polling on its interval forever.
+  const restore = installStudentDom()
+  const { act, fireEvent, render, waitFor } = await import('@testing-library/react')
+  try {
+    const activeIntervals = new Set<number>()
+    const originalSetInterval = window.setInterval.bind(window)
+    const originalClearInterval = window.clearInterval.bind(window)
+    ;(window as unknown as { setInterval: typeof window.setInterval }).setInterval = ((
+      handler: TimerHandler,
+      timeout?: number,
+      ...args: unknown[]
+    ) => {
+      const id = originalSetInterval(handler as never, timeout, ...args) as unknown as number
+      activeIntervals.add(id)
+      return id
+    }) as typeof window.setInterval
+    ;(window as unknown as { clearInterval: typeof window.clearInterval }).clearInterval = ((
+      id?: number,
+    ) => {
+      if (id !== undefined) activeIntervals.delete(id)
+      return originalClearInterval(id as never)
+    }) as typeof window.clearInterval
+
+    window.localStorage.setItem('student-name-session-1', 'Ari')
+    window.localStorage.setItem('student-id-session-1', 'student-1')
+    const rendered = render(React.createElement(MemoryRouter, { initialEntries: ['/session-1'] },
+      React.createElement(Routes, null, React.createElement(Route, { path: '/:sessionId', element: React.createElement(ResonanceStudent) })),
+    ))
+    await waitFor(() => assert.equal(StudentTestWebSocket.instances.length, 1))
+    const socket = StudentTestWebSocket.instances[0]!
+    await act(async () => {
+      socket.emit({ type: 'resonance:session-state', payload: {
+        sessionId: 'session-1', activeQuestionIds: ['q1'], activeQuestionRunRevision: 7,
+        activeQuestionDeadlineAt: Date.now() + 30_000,
+        activeQuestions: [{ id: 'q1', type: 'free-response', text: 'First', order: 1 }],
+      } })
+    })
+    const baselineIntervals = activeIntervals.size
+
+    const input = await waitFor(() => rendered.getByLabelText(/your answer/i) as HTMLTextAreaElement)
+    fireEvent.change(input, { target: { value: 'retry then succeed' } })
+
+    console.info('[TEST] a failed autosave starts the parent retry loop (its own interval, on top of the countdown one)')
+    // The debounced autosave failure and the retry effect's own immediate
+    // first attempt both fail while shouldFailDraft is still true, so this
+    // can settle at more than one attempt — only the resulting interval
+    // count is asserted precisely.
+    await waitFor(() => assert.ok(socket.draftAttempts >= 1), { timeout: 2_500 })
+    await waitFor(() => assert.equal(activeIntervals.size, baselineIntervals + 1))
+
+    socket.shouldFailDraft = false
+    socket.sent.length = 0
+    console.info('[TEST] the retry sends successfully on the next tick but is left unacknowledged')
+    await waitFor(() => assert.equal(socket.sent.length, 1), { timeout: 2_000 })
+    const retryDraftId = (JSON.parse(socket.sent[0]!) as { payload: { draftId: string } }).payload.draftId
+
+    console.info('[TEST] an unrelated snapshot update supersedes the retry effect while that send is still pending')
+    await act(async () => {
+      socket.emit({ type: 'resonance:session-state', payload: {
+        sessionId: 'session-1', activeQuestionIds: ['q1'], activeQuestionRunRevision: 7,
+        activeQuestionDeadlineAt: Date.now() + 31_000,
+        activeQuestions: [{ id: 'q1', type: 'free-response', text: 'First', order: 1 }],
+      } })
+    })
+    // The old effect's interval is cleared, and the new (active) effect
+    // schedules its own — net count is unchanged, but the id underneath it
+    // has rotated.
+    assert.equal(activeIntervals.size, baselineIntervals + 1)
+
+    console.info('[TEST] the ack for the superseded retry must still stop the now-active replacement interval')
+    await act(async () => {
+      socket.emit({ type: 'resonance:draft-saved', payload: { draftId: retryDraftId } })
+    })
+
+    await waitFor(() => assert.equal(activeIntervals.size, baselineIntervals))
+
+    rendered.unmount()
+  } finally {
+    restore()
+  }
+})
+
 void test('unconfirmed draft keys keep a stack-tab draft scoped to its live run', () => {
   const answer = { type: 'free-response', text: 'Saved after switching tabs' }
   assert.equal(

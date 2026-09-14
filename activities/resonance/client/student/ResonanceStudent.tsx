@@ -47,13 +47,17 @@ function isSameDraftAnswer(left: unknown, right: unknown): boolean {
   return JSON.stringify(left) === JSON.stringify(right)
 }
 
-export function buildUnconfirmedDraftKey(payload: Record<string, unknown>): string | null {
-  const questionId = typeof payload.questionId === 'string' ? payload.questionId : null
-  const runToken = typeof payload.activeQuestionRunRevision === 'number'
+function resolvePayloadRunToken(payload: Record<string, unknown>): number | null {
+  return typeof payload.activeQuestionRunRevision === 'number'
     ? payload.activeQuestionRunRevision
     : typeof payload.activeQuestionRunStartedAt === 'number'
       ? payload.activeQuestionRunStartedAt
       : null
+}
+
+export function buildUnconfirmedDraftKey(payload: Record<string, unknown>): string | null {
+  const questionId = typeof payload.questionId === 'string' ? payload.questionId : null
+  const runToken = resolvePayloadRunToken(payload)
   return questionId === null ? null : `${questionId}:${runToken ?? 'self-paced'}`
 }
 
@@ -280,6 +284,11 @@ export default function ResonanceStudent() {
   const [submittedQuestionIds, setSubmittedQuestionIds] = useState<Set<string>>(new Set())
   const [submittedAnswers, setSubmittedAnswers] = useState<Record<string, AnswerPayload | null>>({})
   const submittedAnswersRef = useRef<Record<string, AnswerPayload | null>>({})
+  // Tracks which run each submittedAnswers entry was written under, so a
+  // stale-run discard/reconcile (below) can require that context to match
+  // instead of comparing answer content alone — two different runs can
+  // legitimately contain the same answer text/selection.
+  const submittedAnswerRunRef = useRef<Record<string, number | null>>({})
   const [draftResetVersions, setDraftResetVersions] = useState<Record<string, number>>({})
   const [submissionAnnouncement, setSubmissionAnnouncement] = useState<SubmissionAnnouncement | null>(null)
   const [countdownNow, setCountdownNow] = useState(() => Date.now())
@@ -418,11 +427,13 @@ export default function ResonanceStudent() {
     hasObservedSnapshotRef.current = false
     editSequenceByKeyRef.current = {}
     draftGenerationByKeyRef.current = {}
+    submittedAnswerRunRef.current = {}
     unconfirmedDraftsRef.current.clear()
     setUnconfirmedDraftVersion((current) => current + 1)
   }, [sessionId, studentId])
 
   const reconcileUnconfirmedDraft = useCallback((questionId: string, payload: Record<string, unknown>) => {
+    if (submittedAnswerRunRef.current[questionId] !== resolvePayloadRunToken(payload)) return
     if (!isSameDraftAnswer(submittedAnswersRef.current[questionId], payload.answer)) return
     setSubmittedAnswers((current) => {
       const next = { ...current }
@@ -437,6 +448,7 @@ export default function ResonanceStudent() {
   }, [refresh])
 
   const discardUnconfirmedDraft = useCallback((questionId: string, payload: Record<string, unknown>) => {
+    if (submittedAnswerRunRef.current[questionId] !== resolvePayloadRunToken(payload)) return
     setSubmittedAnswers((current) => {
       if (!isSameDraftAnswer(current[questionId], payload.answer)) return current
       const next = { ...current }
@@ -467,7 +479,6 @@ export default function ResonanceStudent() {
       return
     }
 
-    let cancelled = false
     const retryUnconfirmedDrafts = () => {
       const now = Date.now()
       let changed = false
@@ -506,7 +517,12 @@ export default function ResonanceStudent() {
           if (unconfirmedDraftsRef.current.get(key) !== draft) return
           if (saved) {
             unconfirmedDraftsRef.current.delete(key)
-            if (!cancelled) setUnconfirmedDraftVersion((current) => current + 1)
+            // Bump unconditionally, even if the effect that started this
+            // retry has since been superseded by a snapshot update: this is
+            // the only way the *replacement* effect (which is in the
+            // dependency array on this same version counter) learns the map
+            // is now empty and stops polling on its own interval forever.
+            setUnconfirmedDraftVersion((current) => current + 1)
             return
           }
           draft.retrying = false
@@ -521,7 +537,6 @@ export default function ResonanceStudent() {
     retryUnconfirmedDrafts()
     const intervalId = window.setInterval(retryUnconfirmedDrafts, UNCONFIRMED_DRAFT_RETRY_INTERVAL_MS)
     return () => {
-      cancelled = true
       window.clearInterval(intervalId)
     }
   }, [discardUnconfirmedDraft, reconcileUnconfirmedDraft, saveDraft, snapshot, studentId, unconfirmedDraftVersion])
@@ -804,6 +819,8 @@ export default function ResonanceStudent() {
                 announceSubmittedMessage={!snapshot.selfPacedMode}
                 saveDraft={saveDraft}
                 onDraftChanged={(questionId, answer) => {
+                  submittedAnswerRunRef.current[questionId] =
+                    snapshot.activeQuestionRunRevision ?? snapshot.activeQuestionRunStartedAt
                   setSubmittedAnswers((current) => ({
                     ...current,
                     [questionId]: answer,
@@ -811,6 +828,8 @@ export default function ResonanceStudent() {
                 }}
                 onDraftSaveFailed={recordUnconfirmedDraft}
                 onSubmitted={(questionId, answer) => {
+                  submittedAnswerRunRef.current[questionId] =
+                    snapshot.activeQuestionRunRevision ?? snapshot.activeQuestionRunStartedAt
                   setSubmittedAnswers((current) => ({
                     ...current,
                     [questionId]: answer,
