@@ -54,7 +54,7 @@ export function buildUnconfirmedDraftKey(payload: Record<string, unknown>): stri
     : typeof payload.activeQuestionRunStartedAt === 'number'
       ? payload.activeQuestionRunStartedAt
       : null
-  return questionId === null || runToken === null ? null : `${questionId}:${runToken}`
+  return questionId === null ? null : `${questionId}:${runToken ?? 'self-paced'}`
 }
 
 export function resolveUnconfirmedDraftDisposition(
@@ -279,9 +279,11 @@ export default function ResonanceStudent() {
   const [selectedQuestionId, setSelectedQuestionId] = useState<string | null>(null)
   const [submittedQuestionIds, setSubmittedQuestionIds] = useState<Set<string>>(new Set())
   const [submittedAnswers, setSubmittedAnswers] = useState<Record<string, AnswerPayload | null>>({})
+  const submittedAnswersRef = useRef<Record<string, AnswerPayload | null>>({})
   const [draftResetVersions, setDraftResetVersions] = useState<Record<string, number>>({})
   const [submissionAnnouncement, setSubmissionAnnouncement] = useState<SubmissionAnnouncement | null>(null)
   const [countdownNow, setCountdownNow] = useState(() => Date.now())
+  submittedAnswersRef.current = submittedAnswers
 
   const previousActiveQuestionIdsRef = useRef<string[]>([])
   const previousActiveQuestionRunRevisionRef = useRef<number | null>(null)
@@ -418,7 +420,8 @@ export default function ResonanceStudent() {
     setUnconfirmedDraftVersion((current) => current + 1)
   }, [sessionId, studentId])
 
-  const reconcileUnconfirmedDraft = useCallback((questionId: string) => {
+  const reconcileUnconfirmedDraft = useCallback((questionId: string, payload: Record<string, unknown>) => {
+    if (!isSameDraftAnswer(submittedAnswersRef.current[questionId], payload.answer)) return
     setSubmittedAnswers((current) => {
       const next = { ...current }
       delete next[questionId]
@@ -476,7 +479,7 @@ export default function ResonanceStudent() {
             snapshot.activeQuestionRunRevision === null &&
             snapshot.lastActiveQuestionRunRevision === payloadRunRevision
           if (questionId !== null && expiredRunJustEnded) {
-            reconcileUnconfirmedDraft(questionId)
+            reconcileUnconfirmedDraft(questionId, draft.payload)
           } else if (questionId !== null) {
             discardUnconfirmedDraft(questionId, draft.payload)
           }
@@ -486,7 +489,7 @@ export default function ResonanceStudent() {
         if (disposition === 'reconcile') {
           unconfirmedDraftsRef.current.delete(key)
           changed = true
-          if (questionId !== null) reconcileUnconfirmedDraft(questionId)
+          if (questionId !== null) reconcileUnconfirmedDraft(questionId, draft.payload)
           continue
         }
 
@@ -517,9 +520,9 @@ export default function ResonanceStudent() {
   }, [discardUnconfirmedDraft, reconcileUnconfirmedDraft, saveDraft, snapshot, studentId, unconfirmedDraftVersion])
 
   useEffect(() => {
-    if (snapshot?.activeQuestionRunRevision === null || snapshot?.activeQuestionRunRevision === undefined) return
+    if (snapshot === null) return
     for (const [questionId, generation] of Object.entries(snapshot.draftGenerations)) {
-      const key = buildEditSequenceKey(questionId, snapshot.activeQuestionRunRevision)
+      const key = buildEditSequenceKey(questionId, snapshot.activeQuestionRunRevision ?? snapshot.activeQuestionRunStartedAt)
       draftGenerationByKeyRef.current[key] = Math.max(draftGenerationByKeyRef.current[key] ?? 0, generation)
     }
   }, [snapshot])

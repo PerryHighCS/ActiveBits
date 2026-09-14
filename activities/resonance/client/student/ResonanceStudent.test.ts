@@ -114,7 +114,7 @@ void test('unconfirmed draft keys keep a stack-tab draft scoped to its live run'
     buildUnconfirmedDraftKey({ questionId: 'q1', activeQuestionRunStartedAt: 123, answer }),
     'q1:123',
   )
-  assert.equal(buildUnconfirmedDraftKey({ questionId: 'q1', answer }), null)
+  assert.equal(buildUnconfirmedDraftKey({ questionId: 'q1', answer }), 'q1:self-paced')
 })
 
 void test('unconfirmed draft retry stops on deadline or an authoritative run change', () => {

@@ -3214,7 +3214,10 @@ export default function setupResonanceRoutes(
         }
 
         let persistedSession: ResonanceSession | null = null
+        let shouldAcknowledge = false
         const updated = await sessions.updateAtomic(sessionId, (current) => {
+          persistedSession = null
+          shouldAcknowledge = false
           const currentSession = current as ResonanceSession
           currentSession.data = normalizeSessionData(currentSession.data)
           if (!matchesActiveQuestionRun(
@@ -3222,6 +3225,10 @@ export default function setupResonanceRoutes(
             payload.activeQuestionRunRevision,
             payload.activeQuestionRunStartedAt,
           )) return currentSession
+          if (
+            (currentSession.data.activeQuestionDeadlineAt !== null && Date.now() >= currentSession.data.activeQuestionDeadlineAt) ||
+            !isCurrentStagedQuestionAnswerable(currentSession.data, questionId)
+          ) return currentSession
 
           const currentDraft = currentSession.data.responseDrafts[draftKey]
           const currentGeneration = currentSession.data.responseDraftGenerations[draftKey]
@@ -3234,7 +3241,10 @@ export default function setupResonanceRoutes(
               : 0,
             generationForCurrentRun,
           )
-          if (draftGeneration < storedGeneration) return currentSession
+          if (draftGeneration < storedGeneration) {
+            shouldAcknowledge = true
+            return currentSession
+          }
 
           currentSession.data.responseDraftGenerations[draftKey] = {
             questionId,
@@ -3256,6 +3266,7 @@ export default function setupResonanceRoutes(
             }
           }
           persistedSession = currentSession
+          shouldAcknowledge = true
           return currentSession
         })
         if (updated === null) {
@@ -3272,7 +3283,7 @@ export default function setupResonanceRoutes(
         if (persistedSession !== null) {
           broadcastToRole('resonance:instructor-state', buildInstructorSnapshot(persistedSession), sessionId, true)
         }
-        if (draftId !== null) {
+        if (shouldAcknowledge && draftId !== null) {
           sendToSocket(socket, 'resonance:draft-saved', { draftId }, sessionId)
         }
         break
