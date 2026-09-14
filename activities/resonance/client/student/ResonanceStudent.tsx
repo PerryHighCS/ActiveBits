@@ -293,6 +293,15 @@ export default function ResonanceStudent() {
   // and discard them when the authoritative active run changes.
   const unconfirmedDraftsRef = useRef(new Map<string, UnconfirmedDraft>())
   const [unconfirmedDraftVersion, setUnconfirmedDraftVersion] = useState(0)
+  // Stable across countdown renders: QuestionView includes this callback in
+  // its autosave effect dependencies, so an inline callback would flush the
+  // 1500ms debounce on every timer tick.
+  const nextDraftGeneration = useCallback((questionId: string, activeQuestionRunToken: number | null) => {
+    const key = buildEditSequenceKey(questionId, activeQuestionRunToken)
+    const next = (draftGenerationByKeyRef.current[key] ?? 0) + 1
+    draftGenerationByKeyRef.current[key] = next
+    return next
+  }, [])
 
   useLayoutEffect(() => {
     setIdentityResolved(false)
@@ -746,15 +755,7 @@ export default function ResonanceStudent() {
                   activeQuestion.id,
                   snapshot.activeQuestionRunRevision ?? snapshot.activeQuestionRunStartedAt,
                 )}
-                nextDraftGeneration={() => {
-                  const key = buildEditSequenceKey(
-                    activeQuestion.id,
-                    snapshot.activeQuestionRunRevision ?? snapshot.activeQuestionRunStartedAt,
-                  )
-                  const next = (draftGenerationByKeyRef.current[key] ?? 0) + 1
-                  draftGenerationByKeyRef.current[key] = next
-                  return next
-                }}
+                nextDraftGeneration={nextDraftGeneration}
                 disabled={hasExpired}
                 isSubmitted={submittedQuestionIds.has(activeQuestion.id)}
                 submittedMessage={submittedMessage}

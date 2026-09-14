@@ -3258,8 +3258,17 @@ export default function setupResonanceRoutes(
           persistedSession = currentSession
           return currentSession
         })
-        if (updated !== null && persistedSession !== null) persistedSession = updated as ResonanceSession
-        else persistedSession = null
+        if (updated === null) {
+          console.error(JSON.stringify({
+            component: 'resonance',
+            event: 'draft-save-atomic-update-failed',
+            sessionId,
+            studentId,
+            questionId,
+          }))
+          return
+        }
+        if (persistedSession !== null) persistedSession = updated as ResonanceSession
         if (persistedSession !== null) {
           broadcastToRole('resonance:instructor-state', buildInstructorSnapshot(persistedSession), sessionId, true)
         }

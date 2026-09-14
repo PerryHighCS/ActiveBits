@@ -28,7 +28,7 @@ interface Props {
    * question's first edit session in a run) when omitted.
    */
   editSequence?: number
-  nextDraftGeneration?(): number
+  nextDraftGeneration?(questionId: string, activeQuestionRunToken: number | null): number
   onDraftChanged?(questionId: string, answer: AnswerPayload | null): void
   onDraftSaveFailed?(payload: Record<string, unknown>): void
   onSubmitted?(questionId: string, answer: AnswerPayload): void
@@ -149,7 +149,7 @@ export default function QuestionView({
           : { activeQuestionRunStartedAt: activeQuestionRunToken }),
         ...(activeQuestionDeadlineAt !== null ? { activeQuestionDeadlineAt } : {}),
         editSequence: editSequenceRef.current,
-        draftGeneration: nextDraftGeneration?.() ?? ++draftGenerationRef.current,
+        draftGeneration: nextDraftGeneration?.(question.id, activeQuestionRunToken) ?? ++draftGenerationRef.current,
         answer: pendingDraft,
       }
       if (saveDraft) {

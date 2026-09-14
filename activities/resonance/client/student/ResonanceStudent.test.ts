@@ -26,10 +26,12 @@ class StudentTestWebSocket {
   onclose: (() => void) | null = null
   readyState = 1
   shouldFailDraft = true
+  draftAttempts = 0
   sent: string[] = []
 
   constructor() { StudentTestWebSocket.instances.push(this) }
   send(message: string): void {
+    if (message.includes('resonance:update-draft')) this.draftAttempts += 1
     if (this.shouldFailDraft && message.includes('resonance:update-draft')) throw new Error('offline draft send')
     this.sent.push(message)
   }
@@ -84,9 +86,13 @@ void test('mounted student retains a failed Q1 autosave across a Q2 tab remount 
     })
     const input = await waitFor(() => rendered.getByLabelText(/your answer/i) as HTMLTextAreaElement)
     fireEvent.change(input, { target: { value: 'retain me' } })
-    await new Promise((resolve) => setTimeout(resolve, 600))
+    // The countdown causes a parent render at one second. Its stable
+    // generation callback must not flush this 1500ms child debounce early.
+    await new Promise((resolve) => setTimeout(resolve, 1_050))
+    assert.equal(socket.draftAttempts, 0)
     // Q1's child is keyed and unmounts as the student changes stack tabs.
     fireEvent.click(rendered.getByRole('button', { name: /q2/i }))
+    await waitFor(() => assert.equal(socket.draftAttempts, 1))
     socket.shouldFailDraft = false
     console.info('[TEST] a failed Q1 autosave must be retried by the mounted parent after Q2 remounts')
     await waitFor(() => assert.ok(socket.sent.some((message) => message.includes('retain me'))), { timeout: 2_500 })
