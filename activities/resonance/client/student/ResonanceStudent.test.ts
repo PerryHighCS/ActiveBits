@@ -129,6 +129,63 @@ void test('mounted student retains a failed Q1 autosave across a Q2 tab remount 
   }
 })
 
+void test('a save that fails after its run ends is handed off and cannot leak a stale answer into the new run', async () => {
+  // QuestionView is not remounted just because the run token changes (only a
+  // stack-tab switch remounts it, since it's keyed by question id). A save
+  // that was still in flight when the run changed used to have its failure
+  // silently dropped by QuestionView's own run-token guard: the parent never
+  // learned about it, so the optimistic answer written to `submittedAnswers`
+  // by onDraftChanged was never cleared and kept showing under the new run.
+  const restore = installStudentDom()
+  const { act, fireEvent, render, waitFor } = await import('@testing-library/react')
+  try {
+    window.localStorage.setItem('student-name-session-1', 'Ari')
+    window.localStorage.setItem('student-id-session-1', 'student-1')
+    const rendered = render(React.createElement(MemoryRouter, { initialEntries: ['/session-1'] },
+      React.createElement(Routes, null, React.createElement(Route, { path: '/:sessionId', element: React.createElement(ResonanceStudent) })),
+    ))
+    await waitFor(() => assert.equal(StudentTestWebSocket.instances.length, 1))
+    const socket = StudentTestWebSocket.instances[0]!
+    socket.shouldFailDraft = false
+    await act(async () => {
+      socket.emit({ type: 'resonance:session-state', payload: {
+        sessionId: 'session-1', activeQuestionIds: ['q1'], activeQuestionRunRevision: 7,
+        activeQuestionDeadlineAt: Date.now() + 30_000,
+        activeQuestions: [{ id: 'q1', type: 'free-response', text: 'First', order: 1 }],
+      } })
+    })
+    const input = await waitFor(() => rendered.getByLabelText(/your answer/i) as HTMLTextAreaElement)
+    fireEvent.change(input, { target: { value: 'stale run answer' } })
+
+    console.info('[TEST] a run-7 draft is sent but never acknowledged')
+    await waitFor(() => assert.equal(socket.draftAttempts, 1), { timeout: 2_000 })
+
+    // The instructor reactivates the same question in a new run while the
+    // save above is still pending. Same question id, so QuestionView stays
+    // mounted; only its run-token prop changes.
+    await act(async () => {
+      socket.emit({ type: 'resonance:session-state', payload: {
+        sessionId: 'session-1', activeQuestionIds: ['q1'], activeQuestionRunRevision: 8,
+        activeQuestionDeadlineAt: Date.now() + 30_000,
+        activeQuestions: [{ id: 'q1', type: 'free-response', text: 'First', order: 1 }],
+      } })
+    })
+
+    console.info('[TEST] the stale run-7 save must be discarded, not leaked into run 8, once it finally times out')
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 2_100))
+    })
+
+    await waitFor(() => {
+      assert.notEqual((rendered.getByLabelText(/your answer/i) as HTMLTextAreaElement).value, 'stale run answer')
+    }, { timeout: 2_000 })
+
+    rendered.unmount()
+  } finally {
+    restore()
+  }
+})
+
 void test('unconfirmed draft keys keep a stack-tab draft scoped to its live run', () => {
   const answer = { type: 'free-response', text: 'Saved after switching tabs' }
   assert.equal(
@@ -213,14 +270,6 @@ void test('edit-sequence bookkeeping survives a QuestionView remount, unlike a c
   // A different question, or the same question in a new run, is independent.
   assert.equal(resolveCurrentEditSequence(byKey, 'q2', 1), 1)
   assert.equal(resolveCurrentEditSequence(byKey, 'q1', 2), 1)
-})
-
-void test('a server-seeded draft generation lets a reloaded student advance past persisted autosaves', () => {
-  const run = 1
-  const key = `q1:${run}`
-  const generations: Record<string, number> = { [key]: 4 }
-  const next = (generations[key] ?? 0) + 1
-  assert.equal(next, 5)
 })
 
 void test('seedEditSequenceFromConfirmedResponse recovers a post-reload counter from the server, instead of defaulting to 1 and colliding with an existing submission', () => {

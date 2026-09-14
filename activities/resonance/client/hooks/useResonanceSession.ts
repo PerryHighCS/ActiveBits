@@ -546,6 +546,8 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
   const pendingDraftSavesRef = useRef(new Map<string, {
     resolve(saved: boolean): void
     timeoutId: ReturnType<typeof setTimeout>
+    retryKey: string | null
+    generation: number
   }>())
   const queuedDraftRetriesRef = useRef(new Map<string, Record<string, unknown>>())
   const latestDraftGenerationByKeyRef = useRef(new Map<string, number>())
@@ -751,6 +753,16 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
             if (pending && draftId !== null) {
               clearTimeout(pending.timeoutId)
               pendingDraftSavesRef.current.delete(draftId)
+              // An acknowledged direct save can supersede an older queued
+              // reconnect retry for the same key that a prior timeout left
+              // behind — without this, that stale retry survives to be
+              // resent (and rebroadcast) on the next reconnect/flush.
+              if (pending.retryKey !== null) {
+                const queued = queuedDraftRetriesRef.current.get(pending.retryKey)
+                if (queued && getDraftGeneration(queued) <= pending.generation) {
+                  queuedDraftRetriesRef.current.delete(pending.retryKey)
+                }
+              }
               pending.resolve(true)
             } else if (draftId !== null) {
               const retry = retryDraftSavesRef.current.get(draftId)
@@ -852,7 +864,12 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
         queueDraftRetry(retryKey, payload)
         resolve(false)
       }, DRAFT_SAVE_ACK_TIMEOUT_MS)
-      pendingDraftSavesRef.current.set(draftId, { resolve, timeoutId })
+      pendingDraftSavesRef.current.set(draftId, {
+        resolve,
+        timeoutId,
+        retryKey,
+        generation: getDraftGeneration(payload),
+      })
       try {
         currentWs.send(JSON.stringify({
           type: 'resonance:update-draft',

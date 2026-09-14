@@ -403,6 +403,8 @@ export default function ResonanceStudent() {
     registered && sessionId ? sessionId : null,
     studentId,
   )
+  const snapshotRef = useRef(snapshot)
+  snapshotRef.current = snapshot
 
   useLayoutEffect(() => {
     setSelectedQuestionId(null)
@@ -443,6 +445,11 @@ export default function ResonanceStudent() {
     })
   }, [])
 
+  // Stable regardless of snapshot identity: QuestionView includes this
+  // callback (as onDraftSaveFailed) in its autosave effect dependencies, so a
+  // snapshot update while a debounce is pending would otherwise flush the
+  // draft early. Read the fallback deadline from a ref instead of closing
+  // over snapshot directly.
   const recordUnconfirmedDraft = useCallback((payload: Record<string, unknown>) => {
     const key = buildUnconfirmedDraftKey(payload)
     if (key === null) return
@@ -450,10 +457,10 @@ export default function ResonanceStudent() {
     if (current && resolveDraftGeneration(current.payload) > resolveDraftGeneration(payload)) return
     const deadlineAt = typeof payload.activeQuestionDeadlineAt === 'number'
       ? payload.activeQuestionDeadlineAt
-      : snapshot?.activeQuestionDeadlineAt ?? null
+      : snapshotRef.current?.activeQuestionDeadlineAt ?? null
     unconfirmedDraftsRef.current.set(key, { payload, retrying: false, deadlineAt })
     setUnconfirmedDraftVersion((current) => current + 1)
-  }, [snapshot])
+  }, [])
 
   useEffect(() => {
     if (unconfirmedDraftsRef.current.size === 0 || snapshot === null || studentId === null) {

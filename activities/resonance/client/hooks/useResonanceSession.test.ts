@@ -906,3 +906,66 @@ void test('saveDraft retries an acknowledgement timeout after reconnecting withi
     await act(async () => { rendered.unmount() })
   } finally { restore() }
 })
+
+void test('a direct save that succeeds clears an older queued reconnect retry for the same key', async () => {
+  // The ACK for a normal saveDraft call (pendingDraftSavesRef) and the ACK
+  // for a queued reconnect retry (retryDraftSavesRef) are handled by separate
+  // branches. Only the retry branch cleaned up queuedDraftRetriesRef — a
+  // direct save's ACK left a stale queued entry behind, so an unrelated
+  // later reconnect would resend an already-superseded draft.
+  const restore = installWsTestEnvironment()
+  const { act, render, waitFor } = await import('@testing-library/react')
+
+  try {
+    const captured: { saveDraft: ((payload: Record<string, unknown>) => Promise<boolean>) | null } = { saveDraft: null }
+    function Probe() {
+      const { saveDraft } = useResonanceSession('session-1', 'student-1')
+      captured.saveDraft = saveDraft
+      return null
+    }
+    let rendered!: ReturnType<typeof render>
+    await act(async () => { rendered = render(React.createElement(Probe)); await Promise.resolve() })
+    await waitFor(() => assert.equal(FakeWebSocket.instances.length, 1))
+    const firstSocket = FakeWebSocket.instances[0]!
+    firstSocket.emitMessage({ type: 'resonance:session-state', payload: {
+      sessionId: 'session-1', activeQuestionIds: ['q1'], activeQuestionRunRevision: 3, activeQuestionDeadlineAt: Date.now() + 30_000,
+    } })
+
+    console.info('[TEST] an unacknowledged generation-1 draft queues a reconnect retry after timing out')
+    await act(async () => {
+      assert.equal(await captured.saveDraft?.({
+        studentId: 'student-1', questionId: 'q1', activeQuestionRunRevision: 3,
+        draftGeneration: 1, answer: { type: 'free-response', text: 'Generation one, never acked' },
+      }), false)
+    })
+
+    console.info('[TEST] a later direct save for the same key is acknowledged and must clear that queued retry')
+    const sentAfterSuccess: unknown[] = []
+    firstSocket.send = (message?: unknown) => { sentAfterSuccess.push(message) }
+    const savePromise = captured.saveDraft?.({
+      studentId: 'student-1', questionId: 'q1', activeQuestionRunRevision: 3,
+      draftGeneration: 2, answer: { type: 'free-response', text: 'Generation two, acked directly' },
+    })
+    await waitFor(() => assert.equal(sentAfterSuccess.length, 1))
+    const directDraftId = (JSON.parse(String(sentAfterSuccess[0])) as { payload: { draftId: string } }).payload.draftId
+    await act(async () => {
+      firstSocket.emitMessage({ type: 'resonance:draft-saved', payload: { draftId: directDraftId } })
+      assert.equal(await savePromise, true)
+    })
+
+    // Reconnect: if the generation-1 timeout's queued retry survived the
+    // generation-2 direct ACK above, this flush would resend it here.
+    firstSocket.onclose?.({})
+    await new Promise((resolve) => setTimeout(resolve, 1_100))
+    await waitFor(() => assert.equal(FakeWebSocket.instances.length, 2))
+    const secondSocket = FakeWebSocket.instances[1]!
+    const sentAfterReconnect: unknown[] = []
+    secondSocket.send = (message?: unknown) => { sentAfterReconnect.push(message) }
+    secondSocket.onopen?.()
+
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    assert.deepEqual(sentAfterReconnect, [])
+
+    await act(async () => { rendered.unmount() })
+  } finally { restore() }
+})

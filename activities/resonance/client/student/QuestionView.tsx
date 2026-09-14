@@ -156,22 +156,26 @@ export default function QuestionView({
       }
       if (saveDraft) {
         void saveDraft(payload).then((saved) => {
-          if (
-            activeQuestionRunRevisionRef.current !== activeQuestionRunToken ||
-            sessionIdRef.current !== sessionId ||
-            studentIdRef.current !== studentId ||
-            !isSameAnswer(draftAnswerRef.current, pendingDraft)
-          ) {
+          if (sessionIdRef.current !== sessionId || studentIdRef.current !== studentId) {
             return
           }
+          const isCurrentRun = activeQuestionRunRevisionRef.current === activeQuestionRunToken
           if (saved) {
-            lastSentDraftRef.current = pendingDraft
-          } else {
-            // QuestionView is keyed by question ID and unmounts when the
-            // student switches stack tabs. The parent owns retry/reconciliation
-            // so this failed write remains recoverable after that unmount.
-            // Mark this attempt handled before handing it off. The callback
-            // updates parent state, which may remount this keyed component.
+            if (isCurrentRun && isSameAnswer(draftAnswerRef.current, pendingDraft)) {
+              lastSentDraftRef.current = pendingDraft
+            }
+            return
+          }
+          // QuestionView is keyed by question ID and unmounts when the
+          // student switches stack tabs. The parent owns retry/reconciliation
+          // so this failed write remains recoverable after that unmount. A
+          // same-run failure superseded by a newer local edit is dropped here
+          // — the next debounced send already covers it — but a failure from
+          // a run that has since ended or changed must still be handed off:
+          // this component's local state is no longer authoritative once the
+          // run moves on, and only the parent's deadline-aware disposition
+          // logic can decide whether to retry, reconcile, or discard it.
+          if (!isCurrentRun || isSameAnswer(draftAnswerRef.current, pendingDraft)) {
             lastSentDraftRef.current = pendingDraft
             onDraftSaveFailed?.(payload)
           }
