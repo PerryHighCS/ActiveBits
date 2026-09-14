@@ -98,6 +98,31 @@ void test('mounted student retains a failed Q1 autosave across a Q2 tab remount 
     await waitFor(() => assert.ok(socket.sent.some((message) => message.includes('retain me'))), { timeout: 2_500 })
     const retry = JSON.parse(socket.sent.find((message) => message.includes('retain me'))!) as { payload: { draftId: string } }
     await act(async () => { socket.emit({ type: 'resonance:draft-saved', payload: { draftId: retry.payload.draftId } }) })
+
+    socket.sent.length = 0
+    await act(async () => {
+      socket.emit({ type: 'resonance:session-state', payload: {
+        sessionId: 'session-1', selfPacedMode: true, lastActiveQuestionRunRevision: 7,
+        activeQuestionIds: ['q3', 'q4'],
+        activeQuestions: [
+          { id: 'q3', type: 'free-response', text: 'Reloaded self-paced', order: 3 },
+          { id: 'q4', type: 'free-response', text: 'Other', order: 4 },
+        ], draftGenerations: { q3: 4 },
+      } })
+    })
+    await waitFor(() => rendered.getByText('Reloaded self-paced'))
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    fireEvent.change(rendered.getByLabelText(/your answer/i), { target: { value: 'Generation five' } })
+    fireEvent.click(rendered.getByRole('button', { name: /^q2$/i }))
+    await waitFor(() => assert.ok(socket.sent.some((message) => message.includes('Generation five'))), { timeout: 1_000 })
+    const reloadedDraft = JSON.parse(socket.sent.find((message) => message.includes('Generation five'))!) as {
+      payload: { draftGeneration?: number; draftId?: string }
+    }
+    assert.equal(reloadedDraft.payload.draftGeneration, 5)
+    await act(async () => {
+      socket.emit({ type: 'resonance:draft-saved', payload: { draftId: reloadedDraft.payload.draftId } })
+    })
+
     rendered.unmount()
   } finally {
     restore()
