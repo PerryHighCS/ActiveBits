@@ -120,6 +120,15 @@ export default function QuestionView({
     }
   }, [question.id, activeQuestionRunToken, sessionId, studentId])
 
+  // Closes a same-question run-restart race: the reset effect above fires
+  // (activeQuestionRunToken changed) and seeds draftAnswer from whatever
+  // initialAnswer the parent passed on ITS first render of the new run —
+  // before the parent's own effect has cleared a stale prior-run local
+  // answer out of that same prop. That correction lands here as a later
+  // initialAnswer change; since draftAnswer still matches the value this
+  // component last synchronized (the student hasn't typed anything new in
+  // between), it's safe to resync to the corrected value rather than leaving
+  // the stale one in place for the rest of the run.
   useEffect(() => {
     if (isSameAnswer(draftAnswer, synchronizedInitialAnswerRef.current)) {
       setDraftAnswer(initialAnswer)

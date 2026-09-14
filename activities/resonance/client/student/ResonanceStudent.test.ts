@@ -283,9 +283,9 @@ void test('a stale local answer from a previous run cannot be redisplayed or res
       } })
     })
 
-    assert.notEqual(
+    assert.equal(
       (rendered.getByLabelText(/your answer/i) as HTMLTextAreaElement).value,
-      'leftover from run 7',
+      '',
     )
 
     rendered.unmount()
