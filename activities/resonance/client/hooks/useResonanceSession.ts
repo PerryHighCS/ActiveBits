@@ -533,7 +533,22 @@ export function selectStudentSessionSnapshot(
  * @param sessionId  - The session to connect to, or null to defer.
  * @param studentId  - The registered student ID, forwarded to the WS for identity.
  */
-export function useResonanceSession(sessionId: string | null, studentId?: string | null) {
+export function useResonanceSession(
+  sessionId: string | null,
+  studentId?: string | null,
+  options?: { onDraftReplayAcknowledged?(key: string, generation: number): void },
+) {
+  // A reconnect-replay ack (retryDraftSavesRef, below) doesn't resolve any
+  // caller-held promise the way a direct saveDraft() call does — it's a
+  // fire-and-forget background resend. Without surfacing it here, a caller
+  // tracking its own retained-draft state (e.g. the parent student view) has
+  // no way to learn this specific attempt was persisted, and keeps retrying
+  // it independently until an unrelated retry happens to get acknowledged.
+  // Read from a ref so the reconnect effect below doesn't need this in its
+  // dependency array.
+  const onDraftReplayAcknowledgedRef = useRef(options?.onDraftReplayAcknowledged)
+  onDraftReplayAcknowledgedRef.current = options?.onDraftReplayAcknowledged
+
   const [snapshot, setSnapshot] = useState<StudentSessionSnapshot | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -784,6 +799,7 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
                 if (queued && getDraftGeneration(queued) <= retry.generation) {
                   queuedDraftRetriesRef.current.delete(retry.key)
                 }
+                onDraftReplayAcknowledgedRef.current?.(retry.key, retry.generation)
               }
             }
           } else if (

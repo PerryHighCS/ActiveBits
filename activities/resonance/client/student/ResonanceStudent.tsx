@@ -338,6 +338,19 @@ export default function ResonanceStudent() {
     return next
   }, [])
 
+  // Shared by a direct successful save (handleDraftSaved, below) and a
+  // reconnect-replay ack (passed to useResonanceSession as
+  // onDraftReplayAcknowledged) — both are ways this component can learn a
+  // particular generation is now durably persisted, and either should clear
+  // a same-or-older retained entry rather than leaving it to keep retrying.
+  const clearRetainedDraftIfSuperseded = useCallback((key: string, generation: number) => {
+    const retained = unconfirmedDraftsRef.current.get(key)
+    if (retained && resolveDraftGeneration(retained.payload) <= generation) {
+      unconfirmedDraftsRef.current.delete(key)
+      setUnconfirmedDraftVersion((current) => current + 1)
+    }
+  }, [])
+
   useLayoutEffect(() => {
     setIdentityResolved(false)
     setStudentName(null)
@@ -429,6 +442,7 @@ export default function ResonanceStudent() {
   const { snapshot, loading: sessionLoading, error: sessionError, refresh, sendMessage, saveDraft, cancelDraftRetries } = useResonanceSession(
     registered && sessionId ? sessionId : null,
     studentId,
+    { onDraftReplayAcknowledged: clearRetainedDraftIfSuperseded },
   )
   const snapshotRef = useRef(snapshot)
   snapshotRef.current = snapshot
@@ -523,13 +537,9 @@ export default function ResonanceStudent() {
     const key = buildUnconfirmedDraftKey(payload)
     if (key === null) return
     const generation = resolveDraftGeneration(payload)
-    const retained = unconfirmedDraftsRef.current.get(key)
-    if (retained && resolveDraftGeneration(retained.payload) <= generation) {
-      unconfirmedDraftsRef.current.delete(key)
-      setUnconfirmedDraftVersion((current) => current + 1)
-    }
+    clearRetainedDraftIfSuperseded(key, generation)
     cancelDraftRetries(key, generation)
-  }, [cancelDraftRetries])
+  }, [cancelDraftRetries, clearRetainedDraftIfSuperseded])
 
   useEffect(() => {
     if (unconfirmedDraftsRef.current.size === 0 || snapshot === null || studentId === null) {
@@ -944,7 +954,16 @@ export default function ResonanceStudent() {
                       setUnconfirmedDraftVersion((current) => current + 1)
                     }
                   }
-                  cancelDraftRetries(retainedDraftKey, Number.MAX_SAFE_INTEGER)
+                  // Cap the cancellation at the highest generation actually
+                  // allocated so far for this question+run, not an unbounded
+                  // sentinel: live Resonance allows revisiting a submitted
+                  // question in the same run, and a permanent ceiling would
+                  // make queueDraftRetry reject every later revisit edit's
+                  // failed autosave from ever being replayed on reconnect.
+                  cancelDraftRetries(
+                    retainedDraftKey,
+                    draftGenerationByKeyRef.current[buildEditSequenceKey(questionId, runToken)] ?? 0,
+                  )
                   setSubmittedQuestionIds((current) => {
                     const nextSubmittedQuestionIds = new Set(current)
                     nextSubmittedQuestionIds.add(questionId)
