@@ -942,6 +942,114 @@ void test('a draft that arrives after its submission is dropped instead of resur
   await sessions.close()
 })
 
+void test('a submission that commits while a stale draft write is in flight is not overwritten by that draft', async () => {
+  // The update-draft handler's stale-response guard runs against the session
+  // it read at the start of the WS message. sessions.updateAtomic then reads
+  // the freshest stored session for its actual write. If a submission commits
+  // in that window, the outer guard never saw it — only re-checking the
+  // confirmed response inside the atomic mutator (against its fresh read)
+  // catches the race and keeps the draft from clobbering the submission.
+  const app = createMockApp()
+  const sessions = createSessionStore(null)
+  const session = createMultiQuestionSession()
+  const runStartedAt = Date.now() - 1_000
+  session.data.activeQuestionId = 'q1'
+  session.data.activeQuestionIds = ['q1']
+  session.data.activeQuestionRunStartedAt = runStartedAt
+  session.data.activeQuestionRunRevision = 1
+  session.data.lastActiveQuestionRunRevision = 1
+  const studentCookies = issueStudentCookies(session, 'student1')
+  await sessions.set(session.id, session)
+  const captured = createCapturingMockWs()
+  setupResonanceRoutes(app, sessions, captured.ws)
+
+  const handler = captured.getHandler()
+  const messageHandlers: Array<(message: string) => void> = []
+  const sentMessages: Array<{ type?: string; payload?: { draftId?: string } }> = []
+  assert.ok(handler)
+  handler({
+    readyState: 1,
+    upgradeHeaders: {
+      cookie: Object.entries(studentCookies).map(([name, value]) => `${name}=${value}`).join('; '),
+    },
+    send(message: string) {
+      sentMessages.push(JSON.parse(message) as { type?: string; payload?: { draftId?: string } })
+    },
+    on(event: string, callback: (message: string) => void) {
+      if (event === 'message') messageHandlers.push(callback)
+    },
+    once() {},
+    close() {},
+    terminate() {},
+    ping() {},
+  }, new URLSearchParams({ sessionId: session.id, role: 'student', studentId: 'student1' }), captured.ws.wss)
+  await waitForCondition(() => messageHandlers.length === 1)
+
+  // Pause the draft handler's session read right after it captures a
+  // pre-submission snapshot, so the confirmed-response guard evaluated
+  // against that snapshot cannot see the submission that lands next.
+  const originalGet = sessions.get.bind(sessions)
+  let sawDraftRead = false
+  let releaseDraftRead!: () => void
+  const draftReadGate = new Promise<void>((resolve) => {
+    releaseDraftRead = resolve
+  })
+  sessions.get = (async (id: string) => {
+    const result = await originalGet(id)
+    if (!sawDraftRead && id === session.id) {
+      sawDraftRead = true
+      await draftReadGate
+    }
+    return result
+  }) as SessionStore['get']
+
+  console.info('[TEST] a draft update racing an in-flight submission must not resurrect the pre-submission answer')
+  messageHandlers[0]?.(JSON.stringify({
+    type: 'resonance:update-draft',
+    payload: {
+      studentId: 'student1',
+      questionId: 'q1',
+      draftId: 'racing-draft',
+      activeQuestionRunRevision: 1,
+      editSequence: 1,
+      answer: { type: 'free-response', text: 'Stale draft racing the submission' },
+    },
+  }))
+  await waitForCondition(() => sawDraftRead)
+
+  const submitRes = createResponse()
+  await app.handlers.post['/api/resonance/:sessionId/submit-answer']?.({
+    params: { sessionId: session.id },
+    cookies: studentCookies,
+    body: {
+      studentId: 'student1',
+      questionId: 'q1',
+      activeQuestionRunRevision: 1,
+      editSequence: 1,
+      answer: { type: 'free-response', text: 'Submitted answer' },
+    },
+  }, submitRes)
+  assert.equal(submitRes.statusCode, 200)
+
+  releaseDraftRead()
+  await waitForCondition(() => sentMessages.some((message) =>
+    message.type === 'resonance:draft-saved' && message.payload?.draftId === 'racing-draft'
+  ))
+
+  const stored = await originalGet(session.id)
+  const storedData = stored?.data as {
+    responses?: Array<{ answer?: unknown }>
+    responseDrafts?: Record<string, unknown>
+  } | undefined
+  assert.deepEqual(storedData?.responses?.[0]?.answer, {
+    type: 'free-response',
+    text: 'Submitted answer',
+  })
+  assert.equal(Object.keys(storedData?.responseDrafts ?? {}).length, 0)
+
+  await sessions.close()
+})
+
 void test('a draft made after revisiting an already-submitted question in the same run is persisted, not dropped as stale', async () => {
   const app = createMockApp()
   const sessions = createSessionStore(null)

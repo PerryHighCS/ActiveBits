@@ -3230,6 +3230,24 @@ export default function setupResonanceRoutes(
             !isCurrentStagedQuestionAnswerable(currentSession.data, questionId)
           ) return currentSession
 
+          // Re-check against the freshest confirmed response inside the
+          // atomic mutation: a submission can commit between the pre-check
+          // above and this callback running, and only this current-run
+          // response/editSequence comparison can catch that race.
+          const currentConfirmedResponseForRun = currentSession.data.responses.find(
+            (response) =>
+              response.questionId === questionId &&
+              response.studentId === studentId &&
+              response.activeQuestionRunRevision === currentSession.data.activeQuestionRunRevision,
+          )
+          if (
+            currentConfirmedResponseForRun !== undefined &&
+            editSequence <= (currentConfirmedResponseForRun.editSequence ?? 0)
+          ) {
+            shouldAcknowledge = true
+            return currentSession
+          }
+
           const currentDraft = currentSession.data.responseDrafts[draftKey]
           const currentGeneration = currentSession.data.responseDraftGenerations[draftKey]
           const generationForCurrentRun = currentGeneration?.activeQuestionRunRevision === currentSession.data.activeQuestionRunRevision
