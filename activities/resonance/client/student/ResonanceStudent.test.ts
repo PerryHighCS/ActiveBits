@@ -15,6 +15,7 @@ import { advanceEditSequenceForRevisit, resolveCurrentEditSequence } from './Res
 import { seedEditSequenceFromConfirmedResponse } from './ResonanceStudent.js'
 import { buildUnconfirmedDraftKey } from './ResonanceStudent.js'
 import { resolveUnconfirmedDraftDisposition } from './ResonanceStudent.js'
+import { isSameDraftAnswer } from './ResonanceStudent.js'
 
 ;(globalThis as { React?: typeof React }).React = React
 
@@ -806,6 +807,33 @@ void test('unconfirmed draft keys keep a stack-tab draft scoped to its live run'
     'q1:123',
   )
   assert.equal(buildUnconfirmedDraftKey({ questionId: 'q1', answer }), 'q1:self-paced')
+})
+
+void test('isSameDraftAnswer treats an MCQ selection as unchanged regardless of option order', () => {
+  // Copilot's finding: MCQ answers are set-based (QuestionView.tsx's
+  // isSameAnswer and shared/mcq.ts both compare selectedOptionIds as a
+  // set), but this used a raw JSON.stringify comparison instead — order-
+  // sensitive. reconcileUnconfirmedDraft/discardUnconfirmedDraft use this to
+  // decide whether a retained failed autosave matches the answer that was
+  // actually confirmed; if the confirmed response and the retained draft
+  // list the same options in a different order (e.g. a different click
+  // order), the mismatch would leave the draft retrying forever instead of
+  // reconciling against its own now-confirmed submission.
+  const clickedBThenA = { type: 'multiple-choice', selectedOptionIds: ['optB', 'optA'] }
+  const confirmedAThenB = { type: 'multiple-choice', selectedOptionIds: ['optA', 'optB'] }
+  assert.equal(isSameDraftAnswer(clickedBThenA, confirmedAThenB), true)
+
+  const differentSelection = { type: 'multiple-choice', selectedOptionIds: ['optA', 'optC'] }
+  assert.equal(isSameDraftAnswer(clickedBThenA, differentSelection), false)
+
+  const freeResponseA = { type: 'free-response', text: 'same text' }
+  const freeResponseB = { type: 'free-response', text: 'same text' }
+  assert.equal(isSameDraftAnswer(freeResponseA, freeResponseB), true)
+  assert.equal(isSameDraftAnswer(freeResponseA, { type: 'free-response', text: 'different' }), false)
+
+  assert.equal(isSameDraftAnswer(undefined, undefined), true)
+  assert.equal(isSameDraftAnswer(null, freeResponseA), false)
+  assert.equal(isSameDraftAnswer(freeResponseA, clickedBThenA), false)
 })
 
 void test('unconfirmed draft retry stops on deadline or an authoritative run change', () => {

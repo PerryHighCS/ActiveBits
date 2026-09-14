@@ -1209,3 +1209,123 @@ void test('a reconnect cannot resend a known-stale generation left behind by a n
     await act(async () => { rendered.unmount() })
   } finally { restore() }
 })
+
+void test('cancelDraftRetries caps an unbounded cancellation ceiling at the highest generation actually attempted', async () => {
+  // Copilot's finding: ResonanceStudent.tsx now bounds what it passes to
+  // cancelDraftRetries, but that discipline lives entirely in the caller.
+  // The hook itself still wrote the caller's raw value straight into the
+  // watermark. Passing an unbounded/mistaken ceiling (Number.MAX_SAFE_INTEGER)
+  // would permanently suppress every later generation for that key, since
+  // nothing could ever exceed it — the hook must defend itself too.
+  const restore = installWsTestEnvironment()
+  const { act, render, waitFor } = await import('@testing-library/react')
+
+  try {
+    const captured: {
+      saveDraft: ((payload: Record<string, unknown>) => Promise<boolean>) | null
+      cancelDraftRetries: ((key: string | null, atLeastGeneration: number) => void) | null
+    } = { saveDraft: null, cancelDraftRetries: null }
+    function Probe() {
+      const { saveDraft, cancelDraftRetries } = useResonanceSession('session-1', 'student-1')
+      captured.saveDraft = saveDraft
+      captured.cancelDraftRetries = cancelDraftRetries
+      return null
+    }
+    let rendered!: ReturnType<typeof render>
+    await act(async () => { rendered = render(React.createElement(Probe)); await Promise.resolve() })
+    await waitFor(() => assert.equal(FakeWebSocket.instances.length, 1))
+    const firstSocket = FakeWebSocket.instances[0]!
+    firstSocket.emitMessage({ type: 'resonance:session-state', payload: {
+      sessionId: 'session-1', activeQuestionIds: ['q1'], activeQuestionRunRevision: 3, activeQuestionDeadlineAt: Date.now() + 30_000,
+    } })
+
+    console.info('[TEST] generation 1 is attempted (left unacknowledged), so the hook records it as the highest generation seen')
+    void captured.saveDraft?.({
+      studentId: 'student-1', questionId: 'q1', activeQuestionRunRevision: 3,
+      draftGeneration: 1, answer: { type: 'free-response', text: 'Superseded by a submission' },
+    })
+
+    console.info('[TEST] the caller cancels with an unbounded ceiling, as a buggy caller might')
+    captured.cancelDraftRetries?.('q1:3', Number.MAX_SAFE_INTEGER)
+
+    console.info('[TEST] the student revisits the question and a generation-2 edit fails offline')
+    firstSocket.readyState = 3
+    await act(async () => {
+      assert.equal(await captured.saveDraft?.({
+        studentId: 'student-1', questionId: 'q1', activeQuestionRunRevision: 3,
+        draftGeneration: 2, answer: { type: 'free-response', text: 'A genuine revisit edit' },
+      }), false)
+    })
+
+    console.info('[TEST] that generation-2 draft must still be queued and replayed on reconnect')
+    firstSocket.onclose?.({})
+    await new Promise((resolve) => setTimeout(resolve, 1_100))
+    await waitFor(() => assert.equal(FakeWebSocket.instances.length, 2))
+    const secondSocket = FakeWebSocket.instances[1]!
+    const sentAfterReconnect: unknown[] = []
+    secondSocket.send = (message?: unknown) => { sentAfterReconnect.push(message) }
+    secondSocket.onopen?.()
+
+    await waitFor(() => assert.ok(sentAfterReconnect.some((message) => String(message).includes('A genuine revisit edit'))))
+
+    await act(async () => { rendered.unmount() })
+  } finally { restore() }
+})
+
+void test('a pending direct save whose generation was just cancelled is not requeued when its own ack times out', async () => {
+  // Copilot's finding: cancelling retries only removes an already-queued
+  // entry — it does nothing about a save that's still awaiting its own
+  // ack. If a submission is confirmed while generation N's draft-save is
+  // still in flight and no ack ever arrives, that save's own timeout later
+  // calls queueDraftRetry with generation N again — and the staleness check
+  // there accepts equality with the cancellation ceiling, so a reconnect
+  // would resend the already-superseded payload.
+  const restore = installWsTestEnvironment()
+  const { act, render, waitFor } = await import('@testing-library/react')
+
+  try {
+    const captured: {
+      saveDraft: ((payload: Record<string, unknown>) => Promise<boolean>) | null
+      cancelDraftRetries: ((key: string | null, atLeastGeneration: number) => void) | null
+    } = { saveDraft: null, cancelDraftRetries: null }
+    function Probe() {
+      const { saveDraft, cancelDraftRetries } = useResonanceSession('session-1', 'student-1')
+      captured.saveDraft = saveDraft
+      captured.cancelDraftRetries = cancelDraftRetries
+      return null
+    }
+    let rendered!: ReturnType<typeof render>
+    await act(async () => { rendered = render(React.createElement(Probe)); await Promise.resolve() })
+    await waitFor(() => assert.equal(FakeWebSocket.instances.length, 1))
+    const firstSocket = FakeWebSocket.instances[0]!
+    firstSocket.emitMessage({ type: 'resonance:session-state', payload: {
+      sessionId: 'session-1', activeQuestionIds: ['q1'], activeQuestionRunRevision: 3, activeQuestionDeadlineAt: Date.now() + 30_000,
+    } })
+
+    console.info('[TEST] a generation-1 draft save is sent and left unacknowledged (never times out yet)')
+    const savePromise = captured.saveDraft?.({
+      studentId: 'student-1', questionId: 'q1', activeQuestionRunRevision: 3,
+      draftGeneration: 1, answer: { type: 'free-response', text: 'Confirmed by a submission moments later' },
+    })
+
+    console.info('[TEST] a submission confirms the answer through generation 1 while that save is still pending')
+    captured.cancelDraftRetries?.('q1:3', 1)
+
+    console.info('[TEST] the pending save now times out unacknowledged')
+    await act(async () => { await savePromise })
+
+    console.info('[TEST] on reconnect, the superseded generation-1 payload must not be resent')
+    firstSocket.onclose?.({})
+    await new Promise((resolve) => setTimeout(resolve, 1_100))
+    await waitFor(() => assert.equal(FakeWebSocket.instances.length, 2))
+    const secondSocket = FakeWebSocket.instances[1]!
+    const sentAfterReconnect: unknown[] = []
+    secondSocket.send = (message?: unknown) => { sentAfterReconnect.push(message) }
+    secondSocket.onopen?.()
+
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    assert.deepEqual(sentAfterReconnect, [])
+
+    await act(async () => { rendered.unmount() })
+  } finally { restore() }
+})

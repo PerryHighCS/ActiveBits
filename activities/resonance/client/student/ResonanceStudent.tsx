@@ -8,6 +8,7 @@ import { useResonanceSession } from '../hooks/useResonanceSession.js'
 import NameEntryForm from './NameEntryForm.js'
 import QuestionView from './QuestionView.js'
 import SharedResponseFeed from './SharedResponseFeed.js'
+import { areMcqSelectionsEqual } from '../../shared/mcq.js'
 import type { AnswerPayload } from '../../shared/types.js'
 
 interface RegisterResponse {
@@ -44,8 +45,31 @@ interface UnconfirmedDraftContext {
   submittedResponseEditSequences?: Record<string, number>
 }
 
-function isSameDraftAnswer(left: unknown, right: unknown): boolean {
-  return JSON.stringify(left) === JSON.stringify(right)
+function isAnswerPayload(value: unknown): value is AnswerPayload {
+  if (value === null || typeof value !== 'object') return false
+  const record = value as Record<string, unknown>
+  if (record.type === 'free-response') return typeof record.text === 'string'
+  if (record.type === 'multiple-choice') {
+    return Array.isArray(record.selectedOptionIds) && record.selectedOptionIds.every((id) => typeof id === 'string')
+  }
+  return false
+}
+
+// MCQ answers are set-based (see QuestionView.tsx's isSameAnswer and
+// shared/mcq.ts) — selectedOptionIds order carries no meaning, so a
+// retained draft and its confirmed submission can hold the same selection
+// in a different array order (e.g. a different click order). A raw
+// JSON.stringify comparison would treat those as different and the draft
+// would never reconcile against its own submission, retrying forever.
+export function isSameDraftAnswer(left: unknown, right: unknown): boolean {
+  if (left === right) return true
+  if (!isAnswerPayload(left) || !isAnswerPayload(right)) {
+    return JSON.stringify(left) === JSON.stringify(right)
+  }
+  if (left.type !== right.type) return false
+  return left.type === 'free-response'
+    ? right.type === 'free-response' && left.text === right.text
+    : right.type === 'multiple-choice' && areMcqSelectionsEqual(left.selectedOptionIds, right.selectedOptionIds)
 }
 
 function resolvePayloadRunToken(payload: Record<string, unknown>): number | null {

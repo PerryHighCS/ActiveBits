@@ -567,6 +567,15 @@ export function useResonanceSession(
   }>())
   const queuedDraftRetriesRef = useRef(new Map<string, Record<string, unknown>>())
   const latestDraftGenerationByKeyRef = useRef(new Map<string, number>())
+  // Separate from latestDraftGenerationByKeyRef: that map tracks the highest
+  // generation *attempted* so far and intentionally lets a generation equal
+  // to it still be queued (that's the attempt's own natural retry path).
+  // cancelDraftRetries needs the opposite: once a generation is explicitly
+  // cancelled, an attempt for that exact generation — e.g. its own pending
+  // send timing out moments later — must never be requeued. Tracking this
+  // as its own watermark keeps that "equal is still queueable" behavior
+  // intact for ordinary retries while still closing that gap.
+  const cancelledUpToGenerationByKeyRef = useRef(new Map<string, number>())
   const retryDraftSavesRef = useRef(new Map<string, {
     key: string
     generation: number
@@ -586,6 +595,7 @@ export function useResonanceSession(
     retryDraftSavesRef.current.clear()
     queuedDraftRetriesRef.current.clear()
     latestDraftGenerationByKeyRef.current.clear()
+    cancelledUpToGenerationByKeyRef.current.clear()
     snapshotRef.current = null
     latestActiveQuestionRunRevisionRef.current = null
     setSnapshot(null)
@@ -648,6 +658,8 @@ export function useResonanceSession(
   const queueDraftRetry = useCallback((key: string | null, payload: Record<string, unknown>) => {
     if (key === null) return
     const generation = getDraftGeneration(payload)
+    const cancelledUpTo = cancelledUpToGenerationByKeyRef.current.get(key) ?? -1
+    if (generation <= cancelledUpTo) return
     const latest = latestDraftGenerationByKeyRef.current.get(key) ?? -1
     if (generation < latest) return
     latestDraftGenerationByKeyRef.current.set(key, generation)
@@ -937,10 +949,17 @@ export function useResonanceSession(
   // still resend a stale draft after the run's answer is already settled.
   const cancelDraftRetries = useCallback((key: string | null, atLeastGeneration: number) => {
     if (key === null) return
-    const latest = latestDraftGenerationByKeyRef.current.get(key) ?? -1
-    latestDraftGenerationByKeyRef.current.set(key, Math.max(latest, atLeastGeneration))
+    // Never trust the caller's ceiling as-is: cap it at the highest
+    // generation this hook has itself actually seen attempted (via
+    // saveDraft) for this key. An unbounded or mistaken value (say,
+    // Number.MAX_SAFE_INTEGER) would otherwise permanently block every
+    // later generation for this key, since nothing could ever exceed it.
+    const attempted = latestDraftGenerationByKeyRef.current.get(key) ?? -1
+    const bounded = Math.min(atLeastGeneration, attempted)
+    const cancelledUpTo = cancelledUpToGenerationByKeyRef.current.get(key) ?? -1
+    cancelledUpToGenerationByKeyRef.current.set(key, Math.max(cancelledUpTo, bounded))
     const queued = queuedDraftRetriesRef.current.get(key)
-    if (queued && getDraftGeneration(queued) <= atLeastGeneration) {
+    if (queued && getDraftGeneration(queued) <= bounded) {
       queuedDraftRetriesRef.current.delete(key)
     }
   }, [])
