@@ -548,6 +548,7 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
     timeoutId: ReturnType<typeof setTimeout>
     retryKey: string | null
     generation: number
+    payload: Record<string, unknown>
   }>())
   const queuedDraftRetriesRef = useRef(new Map<string, Record<string, unknown>>())
   const latestDraftGenerationByKeyRef = useRef(new Map<string, number>())
@@ -597,6 +598,16 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
         currentSnapshot.activeQuestionIds.includes(questionId) &&
         (currentSnapshot.activeQuestionDeadlineAt === null || Date.now() < currentSnapshot.activeQuestionDeadlineAt)
       if (!isEligible) {
+        queuedDraftRetriesRef.current.delete(key)
+        continue
+      }
+      // A newer attempt for this key can already be known (recorded in
+      // saveDraft/queueDraftRetry) without yet having replaced this queued
+      // entry — e.g. it's still an in-flight direct send that onclose just
+      // requeued separately, or hasn't timed out yet. Sending this stale
+      // generation could let the server persist/finalize it ahead of the
+      // newer one.
+      if (getDraftGeneration(payload) < (latestDraftGenerationByKeyRef.current.get(key) ?? -1)) {
         queuedDraftRetriesRef.current.delete(key)
         continue
       }
@@ -803,6 +814,18 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
           clearTimeout(pending.timeoutId)
         }
         retryDraftSavesRef.current.clear()
+        // A save still awaiting its ack when the socket drops will never
+        // receive it on this (now-dead) socket. Fail it immediately instead
+        // of waiting up to DRAFT_SAVE_ACK_TIMEOUT_MS: otherwise a stale
+        // generation already sitting in the reconnect queue can be flushed
+        // on the very next reconnect before this newer save's own timeout
+        // ever gets a chance to supersede it.
+        for (const [draftId, pending] of pendingDraftSavesRef.current) {
+          clearTimeout(pending.timeoutId)
+          pendingDraftSavesRef.current.delete(draftId)
+          queueDraftRetry(pending.retryKey, pending.payload)
+          pending.resolve(false)
+        }
         if (!closed && mountedRef.current) {
           reconnectTimeoutId = setTimeout(connect, reconnectDelay)
           reconnectDelay = Math.min(reconnectDelay * 2, 30_000)
@@ -826,7 +849,7 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
       if (ws !== null) ws.close()
       wsRef.current = null
     }
-  }, [sessionId, studentId, fetchSnapshot, flushQueuedDraftRetries])
+  }, [sessionId, studentId, fetchSnapshot, flushQueuedDraftRetries, queueDraftRetry])
 
   useEffect(() => {
     flushQueuedDraftRetries()
@@ -869,6 +892,7 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
         timeoutId,
         retryKey,
         generation: getDraftGeneration(payload),
+        payload,
       })
       try {
         currentWs.send(JSON.stringify({

@@ -308,6 +308,23 @@ through activity-specific props.
   Direct-name registrations without an accepted-participant or capability principal are limited by
   session and trusted-proxy client IP before they mint capability records; a newer same-run draft
   takes precedence over its older confirmed response in instructor progress until submitted.
+- Resonance's student `QuestionView` is keyed by question ID and remounts on every stack-tab
+  switch, so a failed autosave cannot retain itself locally. Instead `ResonanceStudent` owns a
+  parent-level retained-draft map (keyed by question + run) and a 1-second retry loop that
+  survives that remounting; a monotonic draft generation (allocated by the parent, not the
+  child, for the same reason) lets both the client queue and the server's `update-draft` handler
+  discard an older attempt without dropping a newer one that raced ahead of it. The `useResonanceSession`
+  hook separately queues an unacknowledged or send-failed draft for replay on WebSocket reconnect,
+  again ordered by that same generation watermark so a stale queued attempt cannot win a race
+  against a newer one still in flight when the socket drops. A draft's disposition (retry / discard /
+  reconcile) is re-evaluated against the *live* snapshot on every tick: it is discarded once superseded
+  by a confirmed response at an equal or higher edit sequence (self-paced runs have no deadline and
+  keep every question in `activeQuestionIds` indefinitely, so this is the only thing that stops retrying
+  a question the student has already submitted and moved past), and is reconciled from the server
+  once its run's deadline has passed. A run restart (the same question reactivated under a new run
+  token) drops any locally cached answer that isn't stamped with the new run, since the merge that
+  layers server snapshot data under local state would otherwise let a stale prior-run answer stay
+  displayed, and resubmittable, under the new run.
 - Embedded instructor iframes receive a short-lived, server-issued manager-entry token only after
   the authenticated parent start response arrives. Credentialed children exchange it atomically for
   the child passcode and replace the iframe URL to remove the attempted token whether the exchange

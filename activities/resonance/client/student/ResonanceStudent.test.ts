@@ -383,6 +383,87 @@ void test('a retry succeeding after its effect is superseded still stops the rep
   }
 })
 
+void test('a save handoff from a session that has since been navigated away from cannot leak into the replacement session', async () => {
+  // This route does not key ResonanceStudent by sessionId (see the shared
+  // <Route path="/:sessionId"> below), so navigating from one session to
+  // another reuses the same component instance and its stable
+  // onDraftSaveFailed callback. A saveDraft promise still pending in the old
+  // QuestionView at the moment of navigation resolves afterward. Using the
+  // same studentId, question id, and run token in both sessions (plausible
+  // if the same browser/device is reused) removes every other guard
+  // (student/run/question matching), leaving only QuestionView's own
+  // sessionId/studentId ref check to catch it — which it does, because
+  // React updates that still-transitioning instance's props (and therefore
+  // its refs) to the new session in the same commit that resets local
+  // state, strictly before the forced-resolution promise's `.then()`
+  // microtask ever runs.
+  const restore = installStudentDom()
+  const { act, fireEvent, render, waitFor } = await import('@testing-library/react')
+  const { useNavigate } = await import('react-router')
+  try {
+    window.localStorage.setItem('student-name-session-1', 'Ari')
+    window.localStorage.setItem('student-id-session-1', 'student-1')
+    window.localStorage.setItem('student-name-session-2', 'Ari')
+    window.localStorage.setItem('student-id-session-2', 'student-1')
+
+    const navigateRef: { current: ((path: string) => void) | null } = { current: null }
+    function NavigationProbe() {
+      const navigate = useNavigate()
+      navigateRef.current = (path: string) => navigate(path)
+      return null
+    }
+
+    const rendered = render(React.createElement(MemoryRouter, { initialEntries: ['/session-1'] },
+      React.createElement(NavigationProbe),
+      React.createElement(Routes, null, React.createElement(Route, { path: '/:sessionId', element: React.createElement(ResonanceStudent) })),
+    ))
+    await waitFor(() => assert.equal(StudentTestWebSocket.instances.length, 1))
+    const firstSocket = StudentTestWebSocket.instances[0]!
+    firstSocket.shouldFailDraft = false
+    await act(async () => {
+      firstSocket.emit({ type: 'resonance:session-state', payload: {
+        sessionId: 'session-1', activeQuestionIds: ['q1'], activeQuestionRunRevision: 7,
+        activeQuestionDeadlineAt: Date.now() + 30_000,
+        activeQuestions: [{ id: 'q1', type: 'free-response', text: 'First', order: 1 }],
+      } })
+    })
+    const input = await waitFor(() => rendered.getByLabelText(/your answer/i) as HTMLTextAreaElement)
+    fireEvent.change(input, { target: { value: 'stale cross-session answer' } })
+
+    console.info('[TEST] a session-1 draft is sent but never acknowledged before the student navigates away')
+    await waitFor(() => assert.equal(firstSocket.draftAttempts, 1), { timeout: 2_000 })
+
+    await act(async () => {
+      navigateRef.current?.('/session-2')
+    })
+
+    await waitFor(() => assert.equal(StudentTestWebSocket.instances.length, 2))
+    const secondSocket = StudentTestWebSocket.instances[1]!
+    // Let sends actually land in `.sent` instead of throwing (the mock's
+    // default), so a leaked resend attempt is observable either way.
+    secondSocket.shouldFailDraft = false
+    await act(async () => {
+      secondSocket.emit({ type: 'resonance:session-state', payload: {
+        sessionId: 'session-2', activeQuestionIds: ['q1'], activeQuestionRunRevision: 7,
+        activeQuestionDeadlineAt: Date.now() + 30_000,
+        activeQuestions: [{ id: 'q1', type: 'free-response', text: 'First', order: 1 }],
+      } })
+    })
+
+    console.info('[TEST] the abandoned session-1 save times out; its handoff must not be accepted by session-2')
+    await new Promise((resolve) => setTimeout(resolve, 2_600))
+
+    assert.ok(
+      !secondSocket.sent.some((message) => message.includes('stale cross-session answer')),
+      'the stale session-1 draft must not be resent into session-2',
+    )
+
+    rendered.unmount()
+  } finally {
+    restore()
+  }
+})
+
 void test('unconfirmed draft keys keep a stack-tab draft scoped to its live run', () => {
   const answer = { type: 'free-response', text: 'Saved after switching tabs' }
   assert.equal(
@@ -419,6 +500,53 @@ void test('unconfirmed draft retry stops on deadline or an authoritative run cha
   assert.equal(
     resolveUnconfirmedDraftDisposition(payload, { ...snapshot, activeQuestionIds: ['q2'] }, 'student-1', 1_999),
     'discard',
+  )
+})
+
+void test('a self-paced retry stops once its question is submitted, instead of retrying forever', () => {
+  // Self-paced snapshots have no deadline and keep every question in
+  // activeQuestionIds indefinitely, so isCurrentRun alone never turns
+  // false for a failed draft on a question the student has since
+  // submitted and moved past — the 1-second retry interval would poll it
+  // forever. A submitted response's editSequence at or above the draft's
+  // own means it's already superseded and should stop being retried,
+  // whether or not a live run is even involved.
+  const payload = {
+    studentId: 'student-1',
+    questionId: 'q1',
+    editSequence: 2,
+    answer: { type: 'free-response', text: 'Failed autosave before submitting' },
+  }
+  const selfPacedSnapshot = {
+    activeQuestionIds: ['q1', 'q2'],
+    activeQuestionRunStartedAt: null,
+    activeQuestionRunRevision: null,
+    activeQuestionDeadlineAt: null,
+    submittedResponseEditSequences: {},
+  }
+
+  assert.equal(resolveUnconfirmedDraftDisposition(payload, selfPacedSnapshot, 'student-1', 5_000), 'retry')
+
+  assert.equal(
+    resolveUnconfirmedDraftDisposition(
+      payload,
+      { ...selfPacedSnapshot, submittedResponseEditSequences: { q1: 2 } },
+      'student-1',
+      5_000,
+    ),
+    'discard',
+  )
+
+  // A newer local revision (higher editSequence than what's confirmed) is
+  // not yet superseded and still gets retried normally.
+  assert.equal(
+    resolveUnconfirmedDraftDisposition(
+      { ...payload, editSequence: 3 },
+      { ...selfPacedSnapshot, submittedResponseEditSequences: { q1: 2 } },
+      'student-1',
+      5_000,
+    ),
+    'retry',
   )
 })
 

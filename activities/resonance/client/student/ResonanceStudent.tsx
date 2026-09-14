@@ -41,6 +41,7 @@ interface UnconfirmedDraftContext {
   activeQuestionRunRevision: number | null
   activeQuestionDeadlineAt: number | null
   lastActiveQuestionRunRevision?: number | null
+  submittedResponseEditSequences?: Record<string, number>
 }
 
 function isSameDraftAnswer(left: unknown, right: unknown): boolean {
@@ -81,6 +82,21 @@ export function resolveUnconfirmedDraftDisposition(
     snapshot.activeQuestionIds.includes(questionId)
 
   if (!isCurrentRun) return 'discard'
+
+  // Self-paced runs have no deadline (and every question stays in
+  // activeQuestionIds indefinitely), so without this a failed autosave for a
+  // question the student already submitted and moved past would satisfy
+  // isCurrentRun and read null deadline forever, keeping the 1-second retry
+  // interval alive for a question that no longer needs it. A submission with
+  // an editSequence at or above this draft's own means it has already been
+  // superseded, in self-paced mode or a live run alike; a genuinely newer
+  // local revision (higher editSequence) still gets retried normally.
+  const confirmedEditSequence = questionId !== null ? snapshot.submittedResponseEditSequences?.[questionId] : undefined
+  const payloadEditSequence = typeof payload.editSequence === 'number' ? payload.editSequence : 0
+  if (confirmedEditSequence !== undefined && payloadEditSequence <= confirmedEditSequence) {
+    return 'discard'
+  }
+
   return snapshot.activeQuestionDeadlineAt !== null && now >= snapshot.activeQuestionDeadlineAt
     ? 'reconcile'
     : 'retry'

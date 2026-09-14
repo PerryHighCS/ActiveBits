@@ -969,3 +969,68 @@ void test('a direct save that succeeds clears an older queued reconnect retry fo
     await act(async () => { rendered.unmount() })
   } finally { restore() }
 })
+
+void test('a reconnect cannot resend a known-stale generation left behind by a newer save still in flight when the socket drops', async () => {
+  // Generation 1 times out and gets queued for retry. Generation 2 is then
+  // sent directly and is still awaiting its ack (not yet queued anywhere)
+  // when the socket drops. Without failing that in-flight save immediately
+  // on close, the reconnect's flush would only know about the queued
+  // generation 1 and would resend that stale value ahead of generation 2.
+  const restore = installWsTestEnvironment()
+  const { act, render, waitFor } = await import('@testing-library/react')
+
+  try {
+    const captured: { saveDraft: ((payload: Record<string, unknown>) => Promise<boolean>) | null } = { saveDraft: null }
+    function Probe() {
+      const { saveDraft } = useResonanceSession('session-1', 'student-1')
+      captured.saveDraft = saveDraft
+      return null
+    }
+    let rendered!: ReturnType<typeof render>
+    await act(async () => { rendered = render(React.createElement(Probe)); await Promise.resolve() })
+    await waitFor(() => assert.equal(FakeWebSocket.instances.length, 1))
+    const firstSocket = FakeWebSocket.instances[0]!
+    firstSocket.emitMessage({ type: 'resonance:session-state', payload: {
+      sessionId: 'session-1', activeQuestionIds: ['q1'], activeQuestionRunRevision: 3, activeQuestionDeadlineAt: Date.now() + 30_000,
+    } })
+
+    console.info('[TEST] a generation-1 draft times out and is queued for retry')
+    await act(async () => {
+      assert.equal(await captured.saveDraft?.({
+        studentId: 'student-1', questionId: 'q1', activeQuestionRunRevision: 3,
+        draftGeneration: 1, answer: { type: 'free-response', text: 'Generation one, stale' },
+      }), false)
+    })
+
+    console.info('[TEST] a generation-2 direct save is sent but still unacknowledged when the socket drops')
+    const sentBeforeDrop: unknown[] = []
+    firstSocket.send = (message?: unknown) => { sentBeforeDrop.push(message) }
+    const gen2Promise = captured.saveDraft?.({
+      studentId: 'student-1', questionId: 'q1', activeQuestionRunRevision: 3,
+      draftGeneration: 2, answer: { type: 'free-response', text: 'Generation two, current' },
+    })
+    await waitFor(() => assert.equal(sentBeforeDrop.length, 1))
+    // Close without awaiting gen2Promise here: DRAFT_SAVE_ACK_TIMEOUT_MS is
+    // 2000ms, and this test reconnects well before that — if closing didn't
+    // fail the pending save immediately, its own natural timeout would still
+    // be years away (relatively) when the reconnect flush runs, so the
+    // fix's effect (or its absence) is only observable in that gap.
+    firstSocket.onclose?.({})
+
+    await new Promise((resolve) => setTimeout(resolve, 1_100))
+    await waitFor(() => assert.equal(FakeWebSocket.instances.length, 2))
+    const secondSocket = FakeWebSocket.instances[1]!
+    const sentAfterReconnect: unknown[] = []
+    secondSocket.send = (message?: unknown) => { sentAfterReconnect.push(message) }
+    secondSocket.onopen?.()
+
+    await waitFor(() => assert.equal(sentAfterReconnect.length, 1))
+    const resent = JSON.parse(String(sentAfterReconnect[0])) as { payload: { answer: { text: string }, draftGeneration: number } }
+    assert.equal(resent.payload.answer.text, 'Generation two, current')
+    assert.equal(resent.payload.draftGeneration, 2)
+
+    assert.equal(await gen2Promise, false)
+
+    await act(async () => { rendered.unmount() })
+  } finally { restore() }
+})
