@@ -32,6 +32,7 @@ interface Props {
   draftResetVersion?: number
   onDraftChanged?(questionId: string, answer: AnswerPayload | null): void
   onDraftSaveFailed?(payload: Record<string, unknown>): void
+  onDraftSaved?(payload: Record<string, unknown>): void
   onSubmitted?(questionId: string, answer: AnswerPayload): void
   sendMessage?(type: string, payload: unknown): boolean
   saveDraft?(payload: Record<string, unknown>): Promise<boolean>
@@ -67,6 +68,7 @@ export default function QuestionView({
   draftResetVersion = 0,
   onDraftChanged,
   onDraftSaveFailed,
+  onDraftSaved,
   onSubmitted,
   sendMessage,
   saveDraft,
@@ -173,6 +175,12 @@ export default function QuestionView({
             if (isCurrentRun && isSameAnswer(draftAnswerRef.current, pendingDraft)) {
               lastSentDraftRef.current = pendingDraft
             }
+            // A parent-retained older generation for this same question+run
+            // (from an earlier failed save) is now superseded — without this,
+            // it would keep being retried independently of this successful
+            // one until some unrelated signal (a new snapshot, the deadline)
+            // happened to clear it.
+            onDraftSaved?.(payload)
             return
           }
           // QuestionView is keyed by question ID and unmounts when the

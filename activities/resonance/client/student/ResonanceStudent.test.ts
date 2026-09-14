@@ -348,6 +348,125 @@ void test('a successful submission clears a retained failed autosave instead of 
   }
 })
 
+void test('a still-in-flight autosave that fails after submission already succeeded cannot resurrect a retained draft', async () => {
+  // Copilot's finding: onSubmitted only clears an *already-retained* failed
+  // draft. It doesn't stop a *still-in-flight* autosave (sent before the
+  // submission, not yet acknowledged) from failing afterward — e.g. the
+  // socket closes moments later — and calling onDraftSaveFailed with a
+  // run/answer that still matches (submission doesn't change either), which
+  // used to unconditionally resurrect it as a retryable draft even though
+  // the server already has a newer, confirmed answer for that edit sequence.
+  const restore = installStudentDom()
+  const { act, fireEvent, render, waitFor } = await import('@testing-library/react')
+  try {
+    window.localStorage.setItem('student-name-session-1', 'Ari')
+    window.localStorage.setItem('student-id-session-1', 'student-1')
+    const rendered = render(React.createElement(MemoryRouter, { initialEntries: ['/session-1'] },
+      React.createElement(Routes, null, React.createElement(Route, { path: '/:sessionId', element: React.createElement(ResonanceStudent) })),
+    ))
+    await waitFor(() => assert.equal(StudentTestWebSocket.instances.length, 1))
+    const socket = StudentTestWebSocket.instances[0]!
+    socket.shouldFailDraft = false
+    await act(async () => {
+      socket.emit({ type: 'resonance:session-state', payload: {
+        sessionId: 'session-1', selfPacedMode: true, activeQuestionIds: ['q1'],
+        activeQuestions: [{ id: 'q1', type: 'free-response', text: 'Self-paced only', order: 1 }],
+      } })
+    })
+
+    console.info('[TEST] an autosave is sent but left unacknowledged (still in flight)')
+    const input = await waitFor(() => rendered.getByLabelText(/your answer/i) as HTMLTextAreaElement)
+    fireEvent.change(input, { target: { value: 'answer' } })
+    await waitFor(() => assert.ok(socket.sent.some((message) => message.includes('resonance:update-draft'))), { timeout: 2_500 })
+
+    console.info('[TEST] the answer is submitted successfully while that autosave is still pending')
+    fireEvent.click(rendered.getByRole('button', { name: /submit answer/i }))
+    await waitFor(() => assert.equal(rendered.queryByRole('button', { name: /submit answer/i }), null))
+
+    console.info('[TEST] the in-flight autosave now times out and fails, after the submission already settled it')
+    socket.sent.length = 0
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 2_100))
+    })
+
+    console.info('[TEST] no retry loop should have picked up a resurrected draft for the already-submitted answer')
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 1_200))
+    })
+    assert.equal(socket.sent.some((message) => message.includes('resonance:update-draft')), false)
+
+    rendered.unmount()
+  } finally {
+    restore()
+  }
+})
+
+void test('a newer generation succeeding clears an older retained draft still queued for retry', async () => {
+  // Copilot's finding: onDraftChanged only updates submittedAnswers; nothing
+  // clears an older generation's retained entry in unconfirmedDraftsRef when
+  // a newer generation's autosave independently succeeds (via QuestionView's
+  // own debounce, not a submission). In self-paced mode the older entry has
+  // no deadline/active-set-removal to eventually stop it, so it would keep
+  // retrying the now-superseded generation indefinitely.
+  const restore = installStudentDom()
+  const { act, fireEvent, render, waitFor } = await import('@testing-library/react')
+  try {
+    window.localStorage.setItem('student-name-session-1', 'Ari')
+    window.localStorage.setItem('student-id-session-1', 'student-1')
+    const rendered = render(React.createElement(MemoryRouter, { initialEntries: ['/session-1'] },
+      React.createElement(Routes, null, React.createElement(Route, { path: '/:sessionId', element: React.createElement(ResonanceStudent) })),
+    ))
+    await waitFor(() => assert.equal(StudentTestWebSocket.instances.length, 1))
+    const socket = StudentTestWebSocket.instances[0]!
+    await act(async () => {
+      socket.emit({ type: 'resonance:session-state', payload: {
+        sessionId: 'session-1', selfPacedMode: true, activeQuestionIds: ['q1'],
+        activeQuestions: [{ id: 'q1', type: 'free-response', text: 'Self-paced only', order: 1 }],
+      } })
+    })
+
+    // "first draft" is permanently rejected at the socket, even after
+    // shouldFailDraft flips off for the generation-2 send below — so the
+    // only way its retained entry can stop being retried is the fix
+    // (onDraftSaved clearing it), not a lucky natural resend-and-ack.
+    socket.shouldFailDraft = false
+    let firstDraftAttempts = 0
+    const originalSend = socket.send.bind(socket)
+    socket.send = (message: string) => {
+      if (message.includes('resonance:update-draft') && message.includes('first draft')) {
+        firstDraftAttempts += 1
+        throw new Error('first draft is never allowed through')
+      }
+      originalSend(message)
+    }
+
+    console.info('[TEST] a generation-1 autosave fails and is retained for retry')
+    const input = await waitFor(() => rendered.getByLabelText(/your answer/i) as HTMLTextAreaElement)
+    fireEvent.change(input, { target: { value: 'first draft' } })
+    await waitFor(() => assert.ok(firstDraftAttempts > 0), { timeout: 2_500 })
+
+    console.info('[TEST] a generation-2 edit is sent successfully and acknowledged')
+    fireEvent.change(input, { target: { value: 'second draft' } })
+    await waitFor(() => assert.ok(socket.sent.some((message) => message.includes('second draft'))), { timeout: 2_500 })
+    const sentMessage = socket.sent.find((message) => message.includes('second draft'))!
+    const sent = JSON.parse(sentMessage) as { payload: { draftId?: string } }
+    await act(async () => {
+      socket.emit({ type: 'resonance:draft-saved', payload: { draftId: sent.payload.draftId } })
+    })
+
+    console.info('[TEST] the superseded generation-1 retry must stop being attempted entirely')
+    const attemptsAfterAck = firstDraftAttempts
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 1_200))
+    })
+    assert.equal(firstDraftAttempts, attemptsAfterAck)
+
+    rendered.unmount()
+  } finally {
+    restore()
+  }
+})
+
 void test('a stale local answer cannot resurface when its question drops out of the active set and is reactivated later', async () => {
   // CodeRabbit flagged that the run-restart cleanup loop only walks
   // `activeIds`, so a question with a cached local answer that goes
@@ -414,6 +533,96 @@ void test('a stale local answer cannot resurface when its question drops out of 
   } finally {
     restore()
   }
+})
+
+void test('a reactivated question seeds its new run past a stale confirmed edit sequence before any real save can fire', async () => {
+  // Copilot's finding: resolveUnconfirmedDraftDisposition compares a draft's
+  // own (per-run) editSequence against submittedResponseEditSequences, which
+  // is keyed only by questionId — the student's single most recent confirmed
+  // response, regardless of which run recorded it. If q1 was confirmed in
+  // run 7 at editSequence 5 and then reactivated as run 8, a run-8 draft at
+  // the naive default of 1 would satisfy "1 <= 5" and get wrongly discarded
+  // as already-superseded. seedEditSequenceFromConfirmedResponse exists
+  // precisely to prevent that: it bumps a reactivated run's own local
+  // counter past any stale confirmed value before the student can type
+  // anything. Verify the actual sent payload's editSequence reflects that
+  // seed (6, not 1) rather than just asserting on the pure function in
+  // isolation, since the real question is whether the component can ever
+  // hand the disposition check an unseeded value in practice.
+  const restore = installStudentDom()
+  const { act, fireEvent, render, waitFor } = await import('@testing-library/react')
+  try {
+    window.localStorage.setItem('student-name-session-1', 'Ari')
+    window.localStorage.setItem('student-id-session-1', 'student-1')
+    const rendered = render(React.createElement(MemoryRouter, { initialEntries: ['/session-1'] },
+      React.createElement(Routes, null, React.createElement(Route, { path: '/:sessionId', element: React.createElement(ResonanceStudent) })),
+    ))
+    await waitFor(() => assert.equal(StudentTestWebSocket.instances.length, 1))
+    const socket = StudentTestWebSocket.instances[0]!
+    socket.shouldFailDraft = false
+
+    console.info('[TEST] q1 was confirmed at editSequence 5 in run 7')
+    await act(async () => {
+      socket.emit({ type: 'resonance:session-state', payload: {
+        sessionId: 'session-1', activeQuestionIds: ['q1'], activeQuestionRunRevision: 7,
+        activeQuestionDeadlineAt: Date.now() + 30_000,
+        activeQuestions: [{ id: 'q1', type: 'free-response', text: 'First', order: 1 }],
+        submittedAnswers: { q1: { type: 'free-response', text: 'Confirmed in run 7' } },
+        submittedResponseEditSequences: { q1: 5 },
+      } })
+    })
+
+    console.info('[TEST] the instructor reactivates q1 as run 8')
+    await act(async () => {
+      socket.emit({ type: 'resonance:session-state', payload: {
+        sessionId: 'session-1', activeQuestionIds: ['q1'], activeQuestionRunRevision: 8,
+        activeQuestionDeadlineAt: Date.now() + 30_000,
+        activeQuestions: [{ id: 'q1', type: 'free-response', text: 'First', order: 1 }],
+        submittedAnswers: { q1: { type: 'free-response', text: 'Confirmed in run 7' } },
+        submittedResponseEditSequences: { q1: 5 },
+      } })
+    })
+    const input = await waitFor(() => rendered.getByLabelText(/your answer/i) as HTMLTextAreaElement)
+    fireEvent.change(input, { target: { value: 'Edited in run 8' } })
+    await waitFor(() => assert.ok(socket.sent.some((message) => message.includes('Edited in run 8'))), { timeout: 2_500 })
+
+    const sentMessage = socket.sent.find((message) => message.includes('Edited in run 8'))!
+    const sent = JSON.parse(sentMessage) as {
+      payload: { editSequence?: number; activeQuestionRunRevision?: number; draftId?: string }
+    }
+    assert.equal(sent.payload.activeQuestionRunRevision, 8)
+    assert.equal(sent.payload.editSequence, 6)
+    await act(async () => {
+      socket.emit({ type: 'resonance:draft-saved', payload: { draftId: sent.payload.draftId } })
+    })
+
+    rendered.unmount()
+  } finally {
+    restore()
+  }
+})
+
+void test('self-paced mode never exposes an already-confirmed question for editing, so it cannot hand a stale editSequence to the retry loop', () => {
+  // Copilot also claimed "the same happens when self-paced mode follows a
+  // live run" — a student re-answering a question in self-paced mode after
+  // an earlier live confirmation. That premise doesn't hold: self-paced mode
+  // has no revisit flow at all. isRevisit is hardcoded to
+  // `!snapshot.selfPacedMode && ...`, and clearLiveQuestionSubmission is a
+  // deliberate no-op when selfPacedMode is true — so a question with a
+  // submittedResponseEditSequences entry always renders as already-submitted
+  // (not an editable form) in self-paced mode. There is no UI path that
+  // constructs a *new* self-paced draft-save attempt for a question the
+  // student has already confirmed, so resolveUnconfirmedDraftDisposition
+  // never actually receives a low-editSequence payload for a
+  // high-confirmed-editSequence question in self-paced mode.
+  assert.equal(
+    clearLiveQuestionSubmission({
+      selfPacedMode: true,
+      submittedQuestionIds: new Set(['q1']),
+      questionId: 'q1',
+    }).has('q1'),
+    true,
+  )
 })
 
 void test('a retry succeeding after its effect is superseded still stops the replacement interval', async () => {

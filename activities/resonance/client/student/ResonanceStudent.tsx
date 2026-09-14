@@ -305,10 +305,12 @@ export default function ResonanceStudent() {
   // instead of comparing answer content alone — two different runs can
   // legitimately contain the same answer text/selection.
   const submittedAnswerRunRef = useRef<Record<string, number | null>>({})
+  const submittedQuestionIdsRef = useRef<Set<string>>(new Set())
   const [draftResetVersions, setDraftResetVersions] = useState<Record<string, number>>({})
   const [submissionAnnouncement, setSubmissionAnnouncement] = useState<SubmissionAnnouncement | null>(null)
   const [countdownNow, setCountdownNow] = useState(() => Date.now())
   submittedAnswersRef.current = submittedAnswers
+  submittedQuestionIdsRef.current = submittedQuestionIds
 
   const previousActiveQuestionIdsRef = useRef<string[]>([])
   const previousActiveQuestionRunRevisionRef = useRef<number | null>(null)
@@ -424,7 +426,7 @@ export default function ResonanceStudent() {
     }
   }, [sessionId, nameSubmitted, registered, studentName, studentId])
 
-  const { snapshot, loading: sessionLoading, error: sessionError, refresh, sendMessage, saveDraft } = useResonanceSession(
+  const { snapshot, loading: sessionLoading, error: sessionError, refresh, sendMessage, saveDraft, cancelDraftRetries } = useResonanceSession(
     registered && sessionId ? sessionId : null,
     studentId,
   )
@@ -473,6 +475,27 @@ export default function ResonanceStudent() {
     })
   }, [])
 
+  // A still-in-flight autosave (sent before a submission, failing after it —
+  // e.g. the socket closes moments later) can reach recordUnconfirmedDraft
+  // with a run/answer that still matches, since submission doesn't change
+  // either. Without this it would resurrect an already-submitted draft
+  // instead of being dropped as a no-op.
+  const isPayloadSupersededBySubmission = useCallback((payload: Record<string, unknown>): boolean => {
+    const questionId = typeof payload.questionId === 'string' ? payload.questionId : null
+    if (questionId === null) return false
+    // submittedAnswerRunRef/submittedAnswers are written on every keystroke
+    // (onDraftChanged), not just on an actual submission — checking those
+    // alone would treat any optimistically-cached edit as "already
+    // submitted". submittedQuestionIds only gains an entry from onSubmitted,
+    // so it's the actual signal for "a submission happened here".
+    if (!submittedQuestionIdsRef.current.has(questionId)) return false
+    const payloadRunToken = resolvePayloadRunToken(payload)
+    if (submittedAnswerRunRef.current[questionId] !== payloadRunToken) return false
+    const payloadEditSequence = typeof payload.editSequence === 'number' ? payload.editSequence : 0
+    const submittedEditSequence = resolveCurrentEditSequence(editSequenceByKeyRef.current, questionId, payloadRunToken)
+    return payloadEditSequence <= submittedEditSequence
+  }, [])
+
   // Stable regardless of snapshot identity: QuestionView includes this
   // callback (as onDraftSaveFailed) in its autosave effect dependencies, so a
   // snapshot update while a debounce is pending would otherwise flush the
@@ -481,6 +504,7 @@ export default function ResonanceStudent() {
   const recordUnconfirmedDraft = useCallback((payload: Record<string, unknown>) => {
     const key = buildUnconfirmedDraftKey(payload)
     if (key === null) return
+    if (isPayloadSupersededBySubmission(payload)) return
     const current = unconfirmedDraftsRef.current.get(key)
     if (current && resolveDraftGeneration(current.payload) > resolveDraftGeneration(payload)) return
     const deadlineAt = typeof payload.activeQuestionDeadlineAt === 'number'
@@ -488,7 +512,24 @@ export default function ResonanceStudent() {
       : snapshotRef.current?.activeQuestionDeadlineAt ?? null
     unconfirmedDraftsRef.current.set(key, { payload, retrying: false, deadlineAt })
     setUnconfirmedDraftVersion((current) => current + 1)
-  }, [])
+  }, [isPayloadSupersededBySubmission])
+
+  // A newer generation's successful save (acknowledged by the server)
+  // supersedes any older generation this component is still retrying/queuing
+  // for the same question+run — both in this component's own retained-draft
+  // map and in useResonanceSession's separate reconnect-replay queue, which
+  // has no other way to learn a newer attempt already landed.
+  const handleDraftSaved = useCallback((payload: Record<string, unknown>) => {
+    const key = buildUnconfirmedDraftKey(payload)
+    if (key === null) return
+    const generation = resolveDraftGeneration(payload)
+    const retained = unconfirmedDraftsRef.current.get(key)
+    if (retained && resolveDraftGeneration(retained.payload) <= generation) {
+      unconfirmedDraftsRef.current.delete(key)
+      setUnconfirmedDraftVersion((current) => current + 1)
+    }
+    cancelDraftRetries(key, generation)
+  }, [cancelDraftRetries])
 
   useEffect(() => {
     if (unconfirmedDraftsRef.current.size === 0 || snapshot === null || studentId === null) {
@@ -867,6 +908,7 @@ export default function ResonanceStudent() {
                   }))
                 }}
                 onDraftSaveFailed={recordUnconfirmedDraft}
+                onDraftSaved={handleDraftSaved}
                 onSubmitted={(questionId, answer) => {
                   const runToken = snapshot.activeQuestionRunRevision ?? snapshot.activeQuestionRunStartedAt
                   submittedAnswerRunRef.current[questionId] = runToken
@@ -880,7 +922,11 @@ export default function ResonanceStudent() {
                   // deadline and never leave activeQuestionIds, so without
                   // this the 1-second retry loop would otherwise keep
                   // resending it until the next snapshot happens to carry a
-                  // matching submittedResponseEditSequences entry.
+                  // matching submittedResponseEditSequences entry. Also
+                  // cancel any reconnect-queued draft-retry for this
+                  // question+run in the hook itself — that queue is separate
+                  // from this component's own retained-draft map and has no
+                  // other way to learn a submission already settled it.
                   const retainedDraftKey = buildUnconfirmedDraftKey({
                     questionId,
                     activeQuestionRunRevision: snapshot.activeQuestionRunRevision,
@@ -898,6 +944,7 @@ export default function ResonanceStudent() {
                       setUnconfirmedDraftVersion((current) => current + 1)
                     }
                   }
+                  cancelDraftRetries(retainedDraftKey, Number.MAX_SAFE_INTEGER)
                   setSubmittedQuestionIds((current) => {
                     const nextSubmittedQuestionIds = new Set(current)
                     nextSubmittedQuestionIds.add(questionId)

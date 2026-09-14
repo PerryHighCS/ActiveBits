@@ -912,5 +912,22 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
     })
   }, [queueDraftRetry])
 
-  return { snapshot, loading, error, refresh: fetchSnapshot, sendMessage, saveDraft }
+  // Lets a caller that has independently learned a question+run's draft is
+  // superseded (a submission, or a newer generation's own successful save)
+  // stop this hook from replaying an older attempt on reconnect. Without
+  // this, a still-queued reconnect retry has no way to learn about either
+  // event — flushQueuedDraftRetries only compares against generations this
+  // hook has itself observed via saveDraft/queueDraftRetry — so it would
+  // still resend a stale draft after the run's answer is already settled.
+  const cancelDraftRetries = useCallback((key: string | null, atLeastGeneration: number) => {
+    if (key === null) return
+    const latest = latestDraftGenerationByKeyRef.current.get(key) ?? -1
+    latestDraftGenerationByKeyRef.current.set(key, Math.max(latest, atLeastGeneration))
+    const queued = queuedDraftRetriesRef.current.get(key)
+    if (queued && getDraftGeneration(queued) <= atLeastGeneration) {
+      queuedDraftRetriesRef.current.delete(key)
+    }
+  }, [])
+
+  return { snapshot, loading, error, refresh: fetchSnapshot, sendMessage, saveDraft, cancelDraftRetries }
 }

@@ -970,6 +970,62 @@ void test('a direct save that succeeds clears an older queued reconnect retry fo
   } finally { restore() }
 })
 
+void test('cancelDraftRetries stops a queued reconnect retry that a caller has independently learned is superseded', async () => {
+  // Copilot's finding: a submission succeeding over REST (or a newer draft
+  // generation succeeding independently) is invisible to this hook — it has
+  // no way to know either happened, since neither goes through
+  // saveDraft/queueDraftRetry. Without an explicit cancellation hook, a
+  // draft already queued for reconnect replay before that point would still
+  // be resent on the next reconnect, after the answer it belongs to is
+  // already settled.
+  const restore = installWsTestEnvironment()
+  const { act, render, waitFor } = await import('@testing-library/react')
+
+  try {
+    const captured: {
+      saveDraft: ((payload: Record<string, unknown>) => Promise<boolean>) | null
+      cancelDraftRetries: ((key: string | null, atLeastGeneration: number) => void) | null
+    } = { saveDraft: null, cancelDraftRetries: null }
+    function Probe() {
+      const { saveDraft, cancelDraftRetries } = useResonanceSession('session-1', 'student-1')
+      captured.saveDraft = saveDraft
+      captured.cancelDraftRetries = cancelDraftRetries
+      return null
+    }
+    let rendered!: ReturnType<typeof render>
+    await act(async () => { rendered = render(React.createElement(Probe)); await Promise.resolve() })
+    await waitFor(() => assert.equal(FakeWebSocket.instances.length, 1))
+    const firstSocket = FakeWebSocket.instances[0]!
+    firstSocket.emitMessage({ type: 'resonance:session-state', payload: {
+      sessionId: 'session-1', activeQuestionIds: ['q1'], activeQuestionRunRevision: 3, activeQuestionDeadlineAt: Date.now() + 30_000,
+    } })
+
+    console.info('[TEST] an unacknowledged draft queues a reconnect retry after timing out')
+    await act(async () => {
+      assert.equal(await captured.saveDraft?.({
+        studentId: 'student-1', questionId: 'q1', activeQuestionRunRevision: 3,
+        draftGeneration: 1, answer: { type: 'free-response', text: 'Superseded by a submission' },
+      }), false)
+    })
+
+    console.info('[TEST] the caller learns the answer is now settled (e.g. a REST submission) and cancels retries for it')
+    captured.cancelDraftRetries?.('q1:3', Number.MAX_SAFE_INTEGER)
+
+    firstSocket.onclose?.({})
+    await new Promise((resolve) => setTimeout(resolve, 1_100))
+    await waitFor(() => assert.equal(FakeWebSocket.instances.length, 2))
+    const secondSocket = FakeWebSocket.instances[1]!
+    const sentAfterReconnect: unknown[] = []
+    secondSocket.send = (message?: unknown) => { sentAfterReconnect.push(message) }
+    secondSocket.onopen?.()
+
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    assert.deepEqual(sentAfterReconnect, [])
+
+    await act(async () => { rendered.unmount() })
+  } finally { restore() }
+})
+
 void test('a reconnect cannot resend a known-stale generation left behind by a newer save still in flight when the socket drops', async () => {
   // Generation 1 times out and gets queued for retry. Generation 2 is then
   // sent directly and is still awaiting its ack (not yet queued anywhere)
