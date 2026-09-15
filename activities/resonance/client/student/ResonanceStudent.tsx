@@ -654,6 +654,24 @@ export default function ResonanceStudent() {
                 delete submittedEditSequenceByKeyRef.current[legacySequenceKey]
               }
             }
+            const legacyGenerationKey = buildEditSequenceKey(questionId ?? '', legacyRunToken)
+            const canonicalGenerationKey = buildEditSequenceKey(questionId ?? '', 1)
+            if (questionId !== null) {
+              const migratedGeneration = Math.max(
+                draftGenerationByKeyRef.current[legacyGenerationKey] ?? 0,
+                draftGenerationByKeyRef.current[canonicalGenerationKey] ?? 0,
+              )
+              if (migratedGeneration > 0) draftGenerationByKeyRef.current[canonicalGenerationKey] = migratedGeneration
+              delete draftGenerationByKeyRef.current[legacyGenerationKey]
+              const migratedAcknowledgement = Math.max(
+                acknowledgedDraftGenerationByKeyRef.current.get(originalKey) ?? 0,
+                acknowledgedDraftGenerationByKeyRef.current.get(canonicalKey) ?? 0,
+              )
+              if (migratedAcknowledgement > 0) acknowledgedDraftGenerationByKeyRef.current.set(canonicalKey, migratedAcknowledgement)
+              acknowledgedDraftGenerationByKeyRef.current.delete(originalKey)
+              cancelDraftRetries(originalKey, migratedGeneration)
+              cancelDraftRetries(canonicalKey, migratedAcknowledgement)
+            }
             draft = { ...draft, payload: canonicalPayload }
             key = canonicalKey
             unconfirmedDraftsRef.current.set(key, draft)

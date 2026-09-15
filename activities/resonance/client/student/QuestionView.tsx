@@ -195,7 +195,7 @@ export default function QuestionView({
           if (!isCurrentRun || isSameAnswer(draftAnswerRef.current, pendingDraft)) {
             lastSentDraftRef.current = pendingDraft
             onDraftSaveFailed?.(payload)
-          } else if (isCurrentRun) {
+          } else if (isCurrentRun && !isSameAnswer(draftAnswerRef.current, lastSentDraftRef.current)) {
             // A newer local value (including an intentional clear) replaced
             // this failed in-flight save. Hand that newest value directly to
             // the parent: restarting this effect would run its cleanup and
