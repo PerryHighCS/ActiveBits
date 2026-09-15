@@ -9,7 +9,7 @@ import NameEntryForm from './NameEntryForm.js'
 import QuestionView from './QuestionView.js'
 import SharedResponseFeed from './SharedResponseFeed.js'
 import { areMcqSelectionsEqual } from '../../shared/mcq.js'
-import { asRunIdentitySource, payloadMatchesResolvedRunToken, resolveRunToken, type RunIdentitySource } from '../../shared/runIdentity.js'
+import { asRunIdentitySource, payloadMatchesResolvedRunToken, resolveRunToken, runIdentitiesMatch, type RunIdentitySource } from '../../shared/runIdentity.js'
 import { buildDraftRetryKey, resolveDraftGeneration } from '../draftAttempt.js'
 import type { AnswerPayload } from '../../shared/types.js'
 
@@ -544,9 +544,16 @@ export function hasActiveQuestionRunRestart(params: {
   activeQuestionRunStartedAt: number | null
   previousActiveQuestionRunStartedAt: number | null
 }): boolean {
-  const runChanged = params.activeQuestionRunRevision !== null
-    ? params.activeQuestionRunRevision !== params.previousActiveQuestionRunRevision
-    : params.activeQuestionRunStartedAt !== params.previousActiveQuestionRunStartedAt
+  // A raw revision-first comparison treats a legacy-to-canonical migration
+  // (previous: {revision: null, startedAt: T}, new: {revision: 1, startedAt:
+  // T} — the same real run, just normalized) as a restart, wrongly clearing
+  // local answers/submissions for a run that never actually ended. Use the
+  // same equivalence shared/runIdentity.ts already uses for this bridge
+  // everywhere else instead of a bespoke comparison here.
+  const runChanged = !runIdentitiesMatch(
+    { activeQuestionRunRevision: params.activeQuestionRunRevision, activeQuestionRunStartedAt: params.activeQuestionRunStartedAt },
+    { activeQuestionRunRevision: params.previousActiveQuestionRunRevision, activeQuestionRunStartedAt: params.previousActiveQuestionRunStartedAt },
+  )
 
   return (
     params.hasObservedSnapshot &&
@@ -783,6 +790,17 @@ export default function ResonanceStudent() {
     if (questionId === null) return
     if (isPayloadSupersededBySubmission(payload)) return
     const runToken = resolveQuestionRunTokenForPayload(questionDraftStateRef.current, questionId, payload)
+    // A failed save from an older run can arrive after the question has
+    // already moved to a newer one. resolveQuestionRunTokenForPayload
+    // correctly resolves it to that OLD run's own token (it's genuinely not
+    // equivalent to the record's current run) — but every write below goes
+    // through ensureQuestionDraftStateForRun, which would then repurpose
+    // this same questionId record for that old token, wiping the newer
+    // run's attempted/acknowledged generations and edit sequence out from
+    // under it. This failure has nothing to say about the run the record
+    // currently represents, so it's simply dropped rather than retained.
+    const existingState = questionDraftStateRef.current.get(questionId)
+    if (existingState !== undefined && existingState.runToken !== runToken) return
     const payloadGeneration = resolveDraftGeneration(payload)
     if (payloadGeneration <= getQuestionAcknowledgedGeneration(questionDraftStateRef.current, questionId, runToken)) return
     // A late failure from an unmounted view can arrive after a replacement
@@ -929,14 +947,6 @@ export default function ResonanceStudent() {
   }, [discardUnconfirmedDraft, reconcileUnconfirmedDraft, saveDraft, snapshot, studentId, unconfirmedDraftVersion])
 
   useEffect(() => {
-    if (snapshot === null) return
-    const runToken = snapshot.activeQuestionRunRevision ?? snapshot.activeQuestionRunStartedAt
-    for (const [questionId, generation] of Object.entries(snapshot.draftGenerations)) {
-      seedQuestionAttemptedGeneration(questionDraftStateRef.current, questionId, runToken, generation)
-    }
-  }, [snapshot])
-
-  useEffect(() => {
     const intervalId = window.setInterval(() => {
       setCountdownNow(Date.now())
     }, 1000)
@@ -1041,13 +1051,30 @@ export default function ResonanceStudent() {
       // eventually clears it. Drop entries whose recorded run doesn't match
       // the new run immediately, so QuestionView can't resurface or resend
       // them in the meantime.
+      //
+      // Capture each question's *current* recorded runToken synchronously,
+      // right here — not inside the setSubmittedAnswers updater below. A
+      // functional setState updater's body doesn't run when it's passed to
+      // setState; React defers it to the next render's state computation,
+      // by which point every effect from this commit (including the
+      // generation-seeding effect declared below, which stamps a question's
+      // record to this same new run as a side effect of seeding its
+      // generation floor) has already run — so a live ref read inside the
+      // updater would always see the *post*-seeding value, defeating this
+      // check for exactly the questions it exists to catch. The seeding
+      // effect must also stay declared after this one: effects run in
+      // declaration order within a commit, and this capture only sees the
+      // pre-seeding value if it runs first.
+      const priorRunTokenByQuestionId = new Map(
+        activeIds.map((questionId) => [questionId, getQuestionRunToken(questionDraftStateRef.current, questionId)]),
+      )
       setSubmittedAnswers((current) => {
         let changed = false
         const next = { ...current }
         for (const questionId of activeIds) {
           if (
             Object.prototype.hasOwnProperty.call(next, questionId) &&
-            getQuestionRunToken(questionDraftStateRef.current, questionId) !== runToken
+            priorRunTokenByQuestionId.get(questionId) !== runToken
           ) {
             delete next[questionId]
             changed = true
@@ -1067,6 +1094,14 @@ export default function ResonanceStudent() {
     }
 
     setSelectedQuestionId((current) => (current && activeIds.includes(current) ? current : activeIds[0] ?? null))
+  }, [snapshot])
+
+  useEffect(() => {
+    if (snapshot === null) return
+    const runToken = snapshot.activeQuestionRunRevision ?? snapshot.activeQuestionRunStartedAt
+    for (const [questionId, generation] of Object.entries(snapshot.draftGenerations)) {
+      seedQuestionAttemptedGeneration(questionDraftStateRef.current, questionId, runToken, generation)
+    }
   }, [snapshot])
 
   // ── Guards ──────────────────────────────────────────────────────────────────
@@ -1280,7 +1315,7 @@ export default function ResonanceStudent() {
                 }}
                 onDraftSaveFailed={recordUnconfirmedDraft}
                 onDraftSaved={handleDraftSaved}
-                onSubmitted={(questionId, answer, submissionRunToken) => {
+                onSubmitted={(questionId, answer, submissionRunIdentity) => {
                   // This can fire after the QuestionView instance that sent
                   // it has unmounted (a stack-tab switch) and even, since it
                   // was unmounted, been remounted again — so its own checks
@@ -1311,14 +1346,32 @@ export default function ResonanceStudent() {
                   // through the ordinary submittedAnswers merge.
                   const currentSnapshot = snapshotRef.current
                   if (currentSnapshot === null) return
-                  const currentRunToken = currentSnapshot.activeQuestionRunRevision ?? currentSnapshot.activeQuestionRunStartedAt
-                  if (submissionRunToken !== currentRunToken) return
+                  const currentRunIdentity: RunIdentitySource = {
+                    activeQuestionRunRevision: currentSnapshot.activeQuestionRunRevision,
+                    activeQuestionRunStartedAt: currentSnapshot.activeQuestionRunStartedAt,
+                  }
+                  // runIdentitiesMatch (not a raw !==): a submission sent
+                  // while this run was still in legacy timestamp-only form
+                  // must still be recognized once a later snapshot
+                  // canonicalizes that same run to revision 1 — otherwise the
+                  // server persists the answer but the parent never learns,
+                  // leaving its submitted/retained-draft bookkeeping stuck on
+                  // the pre-submission state.
+                  if (!runIdentitiesMatch(currentRunIdentity, submissionRunIdentity)) return
                   if (
                     Object.prototype.hasOwnProperty.call(submittedAnswersRef.current, questionId) &&
                     !isSameDraftAnswer(answer, submittedAnswersRef.current[questionId])
                   ) return
 
-                  const runToken = submissionRunToken
+                  // Use the run's current canonical token, not the
+                  // submission's own (possibly still-legacy) one: every
+                  // QuestionDraftState field below is read back keyed by
+                  // `snapshot.activeQuestionRunRevision ?? ...StartedAt` on
+                  // the next render, so writing under a different-but-
+                  // equivalent token would make that read see a mismatch and
+                  // reset the record, losing the watermarks this call is
+                  // trying to record.
+                  const runToken = resolveRunToken(currentRunIdentity)
                   setQuestionRunToken(questionDraftStateRef.current, questionId, runToken)
                   recordQuestionSubmittedEditSequence(
                     questionDraftStateRef.current,

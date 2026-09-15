@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { AnswerPayload, StudentQuestion } from '../../shared/types.js'
 import { areMcqSelectionsEqual } from '../../shared/mcq.js'
+import { runIdentitiesMatch, type RunIdentitySource } from '../../shared/runIdentity.js'
 import FormattedMarkdown from '../components/FormattedMarkdown.js'
 import FreeResponseInput from './FreeResponseInput.js'
 import MCQInput from './MCQInput.js'
@@ -34,14 +35,19 @@ interface Props {
   onDraftSaveFailed?(payload: Record<string, unknown>): void
   onDraftSaved?(payload: Record<string, unknown>): void
   /**
-   * `runToken` is the run this submission was sent under — not necessarily
-   * the current one, since this can fire after this view has unmounted (a
-   * stack-tab switch) and the parent's own state has moved on. The parent
-   * uses it, together with its own knowledge of the current local answer, to
-   * independently verify this response is still fresh before applying it,
-   * rather than trusting this view's own (possibly stale/frozen) checks.
+   * `runIdentity` is the run this submission was sent under — not
+   * necessarily the current one, since this can fire after this view has
+   * unmounted (a stack-tab switch) and the parent's own state has moved on.
+   * The parent uses it, together with its own knowledge of the current local
+   * answer, to independently verify this response is still fresh before
+   * applying it, rather than trusting this view's own (possibly
+   * stale/frozen) checks. Carries both run-identity fields (not a single
+   * resolved token) so the parent can recognize a legacy-timestamp
+   * submission as equivalent to a since-canonicalized revision-1 run via the
+   * same runIdentitiesMatch bridge used everywhere else, instead of a raw
+   * scalar comparison that a legacy/canonical migration would defeat.
    */
-  onSubmitted?(questionId: string, answer: AnswerPayload, runToken: number | null): void
+  onSubmitted?(questionId: string, answer: AnswerPayload, runIdentity: RunIdentitySource): void
   sendMessage?(type: string, payload: unknown): boolean
   saveDraft?(payload: Record<string, unknown>): Promise<boolean>
 }
@@ -93,6 +99,16 @@ export default function QuestionView({
   const submissionAttemptRef = useRef(0)
   const disabledRef = useRef(disabled)
   const activeQuestionRunRevisionRef = useRef(activeQuestionRunToken)
+  // Unlike activeQuestionRunRevisionRef (a resolved scalar, used for the
+  // draft-save "is this still the current run" checks below), this keeps
+  // both raw identity fields — needed only where a legacy-timestamp run must
+  // still be recognized as equivalent to its since-canonicalized revision-1
+  // form (see submitAnswer's own stale-response guard and onSubmitted).
+  // Collapsing to a scalar first would lose which form produced it.
+  const activeQuestionRunIdentityRef = useRef<RunIdentitySource>({
+    activeQuestionRunRevision,
+    activeQuestionRunStartedAt,
+  })
   const draftAnswerRunRevisionRef = useRef<number | null>(null)
   // Mirrors the editSequence prop so the debounced draft-push effect and
   // submitAnswer (both defined below, outside the render body) always read
@@ -108,6 +124,7 @@ export default function QuestionView({
   draftAnswerRef.current = draftAnswer
   disabledRef.current = disabled
   activeQuestionRunRevisionRef.current = activeQuestionRunToken
+  activeQuestionRunIdentityRef.current = { activeQuestionRunRevision, activeQuestionRunStartedAt }
   editSequenceRef.current = editSequence
   sessionIdRef.current = sessionId
   studentIdRef.current = studentId
@@ -271,6 +288,7 @@ export default function QuestionView({
     setError(null)
     const submissionAttempt = ++submissionAttemptRef.current
     const submissionRunRevision = activeQuestionRunRevisionRef.current
+    const submissionRunIdentity = activeQuestionRunIdentityRef.current
 
     try {
       const resp = await fetch(`/api/resonance/${sessionId}/submit-answer`, {
@@ -295,8 +313,14 @@ export default function QuestionView({
       // (the student switched stack tabs before the response came back)
       // does *not* invalidate it: refs still hold the values from this
       // view's last render, so both checks still pass in that case.
+      //
+      // runIdentitiesMatch (not a raw !==) so a request sent while this run
+      // was still in legacy timestamp-only form is still recognized once a
+      // later snapshot canonicalizes that same run to revision 1 — a raw
+      // scalar comparison would otherwise treat that migration alone as a
+      // run change and drop an entirely valid, already-persisted submission.
       if (
-        submissionRunRevision !== activeQuestionRunRevisionRef.current ||
+        !runIdentitiesMatch(activeQuestionRunIdentityRef.current, submissionRunIdentity) ||
         sessionIdRef.current !== sessionId ||
         studentIdRef.current !== studentId
       ) {
@@ -317,7 +341,7 @@ export default function QuestionView({
       // switch) and must still be told, or a retained failed autosave for
       // this question would keep retrying indefinitely instead of being
       // recognized as superseded.
-      onSubmitted?.(question.id, answer, submissionRunRevision)
+      onSubmitted?.(question.id, answer, submissionRunIdentity)
       if (submissionAttempt === submissionAttemptRef.current) {
         setDraftAnswer(answer)
         lastSentDraftRef.current = answer

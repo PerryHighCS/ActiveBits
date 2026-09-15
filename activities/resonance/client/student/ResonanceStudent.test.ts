@@ -536,6 +536,89 @@ void test('a submission that succeeds after its QuestionView unmounts is still r
   }
 })
 
+void test('a delayed submission response is still recorded when the run migrated from legacy timestamp form to revision 1 while it was in flight', async () => {
+  // Copilot's findings: QuestionView's own stale-response guard and the
+  // parent's onSubmitted handler both used a raw scalar comparison between
+  // the run token captured at submit time and the run token current when
+  // the response arrives. A run that starts out in legacy (pre-revision,
+  // timestamp-only) form and gets canonicalized to revision 1 while a
+  // submission is still in flight is the SAME real run — the server itself
+  // accepts that legacy form as equivalent (see matchesActiveQuestionRun) —
+  // but a raw !== sees {revision: null, startedAt: T} vs {revision: 1,
+  // startedAt: T} as different runs and silently drops an entirely valid,
+  // already-persisted submission: the server records it, but the student's
+  // own view never shows it as submitted.
+  const restore = installStudentDom()
+  const { act, fireEvent, render, waitFor } = await import('@testing-library/react')
+  try {
+    window.localStorage.setItem('student-name-session-1', 'Ari')
+    window.localStorage.setItem('student-id-session-1', 'student-1')
+
+    let resolveSubmit: ((value: { ok: boolean; json: () => Promise<{ ok: boolean }> }) => void) | null = null
+    Object.defineProperty(globalThis, 'fetch', {
+      configurable: true,
+      value: async (url: string, init?: RequestInit) => {
+        if (init?.method === 'POST' && url.includes('register-student')) {
+          return { ok: true, json: async () => ({ studentId: 'student-1', name: 'Ari' }) }
+        }
+        if (init?.method === 'POST' && url.includes('submit-answer')) {
+          return new Promise((resolve) => { resolveSubmit = resolve })
+        }
+        return { ok: true, json: async () => ({ sessionId: 'session-1', activeQuestionIds: [] }) }
+      },
+    })
+
+    const rendered = render(React.createElement(MemoryRouter, { initialEntries: ['/session-1'] },
+      React.createElement(Routes, null, React.createElement(Route, { path: '/:sessionId', element: React.createElement(ResonanceStudent) })),
+    ))
+    await waitFor(() => assert.equal(StudentTestWebSocket.instances.length, 1))
+    const socket = StudentTestWebSocket.instances[0]!
+    console.info('[TEST] the run starts in legacy (pre-revision) timestamp-only form')
+    await act(async () => {
+      socket.emit({ type: 'resonance:session-state', payload: {
+        sessionId: 'session-1', activeQuestionIds: ['q1', 'q2'], activeQuestionRunStartedAt: 5_000,
+        activeQuestionDeadlineAt: Date.now() + 30_000,
+        activeQuestions: [
+          { id: 'q1', type: 'free-response', text: 'First', order: 1 },
+          { id: 'q2', type: 'free-response', text: 'Second', order: 2 },
+        ],
+      } })
+    })
+
+    console.info('[TEST] q1 is answered and submitted while the run is still legacy form; the REST response is held back')
+    const input = await waitFor(() => rendered.getByLabelText(/your answer/i) as HTMLTextAreaElement)
+    fireEvent.change(input, { target: { value: 'legacy-form answer' } })
+    fireEvent.click(rendered.getByRole('button', { name: /submit answer/i }))
+    await waitFor(() => assert.ok(resolveSubmit !== null))
+
+    console.info('[TEST] the server canonicalizes the same run to revision 1 while the submission is still pending')
+    await act(async () => {
+      socket.emit({ type: 'resonance:session-state', payload: {
+        sessionId: 'session-1', activeQuestionIds: ['q1', 'q2'], activeQuestionRunRevision: 1, activeQuestionRunStartedAt: 5_000,
+        activeQuestionDeadlineAt: Date.now() + 30_000,
+        activeQuestions: [
+          { id: 'q1', type: 'free-response', text: 'First', order: 1 },
+          { id: 'q2', type: 'free-response', text: 'Second', order: 2 },
+        ],
+      } })
+    })
+
+    console.info('[TEST] the legacy-form submission now resolves successfully')
+    await act(async () => {
+      resolveSubmit?.({ ok: true, json: async () => ({ ok: true }) })
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    console.info('[TEST] the parent must still record q1 as submitted, even though the run migrated form while the request was in flight')
+    await waitFor(() => assert.ok(rendered.queryByRole('button', { name: 'Q1 ✓' }) !== null))
+
+    rendered.unmount()
+  } finally {
+    restore()
+  }
+})
+
 void test('a delayed submission response from a run that has since restarted cannot resurrect its stale answer', async () => {
   // CodeRabbit and Copilot both flagged the same gap in the previous round's
   // fix (letting onSubmitted fire after unmount): it only re-checked
@@ -621,6 +704,86 @@ void test('a delayed submission response from a run that has since restarted can
     await waitFor(() => rendered.getByText('First'))
     assert.ok(rendered.queryByRole('button', { name: /submit answer/i }) !== null, 'q1 must not be pre-marked submitted')
     assert.equal((rendered.getByLabelText(/your answer/i) as HTMLTextAreaElement).value, '')
+
+    rendered.unmount()
+  } finally {
+    restore()
+  }
+})
+
+void test('a delayed draft-save failure from an older run cannot wipe a QuestionDraftState record already advanced to a newer run', async () => {
+  // Copilot's finding: resolveQuestionRunTokenForPayload correctly resolves
+  // a stale run-7 failure to run 7's own token (it's genuinely not
+  // equivalent to q1's current run-8 record) — but recordUnconfirmedDraft
+  // used to write through that token unconditionally regardless. Every
+  // writer goes through ensureQuestionDraftStateForRun, which resets a
+  // record whenever the token it's asked to write under differs from the
+  // one already stored — repurposing q1's run-8 record (its
+  // attemptedGeneration watermark included) back to a fresh run-7 one. The
+  // next run-8 edit then starts its generation counter over from scratch,
+  // colliding with a generation number already sent to the server for this
+  // same question+run.
+  const restore = installStudentDom()
+  const { act, fireEvent, render, waitFor } = await import('@testing-library/react')
+  try {
+    window.localStorage.setItem('student-name-session-1', 'Ari')
+    window.localStorage.setItem('student-id-session-1', 'student-1')
+    const rendered = render(React.createElement(MemoryRouter, { initialEntries: ['/session-1'] },
+      React.createElement(Routes, null, React.createElement(Route, { path: '/:sessionId', element: React.createElement(ResonanceStudent) })),
+    ))
+    await waitFor(() => assert.equal(StudentTestWebSocket.instances.length, 1))
+    const socket = StudentTestWebSocket.instances[0]!
+    // Sends succeed (no synchronous throw); the failure instead comes from
+    // saveDraft's own ack-timeout, since no 'resonance:draft-saved' is ever
+    // emitted for these draftIds — matching a genuinely lost/delayed ack.
+    socket.shouldFailDraft = false
+    await act(async () => {
+      socket.emit({ type: 'resonance:session-state', payload: {
+        sessionId: 'session-1', activeQuestionIds: ['q1'], activeQuestionRunRevision: 7,
+        activeQuestionDeadlineAt: Date.now() + 60_000,
+        activeQuestions: [{ id: 'q1', type: 'free-response', text: 'First', order: 1 }],
+      } })
+    })
+
+    console.info('[TEST] q1 is edited under run 7; the save is sent but its ack never arrives')
+    const input = await waitFor(() => rendered.getByLabelText(/your answer/i) as HTMLTextAreaElement)
+    fireEvent.change(input, { target: { value: 'run seven text' } })
+    await waitFor(() => assert.ok(socket.sent.some((message) => message.includes('run seven text'))), { timeout: 2_500 })
+
+    console.info('[TEST] the run restarts to 8 while q1 stays active')
+    await act(async () => {
+      socket.emit({ type: 'resonance:session-state', payload: {
+        sessionId: 'session-1', activeQuestionIds: ['q1'], activeQuestionRunRevision: 8,
+        activeQuestionDeadlineAt: Date.now() + 60_000,
+        activeQuestions: [{ id: 'q1', type: 'free-response', text: 'First', order: 1 }],
+      } })
+    })
+
+    console.info('[TEST] the student makes a first edit under run 8, establishing its own QuestionDraftState record')
+    fireEvent.change(input, { target: { value: 'run eight first' } })
+    await waitFor(() => assert.ok(socket.sent.some((message) => message.includes('run eight first'))), { timeout: 2_500 })
+    const firstRun8Send = JSON.parse(socket.sent.find((message) => message.includes('run eight first'))!) as { payload: { draftGeneration: number; draftId: string } }
+    assert.equal(firstRun8Send.payload.draftGeneration, 1)
+    // Acknowledged immediately so this attempt is a clean success, not
+    // itself a retained failure — isolating the run-7 stale failure below as
+    // the only thing under test.
+    await act(async () => {
+      socket.emit({ type: 'resonance:draft-saved', payload: { draftId: firstRun8Send.payload.draftId } })
+    })
+
+    console.info('[TEST] the run-7 save now fails (its ack-timeout elapses) after the run-8 record already exists')
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 2_100))
+    })
+
+    console.info('[TEST] a second edit under run 8 must not collide with the generation already sent for the first')
+    fireEvent.change(input, { target: { value: 'run eight second' } })
+    await waitFor(() => assert.ok(socket.sent.some((message) => message.includes('run eight second'))), { timeout: 2_500 })
+    const secondRun8Send = JSON.parse(socket.sent.find((message) => message.includes('run eight second'))!) as { payload: { draftGeneration: number; draftId: string } }
+    assert.equal(secondRun8Send.payload.draftGeneration, 2)
+    await act(async () => {
+      socket.emit({ type: 'resonance:draft-saved', payload: { draftId: secondRun8Send.payload.draftId } })
+    })
 
     rendered.unmount()
   } finally {
@@ -987,6 +1150,60 @@ void test('a stale local answer cannot resurface when its question drops out of 
       (rendered.getByLabelText(/your answer/i) as HTMLTextAreaElement).value,
       '',
     ))
+
+    rendered.unmount()
+  } finally {
+    restore()
+  }
+})
+
+void test('a run-restart cleanup must not be skipped just because a later effect stamps the run token first', async () => {
+  // Copilot's finding: the generation-seeding effect (iterating
+  // snapshot.draftGenerations) and the run-restart cleanup effect (which
+  // drops a submittedAnswers entry whose recorded run doesn't match the new
+  // one) both react to the same snapshot. Seeding calls
+  // ensureQuestionDraftStateForRun, which stamps a question's
+  // QuestionDraftState.runToken to the new run as a side effect — when it ran
+  // BEFORE the cleanup effect (their prior declaration order), a question
+  // that happens to have a residual draft-generation entry in the new
+  // snapshot got its record's runToken pre-stamped to the new run, so the
+  // cleanup's per-question runToken check wrongly treated a still-stale
+  // prior-run answer as already belonging to the new run and kept it.
+  const restore = installStudentDom()
+  const { act, fireEvent, render, waitFor } = await import('@testing-library/react')
+  try {
+    window.localStorage.setItem('student-name-session-1', 'Ari')
+    window.localStorage.setItem('student-id-session-1', 'student-1')
+    const rendered = render(React.createElement(MemoryRouter, { initialEntries: ['/session-1'] },
+      React.createElement(Routes, null, React.createElement(Route, { path: '/:sessionId', element: React.createElement(ResonanceStudent) })),
+    ))
+    await waitFor(() => assert.equal(StudentTestWebSocket.instances.length, 1))
+    const socket = StudentTestWebSocket.instances[0]!
+    await act(async () => {
+      socket.emit({ type: 'resonance:session-state', payload: {
+        sessionId: 'session-1', activeQuestionIds: ['q1'], activeQuestionRunRevision: 7,
+        activeQuestionDeadlineAt: Date.now() + 60_000,
+        activeQuestions: [{ id: 'q1', type: 'free-response', text: 'First', order: 1 }],
+      } })
+    })
+
+    console.info('[TEST] q1 gets a local optimistic answer under run 7')
+    const input = await waitFor(() => rendered.getByLabelText(/your answer/i) as HTMLTextAreaElement)
+    fireEvent.change(input, { target: { value: 'run seven stale text' } })
+    await waitFor(() => assert.equal(input.value, 'run seven stale text'))
+
+    console.info('[TEST] run 8 starts, carrying a residual draftGenerations entry for q1 from the server')
+    await act(async () => {
+      socket.emit({ type: 'resonance:session-state', payload: {
+        sessionId: 'session-1', activeQuestionIds: ['q1'], activeQuestionRunRevision: 8,
+        activeQuestionDeadlineAt: Date.now() + 60_000,
+        activeQuestions: [{ id: 'q1', type: 'free-response', text: 'First', order: 1 }],
+        draftGenerations: { q1: 3 },
+      } })
+    })
+
+    console.info('[TEST] the stale run-7 answer must not survive into run 8')
+    await waitFor(() => assert.equal((rendered.getByLabelText(/your answer/i) as HTMLTextAreaElement).value, ''))
 
     rendered.unmount()
   } finally {
@@ -1825,5 +2042,24 @@ void test('hasActiveQuestionRunRestart detects a new revision when activation ti
       previousActiveQuestionRunStartedAt: 2_000,
     }),
     true,
+  )
+})
+
+void test('hasActiveQuestionRunRestart does not treat a legacy-to-canonical migration of the same run as a restart', () => {
+  // Copilot's finding: a revision-first raw comparison sees {revision: null,
+  // startedAt: T} -> {revision: 1, startedAt: T} as a brand new run (null !==
+  // 1), even though the server canonicalizes a pre-revision-rollout run to
+  // revision 1 for the SAME physical run. A false restart here wipes a local
+  // optimistic answer/submission that never actually needed clearing.
+  assert.equal(
+    hasActiveQuestionRunRestart({
+      hasObservedSnapshot: true,
+      activeQuestionIds: ['q1'],
+      activeQuestionRunRevision: 1,
+      previousActiveQuestionRunRevision: null,
+      activeQuestionRunStartedAt: 5_000,
+      previousActiveQuestionRunStartedAt: 5_000,
+    }),
+    false,
   )
 })
