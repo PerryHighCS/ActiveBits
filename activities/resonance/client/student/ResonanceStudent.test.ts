@@ -15,6 +15,7 @@ import { advanceEditSequenceForRevisit, resolveCurrentEditSequence } from './Res
 import { seedEditSequenceFromConfirmedResponse } from './ResonanceStudent.js'
 import { buildUnconfirmedDraftKey } from './ResonanceStudent.js'
 import { canonicalizeLegacyRevisionOneDraft } from './ResonanceStudent.js'
+import { payloadMatchesRunToken } from './ResonanceStudent.js'
 import { resolveUnconfirmedDraftDisposition } from './ResonanceStudent.js'
 import { isSameDraftAnswer } from './ResonanceStudent.js'
 
@@ -882,6 +883,13 @@ void test('legacy timestamp drafts canonicalize to revision one before expiry re
     canonicalizeLegacyRevisionOneDraft(legacy, { activeQuestionRunRevision: 1, activeQuestionRunStartedAt: 2_000 }),
     legacy,
   )
+})
+
+void test('legacy timestamp drafts match revision one after expiry but not a later run', () => {
+  const legacy = { questionId: 'q1', activeQuestionRunStartedAt: 1_000 }
+  assert.equal(payloadMatchesRunToken(legacy, 1), true)
+  assert.equal(payloadMatchesRunToken(legacy, 2), false)
+  assert.equal(payloadMatchesRunToken(legacy, null), false)
 })
 
 void test('isSameDraftAnswer treats an MCQ selection as unchanged regardless of option order', () => {

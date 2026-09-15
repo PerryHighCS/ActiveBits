@@ -80,6 +80,18 @@ function resolvePayloadRunToken(payload: Record<string, unknown>): number | null
       : null
 }
 
+// A timestamp-only payload can identify only the original numbered run.
+// The server maps that legacy form to revision 1, including after expiry
+// when the active start timestamp is no longer present in the snapshot.
+export function payloadMatchesRunToken(payload: Record<string, unknown>, runToken: number | null): boolean {
+  const payloadToken = resolvePayloadRunToken(payload)
+  return payloadToken === runToken || (
+    runToken === 1 &&
+    typeof payload.activeQuestionRunRevision !== 'number' &&
+    typeof payload.activeQuestionRunStartedAt === 'number'
+  )
+}
+
 export function buildUnconfirmedDraftKey(payload: Record<string, unknown>): string | null {
   const questionId = typeof payload.questionId === 'string' ? payload.questionId : null
   const runToken = resolvePayloadRunToken(payload)
@@ -524,7 +536,7 @@ export default function ResonanceStudent() {
   }, [sessionId, studentId])
 
   const reconcileUnconfirmedDraft = useCallback((questionId: string, payload: Record<string, unknown>) => {
-    if (submittedAnswerRunRef.current[questionId] !== resolvePayloadRunToken(payload)) return
+    if (!payloadMatchesRunToken(payload, submittedAnswerRunRef.current[questionId] ?? null)) return
     if (!isSameDraftAnswer(submittedAnswersRef.current[questionId], payload.answer)) return
     setSubmittedAnswers((current) => {
       const next = { ...current }
@@ -539,7 +551,7 @@ export default function ResonanceStudent() {
   }, [refresh])
 
   const discardUnconfirmedDraft = useCallback((questionId: string, payload: Record<string, unknown>) => {
-    if (submittedAnswerRunRef.current[questionId] !== resolvePayloadRunToken(payload)) return
+    if (!payloadMatchesRunToken(payload, submittedAnswerRunRef.current[questionId] ?? null)) return
     setSubmittedAnswers((current) => {
       if (!isSameDraftAnswer(current[questionId], payload.answer)) return current
       const next = { ...current }
@@ -563,7 +575,7 @@ export default function ResonanceStudent() {
     // so it's the actual signal for "a submission happened here".
     if (!submittedQuestionIdsRef.current.has(questionId)) return false
     const payloadRunToken = resolvePayloadRunToken(payload)
-    if (submittedAnswerRunRef.current[questionId] !== payloadRunToken) return false
+    if (!payloadMatchesRunToken(payload, submittedAnswerRunRef.current[questionId] ?? null)) return false
     const payloadEditSequence = typeof payload.editSequence === 'number' ? payload.editSequence : 0
     const submittedEditSequence = resolveCurrentEditSequence(editSequenceByKeyRef.current, questionId, payloadRunToken)
     return payloadEditSequence <= submittedEditSequence
@@ -637,7 +649,9 @@ export default function ResonanceStudent() {
           changed = true
           const payloadRunRevision = typeof draft.payload.activeQuestionRunRevision === 'number'
             ? draft.payload.activeQuestionRunRevision
-            : null
+            : typeof draft.payload.activeQuestionRunStartedAt === 'number'
+              ? 1
+              : null
           const expiredRunJustEnded = draft.deadlineAt !== null && now >= draft.deadlineAt &&
             snapshot.activeQuestionRunRevision === null &&
             snapshot.lastActiveQuestionRunRevision === payloadRunRevision
