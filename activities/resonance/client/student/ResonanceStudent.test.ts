@@ -890,6 +890,11 @@ void test('legacy timestamp drafts match revision one after expiry but not a lat
   assert.equal(payloadMatchesRunToken(legacy, 1), true)
   assert.equal(payloadMatchesRunToken(legacy, 2), false)
   assert.equal(payloadMatchesRunToken(legacy, null), false)
+  const canonical = canonicalizeLegacyRevisionOneDraft(legacy, {
+    activeQuestionRunRevision: 1,
+    activeQuestionRunStartedAt: 1_000,
+  })
+  assert.equal(payloadMatchesRunToken(canonical, 1_000), true)
 })
 
 void test('isSameDraftAnswer treats an MCQ selection as unchanged regardless of option order', () => {

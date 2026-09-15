@@ -89,6 +89,13 @@ export function payloadMatchesRunToken(payload: Record<string, unknown>, runToke
     runToken === 1 &&
     typeof payload.activeQuestionRunRevision !== 'number' &&
     typeof payload.activeQuestionRunStartedAt === 'number'
+  ) || (
+    // Canonicalization preserves the legacy start time. Parent state written
+    // before that migration may still hold this timestamp, so recognize the
+    // same revision-1 run in the opposite direction as well.
+    payload.activeQuestionRunRevision === 1 &&
+    typeof payload.activeQuestionRunStartedAt === 'number' &&
+    payload.activeQuestionRunStartedAt === runToken
   )
 }
 
