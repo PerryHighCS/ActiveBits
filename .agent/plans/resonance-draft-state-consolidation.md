@@ -13,7 +13,15 @@
 - [x] Full existing test suite green with **no behavioral test edits** (only renames/moves — the one hook test asserting the ack callback's shape changed signature, not behavior, since the callback itself now carries richer data)
 - [x] Comment/reference sanity pass: re-checked `ResonanceStudent.tsx`, `useResonanceSession.ts`, and the test files for stale references to the deleted structures/functions — found and fixed two (a stale function name in a test comment, and a "being migrated incrementally" doc comment now that the migration is done). No stale line-number or old-identifier references found elsewhere in the activity.
 - [x] `DEPLOYMENT.md` / `ARCHITECTURE.md` updated — fixed two DEPLOYMENT.md passages describing implementation details that no longer exist (the `onDraftReplayAcknowledged` callback signature; the "aliased permanently" legacy-key mechanism, now `payloadMatchesResolvedRunToken`-based identity matching instead), and updated ARCHITECTURE.md's description of the retained-draft structure from "keyed by question + run" to the consolidated `Map<questionId, QuestionDraftState>`, plus a pointer to the new shared `runIdentity.ts`. The rest of DEPLOYMENT.md item 15's behavioral description was left as-is: this consolidation is a refactor, not a behavior change, so the *contract* it documents is still accurate — only the specific implementation-detail sentences needed correcting.
-- [ ] Branch squashed/rebased into a small number of logical commits for final review
+- [x] Branch squashed/rebased into a small number of logical commits for final review — 11 unpushed local commits condensed into 5 (plan doc; shared run-identity comparator; shared draft-attempt helpers; the full `QuestionDraftState` collapse; doc/comment cleanup), built via `git read-tree --reset` at each group boundary and verified with a full `git diff --stat` against the pre-squash tip (empty — byte-for-byte identical final tree) before the branch pointer was moved. A `backup-before-squash` local branch still points at the original 11-commit history as a safety net.
+
+## Consolidation complete
+
+All items above are done. `ResonanceStudent.tsx`'s ref count for this
+subsystem dropped from 9 (plus a hook-level 7 and two server-side
+comparators) to one `Map<questionId, QuestionDraftState>`. Full `npm test`
+green throughout, verified via repeated full-suite reruns to rule out
+concurrent-test-runner flakiness as a real regression at each step.
 
 ## Why this exists
 
