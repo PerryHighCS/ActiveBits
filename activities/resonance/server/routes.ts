@@ -3261,11 +3261,11 @@ export default function setupResonanceRoutes(
           )
           // Generation-zero payloads are from rolling/legacy clients that
           // provide no ordering token. Their only compatible semantics are
-          // last arrival wins: treating an equal zero after a clear as stale
-          // would also reject that client's legitimate next edit. Current
-          // clients send monotonic positive generations, whose tombstones
-          // remain protected by this strict lower-generation check.
-          if (draftGeneration < storedGeneration) {
+          // last arrival wins, including while a rolling deployment has a
+          // positive-generation draft from a newer client. Current clients
+          // send positive monotonic generations, whose tombstones remain
+          // protected by this strict lower-generation check.
+          if (draftGeneration > 0 && draftGeneration < storedGeneration) {
             shouldAcknowledge = true
             return currentSession
           }

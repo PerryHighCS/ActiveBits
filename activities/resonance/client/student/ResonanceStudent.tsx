@@ -939,8 +939,32 @@ export default function ResonanceStudent() {
                 announceSubmittedMessage={!snapshot.selfPacedMode}
                 saveDraft={saveDraft}
                 onDraftChanged={(questionId, answer) => {
-                  submittedAnswerRunRef.current[questionId] =
-                    snapshot.activeQuestionRunRevision ?? snapshot.activeQuestionRunStartedAt
+                  const runToken = snapshot.activeQuestionRunRevision ?? snapshot.activeQuestionRunStartedAt
+                  submittedAnswerRunRef.current[questionId] = runToken
+                  // A failed autosave can already be retained while the
+                  // student continues typing. Keep its reconciliation value
+                  // current: if the deadline cuts off the child's debounce,
+                  // the parent must reconcile the newest optimistic answer,
+                  // not discard the older retained payload on mismatch.
+                  const key = buildUnconfirmedDraftKey({
+                    questionId,
+                    ...(snapshot.activeQuestionRunRevision !== null
+                      ? { activeQuestionRunRevision: runToken }
+                      : { activeQuestionRunStartedAt: runToken }),
+                  })
+                  const retained = key === null ? undefined : unconfirmedDraftsRef.current.get(key)
+                  if (retained !== undefined) {
+                    // Replace, rather than mutate, the retained entry. An
+                    // older retry may already be in flight; its completion
+                    // is identity-checked by the retry loop and must not be
+                    // allowed to delete this newer draft.
+                    unconfirmedDraftsRef.current.set(key!, {
+                      ...retained,
+                      payload: { ...retained.payload, answer },
+                      retrying: false,
+                    })
+                    setUnconfirmedDraftVersion((current) => current + 1)
+                  }
                   setSubmittedAnswers((current) => ({
                     ...current,
                     [questionId]: answer,

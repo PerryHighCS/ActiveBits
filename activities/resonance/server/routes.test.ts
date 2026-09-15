@@ -1188,25 +1188,9 @@ void test('a draft made after revisiting an already-submitted question in the sa
   assert.equal(afterClear.responseDrafts?.['q1:student1'], undefined)
   assert.equal(afterClear.responseDraftGenerations?.['q1:student1']?.draftGeneration, 3)
   // Rolling/legacy clients do not send a generation, which resolves to zero.
-  // They have no ordering token, so preserve their historical last-arrival
-  // behavior: a legitimate edit after a clear must be persisted. Numbered
-  // clients use the strict tombstone protection asserted above.
-  // Reset this isolated in-memory fixture's draft state so the legacy case is
-  // independent from the numbered generation above.
-  session.data.responseDrafts = {}
-  session.data.responseDraftGenerations = {}
-  await sessions.set(session.id, session)
-  console.info('[TEST] an unversioned legacy edit after a clear keeps last-arrival behavior')
-  messageHandlers[0]?.(JSON.stringify({
-    type: 'resonance:update-draft',
-    payload: {
-      studentId: 'student1', questionId: 'q1', draftId: 'legacy-clear',
-      activeQuestionRunRevision: 1, editSequence: 2, answer: null,
-    },
-  }))
-  await waitForCondition(() => sentMessages.some((message) =>
-    message.type === 'resonance:draft-saved' && message.payload?.draftId === 'legacy-clear'
-  ))
+  // Even after this current client wrote the positive-generation tombstone,
+  // preserve the legacy client's last-arrival behavior during a deployment.
+  console.info('[TEST] a generation-zero legacy edit can follow a current-client tombstone')
   messageHandlers[0]?.(JSON.stringify({
     type: 'resonance:update-draft',
     payload: {

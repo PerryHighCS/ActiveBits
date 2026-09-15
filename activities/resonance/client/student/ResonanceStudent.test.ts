@@ -155,7 +155,12 @@ void test('mounted parent reconciles a failed off-screen stack draft when the li
     fireEvent.click(rendered.getByRole('button', { name: /^q2$/i }))
     await waitFor(() => assert.ok(socket.draftAttempts >= 1))
 
-    console.info('[TEST] an expired live snapshot reconciles an unacknowledged Q1 draft while Q2 is mounted')
+    // The retained Q1 save has failed, but the student returns and makes a
+    // newer edit whose normal debounce has not fired when the deadline hits.
+    fireEvent.click(rendered.getByRole('button', { name: /^q1$/i }))
+    fireEvent.change(await waitFor(() => rendered.getByLabelText(/your answer/i)), { target: { value: 'newer deadline draft' } })
+
+    console.info('[TEST] an expired live snapshot reconciles the newest optimistic Q1 edit after an older save failed')
     await act(async () => {
       socket.emit({ type: 'resonance:session-state', payload: {
         sessionId: 'session-1', activeQuestionIds: ['q1', 'q2'], activeQuestionRunRevision: 7,
@@ -166,7 +171,6 @@ void test('mounted parent reconciles a failed off-screen stack draft when the li
         ],
       } })
     })
-    fireEvent.click(rendered.getByRole('button', { name: /^q1$/i }))
     await waitFor(() => assert.equal((rendered.getByLabelText(/your answer/i) as HTMLTextAreaElement).value, ''))
     rendered.unmount()
   } finally {
