@@ -496,11 +496,19 @@ void test('a newer generation succeeding clears an older retained draft still qu
 
     console.info('[TEST] a generation-2 edit is sent successfully and acknowledged')
     fireEvent.change(input, { target: { value: 'second draft' } })
-    await waitFor(() => assert.ok(socket.sent.some((message) => message.includes('second draft'))), { timeout: 2_500 })
-    const sentMessage = socket.sent.find((message) => message.includes('second draft'))!
-    const sent = JSON.parse(sentMessage) as { payload: { draftId?: string } }
+    // The parent may immediately retry the newly replaced retained payload
+    // with its original generation before QuestionView's own debounce sends
+    // generation 2. Wait for the child send specifically, then acknowledge
+    // every outstanding B attempt so no timer outlives this mounted test.
+    await waitFor(() => assert.ok(socket.sent.some((message) => {
+      const sent = JSON.parse(message) as { payload?: { draftGeneration?: number } }
+      return message.includes('second draft') && sent.payload?.draftGeneration === 2
+    })), { timeout: 2_500 })
     await act(async () => {
-      socket.emit({ type: 'resonance:draft-saved', payload: { draftId: sent.payload.draftId } })
+      for (const message of socket.sent.filter((entry) => entry.includes('second draft'))) {
+        const sent = JSON.parse(message) as { payload: { draftId?: string } }
+        socket.emit({ type: 'resonance:draft-saved', payload: { draftId: sent.payload.draftId } })
+      }
     })
 
     console.info('[TEST] the superseded generation-1 retry must stop being attempted entirely')
