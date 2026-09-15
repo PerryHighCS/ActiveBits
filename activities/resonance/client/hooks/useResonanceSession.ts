@@ -33,6 +33,21 @@ function getDraftGeneration(payload: Record<string, unknown>): number {
     : 0
 }
 
+function isPayloadForSnapshotRun(payload: Record<string, unknown>, snapshot: StudentSessionSnapshot): boolean {
+  const payloadHasRevision = typeof payload.activeQuestionRunRevision === 'number'
+  const payloadRunToken = payloadHasRevision
+    ? payload.activeQuestionRunRevision as number
+    : typeof payload.activeQuestionRunStartedAt === 'number'
+      ? payload.activeQuestionRunStartedAt
+      : null
+  const activeRunToken = snapshot.activeQuestionRunRevision ?? snapshot.activeQuestionRunStartedAt
+  return payloadRunToken === activeRunToken || (
+    !payloadHasRevision &&
+    snapshot.activeQuestionRunRevision === 1 &&
+    payloadRunToken === snapshot.activeQuestionRunStartedAt
+  )
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value != null && typeof value === 'object' && !Array.isArray(value)
 }
@@ -608,17 +623,11 @@ export function useResonanceSession(
     const currentSnapshot = snapshotRef.current
     if (currentWs?.readyState !== WebSocket.OPEN || currentSnapshot === null) return
 
-    const activeRunToken = currentSnapshot.activeQuestionRunRevision ?? currentSnapshot.activeQuestionRunStartedAt
     for (const [key, payload] of queuedDraftRetriesRef.current) {
-      const payloadRunToken = typeof payload.activeQuestionRunRevision === 'number'
-        ? payload.activeQuestionRunRevision
-        : typeof payload.activeQuestionRunStartedAt === 'number'
-          ? payload.activeQuestionRunStartedAt
-          : null
       const questionId = typeof payload.questionId === 'string' ? payload.questionId : null
       const isEligible =
         payload.studentId === studentId &&
-        payloadRunToken === activeRunToken &&
+        isPayloadForSnapshotRun(payload, currentSnapshot) &&
         questionId !== null &&
         currentSnapshot.activeQuestionIds.includes(questionId) &&
         (currentSnapshot.activeQuestionDeadlineAt === null || Date.now() < currentSnapshot.activeQuestionDeadlineAt)

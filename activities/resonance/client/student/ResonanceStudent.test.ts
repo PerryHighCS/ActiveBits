@@ -908,6 +908,20 @@ void test('unconfirmed draft retry stops on deadline or an authoritative run cha
 
   assert.equal(resolveUnconfirmedDraftDisposition(payload, snapshot, 'student-1', 1_999), 'retry')
   assert.equal(resolveUnconfirmedDraftDisposition(payload, snapshot, 'student-1', 2_000), 'reconcile')
+  // A pre-revision client identifies the original numbered run by timestamp.
+  // The server treats it as revision 1, so the parent retry owner must too.
+  const legacyPayload = {
+    studentId: 'student-1', questionId: 'q1', activeQuestionRunStartedAt: 1_000,
+    activeQuestionDeadlineAt: 2_000, answer: { type: 'free-response', text: 'Legacy failed draft' },
+  }
+  const revisionOneSnapshot = { ...snapshot, activeQuestionRunRevision: 1, activeQuestionRunStartedAt: 1_000 }
+  assert.equal(resolveUnconfirmedDraftDisposition(legacyPayload, revisionOneSnapshot, 'student-1', 1_999), 'retry')
+  // A delayed same-run snapshot can omit the deadline. The failed payload's
+  // captured deadline must still bound retry and trigger reconciliation.
+  assert.equal(
+    resolveUnconfirmedDraftDisposition(legacyPayload, { ...revisionOneSnapshot, activeQuestionDeadlineAt: null }, 'student-1', 2_000),
+    'reconcile',
+  )
   assert.equal(
     resolveUnconfirmedDraftDisposition(payload, { ...snapshot, activeQuestionRunRevision: 8 }, 'student-1', 1_999),
     'discard',

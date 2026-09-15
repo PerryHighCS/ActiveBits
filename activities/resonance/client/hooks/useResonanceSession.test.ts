@@ -809,7 +809,7 @@ void test('saveDraft resolves false instead of rejecting when the socket throws 
   }
 })
 
-void test('saveDraft retries a failed send after reconnecting within the same active run', async () => {
+void test('saveDraft retries a legacy timestamp draft after reconnecting into equivalent revision one', async () => {
   const restore = installWsTestEnvironment()
   const { act, render, waitFor } = await import('@testing-library/react')
 
@@ -833,7 +833,8 @@ void test('saveDraft retries a failed send after reconnecting within the same ac
       payload: {
         sessionId: 'session-1',
         activeQuestionIds: ['q1'],
-        activeQuestionRunRevision: 3,
+        activeQuestionRunRevision: 1,
+        activeQuestionRunStartedAt: 1_000,
         activeQuestionDeadlineAt: Date.now() + 10_000,
       },
     })
@@ -846,7 +847,7 @@ void test('saveDraft retries a failed send after reconnecting within the same ac
       assert.equal(await captured.saveDraft?.({
         studentId: 'student-1',
         questionId: 'q1',
-        activeQuestionRunRevision: 3,
+        activeQuestionRunStartedAt: 1_000,
         answer: { type: 'free-response', text: 'Retry me' },
       }), false)
     })

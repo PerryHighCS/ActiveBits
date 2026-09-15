@@ -93,15 +93,22 @@ export function resolveUnconfirmedDraftDisposition(
   now: number,
 ): 'discard' | 'reconcile' | 'retry' {
   const activeRunToken = snapshot.activeQuestionRunRevision ?? snapshot.activeQuestionRunStartedAt
-  const payloadRunToken = typeof payload.activeQuestionRunRevision === 'number'
-    ? payload.activeQuestionRunRevision
+  const payloadHasRevision = typeof payload.activeQuestionRunRevision === 'number'
+  const payloadRunToken = payloadHasRevision
+    ? payload.activeQuestionRunRevision as number
     : typeof payload.activeQuestionRunStartedAt === 'number'
       ? payload.activeQuestionRunStartedAt
       : null
+  // The server accepts timestamp-only drafts from pre-revision clients for
+  // the original numbered run (revision 1). Mirror that migration path in
+  // the client retry owner so reconnect does not discard a still-valid draft.
+  const isLegacyRevisionOneRun = !payloadHasRevision &&
+    snapshot.activeQuestionRunRevision === 1 &&
+    payloadRunToken === snapshot.activeQuestionRunStartedAt
   const questionId = typeof payload.questionId === 'string' ? payload.questionId : null
   const isCurrentRun =
     payload.studentId === studentId &&
-    payloadRunToken === activeRunToken &&
+    (payloadRunToken === activeRunToken || isLegacyRevisionOneRun) &&
     questionId !== null &&
     snapshot.activeQuestionIds.includes(questionId)
 
@@ -121,7 +128,10 @@ export function resolveUnconfirmedDraftDisposition(
     return 'discard'
   }
 
-  return snapshot.activeQuestionDeadlineAt !== null && now >= snapshot.activeQuestionDeadlineAt
+  const capturedDeadlineAt = typeof payload.activeQuestionDeadlineAt === 'number'
+    ? payload.activeQuestionDeadlineAt
+    : snapshot.activeQuestionDeadlineAt
+  return capturedDeadlineAt !== null && now >= capturedDeadlineAt
     ? 'reconcile'
     : 'retry'
 }
