@@ -14,6 +14,17 @@ export interface RunIdentitySource {
   activeQuestionRunStartedAt?: number | null
 }
 
+/**
+ * Callers on the client hold an untyped `Record<string, unknown>` payload
+ * (raw WebSocket/REST JSON) rather than a typed RunIdentitySource. Every
+ * function in this module re-validates each field's type at runtime
+ * regardless of what the caller claims, so this cast is safe: it exists
+ * only to satisfy the type checker at the boundary, not to skip validation.
+ */
+export function asRunIdentitySource(payload: Record<string, unknown>): RunIdentitySource {
+  return payload as unknown as RunIdentitySource
+}
+
 function hasRevision(source: RunIdentitySource): boolean {
   return typeof source.activeQuestionRunRevision === 'number' && Number.isSafeInteger(source.activeQuestionRunRevision)
 }

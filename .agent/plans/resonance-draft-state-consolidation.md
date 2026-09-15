@@ -7,7 +7,7 @@
 - [x] Server: `matchesActiveQuestionRun` now delegates to the shared `runIdentitiesMatch`. `responseMatchesActiveRun` stays a small standalone function rather than delegating — see note below
 - [x] Server: legacy-response `activeQuestionRunRevision` backfill investigated — decided against it (kept the existing explicit-`undefined` special case instead; see note below)
 - [x] Client: `payloadMatchesRunToken`/`resolvePayloadRunToken` (component) and `isPayloadForSnapshotRun` (hook) now delegate to the shared module — see note below on the two real divergences the equivalence matrix caught along the way
-- [ ] Client: shared draft-attempt helpers (`draftAttempt.ts`) added and wired into both the hook and the component
+- [x] Client: shared draft-attempt helpers (`draftAttempt.ts`) added and wired into both the hook and the component; `asRunIdentitySource` also deduplicated into `runIdentity.ts` (it was independently copy-pasted into both files during steps 2-3)
 - [ ] Client: per-question state collapsed into a single `QuestionDraftState` map in `ResonanceStudent.tsx`
 - [ ] `legacyDraftKeyAliasRef` and its migration-copy code deleted
 - [ ] Full existing test suite green with **no behavioral test edits** (only renames/moves)

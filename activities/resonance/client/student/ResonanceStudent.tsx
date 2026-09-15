@@ -9,7 +9,8 @@ import NameEntryForm from './NameEntryForm.js'
 import QuestionView from './QuestionView.js'
 import SharedResponseFeed from './SharedResponseFeed.js'
 import { areMcqSelectionsEqual } from '../../shared/mcq.js'
-import { payloadMatchesResolvedRunToken, resolveRunToken, type RunIdentitySource } from '../../shared/runIdentity.js'
+import { asRunIdentitySource, payloadMatchesResolvedRunToken, resolveRunToken } from '../../shared/runIdentity.js'
+import { buildDraftRetryKey, resolveDraftGeneration } from '../draftAttempt.js'
 import type { AnswerPayload } from '../../shared/types.js'
 
 interface RegisterResponse {
@@ -27,12 +28,6 @@ interface UnconfirmedDraft {
   payload: Record<string, unknown>
   retrying: boolean
   deadlineAt: number | null
-}
-
-function resolveDraftGeneration(payload: Record<string, unknown>): number {
-  return typeof payload.draftGeneration === 'number' && Number.isSafeInteger(payload.draftGeneration) && payload.draftGeneration >= 0
-    ? payload.draftGeneration
-    : 0
 }
 
 const UNCONFIRMED_DRAFT_RETRY_INTERVAL_MS = 1_000
@@ -73,10 +68,6 @@ export function isSameDraftAnswer(left: unknown, right: unknown): boolean {
     : right.type === 'multiple-choice' && areMcqSelectionsEqual(left.selectedOptionIds, right.selectedOptionIds)
 }
 
-function asRunIdentitySource(payload: Record<string, unknown>): RunIdentitySource {
-  return payload as unknown as RunIdentitySource
-}
-
 function resolvePayloadRunToken(payload: Record<string, unknown>): number | null {
   return resolveRunToken(asRunIdentitySource(payload))
 }
@@ -89,10 +80,11 @@ export function payloadMatchesRunToken(payload: Record<string, unknown>, runToke
   return payloadMatchesResolvedRunToken(asRunIdentitySource(payload), runToken)
 }
 
+// See buildDraftRetryKey in client/draftAttempt.ts. Kept under this name
+// (and exported from here) since it's part of this component's own public
+// test surface.
 export function buildUnconfirmedDraftKey(payload: Record<string, unknown>): string | null {
-  const questionId = typeof payload.questionId === 'string' ? payload.questionId : null
-  const runToken = resolvePayloadRunToken(payload)
-  return questionId === null ? null : `${questionId}:${runToken ?? 'self-paced'}`
+  return buildDraftRetryKey(payload)
 }
 
 // Normalize the sole legacy run form that the server accepts after revision

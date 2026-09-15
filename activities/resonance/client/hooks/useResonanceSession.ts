@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { isValidStudentReactionEmoji } from '../../shared/emojiSet.js'
 import { getMcqSelectionMode } from '../../shared/mcq.js'
-import { resolveRunToken, runIdentitiesMatch, type RunIdentitySource } from '../../shared/runIdentity.js'
+import { asRunIdentitySource, runIdentitiesMatch } from '../../shared/runIdentity.js'
+import { buildDraftRetryKey as getDraftRetryKey, resolveDraftGeneration as getDraftGeneration } from '../draftAttempt.js'
 import type {
   AnswerPayload,
   QuestionReveal,
@@ -17,22 +18,6 @@ import type {
 
 const FALLBACK_POLL_INTERVAL_MS = 15_000
 const DRAFT_SAVE_ACK_TIMEOUT_MS = 2_000
-
-function asRunIdentitySource(payload: Record<string, unknown>): RunIdentitySource {
-  return payload as unknown as RunIdentitySource
-}
-
-function getDraftRetryKey(payload: Record<string, unknown>): string | null {
-  const questionId = typeof payload.questionId === 'string' ? payload.questionId : null
-  const runToken = resolveRunToken(asRunIdentitySource(payload))
-  return questionId === null ? null : `${questionId}:${runToken ?? 'self-paced'}`
-}
-
-function getDraftGeneration(payload: Record<string, unknown>): number {
-  return typeof payload.draftGeneration === 'number' && Number.isSafeInteger(payload.draftGeneration) && payload.draftGeneration >= 0
-    ? payload.draftGeneration
-    : 0
-}
 
 function isPayloadForSnapshotRun(payload: Record<string, unknown>, snapshot: StudentSessionSnapshot): boolean {
   return runIdentitiesMatch(snapshot, asRunIdentitySource(payload))
