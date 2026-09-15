@@ -772,6 +772,48 @@ void test('QuestionView reports an unacknowledged draft to its parent before sta
   }
 })
 
+void test('QuestionView hands the newest failed in-flight edit to its parent once when the deadline disables the view', async () => {
+  const restoreDomEnvironment = installDomEnvironment()
+  const { act, fireEvent, render, waitFor } = await import('@testing-library/react')
+
+  try {
+    let settleFirstSave: ((saved: boolean) => void) | null = null
+    const failedDrafts: Record<string, unknown>[] = []
+    let saveCount = 0
+    const props = {
+      question: { id: 'q1', type: 'free-response' as const, text: 'Explain your reasoning.', order: 0 },
+      sessionId: 'session-1',
+      studentId: 'student-1',
+      activeQuestionRunStartedAt: 1_000,
+      saveDraft: () => {
+        saveCount += 1
+        return new Promise<boolean>((resolve) => { settleFirstSave = resolve })
+      },
+      onDraftSaveFailed: (payload: Record<string, unknown>) => failedDrafts.push(payload),
+    }
+    const rendered = render(React.createElement(QuestionView, props))
+    const textarea = rendered.getByLabelText(/your answer/i)
+    fireEvent.change(textarea, { target: { value: 'Older edit' } })
+    await waitFor(() => assert.equal(saveCount, 1), { timeout: 2_500 })
+
+    fireEvent.change(textarea, { target: { value: 'Newest edit' } })
+    // The deadline snapshot can disable the input before the newer debounce
+    // runs. Its failed predecessor must still transfer the newest value to
+    // the parent, without restarting this child effect and duplicating it.
+    rendered.rerender(React.createElement(QuestionView, { ...props, disabled: true }))
+    console.info('[TEST] the older in-flight save is expected to fail after the deadline disables QuestionView')
+    await act(async () => { settleFirstSave?.(false) })
+    await waitFor(() => assert.equal(failedDrafts.length, 1))
+    assert.deepEqual(failedDrafts[0]?.answer, { type: 'free-response', text: 'Newest edit' })
+    assert.equal(failedDrafts[0]?.draftGeneration, 2)
+    await new Promise((resolve) => setTimeout(resolve, 1_700))
+    assert.equal(saveCount, 1)
+    rendered.unmount()
+  } finally {
+    restoreDomEnvironment()
+  }
+})
+
 void test('QuestionView shows only the stem for staged MCQs before choices are revealed', async () => {
   const restoreDomEnvironment = installDomEnvironment()
   const { render } = await import('@testing-library/react')

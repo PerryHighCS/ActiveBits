@@ -130,6 +130,50 @@ void test('mounted student retains a failed Q1 autosave across a Q2 tab remount 
   }
 })
 
+void test('mounted parent reconciles a failed off-screen stack draft when the live deadline expires', async () => {
+  const restore = installStudentDom()
+  const { act, fireEvent, render, waitFor } = await import('@testing-library/react')
+  try {
+    window.localStorage.setItem('student-name-session-1', 'Ari')
+    window.localStorage.setItem('student-id-session-1', 'student-1')
+    const rendered = render(React.createElement(MemoryRouter, { initialEntries: ['/session-1'] },
+      React.createElement(Routes, null, React.createElement(Route, { path: '/:sessionId', element: React.createElement(ResonanceStudent) })),
+    ))
+    await waitFor(() => assert.equal(StudentTestWebSocket.instances.length, 1))
+    const socket = StudentTestWebSocket.instances[0]!
+    await act(async () => {
+      socket.emit({ type: 'resonance:session-state', payload: {
+        sessionId: 'session-1', activeQuestionIds: ['q1', 'q2'], activeQuestionRunRevision: 7,
+        activeQuestionDeadlineAt: Date.now() + 30_000,
+        activeQuestions: [
+          { id: 'q1', type: 'free-response', text: 'First', order: 1 },
+          { id: 'q2', type: 'free-response', text: 'Second', order: 2 },
+        ],
+      } })
+    })
+    fireEvent.change(await waitFor(() => rendered.getByLabelText(/your answer/i)), { target: { value: 'off-screen failed draft' } })
+    fireEvent.click(rendered.getByRole('button', { name: /^q2$/i }))
+    await waitFor(() => assert.ok(socket.draftAttempts >= 1))
+
+    console.info('[TEST] an expired live snapshot reconciles an unacknowledged Q1 draft while Q2 is mounted')
+    await act(async () => {
+      socket.emit({ type: 'resonance:session-state', payload: {
+        sessionId: 'session-1', activeQuestionIds: ['q1', 'q2'], activeQuestionRunRevision: 7,
+        activeQuestionDeadlineAt: Date.now() - 1,
+        activeQuestions: [
+          { id: 'q1', type: 'free-response', text: 'First', order: 1 },
+          { id: 'q2', type: 'free-response', text: 'Second', order: 2 },
+        ],
+      } })
+    })
+    fireEvent.click(rendered.getByRole('button', { name: /^q1$/i }))
+    await waitFor(() => assert.equal((rendered.getByLabelText(/your answer/i) as HTMLTextAreaElement).value, ''))
+    rendered.unmount()
+  } finally {
+    restore()
+  }
+})
+
 void test('a save that fails after its run ends is handed off and cannot leak a stale answer into the new run', async () => {
   // QuestionView is not remounted just because the run token changes (only a
   // stack-tab switch remounts it, since it's keyed by question id). A save

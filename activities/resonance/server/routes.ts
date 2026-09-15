@@ -184,6 +184,9 @@ interface ResonanceSessionData extends Record<string, unknown> {
     studentId: string
     activeQuestionRunRevision?: number | null
     draftGeneration: number
+    // Legacy clients use generation 0. Retain whether that zero-generation
+    // entry was a clear so a delayed legacy update cannot resurrect it.
+    cleared?: true
   }>
   annotations: Record<string, InstructorAnnotation>
   reveals: QuestionReveal[]
@@ -873,7 +876,7 @@ function normalizeResponseDraftGenerations(value: unknown): ResonanceSessionData
     const questionId = typeof rawGeneration.questionId === 'string' ? rawGeneration.questionId : ''
     const studentId = typeof rawGeneration.studentId === 'string' ? rawGeneration.studentId : ''
     const draftGeneration = resolveDraftGeneration(rawGeneration.draftGeneration)
-    if (!questionId || !studentId || draftGeneration === 0) continue
+    if (!questionId || !studentId) continue
     const activeQuestionRunRevision = rawGeneration.activeQuestionRunRevision === null
       ? null
       : typeof rawGeneration.activeQuestionRunRevision === 'number' &&
@@ -885,6 +888,7 @@ function normalizeResponseDraftGenerations(value: unknown): ResonanceSessionData
       studentId,
       ...(activeQuestionRunRevision !== undefined ? { activeQuestionRunRevision } : {}),
       draftGeneration,
+      ...(rawGeneration.cleared === true ? { cleared: true as const } : {}),
     }
   }
   return generations
@@ -3259,7 +3263,10 @@ export default function setupResonanceRoutes(
               : 0,
             generationForCurrentRun,
           )
-          if (draftGeneration < storedGeneration) {
+          if (
+            draftGeneration < storedGeneration ||
+            (draftGeneration === 0 && storedGeneration === 0 && currentGeneration?.cleared === true)
+          ) {
             shouldAcknowledge = true
             return currentSession
           }
@@ -3269,6 +3276,7 @@ export default function setupResonanceRoutes(
             studentId,
             activeQuestionRunRevision: currentSession.data.activeQuestionRunRevision,
             draftGeneration,
+            ...(answer === null ? { cleared: true as const } : {}),
           }
           if (answer === null) {
             delete currentSession.data.responseDrafts[draftKey]

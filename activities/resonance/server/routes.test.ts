@@ -1187,6 +1187,41 @@ void test('a draft made after revisiting an already-submitted question in the sa
   const afterClear = (await sessions.get(session.id))?.data as { responseDrafts?: Record<string, unknown>; responseDraftGenerations?: Record<string, { draftGeneration?: number }> }
   assert.equal(afterClear.responseDrafts?.['q1:student1'], undefined)
   assert.equal(afterClear.responseDraftGenerations?.['q1:student1']?.draftGeneration, 3)
+  // Rolling/legacy clients do not send a generation, which resolves to zero.
+  // A clear at that generation must still survive a delayed legacy update.
+  // Reset this isolated in-memory fixture's draft state so the legacy case is
+  // not trivially rejected by the numbered generation above.
+  session.data.responseDrafts = {}
+  session.data.responseDraftGenerations = {}
+  await sessions.set(session.id, session)
+  console.info('[TEST] an unversioned legacy clear must reject a delayed unversioned draft')
+  messageHandlers[0]?.(JSON.stringify({
+    type: 'resonance:update-draft',
+    payload: {
+      studentId: 'student1', questionId: 'q1', draftId: 'legacy-clear',
+      activeQuestionRunRevision: 1, editSequence: 2, answer: null,
+    },
+  }))
+  await waitForCondition(() => sentMessages.some((message) =>
+    message.type === 'resonance:draft-saved' && message.payload?.draftId === 'legacy-clear'
+  ))
+  messageHandlers[0]?.(JSON.stringify({
+    type: 'resonance:update-draft',
+    payload: {
+      studentId: 'student1', questionId: 'q1', draftId: 'legacy-delayed-update',
+      activeQuestionRunRevision: 1, editSequence: 2,
+      answer: { type: 'free-response', text: 'Must not resurrect after legacy clear' },
+    },
+  }))
+  await waitForCondition(() => sentMessages.some((message) =>
+    message.type === 'resonance:draft-saved' && message.payload?.draftId === 'legacy-delayed-update'
+  ))
+  const afterLegacyClear = (await sessions.get(session.id))?.data as {
+    responseDrafts?: Record<string, unknown>
+    responseDraftGenerations?: Record<string, { draftGeneration?: number; cleared?: boolean }>
+  }
+  assert.equal(afterLegacyClear.responseDrafts?.['q1:student1'], undefined)
+  assert.deepEqual(afterLegacyClear.responseDraftGenerations?.['q1:student1'], { draftGeneration: 0, questionId: 'q1', studentId: 'student1', activeQuestionRunRevision: 1, cleared: true })
   // The confirmed response is untouched until the student resubmits or the
   // deadline finalizes the pending draft.
   assert.deepEqual(storedData?.responses?.[0]?.answer, {
@@ -4779,6 +4814,42 @@ void test('student state reports each confirmed response\'s editSequence, so a r
     submittedResponseEditSequences?: Record<string, number>
   }
   assert.equal(body.submittedResponseEditSequences?.q1, 2)
+
+  await sessions.close()
+})
+
+void test('student state projects persisted draft generations for both live and self-paced runs', async () => {
+  const app = createMockApp()
+  const sessions = createSessionStore(null)
+  const live = createMultiQuestionSession()
+  live.id = 'resonance-session-live-draft-generation'
+  live.data.activeQuestionId = 'q1'
+  live.data.activeQuestionIds = ['q1']
+  live.data.activeQuestionRunStartedAt = Date.now() - 1_000
+  live.data.activeQuestionRunRevision = 4
+  live.data.responseDraftGenerations = {
+    'q1:student1': { questionId: 'q1', studentId: 'student1', activeQuestionRunRevision: 4, draftGeneration: 8 },
+  }
+  const selfPaced = createMultiQuestionSession()
+  selfPaced.id = 'resonance-session-self-paced-draft-generation'
+  selfPaced.data.selfPacedMode = true
+  selfPaced.data.responseDraftGenerations = {
+    'q1:student1': { questionId: 'q1', studentId: 'student1', activeQuestionRunRevision: null, draftGeneration: 9 },
+  }
+  await sessions.set(live.id, live)
+  await sessions.set(selfPaced.id, selfPaced)
+  setupResonanceRoutes(app, sessions, createMockWs())
+  const stateHandler = app.handlers.get['/api/resonance/:sessionId/state']
+  assert.equal(typeof stateHandler, 'function')
+
+  for (const [session, expectedGeneration] of [[live, 8], [selfPaced, 9]] as const) {
+    const res = createResponse()
+    await stateHandler?.({
+      params: { sessionId: session.id }, query: { studentId: 'student1' }, cookies: issueStudentCookies(session, 'student1'),
+    }, res)
+    assert.equal(res.statusCode, 200)
+    assert.deepEqual((res.body as { draftGenerations?: Record<string, number> }).draftGenerations, { q1: expectedGeneration })
+  }
 
   await sessions.close()
 })

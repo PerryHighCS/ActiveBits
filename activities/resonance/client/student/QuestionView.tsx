@@ -77,9 +77,7 @@ export default function QuestionView({
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [draftAnswer, setDraftAnswer] = useState<AnswerPayload | null>(initialAnswer)
-  const [draftRetryVersion, setDraftRetryVersion] = useState(0)
   const draftAnswerRef = useRef(draftAnswer)
-  const mountedRef = useRef(true)
   const lastSentDraftRef = useRef<AnswerPayload | null>(null)
   const draftGenerationRef = useRef(0)
   const initialAnswerRef = useRef(initialAnswer)
@@ -107,11 +105,6 @@ export default function QuestionView({
   studentIdRef.current = studentId
   const isWaitingForChoices =
     question.type === 'multiple-choice' && question.choicesRevealed === false
-
-  useEffect(() => {
-    mountedRef.current = true
-    return () => { mountedRef.current = false }
-  }, [])
 
   useEffect(() => {
     setDraftAnswer(initialAnswerRef.current)
@@ -202,12 +195,21 @@ export default function QuestionView({
           if (!isCurrentRun || isSameAnswer(draftAnswerRef.current, pendingDraft)) {
             lastSentDraftRef.current = pendingDraft
             onDraftSaveFailed?.(payload)
-          } else if (isCurrentRun && mountedRef.current) {
-            // The current value (including an intentional clear) superseded
-            // this failed in-flight draft. Mark the old value as sent and
-            // restart the effect so the current value is persisted next.
-            lastSentDraftRef.current = pendingDraft
-            setDraftRetryVersion((current) => current + 1)
+          } else if (isCurrentRun) {
+            // A newer local value (including an intentional clear) replaced
+            // this failed in-flight save. Hand that newest value directly to
+            // the parent: restarting this effect would run its cleanup and
+            // schedule a second debounce for the same value, and a deadline
+            // can disable this view before that timer is allowed to run.
+            // The parent owns retry/deadline reconciliation after a view is
+            // disabled or unmounted, so it is the one durable handoff point.
+            const currentDraft = draftAnswerRef.current
+            lastSentDraftRef.current = currentDraft
+            onDraftSaveFailed?.({
+              ...payload,
+              draftGeneration: nextDraftGeneration?.(question.id, activeQuestionRunToken) ?? ++draftGenerationRef.current,
+              answer: currentDraft,
+            })
           }
         })
         return
@@ -247,7 +249,7 @@ export default function QuestionView({
         sendDraft()
       }
     }
-  }, [activeQuestionDeadlineAt, activeQuestionRunRevision, activeQuestionRunToken, disabled, draftAnswer, draftRetryVersion, isSubmitted, isWaitingForChoices, nextDraftGeneration, onDraftSaveFailed, onDraftSaved, question.id, saveDraft, sendMessage, sessionId, studentId])
+  }, [activeQuestionDeadlineAt, activeQuestionRunRevision, activeQuestionRunToken, disabled, draftAnswer, isSubmitted, isWaitingForChoices, nextDraftGeneration, onDraftSaveFailed, onDraftSaved, question.id, saveDraft, sendMessage, sessionId, studentId])
 
   async function submitAnswer(
     answer: { type: 'free-response'; text: string } | { type: 'multiple-choice'; selectedOptionIds: string[] },
