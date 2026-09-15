@@ -9,7 +9,7 @@ import NameEntryForm from './NameEntryForm.js'
 import QuestionView from './QuestionView.js'
 import SharedResponseFeed from './SharedResponseFeed.js'
 import { areMcqSelectionsEqual } from '../../shared/mcq.js'
-import { asRunIdentitySource, payloadMatchesResolvedRunToken, resolveRunToken } from '../../shared/runIdentity.js'
+import { asRunIdentitySource, payloadMatchesResolvedRunToken, resolveRunToken, type RunIdentitySource } from '../../shared/runIdentity.js'
 import { buildDraftRetryKey, resolveDraftGeneration } from '../draftAttempt.js'
 import type { AnswerPayload } from '../../shared/types.js'
 
@@ -28,6 +28,199 @@ interface UnconfirmedDraft {
   payload: Record<string, unknown>
   retrying: boolean
   deadlineAt: number | null
+}
+
+/**
+ * Per-question state that survives a QuestionView remount (that component
+ * is deliberately remounted on every stack-tab switch), being migrated
+ * incrementally off a set of separately-keyed refs/maps that previously
+ * had to be kept in sync by hand — see the consolidation plan at
+ * .agent/plans/resonance-draft-state-consolidation.md. Keyed by questionId
+ * alone: a run transition updates fields on the existing entry in place
+ * rather than requiring values to be copied across a second key
+ * namespace.
+ *
+ * None of these fields (other than runToken itself) are trustworthy on
+ * their own — a composite `questionId:runToken` key used to make a run
+ * transition reset them *implicitly*, just by being a different string.
+ * Collapsed into one record, every read must instead check `runToken`
+ * against the run it's being asked about (see the `getQuestion*` readers
+ * below, which fall back to the same baseline a missing composite-key
+ * entry would have produced). Writes go through
+ * ensureQuestionDraftStateForRun, which only resets when the record's
+ * `runToken` doesn't already match — so a same-run write is a plain
+ * in-place mutation, and only a genuine transition starts fresh.
+ */
+export interface QuestionDraftState {
+  /** Which run this record currently represents. Always trustworthy as-is — this is what every other field is scoped to. */
+  runToken: number | null
+  /** Highest draftGeneration attempted so far for this run (see nextDraftGeneration). */
+  attemptedGeneration: number
+  /** Highest draftGeneration the server has acknowledged for this run. */
+  acknowledgedGeneration: number
+  /** A failed autosave retained for retry, or null if nothing is outstanding. */
+  unconfirmedDraft: UnconfirmedDraft | null
+  /** "Attempt N of answering this question in this run" — advances on a revisit, never resets on its own (see advanceQuestionEditSequenceForRevisit). Baseline 1. */
+  editSequence: number
+  /** The editSequence that was actually confirmed submitted for this run, or null if nothing has been confirmed yet. */
+  submittedEditSequence: number | null
+}
+
+function freshQuestionDraftState(runToken: number | null): QuestionDraftState {
+  return {
+    runToken,
+    attemptedGeneration: 0,
+    acknowledgedGeneration: 0,
+    unconfirmedDraft: null,
+    editSequence: 1,
+    submittedEditSequence: null,
+  }
+}
+
+/**
+ * Returns the record for `questionId`, resetting it first if it exists but
+ * represents a different run than `runToken` — the one place a genuine run
+ * transition is detected and applied. Every writer below goes through
+ * this; canonicalizeQuestionRunToken is the deliberate exception (a
+ * same-run relabeling, not a transition — see its own comment).
+ */
+function ensureQuestionDraftStateForRun(
+  questionDraftStateByQuestionId: Map<string, QuestionDraftState>,
+  questionId: string,
+  runToken: number | null,
+): QuestionDraftState {
+  const existing = questionDraftStateByQuestionId.get(questionId)
+  if (existing !== undefined && existing.runToken === runToken) return existing
+  const fresh = freshQuestionDraftState(runToken)
+  questionDraftStateByQuestionId.set(questionId, fresh)
+  return fresh
+}
+
+export function getQuestionRunToken(
+  questionDraftStateByQuestionId: Map<string, QuestionDraftState>,
+  questionId: string,
+): number | null | undefined {
+  return questionDraftStateByQuestionId.get(questionId)?.runToken
+}
+
+export function setQuestionRunToken(
+  questionDraftStateByQuestionId: Map<string, QuestionDraftState>,
+  questionId: string,
+  runToken: number | null,
+): void {
+  ensureQuestionDraftStateForRun(questionDraftStateByQuestionId, questionId, runToken)
+}
+
+// Used only when canonicalizing a legacy (pre-revision) run token to its
+// revision-1 form for the SAME real run (see canonicalizeLegacyRevisionOneDraft)
+// — unlike setQuestionRunToken, this must preserve every other field: it's
+// not a new run, just a different representation of the one already
+// recorded.
+export function canonicalizeQuestionRunToken(
+  questionDraftStateByQuestionId: Map<string, QuestionDraftState>,
+  questionId: string,
+  runToken: number,
+): void {
+  const existing = questionDraftStateByQuestionId.get(questionId)
+  if (existing) {
+    existing.runToken = runToken
+  } else {
+    questionDraftStateByQuestionId.set(questionId, freshQuestionDraftState(runToken))
+  }
+}
+
+export function nextQuestionDraftGeneration(
+  questionDraftStateByQuestionId: Map<string, QuestionDraftState>,
+  questionId: string,
+  runToken: number | null,
+): number {
+  const state = ensureQuestionDraftStateForRun(questionDraftStateByQuestionId, questionId, runToken)
+  state.attemptedGeneration += 1
+  return state.attemptedGeneration
+}
+
+export function getQuestionAttemptedGeneration(
+  questionDraftStateByQuestionId: Map<string, QuestionDraftState>,
+  questionId: string,
+  runToken: number | null,
+): number {
+  const state = questionDraftStateByQuestionId.get(questionId)
+  return state !== undefined && state.runToken === runToken ? state.attemptedGeneration : 0
+}
+
+// Raises attemptedGeneration's floor to at least `generation` — used to
+// seed it from the server's own record on every snapshot, the same way a
+// post-reload local counter needs a floor so it doesn't collide with (or
+// trail) generations the server has already seen for this run.
+export function seedQuestionAttemptedGeneration(
+  questionDraftStateByQuestionId: Map<string, QuestionDraftState>,
+  questionId: string,
+  runToken: number | null,
+  generation: number,
+): void {
+  const state = ensureQuestionDraftStateForRun(questionDraftStateByQuestionId, questionId, runToken)
+  state.attemptedGeneration = Math.max(state.attemptedGeneration, generation)
+}
+
+export function getQuestionUnconfirmedDraft(
+  questionDraftStateByQuestionId: Map<string, QuestionDraftState>,
+  questionId: string,
+  runToken: number | null,
+): UnconfirmedDraft | null {
+  const state = questionDraftStateByQuestionId.get(questionId)
+  return state !== undefined && state.runToken === runToken ? state.unconfirmedDraft : null
+}
+
+export function setQuestionUnconfirmedDraft(
+  questionDraftStateByQuestionId: Map<string, QuestionDraftState>,
+  questionId: string,
+  runToken: number | null,
+  draft: UnconfirmedDraft | null,
+): void {
+  const state = ensureQuestionDraftStateForRun(questionDraftStateByQuestionId, questionId, runToken)
+  state.unconfirmedDraft = draft
+}
+
+export function getQuestionAcknowledgedGeneration(
+  questionDraftStateByQuestionId: Map<string, QuestionDraftState>,
+  questionId: string,
+  runToken: number | null,
+): number {
+  const state = questionDraftStateByQuestionId.get(questionId)
+  return state !== undefined && state.runToken === runToken ? state.acknowledgedGeneration : 0
+}
+
+// An ack (from a direct save or a hook-level reconnect replay) only ever
+// names a specific (questionId, run) pair — never "the current run,
+// whatever that is now" — since it can arrive long after that run has
+// ended. `runIdentity` is the run identity the *ack itself* names, which
+// for a delayed reconnect-replay ack can still be in legacy (timestamp-only)
+// form even after the local record has since been canonicalized to a
+// revision number for the same real run — payloadMatchesResolvedRunToken
+// (not a raw ===) is what recognizes that as the same run rather than
+// rejecting the ack as stale. Refuses to touch an EXISTING record for a
+// genuinely different run (that record now belongs to a later run and this
+// ack has nothing to say about it), but will still create a fresh one if
+// none exists yet, matching the old acknowledgedDraftGenerationByKeyRef's
+// behavior of recording an acknowledgement independently of whether
+// anything was retained. Returns whether a retained draft was cleared, so
+// the caller can skip an unnecessary re-render when nothing changed.
+export function acknowledgeQuestionDraftGeneration(
+  questionDraftStateByQuestionId: Map<string, QuestionDraftState>,
+  questionId: string,
+  runIdentity: RunIdentitySource,
+  generation: number,
+): boolean {
+  const existing = questionDraftStateByQuestionId.get(questionId)
+  if (existing !== undefined && !payloadMatchesResolvedRunToken(runIdentity, existing.runToken)) return false
+  const runToken = existing?.runToken ?? resolveRunToken(runIdentity)
+  const state = ensureQuestionDraftStateForRun(questionDraftStateByQuestionId, questionId, runToken)
+  state.acknowledgedGeneration = Math.max(state.acknowledgedGeneration, generation)
+  if (state.unconfirmedDraft !== null && resolveDraftGeneration(state.unconfirmedDraft.payload) <= generation) {
+    state.unconfirmedDraft = null
+    return true
+  }
+  return false
 }
 
 const UNCONFIRMED_DRAFT_RETRY_INTERVAL_MS = 1_000
@@ -199,32 +392,31 @@ export function clearLiveQuestionSubmission(params: {
   return next
 }
 
-/**
- * Per-question/run edit-sequence bookkeeping, keyed independently of any one
- * QuestionView mount so it survives that component remounting when the
- * student switches stack tabs away and back. `runToken` should be the same
- * activeQuestionRunRevision ?? activeQuestionRunStartedAt value passed to
- * QuestionView, so a new run naturally starts its own counter at the baseline.
- */
-export function buildEditSequenceKey(questionId: string, runToken: number | null): string {
-  return `${questionId}:${runToken ?? 'null'}`
-}
+// Per-question/run edit-sequence bookkeeping — "attempt N of answering this
+// question in this run" — using the same read-time-validated
+// QuestionDraftState pattern as the generation/draft fields above (see the
+// type's own doc comment). `runToken` should be the same
+// activeQuestionRunRevision ?? activeQuestionRunStartedAt value passed to
+// QuestionView, so a new run naturally starts its own counter at the
+// baseline.
 
-export function resolveCurrentEditSequence(
-  editSequenceByKey: Record<string, number>,
+export function resolveQuestionEditSequence(
+  questionDraftStateByQuestionId: Map<string, QuestionDraftState>,
   questionId: string,
   runToken: number | null,
 ): number {
-  return editSequenceByKey[buildEditSequenceKey(questionId, runToken)] ?? 1
+  const state = questionDraftStateByQuestionId.get(questionId)
+  return state !== undefined && state.runToken === runToken ? state.editSequence : 1
 }
 
-export function advanceEditSequenceForRevisit(
-  editSequenceByKey: Record<string, number>,
+export function advanceQuestionEditSequenceForRevisit(
+  questionDraftStateByQuestionId: Map<string, QuestionDraftState>,
   questionId: string,
   runToken: number | null,
-): Record<string, number> {
-  const key = buildEditSequenceKey(questionId, runToken)
-  return { ...editSequenceByKey, [key]: (editSequenceByKey[key] ?? 1) + 1 }
+): number {
+  const state = ensureQuestionDraftStateForRun(questionDraftStateByQuestionId, questionId, runToken)
+  state.editSequence += 1
+  return state.editSequence
 }
 
 /**
@@ -236,18 +428,33 @@ export function advanceEditSequenceForRevisit(
  * own editSequence (floor = confirmed + 1) whenever it would otherwise leave
  * a lower value in place; never lowers an already-advanced local counter.
  */
-export function seedEditSequenceFromConfirmedResponse(
-  editSequenceByKey: Record<string, number>,
+export function seedQuestionEditSequenceFromConfirmedResponse(
+  questionDraftStateByQuestionId: Map<string, QuestionDraftState>,
   questionId: string,
   runToken: number | null,
   confirmedEditSequence: number,
-): Record<string, number> {
-  const key = buildEditSequenceKey(questionId, runToken)
-  const floor = confirmedEditSequence + 1
-  if ((editSequenceByKey[key] ?? 1) >= floor) {
-    return editSequenceByKey
-  }
-  return { ...editSequenceByKey, [key]: floor }
+): void {
+  const state = ensureQuestionDraftStateForRun(questionDraftStateByQuestionId, questionId, runToken)
+  state.editSequence = Math.max(state.editSequence, confirmedEditSequence + 1)
+}
+
+export function getQuestionSubmittedEditSequence(
+  questionDraftStateByQuestionId: Map<string, QuestionDraftState>,
+  questionId: string,
+  runToken: number | null,
+): number | null {
+  const state = questionDraftStateByQuestionId.get(questionId)
+  return state !== undefined && state.runToken === runToken ? state.submittedEditSequence : null
+}
+
+export function recordQuestionSubmittedEditSequence(
+  questionDraftStateByQuestionId: Map<string, QuestionDraftState>,
+  questionId: string,
+  runToken: number | null,
+  editSequence: number,
+): void {
+  const state = ensureQuestionDraftStateForRun(questionDraftStateByQuestionId, questionId, runToken)
+  state.submittedEditSequence = editSequence
 }
 
 export function resolveQuestionAnswer(params: {
@@ -360,7 +567,7 @@ export default function ResonanceStudent() {
   // stale-run discard/reconcile (below) can require that context to match
   // instead of comparing answer content alone — two different runs can
   // legitimately contain the same answer text/selection.
-  const submittedAnswerRunRef = useRef<Record<string, number | null>>({})
+  const questionDraftStateRef = useRef(new Map<string, QuestionDraftState>())
   const [draftResetVersions, setDraftResetVersions] = useState<Record<string, number>>({})
   const [submissionAnnouncement, setSubmissionAnnouncement] = useState<SubmissionAnnouncement | null>(null)
   const [countdownNow, setCountdownNow] = useState(() => Date.now())
@@ -370,55 +577,22 @@ export default function ResonanceStudent() {
   const previousActiveQuestionRunRevisionRef = useRef<number | null>(null)
   const previousActiveQuestionRunStartedAtRef = useRef<number | null>(null)
   const hasObservedSnapshotRef = useRef(false)
-  // Owned here (not in QuestionView) because QuestionView remounts on every
-  // stack-tab switch (it's keyed by question id): a counter local to it would
-  // reset to its baseline on remount, colliding with the sequence already
-  // recorded on a confirmed response and causing a legitimate revisit edit to
-  // be dropped as stale. See resolveCurrentEditSequence/advanceEditSequenceForRevisit.
-  const editSequenceByKeyRef = useRef<Record<string, number>>({})
-  // Unlike the editable counter above, this watermark records an actual
-  // accepted submission and survives unlocking a live question for revisit.
-  const submittedEditSequenceByKeyRef = useRef<Record<string, number>>({})
-  const draftGenerationByKeyRef = useRef<Record<string, number>>({})
-  // Failed writes cannot live in QuestionView: that component is deliberately
-  // remounted on a stack-tab change. Keep them for the student view lifetime,
-  // and discard them when the authoritative active run changes.
-  const unconfirmedDraftsRef = useRef(new Map<string, UnconfirmedDraft>())
-  const acknowledgedDraftGenerationByKeyRef = useRef(new Map<string, number>())
-  // A legacy-timestamp draft-retry send that was already in flight (queued
-  // in useResonanceSession's retryDraftSavesRef, awaiting its own ack) when
-  // canonicalization moved the retained entry to the revision-1 key is not
-  // cancelled by that migration — cancelDraftRetries only reaches the
-  // hook's *queued* entry, not one already sent. Its acknowledgement can
-  // still arrive afterward, keyed by the legacy identity. Keep a permanent
-  // alias so that late ack still resolves to wherever the draft actually
-  // lives now, instead of being a no-op that leaves the canonical entry
-  // retrying forever.
-  const legacyDraftKeyAliasRef = useRef(new Map<string, string>())
   const [unconfirmedDraftVersion, setUnconfirmedDraftVersion] = useState(0)
   // Stable across countdown renders: QuestionView includes this callback in
   // its autosave effect dependencies, so an inline callback would flush the
   // 1500ms debounce on every timer tick.
   const nextDraftGeneration = useCallback((questionId: string, activeQuestionRunToken: number | null) => {
-    const key = buildEditSequenceKey(questionId, activeQuestionRunToken)
-    const next = (draftGenerationByKeyRef.current[key] ?? 0) + 1
-    draftGenerationByKeyRef.current[key] = next
-    return next
+    return nextQuestionDraftGeneration(questionDraftStateRef.current, questionId, activeQuestionRunToken)
   }, [])
-
 
   // Shared by a direct successful save (handleDraftSaved, below) and a
   // reconnect-replay ack (passed to useResonanceSession as
   // onDraftReplayAcknowledged) — both are ways this component can learn a
   // particular generation is now durably persisted, and either should clear
   // a same-or-older retained entry rather than leaving it to keep retrying.
-  const clearRetainedDraftIfSuperseded = useCallback((key: string, generation: number) => {
-    const resolvedKey = legacyDraftKeyAliasRef.current.get(key) ?? key
-    const acknowledged = acknowledgedDraftGenerationByKeyRef.current.get(resolvedKey) ?? 0
-    acknowledgedDraftGenerationByKeyRef.current.set(resolvedKey, Math.max(acknowledged, generation))
-    const retained = unconfirmedDraftsRef.current.get(resolvedKey)
-    if (retained && resolveDraftGeneration(retained.payload) <= generation) {
-      unconfirmedDraftsRef.current.delete(resolvedKey)
+  const clearRetainedDraftIfSuperseded = useCallback((questionId: string | null, runIdentity: RunIdentitySource, generation: number) => {
+    if (questionId === null) return
+    if (acknowledgeQuestionDraftGeneration(questionDraftStateRef.current, questionId, runIdentity, generation)) {
       setUnconfirmedDraftVersion((current) => current + 1)
     }
   }, [])
@@ -529,18 +703,12 @@ export default function ResonanceStudent() {
     previousActiveQuestionRunRevisionRef.current = null
     previousActiveQuestionRunStartedAtRef.current = null
     hasObservedSnapshotRef.current = false
-    editSequenceByKeyRef.current = {}
-    submittedEditSequenceByKeyRef.current = {}
-    draftGenerationByKeyRef.current = {}
-    acknowledgedDraftGenerationByKeyRef.current.clear()
-    legacyDraftKeyAliasRef.current.clear()
-    submittedAnswerRunRef.current = {}
-    unconfirmedDraftsRef.current.clear()
+    questionDraftStateRef.current.clear()
     setUnconfirmedDraftVersion((current) => current + 1)
   }, [sessionId, studentId])
 
   const reconcileUnconfirmedDraft = useCallback((questionId: string, payload: Record<string, unknown>) => {
-    if (!payloadMatchesRunToken(payload, submittedAnswerRunRef.current[questionId] ?? null)) return
+    if (!payloadMatchesRunToken(payload, getQuestionRunToken(questionDraftStateRef.current, questionId) ?? null)) return
     if (!isSameDraftAnswer(submittedAnswersRef.current[questionId], payload.answer)) return
     setSubmittedAnswers((current) => {
       const next = { ...current }
@@ -555,7 +723,7 @@ export default function ResonanceStudent() {
   }, [refresh])
 
   const discardUnconfirmedDraft = useCallback((questionId: string, payload: Record<string, unknown>) => {
-    if (!payloadMatchesRunToken(payload, submittedAnswerRunRef.current[questionId] ?? null)) return
+    if (!payloadMatchesRunToken(payload, getQuestionRunToken(questionDraftStateRef.current, questionId) ?? null)) return
     setSubmittedAnswers((current) => {
       if (!isSameDraftAnswer(current[questionId], payload.answer)) return current
       const next = { ...current }
@@ -572,11 +740,11 @@ export default function ResonanceStudent() {
   const isPayloadSupersededBySubmission = useCallback((payload: Record<string, unknown>): boolean => {
     const questionId = typeof payload.questionId === 'string' ? payload.questionId : null
     if (questionId === null) return false
-    const submittedRunToken = submittedAnswerRunRef.current[questionId] ?? null
+    const submittedRunToken = getQuestionRunToken(questionDraftStateRef.current, questionId) ?? null
     if (!payloadMatchesRunToken(payload, submittedRunToken)) return false
     const payloadEditSequence = typeof payload.editSequence === 'number' ? payload.editSequence : 0
-    const submittedEditSequence = submittedEditSequenceByKeyRef.current[buildEditSequenceKey(questionId, submittedRunToken)]
-    return submittedEditSequence !== undefined && payloadEditSequence <= submittedEditSequence
+    const submittedEditSequence = getQuestionSubmittedEditSequence(questionDraftStateRef.current, questionId, submittedRunToken)
+    return submittedEditSequence !== null && payloadEditSequence <= submittedEditSequence
   }, [])
 
   // Stable regardless of snapshot identity: QuestionView includes this
@@ -585,10 +753,12 @@ export default function ResonanceStudent() {
   // draft early. Read the fallback deadline from a ref instead of closing
   // over snapshot directly.
   const recordUnconfirmedDraft = useCallback((payload: Record<string, unknown>) => {
-    const key = buildUnconfirmedDraftKey(payload)
-    if (key === null) return
+    const questionId = typeof payload.questionId === 'string' ? payload.questionId : null
+    if (questionId === null) return
     if (isPayloadSupersededBySubmission(payload)) return
-    if (resolveDraftGeneration(payload) <= (acknowledgedDraftGenerationByKeyRef.current.get(key) ?? 0)) return
+    const runToken = resolvePayloadRunToken(payload)
+    const payloadGeneration = resolveDraftGeneration(payload)
+    if (payloadGeneration <= getQuestionAcknowledgedGeneration(questionDraftStateRef.current, questionId, runToken)) return
     // A late failure from an unmounted view can arrive after a replacement
     // view (post-remount) has already attempted — but not yet resolved — a
     // newer save for the same question+run. Neither of the checks above
@@ -598,17 +768,13 @@ export default function ResonanceStudent() {
     // generation *attempted* so far (not just acknowledged or retained)
     // catches it without risk: if that newer attempt later fails too, it is
     // by then the highest attempted and retains itself correctly.
-    const payloadQuestionId = typeof payload.questionId === 'string' ? payload.questionId : null
-    const generationKey = payloadQuestionId !== null
-      ? buildEditSequenceKey(payloadQuestionId, resolvePayloadRunToken(payload))
-      : null
-    if (generationKey !== null && resolveDraftGeneration(payload) < (draftGenerationByKeyRef.current[generationKey] ?? 0)) return
-    const current = unconfirmedDraftsRef.current.get(key)
-    if (current && resolveDraftGeneration(current.payload) > resolveDraftGeneration(payload)) return
+    if (payloadGeneration < getQuestionAttemptedGeneration(questionDraftStateRef.current, questionId, runToken)) return
+    const current = getQuestionUnconfirmedDraft(questionDraftStateRef.current, questionId, runToken)
+    if (current && resolveDraftGeneration(current.payload) > payloadGeneration) return
     const deadlineAt = typeof payload.activeQuestionDeadlineAt === 'number'
       ? payload.activeQuestionDeadlineAt
       : snapshotRef.current?.activeQuestionDeadlineAt ?? null
-    unconfirmedDraftsRef.current.set(key, { payload, retrying: false, deadlineAt })
+    setQuestionUnconfirmedDraft(questionDraftStateRef.current, questionId, runToken, { payload, retrying: false, deadlineAt })
     setUnconfirmedDraftVersion((current) => current + 1)
   }, [isPayloadSupersededBySubmission])
 
@@ -620,13 +786,17 @@ export default function ResonanceStudent() {
   const handleDraftSaved = useCallback((payload: Record<string, unknown>) => {
     const key = buildUnconfirmedDraftKey(payload)
     if (key === null) return
+    const questionId = typeof payload.questionId === 'string' ? payload.questionId : null
     const generation = resolveDraftGeneration(payload)
-    clearRetainedDraftIfSuperseded(key, generation)
+    clearRetainedDraftIfSuperseded(questionId, asRunIdentitySource(payload), generation)
     cancelDraftRetries(key, generation)
   }, [cancelDraftRetries, clearRetainedDraftIfSuperseded])
 
   useEffect(() => {
-    if (unconfirmedDraftsRef.current.size === 0 || snapshot === null || studentId === null) {
+    const hasAnyUnconfirmedDraft = [...questionDraftStateRef.current.values()].some(
+      (state) => state.unconfirmedDraft !== null,
+    )
+    if (!hasAnyUnconfirmedDraft || snapshot === null || studentId === null) {
       return
     }
 
@@ -634,70 +804,47 @@ export default function ResonanceStudent() {
       const now = Date.now()
       let changed = false
 
-      for (const [originalKey, retainedDraft] of unconfirmedDraftsRef.current) {
-        let key = originalKey
-        let draft = retainedDraft
+      for (const [questionId, state] of questionDraftStateRef.current) {
+        let draft = state.unconfirmedDraft
+        if (draft === null) continue
+
         const canonicalPayload = canonicalizeLegacyRevisionOneDraft(draft.payload, snapshot)
         if (canonicalPayload !== draft.payload) {
-          const canonicalKey = buildUnconfirmedDraftKey(canonicalPayload)
-          if (canonicalKey !== null && canonicalKey !== key) {
-            // Recorded unconditionally, and never removed: an in-flight
-            // reconnect-replay send for the legacy key (already sent, not
-            // just queued) can still be acknowledged after this migration
-            // moves the retained entry to canonicalKey, and that late ack
-            // must still resolve to wherever this draft actually ends up.
-            legacyDraftKeyAliasRef.current.set(key, canonicalKey)
-            const existing = unconfirmedDraftsRef.current.get(canonicalKey)
-            unconfirmedDraftsRef.current.delete(key)
-            if (existing !== undefined && resolveDraftGeneration(existing.payload) > resolveDraftGeneration(canonicalPayload)) {
-              changed = true
-              continue
+          const legacyKey = buildDraftRetryKey(draft.payload)
+          const canonicalKey = buildDraftRetryKey(canonicalPayload)
+          if (canonicalKey !== null && canonicalKey !== legacyKey) {
+            // An in-flight reconnect-replay send for the legacy key
+            // (already sent, not just queued) can still be acknowledged
+            // after this migration moves the retained entry to its
+            // canonical run token. That late ack still resolves correctly
+            // without any alias bookkeeping here: useResonanceSession
+            // carries the run identity the ack itself names, and
+            // acknowledgeQuestionDraftGeneration (see clearRetainedDraftIfSuperseded)
+            // recognizes it as the same run via payloadMatchesResolvedRunToken,
+            // not a raw key match.
+            const canonicalRunToken = resolvePayloadRunToken(canonicalPayload)
+            if (canonicalRunToken !== null && state.runToken !== canonicalRunToken) {
+              // Canonicalizing the run token preserves attemptedGeneration,
+              // acknowledgedGeneration, and the retained draft itself in
+              // place — they're all on this same record now, so nothing
+              // needs to be copied across a separate key namespace the way
+              // it once did.
+              canonicalizeQuestionRunToken(questionDraftStateRef.current, questionId, canonicalRunToken)
             }
-            const questionId = typeof draft.payload.questionId === 'string' ? draft.payload.questionId : null
-            const legacyRunToken = resolvePayloadRunToken(draft.payload)
-            if (questionId !== null && legacyRunToken !== null && submittedAnswerRunRef.current[questionId] === legacyRunToken) {
-              // Move the parent-owned optimistic-answer and submission
-              // watermark identity alongside the retained draft. Otherwise
-              // expiry reconciliation sees canonical revision 1 against the
-              // stale timestamp and refuses to clear the optimistic answer.
-              submittedAnswerRunRef.current[questionId] = 1
-              const legacySequenceKey = buildEditSequenceKey(questionId, legacyRunToken)
-              const canonicalSequenceKey = buildEditSequenceKey(questionId, 1)
-              const submittedSequence = submittedEditSequenceByKeyRef.current[legacySequenceKey]
-              if (submittedSequence !== undefined) {
-                submittedEditSequenceByKeyRef.current[canonicalSequenceKey] = submittedSequence
-                delete submittedEditSequenceByKeyRef.current[legacySequenceKey]
-              }
-            }
-            const legacyGenerationKey = buildEditSequenceKey(questionId ?? '', legacyRunToken)
-            const canonicalGenerationKey = buildEditSequenceKey(questionId ?? '', 1)
-            if (questionId !== null) {
-              const migratedGeneration = Math.max(
-                draftGenerationByKeyRef.current[legacyGenerationKey] ?? 0,
-                draftGenerationByKeyRef.current[canonicalGenerationKey] ?? 0,
-              )
-              if (migratedGeneration > 0) draftGenerationByKeyRef.current[canonicalGenerationKey] = migratedGeneration
-              delete draftGenerationByKeyRef.current[legacyGenerationKey]
-              const migratedAcknowledgement = Math.max(
-                acknowledgedDraftGenerationByKeyRef.current.get(originalKey) ?? 0,
-                acknowledgedDraftGenerationByKeyRef.current.get(canonicalKey) ?? 0,
-              )
-              if (migratedAcknowledgement > 0) acknowledgedDraftGenerationByKeyRef.current.set(canonicalKey, migratedAcknowledgement)
-              acknowledgedDraftGenerationByKeyRef.current.delete(originalKey)
-              cancelDraftRetries(originalKey, migratedGeneration)
-              cancelDraftRetries(canonicalKey, migratedAcknowledgement)
+            if (legacyKey !== null) {
+              cancelDraftRetries(legacyKey, state.attemptedGeneration)
+              cancelDraftRetries(canonicalKey, state.acknowledgedGeneration)
             }
             draft = { ...draft, payload: canonicalPayload }
-            key = canonicalKey
-            unconfirmedDraftsRef.current.set(key, draft)
+            state.unconfirmedDraft = draft
             changed = true
           }
         }
-        const questionId = typeof draft.payload.questionId === 'string' ? draft.payload.questionId : null
+
         const disposition = resolveUnconfirmedDraftDisposition(draft.payload, snapshot, studentId, now)
 
         if (disposition === 'discard') {
-          unconfirmedDraftsRef.current.delete(key)
+          state.unconfirmedDraft = null
           changed = true
           const payloadRunRevision = typeof draft.payload.activeQuestionRunRevision === 'number'
             ? draft.payload.activeQuestionRunRevision
@@ -707,36 +854,39 @@ export default function ResonanceStudent() {
           const expiredRunJustEnded = draft.deadlineAt !== null && now >= draft.deadlineAt &&
             snapshot.activeQuestionRunRevision === null &&
             snapshot.lastActiveQuestionRunRevision === payloadRunRevision
-          if (questionId !== null && expiredRunJustEnded) {
+          if (expiredRunJustEnded) {
             reconcileUnconfirmedDraft(questionId, draft.payload)
-          } else if (questionId !== null) {
+          } else {
             discardUnconfirmedDraft(questionId, draft.payload)
           }
           continue
         }
 
         if (disposition === 'reconcile') {
-          unconfirmedDraftsRef.current.delete(key)
+          state.unconfirmedDraft = null
           changed = true
-          if (questionId !== null) reconcileUnconfirmedDraft(questionId, draft.payload)
+          reconcileUnconfirmedDraft(questionId, draft.payload)
           continue
         }
 
         if (draft.retrying) continue
         draft.retrying = true
-        void saveDraft(draft.payload).then((saved) => {
-          if (unconfirmedDraftsRef.current.get(key) !== draft) return
+        const draftBeingSaved = draft
+        void saveDraft(draftBeingSaved.payload).then((saved) => {
+          if (questionDraftStateRef.current.get(questionId)?.unconfirmedDraft !== draftBeingSaved) return
           if (saved) {
-            unconfirmedDraftsRef.current.delete(key)
+            const currentState = questionDraftStateRef.current.get(questionId)
+            if (currentState) currentState.unconfirmedDraft = null
             // Bump unconditionally, even if the effect that started this
             // retry has since been superseded by a snapshot update: this is
             // the only way the *replacement* effect (which is in the
-            // dependency array on this same version counter) learns the map
-            // is now empty and stops polling on its own interval forever.
+            // dependency array on this same version counter) learns nothing
+            // is outstanding anymore and stops polling on its own interval
+            // forever.
             setUnconfirmedDraftVersion((current) => current + 1)
             return
           }
-          draft.retrying = false
+          draftBeingSaved.retrying = false
         })
       }
 
@@ -754,9 +904,9 @@ export default function ResonanceStudent() {
 
   useEffect(() => {
     if (snapshot === null) return
+    const runToken = snapshot.activeQuestionRunRevision ?? snapshot.activeQuestionRunStartedAt
     for (const [questionId, generation] of Object.entries(snapshot.draftGenerations)) {
-      const key = buildEditSequenceKey(questionId, snapshot.activeQuestionRunRevision ?? snapshot.activeQuestionRunStartedAt)
-      draftGenerationByKeyRef.current[key] = Math.max(draftGenerationByKeyRef.current[key] ?? 0, generation)
+      seedQuestionAttemptedGeneration(questionDraftStateRef.current, questionId, runToken, generation)
     }
   }, [snapshot])
 
@@ -790,7 +940,7 @@ export default function ResonanceStudent() {
       let changed = false
       const next: typeof current = {}
       for (const [questionId, answer] of Object.entries(current)) {
-        if (submittedAnswerRunRef.current[questionId] === null) {
+        if (getQuestionRunToken(questionDraftStateRef.current, questionId) === null) {
           next[questionId] = answer
         } else {
           changed = true
@@ -831,12 +981,7 @@ export default function ResonanceStudent() {
     for (const questionId of activeIds) {
       const confirmedEditSequence = snapshot.submittedResponseEditSequences[questionId]
       if (confirmedEditSequence !== undefined) {
-        editSequenceByKeyRef.current = seedEditSequenceFromConfirmedResponse(
-          editSequenceByKeyRef.current,
-          questionId,
-          runToken,
-          confirmedEditSequence,
-        )
+        seedQuestionEditSequenceFromConfirmedResponse(questionDraftStateRef.current, questionId, runToken, confirmedEditSequence)
       }
     }
 
@@ -876,7 +1021,7 @@ export default function ResonanceStudent() {
         for (const questionId of activeIds) {
           if (
             Object.prototype.hasOwnProperty.call(next, questionId) &&
-            submittedAnswerRunRef.current[questionId] !== runToken
+            getQuestionRunToken(questionDraftStateRef.current, questionId) !== runToken
           ) {
             delete next[questionId]
             changed = true
@@ -1022,11 +1167,7 @@ export default function ResonanceStudent() {
                             questionId: question.id,
                           }))
                           if (isRevisit) {
-                            editSequenceByKeyRef.current = advanceEditSequenceForRevisit(
-                              editSequenceByKeyRef.current,
-                              question.id,
-                              runToken,
-                            )
+                            advanceQuestionEditSequenceForRevisit(questionDraftStateRef.current, question.id, runToken)
                           }
                           setSelectedQuestionId(question.id)
                         }}
@@ -1060,8 +1201,8 @@ export default function ResonanceStudent() {
                 activeQuestionRunStartedAt={snapshot.activeQuestionRunStartedAt}
                 activeQuestionRunRevision={snapshot.activeQuestionRunRevision}
                 activeQuestionDeadlineAt={snapshot.activeQuestionDeadlineAt}
-                editSequence={resolveCurrentEditSequence(
-                  editSequenceByKeyRef.current,
+                editSequence={resolveQuestionEditSequence(
+                  questionDraftStateRef.current,
                   activeQuestion.id,
                   snapshot.activeQuestionRunRevision ?? snapshot.activeQuestionRunStartedAt,
                 )}
@@ -1074,36 +1215,31 @@ export default function ResonanceStudent() {
                 saveDraft={saveDraft}
                 onDraftChanged={(questionId, answer) => {
                   const runToken = snapshot.activeQuestionRunRevision ?? snapshot.activeQuestionRunStartedAt
-                  submittedAnswerRunRef.current[questionId] = runToken
+                  setQuestionRunToken(questionDraftStateRef.current, questionId, runToken)
                   // A failed autosave can already be retained while the
                   // student continues typing. Keep its reconciliation value
                   // current: if the deadline cuts off the child's debounce,
                   // the parent must reconcile the newest optimistic answer,
                   // not discard the older retained payload on mismatch.
-                  const key = buildUnconfirmedDraftKey({
-                    questionId,
-                    ...(snapshot.activeQuestionRunRevision !== null
-                      ? { activeQuestionRunRevision: runToken }
-                      : { activeQuestionRunStartedAt: runToken }),
-                  })
-                  const retained = key === null ? undefined : unconfirmedDraftsRef.current.get(key)
-                  if (retained !== undefined) {
+                  const retained = getQuestionUnconfirmedDraft(questionDraftStateRef.current, questionId, runToken)
+                  if (retained !== null) {
                     const supersededGeneration = resolveDraftGeneration(retained.payload)
                     const replacementGeneration = nextDraftGeneration(questionId, runToken)
                     // useResonanceSession owns reconnect retries separately.
                     // Stop its old-generation replay before retaining the
                     // replacement, otherwise that replay's acknowledgement
                     // can incorrectly clear this newer local answer.
-                    cancelDraftRetries(key, supersededGeneration)
+                    const retryKey = buildDraftRetryKey(retained.payload)
+                    if (retryKey !== null) cancelDraftRetries(retryKey, supersededGeneration)
                     // Replace, rather than mutate, the retained entry. An
                     // older retry may already be in flight; its completion
                     // is identity-checked by the retry loop and must not be
                     // allowed to delete this newer draft.
-                    unconfirmedDraftsRef.current.set(key!, {
+                    setQuestionUnconfirmedDraft(questionDraftStateRef.current, questionId, runToken, {
                       ...retained,
                       payload: {
                         ...retained.payload,
-                        editSequence: resolveCurrentEditSequence(editSequenceByKeyRef.current, questionId, runToken),
+                        editSequence: resolveQuestionEditSequence(questionDraftStateRef.current, questionId, runToken),
                         draftGeneration: replacementGeneration,
                         answer,
                       },
@@ -1157,9 +1293,13 @@ export default function ResonanceStudent() {
                   ) return
 
                   const runToken = submissionRunToken
-                  submittedAnswerRunRef.current[questionId] = runToken
-                  submittedEditSequenceByKeyRef.current[buildEditSequenceKey(questionId, runToken)] =
-                    resolveCurrentEditSequence(editSequenceByKeyRef.current, questionId, runToken)
+                  setQuestionRunToken(questionDraftStateRef.current, questionId, runToken)
+                  recordQuestionSubmittedEditSequence(
+                    questionDraftStateRef.current,
+                    questionId,
+                    runToken,
+                    resolveQuestionEditSequence(questionDraftStateRef.current, questionId, runToken),
+                  )
                   setSubmittedAnswers((current) => ({
                     ...current,
                     [questionId]: answer,
@@ -1173,22 +1313,20 @@ export default function ResonanceStudent() {
                   // matching submittedResponseEditSequences entry. Also
                   // cancel any reconnect-queued draft-retry for this
                   // question+run in the hook itself — that queue is separate
-                  // from this component's own retained-draft map and has no
-                  // other way to learn a submission already settled it.
-                  const retainedDraftKey = buildUnconfirmedDraftKey({
+                  // from this component's own retained-draft state and has
+                  // no other way to learn a submission already settled it.
+                  const retainedDraft = getQuestionUnconfirmedDraft(questionDraftStateRef.current, questionId, runToken)
+                  const retainedDraftKey = buildDraftRetryKey({
                     questionId,
                     activeQuestionRunRevision: currentSnapshot.activeQuestionRunRevision,
                     activeQuestionRunStartedAt: currentSnapshot.activeQuestionRunStartedAt,
                   })
-                  const retainedDraft = retainedDraftKey !== null
-                    ? unconfirmedDraftsRef.current.get(retainedDraftKey)
-                    : undefined
-                  if (retainedDraft && retainedDraftKey !== null) {
+                  if (retainedDraft) {
                     const retainedEditSequence =
                       typeof retainedDraft.payload.editSequence === 'number' ? retainedDraft.payload.editSequence : 0
-                    const submittedEditSequence = resolveCurrentEditSequence(editSequenceByKeyRef.current, questionId, runToken)
+                    const submittedEditSequence = resolveQuestionEditSequence(questionDraftStateRef.current, questionId, runToken)
                     if (retainedEditSequence <= submittedEditSequence) {
-                      unconfirmedDraftsRef.current.delete(retainedDraftKey)
+                      setQuestionUnconfirmedDraft(questionDraftStateRef.current, questionId, runToken, null)
                       setUnconfirmedDraftVersion((current) => current + 1)
                     }
                   }
@@ -1200,7 +1338,7 @@ export default function ResonanceStudent() {
                   // failed autosave from ever being replayed on reconnect.
                   cancelDraftRetries(
                     retainedDraftKey,
-                    draftGenerationByKeyRef.current[buildEditSequenceKey(questionId, runToken)] ?? 0,
+                    getQuestionAttemptedGeneration(questionDraftStateRef.current, questionId, runToken),
                   )
                   setSubmittedQuestionIds((current) => {
                     const nextSubmittedQuestionIds = new Set(current)

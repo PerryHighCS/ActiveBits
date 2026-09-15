@@ -11,8 +11,9 @@ import { resolveSubmissionAnnouncement } from './ResonanceStudent.js'
 import { resolveSelfPacedSubmittedMessage } from './ResonanceStudent.js'
 import { hasActiveQuestionRunRestart } from './ResonanceStudent.js'
 import { shouldRetryRegistrationWithoutStudentId } from './ResonanceStudent.js'
-import { advanceEditSequenceForRevisit, resolveCurrentEditSequence } from './ResonanceStudent.js'
-import { seedEditSequenceFromConfirmedResponse } from './ResonanceStudent.js'
+import { advanceQuestionEditSequenceForRevisit, resolveQuestionEditSequence } from './ResonanceStudent.js'
+import { seedQuestionEditSequenceFromConfirmedResponse } from './ResonanceStudent.js'
+import type { QuestionDraftState } from './ResonanceStudent.js'
 import { buildUnconfirmedDraftKey } from './ResonanceStudent.js'
 import { canonicalizeLegacyRevisionOneDraft } from './ResonanceStudent.js'
 import { payloadMatchesRunToken } from './ResonanceStudent.js'
@@ -1508,47 +1509,47 @@ void test('edit-sequence bookkeeping survives a QuestionView remount, unlike a c
   // back remounts it with a fresh local ref if it owned this counter itself.
   // ResonanceStudent owns it instead, so a revisit still advances the
   // sequence past whatever the confirmed response recorded.
-  let byKey: Record<string, number> = {}
-  assert.equal(resolveCurrentEditSequence(byKey, 'q1', 1), 1)
+  const state = new Map<string, QuestionDraftState>()
+  assert.equal(resolveQuestionEditSequence(state, 'q1', 1), 1)
 
-  byKey = advanceEditSequenceForRevisit(byKey, 'q1', 1)
-  assert.equal(resolveCurrentEditSequence(byKey, 'q1', 1), 2)
+  advanceQuestionEditSequenceForRevisit(state, 'q1', 1)
+  assert.equal(resolveQuestionEditSequence(state, 'q1', 1), 2)
 
   // A second revisit (e.g. switching away and back again) advances further.
-  byKey = advanceEditSequenceForRevisit(byKey, 'q1', 1)
-  assert.equal(resolveCurrentEditSequence(byKey, 'q1', 1), 3)
+  advanceQuestionEditSequenceForRevisit(state, 'q1', 1)
+  assert.equal(resolveQuestionEditSequence(state, 'q1', 1), 3)
 
   // A different question, or the same question in a new run, is independent.
-  assert.equal(resolveCurrentEditSequence(byKey, 'q2', 1), 1)
-  assert.equal(resolveCurrentEditSequence(byKey, 'q1', 2), 1)
+  assert.equal(resolveQuestionEditSequence(state, 'q2', 1), 1)
+  assert.equal(resolveQuestionEditSequence(state, 'q1', 2), 1)
 })
 
-void test('seedEditSequenceFromConfirmedResponse recovers a post-reload counter from the server, instead of defaulting to 1 and colliding with an existing submission', () => {
-  // Without this seed, a page reload mid-run leaves editSequenceByKeyRef empty
-  // (it's only ever bumped in memory by a revisit click). resolveCurrentEditSequence
+void test('seedQuestionEditSequenceFromConfirmedResponse recovers a post-reload counter from the server, instead of defaulting to 1 and colliding with an existing submission', () => {
+  // Without this seed, a page reload mid-run leaves the local record empty
+  // (it's only ever bumped in memory by a revisit click). resolveQuestionEditSequence
   // would then default the next autosave to sequence 1 — but the confirmed
   // response from *before* the reload is already at sequence 1, so the
   // server's stale-draft guard (editSequence <= confirmed.editSequence) would
   // silently drop the reloaded student's revision.
-  let byKey: Record<string, number> = {}
-  byKey = seedEditSequenceFromConfirmedResponse(byKey, 'q1', 1, 1)
-  assert.equal(resolveCurrentEditSequence(byKey, 'q1', 1), 2)
+  const state = new Map<string, QuestionDraftState>()
+  seedQuestionEditSequenceFromConfirmedResponse(state, 'q1', 1, 1)
+  assert.equal(resolveQuestionEditSequence(state, 'q1', 1), 2)
 
   // A higher confirmed sequence (the student had already revisited before
   // reloading) seeds a correspondingly higher floor.
-  byKey = seedEditSequenceFromConfirmedResponse(byKey, 'q2', 1, 3)
-  assert.equal(resolveCurrentEditSequence(byKey, 'q2', 1), 4)
+  seedQuestionEditSequenceFromConfirmedResponse(state, 'q2', 1, 3)
+  assert.equal(resolveQuestionEditSequence(state, 'q2', 1), 4)
 
   // Seeding never lowers a counter already advanced further locally this
   // session (e.g. a revisit click already happened before the next snapshot
   // arrived and re-seeds from the same confirmed value).
-  byKey = advanceEditSequenceForRevisit(byKey, 'q2', 1)
-  assert.equal(resolveCurrentEditSequence(byKey, 'q2', 1), 5)
-  byKey = seedEditSequenceFromConfirmedResponse(byKey, 'q2', 1, 3)
-  assert.equal(resolveCurrentEditSequence(byKey, 'q2', 1), 5)
+  advanceQuestionEditSequenceForRevisit(state, 'q2', 1)
+  assert.equal(resolveQuestionEditSequence(state, 'q2', 1), 5)
+  seedQuestionEditSequenceFromConfirmedResponse(state, 'q2', 1, 3)
+  assert.equal(resolveQuestionEditSequence(state, 'q2', 1), 5)
 
   // A different run token is an independent counter, unaffected by seeding.
-  assert.equal(resolveCurrentEditSequence(byKey, 'q1', 2), 1)
+  assert.equal(resolveQuestionEditSequence(state, 'q1', 2), 1)
 })
 
 void test('resolveQuestionAnswer preserves a revised local draft over an older snapshot answer', () => {

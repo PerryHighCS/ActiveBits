@@ -8,9 +8,9 @@
 - [x] Server: legacy-response `activeQuestionRunRevision` backfill investigated — decided against it (kept the existing explicit-`undefined` special case instead; see note below)
 - [x] Client: `payloadMatchesRunToken`/`resolvePayloadRunToken` (component) and `isPayloadForSnapshotRun` (hook) now delegate to the shared module — see note below on the two real divergences the equivalence matrix caught along the way
 - [x] Client: shared draft-attempt helpers (`draftAttempt.ts`) added and wired into both the hook and the component; `asRunIdentitySource` also deduplicated into `runIdentity.ts` (it was independently copy-pasted into both files during steps 2-3)
-- [ ] Client: per-question state collapsed into a single `QuestionDraftState` map in `ResonanceStudent.tsx`
-- [ ] `legacyDraftKeyAliasRef` and its migration-copy code deleted
-- [ ] Full existing test suite green with **no behavioral test edits** (only renames/moves)
+- [x] Client: per-question state collapsed into a single `QuestionDraftState` map in `ResonanceStudent.tsx`, using the read-time-validated design (see section 4's "Update" note). All 6 original structures (`submittedAnswerRunRef`, `editSequenceByKeyRef`, `submittedEditSequenceByKeyRef`, `draftGenerationByKeyRef`, `acknowledgedDraftGenerationByKeyRef`, `unconfirmedDraftsRef`) now live as fields on one `Map<questionId, QuestionDraftState>`
+- [x] `legacyDraftKeyAliasRef` and its migration-copy code deleted — `useResonanceSession.ts`'s `retryDraftSavesRef` now carries the retry's own `questionId` and full `RunIdentitySource`, passed through `onDraftReplayAcknowledged`; `acknowledgeQuestionDraftGeneration` uses `payloadMatchesResolvedRunToken` (not raw `===`) to recognize a late ack for a legacy-form run against an already-canonicalized record, so no alias table is needed
+- [x] Full existing test suite green with **no behavioral test edits** (only renames/moves — the one hook test asserting the ack callback's shape changed signature, not behavior, since the callback itself now carries richer data)
 - [ ] `DEPLOYMENT.md` / `ARCHITECTURE.md` updated to describe the new single-model contract
 - [ ] Branch squashed/rebased into a small number of logical commits for final review
 
@@ -217,6 +217,14 @@ but get one shared definition of how each is read/compared instead of two.
 
 ### 4. Collapse the six per-question-per-run maps into one record
 
+**Update (design revised during implementation — read this before touching
+more code):** the original sketch below (a flat `QuestionDraftState` with
+plain fields, reset "when the run changes") turned out to be unsafe as
+written. Keeping it here struck through, followed by what's actually
+correct and why.
+
+<del>
+
 Replace `editSequenceByKeyRef`, `submittedEditSequenceByKeyRef`,
 `draftGenerationByKeyRef`, `acknowledgedDraftGenerationByKeyRef`,
 `unconfirmedDraftsRef`, and `submittedAnswerRunRef` in
@@ -238,10 +246,165 @@ const questionDraftStateRef = useRef(new Map<string /* questionId */, QuestionDr
 Keyed by **`questionId` alone**, not `questionId:runToken`. A run
 transition updates the `runToken` field (and resets the fields that don't
 survive a run boundary) on the existing record, instead of requiring values
-to be copied across five separately-keyed maps into new keys. This is what
-makes `legacyDraftKeyAliasRef` and the ~50-line manual migration block
-([ResonanceStudent.tsx:660-711](../../activities/resonance/client/student/ResonanceStudent.tsx#L660-L711))
-unnecessary — there's no second key namespace to alias between.
+to be copied across five separately-keyed maps into new keys.
+
+</del>
+
+**Why this was unsafe**: none of the five fields being merged in have any
+*explicit* reset-on-new-run logic today. The composite key resets them
+*implicitly* — a new run is a new key string, so a missing map entry (or
+`?? 1` / `?? 0` default) naturally reads as "fresh." Collapsing to one
+record per `questionId` removes that free reset, and "reset the field when
+the run changes" is ambiguous about *when*:
+
+- **Reset-on-write is too late.** `editSequence` is read on every render
+  (`QuestionView`'s `editSequence` prop), not gated by any event. A record
+  whose `runToken` hasn't been explicitly updated yet (nothing has *written*
+  to it since the run changed) would still hand back the previous run's
+  stale number to a read that happens first.
+- **A blind write-time reset is also wrong**, because not every write
+  represents a new run. `canonicalizeLegacyRevisionOneDraft` updates
+  `runToken` for the *same real run* (legacy timestamp form → canonical
+  revision-1 form) and must *not* clear anything — that's the "same run,
+  different representation" case the whole legacy-alias mechanism exists
+  to handle correctly, as opposed to `onDraftChanged`/`onSubmitted`, where a
+  changed `runToken` really is a new run.
+- **A stale ack must not resurrect a dead record.** `clearRetainedDraftIfSuperseded`
+  is called with a composite key like `q1:7` (the run it was originally sent
+  under) — possibly long after the local record has moved on to `q1:8`. It
+  must never create or overwrite a `q1` record on run 8's behalf, and,
+  because of legacy canonicalization, "does this ack's run match the
+  record's run" is a `runIdentitiesMatch`-style equivalence check, not a
+  strict `===` (an ack for legacy timestamp `1000` must still be recognized
+  against a record already canonicalized to revision `1`, if they're the
+  same real run).
+
+**The actual design**: every run-scoped field is validated for its run at
+**read** time, not reset at write time. A field is only trusted when
+`state.runToken` matches the run being asked about (via
+`runIdentitiesMatch`/`resolveRunToken`, not raw `===`, for the legacy-form
+case); otherwise the read returns the baseline, exactly as a missing
+composite-key entry would have. Writes always go through one shared
+"ensure this record represents this run" step that resets every field
+*except* `runToken` **only when the record's current `runToken` doesn't
+already match** the run being written for — so a same-run write (the
+overwhelmingly common case: typing, an ack, a retry tick) is a plain
+in-place mutation, and only a genuine transition (or first use) starts
+fresh:
+
+```ts
+interface QuestionDraftState {
+  runToken: number | null
+  editSequence: number
+  submittedEditSequence: number | null
+  attemptedGeneration: number
+  acknowledgedGeneration: number
+  unconfirmedDraft: UnconfirmedDraft | null
+}
+
+function ensureQuestionDraftStateForRun(
+  questionDraftStateByQuestionId: Map<string, QuestionDraftState>,
+  questionId: string,
+  runToken: number | null,
+): QuestionDraftState {
+  const existing = questionDraftStateByQuestionId.get(questionId)
+  if (existing !== undefined && existing.runToken === runToken) return existing
+  const fresh: QuestionDraftState = {
+    runToken, editSequence: 1, submittedEditSequence: null,
+    attemptedGeneration: 0, acknowledgedGeneration: 0, unconfirmedDraft: null,
+  }
+  questionDraftStateByQuestionId.set(questionId, fresh)
+  return fresh
+}
+```
+
+Every writer (`setQuestionRunToken`, `advanceQuestionEditSequenceForRevisit`,
+`seedQuestionEditSequenceFromConfirmedResponse`, `recordQuestionSubmission`,
+`nextQuestionDraftGeneration`, `setQuestionUnconfirmedDraft`) calls
+`ensureQuestionDraftStateForRun` first, then mutates its one field. Every
+reader (`resolveQuestionEditSequence`, etc.) checks `state.runToken ===
+runToken` (or the `runIdentitiesMatch` equivalent where legacy timestamps
+are in play) before trusting the stored value, falling back to the same
+baseline `ensureQuestionDraftStateForRun` would have started from.
+
+`canonicalizeLegacyRevisionOneDraft`'s call site is the one exception: it
+needs a **non-resetting** update — `canonicalizeQuestionRunToken(map,
+questionId, runToken)` — that only overwrites `.runToken` in place on an
+existing record, preserving every other field, since it represents the
+same real run.
+
+**The stale-ack problem and `legacyDraftKeyAliasRef`**: `clearRetainedDraftIfSuperseded`
+only has a composite key string (`q1:7`) to work from when called from the
+hook's `onDraftReplayAcknowledged` — not the original payload. Rather than
+parsing a run token back out of a string (lossy, easy to get subtly wrong),
+extend what `useResonanceSession.ts`'s `retryDraftSavesRef` tracks to carry
+the retry's own run-identity fields (it already tracks `key` and
+`generation`; add the resolved `runToken`) and pass that through to
+`onDraftReplayAcknowledged` alongside the key. Then
+`acknowledgeQuestionDraftGenerationForKey(map, questionId, runToken,
+generation)` can do the real check — `existing !== undefined &&
+runIdentitiesMatch(existing, { activeQuestionRunRevision: runToken })` (or
+equivalent) — and no-op otherwise, rather than creating or resetting
+anything. This is what makes `legacyDraftKeyAliasRef` unnecessary: a late
+ack for either form of the same real run resolves correctly by identity,
+not by a separately-maintained alias table.
+
+**Revised migration order for the remaining fields**, each its own
+commit, full suite after each:
+1. ~~`unconfirmedDraft` (needs the read/write pattern above, but no other
+   field depends on it — self-contained).~~ **Done — combined with 2
+   below**, once implementation showed they're not actually separable:
+   the retry loop's legacy-canonicalization block reads/writes
+   `unconfirmedDraft`, `attemptedGeneration`, and `acknowledgedGeneration`
+   together in the same few lines (see `retryUnconfirmedDrafts` in
+   `ResonanceStudent.tsx`), so splitting them into separate commits would
+   have meant a transitional state where that block straddled the old
+   Record/Map structures and the new collapsed record for no real safety
+   benefit.
+2. ~~`attemptedGeneration` + `acknowledgedGeneration` together~~ **Done**,
+   together with `unconfirmedDraft` above (`draftGenerationByKeyRef`,
+   `acknowledgedDraftGenerationByKeyRef`, and `unconfirmedDraftsRef` all
+   deleted in the same commit). This also collapsed most of the ~50-line
+   legacy-canonicalization block: since all three fields now live on one
+   record, canonicalizing `runToken` in place (`canonicalizeQuestionRunToken`)
+   carries the other two along for free — no more copying values across a
+   second key namespace, and no more "does an entry already exist at the
+   canonical key" conflict to resolve (there's only ever one record per
+   question now, so that scenario is structurally impossible). What's left
+   of the block is the alias bookkeeping for `legacyDraftKeyAliasRef`
+   (still needed — see below) and the hook-level `cancelDraftRetries` calls
+   (unrelated to local storage, still required).
+
+   `legacyDraftKeyAliasRef` was **not** deleted in this step, contrary to
+   the original plan — see the checklist note. `clearRetainedDraftIfSuperseded`
+   (called from the hook's reconnect-replay ack path) only has a composite
+   key string to work from, not the original payload; a new
+   `parseDraftRetryKey` inverts `buildDraftRetryKey`'s format well enough
+   to resolve `(questionId, runToken)` from an *already-aliased* key, but
+   the alias resolution step itself (mapping a genuinely legacy key to its
+   canonical form) still depends on `legacyDraftKeyAliasRef` until the hook
+   is extended to carry a resolved `runToken` alongside its retry tracking
+   (see the still-open item in section 4).
+3. ~~`editSequence` + `submittedEditSequence` together~~ **Done** —
+   `resolveCurrentEditSequence`/`advanceEditSequenceForRevisit`/
+   `seedEditSequenceFromConfirmedResponse` renamed to their `Question*`
+   equivalents on the collapsed map; new `recordQuestionSubmittedEditSequence`/
+   `getQuestionSubmittedEditSequence` for the watermark. `QuestionDraftState`
+   exported so tests can type their own map instances directly.
+4. ~~Extend `useResonanceSession.ts`'s `retryDraftSavesRef` with a resolved
+   `runToken`, then delete `legacyDraftKeyAliasRef`~~ **Done, but ended up
+   carrying more than a bare `runToken`.** A resolved scalar alone can't
+   distinguish "this ack is for a legacy timestamp form that's since been
+   canonicalized" from "this ack is for a genuinely different run" — that
+   distinction needs the *original* revision/startedAt fields, not just
+   whichever one `resolveRunToken` picked. `retryDraftSavesRef` entries now
+   carry `questionId` and the full `RunIdentitySource` (renamed `parseDraftRetryKey`
+   away entirely, since the hook no longer needs to hand back a bare key for
+   this purpose); `acknowledgeQuestionDraftGeneration`'s match check uses
+   `payloadMatchesResolvedRunToken` (already built and tested in step 1)
+   instead of raw `===`, since it's exactly the "compare a payload's run
+   identity against an already-resolved scalar from elsewhere" case that
+   function exists for.
 
 ### 5. Hook stays, but stops re-deriving generation independently
 
@@ -270,21 +433,29 @@ test suite is the spec here, not an obstacle.
    `isPayloadForSnapshotRun` → `runIdentitiesMatch`). Run client suite.
 4. Add `draftAttempt.ts`, swap both files' generation/key helpers to use
    it. Run client suite.
-5. Introduce `QuestionDraftState` in the component. Migrate one field at a
-   time (start with `submittedAnswerRunRef` → `.runToken`, the
-   lowest-risk), running the full suite after each field before moving to
-   the next. Delete each old ref only once nothing references it.
-6. Delete `legacyDraftKeyAliasRef` and the manual cross-map migration block
+5. Introduce `QuestionDraftState` in the component, starting with just
+   `runToken` (was `submittedAnswerRunRef`, already questionId-keyed —
+   the lowest-risk, a plain Record→Map swap). **Done.**
+6. Migrate the remaining fields using the read-time-validated design in
+   section 4 above (not the original write-time-reset sketch, which turned
+   out to be unsafe) — `unconfirmedDraft` alone, then
+   `attemptedGeneration`+`acknowledgedGeneration` together, then
+   `editSequence`+`submittedEditSequence` together, each its own commit,
+   full suite after each. Extend `useResonanceSession.ts`'s
+   `retryDraftSavesRef` to carry a resolved `runToken` alongside its
+   existing `key`/`generation` tracking, so late-ack handling can check
+   real run identity instead of a string-parsed guess.
+7. Delete `legacyDraftKeyAliasRef` and the manual cross-map migration block
    once the consolidated record makes it structurally unreachable.
-7. Re-read the whole file against the 46 commits' worth of `// ...`
+8. Re-read the whole file against the 46 commits' worth of `// ...`
    explanatory comments accumulated along the way. For each: confirm it's
    still accurate against the new structure, or that the concern it
    describes is now structurally impossible (and can be deleted) rather
    than just no-longer-mentioned.
-8. Update `ARCHITECTURE.md` / `DEPLOYMENT.md` to describe the consolidated
+9. Update `ARCHITECTURE.md` / `DEPLOYMENT.md` to describe the consolidated
    contract (single run-identity resolver, single per-question state
    record) in place of the current piecemeal notes.
-9. Squash/rebase the branch into a small number of logical commits (e.g.
+10. Squash/rebase the branch into a small number of logical commits (e.g.
    one per migration step above) for final review, once everything is
    green.
 

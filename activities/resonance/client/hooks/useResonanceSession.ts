@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { isValidStudentReactionEmoji } from '../../shared/emojiSet.js'
 import { getMcqSelectionMode } from '../../shared/mcq.js'
-import { asRunIdentitySource, runIdentitiesMatch } from '../../shared/runIdentity.js'
+import { asRunIdentitySource, runIdentitiesMatch, type RunIdentitySource } from '../../shared/runIdentity.js'
 import { buildDraftRetryKey as getDraftRetryKey, resolveDraftGeneration as getDraftGeneration } from '../draftAttempt.js'
 import type {
   AnswerPayload,
@@ -526,7 +526,9 @@ export function selectStudentSessionSnapshot(
 export function useResonanceSession(
   sessionId: string | null,
   studentId?: string | null,
-  options?: { onDraftReplayAcknowledged?(key: string, generation: number): void },
+  options?: {
+    onDraftReplayAcknowledged?(questionId: string | null, runIdentity: RunIdentitySource, generation: number): void
+  },
 ) {
   // A reconnect-replay ack (retryDraftSavesRef, below) doesn't resolve any
   // caller-held promise the way a direct saveDraft() call does — it's a
@@ -568,6 +570,8 @@ export function useResonanceSession(
   const cancelledUpToGenerationByKeyRef = useRef(new Map<string, number>())
   const retryDraftSavesRef = useRef(new Map<string, {
     key: string
+    questionId: string | null
+    runIdentity: RunIdentitySource
     generation: number
     timeoutId: ReturnType<typeof setTimeout>
   }>())
@@ -626,7 +630,13 @@ export function useResonanceSession(
       const timeoutId = setTimeout(() => {
         retryDraftSavesRef.current.delete(draftId)
       }, DRAFT_SAVE_ACK_TIMEOUT_MS)
-      retryDraftSavesRef.current.set(draftId, { key, generation: getDraftGeneration(payload), timeoutId })
+      retryDraftSavesRef.current.set(draftId, {
+        key,
+        questionId,
+        runIdentity: asRunIdentitySource(payload),
+        generation: getDraftGeneration(payload),
+        timeoutId,
+      })
       try {
         currentWs.send(JSON.stringify({
           type: 'resonance:update-draft',
@@ -795,7 +805,7 @@ export function useResonanceSession(
                 if (queued && getDraftGeneration(queued) <= retry.generation) {
                   queuedDraftRetriesRef.current.delete(retry.key)
                 }
-                onDraftReplayAcknowledgedRef.current?.(retry.key, retry.generation)
+                onDraftReplayAcknowledgedRef.current?.(retry.questionId, retry.runIdentity, retry.generation)
               }
             }
           } else if (

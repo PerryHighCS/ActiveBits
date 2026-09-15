@@ -1099,11 +1099,13 @@ void test('a reconnect-replay ack invokes onDraftReplayAcknowledged, unlike a di
   try {
     const captured: {
       saveDraft: ((payload: Record<string, unknown>) => Promise<boolean>) | null
-      acknowledged: Array<{ key: string; generation: number }>
+      acknowledged: Array<{ questionId: string | null; runIdentity: unknown; generation: number }>
     } = { saveDraft: null, acknowledged: [] }
     function Probe() {
       const { saveDraft } = useResonanceSession('session-1', 'student-1', {
-        onDraftReplayAcknowledged: (key, generation) => { captured.acknowledged.push({ key, generation }) },
+        onDraftReplayAcknowledged: (questionId, runIdentity, generation) => {
+          captured.acknowledged.push({ questionId, runIdentity, generation })
+        },
       })
       captured.saveDraft = saveDraft
       return null
@@ -1139,8 +1141,12 @@ void test('a reconnect-replay ack invokes onDraftReplayAcknowledged, unlike a di
       secondSocket.emitMessage({ type: 'resonance:draft-saved', payload: { draftId: retryDraftId } })
     })
 
-    console.info('[TEST] the caller must be told this key/generation is now persisted')
-    assert.deepEqual(captured.acknowledged, [{ key: 'q1:3', generation: 1 }])
+    console.info('[TEST] the caller must be told this question/run/generation is now persisted')
+    assert.deepEqual(captured.acknowledged, [{
+      questionId: 'q1',
+      runIdentity: { studentId: 'student-1', questionId: 'q1', activeQuestionRunRevision: 3, draftGeneration: 1, answer: { type: 'free-response', text: 'Queued for reconnect' } },
+      generation: 1,
+    }])
 
     await act(async () => { rendered.unmount() })
   } finally { restore() }
