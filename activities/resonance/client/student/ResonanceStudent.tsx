@@ -631,6 +631,22 @@ export default function ResonanceStudent() {
               changed = true
               continue
             }
+            const questionId = typeof draft.payload.questionId === 'string' ? draft.payload.questionId : null
+            const legacyRunToken = resolvePayloadRunToken(draft.payload)
+            if (questionId !== null && legacyRunToken !== null && submittedAnswerRunRef.current[questionId] === legacyRunToken) {
+              // Move the parent-owned optimistic-answer and submission
+              // watermark identity alongside the retained draft. Otherwise
+              // expiry reconciliation sees canonical revision 1 against the
+              // stale timestamp and refuses to clear the optimistic answer.
+              submittedAnswerRunRef.current[questionId] = 1
+              const legacySequenceKey = buildEditSequenceKey(questionId, legacyRunToken)
+              const canonicalSequenceKey = buildEditSequenceKey(questionId, 1)
+              const submittedSequence = submittedEditSequenceByKeyRef.current[legacySequenceKey]
+              if (submittedSequence !== undefined) {
+                submittedEditSequenceByKeyRef.current[canonicalSequenceKey] = submittedSequence
+                delete submittedEditSequenceByKeyRef.current[legacySequenceKey]
+              }
+            }
             draft = { ...draft, payload: canonicalPayload }
             key = canonicalKey
             unconfirmedDraftsRef.current.set(key, draft)
