@@ -1157,6 +1157,70 @@ void test('a stale local answer cannot resurface when its question drops out of 
   }
 })
 
+void test('a legacy-to-canonical run migration relabels every question record, not only ones with a retained draft', async () => {
+  // Copilot's finding: the retry loop only canonicalizes a record's runToken
+  // via canonicalizeQuestionRunToken when that record already has a
+  // retained failed draft. A question with confirmed/in-flight local state
+  // but no retained draft (its autosaves have all succeeded) keeps its old
+  // legacy-timestamp token until its *next* edit — at which point
+  // ensureQuestionDraftStateForRun's strict equality check sees a mismatch
+  // and resets the record, restarting its generation counter from zero and
+  // colliding with a generation already sent to the server under the old
+  // token.
+  const restore = installStudentDom()
+  const { act, fireEvent, render, waitFor } = await import('@testing-library/react')
+  try {
+    window.localStorage.setItem('student-name-session-1', 'Ari')
+    window.localStorage.setItem('student-id-session-1', 'student-1')
+    const rendered = render(React.createElement(MemoryRouter, { initialEntries: ['/session-1'] },
+      React.createElement(Routes, null, React.createElement(Route, { path: '/:sessionId', element: React.createElement(ResonanceStudent) })),
+    ))
+    await waitFor(() => assert.equal(StudentTestWebSocket.instances.length, 1))
+    const socket = StudentTestWebSocket.instances[0]!
+    socket.shouldFailDraft = false
+    console.info('[TEST] the run starts in legacy (pre-revision) timestamp-only form')
+    await act(async () => {
+      socket.emit({ type: 'resonance:session-state', payload: {
+        sessionId: 'session-1', activeQuestionIds: ['q1'], activeQuestionRunStartedAt: 5_000,
+        activeQuestionDeadlineAt: Date.now() + 60_000,
+        activeQuestions: [{ id: 'q1', type: 'free-response', text: 'First', order: 1 }],
+      } })
+    })
+
+    console.info('[TEST] a first edit succeeds and is acknowledged while the run is still legacy form')
+    const input = await waitFor(() => rendered.getByLabelText(/your answer/i) as HTMLTextAreaElement)
+    fireEvent.change(input, { target: { value: 'legacy edit one' } })
+    await waitFor(() => assert.ok(socket.sent.some((message) => message.includes('legacy edit one'))), { timeout: 2_500 })
+    const firstSend = JSON.parse(socket.sent.find((message) => message.includes('legacy edit one'))!) as { payload: { draftGeneration: number; draftId: string } }
+    assert.equal(firstSend.payload.draftGeneration, 1)
+    await act(async () => {
+      socket.emit({ type: 'resonance:draft-saved', payload: { draftId: firstSend.payload.draftId } })
+    })
+
+    console.info('[TEST] the server canonicalizes the same run to revision 1 — no draft is retained/failed at this point')
+    await act(async () => {
+      socket.emit({ type: 'resonance:session-state', payload: {
+        sessionId: 'session-1', activeQuestionIds: ['q1'], activeQuestionRunRevision: 1, activeQuestionRunStartedAt: 5_000,
+        activeQuestionDeadlineAt: Date.now() + 60_000,
+        activeQuestions: [{ id: 'q1', type: 'free-response', text: 'First', order: 1 }],
+      } })
+    })
+
+    console.info('[TEST] a second edit after the migration must continue the generation counter, not collide with the first')
+    fireEvent.change(input, { target: { value: 'edit after migration' } })
+    await waitFor(() => assert.ok(socket.sent.some((message) => message.includes('edit after migration'))), { timeout: 2_500 })
+    const secondSend = JSON.parse(socket.sent.find((message) => message.includes('edit after migration'))!) as { payload: { draftGeneration: number; draftId: string } }
+    assert.equal(secondSend.payload.draftGeneration, 2)
+    await act(async () => {
+      socket.emit({ type: 'resonance:draft-saved', payload: { draftId: secondSend.payload.draftId } })
+    })
+
+    rendered.unmount()
+  } finally {
+    restore()
+  }
+})
+
 void test('a run-restart cleanup must not be skipped just because a later effect stamps the run token first', async () => {
   // Copilot's finding: the generation-seeding effect (iterating
   // snapshot.draftGenerations) and the run-restart cleanup effect (which
@@ -1504,14 +1568,14 @@ void test('legacy timestamp drafts canonicalize to revision one before expiry re
 
 void test('legacy timestamp drafts match revision one after expiry but not a later run', () => {
   const legacy = { questionId: 'q1', activeQuestionRunStartedAt: 1_000 }
-  assert.equal(payloadMatchesRunToken(legacy, 1), true)
-  assert.equal(payloadMatchesRunToken(legacy, 2), false)
-  assert.equal(payloadMatchesRunToken(legacy, null), false)
+  assert.equal(payloadMatchesRunToken(legacy, 1, 1_000), true)
+  assert.equal(payloadMatchesRunToken(legacy, 2, 1_000), false)
+  assert.equal(payloadMatchesRunToken(legacy, null, 1_000), false)
   const canonical = canonicalizeLegacyRevisionOneDraft(legacy, {
     activeQuestionRunRevision: 1,
     activeQuestionRunStartedAt: 1_000,
   })
-  assert.equal(payloadMatchesRunToken(canonical, 1_000), true)
+  assert.equal(payloadMatchesRunToken(canonical, 1_000, 1_000), true)
 })
 
 void test('a late reconnect-replay ack for a legacy draft key still clears the migrated canonical retry', async () => {
@@ -1744,7 +1808,7 @@ void test('resolveQuestionRunTokenForPayload reuses an existing record\'s own ru
 
   // No record yet: falls back to resolving straight from the payload.
   assert.equal(
-    resolveQuestionRunTokenForPayload(state, 'q1', { activeQuestionRunStartedAt: 1_000 }),
+    resolveQuestionRunTokenForPayload(state, 'q1', { activeQuestionRunStartedAt: 1_000 }, 1_000),
     1_000,
   )
 
@@ -1758,7 +1822,7 @@ void test('resolveQuestionRunTokenForPayload reuses an existing record\'s own ru
   // real run must resolve to the record's own (canonical) runToken, not
   // the payload's raw legacy timestamp.
   assert.equal(
-    resolveQuestionRunTokenForPayload(state, 'q1', { activeQuestionRunStartedAt: 1_000 }),
+    resolveQuestionRunTokenForPayload(state, 'q1', { activeQuestionRunStartedAt: 1_000 }, 1_000),
     1,
   )
 
@@ -1769,14 +1833,40 @@ void test('resolveQuestionRunTokenForPayload reuses an existing record\'s own ru
   // — so this case specifically needs an explicit revision to prove a
   // genuine mismatch, not just a different timestamp.)
   assert.equal(
-    resolveQuestionRunTokenForPayload(state, 'q1', { activeQuestionRunRevision: 2 }),
+    resolveQuestionRunTokenForPayload(state, 'q1', { activeQuestionRunRevision: 2 }, 1_000),
     2,
   )
 
   // A canonical-form payload that already agrees with the record trivially
   // resolves to that same value.
   assert.equal(
-    resolveQuestionRunTokenForPayload(state, 'q1', { activeQuestionRunRevision: 1 }),
+    resolveQuestionRunTokenForPayload(state, 'q1', { activeQuestionRunRevision: 1 }, 1_000),
+    1,
+  )
+})
+
+void test('resolveQuestionRunTokenForPayload does not treat a legacy payload from an earlier pre-rollout run as the one revision 1 now identifies', () => {
+  // Copilot's finding: a session can have more than one legacy (bare
+  // timestamp) run predating the revision rollout. A record already
+  // canonicalized to revision 1 for the *current* pre-rollout run (started
+  // at 2000) must not be reused for a delayed failure payload carrying an
+  // *earlier* pre-rollout run's own timestamp (1000) just because both
+  // happen to be legacy-form and the record's resolved token happens to be 1.
+  const state = new Map<string, QuestionDraftState>()
+  nextQuestionDraftGeneration(state, 'q1', 2_000)
+  canonicalizeQuestionRunToken(state, 'q1', 1)
+
+  const earlierRunPayload = { questionId: 'q1', activeQuestionRunStartedAt: 1_000 }
+  assert.equal(
+    resolveQuestionRunTokenForPayload(state, 'q1', earlierRunPayload, 2_000),
+    1_000,
+  )
+
+  // The genuinely current pre-rollout run's own timestamp still resolves to
+  // the record's own (canonical) token, as in the test above.
+  const currentRunPayload = { questionId: 'q1', activeQuestionRunStartedAt: 2_000 }
+  assert.equal(
+    resolveQuestionRunTokenForPayload(state, 'q1', currentRunPayload, 2_000),
     1,
   )
 })
@@ -1811,7 +1901,7 @@ void test('a delayed legacy-form draft failure cannot wipe a QuestionDraftState 
     draftGeneration: 1,
     answer: { type: 'free-response', text: 'stale' },
   }
-  const runToken = resolveQuestionRunTokenForPayload(state, 'q1', delayedLegacyPayload)
+  const runToken = resolveQuestionRunTokenForPayload(state, 'q1', delayedLegacyPayload, 1_000)
 
   // The real attempted generation (2) must be visible under the resolved
   // token — reading it under the payload's own raw (legacy) token would

@@ -200,9 +200,10 @@ export function resolveQuestionRunTokenForPayload(
   questionDraftStateByQuestionId: Map<string, QuestionDraftState>,
   questionId: string,
   payload: Record<string, unknown>,
+  revisionOneStartedAt: number | null,
 ): number | null {
   const existing = questionDraftStateByQuestionId.get(questionId)
-  return existing !== undefined && payloadMatchesResolvedRunToken(payload, existing.runToken)
+  return existing !== undefined && payloadMatchesResolvedRunToken(payload, existing.runToken, revisionOneStartedAt)
     ? existing.runToken
     : resolvePayloadRunToken(payload)
 }
@@ -236,9 +237,10 @@ export function acknowledgeQuestionDraftGeneration(
   questionId: string,
   runIdentity: RunIdentitySource,
   generation: number,
+  revisionOneStartedAt: number | null,
 ): boolean {
   const existing = questionDraftStateByQuestionId.get(questionId)
-  if (existing !== undefined && !payloadMatchesResolvedRunToken(runIdentity, existing.runToken)) return false
+  if (existing !== undefined && !payloadMatchesResolvedRunToken(runIdentity, existing.runToken, revisionOneStartedAt)) return false
   const runToken = existing?.runToken ?? resolveRunToken(runIdentity)
   const state = ensureQuestionDraftStateForRun(questionDraftStateByQuestionId, questionId, runToken)
   state.acknowledgedGeneration = Math.max(state.acknowledgedGeneration, generation)
@@ -295,8 +297,8 @@ function resolvePayloadRunToken(payload: Record<string, unknown>): number | null
 // The server maps that legacy form to revision 1, including after expiry
 // when the active start timestamp is no longer present in the snapshot.
 // See payloadMatchesResolvedRunToken in shared/runIdentity.ts.
-export function payloadMatchesRunToken(payload: Record<string, unknown>, runToken: number | null): boolean {
-  return payloadMatchesResolvedRunToken(asRunIdentitySource(payload), runToken)
+export function payloadMatchesRunToken(payload: Record<string, unknown>, runToken: number | null, revisionOneStartedAt: number | null): boolean {
+  return payloadMatchesResolvedRunToken(asRunIdentitySource(payload), runToken, revisionOneStartedAt)
 }
 
 // See buildDraftRetryKey in client/draftAttempt.ts. Kept under this name
@@ -610,6 +612,15 @@ export default function ResonanceStudent() {
   const previousActiveQuestionRunRevisionRef = useRef<number | null>(null)
   const previousActiveQuestionRunStartedAtRef = useRef<number | null>(null)
   const hasObservedSnapshotRef = useRef(false)
+  // Revision 1 is assigned exactly once per session's lifetime (revision
+  // numbers are monotonic and never reused — see nextActiveQuestionRunRevision
+  // server-side), so once observed its corresponding startedAt is constant
+  // for the rest of the session. Needed to disambiguate a legacy (bare
+  // timestamp) payload against a resolved runToken of 1: a session can
+  // accumulate legacy drafts/acks from more than one pre-rollout run, and
+  // only the one whose own startedAt matches this ref is actually "the" run
+  // revision 1 identifies — see payloadMatchesResolvedRunToken.
+  const revisionOneStartedAtRef = useRef<number | null>(null)
   const [unconfirmedDraftVersion, setUnconfirmedDraftVersion] = useState(0)
   // Stable across countdown renders: QuestionView includes this callback in
   // its autosave effect dependencies, so an inline callback would flush the
@@ -625,7 +636,7 @@ export default function ResonanceStudent() {
   // a same-or-older retained entry rather than leaving it to keep retrying.
   const clearRetainedDraftIfSuperseded = useCallback((questionId: string | null, runIdentity: RunIdentitySource, generation: number) => {
     if (questionId === null) return
-    if (acknowledgeQuestionDraftGeneration(questionDraftStateRef.current, questionId, runIdentity, generation)) {
+    if (acknowledgeQuestionDraftGeneration(questionDraftStateRef.current, questionId, runIdentity, generation, revisionOneStartedAtRef.current)) {
       setUnconfirmedDraftVersion((current) => current + 1)
     }
   }, [])
@@ -736,12 +747,13 @@ export default function ResonanceStudent() {
     previousActiveQuestionRunRevisionRef.current = null
     previousActiveQuestionRunStartedAtRef.current = null
     hasObservedSnapshotRef.current = false
+    revisionOneStartedAtRef.current = null
     questionDraftStateRef.current.clear()
     setUnconfirmedDraftVersion((current) => current + 1)
   }, [sessionId, studentId])
 
   const reconcileUnconfirmedDraft = useCallback((questionId: string, payload: Record<string, unknown>) => {
-    if (!payloadMatchesRunToken(payload, getQuestionRunToken(questionDraftStateRef.current, questionId) ?? null)) return
+    if (!payloadMatchesRunToken(payload, getQuestionRunToken(questionDraftStateRef.current, questionId) ?? null, revisionOneStartedAtRef.current)) return
     if (!isSameDraftAnswer(submittedAnswersRef.current[questionId], payload.answer)) return
     setSubmittedAnswers((current) => {
       const next = { ...current }
@@ -756,7 +768,7 @@ export default function ResonanceStudent() {
   }, [refresh])
 
   const discardUnconfirmedDraft = useCallback((questionId: string, payload: Record<string, unknown>) => {
-    if (!payloadMatchesRunToken(payload, getQuestionRunToken(questionDraftStateRef.current, questionId) ?? null)) return
+    if (!payloadMatchesRunToken(payload, getQuestionRunToken(questionDraftStateRef.current, questionId) ?? null, revisionOneStartedAtRef.current)) return
     setSubmittedAnswers((current) => {
       if (!isSameDraftAnswer(current[questionId], payload.answer)) return current
       const next = { ...current }
@@ -774,7 +786,7 @@ export default function ResonanceStudent() {
     const questionId = typeof payload.questionId === 'string' ? payload.questionId : null
     if (questionId === null) return false
     const submittedRunToken = getQuestionRunToken(questionDraftStateRef.current, questionId) ?? null
-    if (!payloadMatchesRunToken(payload, submittedRunToken)) return false
+    if (!payloadMatchesRunToken(payload, submittedRunToken, revisionOneStartedAtRef.current)) return false
     const payloadEditSequence = typeof payload.editSequence === 'number' ? payload.editSequence : 0
     const submittedEditSequence = getQuestionSubmittedEditSequence(questionDraftStateRef.current, questionId, submittedRunToken)
     return submittedEditSequence !== null && payloadEditSequence <= submittedEditSequence
@@ -789,7 +801,7 @@ export default function ResonanceStudent() {
     const questionId = typeof payload.questionId === 'string' ? payload.questionId : null
     if (questionId === null) return
     if (isPayloadSupersededBySubmission(payload)) return
-    const runToken = resolveQuestionRunTokenForPayload(questionDraftStateRef.current, questionId, payload)
+    const runToken = resolveQuestionRunTokenForPayload(questionDraftStateRef.current, questionId, payload, revisionOneStartedAtRef.current)
     // A failed save from an older run can arrive after the question has
     // already moved to a newer one. resolveQuestionRunTokenForPayload
     // correctly resolves it to that OLD run's own token (it's genuinely not
@@ -1013,6 +1025,10 @@ export default function ResonanceStudent() {
     const activeIds = snapshot.activeQuestions.map((question) => question.id)
     const previousActiveIds = previousActiveQuestionIdsRef.current
 
+    if (snapshot.activeQuestionRunRevision === 1) {
+      revisionOneStartedAtRef.current = activeRunStartedAt
+    }
+
     const runToken = snapshot.activeQuestionRunRevision ?? activeRunStartedAt
     for (const questionId of activeIds) {
       const confirmedEditSequence = snapshot.submittedResponseEditSequences[questionId]
@@ -1082,6 +1098,28 @@ export default function ResonanceStudent() {
         }
         return changed ? next : current
       })
+    } else if (hasObservedSnapshot && runToken !== null) {
+      // Not a restart (hasActiveQuestionRunRestart already confirmed via
+      // runIdentitiesMatch that this is the same real run), but the
+      // resolved token still changed value — a legacy timestamp-only run
+      // being relabeled to its canonical revision. The retry loop only
+      // canonicalizes a record that already has a retained failed draft
+      // (see canonicalizeLegacyRevisionOneDraft below); a question with
+      // confirmed/in-flight local state but no retained draft would
+      // otherwise keep its old token until its *next* edit, at which point
+      // ensureQuestionDraftStateForRun's strict equality check resets it
+      // and restarts its generation/edit-sequence counters from zero —
+      // colliding with generations already sent to the server under the
+      // old token. Relabel every matching record proactively instead of
+      // waiting for that edit to happen.
+      const previousRunToken = previousActiveQuestionRunRevisionRef.current ?? previousActiveQuestionRunStartedAtRef.current
+      if (previousRunToken !== runToken) {
+        for (const [questionId, state] of questionDraftStateRef.current) {
+          if (state.runToken === previousRunToken) {
+            canonicalizeQuestionRunToken(questionDraftStateRef.current, questionId, runToken)
+          }
+        }
+      }
     }
     hasObservedSnapshotRef.current = true
     previousActiveQuestionIdsRef.current = activeIds

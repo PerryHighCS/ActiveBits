@@ -239,25 +239,75 @@ const SNAPSHOT_SAMPLES: RunIdentitySource[] = [
 
 const RESPONSE_REVISION_SAMPLES: Array<number | null | undefined> = [undefined, null, 1, 2]
 
-void test('payloadMatchesResolvedRunToken matches payloadMatchesRunToken across a scalar-runToken matrix', () => {
+const RESOLVED_TOKEN_STARTED_AT_SAMPLES: Array<number | null> = [null, 555, 999]
+
+// The old reference's ambiguous branch (runToken === 1, payload is a bare
+// legacy timestamp) accepted *any* startedAt — a session can accumulate
+// legacy drafts/acks from more than one pre-rollout run, and only one of
+// them is ever "the" run revision 1 actually identifies. The fixed
+// implementation additionally requires the payload's own startedAt to
+// match resolvedTokenStartedAt; every other branch is unchanged from the
+// original, already-verified behavior.
+void test('payloadMatchesResolvedRunToken matches the original scalar-runToken matrix everywhere except its one deliberately-fixed ambiguous branch', () => {
   for (const payload of PAYLOAD_SAMPLES) {
     for (const runToken of RUN_TOKEN_SAMPLES) {
-      const expected = referencePayloadMatchesRunToken(payload, runToken)
-      const actual = payloadMatchesResolvedRunToken(payload, runToken)
-      assert.equal(
-        actual,
-        expected,
-        `payload=${JSON.stringify(payload)} runToken=${runToken}: expected ${expected}, got ${actual}`,
-      )
+      for (const resolvedTokenStartedAt of RESOLVED_TOKEN_STARTED_AT_SAMPLES) {
+        const isAmbiguousLegacyBranch = runToken === 1 &&
+          typeof payload.activeQuestionRunRevision !== 'number' &&
+          typeof payload.activeQuestionRunStartedAt === 'number'
+        const expected = isAmbiguousLegacyBranch
+          ? payload.activeQuestionRunStartedAt === resolvedTokenStartedAt
+          : referencePayloadMatchesRunToken(payload, runToken)
+        const actual = payloadMatchesResolvedRunToken(payload, runToken, resolvedTokenStartedAt)
+        assert.equal(
+          actual,
+          expected,
+          `payload=${JSON.stringify(payload)} runToken=${runToken} resolvedTokenStartedAt=${resolvedTokenStartedAt}: expected ${expected}, got ${actual}`,
+        )
+      }
     }
   }
 })
 
-void test('runIdentitiesMatch matches isPayloadForSnapshotRun for every realistic snapshot shape', () => {
+void test('payloadMatchesResolvedRunToken rejects a legacy payload from a different pre-rollout run than the one revision 1 identifies', () => {
+  // Copilot's finding: a session can have more than one legacy (bare
+  // timestamp) run predating the revision rollout. Only the run active at
+  // the moment of the upgrade is ever backfilled to revision 1 — a delayed
+  // reconnect-replay ack or draft-save failure from an *earlier* pre-rollout
+  // run must not be mistaken for the one revision 1 now identifies just
+  // because both happen to be legacy-form.
+  const earlierRunPayload: RunIdentitySource = { activeQuestionRunStartedAt: 1_000 }
+  assert.equal(payloadMatchesResolvedRunToken(earlierRunPayload, 1, 2_000), false)
+  // The genuinely current pre-rollout run's own timestamp still matches.
+  const currentRunPayload: RunIdentitySource = { activeQuestionRunStartedAt: 2_000 }
+  assert.equal(payloadMatchesResolvedRunToken(currentRunPayload, 1, 2_000), true)
+  // A caller that genuinely doesn't know revision 1's own startedAt (null)
+  // must fail closed rather than accept any legacy payload.
+  assert.equal(payloadMatchesResolvedRunToken(currentRunPayload, 1, null), false)
+})
+
+// The one deliberate divergence from the original isPayloadForSnapshotRun
+// (see reverseCrossFormMatch / runIdentitiesMatch's own doc comment): a
+// snapshot still in legacy form with a genuine timestamp must match a
+// payload that has already migrated to the explicit canonical revision 1
+// for that same timestamp. The original inline logic never recognized this
+// direction — a real gap this reverse bridge closes, not a preserved quirk.
+function isDeliberateReverseBridgeDivergence(snapshot: RunIdentitySource, payload: RunIdentitySource): boolean {
+  return snapshot.activeQuestionRunRevision === null &&
+    snapshot.activeQuestionRunStartedAt === 555 &&
+    payload.activeQuestionRunRevision === 1 &&
+    payload.activeQuestionRunStartedAt === 555
+}
+
+void test('runIdentitiesMatch matches isPayloadForSnapshotRun for every realistic snapshot shape, except the reverse-bridge fix', () => {
   for (const snapshot of SNAPSHOT_SAMPLES) {
     for (const payload of PAYLOAD_SAMPLES) {
-      const expected = referenceIsPayloadForSnapshotRun(payload, snapshot)
       const actual = runIdentitiesMatch(snapshot, payload)
+      if (isDeliberateReverseBridgeDivergence(snapshot, payload)) {
+        assert.equal(actual, true, `snapshot=${JSON.stringify(snapshot)} payload=${JSON.stringify(payload)}: expected the reverse bridge to match`)
+        continue
+      }
+      const expected = referenceIsPayloadForSnapshotRun(payload, snapshot)
       assert.equal(
         actual,
         expected,
@@ -265,6 +315,39 @@ void test('runIdentitiesMatch matches isPayloadForSnapshotRun for every realisti
       )
     }
   }
+})
+
+void test('runIdentitiesMatch recognizes a legacy-form current against a canonical revision-1 candidate (the reverse migration direction)', () => {
+  // Out-of-order delivery (or a rollout in progress) can mean the "current"
+  // side of a comparison is still in legacy form while the incoming
+  // candidate has already migrated to canonical revision 1 — the mirror
+  // image of the original, already-supported direction.
+  assert.equal(
+    runIdentitiesMatch(
+      { activeQuestionRunRevision: null, activeQuestionRunStartedAt: 5_000 },
+      { activeQuestionRunRevision: 1, activeQuestionRunStartedAt: 5_000 },
+    ),
+    true,
+  )
+  // A different timestamp means a genuinely different run — must not match.
+  assert.equal(
+    runIdentitiesMatch(
+      { activeQuestionRunRevision: null, activeQuestionRunStartedAt: 5_000 },
+      { activeQuestionRunRevision: 1, activeQuestionRunStartedAt: 6_000 },
+    ),
+    false,
+  )
+  // The regression the prior symmetric attempt introduced: "no active run
+  // at all" (no timestamp) must never match an explicit revision-1
+  // assertion just because both sides resolve their missing field the same
+  // way.
+  assert.equal(
+    runIdentitiesMatch(
+      { activeQuestionRunRevision: null, activeQuestionRunStartedAt: null },
+      { activeQuestionRunRevision: 1, activeQuestionRunStartedAt: null },
+    ),
+    false,
+  )
 })
 
 void test('runIdentitiesMatch matches matchesActiveQuestionRun for every realistic session shape', () => {

@@ -44,15 +44,36 @@ export function resolveRunToken(source: RunIdentitySource): number | null {
 // carries no revision of its own (a legacy timestamp-only form, or nothing
 // at all). They still identify the same run if their (possibly absent)
 // start timestamps agree — absent and explicit null both mean "no
-// timestamp provided" here. One-directional only: a candidate that itself
-// asserts a specific revision is never given this benefit-of-the-doubt
-// treatment against a current that lacks one (that's not a legacy-form
-// bridge, that's current genuinely being a different or absent run — see
-// runIdentitiesMatch's doc comment).
-function crossFormMatch(current: RunIdentitySource, candidate: RunIdentitySource): boolean {
+// timestamp provided" here.
+function forwardCrossFormMatch(current: RunIdentitySource, candidate: RunIdentitySource): boolean {
   if (current.activeQuestionRunRevision !== 1) return false
   if (typeof candidate.activeQuestionRunRevision === 'number') return false
   return (current.activeQuestionRunStartedAt ?? null) === (candidate.activeQuestionRunStartedAt ?? null)
+}
+
+// The mirror image: `current` is itself still in legacy form and
+// `candidate` explicitly asserts canonical revision 1. Unlike
+// forwardCrossFormMatch, this direction requires `current` to carry a REAL
+// (non-null) start timestamp, not just an absent one — a `current` with no
+// timestamp at all means "no active run" (or "no information"), which must
+// never be treated as equivalent to a candidate's explicit revision-1
+// assertion. (An earlier attempt made this bridge symmetric by re-running
+// forwardCrossFormMatch with the arguments swapped, which allowed exactly
+// that: `current: {revision: null, startedAt: null}` — no active run —
+// wrongly matched `candidate: {revision: 1, startedAt: null}`. Requiring a
+// genuine timestamp on `current` here closes that hole while still
+// admitting the real case this exists for: a client-side snapshot that's
+// still in legacy form when an incoming payload has already migrated,
+// e.g. via out-of-order delivery during rollout.)
+function reverseCrossFormMatch(current: RunIdentitySource, candidate: RunIdentitySource): boolean {
+  if (typeof current.activeQuestionRunRevision === 'number') return false
+  if (typeof current.activeQuestionRunStartedAt !== 'number') return false
+  if (candidate.activeQuestionRunRevision !== 1) return false
+  return current.activeQuestionRunStartedAt === (candidate.activeQuestionRunStartedAt ?? null)
+}
+
+function crossFormMatch(current: RunIdentitySource, candidate: RunIdentitySource): boolean {
+  return forwardCrossFormMatch(current, candidate) || reverseCrossFormMatch(current, candidate)
 }
 
 /**
@@ -78,11 +99,20 @@ function crossFormMatch(current: RunIdentitySource, candidate: RunIdentitySource
  * both as reference copies in runIdentity.test.ts and asserting exact
  * equivalence across a shape matrix — including shapes discovered only by
  * that matrix catching real divergences during this consolidation, not by
- * hand-reasoning alone. (One such divergence: a symmetric version of the
- * crossFormMatch bridge below — trying it in both directions — let a
+ * hand-reasoning alone. The bridge started out one-directional (current
+ * asserts revision 1, candidate is legacy-form) because a naive symmetric
+ * version — re-running the same check with the arguments swapped — let a
  * candidate that explicitly asserts revision 1 match a current with no
  * active run at all, since both resolve their *other* side's missing
- * revision the same way. The bridge is intentionally one-directional.)
+ * revision the same way. reverseCrossFormMatch below adds the missing
+ * direction (current still legacy-form, candidate already canonical) back
+ * deliberately, guarded by requiring current to carry a genuine timestamp —
+ * closing that hole rather than reopening it. This makes runIdentitiesMatch
+ * accept one shape isPayloadForSnapshotRun's original inline logic did not
+ * (a legacy-form snapshot against an explicit revision-1 payload with the
+ * same timestamp) — a real gap in that original logic, not a preserved
+ * quirk, so the equivalence test for that one shape asserts the corrected
+ * behavior instead of exact reproduction.
  */
 export function runIdentitiesMatch(current: RunIdentitySource, candidate: RunIdentitySource): boolean {
   if (resolveRunToken(current) === resolveRunToken(candidate)) return true
@@ -97,8 +127,22 @@ export function runIdentitiesMatch(current: RunIdentitySource, candidate: RunIde
  * revision or a legacy start timestamp, so both possibilities have to be
  * tried; prefer runIdentitiesMatch whenever both sides are still full
  * identity objects.
+ *
+ * `resolvedTokenStartedAt` is the start timestamp that `resolvedToken`
+ * corresponds to when it's revision 1 — required (not optional) so a
+ * caller can't silently keep accepting any legacy payload just by omitting
+ * it. A session can accumulate legacy (timestamp-only) drafts/acks from
+ * more than one pre-rollout run; only one of them is ever "the" run
+ * `resolvedToken === 1` actually identifies, and a caller that genuinely
+ * doesn't know which timestamp that is should pass `null` — which makes
+ * the ambiguous branch below require an impossible match instead of
+ * accepting every timestamp, the fail-closed default.
  */
-export function payloadMatchesResolvedRunToken(payload: RunIdentitySource, resolvedToken: number | null): boolean {
+export function payloadMatchesResolvedRunToken(
+  payload: RunIdentitySource,
+  resolvedToken: number | null,
+  resolvedTokenStartedAt: number | null,
+): boolean {
   if (resolveRunToken(payload) === resolvedToken) return true
 
   // The cached scalar might itself be a legacy timestamp that this
@@ -112,8 +156,16 @@ export function payloadMatchesResolvedRunToken(payload: RunIdentitySource, resol
   }
 
   // Or the cached scalar might already be revision 1, and this payload is
-  // a timestamp-only legacy form — the only run such a payload could mean.
-  if (resolvedToken === 1 && !hasRevision(payload) && hasStartedAt(payload)) {
+  // a timestamp-only legacy form. Its own startedAt must actually match
+  // what revision 1 corresponds to — accepting any timestamp here would
+  // let a delayed reconnect-replay/failure from a *different*, earlier
+  // pre-rollout run masquerade as belonging to the current one.
+  if (
+    resolvedToken === 1 &&
+    !hasRevision(payload) &&
+    hasStartedAt(payload) &&
+    payload.activeQuestionRunStartedAt === resolvedTokenStartedAt
+  ) {
     return true
   }
 
