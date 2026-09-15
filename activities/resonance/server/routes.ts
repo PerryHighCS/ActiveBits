@@ -33,6 +33,7 @@ import type {
 } from '../shared/types.js'
 import { isValidStudentReactionEmoji } from '../shared/emojiSet.js'
 import { getCorrectOptionIds, getMcqSelectionMode } from '../shared/mcq.js'
+import { runIdentitiesMatch } from '../shared/runIdentity.js'
 import { normalizePresentationMode, validateAnswerPayload, validateQuestion, validateQuestionSet, validateStudentRegistration } from '../shared/validation.js'
 import { decryptQuestions, encryptQuestions, MAX_ENCODED_PAYLOAD_CHARS } from './questionCrypto.js'
 import {
@@ -522,37 +523,38 @@ function getQuestionAnswerability(sessionData: ResonanceSessionData, questionId:
     : { ok: false, reason: 'choices-hidden' }
 }
 
+// A payload's revision/legacyStartedAt fields arrive as unknown (raw
+// client JSON); narrow them to the shared comparator's expected shape
+// rather than trusting their type. sessionData's own fields are always
+// clean number|null (set together — see setStagedActiveQuestion and
+// normalizeSessionData's backfill below), so no narrowing is needed there.
 function matchesActiveQuestionRun(
   sessionData: ResonanceSessionData,
   revision: unknown,
   legacyStartedAt: unknown,
 ): boolean {
-  if (typeof revision === 'number' && Number.isSafeInteger(revision)) {
-    return revision === sessionData.activeQuestionRunRevision
-  }
-  if (
-    revision == null &&
-    legacyStartedAt == null &&
-    sessionData.activeQuestionRunRevision === null &&
-    sessionData.activeQuestionRunStartedAt === null
-  ) {
-    return true
-  }
-  return sessionData.activeQuestionRunRevision === 1 && legacyStartedAt === sessionData.activeQuestionRunStartedAt
+  return runIdentitiesMatch(sessionData, {
+    activeQuestionRunRevision: typeof revision === 'number' ? revision : null,
+    activeQuestionRunStartedAt: typeof legacyStartedAt === 'number' ? legacyStartedAt : null,
+  })
 }
 
 // A stored response persisted before the revision rollout never had
 // activeQuestionRunRevision backfilled — unlike the session-level counter,
 // which normalizeSessionData always upgrades to at least 1 once a run is
 // active, normalizeStoredResponses leaves a legacy response's field
-// permanently `undefined`. A strict-equality comparison against the
-// session's (now-normalized) revision would then never recognize that
-// legacy response as belonging to the current run, even when it genuinely
-// does — letting a stale pre-rollout draft bypass the freshness guard this
-// is used for and later get promoted over an already-confirmed answer.
+// permanently `undefined`. A response carries no timestamp of its own (no
+// legacy start-time field), so this is a plain revision-to-revision
+// comparison, not a candidate-vs-run-identity match — it deliberately
+// doesn't delegate to runIdentitiesMatch, whose legacy-timestamp branch
+// would otherwise treat a response's *absent* timestamp field as matching
+// a session whose own start timestamp also happens to be null (a real,
+// reachable shape — see normalizeSessionData), producing a false match.
 function responseMatchesActiveRun(response: Pick<Response, 'activeQuestionRunRevision'>, sessionData: ResonanceSessionData): boolean {
-  return response.activeQuestionRunRevision === sessionData.activeQuestionRunRevision ||
-    (response.activeQuestionRunRevision === undefined && sessionData.activeQuestionRunRevision === 1)
+  if (response.activeQuestionRunRevision === undefined) {
+    return sessionData.activeQuestionRunRevision === 1
+  }
+  return response.activeQuestionRunRevision === sessionData.activeQuestionRunRevision
 }
 
 export function resolveAnswerabilityErrorMessage(reason: 'expired' | 'choices-hidden' | 'inactive'): string {

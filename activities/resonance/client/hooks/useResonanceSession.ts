@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { isValidStudentReactionEmoji } from '../../shared/emojiSet.js'
 import { getMcqSelectionMode } from '../../shared/mcq.js'
+import { resolveRunToken, runIdentitiesMatch, type RunIdentitySource } from '../../shared/runIdentity.js'
 import type {
   AnswerPayload,
   QuestionReveal,
@@ -17,13 +18,13 @@ import type {
 const FALLBACK_POLL_INTERVAL_MS = 15_000
 const DRAFT_SAVE_ACK_TIMEOUT_MS = 2_000
 
+function asRunIdentitySource(payload: Record<string, unknown>): RunIdentitySource {
+  return payload as unknown as RunIdentitySource
+}
+
 function getDraftRetryKey(payload: Record<string, unknown>): string | null {
   const questionId = typeof payload.questionId === 'string' ? payload.questionId : null
-  const runToken = typeof payload.activeQuestionRunRevision === 'number'
-    ? payload.activeQuestionRunRevision
-    : typeof payload.activeQuestionRunStartedAt === 'number'
-      ? payload.activeQuestionRunStartedAt
-      : null
+  const runToken = resolveRunToken(asRunIdentitySource(payload))
   return questionId === null ? null : `${questionId}:${runToken ?? 'self-paced'}`
 }
 
@@ -34,18 +35,7 @@ function getDraftGeneration(payload: Record<string, unknown>): number {
 }
 
 function isPayloadForSnapshotRun(payload: Record<string, unknown>, snapshot: StudentSessionSnapshot): boolean {
-  const payloadHasRevision = typeof payload.activeQuestionRunRevision === 'number'
-  const payloadRunToken = payloadHasRevision
-    ? payload.activeQuestionRunRevision as number
-    : typeof payload.activeQuestionRunStartedAt === 'number'
-      ? payload.activeQuestionRunStartedAt
-      : null
-  const activeRunToken = snapshot.activeQuestionRunRevision ?? snapshot.activeQuestionRunStartedAt
-  return payloadRunToken === activeRunToken || (
-    !payloadHasRevision &&
-    snapshot.activeQuestionRunRevision === 1 &&
-    payloadRunToken === snapshot.activeQuestionRunStartedAt
-  )
+  return runIdentitiesMatch(snapshot, asRunIdentitySource(payload))
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

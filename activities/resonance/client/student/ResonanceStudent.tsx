@@ -9,6 +9,7 @@ import NameEntryForm from './NameEntryForm.js'
 import QuestionView from './QuestionView.js'
 import SharedResponseFeed from './SharedResponseFeed.js'
 import { areMcqSelectionsEqual } from '../../shared/mcq.js'
+import { payloadMatchesResolvedRunToken, resolveRunToken, type RunIdentitySource } from '../../shared/runIdentity.js'
 import type { AnswerPayload } from '../../shared/types.js'
 
 interface RegisterResponse {
@@ -72,31 +73,20 @@ export function isSameDraftAnswer(left: unknown, right: unknown): boolean {
     : right.type === 'multiple-choice' && areMcqSelectionsEqual(left.selectedOptionIds, right.selectedOptionIds)
 }
 
+function asRunIdentitySource(payload: Record<string, unknown>): RunIdentitySource {
+  return payload as unknown as RunIdentitySource
+}
+
 function resolvePayloadRunToken(payload: Record<string, unknown>): number | null {
-  return typeof payload.activeQuestionRunRevision === 'number'
-    ? payload.activeQuestionRunRevision
-    : typeof payload.activeQuestionRunStartedAt === 'number'
-      ? payload.activeQuestionRunStartedAt
-      : null
+  return resolveRunToken(asRunIdentitySource(payload))
 }
 
 // A timestamp-only payload can identify only the original numbered run.
 // The server maps that legacy form to revision 1, including after expiry
 // when the active start timestamp is no longer present in the snapshot.
+// See payloadMatchesResolvedRunToken in shared/runIdentity.ts.
 export function payloadMatchesRunToken(payload: Record<string, unknown>, runToken: number | null): boolean {
-  const payloadToken = resolvePayloadRunToken(payload)
-  return payloadToken === runToken || (
-    runToken === 1 &&
-    typeof payload.activeQuestionRunRevision !== 'number' &&
-    typeof payload.activeQuestionRunStartedAt === 'number'
-  ) || (
-    // Canonicalization preserves the legacy start time. Parent state written
-    // before that migration may still hold this timestamp, so recognize the
-    // same revision-1 run in the opposite direction as well.
-    payload.activeQuestionRunRevision === 1 &&
-    typeof payload.activeQuestionRunStartedAt === 'number' &&
-    payload.activeQuestionRunStartedAt === runToken
-  )
+  return payloadMatchesResolvedRunToken(asRunIdentitySource(payload), runToken)
 }
 
 export function buildUnconfirmedDraftKey(payload: Record<string, unknown>): string | null {

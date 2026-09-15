@@ -2,10 +2,11 @@
 
 ## Status
 
-- [ ] Root-cause catalog reviewed and agreed
-- [ ] Shared `runIdentity` module added (client+server) and wired in
-- [ ] Server: `matchesActiveQuestionRun` / `responseMatchesActiveRun` collapsed into one comparator
-- [ ] Server: legacy-response `activeQuestionRunRevision` backfill investigated and (if safe) added to `normalizeStoredResponses`
+- [x] Root-cause catalog reviewed and agreed
+- [x] Shared `runIdentity` module added, unit-tested against reference copies of all four original comparators, and wired into the server
+- [x] Server: `matchesActiveQuestionRun` now delegates to the shared `runIdentitiesMatch`. `responseMatchesActiveRun` stays a small standalone function rather than delegating — see note below
+- [x] Server: legacy-response `activeQuestionRunRevision` backfill investigated — decided against it (kept the existing explicit-`undefined` special case instead; see note below)
+- [x] Client: `payloadMatchesRunToken`/`resolvePayloadRunToken` (component) and `isPayloadForSnapshotRun` (hook) now delegate to the shared module — see note below on the two real divergences the equivalence matrix caught along the way
 - [ ] Client: shared draft-attempt helpers (`draftAttempt.ts`) added and wired into both the hook and the component
 - [ ] Client: per-question state collapsed into a single `QuestionDraftState` map in `ResonanceStudent.tsx`
 - [ ] `legacyDraftKeyAliasRef` and its migration-copy code deleted
@@ -144,18 +145,64 @@ case currently spread across the four originals.
 
 ### 2. Fix the server-side asymmetry at the root, not with a second comparator
 
-Investigate backfilling `activeQuestionRunRevision` on legacy stored
-responses inside `normalizeStoredResponses`, the same way
-`normalizeSessionData` already backfills the session's own field. If safe
-(see Risks — this needs to distinguish "legacy, revision system didn't
-exist yet" from "explicitly self-paced/no run," which the current
-`undefined` vs `null` distinction encodes and a backfill must preserve
-correctly), every stored response always has a concrete
-`activeQuestionRunRevision` after normalization, and
-`responseMatchesActiveRun` collapses to a plain call to
-`runIdentitiesMatch(response, sessionData)` — deleting the function and its
-permanent special-cased branch entirely, rather than keeping it as a
-second, forever-parallel comparator.
+**Update (implemented):** Investigated backfilling `activeQuestionRunRevision`
+on legacy stored responses inside `normalizeStoredResponses`. Decided
+against it for this pass — the risk flagged below (conflating "legacy,
+revision system didn't exist yet" with "explicitly self-paced/no run")
+would need its own dedicated verification, and the existing explicit
+`undefined`-check in `responseMatchesActiveRun` is small, already correct,
+and now has direct equivalence-test coverage. Revisit only if a future
+finding specifically motivates it.
+
+**Also discovered during implementation:** `responseMatchesActiveRun` does
+**not** delegate to `runIdentitiesMatch`, unlike `matchesActiveQuestionRun`.
+A stored `Response` carries no timestamp field at all, so routing it
+through `runIdentitiesMatch`'s legacy-timestamp branch (branch 3) would
+treat a response's *absent* timestamp as matching a session whose own
+start timestamp also happens to be `null` — a real, reachable shape (see
+the note on `runIdentitiesMatch` below) — producing a false positive. This
+was caught by the equivalence test, not by hand-reasoning; two earlier
+attempts at a "cleaner" delegating version both introduced regressions
+that the full test suite caught before merge. `responseMatchesActiveRun`
+remains its own small function; only `matchesActiveQuestionRun` and the
+(not yet wired in) client call sites share `runIdentitiesMatch`.
+
+**Also discovered:** a session's `activeQuestionRunRevision` and
+`activeQuestionRunStartedAt` are not always assigned together — the
+non-staged normalization backfill path
+(`normalizeSessionData`, ~line 1081-1087) can default revision to `1`
+while leaving `activeQuestionRunStartedAt` as `null`, if the raw stored
+session had no valid source timestamp. `runIdentitiesMatch` has to
+preserve the original's exact (slightly quirky) null-handling for this
+case rather than a "more elegant" symmetric reinterpretation — see the
+comment on `runIdentitiesMatch` in `runIdentity.ts`.
+
+**Update (implemented):** wiring the client hook's `isPayloadForSnapshotRun`
+into `runIdentitiesMatch` surfaced two more real divergences, both caught by
+the equivalence matrix (not by hand-reasoning — two intermediate designs
+each looked correct on paper and broke a real test):
+
+- A client-side `StudentSessionSnapshot`, unlike server-side
+  `ResonanceSessionData`, *can* have a null revision alongside a real start
+  timestamp (`normalizeStudentSessionSnapshot` just parses whatever the
+  server sent; it doesn't re-derive the server's own "revision null implies
+  startedAt null too" invariant). `runIdentitiesMatch` now compares
+  resolved tokens directly first (`resolveRunToken(current) ===
+  resolveRunToken(candidate)`), which handles this case for free, before
+  falling back to the legacy revision-1 bridge.
+- That bridge (`crossFormMatch`) is intentionally **one-directional**: it
+  only lets a `candidate` lacking its own revision inherit a `current` that
+  explicitly asserts revision 1 — never the reverse. A symmetric version
+  (tried first) let a candidate that explicitly asserts revision 1 match a
+  `current` with no active run at all, since both sides' missing
+  information resolved the same way once the direction was ignored.
+
+`runIdentity.test.ts` now keeps two separate realistic-shape sample sets
+(`SESSION_DATA_SAMPLES` for the server-only invariant,
+`SNAPSHOT_SAMPLES` for the client's looser one) rather than one shared
+`CANONICAL_SAMPLES`, since testing `matchesActiveQuestionRun` against a
+session shape that can't actually occur server-side was measuring
+undefined behavior, not a real regression risk.
 
 ### 3. Shared draft-attempt helpers (new: `activities/resonance/client/draftAttempt.ts`)
 
