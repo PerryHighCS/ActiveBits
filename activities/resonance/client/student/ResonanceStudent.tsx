@@ -403,6 +403,16 @@ export default function ResonanceStudent() {
   // and discard them when the authoritative active run changes.
   const unconfirmedDraftsRef = useRef(new Map<string, UnconfirmedDraft>())
   const acknowledgedDraftGenerationByKeyRef = useRef(new Map<string, number>())
+  // A legacy-timestamp draft-retry send that was already in flight (queued
+  // in useResonanceSession's retryDraftSavesRef, awaiting its own ack) when
+  // canonicalization moved the retained entry to the revision-1 key is not
+  // cancelled by that migration — cancelDraftRetries only reaches the
+  // hook's *queued* entry, not one already sent. Its acknowledgement can
+  // still arrive afterward, keyed by the legacy identity. Keep a permanent
+  // alias so that late ack still resolves to wherever the draft actually
+  // lives now, instead of being a no-op that leaves the canonical entry
+  // retrying forever.
+  const legacyDraftKeyAliasRef = useRef(new Map<string, string>())
   const [unconfirmedDraftVersion, setUnconfirmedDraftVersion] = useState(0)
   // Stable across countdown renders: QuestionView includes this callback in
   // its autosave effect dependencies, so an inline callback would flush the
@@ -420,11 +430,12 @@ export default function ResonanceStudent() {
   // particular generation is now durably persisted, and either should clear
   // a same-or-older retained entry rather than leaving it to keep retrying.
   const clearRetainedDraftIfSuperseded = useCallback((key: string, generation: number) => {
-    const acknowledged = acknowledgedDraftGenerationByKeyRef.current.get(key) ?? 0
-    acknowledgedDraftGenerationByKeyRef.current.set(key, Math.max(acknowledged, generation))
-    const retained = unconfirmedDraftsRef.current.get(key)
+    const resolvedKey = legacyDraftKeyAliasRef.current.get(key) ?? key
+    const acknowledged = acknowledgedDraftGenerationByKeyRef.current.get(resolvedKey) ?? 0
+    acknowledgedDraftGenerationByKeyRef.current.set(resolvedKey, Math.max(acknowledged, generation))
+    const retained = unconfirmedDraftsRef.current.get(resolvedKey)
     if (retained && resolveDraftGeneration(retained.payload) <= generation) {
-      unconfirmedDraftsRef.current.delete(key)
+      unconfirmedDraftsRef.current.delete(resolvedKey)
       setUnconfirmedDraftVersion((current) => current + 1)
     }
   }, [])
@@ -539,6 +550,7 @@ export default function ResonanceStudent() {
     submittedEditSequenceByKeyRef.current = {}
     draftGenerationByKeyRef.current = {}
     acknowledgedDraftGenerationByKeyRef.current.clear()
+    legacyDraftKeyAliasRef.current.clear()
     submittedAnswerRunRef.current = {}
     unconfirmedDraftsRef.current.clear()
     setUnconfirmedDraftVersion((current) => current + 1)
@@ -632,6 +644,12 @@ export default function ResonanceStudent() {
         if (canonicalPayload !== draft.payload) {
           const canonicalKey = buildUnconfirmedDraftKey(canonicalPayload)
           if (canonicalKey !== null && canonicalKey !== key) {
+            // Recorded unconditionally, and never removed: an in-flight
+            // reconnect-replay send for the legacy key (already sent, not
+            // just queued) can still be acknowledged after this migration
+            // moves the retained entry to canonicalKey, and that late ack
+            // must still resolve to wherever this draft actually ends up.
+            legacyDraftKeyAliasRef.current.set(key, canonicalKey)
             const existing = unconfirmedDraftsRef.current.get(canonicalKey)
             unconfirmedDraftsRef.current.delete(key)
             if (existing !== undefined && resolveDraftGeneration(existing.payload) > resolveDraftGeneration(canonicalPayload)) {
@@ -760,10 +778,29 @@ export default function ResonanceStudent() {
       return
     }
 
-    setSubmittedAnswers((current) => ({
-      ...snapshot.submittedAnswers,
-      ...current,
-    }))
+    setSubmittedAnswers((current) => {
+      if (!snapshot.selfPacedMode) {
+        return { ...snapshot.submittedAnswers, ...current }
+      }
+      // A live run can hand off directly to a self-paced snapshot without an
+      // intermediate idle snapshot in between (e.g. its SyncDeck parent
+      // going standalone mid-run) — the didRunRestart cleanup further below
+      // never runs for that transition, since it's gated on this branch not
+      // being taken. Self-paced mode has no run identity of its own, so any
+      // local entry still stamped with an actual (non-null) run token
+      // belongs to the run that just ended, not to this self-paced context,
+      // and must not keep rendering — or be resubmittable — as if it did.
+      let changed = false
+      const next: typeof current = {}
+      for (const [questionId, answer] of Object.entries(current)) {
+        if (submittedAnswerRunRef.current[questionId] === null) {
+          next[questionId] = answer
+        } else {
+          changed = true
+        }
+      }
+      return { ...snapshot.submittedAnswers, ...(changed ? next : current) }
+    })
 
     if (snapshot.selfPacedMode) {
       setSubmittedQuestionIds((current) => {

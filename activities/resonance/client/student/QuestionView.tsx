@@ -281,8 +281,13 @@ export default function QuestionView({
 
       const data = (await resp.json()) as { ok?: boolean; error?: string }
 
+      // A stale run or participant identity means this response no longer
+      // means what it did when the request was sent (e.g. the run restarted
+      // while this view stayed mounted) — never act on it. Plain unmount
+      // (the student switched stack tabs before the response came back)
+      // does *not* invalidate it: refs still hold the values from this
+      // view's last render, so both checks still pass in that case.
       if (
-        submissionAttempt !== submissionAttemptRef.current ||
         submissionRunRevision !== activeQuestionRunRevisionRef.current ||
         sessionIdRef.current !== sessionId ||
         studentIdRef.current !== studentId
@@ -291,15 +296,25 @@ export default function QuestionView({
       }
 
       if (!resp.ok) {
-        setError(data.error ?? 'Submission failed — please try again')
-        setSubmitting(false)
+        if (submissionAttempt === submissionAttemptRef.current) {
+          setError(data.error ?? 'Submission failed — please try again')
+          setSubmitting(false)
+        }
         return
       }
 
+      // The server persisted this submission even if this view has since
+      // unmounted — the parent owns retained-draft/edit-sequence bookkeeping
+      // across that unmount (QuestionView is remounted on every stack-tab
+      // switch) and must still be told, or a retained failed autosave for
+      // this question would keep retrying indefinitely instead of being
+      // recognized as superseded.
       onSubmitted?.(question.id, answer)
-      setDraftAnswer(answer)
-      lastSentDraftRef.current = answer
-      draftAnswerRunRevisionRef.current = activeQuestionRunToken
+      if (submissionAttempt === submissionAttemptRef.current) {
+        setDraftAnswer(answer)
+        lastSentDraftRef.current = answer
+        draftAnswerRunRevisionRef.current = activeQuestionRunToken
+      }
     } catch {
       if (
         submissionAttempt === submissionAttemptRef.current &&

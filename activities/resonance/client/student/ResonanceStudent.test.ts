@@ -345,6 +345,62 @@ void test('a stale local answer from a previous run cannot be redisplayed or res
   }
 })
 
+void test('a stale local answer from an ended live run cannot be redisplayed after a direct fallback to self-paced mode', async () => {
+  // Copilot's finding: the didRunRestart stale-answer cleanup above only
+  // runs in the non-self-paced branch of this effect. A live run can hand
+  // off directly to a self-paced snapshot without an intermediate idle
+  // snapshot in between (e.g. its SyncDeck parent going standalone
+  // mid-run), so that cleanup never runs for this transition — a run-7
+  // answer would otherwise still render (and be resubmittable) under the
+  // self-paced context, which has no run identity of its own to compare
+  // against.
+  const restore = installStudentDom()
+  const { act, fireEvent, render, waitFor } = await import('@testing-library/react')
+  try {
+    window.localStorage.setItem('student-name-session-1', 'Ari')
+    window.localStorage.setItem('student-id-session-1', 'student-1')
+    const rendered = render(React.createElement(MemoryRouter, { initialEntries: ['/session-1'] },
+      React.createElement(Routes, null, React.createElement(Route, { path: '/:sessionId', element: React.createElement(ResonanceStudent) })),
+    ))
+    await waitFor(() => assert.equal(StudentTestWebSocket.instances.length, 1))
+    const socket = StudentTestWebSocket.instances[0]!
+    socket.shouldFailDraft = false
+    await act(async () => {
+      socket.emit({ type: 'resonance:session-state', payload: {
+        sessionId: 'session-1', activeQuestionIds: ['q1'], activeQuestionRunRevision: 7,
+        activeQuestionDeadlineAt: Date.now() + 30_000,
+        activeQuestions: [{ id: 'q1', type: 'free-response', text: 'First', order: 1 }],
+      } })
+    })
+    const input = await waitFor(() => rendered.getByLabelText(/your answer/i) as HTMLTextAreaElement)
+    fireEvent.change(input, { target: { value: 'leftover from run 7' } })
+
+    console.info('[TEST] the run-7 answer is cached locally as soon as it is typed')
+    await waitFor(() => assert.equal(
+      (rendered.getByLabelText(/your answer/i) as HTMLTextAreaElement).value,
+      'leftover from run 7',
+    ))
+
+    console.info('[TEST] the session falls straight back to self-paced mode, with no intermediate idle snapshot')
+    await act(async () => {
+      socket.emit({ type: 'resonance:session-state', payload: {
+        sessionId: 'session-1', selfPacedMode: true, lastActiveQuestionRunRevision: 7,
+        activeQuestionIds: ['q1'],
+        activeQuestions: [{ id: 'q1', type: 'free-response', text: 'First', order: 1 }],
+      } })
+    })
+
+    assert.equal(
+      (rendered.getByLabelText(/your answer/i) as HTMLTextAreaElement).value,
+      '',
+    )
+
+    rendered.unmount()
+  } finally {
+    restore()
+  }
+})
+
 void test('a successful submission clears a retained failed autosave instead of leaving it to retry forever', async () => {
   // Copilot's finding: submission goes over REST, independent of the
   // WebSocket, so a REST submit can succeed while the socket is still down.
@@ -392,6 +448,77 @@ void test('a successful submission clears a retained failed autosave instead of 
       await new Promise((resolve) => setTimeout(resolve, 1_200))
     })
     assert.equal(socket.draftAttempts, attemptsBeforeSubmit)
+
+    rendered.unmount()
+  } finally {
+    restore()
+  }
+})
+
+void test('a submission that succeeds after its QuestionView unmounts is still recorded by the parent', async () => {
+  // Copilot's finding: submitAnswer's success branch (in QuestionView.tsx)
+  // was gated behind the same submissionAttemptRef check used to protect
+  // local-only state — but that ref is also bumped by plain unmount (the
+  // student switching stack tabs before the response returns), which this
+  // codebase deliberately allows. If the REST submission succeeds after
+  // that unmount, onSubmitted never used to fire, so the parent (which owns
+  // submittedQuestionIds/retained-draft bookkeeping across a stack-tab
+  // switch) never learns the submission happened.
+  const restore = installStudentDom()
+  const { act, fireEvent, render, waitFor } = await import('@testing-library/react')
+  try {
+    window.localStorage.setItem('student-name-session-1', 'Ari')
+    window.localStorage.setItem('student-id-session-1', 'student-1')
+
+    let resolveSubmit: ((value: { ok: boolean; json: () => Promise<{ ok: boolean }> }) => void) | null = null
+    Object.defineProperty(globalThis, 'fetch', {
+      configurable: true,
+      value: async (url: string, init?: RequestInit) => {
+        if (init?.method === 'POST' && url.includes('register-student')) {
+          return { ok: true, json: async () => ({ studentId: 'student-1', name: 'Ari' }) }
+        }
+        if (init?.method === 'POST' && url.includes('submit-answer')) {
+          return new Promise((resolve) => { resolveSubmit = resolve })
+        }
+        return { ok: true, json: async () => ({ sessionId: 'session-1', activeQuestionIds: [] }) }
+      },
+    })
+
+    const rendered = render(React.createElement(MemoryRouter, { initialEntries: ['/session-1'] },
+      React.createElement(Routes, null, React.createElement(Route, { path: '/:sessionId', element: React.createElement(ResonanceStudent) })),
+    ))
+    await waitFor(() => assert.equal(StudentTestWebSocket.instances.length, 1))
+    const socket = StudentTestWebSocket.instances[0]!
+    await act(async () => {
+      socket.emit({ type: 'resonance:session-state', payload: {
+        sessionId: 'session-1', activeQuestionIds: ['q1', 'q2'], activeQuestionRunRevision: 7,
+        activeQuestionDeadlineAt: Date.now() + 30_000,
+        activeQuestions: [
+          { id: 'q1', type: 'free-response', text: 'First', order: 1 },
+          { id: 'q2', type: 'free-response', text: 'Second', order: 2 },
+        ],
+      } })
+    })
+
+    console.info('[TEST] q1 is answered and submitted, but the REST response is held back')
+    const input = await waitFor(() => rendered.getByLabelText(/your answer/i) as HTMLTextAreaElement)
+    fireEvent.change(input, { target: { value: 'submitted then abandoned' } })
+    fireEvent.click(rendered.getByRole('button', { name: /submit answer/i }))
+    await waitFor(() => assert.ok(resolveSubmit !== null))
+
+    console.info('[TEST] the student switches to q2 before the submission response arrives, unmounting q1\'s QuestionView')
+    fireEvent.click(rendered.getByRole('button', { name: /^q2$/i }))
+    await waitFor(() => rendered.getByText('Second'))
+
+    console.info('[TEST] the held-back submission now succeeds')
+    await act(async () => {
+      resolveSubmit?.({ ok: true, json: async () => ({ ok: true }) })
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    console.info('[TEST] the parent must still record q1 as submitted, even though its view had already unmounted')
+    await waitFor(() => assert.ok(rendered.queryByRole('button', { name: 'Q1 ✓' }) !== null))
 
     rendered.unmount()
   } finally {
@@ -895,6 +1022,81 @@ void test('legacy timestamp drafts match revision one after expiry but not a lat
     activeQuestionRunStartedAt: 1_000,
   })
   assert.equal(payloadMatchesRunToken(canonical, 1_000), true)
+})
+
+void test('a late reconnect-replay ack for a legacy draft key still clears the migrated canonical retry', async () => {
+  // Copilot's finding: canonicalizeLegacyRevisionOneDraft moves a retained
+  // draft from its legacy timestamp key to the revision-1 key, and cancels
+  // the hook's *queued* reconnect-retry entry for both — but a legacy-keyed
+  // replay send that was already in flight (sent, awaiting its own ack) at
+  // that moment is untouched by cancelDraftRetries, which only reaches a
+  // queued entry. If that ack arrives afterward, onDraftReplayAcknowledged
+  // receives the old legacy key, which no longer has anything retained
+  // under it — a no-op that leaves the canonical entry retrying forever.
+  const restore = installStudentDom()
+  const { act, fireEvent, render, waitFor } = await import('@testing-library/react')
+  try {
+    window.localStorage.setItem('student-name-session-1', 'Ari')
+    window.localStorage.setItem('student-id-session-1', 'student-1')
+    const rendered = render(React.createElement(MemoryRouter, { initialEntries: ['/session-1'] },
+      React.createElement(Routes, null, React.createElement(Route, { path: '/:sessionId', element: React.createElement(ResonanceStudent) })),
+    ))
+    await waitFor(() => assert.equal(StudentTestWebSocket.instances.length, 1))
+    const firstSocket = StudentTestWebSocket.instances[0]!
+    firstSocket.shouldFailDraft = false
+    await act(async () => {
+      firstSocket.emit({ type: 'resonance:session-state', payload: {
+        sessionId: 'session-1', activeQuestionRunRevision: null, activeQuestionRunStartedAt: 1_000,
+        activeQuestionIds: ['q1'], activeQuestionDeadlineAt: Date.now() + 60_000,
+        activeQuestions: [{ id: 'q1', type: 'free-response', text: 'First', order: 1 }],
+      } })
+    })
+
+    console.info('[TEST] a legacy (pre-revision) draft is sent but left unacknowledged until it times out and is retained')
+    const input = await waitFor(() => rendered.getByLabelText(/your answer/i) as HTMLTextAreaElement)
+    fireEvent.change(input, { target: { value: 'legacy retained draft' } })
+    await waitFor(() => assert.ok(firstSocket.sent.some((message) => message.includes('legacy retained draft'))), { timeout: 2_500 })
+    // Never ack it — its own 2s ack timeout fires, which both retains it
+    // (parent) and queues it for reconnect replay (hook).
+
+    console.info('[TEST] the socket reconnects and the hook replays the queued legacy draft')
+    await act(async () => { firstSocket.onclose?.() })
+    await waitFor(() => assert.equal(StudentTestWebSocket.instances.length, 2), { timeout: 2_500 })
+    const secondSocket = StudentTestWebSocket.instances[1]!
+    secondSocket.shouldFailDraft = false
+    await act(async () => { secondSocket.onopen?.() })
+    await waitFor(() => assert.ok(secondSocket.sent.some((message) =>
+      message.includes('draft-retry-') && message.includes('legacy retained draft'),
+    )), { timeout: 2_500 })
+    const replaySent = secondSocket.sent.find((message) => message.includes('draft-retry-') && message.includes('legacy retained draft'))!
+    const replayDraftId = (JSON.parse(replaySent) as { payload: { draftId: string } }).payload.draftId
+
+    console.info('[TEST] a new snapshot confirms revision 1 for the same run, canonicalizing the retained draft — before the replay above is acknowledged')
+    await act(async () => {
+      secondSocket.emit({ type: 'resonance:session-state', payload: {
+        sessionId: 'session-1', activeQuestionRunRevision: 1, activeQuestionRunStartedAt: 1_000,
+        activeQuestionIds: ['q1'], activeQuestionDeadlineAt: Date.now() + 60_000,
+        activeQuestions: [{ id: 'q1', type: 'free-response', text: 'First', order: 1 }],
+      } })
+    })
+
+    console.info('[TEST] the delayed ack for the legacy-keyed replay finally arrives')
+    await act(async () => {
+      secondSocket.emit({ type: 'resonance:draft-saved', payload: { draftId: replayDraftId } })
+    })
+
+    console.info('[TEST] the migrated canonical retry must not keep resending after that ack')
+    secondSocket.sent.length = 0
+    await new Promise((resolve) => setTimeout(resolve, 2_500))
+    assert.ok(
+      !secondSocket.sent.some((message) => message.includes('legacy retained draft')),
+      'the canonical retry must have been cleared by the delayed legacy-keyed acknowledgement',
+    )
+
+    rendered.unmount()
+  } finally {
+    restore()
+  }
 })
 
 void test('isSameDraftAnswer treats an MCQ selection as unchanged regardless of option order', () => {
