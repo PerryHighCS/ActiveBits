@@ -86,6 +86,20 @@ export function buildUnconfirmedDraftKey(payload: Record<string, unknown>): stri
   return questionId === null ? null : `${questionId}:${runToken ?? 'self-paced'}`
 }
 
+// Normalize the sole legacy run form that the server accepts after revision
+// rollout. Once retained locally, use revision 1 everywhere so retry keys,
+// acknowledgements, and post-expiry reconciliation share one identity.
+export function canonicalizeLegacyRevisionOneDraft(
+  payload: Record<string, unknown>,
+  snapshot: Pick<UnconfirmedDraftContext, 'activeQuestionRunRevision' | 'activeQuestionRunStartedAt'>,
+): Record<string, unknown> {
+  return typeof payload.activeQuestionRunRevision !== 'number' &&
+    snapshot.activeQuestionRunRevision === 1 &&
+    payload.activeQuestionRunStartedAt === snapshot.activeQuestionRunStartedAt
+    ? { ...payload, activeQuestionRunRevision: 1 }
+    : payload
+}
+
 export function resolveUnconfirmedDraftDisposition(
   payload: Record<string, unknown>,
   snapshot: UnconfirmedDraftContext,
@@ -596,7 +610,25 @@ export default function ResonanceStudent() {
       const now = Date.now()
       let changed = false
 
-      for (const [key, draft] of unconfirmedDraftsRef.current) {
+      for (const [originalKey, retainedDraft] of unconfirmedDraftsRef.current) {
+        let key = originalKey
+        let draft = retainedDraft
+        const canonicalPayload = canonicalizeLegacyRevisionOneDraft(draft.payload, snapshot)
+        if (canonicalPayload !== draft.payload) {
+          const canonicalKey = buildUnconfirmedDraftKey(canonicalPayload)
+          if (canonicalKey !== null && canonicalKey !== key) {
+            const existing = unconfirmedDraftsRef.current.get(canonicalKey)
+            unconfirmedDraftsRef.current.delete(key)
+            if (existing !== undefined && resolveDraftGeneration(existing.payload) > resolveDraftGeneration(canonicalPayload)) {
+              changed = true
+              continue
+            }
+            draft = { ...draft, payload: canonicalPayload }
+            key = canonicalKey
+            unconfirmedDraftsRef.current.set(key, draft)
+            changed = true
+          }
+        }
         const questionId = typeof draft.payload.questionId === 'string' ? draft.payload.questionId : null
         const disposition = resolveUnconfirmedDraftDisposition(draft.payload, snapshot, studentId, now)
 

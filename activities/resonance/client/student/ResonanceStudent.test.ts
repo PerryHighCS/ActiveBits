@@ -14,6 +14,7 @@ import { shouldRetryRegistrationWithoutStudentId } from './ResonanceStudent.js'
 import { advanceEditSequenceForRevisit, resolveCurrentEditSequence } from './ResonanceStudent.js'
 import { seedEditSequenceFromConfirmedResponse } from './ResonanceStudent.js'
 import { buildUnconfirmedDraftKey } from './ResonanceStudent.js'
+import { canonicalizeLegacyRevisionOneDraft } from './ResonanceStudent.js'
 import { resolveUnconfirmedDraftDisposition } from './ResonanceStudent.js'
 import { isSameDraftAnswer } from './ResonanceStudent.js'
 
@@ -863,6 +864,24 @@ void test('unconfirmed draft keys keep a stack-tab draft scoped to its live run'
     'q1:123',
   )
   assert.equal(buildUnconfirmedDraftKey({ questionId: 'q1', answer }), 'q1:self-paced')
+})
+
+void test('legacy timestamp drafts canonicalize to revision one before expiry reconciliation', () => {
+  const legacy = {
+    questionId: 'q1', activeQuestionRunStartedAt: 1_000,
+    answer: { type: 'free-response', text: 'Failed before revision rollout' },
+  }
+  const canonical = canonicalizeLegacyRevisionOneDraft(legacy, {
+    activeQuestionRunRevision: 1,
+    activeQuestionRunStartedAt: 1_000,
+  })
+  assert.equal(canonical.activeQuestionRunRevision, 1)
+  assert.equal(buildUnconfirmedDraftKey(canonical), 'q1:1')
+  // A different activation timestamp must not be upgraded into revision 1.
+  assert.equal(
+    canonicalizeLegacyRevisionOneDraft(legacy, { activeQuestionRunRevision: 1, activeQuestionRunStartedAt: 2_000 }),
+    legacy,
+  )
 })
 
 void test('isSameDraftAnswer treats an MCQ selection as unchanged regardless of option order', () => {
