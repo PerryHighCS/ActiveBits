@@ -13,6 +13,15 @@ import { hasActiveQuestionRunRestart } from './ResonanceStudent.js'
 import { shouldRetryRegistrationWithoutStudentId } from './ResonanceStudent.js'
 import { advanceQuestionEditSequenceForRevisit, resolveQuestionEditSequence } from './ResonanceStudent.js'
 import { seedQuestionEditSequenceFromConfirmedResponse } from './ResonanceStudent.js'
+import {
+  canonicalizeQuestionRunToken,
+  getQuestionAcknowledgedGeneration,
+  getQuestionAttemptedGeneration,
+  getQuestionUnconfirmedDraft,
+  nextQuestionDraftGeneration,
+  resolveQuestionRunTokenForPayload,
+  setQuestionUnconfirmedDraft,
+} from './ResonanceStudent.js'
 import type { QuestionDraftState } from './ResonanceStudent.js'
 import { buildUnconfirmedDraftKey } from './ResonanceStudent.js'
 import { canonicalizeLegacyRevisionOneDraft } from './ResonanceStudent.js'
@@ -1502,6 +1511,105 @@ void test('clearLiveQuestionSubmission unlocks a revisited live question only', 
     }),
     submittedQuestionIds,
   )
+})
+
+void test('resolveQuestionRunTokenForPayload reuses an existing record\'s own runToken when the payload is an equivalent legacy form', () => {
+  // CodeRabbit's finding: recordUnconfirmedDraft resolved a timestamp-only
+  // failure payload's runToken directly and used it for strict-equality
+  // reads/writes against QuestionDraftState. If the question's record had
+  // already moved to revision 1 for the same real run (e.g. via the retry
+  // loop's canonicalizeQuestionRunToken), a delayed failure still carrying
+  // the legacy timestamp form would look like a different run entirely —
+  // reading baseline generation/draft state instead of the real values, and
+  // then wiping the record via setQuestionUnconfirmedDraft's
+  // reset-on-mismatch instead of updating it in place.
+  const state = new Map<string, QuestionDraftState>()
+
+  // No record yet: falls back to resolving straight from the payload.
+  assert.equal(
+    resolveQuestionRunTokenForPayload(state, 'q1', { activeQuestionRunStartedAt: 1_000 }),
+    1_000,
+  )
+
+  // Establish a record already canonicalized to revision 1 for a run that
+  // started at timestamp 1000 (canonicalizeQuestionRunToken is the
+  // non-resetting path the retry loop uses for exactly this transition).
+  nextQuestionDraftGeneration(state, 'q1', 1_000)
+  canonicalizeQuestionRunToken(state, 'q1', 1)
+
+  // A delayed failure still in legacy (timestamp-only) form for the SAME
+  // real run must resolve to the record's own (canonical) runToken, not
+  // the payload's raw legacy timestamp.
+  assert.equal(
+    resolveQuestionRunTokenForPayload(state, 'q1', { activeQuestionRunStartedAt: 1_000 }),
+    1,
+  )
+
+  // A payload with its own explicit, genuinely different revision must not
+  // be treated as equivalent — it still resolves from its own identity, so
+  // a real transition still gets its own fresh record. (A timestamp-only
+  // payload can only ever mean revision 1 — see payloadMatchesResolvedRunToken
+  // — so this case specifically needs an explicit revision to prove a
+  // genuine mismatch, not just a different timestamp.)
+  assert.equal(
+    resolveQuestionRunTokenForPayload(state, 'q1', { activeQuestionRunRevision: 2 }),
+    2,
+  )
+
+  // A canonical-form payload that already agrees with the record trivially
+  // resolves to that same value.
+  assert.equal(
+    resolveQuestionRunTokenForPayload(state, 'q1', { activeQuestionRunRevision: 1 }),
+    1,
+  )
+})
+
+void test('a delayed legacy-form draft failure cannot wipe a QuestionDraftState record already canonicalized to revision one', () => {
+  // Same finding as above, exercised through the full read/write sequence
+  // recordUnconfirmedDraft performs — not just the runToken resolution — to
+  // prove the fix actually reads the real acknowledged/attempted watermarks
+  // and updates the existing record in place, rather than only resolving
+  // the "correct" key without using it correctly end to end.
+  const state = new Map<string, QuestionDraftState>()
+
+  // A revision-one record with a newer attempted generation already
+  // established (generation 2), and nothing acknowledged yet.
+  nextQuestionDraftGeneration(state, 'q1', 1_000)
+  canonicalizeQuestionRunToken(state, 'q1', 1)
+  nextQuestionDraftGeneration(state, 'q1', 1)
+  assert.equal(getQuestionAttemptedGeneration(state, 'q1', 1), 2)
+
+  // A retained draft for the current (generation 2) attempt.
+  setQuestionUnconfirmedDraft(state, 'q1', 1, {
+    payload: { questionId: 'q1', activeQuestionRunRevision: 1, draftGeneration: 2, answer: { type: 'free-response', text: 'current' } },
+    retrying: false,
+    deadlineAt: null,
+  })
+
+  // A delayed failure for the original, lower-generation (1) attempt
+  // arrives late, still in legacy timestamp form.
+  const delayedLegacyPayload = {
+    questionId: 'q1',
+    activeQuestionRunStartedAt: 1_000,
+    draftGeneration: 1,
+    answer: { type: 'free-response', text: 'stale' },
+  }
+  const runToken = resolveQuestionRunTokenForPayload(state, 'q1', delayedLegacyPayload)
+
+  // The real attempted generation (2) must be visible under the resolved
+  // token — reading it under the payload's own raw (legacy) token would
+  // incorrectly see the baseline (0) instead.
+  assert.equal(getQuestionAttemptedGeneration(state, 'q1', runToken), 2)
+  assert.equal(getQuestionAcknowledgedGeneration(state, 'q1', runToken), 0)
+
+  // recordUnconfirmedDraft's own generation-ceiling check would now
+  // correctly discard this stale generation-1 failure (1 < 2) instead of
+  // reaching setQuestionUnconfirmedDraft at all — verify directly that the
+  // record is untouched by the retained generation-2 draft still being
+  // exactly what was set above.
+  const retained = getQuestionUnconfirmedDraft(state, 'q1', runToken)
+  assert.equal(retained?.payload.draftGeneration, 2)
+  assert.equal((retained?.payload.answer as { text?: string } | undefined)?.text, 'current')
 })
 
 void test('edit-sequence bookkeeping survives a QuestionView remount, unlike a component-local counter', () => {

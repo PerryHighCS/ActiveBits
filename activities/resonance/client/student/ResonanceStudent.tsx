@@ -180,6 +180,33 @@ export function setQuestionUnconfirmedDraft(
   state.unconfirmedDraft = draft
 }
 
+// A failure payload can still be in legacy (timestamp-only) form after this
+// question's QuestionDraftState record has already moved to a revision
+// number for the same real run (e.g. the retry loop's own canonicalization
+// ran first). Every read/write above compares by strict equality against
+// state.runToken, so a legacy-form runToken would look like a different run
+// entirely — missing the real acknowledged/attempted watermarks, and
+// wiping the record via setQuestionUnconfirmedDraft's reset-on-mismatch.
+// If an existing record's runToken is equivalent to this payload's own
+// identity (payloadMatchesResolvedRunToken recognizes the legacy/canonical
+// bridge a raw === can't), reuse the record's own runToken for every
+// subsequent read/write instead of re-resolving from the payload —
+// guaranteeing they agree by construction, regardless of whether some
+// other signal (like the current snapshot) has moved ahead of what this
+// record reflects yet. Falls back to resolving from the payload directly
+// when there's no existing record, or it genuinely belongs to a different
+// run — the same cases setQuestionRunToken already treats as fresh.
+export function resolveQuestionRunTokenForPayload(
+  questionDraftStateByQuestionId: Map<string, QuestionDraftState>,
+  questionId: string,
+  payload: Record<string, unknown>,
+): number | null {
+  const existing = questionDraftStateByQuestionId.get(questionId)
+  return existing !== undefined && payloadMatchesResolvedRunToken(payload, existing.runToken)
+    ? existing.runToken
+    : resolvePayloadRunToken(payload)
+}
+
 export function getQuestionAcknowledgedGeneration(
   questionDraftStateByQuestionId: Map<string, QuestionDraftState>,
   questionId: string,
@@ -755,7 +782,7 @@ export default function ResonanceStudent() {
     const questionId = typeof payload.questionId === 'string' ? payload.questionId : null
     if (questionId === null) return
     if (isPayloadSupersededBySubmission(payload)) return
-    const runToken = resolvePayloadRunToken(payload)
+    const runToken = resolveQuestionRunTokenForPayload(questionDraftStateRef.current, questionId, payload)
     const payloadGeneration = resolveDraftGeneration(payload)
     if (payloadGeneration <= getQuestionAcknowledgedGeneration(questionDraftStateRef.current, questionId, runToken)) return
     // A late failure from an unmounted view can arrive after a replacement
