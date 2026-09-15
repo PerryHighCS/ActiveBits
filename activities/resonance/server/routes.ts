@@ -3286,11 +3286,20 @@ export default function setupResonanceRoutes(
             return currentSession
           }
 
+          // A generation-zero (legacy/rolling-deploy) payload's content
+          // still wins unconditionally below — that's the whole point of
+          // the compatibility path above — but the stored watermark itself
+          // must never regress. Storing draftGeneration as-is here would
+          // reset an already-higher positive watermark back to 0, letting a
+          // later delayed lower-but-still-positive generation slip past the
+          // strict check above (which only rejects when draftGeneration is
+          // strictly less than storedGeneration) since it would then be
+          // comparing against a falsely-reset floor instead of the real one.
           currentSession.data.responseDraftGenerations[draftKey] = {
             questionId,
             studentId,
             activeQuestionRunRevision: currentSession.data.activeQuestionRunRevision,
-            draftGeneration,
+            draftGeneration: Math.max(storedGeneration, draftGeneration),
           }
           if (answer === null) {
             delete currentSession.data.responseDrafts[draftKey]

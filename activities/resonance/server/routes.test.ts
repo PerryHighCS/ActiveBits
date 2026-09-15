@@ -1211,7 +1211,35 @@ void test('a draft made after revisiting an already-submitted question in the sa
     activeQuestionRunRevision: 1, editSequence: 2,
     answer: { type: 'free-response', text: 'Persisted legacy edit after clear' },
   })
-  assert.equal(afterLegacyEdit.responseDraftGenerations?.['q1:student1']?.draftGeneration, 0)
+  // The legacy edit's own content still wins unconditionally (asserted
+  // above) — that's the "last arrival wins" compatibility path. But the
+  // stored watermark itself must never regress below the highest positive
+  // generation already seen (3, from the tombstone above): CodeRabbit
+  // flagged that storing draftGeneration as-is here reset the watermark to
+  // 0, which would let a later delayed lower-but-still-positive generation
+  // (e.g. 1 or 2) slip past the strict staleness check, since it would then
+  // be compared against a falsely-reset floor instead of the real one.
+  assert.equal(afterLegacyEdit.responseDraftGenerations?.['q1:student1']?.draftGeneration, 3)
+  console.info('[TEST] a delayed lower-positive-generation draft arriving after the legacy edit must still be rejected as stale')
+  messageHandlers[0]?.(JSON.stringify({
+    type: 'resonance:update-draft',
+    payload: {
+      studentId: 'student1', questionId: 'q1', draftId: 'delayed-generation-two-after-legacy',
+      activeQuestionRunRevision: 1, editSequence: 2, draftGeneration: 2,
+      answer: { type: 'free-response', text: 'Must not overwrite the legacy edit' },
+    },
+  }))
+  await waitForCondition(() => sentMessages.some((message) =>
+    message.type === 'resonance:draft-saved' && message.payload?.draftId === 'delayed-generation-two-after-legacy'
+  ))
+  const afterDelayedGenerationTwo = (await sessions.get(session.id))?.data as {
+    responseDrafts?: Record<string, { answer?: unknown }>
+  }
+  assert.deepEqual(afterDelayedGenerationTwo.responseDrafts?.['q1:student1']?.answer, {
+    type: 'free-response',
+    text: 'Persisted legacy edit after clear',
+  })
+
   // The confirmed response is untouched until the student resubmits or the
   // deadline finalizes the pending draft.
   assert.deepEqual(storedData?.responses?.[0]?.answer, {
