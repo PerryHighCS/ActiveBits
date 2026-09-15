@@ -954,13 +954,20 @@ export default function ResonanceStudent() {
                   })
                   const retained = key === null ? undefined : unconfirmedDraftsRef.current.get(key)
                   if (retained !== undefined) {
+                    const supersededGeneration = resolveDraftGeneration(retained.payload)
+                    const replacementGeneration = nextDraftGeneration(questionId, runToken)
+                    // useResonanceSession owns reconnect retries separately.
+                    // Stop its old-generation replay before retaining the
+                    // replacement, otherwise that replay's acknowledgement
+                    // can incorrectly clear this newer local answer.
+                    cancelDraftRetries(key, supersededGeneration)
                     // Replace, rather than mutate, the retained entry. An
                     // older retry may already be in flight; its completion
                     // is identity-checked by the retry loop and must not be
                     // allowed to delete this newer draft.
                     unconfirmedDraftsRef.current.set(key!, {
                       ...retained,
-                      payload: { ...retained.payload, answer },
+                      payload: { ...retained.payload, draftGeneration: replacementGeneration, answer },
                       retrying: false,
                     })
                     setUnconfirmedDraftVersion((current) => current + 1)
