@@ -130,8 +130,15 @@ export function resolveUnconfirmedDraftDisposition(
 
   const capturedDeadlineAt = typeof payload.activeQuestionDeadlineAt === 'number'
     ? payload.activeQuestionDeadlineAt
-    : snapshot.activeQuestionDeadlineAt
-  return capturedDeadlineAt !== null && now >= capturedDeadlineAt
+    : null
+  // A delayed snapshot can omit a deadline, but an authoritative snapshot
+  // may also shorten it. Never continue retrying past either known bound.
+  const deadlineAt = capturedDeadlineAt === null
+    ? snapshot.activeQuestionDeadlineAt
+    : snapshot.activeQuestionDeadlineAt === null
+      ? capturedDeadlineAt
+      : Math.min(capturedDeadlineAt, snapshot.activeQuestionDeadlineAt)
+  return deadlineAt !== null && now >= deadlineAt
     ? 'reconcile'
     : 'retry'
 }
