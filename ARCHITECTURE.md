@@ -324,11 +324,12 @@ through activity-specific props.
   hook separately queues an unacknowledged or send-failed draft for replay on WebSocket reconnect,
   again ordered by that same generation watermark so a stale queued attempt cannot win a race
   against a newer one still in flight when the socket drops. A draft's disposition (retry / discard /
-  reconcile) is re-evaluated against the *live* snapshot on every tick: it is discarded once superseded
-  by a confirmed response at an equal or higher edit sequence (self-paced runs have no deadline and
-  keep every question in `activeQuestionIds` indefinitely, so this is the only thing that stops retrying
-  a question the student has already submitted and moved past), and is reconciled from the server
-  once its run's deadline has passed. A run restart (the same question reactivated under a new run
+  reconcile) is re-evaluated against the *live* snapshot on every tick: retries stop when the draft
+  or a newer generation is acknowledged as persisted, when a successful submission supersedes the
+  retained draft, or when it is discarded after a confirmed response at an equal or higher edit
+  sequence (self-paced runs have no deadline and keep every question in `activeQuestionIds`
+  indefinitely, so the other two paths matter there too, not just this one), and the draft is
+  reconciled from the server once its run's deadline has passed. A run restart (the same question reactivated under a new run
   token) drops any locally cached answer that isn't stamped with the new run, since the merge that
   layers server snapshot data under local state would otherwise let a stale prior-run answer stay
   displayed, and resubmittable, under the new run.
