@@ -1188,13 +1188,15 @@ void test('a draft made after revisiting an already-submitted question in the sa
   assert.equal(afterClear.responseDrafts?.['q1:student1'], undefined)
   assert.equal(afterClear.responseDraftGenerations?.['q1:student1']?.draftGeneration, 3)
   // Rolling/legacy clients do not send a generation, which resolves to zero.
-  // A clear at that generation must still survive a delayed legacy update.
+  // They have no ordering token, so preserve their historical last-arrival
+  // behavior: a legitimate edit after a clear must be persisted. Numbered
+  // clients use the strict tombstone protection asserted above.
   // Reset this isolated in-memory fixture's draft state so the legacy case is
-  // not trivially rejected by the numbered generation above.
+  // independent from the numbered generation above.
   session.data.responseDrafts = {}
   session.data.responseDraftGenerations = {}
   await sessions.set(session.id, session)
-  console.info('[TEST] an unversioned legacy clear must reject a delayed unversioned draft')
+  console.info('[TEST] an unversioned legacy edit after a clear keeps last-arrival behavior')
   messageHandlers[0]?.(JSON.stringify({
     type: 'resonance:update-draft',
     payload: {
@@ -1210,18 +1212,22 @@ void test('a draft made after revisiting an already-submitted question in the sa
     payload: {
       studentId: 'student1', questionId: 'q1', draftId: 'legacy-delayed-update',
       activeQuestionRunRevision: 1, editSequence: 2,
-      answer: { type: 'free-response', text: 'Must not resurrect after legacy clear' },
+      answer: { type: 'free-response', text: 'Persisted legacy edit after clear' },
     },
   }))
   await waitForCondition(() => sentMessages.some((message) =>
     message.type === 'resonance:draft-saved' && message.payload?.draftId === 'legacy-delayed-update'
   ))
-  const afterLegacyClear = (await sessions.get(session.id))?.data as {
+  const afterLegacyEdit = (await sessions.get(session.id))?.data as {
     responseDrafts?: Record<string, unknown>
-    responseDraftGenerations?: Record<string, { draftGeneration?: number; cleared?: boolean }>
+    responseDraftGenerations?: Record<string, { draftGeneration?: number }>
   }
-  assert.equal(afterLegacyClear.responseDrafts?.['q1:student1'], undefined)
-  assert.deepEqual(afterLegacyClear.responseDraftGenerations?.['q1:student1'], { draftGeneration: 0, questionId: 'q1', studentId: 'student1', activeQuestionRunRevision: 1, cleared: true })
+  assert.deepEqual(afterLegacyEdit.responseDrafts?.['q1:student1'], {
+    questionId: 'q1', studentId: 'student1', updatedAt: (afterLegacyEdit.responseDrafts?.['q1:student1'] as { updatedAt: number }).updatedAt,
+    activeQuestionRunRevision: 1, editSequence: 2,
+    answer: { type: 'free-response', text: 'Persisted legacy edit after clear' },
+  })
+  assert.equal(afterLegacyEdit.responseDraftGenerations?.['q1:student1']?.draftGeneration, 0)
   // The confirmed response is untouched until the student resubmits or the
   // deadline finalizes the pending draft.
   assert.deepEqual(storedData?.responses?.[0]?.answer, {

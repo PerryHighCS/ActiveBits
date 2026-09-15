@@ -184,9 +184,6 @@ interface ResonanceSessionData extends Record<string, unknown> {
     studentId: string
     activeQuestionRunRevision?: number | null
     draftGeneration: number
-    // Legacy clients use generation 0. Retain whether that zero-generation
-    // entry was a clear so a delayed legacy update cannot resurrect it.
-    cleared?: true
   }>
   annotations: Record<string, InstructorAnnotation>
   reveals: QuestionReveal[]
@@ -888,7 +885,6 @@ function normalizeResponseDraftGenerations(value: unknown): ResonanceSessionData
       studentId,
       ...(activeQuestionRunRevision !== undefined ? { activeQuestionRunRevision } : {}),
       draftGeneration,
-      ...(rawGeneration.cleared === true ? { cleared: true as const } : {}),
     }
   }
   return generations
@@ -3263,10 +3259,13 @@ export default function setupResonanceRoutes(
               : 0,
             generationForCurrentRun,
           )
-          if (
-            draftGeneration < storedGeneration ||
-            (draftGeneration === 0 && storedGeneration === 0 && currentGeneration?.cleared === true)
-          ) {
+          // Generation-zero payloads are from rolling/legacy clients that
+          // provide no ordering token. Their only compatible semantics are
+          // last arrival wins: treating an equal zero after a clear as stale
+          // would also reject that client's legitimate next edit. Current
+          // clients send monotonic positive generations, whose tombstones
+          // remain protected by this strict lower-generation check.
+          if (draftGeneration < storedGeneration) {
             shouldAcknowledge = true
             return currentSession
           }
@@ -3276,7 +3275,6 @@ export default function setupResonanceRoutes(
             studentId,
             activeQuestionRunRevision: currentSession.data.activeQuestionRunRevision,
             draftGeneration,
-            ...(answer === null ? { cleared: true as const } : {}),
           }
           if (answer === null) {
             delete currentSession.data.responseDrafts[draftKey]
