@@ -1222,6 +1222,92 @@ void test('a draft made after revisiting an already-submitted question in the sa
   await sessions.close()
 })
 
+void test('a stale pre-rollout draft is rejected as already-superseded by a legacy confirmed response', async () => {
+  // Copilot's finding: the draft-save handler's freshness guard finds "the
+  // confirmed response for this run" by strictly comparing
+  // response.activeQuestionRunRevision to the session's own (now-normalized)
+  // revision. normalizeSessionData always upgrades the session-level
+  // counter to at least 1 once a run is active, but normalizeStoredResponses
+  // never backfills that field on an individual response — a response
+  // persisted before the revision rollout keeps activeQuestionRunRevision
+  // permanently undefined. That response would then never be recognized as
+  // "the confirmed response for the current run", so a stale pre-submission
+  // draft with a lower editSequence could sail past this guard and get
+  // persisted — later risking promotion over the already-confirmed answer
+  // at deadline finalization.
+  const app = createMockApp()
+  const sessions = createSessionStore(null)
+  const session = createMultiQuestionSession()
+  const runStartedAt = Date.now() - 1_000
+  session.data.activeQuestionId = 'q1'
+  session.data.activeQuestionIds = ['q1']
+  session.data.activeQuestionRunStartedAt = runStartedAt
+  session.data.activeQuestionRunRevision = 1
+  session.data.lastActiveQuestionRunRevision = 1
+  // A legacy confirmed response: no activeQuestionRunRevision field at all,
+  // as normalizeStoredResponses would leave one persisted before the
+  // revision rollout.
+  session.data.responses = [
+    {
+      id: 'legacy-response',
+      questionId: 'q1',
+      studentId: 'student1',
+      submittedAt: runStartedAt + 100,
+      editSequence: 3,
+      answer: { type: 'free-response', text: 'Confirmed before the revision rollout' },
+    },
+  ]
+  const studentCookies = issueStudentCookies(session, 'student1')
+  await sessions.set(session.id, session)
+  const captured = createCapturingMockWs()
+  setupResonanceRoutes(app, sessions, captured.ws)
+
+  const handler = captured.getHandler()
+  const messageHandlers: Array<(message: string) => void> = []
+  const sentMessages: Array<{ type?: string; payload?: { draftId?: string } }> = []
+  assert.ok(handler)
+  handler({
+    readyState: 1,
+    upgradeHeaders: {
+      cookie: Object.entries(studentCookies).map(([name, value]) => `${name}=${value}`).join('; '),
+    },
+    send(message: string) {
+      sentMessages.push(JSON.parse(message) as { type?: string; payload?: { draftId?: string } })
+    },
+    on(event: string, callback: (message: string) => void) {
+      if (event === 'message') messageHandlers.push(callback)
+    },
+    once() {},
+    close() {},
+    terminate() {},
+    ping() {},
+  }, new URLSearchParams({ sessionId: session.id, role: 'student', studentId: 'student1' }), captured.ws.wss)
+  await waitForCondition(() => messageHandlers.length === 1)
+
+  console.info('[TEST] a delayed pre-submission draft (lower editSequence than the legacy confirmed response) arrives')
+  messageHandlers[0]?.(JSON.stringify({
+    type: 'resonance:update-draft',
+    payload: {
+      studentId: 'student1', questionId: 'q1', draftId: 'stale-pre-submission-draft',
+      activeQuestionRunRevision: 1, editSequence: 1, draftGeneration: 1,
+      answer: { type: 'free-response', text: 'Stale draft from before the legacy submission' },
+    },
+  }))
+  await waitForCondition(() => sentMessages.some((message) =>
+    message.type === 'resonance:draft-saved' && message.payload?.draftId === 'stale-pre-submission-draft'
+  ))
+
+  console.info('[TEST] the stale draft must be acknowledged as a no-op, not stored where it could later overwrite the confirmed answer')
+  const stored = (await sessions.get(session.id))?.data as {
+    responseDrafts?: Record<string, unknown>
+    responses?: Array<{ answer?: unknown }>
+  } | undefined
+  assert.equal(stored?.responseDrafts?.['q1:student1'], undefined)
+  assert.deepEqual(stored?.responses?.[0]?.answer, { type: 'free-response', text: 'Confirmed before the revision rollout' })
+
+  await sessions.close()
+})
+
 void test('clearing a draft over the websocket still acknowledges the write, present or absent', async () => {
   const app = createMockApp()
   const sessions = createSessionStore(null)

@@ -541,6 +541,20 @@ function matchesActiveQuestionRun(
   return sessionData.activeQuestionRunRevision === 1 && legacyStartedAt === sessionData.activeQuestionRunStartedAt
 }
 
+// A stored response persisted before the revision rollout never had
+// activeQuestionRunRevision backfilled — unlike the session-level counter,
+// which normalizeSessionData always upgrades to at least 1 once a run is
+// active, normalizeStoredResponses leaves a legacy response's field
+// permanently `undefined`. A strict-equality comparison against the
+// session's (now-normalized) revision would then never recognize that
+// legacy response as belonging to the current run, even when it genuinely
+// does — letting a stale pre-rollout draft bypass the freshness guard this
+// is used for and later get promoted over an already-confirmed answer.
+function responseMatchesActiveRun(response: Pick<Response, 'activeQuestionRunRevision'>, sessionData: ResonanceSessionData): boolean {
+  return response.activeQuestionRunRevision === sessionData.activeQuestionRunRevision ||
+    (response.activeQuestionRunRevision === undefined && sessionData.activeQuestionRunRevision === 1)
+}
+
 export function resolveAnswerabilityErrorMessage(reason: 'expired' | 'choices-hidden' | 'inactive'): string {
   switch (reason) {
     case 'expired':
@@ -3193,7 +3207,7 @@ export default function setupResonanceRoutes(
           (response) =>
             response.questionId === questionId &&
             response.studentId === studentId &&
-            response.activeQuestionRunRevision === session.data.activeQuestionRunRevision,
+            responseMatchesActiveRun(response, session.data),
         )
         if (confirmedResponseForRun !== undefined && editSequence <= (confirmedResponseForRun.editSequence ?? 0)) {
           if (draftId !== null) {
@@ -3238,7 +3252,7 @@ export default function setupResonanceRoutes(
             (response) =>
               response.questionId === questionId &&
               response.studentId === studentId &&
-              response.activeQuestionRunRevision === currentSession.data.activeQuestionRunRevision,
+              responseMatchesActiveRun(response, currentSession.data),
           )
           if (
             currentConfirmedResponseForRun !== undefined &&
