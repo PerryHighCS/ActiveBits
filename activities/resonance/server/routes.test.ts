@@ -1050,6 +1050,190 @@ void test('a submission that commits while a stale draft write is in flight is n
   await sessions.close()
 })
 
+void test('a draft-save updateAtomic must not commit into a foreign session created at the same id mid-flight', async () => {
+  // Copilot's finding: the update-draft handler reads `session` once, but
+  // its updateAtomic callback blindly treats whatever record currently
+  // occupies `sessionId` as a ResonanceSession. If that id is deleted and
+  // recreated for a different activity between this handler's outer read
+  // and updateAtomic's own internal read, updateAtomic's CAS only protects
+  // against a *concurrent resonance* write — it has no way to know the
+  // record is now a different activity's session entirely — so the callback
+  // would normalize and write resonance draft data into a foreign record.
+  const app = createMockApp()
+  const sessions = createSessionStore(null)
+  const session = createMultiQuestionSession()
+  const runStartedAt = Date.now() - 1_000
+  session.data.activeQuestionId = 'q1'
+  session.data.activeQuestionIds = ['q1']
+  session.data.activeQuestionRunStartedAt = runStartedAt
+  session.data.activeQuestionRunRevision = 1
+  session.data.lastActiveQuestionRunRevision = 1
+  const studentCookies = issueStudentCookies(session, 'student1')
+  await sessions.set(session.id, session)
+  const captured = createCapturingMockWs()
+  setupResonanceRoutes(app, sessions, captured.ws)
+
+  const handler = captured.getHandler()
+  const messageHandlers: Array<(message: string) => void> = []
+  const sentMessages: Array<{ type?: string; payload?: { draftId?: string } }> = []
+  assert.ok(handler)
+  handler({
+    readyState: 1,
+    upgradeHeaders: {
+      cookie: Object.entries(studentCookies).map(([name, value]) => `${name}=${value}`).join('; '),
+    },
+    send(message: string) {
+      sentMessages.push(JSON.parse(message) as { type?: string; payload?: { draftId?: string } })
+    },
+    on(event: string, callback: (message: string) => void) {
+      if (event === 'message') messageHandlers.push(callback)
+    },
+    once() {},
+    close() {},
+    terminate() {},
+    ping() {},
+  }, new URLSearchParams({ sessionId: session.id, role: 'student', studentId: 'student1' }), captured.ws.wss)
+  await waitForCondition(() => messageHandlers.length === 1)
+
+  // The id is deleted and recreated as a foreign (non-resonance) session
+  // the first time this handler calls updateAtomic — simulating a
+  // delete-then-recreate race that lands strictly between this handler's
+  // outer session read and its atomic write.
+  const originalUpdateAtomic = sessions.updateAtomic!.bind(sessions)
+  let swapped = false
+  sessions.updateAtomic = (async (id: string, mutate: (session: SessionRecord) => SessionRecord) => {
+    if (!swapped && id === session.id) {
+      swapped = true
+      await sessions.delete(id)
+      await sessions.set(id, {
+        id,
+        type: 'other-activity',
+        created: Date.now(),
+        lastActivity: Date.now(),
+        data: { marker: 'do-not-touch' },
+      } as SessionRecord)
+    }
+    return originalUpdateAtomic(id, mutate)
+  }) as SessionStore['updateAtomic']
+
+  console.info('[TEST] a draft write must not commit into a same-id record recreated for a different activity')
+  messageHandlers[0]?.(JSON.stringify({
+    type: 'resonance:update-draft',
+    payload: {
+      studentId: 'student1',
+      questionId: 'q1',
+      draftId: 'swapped-draft',
+      activeQuestionRunRevision: 1,
+      editSequence: 1,
+      answer: { type: 'free-response', text: 'Must never reach the foreign session' },
+    },
+  }))
+  await waitForCondition(() => swapped)
+  // Give the aborted write's rejected promise a turn to settle before
+  // asserting nothing was ever acknowledged or persisted into it.
+  await new Promise((resolve) => setTimeout(resolve, 20))
+
+  assert.equal(sentMessages.some((message) => message.type === 'resonance:draft-saved'), false)
+  const stored = await sessions.get(session.id) as (SessionRecord & {
+    data: { marker?: string; responseDrafts?: Record<string, unknown> }
+  }) | null
+  assert.equal(stored?.type, 'other-activity')
+  assert.equal(stored?.data.marker, 'do-not-touch')
+  // The most direct signal that normalizeSessionData/the draft write never
+  // ran against this record at all: a resonance-shaped responseDrafts map
+  // (with the injected draft's answer in it) would exist here if the guard
+  // had not aborted the commit.
+  assert.equal(stored?.data.responseDrafts, undefined)
+
+  await sessions.close()
+})
+
+void test('a legacy response from an earlier pre-rollout run is not mistaken for a confirmation in the current revision-1 run', async () => {
+  // Copilot's finding: responseMatchesActiveRun treated every response with
+  // an omitted activeQuestionRunRevision as belonging to whichever run is
+  // *currently* revision 1 — but omitted revision is also how a response
+  // from an EARLIER pre-rollout run is stored (a session can accumulate
+  // more than one such response, one per question, across several runs that
+  // all predate the revision rollout). Only the run active at the moment of
+  // the upgrade is ever backfilled to revision 1; an older pre-rollout run's
+  // leftover response is otherwise indistinguishable from the session's
+  // current run by the undefined marker alone, so a legitimate
+  // low-editSequence draft in the brand new run was wrongly rejected as
+  // stale against a high-editSequence response that actually belongs to a
+  // run that ended before this one even started.
+  const app = createMockApp()
+  const sessions = createSessionStore(null)
+  const session = createMultiQuestionSession()
+  const priorRunSubmittedAt = Date.now() - 100_000
+  const currentRunStartedAt = Date.now() - 1_000
+  session.data.activeQuestionId = 'q1'
+  session.data.activeQuestionIds = ['q1']
+  session.data.activeQuestionRunStartedAt = currentRunStartedAt
+  session.data.activeQuestionRunRevision = 1
+  session.data.lastActiveQuestionRunRevision = 1
+  session.data.responses = [
+    {
+      id: 'r_legacy',
+      questionId: 'q1',
+      studentId: 'student1',
+      submittedAt: priorRunSubmittedAt,
+      editSequence: 5,
+      answer: { type: 'free-response', text: 'Answer from a run that ended before rollout' },
+    },
+  ]
+  const studentCookies = issueStudentCookies(session, 'student1')
+  await sessions.set(session.id, session)
+  const captured = createCapturingMockWs()
+  setupResonanceRoutes(app, sessions, captured.ws)
+
+  const handler = captured.getHandler()
+  const messageHandlers: Array<(message: string) => void> = []
+  const sentMessages: Array<{ type?: string; payload?: { draftId?: string } }> = []
+  assert.ok(handler)
+  handler({
+    readyState: 1,
+    upgradeHeaders: {
+      cookie: Object.entries(studentCookies).map(([name, value]) => `${name}=${value}`).join('; '),
+    },
+    send(message: string) {
+      sentMessages.push(JSON.parse(message) as { type?: string; payload?: { draftId?: string } })
+    },
+    on(event: string, callback: (message: string) => void) {
+      if (event === 'message') messageHandlers.push(callback)
+    },
+    once() {},
+    close() {},
+    terminate() {},
+    ping() {},
+  }, new URLSearchParams({ sessionId: session.id, role: 'student', studentId: 'student1' }), captured.ws.wss)
+  await waitForCondition(() => messageHandlers.length === 1)
+
+  console.info("[TEST] a fresh edit in the current run must not be rejected as stale against an older pre-rollout run's response")
+  messageHandlers[0]?.(JSON.stringify({
+    type: 'resonance:update-draft',
+    payload: {
+      studentId: 'student1',
+      questionId: 'q1',
+      draftId: 'new-run-draft',
+      activeQuestionRunRevision: 1,
+      editSequence: 1,
+      answer: { type: 'free-response', text: 'Fresh edit in the new run' },
+    },
+  }))
+  await waitForCondition(() => sentMessages.some((message) =>
+    message.type === 'resonance:draft-saved' && message.payload?.draftId === 'new-run-draft'
+  ))
+
+  const stored = await sessions.get(session.id)
+  const storedData = stored?.data as { responseDrafts?: Record<string, { answer?: unknown }> } | undefined
+  assert.deepEqual(storedData?.responseDrafts?.['q1:student1']?.answer, {
+    type: 'free-response',
+    text: 'Fresh edit in the new run',
+  })
+
+  await sessions.close()
+})
+
 void test('a draft made after revisiting an already-submitted question in the same run is persisted, not dropped as stale', async () => {
   const app = createMockApp()
   const sessions = createSessionStore(null)
