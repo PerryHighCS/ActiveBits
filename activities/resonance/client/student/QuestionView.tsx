@@ -33,7 +33,15 @@ interface Props {
   onDraftChanged?(questionId: string, answer: AnswerPayload | null): void
   onDraftSaveFailed?(payload: Record<string, unknown>): void
   onDraftSaved?(payload: Record<string, unknown>): void
-  onSubmitted?(questionId: string, answer: AnswerPayload): void
+  /**
+   * `runToken` is the run this submission was sent under — not necessarily
+   * the current one, since this can fire after this view has unmounted (a
+   * stack-tab switch) and the parent's own state has moved on. The parent
+   * uses it, together with its own knowledge of the current local answer, to
+   * independently verify this response is still fresh before applying it,
+   * rather than trusting this view's own (possibly stale/frozen) checks.
+   */
+  onSubmitted?(questionId: string, answer: AnswerPayload, runToken: number | null): void
   sendMessage?(type: string, payload: unknown): boolean
   saveDraft?(payload: Record<string, unknown>): Promise<boolean>
 }
@@ -309,7 +317,7 @@ export default function QuestionView({
       // switch) and must still be told, or a retained failed autosave for
       // this question would keep retrying indefinitely instead of being
       // recognized as superseded.
-      onSubmitted?.(question.id, answer)
+      onSubmitted?.(question.id, answer, submissionRunRevision)
       if (submissionAttempt === submissionAttemptRef.current) {
         setDraftAnswer(answer)
         lastSentDraftRef.current = answer

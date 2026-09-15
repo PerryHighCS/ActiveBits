@@ -424,6 +424,7 @@ export default function ResonanceStudent() {
     return next
   }, [])
 
+
   // Shared by a direct successful save (handleDraftSaved, below) and a
   // reconnect-replay ack (passed to useResonanceSession as
   // onDraftReplayAcknowledged) — both are ways this component can learn a
@@ -606,6 +607,20 @@ export default function ResonanceStudent() {
     if (key === null) return
     if (isPayloadSupersededBySubmission(payload)) return
     if (resolveDraftGeneration(payload) <= (acknowledgedDraftGenerationByKeyRef.current.get(key) ?? 0)) return
+    // A late failure from an unmounted view can arrive after a replacement
+    // view (post-remount) has already attempted — but not yet resolved — a
+    // newer save for the same question+run. Neither of the checks above
+    // catches that: nothing has acknowledged the newer attempt yet, and
+    // nothing is retained for it either, since it hasn't failed (or it may
+    // still succeed and never need to be). Comparing against the highest
+    // generation *attempted* so far (not just acknowledged or retained)
+    // catches it without risk: if that newer attempt later fails too, it is
+    // by then the highest attempted and retains itself correctly.
+    const payloadQuestionId = typeof payload.questionId === 'string' ? payload.questionId : null
+    const generationKey = payloadQuestionId !== null
+      ? buildEditSequenceKey(payloadQuestionId, resolvePayloadRunToken(payload))
+      : null
+    if (generationKey !== null && resolveDraftGeneration(payload) < (draftGenerationByKeyRef.current[generationKey] ?? 0)) return
     const current = unconfirmedDraftsRef.current.get(key)
     if (current && resolveDraftGeneration(current.payload) > resolveDraftGeneration(payload)) return
     const deadlineAt = typeof payload.activeQuestionDeadlineAt === 'number'
@@ -1121,8 +1136,45 @@ export default function ResonanceStudent() {
                 }}
                 onDraftSaveFailed={recordUnconfirmedDraft}
                 onDraftSaved={handleDraftSaved}
-                onSubmitted={(questionId, answer) => {
-                  const runToken = snapshot.activeQuestionRunRevision ?? snapshot.activeQuestionRunStartedAt
+                onSubmitted={(questionId, answer, submissionRunToken) => {
+                  // This can fire after the QuestionView instance that sent
+                  // it has unmounted (a stack-tab switch) and even, since it
+                  // was unmounted, been remounted again — so its own checks
+                  // (frozen refs from its last render) aren't trustworthy.
+                  // Re-validate against the parent's actual current state
+                  // (read from the ref, not the `snapshot` this closure was
+                  // created with — an older render's closure can still be
+                  // the one that runs) before touching anything:
+                  //   - a run restart since this submission was sent means
+                  //     it belongs to a run that's already over — the
+                  //     didRunRestart cleanup elsewhere already handled that
+                  //     transition, and applying a stale-run answer here
+                  //     would undo it.
+                  //   - a locally-cached answer for this question that
+                  //     differs from what this submission is about to apply
+                  //     means a replacement view (after this one unmounted
+                  //     and remounted, e.g. a stack-tab switch away and back)
+                  //     has made its own newer, independent edit since —
+                  //     applying this older answer would clobber it. A
+                  //     draft-generation comparison was tried first but
+                  //     false-positived on this view's own harmless
+                  //     flush-on-unmount re-send of the *same* answer it had
+                  //     just submitted; comparing the answer content itself
+                  //     doesn't have that problem.
+                  // A stale submission is fully discarded rather than
+                  // partially applied: the server did persist it, so the
+                  // next snapshot naturally reconciles it into local state
+                  // through the ordinary submittedAnswers merge.
+                  const currentSnapshot = snapshotRef.current
+                  if (currentSnapshot === null) return
+                  const currentRunToken = currentSnapshot.activeQuestionRunRevision ?? currentSnapshot.activeQuestionRunStartedAt
+                  if (submissionRunToken !== currentRunToken) return
+                  if (
+                    Object.prototype.hasOwnProperty.call(submittedAnswersRef.current, questionId) &&
+                    !isSameDraftAnswer(answer, submittedAnswersRef.current[questionId])
+                  ) return
+
+                  const runToken = submissionRunToken
                   submittedAnswerRunRef.current[questionId] = runToken
                   submittedEditSequenceByKeyRef.current[buildEditSequenceKey(questionId, runToken)] =
                     resolveCurrentEditSequence(editSequenceByKeyRef.current, questionId, runToken)
@@ -1143,8 +1195,8 @@ export default function ResonanceStudent() {
                   // other way to learn a submission already settled it.
                   const retainedDraftKey = buildUnconfirmedDraftKey({
                     questionId,
-                    activeQuestionRunRevision: snapshot.activeQuestionRunRevision,
-                    activeQuestionRunStartedAt: snapshot.activeQuestionRunStartedAt,
+                    activeQuestionRunRevision: currentSnapshot.activeQuestionRunRevision,
+                    activeQuestionRunStartedAt: currentSnapshot.activeQuestionRunStartedAt,
                   })
                   const retainedDraft = retainedDraftKey !== null
                     ? unconfirmedDraftsRef.current.get(retainedDraftKey)
@@ -1171,9 +1223,10 @@ export default function ResonanceStudent() {
                   setSubmittedQuestionIds((current) => {
                     const nextSubmittedQuestionIds = new Set(current)
                     nextSubmittedQuestionIds.add(questionId)
+                    const currentActiveQuestions = currentSnapshot.activeQuestions
                     const nextAnnouncement = resolveSubmissionAnnouncement({
-                      selfPacedMode: snapshot.selfPacedMode,
-                      questionIds: activeQuestions.map((question) => question.id),
+                      selfPacedMode: currentSnapshot.selfPacedMode,
+                      questionIds: currentActiveQuestions.map((question) => question.id),
                       submittedQuestionIds: nextSubmittedQuestionIds,
                       currentQuestionId: questionId,
                     })
@@ -1183,9 +1236,9 @@ export default function ResonanceStudent() {
                         message: nextAnnouncement,
                       }))
                     }
-                    if (snapshot.selfPacedMode) {
+                    if (currentSnapshot.selfPacedMode) {
                       setSelectedQuestionId((currentQuestionId) => resolveNextSelfPacedQuestionId({
-                        questionIds: activeQuestions.map((question) => question.id),
+                        questionIds: currentActiveQuestions.map((question) => question.id),
                         submittedQuestionIds: nextSubmittedQuestionIds,
                         currentQuestionId: currentQuestionId ?? questionId,
                       }))

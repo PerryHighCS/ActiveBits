@@ -526,6 +526,188 @@ void test('a submission that succeeds after its QuestionView unmounts is still r
   }
 })
 
+void test('a delayed submission response from a run that has since restarted cannot resurrect its stale answer', async () => {
+  // CodeRabbit and Copilot both flagged the same gap in the previous round's
+  // fix (letting onSubmitted fire after unmount): it only re-checked
+  // QuestionView's own frozen refs. Those refs *do* stay current across a
+  // run-token change alone, since ResonanceStudent re-renders the same
+  // still-mounted QuestionView instance with the new prop — but not once
+  // this view has unmounted for any reason (here, a plain stack-tab switch)
+  // and a run restart happens *afterward*, since a since-unmounted instance
+  // never re-renders to pick up the new run token. Its refs stay frozen on
+  // the old run, and the child's own guard incorrectly still passes.
+  //
+  // q1 deliberately stays in the active set throughout (never dropped and
+  // reactivated) — a reactivation triggers its own, unrelated
+  // submittedQuestionIds/submittedAnswers cleanup that would mask whether
+  // this specific ownership check actually did the work.
+  const restore = installStudentDom()
+  const { act, fireEvent, render, waitFor } = await import('@testing-library/react')
+  try {
+    window.localStorage.setItem('student-name-session-1', 'Ari')
+    window.localStorage.setItem('student-id-session-1', 'student-1')
+
+    let resolveSubmit: ((value: { ok: boolean; json: () => Promise<{ ok: boolean }> }) => void) | null = null
+    Object.defineProperty(globalThis, 'fetch', {
+      configurable: true,
+      value: async (url: string, init?: RequestInit) => {
+        if (init?.method === 'POST' && url.includes('register-student')) {
+          return { ok: true, json: async () => ({ studentId: 'student-1', name: 'Ari' }) }
+        }
+        if (init?.method === 'POST' && url.includes('submit-answer')) {
+          return new Promise((resolve) => { resolveSubmit = resolve })
+        }
+        return { ok: true, json: async () => ({ sessionId: 'session-1', activeQuestionIds: [] }) }
+      },
+    })
+
+    const rendered = render(React.createElement(MemoryRouter, { initialEntries: ['/session-1'] },
+      React.createElement(Routes, null, React.createElement(Route, { path: '/:sessionId', element: React.createElement(ResonanceStudent) })),
+    ))
+    await waitFor(() => assert.equal(StudentTestWebSocket.instances.length, 1))
+    const socket = StudentTestWebSocket.instances[0]!
+    await act(async () => {
+      socket.emit({ type: 'resonance:session-state', payload: {
+        sessionId: 'session-1', activeQuestionIds: ['q1', 'q2'], activeQuestionRunRevision: 7,
+        activeQuestionDeadlineAt: Date.now() + 30_000,
+        activeQuestions: [
+          { id: 'q1', type: 'free-response', text: 'First', order: 1 },
+          { id: 'q2', type: 'free-response', text: 'Second', order: 2 },
+        ],
+      } })
+    })
+
+    console.info('[TEST] q1 is answered and submitted under run 7, but the REST response is held back')
+    const input = await waitFor(() => rendered.getByLabelText(/your answer/i) as HTMLTextAreaElement)
+    fireEvent.change(input, { target: { value: 'run 7 answer' } })
+    fireEvent.click(rendered.getByRole('button', { name: /submit answer/i }))
+    await waitFor(() => assert.ok(resolveSubmit !== null))
+
+    console.info('[TEST] the student switches to q2 — q1\'s QuestionView unmounts, its refs frozen on run 7')
+    fireEvent.click(rendered.getByRole('button', { name: /^q2$/i }))
+    await waitFor(() => rendered.getByText('Second'))
+
+    console.info('[TEST] the run restarts to 8 while q1 is unmounted — still active, so no reactivation cleanup fires for it')
+    await act(async () => {
+      socket.emit({ type: 'resonance:session-state', payload: {
+        sessionId: 'session-1', activeQuestionIds: ['q1', 'q2'], activeQuestionRunRevision: 8,
+        activeQuestionDeadlineAt: Date.now() + 30_000,
+        activeQuestions: [
+          { id: 'q1', type: 'free-response', text: 'First', order: 1 },
+          { id: 'q2', type: 'free-response', text: 'Second', order: 2 },
+        ],
+      } })
+    })
+
+    console.info('[TEST] the stale run-7 submission now resolves successfully')
+    await act(async () => {
+      resolveSubmit?.({ ok: true, json: async () => ({ ok: true }) })
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    console.info('[TEST] switching back to q1 (now under run 8) must not show it pre-submitted with the stale run-7 answer')
+    fireEvent.click(rendered.getByRole('button', { name: /^q1/i }))
+    await waitFor(() => rendered.getByText('First'))
+    assert.ok(rendered.queryByRole('button', { name: /submit answer/i }) !== null, 'q1 must not be pre-marked submitted')
+    assert.equal((rendered.getByLabelText(/your answer/i) as HTMLTextAreaElement).value, '')
+
+    rendered.unmount()
+  } finally {
+    restore()
+  }
+})
+
+void test('a delayed submission response cannot clobber a newer independent edit made after the view remounted', async () => {
+  // Copilot's finding: the same-run case of the same gap. The student
+  // submits q1, switches away before the response returns (unmounting its
+  // QuestionView), switches back (remounting a fresh one, still not marked
+  // submitted since the parent hasn't heard back yet), and types a
+  // different answer — which fires its own, independent draft save. The
+  // stale first submission's response arriving after that must not
+  // overwrite the newer local answer or lock q1 as submitted with the old
+  // text.
+  const restore = installStudentDom()
+  const { act, fireEvent, render, waitFor } = await import('@testing-library/react')
+  try {
+    window.localStorage.setItem('student-name-session-1', 'Ari')
+    window.localStorage.setItem('student-id-session-1', 'student-1')
+
+    let resolveSubmit: ((value: { ok: boolean; json: () => Promise<{ ok: boolean }> }) => void) | null = null
+    Object.defineProperty(globalThis, 'fetch', {
+      configurable: true,
+      value: async (url: string, init?: RequestInit) => {
+        if (init?.method === 'POST' && url.includes('register-student')) {
+          return { ok: true, json: async () => ({ studentId: 'student-1', name: 'Ari' }) }
+        }
+        if (init?.method === 'POST' && url.includes('submit-answer')) {
+          return new Promise((resolve) => { resolveSubmit = resolve })
+        }
+        return { ok: true, json: async () => ({ sessionId: 'session-1', activeQuestionIds: [] }) }
+      },
+    })
+
+    const rendered = render(React.createElement(MemoryRouter, { initialEntries: ['/session-1'] },
+      React.createElement(Routes, null, React.createElement(Route, { path: '/:sessionId', element: React.createElement(ResonanceStudent) })),
+    ))
+    await waitFor(() => assert.equal(StudentTestWebSocket.instances.length, 1))
+    const socket = StudentTestWebSocket.instances[0]!
+    socket.shouldFailDraft = false
+    await act(async () => {
+      socket.emit({ type: 'resonance:session-state', payload: {
+        sessionId: 'session-1', activeQuestionIds: ['q1', 'q2'], activeQuestionRunRevision: 7,
+        activeQuestionDeadlineAt: Date.now() + 30_000,
+        activeQuestions: [
+          { id: 'q1', type: 'free-response', text: 'First', order: 1 },
+          { id: 'q2', type: 'free-response', text: 'Second', order: 2 },
+        ],
+      } })
+    })
+
+    console.info('[TEST] q1 is answered and submitted, but the REST response is held back')
+    const input = await waitFor(() => rendered.getByLabelText(/your answer/i) as HTMLTextAreaElement)
+    fireEvent.change(input, { target: { value: 'draft one' } })
+    fireEvent.click(rendered.getByRole('button', { name: /submit answer/i }))
+    await waitFor(() => assert.ok(resolveSubmit !== null))
+
+    console.info('[TEST] the student switches away and back, remounting a fresh (not-yet-submitted) q1 view')
+    fireEvent.click(rendered.getByRole('button', { name: /^q2$/i }))
+    await waitFor(() => rendered.getByText('Second'))
+    fireEvent.click(rendered.getByRole('button', { name: /^q1$/i }))
+    const reopenedInput = await waitFor(() => rendered.getByLabelText(/your answer/i) as HTMLTextAreaElement)
+    assert.equal(reopenedInput.value, 'draft one')
+
+    console.info('[TEST] the replacement view makes its own newer, independent edit')
+    fireEvent.change(reopenedInput, { target: { value: 'draft two' } })
+    await waitFor(() => assert.ok(socket.sent.some((message) => message.includes('draft two'))), { timeout: 2_500 })
+
+    console.info('[TEST] the stale first submission now resolves successfully')
+    await act(async () => {
+      resolveSubmit?.({ ok: true, json: async () => ({ ok: true }) })
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    console.info('[TEST] q1 must not be locked as submitted with the old answer, clobbering the newer edit')
+    assert.equal(rendered.queryByRole('button', { name: 'Q1 ✓' }), null)
+    assert.equal((rendered.getByLabelText(/your answer/i) as HTMLTextAreaElement).value, 'draft two')
+
+    // Acknowledge the still-pending "draft two" send before unmounting, or
+    // its own ack timeout fires after teardown and the JSDOM globals it
+    // needs are already gone.
+    await act(async () => {
+      for (const message of socket.sent.filter((entry) => entry.includes('draft two'))) {
+        const sent = JSON.parse(message) as { payload: { draftId?: string } }
+        socket.emit({ type: 'resonance:draft-saved', payload: { draftId: sent.payload.draftId } })
+      }
+    })
+
+    rendered.unmount()
+  } finally {
+    restore()
+  }
+})
+
 void test('a still-in-flight autosave that fails after submission already succeeded cannot resurrect a retained draft', async () => {
   // Copilot's finding: onSubmitted only clears an *already-retained* failed
   // draft. It doesn't stop a *still-in-flight* autosave (sent before the
@@ -646,6 +828,87 @@ void test('a newer generation succeeding clears an older retained draft still qu
       await new Promise((resolve) => setTimeout(resolve, 1_200))
     })
     assert.equal(firstDraftAttempts, attemptsAfterAck)
+
+    rendered.unmount()
+  } finally {
+    restore()
+  }
+})
+
+void test('a stale generation-1 failure cannot be retained while a newer generation-2 send is still awaiting its own ack', async () => {
+  // Copilot's finding: recordUnconfirmedDraft's existing guards only compare
+  // against the highest *acknowledged* generation and whatever is already
+  // *retained* — neither catches a newer generation that has been sent but
+  // not yet resolved either way. Copilot's scenario: the older send came
+  // from a view that has since unmounted (and a replacement view's newer
+  // send is still in flight) when the older one's ack-timeout fires. A
+  // same-instance retype doesn't reproduce this — QuestionView's own
+  // isSameAnswer check already drops a stale same-instance failure report
+  // once draftAnswerRef has moved on — so this needs an actual unmount:
+  // switching away and back remounts a fresh view (still showing the first
+  // attempt, cached optimistically), which then makes its own independent
+  // edit while the *original* (unmounted) view's send is still pending.
+  const restore = installStudentDom()
+  const { act, fireEvent, render, waitFor } = await import('@testing-library/react')
+  try {
+    window.localStorage.setItem('student-name-session-1', 'Ari')
+    window.localStorage.setItem('student-id-session-1', 'student-1')
+    const rendered = render(React.createElement(MemoryRouter, { initialEntries: ['/session-1'] },
+      React.createElement(Routes, null, React.createElement(Route, { path: '/:sessionId', element: React.createElement(ResonanceStudent) })),
+    ))
+    await waitFor(() => assert.equal(StudentTestWebSocket.instances.length, 1))
+    const socket = StudentTestWebSocket.instances[0]!
+    socket.shouldFailDraft = false
+    await act(async () => {
+      socket.emit({ type: 'resonance:session-state', payload: {
+        sessionId: 'session-1', activeQuestionIds: ['q1', 'q2'], activeQuestionRunRevision: 7,
+        activeQuestionDeadlineAt: Date.now() + 60_000,
+        activeQuestions: [
+          { id: 'q1', type: 'free-response', text: 'First', order: 1 },
+          { id: 'q2', type: 'free-response', text: 'Second', order: 2 },
+        ],
+      } })
+    })
+
+    console.info('[TEST] a generation-1 draft is sent from the original q1 view and left unacknowledged')
+    const input = await waitFor(() => rendered.getByLabelText(/your answer/i) as HTMLTextAreaElement)
+    fireEvent.change(input, { target: { value: 'first attempt' } })
+    await waitFor(() => assert.ok(socket.sent.some((message) => message.includes('first attempt'))), { timeout: 2_500 })
+    const firstSentAt = Date.now()
+
+    console.info('[TEST] the student switches away and back, remounting a fresh q1 view')
+    fireEvent.click(rendered.getByRole('button', { name: /^q2$/i }))
+    await waitFor(() => rendered.getByText('Second'))
+    fireEvent.click(rendered.getByRole('button', { name: /^q1/i }))
+    const reopenedInput = await waitFor(() => rendered.getByLabelText(/your answer/i) as HTMLTextAreaElement)
+    assert.equal(reopenedInput.value, 'first attempt')
+
+    console.info('[TEST] the replacement view sends its own newer, independent edit — also left unacknowledged')
+    fireEvent.change(reopenedInput, { target: { value: 'second attempt' } })
+    await waitFor(() => assert.ok(socket.sent.some((message) => message.includes('second attempt'))), { timeout: 3_000 })
+    const secondDraftId = (JSON.parse(
+      socket.sent.find((message) => message.includes('second attempt'))!,
+    ) as { payload: { draftId: string } }).payload.draftId
+
+    console.info('[TEST] the original view\'s generation-1 send now times out unacknowledged, while generation 2 is still pending')
+    const elapsedSinceFirstSent = Date.now() - firstSentAt
+    const waitForFirstTimeout = Math.max(0, 2_000 - elapsedSinceFirstSent) + 300
+    socket.sent.length = 0
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, waitForFirstTimeout))
+    })
+
+    assert.ok(
+      !socket.sent.some((message) => message.includes('first attempt')),
+      'the superseded generation-1 failure must not be retried while generation 2 is still in flight',
+    )
+
+    // Acknowledge generation 2's still-pending send before unmounting, or
+    // its own ack timeout fires after teardown once the JSDOM globals it
+    // needs are already gone.
+    await act(async () => {
+      socket.emit({ type: 'resonance:draft-saved', payload: { draftId: secondDraftId } })
+    })
 
     rendered.unmount()
   } finally {
