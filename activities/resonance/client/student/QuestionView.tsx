@@ -207,6 +207,7 @@ export default function QuestionView({
             lastSentDraftRef.current = currentDraft
             onDraftSaveFailed?.({
               ...payload,
+              editSequence: editSequenceRef.current,
               draftGeneration: nextDraftGeneration?.(question.id, activeQuestionRunToken) ?? ++draftGenerationRef.current,
               answer: currentDraft,
             })

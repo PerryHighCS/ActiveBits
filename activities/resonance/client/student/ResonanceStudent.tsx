@@ -372,12 +372,10 @@ export default function ResonanceStudent() {
   // instead of comparing answer content alone — two different runs can
   // legitimately contain the same answer text/selection.
   const submittedAnswerRunRef = useRef<Record<string, number | null>>({})
-  const submittedQuestionIdsRef = useRef<Set<string>>(new Set())
   const [draftResetVersions, setDraftResetVersions] = useState<Record<string, number>>({})
   const [submissionAnnouncement, setSubmissionAnnouncement] = useState<SubmissionAnnouncement | null>(null)
   const [countdownNow, setCountdownNow] = useState(() => Date.now())
   submittedAnswersRef.current = submittedAnswers
-  submittedQuestionIdsRef.current = submittedQuestionIds
 
   const previousActiveQuestionIdsRef = useRef<string[]>([])
   const previousActiveQuestionRunRevisionRef = useRef<number | null>(null)
@@ -389,6 +387,9 @@ export default function ResonanceStudent() {
   // recorded on a confirmed response and causing a legitimate revisit edit to
   // be dropped as stale. See resolveCurrentEditSequence/advanceEditSequenceForRevisit.
   const editSequenceByKeyRef = useRef<Record<string, number>>({})
+  // Unlike the editable counter above, this watermark records an actual
+  // accepted submission and survives unlocking a live question for revisit.
+  const submittedEditSequenceByKeyRef = useRef<Record<string, number>>({})
   const draftGenerationByKeyRef = useRef<Record<string, number>>({})
   // Failed writes cannot live in QuestionView: that component is deliberately
   // remounted on a stack-tab change. Keep them for the student view lifetime,
@@ -528,6 +529,7 @@ export default function ResonanceStudent() {
     previousActiveQuestionRunStartedAtRef.current = null
     hasObservedSnapshotRef.current = false
     editSequenceByKeyRef.current = {}
+    submittedEditSequenceByKeyRef.current = {}
     draftGenerationByKeyRef.current = {}
     acknowledgedDraftGenerationByKeyRef.current.clear()
     submittedAnswerRunRef.current = {}
@@ -568,17 +570,11 @@ export default function ResonanceStudent() {
   const isPayloadSupersededBySubmission = useCallback((payload: Record<string, unknown>): boolean => {
     const questionId = typeof payload.questionId === 'string' ? payload.questionId : null
     if (questionId === null) return false
-    // submittedAnswerRunRef/submittedAnswers are written on every keystroke
-    // (onDraftChanged), not just on an actual submission — checking those
-    // alone would treat any optimistically-cached edit as "already
-    // submitted". submittedQuestionIds only gains an entry from onSubmitted,
-    // so it's the actual signal for "a submission happened here".
-    if (!submittedQuestionIdsRef.current.has(questionId)) return false
-    const payloadRunToken = resolvePayloadRunToken(payload)
-    if (!payloadMatchesRunToken(payload, submittedAnswerRunRef.current[questionId] ?? null)) return false
+    const submittedRunToken = submittedAnswerRunRef.current[questionId] ?? null
+    if (!payloadMatchesRunToken(payload, submittedRunToken)) return false
     const payloadEditSequence = typeof payload.editSequence === 'number' ? payload.editSequence : 0
-    const submittedEditSequence = resolveCurrentEditSequence(editSequenceByKeyRef.current, questionId, payloadRunToken)
-    return payloadEditSequence <= submittedEditSequence
+    const submittedEditSequence = submittedEditSequenceByKeyRef.current[buildEditSequenceKey(questionId, submittedRunToken)]
+    return submittedEditSequence !== undefined && payloadEditSequence <= submittedEditSequence
   }, [])
 
   // Stable regardless of snapshot identity: QuestionView includes this
@@ -1030,7 +1026,12 @@ export default function ResonanceStudent() {
                     // allowed to delete this newer draft.
                     unconfirmedDraftsRef.current.set(key!, {
                       ...retained,
-                      payload: { ...retained.payload, draftGeneration: replacementGeneration, answer },
+                      payload: {
+                        ...retained.payload,
+                        editSequence: resolveCurrentEditSequence(editSequenceByKeyRef.current, questionId, runToken),
+                        draftGeneration: replacementGeneration,
+                        answer,
+                      },
                       retrying: false,
                     })
                     setUnconfirmedDraftVersion((current) => current + 1)
@@ -1045,6 +1046,8 @@ export default function ResonanceStudent() {
                 onSubmitted={(questionId, answer) => {
                   const runToken = snapshot.activeQuestionRunRevision ?? snapshot.activeQuestionRunStartedAt
                   submittedAnswerRunRef.current[questionId] = runToken
+                  submittedEditSequenceByKeyRef.current[buildEditSequenceKey(questionId, runToken)] =
+                    resolveCurrentEditSequence(editSequenceByKeyRef.current, questionId, runToken)
                   setSubmittedAnswers((current) => ({
                     ...current,
                     [questionId]: answer,
