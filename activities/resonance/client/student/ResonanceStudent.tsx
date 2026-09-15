@@ -32,12 +32,11 @@ interface UnconfirmedDraft {
 
 /**
  * Per-question state that survives a QuestionView remount (that component
- * is deliberately remounted on every stack-tab switch), being migrated
- * incrementally off a set of separately-keyed refs/maps that previously
- * had to be kept in sync by hand — see the consolidation plan at
- * .agent/plans/resonance-draft-state-consolidation.md. Keyed by questionId
- * alone: a run transition updates fields on the existing entry in place
- * rather than requiring values to be copied across a second key
+ * is deliberately remounted on every stack-tab switch). Consolidates what
+ * used to be six separately-keyed refs/maps that had to be kept in sync by
+ * hand — see .agent/plans/resonance-draft-state-consolidation.md. Keyed by
+ * questionId alone: a run transition updates fields on the existing entry
+ * in place rather than requiring values to be copied across a second key
  * namespace.
  *
  * None of these fields (other than runToken itself) are trustworthy on

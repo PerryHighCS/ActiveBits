@@ -310,10 +310,17 @@ through activity-specific props.
   takes precedence over its older confirmed response in instructor progress until submitted.
 - Resonance's student `QuestionView` is keyed by question ID and remounts on every stack-tab
   switch, so a failed autosave cannot retain itself locally. Instead `ResonanceStudent` owns a
-  parent-level retained-draft map (keyed by question + run) and a 1-second retry loop that
-  survives that remounting; a monotonic draft generation (allocated by the parent, not the
-  child, for the same reason) lets both the client queue and the server's `update-draft` handler
-  discard an older attempt without dropping a newer one that raced ahead of it. The `useResonanceSession`
+  parent-level `Map<questionId, QuestionDraftState>` (one record per question, holding which run
+  it currently represents plus every run-scoped field — edit sequence, draft generation,
+  acknowledgement watermark, retained draft — together, so a run transition updates one record in
+  place instead of requiring values to be copied across a separate per-run key) and a 1-second
+  retry loop that survives that remounting; a monotonic draft generation (allocated by the
+  parent, not the child, for the same reason) lets both the client queue and the server's
+  `update-draft` handler discard an older attempt without dropping a newer one that raced ahead
+  of it. Run-identity comparison (a payload's revision or legacy pre-rollout timestamp against a
+  session/snapshot's current run) is centralized in `activities/resonance/shared/runIdentity.ts`,
+  shared by the client component, the client hook, and the server, rather than reimplemented at
+  each call site. The `useResonanceSession`
   hook separately queues an unacknowledged or send-failed draft for replay on WebSocket reconnect,
   again ordered by that same generation watermark so a stale queued attempt cannot win a race
   against a newer one still in flight when the socket drops. A draft's disposition (retry / discard /

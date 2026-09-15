@@ -992,7 +992,7 @@ void test('a reactivated question seeds its new run past a stale confirmed edit 
   // response, regardless of which run recorded it. If q1 was confirmed in
   // run 7 at editSequence 5 and then reactivated as run 8, a run-8 draft at
   // the naive default of 1 would satisfy "1 <= 5" and get wrongly discarded
-  // as already-superseded. seedEditSequenceFromConfirmedResponse exists
+  // as already-superseded. seedQuestionEditSequenceFromConfirmedResponse exists
   // precisely to prevent that: it bumps a reactivated run's own local
   // counter past any stale confirmed value before the student can type
   // anything. Verify the actual sent payload's editSequence reflects that
