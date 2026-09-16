@@ -178,18 +178,36 @@ export default function QuestionView({
     }
 
     const pendingDraft = draftAnswer
+    // Shared by every send/handoff below so a payload's shape (and its
+    // draftGeneration allocation, a side effect of building one) only has
+    // one implementation — previously duplicated three times, once per
+    // handoff site, which is exactly how the handoff itself went missing
+    // from a fourth site (the disabled-transition branch in the cleanup
+    // below) until a later review round found it.
+    const buildDraftPayload = (answer: AnswerPayload | null) => ({
+      studentId,
+      questionId: question.id,
+      ...(activeQuestionRunRevision !== null
+        ? { activeQuestionRunRevision: activeQuestionRunToken }
+        : { activeQuestionRunStartedAt: activeQuestionRunToken }),
+      ...(activeQuestionDeadlineAt !== null ? { activeQuestionDeadlineAt } : {}),
+      editSequence: editSequenceRef.current,
+      draftGeneration: nextDraftGeneration?.(question.id, activeQuestionRunToken) ?? ++draftGenerationRef.current,
+      answer,
+    })
+    // The parent owns retry/deadline reconciliation once a value can no
+    // longer reach the server through this view's own debounce — after a
+    // save this component started is superseded, after a failure, or after
+    // the deadline disables this view before its own debounce ever got to
+    // run. In every case, handing the CURRENT (not the stale pending) value
+    // off with a fresh generation is the one durable path.
+    const handOffCurrentDraft = () => {
+      const currentDraft = draftAnswerRef.current
+      lastSentDraftRef.current = currentDraft
+      onDraftSaveFailed?.(buildDraftPayload(currentDraft))
+    }
     const sendDraft = () => {
-      const payload = {
-        studentId,
-        questionId: question.id,
-        ...(activeQuestionRunRevision !== null
-          ? { activeQuestionRunRevision: activeQuestionRunToken }
-          : { activeQuestionRunStartedAt: activeQuestionRunToken }),
-        ...(activeQuestionDeadlineAt !== null ? { activeQuestionDeadlineAt } : {}),
-        editSequence: editSequenceRef.current,
-        draftGeneration: nextDraftGeneration?.(question.id, activeQuestionRunToken) ?? ++draftGenerationRef.current,
-        answer: pendingDraft,
-      }
+      const payload = buildDraftPayload(pendingDraft)
       if (saveDraft) {
         void saveDraft(payload).then((saved) => {
           if (sessionIdRef.current !== sessionId || studentIdRef.current !== studentId) {
@@ -215,14 +233,7 @@ export default function QuestionView({
             // deadline disables this view before its own debounce fires,
             // that edit would otherwise never reach the server at all.
             if (isCurrentRun && !isSameAnswer(draftAnswerRef.current, lastSentDraftRef.current)) {
-              const currentDraft = draftAnswerRef.current
-              lastSentDraftRef.current = currentDraft
-              onDraftSaveFailed?.({
-                ...payload,
-                editSequence: editSequenceRef.current,
-                draftGeneration: nextDraftGeneration?.(question.id, activeQuestionRunToken) ?? ++draftGenerationRef.current,
-                answer: currentDraft,
-              })
+              handOffCurrentDraft()
             }
             return
           }
@@ -244,16 +255,7 @@ export default function QuestionView({
             // the parent: restarting this effect would run its cleanup and
             // schedule a second debounce for the same value, and a deadline
             // can disable this view before that timer is allowed to run.
-            // The parent owns retry/deadline reconciliation after a view is
-            // disabled or unmounted, so it is the one durable handoff point.
-            const currentDraft = draftAnswerRef.current
-            lastSentDraftRef.current = currentDraft
-            onDraftSaveFailed?.({
-              ...payload,
-              editSequence: editSequenceRef.current,
-              draftGeneration: nextDraftGeneration?.(question.id, activeQuestionRunToken) ?? ++draftGenerationRef.current,
-              answer: currentDraft,
-            })
+            handOffCurrentDraft()
           }
         })
         return
@@ -279,19 +281,31 @@ export default function QuestionView({
     return () => {
       window.clearTimeout(timeoutId)
       if (
-        activeQuestionRunRevisionRef.current === activeQuestionRunToken &&
-        draftAnswerRunRevision === activeQuestionRunToken &&
-        sessionIdRef.current === sessionId &&
-        studentIdRef.current === studentId &&
-        !disabledRef.current &&
+        activeQuestionRunRevisionRef.current !== activeQuestionRunToken ||
+        draftAnswerRunRevision !== activeQuestionRunToken ||
+        sessionIdRef.current !== sessionId ||
+        studentIdRef.current !== studentId ||
         // On a draft value change React runs this cleanup before scheduling
         // the next debounce. The ref already holds the newer value, so do not
         // flush the previous keystroke; reserve flushing for actual unmount.
-        isSameAnswer(draftAnswerRef.current, pendingDraft) &&
-        !isSameAnswer(pendingDraft, lastSentDraftRef.current)
+        !isSameAnswer(draftAnswerRef.current, pendingDraft) ||
+        isSameAnswer(pendingDraft, lastSentDraftRef.current)
       ) {
-        sendDraft()
+        return
       }
+      if (!disabledRef.current) {
+        sendDraft()
+        return
+      }
+      // The deadline disabled this view while this debounce was still
+      // pending and nothing was in flight to catch it via the saveDraft
+      // success/failure handoffs above (those only run once a promise
+      // settles). Previously this branch did nothing at all — the pending
+      // edit was silently dropped instead of hand off, indistinguishable
+      // from "the debounce's own send lost the race to a throttled timer,"
+      // a real risk for a backgrounded tab where the browser can delay
+      // this timeout well past its nominal delay.
+      handOffCurrentDraft()
     }
   }, [activeQuestionDeadlineAt, activeQuestionRunRevision, activeQuestionRunToken, disabled, draftAnswer, isSubmitted, isWaitingForChoices, nextDraftGeneration, onDraftSaveFailed, onDraftSaved, question.id, saveDraft, sendMessage, sessionId, studentId])
 

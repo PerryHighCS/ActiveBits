@@ -4030,6 +4030,51 @@ void test('advance-staged-question can intentionally skip a stem-only MCQ', asyn
   await sessions.close()
 })
 
+void test('submit-answer route rejects a malformed activeQuestionRunRevision instead of treating it as absent', async () => {
+  // Copilot's finding: matchesActiveQuestionRun narrowed a non-number
+  // revision/startedAt to null before ever calling into the shared
+  // runIdentitiesMatch — so a malformed value like the string 'bad' was
+  // silently laundered into a legitimately-absent field by the time
+  // runIdentitiesMatch's own malformed-field guard ever saw it, letting an
+  // invalid run identity pass as "no run info provided" and match a
+  // self-paced session's null/null run state.
+  const app = createMockApp()
+  const ws = createMockWs()
+  const sessions = createSessionStore(null)
+  const session = createMultiQuestionSession()
+  ;(session.data as { selfPacedMode?: boolean }).selfPacedMode = true
+  const studentCookies = issueStudentCookies(session, 'student1')
+  await sessions.set(session.id, session)
+
+  setupResonanceRoutes(app, sessions, ws)
+
+  const submitHandler = app.handlers.post['/api/resonance/:sessionId/submit-answer']
+  assert.equal(typeof submitHandler, 'function')
+
+  const submitRes = createResponse()
+  await submitHandler?.(
+    {
+      params: { sessionId: session.id },
+      cookies: studentCookies,
+      body: {
+        studentId: 'student1',
+        questionId: 'q1',
+        activeQuestionRunRevision: 'bad',
+        answer: {
+          type: 'free-response',
+          text: 'Self-paced answer',
+        },
+      },
+    },
+    submitRes,
+  )
+
+  assert.equal(submitRes.statusCode, 409)
+  assert.deepEqual(submitRes.body, { error: 'question run changed' })
+
+  await sessions.close()
+})
+
 void test('submit-answer route broadcasts an updated instructor snapshot to instructor displays', async () => {
   const app = createMockApp()
   const ws = createMockWs()

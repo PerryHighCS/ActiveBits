@@ -147,6 +147,48 @@ export function runIdentitiesMatch(current: RunIdentitySource, candidate: RunIde
   return crossFormMatch(current, candidate)
 }
 
+// One side is still legacy-form and the other explicitly canonical revision
+// 1 — but unlike crossFormMatch's forward/reverse halves, BOTH sides here
+// are full authoritative snapshots, so there is no "absent field" case to
+// forgive: a snapshot's null is always a deliberate assertion. The legacy
+// side must therefore carry a genuine (non-null) timestamp to match, in
+// both directions symmetrically.
+function snapshotsMigratedSameRun(legacySide: RunIdentitySource, canonicalSide: RunIdentitySource): boolean {
+  return canonicalSide.activeQuestionRunRevision === 1 &&
+    !hasRevision(legacySide) &&
+    hasStartedAt(legacySide) &&
+    legacySide.activeQuestionRunStartedAt === canonicalSide.activeQuestionRunStartedAt
+}
+
+/**
+ * Does `previous` and `current` — both FULL, authoritative snapshots taken
+ * at two points in time (never an incoming payload, which may legitimately
+ * omit fields) — identify the same real run?
+ *
+ * This is deliberately NOT runIdentitiesMatch. That comparator's forgiving
+ * "no information provided" bridge exists for its own contract — a
+ * candidate payload that omits a field is not asserting "no active run,"
+ * just "I didn't say" — and normalizeSessionData's independent backfill
+ * (revision defaults to 1 before a real startedAt is known) means a
+ * genuinely active current run can share runIdentitiesMatch's "absent"
+ * shape with a candidate that provides nothing at all. Reusing that
+ * contract here, where BOTH operands are full snapshots with no such
+ * excuse, was itself the bug an earlier review round found: it let
+ * `previous: {revision: null, startedAt: null}` (a genuinely idle session)
+ * match `current: {revision: 1, startedAt: null}` (a run that has just
+ * started, before any deadline/timestamp backfill), silently swallowing a
+ * real activation as "not a restart." A full snapshot's null is always a
+ * deliberate "no run" assertion, so there is no absent-field case to
+ * forgive — the only accepted cross-form case is a genuine legacy-to-
+ * canonical migration of the SAME run, which still requires the legacy
+ * side to carry a real timestamp (see snapshotsMigratedSameRun).
+ */
+export function snapshotsIdentifySameRun(previous: RunIdentitySource, current: RunIdentitySource): boolean {
+  if (hasInvalidRunField(previous) || hasInvalidRunField(current)) return false
+  if (resolveRunToken(previous) === resolveRunToken(current)) return true
+  return snapshotsMigratedSameRun(previous, current) || snapshotsMigratedSameRun(current, previous)
+}
+
 /**
  * Compare a payload's run identity against a scalar token already resolved
  * (via resolveRunToken) from some other source at an earlier point in time
@@ -171,6 +213,7 @@ export function payloadMatchesResolvedRunToken(
   resolvedToken: number | null,
   resolvedTokenStartedAt: number | null,
 ): boolean {
+  if (hasInvalidRunField(payload)) return false
   if (resolveRunToken(payload) === resolvedToken) return true
 
   // The cached scalar might itself be a legacy timestamp that this

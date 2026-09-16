@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { payloadMatchesResolvedRunToken, resolveRunToken, runIdentitiesMatch, type RunIdentitySource } from './runIdentity.js'
+import { payloadMatchesResolvedRunToken, resolveRunToken, runIdentitiesMatch, snapshotsIdentifySameRun, type RunIdentitySource } from './runIdentity.js'
 
 void test('resolveRunToken prefers revision over the legacy start timestamp', () => {
   assert.equal(resolveRunToken({ activeQuestionRunRevision: 3, activeQuestionRunStartedAt: 999 }), 3)
@@ -140,6 +140,72 @@ void test('runIdentitiesMatch: a current that is itself still in legacy (null re
     runIdentitiesMatch(
       { activeQuestionRunRevision: null, activeQuestionRunStartedAt: 1_000 },
       { activeQuestionRunStartedAt: 2_000 },
+    ),
+    false,
+  )
+})
+
+void test('snapshotsIdentifySameRun does not treat a genuinely idle previous snapshot as the same run as a freshly-started one', () => {
+  // Copilot's finding: hasActiveQuestionRunRestart used to delegate this
+  // exact comparison to runIdentitiesMatch, which is designed to treat a
+  // candidate that provides no run information at all as compatible with a
+  // current run whose own startedAt also happens to be null (a real,
+  // legitimate backfill quirk for its actual contract — see
+  // runIdentitiesMatch's own tests above). Reused for two full snapshots
+  // instead, that same leniency let a previous snapshot with no active run
+  // at all ({revision: null, startedAt: null} — genuinely idle) match a
+  // current snapshot for a run that has just started ({revision: 1,
+  // startedAt: null} — before any timestamp backfill), silently treating a
+  // real activation as "not a restart."
+  assert.equal(
+    snapshotsIdentifySameRun(
+      { activeQuestionRunRevision: null, activeQuestionRunStartedAt: null },
+      { activeQuestionRunRevision: 1, activeQuestionRunStartedAt: null },
+    ),
+    false,
+  )
+  // The reverse direction (a run ending) must also not be masked.
+  assert.equal(
+    snapshotsIdentifySameRun(
+      { activeQuestionRunRevision: 1, activeQuestionRunStartedAt: null },
+      { activeQuestionRunRevision: null, activeQuestionRunStartedAt: null },
+    ),
+    false,
+  )
+})
+
+void test('snapshotsIdentifySameRun still recognizes a genuine legacy-to-canonical migration of the same run, in both directions', () => {
+  assert.equal(
+    snapshotsIdentifySameRun(
+      { activeQuestionRunRevision: null, activeQuestionRunStartedAt: 1_000 },
+      { activeQuestionRunRevision: 1, activeQuestionRunStartedAt: 1_000 },
+    ),
+    true,
+  )
+  assert.equal(
+    snapshotsIdentifySameRun(
+      { activeQuestionRunRevision: 1, activeQuestionRunStartedAt: 1_000 },
+      { activeQuestionRunRevision: null, activeQuestionRunStartedAt: 1_000 },
+    ),
+    true,
+  )
+  // A migration claim without a genuine shared timestamp is not the same
+  // run — the legacy side must carry a real timestamp, not just an absent
+  // one, exactly like the idle case above.
+  assert.equal(
+    snapshotsIdentifySameRun(
+      { activeQuestionRunRevision: null, activeQuestionRunStartedAt: 1_000 },
+      { activeQuestionRunRevision: 1, activeQuestionRunStartedAt: 2_000 },
+    ),
+    false,
+  )
+})
+
+void test('snapshotsIdentifySameRun rejects a present-but-malformed field on either snapshot', () => {
+  assert.equal(
+    snapshotsIdentifySameRun(
+      { activeQuestionRunRevision: null, activeQuestionRunStartedAt: null },
+      { activeQuestionRunRevision: 1.5, activeQuestionRunStartedAt: null },
     ),
     false,
   )
@@ -320,6 +386,23 @@ void test('payloadMatchesResolvedRunToken rejects a legacy payload from a differ
   // A caller that genuinely doesn't know revision 1's own startedAt (null)
   // must fail closed rather than accept any legacy payload.
   assert.equal(payloadMatchesResolvedRunToken(currentRunPayload, 1, null), false)
+})
+
+void test('payloadMatchesResolvedRunToken rejects a present-but-malformed payload field, consistent with runIdentitiesMatch', () => {
+  // Copilot's finding: this function started with a bare
+  // `resolveRunToken(payload) === resolvedToken`, never calling
+  // hasInvalidRunField the way runIdentitiesMatch does — so a malformed
+  // payload like `{ activeQuestionRunStartedAt: NaN }` resolved to null the
+  // same way a genuinely self-paced/no-run payload does, and could match a
+  // cached `resolvedToken: null`, letting the parent treat an invalid
+  // callback as a legitimate self-paced draft.
+  assert.equal(payloadMatchesResolvedRunToken({ activeQuestionRunStartedAt: Number.NaN }, null, null), false)
+  assert.equal(payloadMatchesResolvedRunToken({ activeQuestionRunRevision: 1.5 }, null, null), false)
+  // A malformed field must also block a match against a non-null resolved
+  // token, not just the null/self-paced case.
+  assert.equal(payloadMatchesResolvedRunToken({ activeQuestionRunRevision: 1.5 }, 1, 555), false)
+  // A genuinely absent/null field is still accepted.
+  assert.equal(payloadMatchesResolvedRunToken({}, null, null), true)
 })
 
 // The one deliberate divergence from the original isPayloadForSnapshotRun

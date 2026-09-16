@@ -1909,6 +1909,32 @@ void test('unconfirmed draft retry stops on deadline or an authoritative run cha
   )
 })
 
+void test('resolveUnconfirmedDraftDisposition recognizes a canonicalized retained draft against an out-of-order still-legacy snapshot', () => {
+  // Copilot's finding: this used its own hand-rolled, one-directional
+  // isLegacyRevisionOneRun bridge instead of the shared runIdentitiesMatch —
+  // a fifth reimplementation the runIdentity.ts consolidation missed. It
+  // only recognized "payload is legacy, snapshot is canonical revision 1,"
+  // not the reverse: a retained draft already canonicalized to revision 1
+  // (by canonicalizeLegacyRevisionOneDraft) arriving against an
+  // out-of-order snapshot that is STILL timestamp-only (a real, reachable
+  // shape — snapshots and draft-save payloads travel over different
+  // connections/timings). Both forms identify the exact same run, but the
+  // old comparison saw payloadRunToken (1) !== activeRunToken (the
+  // snapshot's raw startedAt) and discarded a perfectly valid retained
+  // draft.
+  const canonicalizedPayload = {
+    studentId: 'student-1', questionId: 'q1', activeQuestionRunRevision: 1, activeQuestionRunStartedAt: 500,
+    activeQuestionDeadlineAt: 2_000, answer: { type: 'free-response', text: 'Already canonicalized' },
+  }
+  const stillLegacySnapshot = {
+    activeQuestionIds: ['q1'],
+    activeQuestionRunStartedAt: 500,
+    activeQuestionRunRevision: null,
+    activeQuestionDeadlineAt: 2_000,
+  }
+  assert.equal(resolveUnconfirmedDraftDisposition(canonicalizedPayload, stillLegacySnapshot, 'student-1', 1_999), 'retry')
+})
+
 void test('a self-paced retry stops once its question is submitted, instead of retrying forever', () => {
   // Self-paced snapshots have no deadline and keep every question in
   // activeQuestionIds indefinitely, so isCurrentRun alone never turns
@@ -2340,5 +2366,29 @@ void test('hasActiveQuestionRunRestart does not treat a legacy-to-canonical migr
       previousActiveQuestionRunStartedAt: 5_000,
     }),
     false,
+  )
+})
+
+void test('hasActiveQuestionRunRestart still detects a genuine idle-to-live transition when the newly-started run has no timestamp yet', () => {
+  // Copilot's finding: hasActiveQuestionRunRestart used to delegate this
+  // comparison to runIdentitiesMatch, whose "no information provided"
+  // leniency (built for its actual contract: a candidate payload that omits
+  // a field entirely) let a previous snapshot with no active run at all
+  // (revision null, startedAt null) match a current snapshot for a run that
+  // has JUST started (revision 1, startedAt not yet backfilled) — because
+  // both happen to resolve their "other" missing field to null the same
+  // way. That silently swallowed a real activation as "not a restart,"
+  // leaving the prior idle state's local answers in place instead of
+  // clearing them for the new run.
+  assert.equal(
+    hasActiveQuestionRunRestart({
+      hasObservedSnapshot: true,
+      activeQuestionIds: ['q1'],
+      activeQuestionRunRevision: 1,
+      previousActiveQuestionRunRevision: null,
+      activeQuestionRunStartedAt: null,
+      previousActiveQuestionRunStartedAt: null,
+    }),
+    true,
   )
 })

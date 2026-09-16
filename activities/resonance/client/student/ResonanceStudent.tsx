@@ -9,7 +9,7 @@ import NameEntryForm from './NameEntryForm.js'
 import QuestionView from './QuestionView.js'
 import SharedResponseFeed from './SharedResponseFeed.js'
 import { areMcqSelectionsEqual } from '../../shared/mcq.js'
-import { asRunIdentitySource, payloadMatchesResolvedRunToken, resolveRunToken, runIdentitiesMatch, type RunIdentitySource } from '../../shared/runIdentity.js'
+import { asRunIdentitySource, payloadMatchesResolvedRunToken, resolveRunToken, runIdentitiesMatch, snapshotsIdentifySameRun, type RunIdentitySource } from '../../shared/runIdentity.js'
 import { buildDraftRetryKey, resolveDraftGeneration } from '../draftAttempt.js'
 import type { AnswerPayload } from '../../shared/types.js'
 
@@ -328,23 +328,16 @@ export function resolveUnconfirmedDraftDisposition(
   studentId: string,
   now: number,
 ): 'discard' | 'reconcile' | 'retry' {
-  const activeRunToken = snapshot.activeQuestionRunRevision ?? snapshot.activeQuestionRunStartedAt
-  const payloadHasRevision = typeof payload.activeQuestionRunRevision === 'number'
-  const payloadRunToken = payloadHasRevision
-    ? payload.activeQuestionRunRevision as number
-    : typeof payload.activeQuestionRunStartedAt === 'number'
-      ? payload.activeQuestionRunStartedAt
-      : null
-  // The server accepts timestamp-only drafts from pre-revision clients for
-  // the original numbered run (revision 1). Mirror that migration path in
-  // the client retry owner so reconnect does not discard a still-valid draft.
-  const isLegacyRevisionOneRun = !payloadHasRevision &&
-    snapshot.activeQuestionRunRevision === 1 &&
-    payloadRunToken === snapshot.activeQuestionRunStartedAt
+  // runIdentitiesMatch (not a hand-rolled comparison) covers the server's
+  // migration path for timestamp-only drafts from pre-revision clients, the
+  // same way every other payload-vs-active-run comparison in this file
+  // does — this used to be its own one-directional bridge, which had the
+  // same asymmetry bug the shared module's reverseCrossFormMatch exists to
+  // fix, just reimplemented locally instead of migrated onto it.
   const questionId = typeof payload.questionId === 'string' ? payload.questionId : null
   const isCurrentRun =
     payload.studentId === studentId &&
-    (payloadRunToken === activeRunToken || isLegacyRevisionOneRun) &&
+    runIdentitiesMatch(snapshot, asRunIdentitySource(payload)) &&
     questionId !== null &&
     snapshot.activeQuestionIds.includes(questionId)
 
@@ -549,12 +542,15 @@ export function hasActiveQuestionRunRestart(params: {
   // A raw revision-first comparison treats a legacy-to-canonical migration
   // (previous: {revision: null, startedAt: T}, new: {revision: 1, startedAt:
   // T} — the same real run, just normalized) as a restart, wrongly clearing
-  // local answers/submissions for a run that never actually ended. Use the
-  // same equivalence shared/runIdentity.ts already uses for this bridge
-  // everywhere else instead of a bespoke comparison here.
-  const runChanged = !runIdentitiesMatch(
-    { activeQuestionRunRevision: params.activeQuestionRunRevision, activeQuestionRunStartedAt: params.activeQuestionRunStartedAt },
+  // local answers/submissions for a run that never actually ended.
+  // snapshotsIdentifySameRun (not runIdentitiesMatch — both params here are
+  // full snapshots, not a payload-vs-active-run comparison, and
+  // runIdentitiesMatch's forgiving-absent-field bridge doesn't apply to two
+  // snapshots that both explicitly assert null) handles that migration case
+  // without also swallowing a genuine idle-to-active transition.
+  const runChanged = !snapshotsIdentifySameRun(
     { activeQuestionRunRevision: params.previousActiveQuestionRunRevision, activeQuestionRunStartedAt: params.previousActiveQuestionRunStartedAt },
+    { activeQuestionRunRevision: params.activeQuestionRunRevision, activeQuestionRunStartedAt: params.activeQuestionRunStartedAt },
   )
 
   return (

@@ -33,7 +33,7 @@ import type {
 } from '../shared/types.js'
 import { isValidStudentReactionEmoji } from '../shared/emojiSet.js'
 import { getCorrectOptionIds, getMcqSelectionMode } from '../shared/mcq.js'
-import { runIdentitiesMatch } from '../shared/runIdentity.js'
+import { asRunIdentitySource, runIdentitiesMatch } from '../shared/runIdentity.js'
 import { normalizePresentationMode, validateAnswerPayload, validateQuestion, validateQuestionSet, validateStudentRegistration } from '../shared/validation.js'
 import { decryptQuestions, encryptQuestions, MAX_ENCODED_PAYLOAD_CHARS } from './questionCrypto.js'
 import {
@@ -524,19 +524,25 @@ function getQuestionAnswerability(sessionData: ResonanceSessionData, questionId:
 }
 
 // A payload's revision/legacyStartedAt fields arrive as unknown (raw
-// client JSON); narrow them to the shared comparator's expected shape
-// rather than trusting their type. sessionData's own fields are always
-// clean number|null (set together — see setStagedActiveQuestion and
-// normalizeSessionData's backfill below), so no narrowing is needed there.
+// client JSON). Pass them through to the shared comparator as-is (via
+// asRunIdentitySource, which only affects the TypeScript type, not the
+// runtime value) rather than coercing a non-number to null here: that
+// coercion used to make a malformed value (e.g. a string) indistinguishable
+// from a legitimately absent field by the time runIdentitiesMatch's own
+// malformed-field guard ever saw it, silently laundering an invalid run
+// identity into an accepted "no run info provided" shape. sessionData's own
+// fields are always clean number|null (set together — see
+// setStagedActiveQuestion and normalizeSessionData's backfill below), so no
+// narrowing is needed there.
 function matchesActiveQuestionRun(
   sessionData: ResonanceSessionData,
   revision: unknown,
   legacyStartedAt: unknown,
 ): boolean {
-  return runIdentitiesMatch(sessionData, {
-    activeQuestionRunRevision: typeof revision === 'number' ? revision : null,
-    activeQuestionRunStartedAt: typeof legacyStartedAt === 'number' ? legacyStartedAt : null,
-  })
+  return runIdentitiesMatch(sessionData, asRunIdentitySource({
+    activeQuestionRunRevision: revision,
+    activeQuestionRunStartedAt: legacyStartedAt,
+  }))
 }
 
 // A stored response persisted before the revision rollout never had
