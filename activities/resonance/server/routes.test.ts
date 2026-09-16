@@ -4052,6 +4052,7 @@ void test('submit-answer route rejects a malformed activeQuestionRunRevision ins
   assert.equal(typeof submitHandler, 'function')
 
   const submitRes = createResponse()
+  console.info('[TEST] malformed activeQuestionRunRevision must be rejected')
   await submitHandler?.(
     {
       params: { sessionId: session.id },
