@@ -32,6 +32,16 @@ Before making changes, read these files when relevant:
 12. When adding or changing SyncDeck-embedded activity launch formats, update `skills/syncdeck/references/ACTIVITY_PAYLOADS.md` in the same branch so the shared skill docs stay aligned with the real payloads used by the repo.
 13. If a `skills/syncdeck/...` doc change is intended to be shared across repos, push the updated subtree back to `syncdeck-agent-skills` as part of the completion flow.
 14. Always perform `git subtree pull` and other subtree sync operations on a non-`main` branch. Keep local `main` aligned with `origin/main`, and branch first before pulling subtree updates.
+15. For stateful behavior that crosses module, request, process, or asynchronous boundaries, make the contract explicit and keep its implementation cohesive:
+   - Centralize a shared decision or derivation in one named, exported, tested function instead of duplicating it across callers.
+   - Test semantic rules with a decision table or equivalence matrix that covers ordinary, boundary, missing/legacy, and conflicting inputs.
+   - Keep related mutable state for one entity in a single record, type, or explicitly owned state machine rather than parallel structures that can drift.
+   - Before introducing a non-trivial invariant (for example ordering, reconciliation,
+     deduplication, or retry semantics), document its owner, invariant, and failure
+     behavior in the relevant active `.agent/plans/<name>.md`; create a new plan only
+     when no relevant active plan exists. Promote the final contract to `ARCHITECTURE.md`
+     or `.agent/knowledge/data-contracts.md` when future changes must preserve it.
+16. If three or more review rounds on the same PR expose related defects, stop and perform root-cause analysis against the relevant contract rather than continuing to patch symptoms.
  
 ## Preflight Checklist
 
@@ -94,13 +104,31 @@ Run these minimum checks based on scope:
    - owner
    - cleanup condition or target date
 
-## Release-Impact Rule
+## Documentation and Release-Impact Rule
 
-If a change affects runtime, build, or deployment behavior:
+When a change affects production behavior, update the authoritative documentation in
+the same PR. Choose the document by audience:
 
-1. Update `DEPLOYMENT.md` in the same PR.
-2. Update `README.md` quick-start/build/run commands as needed.
-3. Update `ARCHITECTURE.md` if system boundaries or runtime flow changed.
+1. Update `DEPLOYMENT.md` only when operators must change or verify something:
+   environment variables, build/start commands, deploy artifacts, hosting/platform
+   configuration, network/proxy/TLS/cookie requirements, data migrations or rollback,
+   scaling topology, monitoring, or incident response.
+
+2. Put system design, concurrency, cache/session behavior, and cross-workspace runtime
+   flow in `ARCHITECTURE.md`.
+
+3. Put activity-specific behavior, client/server protocol details, and compatibility
+   rules in the activity documentation, `skills/...` reference, or
+   `.agent/knowledge/data-contracts.md` as appropriate.
+
+4. Put security rationale and credential/capability design details in
+   `.agent/knowledge/security-notes.md`; put dated operational risks, evidence, and
+   rollback notes in `.agent/knowledge/deployment-notes.md`.
+
+5. Do not add implementation narratives, state-machine histories, review findings, or
+   activity-specific protocol details to `DEPLOYMENT.md`. Each entry there must state
+   an operator action, constraint, verification, or incident response. Link to the
+   authoritative technical document when additional detail is needed.
 
 ## Ownership and Escalation
 
@@ -132,6 +160,6 @@ If a discovery does not fit an existing knowledge file, create a new `.agent/kno
 ## Definition of Done (General)
 
 1. Relevant tests pass.
-2. Documentation is updated for any workflow/runtime/build change.
+2. Relevant authoritative documentation is updated for any workflow, runtime, build, or deployment change, following the Documentation and Release-Impact Rule.
 3. Notes are recorded in the appropriate log files.
 4. If following a plan, appropriate step(s) are marked as complete.
