@@ -48,7 +48,7 @@ Configure these environment variables:
 | `VALKEY_URL` | Yes for production persistence and multi-instance operation | Internal Render Key Value URL |
 | `PERSISTENT_SESSION_SECRET` | Yes | Unique random value of at least 32 characters |
 | `SESSION_TTL_MS` | No | `3600000` (one hour) |
-| `HOST` | No | `0.0.0.0` |
+| `HOST` | Yes on Render | `0.0.0.0` |
 | `PORT` | No | Render supplies this automatically |
 | `LEARN_SYNCDECK_HMAC_SECRET` | Only for the Learn SyncDeck integration | Dedicated shared secret; never reuse an LTI secret |
 | `LEARN_SYNCDECK_HMAC_KEY_ID` | No | `learn-default` |
@@ -77,7 +77,8 @@ After a successful deploy:
 2. Request `/health-check`; it must return a 2xx response.
 3. Open `/manage`, create a test session, and confirm that it survives a
    redeployment when `VALKEY_URL` is configured.
-4. Request `/api/status` and confirm `storage.mode` is `valkey` in production.
+4. Request `/api/status` and confirm `storage.mode` is `valkey` and
+   `valkey.ping` is `PONG`; `valkey.error` indicates a failed datastore check.
 5. For SyncDeck or Learn deployments, exercise an embedded launch in its intended
    HTTPS/LMS context.
 
@@ -98,8 +99,9 @@ Before increasing the instance count:
 3. Ensure every instance uses the same `PERSISTENT_SESSION_SECRET` and relevant
    Learn integration secrets.
 4. Monitor Key Value connection use and memory as instances are added.
-5. Do not run Resonance with more than one app instance until its session writes
-   support safe multi-instance operation.
+5. Resonance does not currently have a safe concurrent-writer deployment. Do not
+   scale it beyond one app instance; one instance only bounds cross-instance races.
+   Its session writes must support safe concurrent operation before scale-out.
 
 See [Atomic Session Mutation](ARCHITECTURE.md#atomic-session-mutation) for the
 session coordination model and compatibility requirements.
@@ -145,9 +147,10 @@ Key Value memory. Do not log capability tokens, secrets, or full bearer URLs.
 ## Backup and recovery
 
 Live sessions are ephemeral and expire according to `SESSION_TTL_MS`; they are not a
-backup system. Persistent teacher links can be exported through
-`/api/persistent-session/list`. For a datastore outage, restore Key Value service,
-verify `/api/status`, and have users reconnect.
+backup system. `/api/persistent-session/list` reconstructs persistent links from the
+current browser's remembered cookie entries; it is not a server-side backup. For a
+datastore outage, restore Key Value service, verify `/api/status`, and have users
+reconnect.
 
 ## Further reference
 
