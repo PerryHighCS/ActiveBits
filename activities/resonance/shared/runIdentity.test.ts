@@ -388,6 +388,20 @@ void test('payloadMatchesResolvedRunToken rejects a legacy payload from a differ
   assert.equal(payloadMatchesResolvedRunToken(currentRunPayload, 1, null), false)
 })
 
+void test('payloadMatchesResolvedRunToken does not let a legacy timestamp numerically collide with resolvedToken === 1', () => {
+  // Copilot's finding: the bare `resolveRunToken(payload) === resolvedToken`
+  // fast path ran before the guarded bridge, so a timestamp-only payload
+  // whose activeQuestionRunStartedAt happened to equal 1 (a delayed/crafted
+  // legacy callback from an unrelated run, or simply a degenerate value)
+  // matched resolvedToken === 1 outright, without ever checking whether 1
+  // was really a legacy timestamp or a revision, or comparing against the
+  // run's actual recorded start time.
+  const degenerateLegacyPayload: RunIdentitySource = { activeQuestionRunStartedAt: 1 }
+  assert.equal(payloadMatchesResolvedRunToken(degenerateLegacyPayload, 1, 999), false)
+  // It still matches when its timestamp genuinely is the run's own start time.
+  assert.equal(payloadMatchesResolvedRunToken(degenerateLegacyPayload, 1, 1), true)
+})
+
 void test('payloadMatchesResolvedRunToken rejects a present-but-malformed payload field, consistent with runIdentitiesMatch', () => {
   // Copilot's finding: this function started with a bare
   // `resolveRunToken(payload) === resolvedToken`, never calling

@@ -240,7 +240,18 @@ export function payloadMatchesResolvedRunToken(
   resolvedTokenStartedAt: number | null,
 ): boolean {
   if (hasInvalidRunField(payload)) return false
-  if (resolveRunToken(payload) === resolvedToken) return true
+  // A timestamp-only payload must not match resolvedToken === 1 through
+  // this bare scalar equality: resolvedToken is ambiguous (it could be a
+  // real revision or a real legacy timestamp), and 1 is the one value a
+  // legacy run can genuinely correspond to, so a delayed/crafted legacy
+  // payload (e.g. activeQuestionRunStartedAt: 1) could otherwise collide
+  // numerically with canonical revision 1 before the guarded bridge below
+  // ever compares real start times against resolvedTokenStartedAt. Route
+  // that one ambiguous case through the bridge exclusively; every other
+  // combination (payload has its own revision, or resolvedToken isn't 1)
+  // is unambiguous and keeps the direct scalar comparison.
+  const isAmbiguousLegacyToken = resolvedToken === 1 && !hasRevision(payload) && hasStartedAt(payload)
+  if (!isAmbiguousLegacyToken && resolveRunToken(payload) === resolvedToken) return true
 
   // The cached scalar might itself be a legacy timestamp that this
   // canonicalized revision-1 payload's own startedAt still remembers.
