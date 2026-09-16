@@ -585,6 +585,7 @@ void test('QuestionView keeps an unsent draft associated with its original quest
         questionId: 'q1',
         activeQuestionRunStartedAt: 1_000,
         editSequence: 1,
+        draftGeneration: 1,
         answer: { type: 'free-response', text: 'Draft for the first question' },
       }])
     })
@@ -671,11 +672,13 @@ void test('QuestionView flushes an edit made inside the final debounce window be
     })
 
     await waitFor(() => assert.equal(sentDrafts.length, 1), { timeout: 1_000 })
-    assert.deepEqual(sentDrafts[0], {
+    const { activeQuestionDeadlineAt: _deadlineAt, ...lastSecondPayload } = sentDrafts[0] as Record<string, unknown>
+    assert.deepEqual(lastSecondPayload, {
       studentId: 'student-1',
       questionId: 'q1',
       activeQuestionRunStartedAt: 1_000,
       editSequence: 1,
+      draftGeneration: 1,
       answer: { type: 'free-response', text: 'Last-second revision' },
     })
     rendered.unmount()
@@ -714,9 +717,9 @@ void test('QuestionView debounces rapid draft edits without flushing each replac
   }
 })
 
-void test('QuestionView reconciles an unacknowledged draft when the question expires', async () => {
+void test('QuestionView reports an unacknowledged draft to its parent before stack navigation can unmount it', async () => {
   const restoreDomEnvironment = installDomEnvironment()
-  const { fireEvent, render, waitFor } = await import('@testing-library/react')
+  const { act, fireEvent, render, waitFor } = await import('@testing-library/react')
 
   try {
     const question = {
@@ -725,9 +728,9 @@ void test('QuestionView reconciles an unacknowledged draft when the question exp
       text: 'Explain your reasoning.',
       order: 0,
     }
-    let unconfirmedCount = 0
+    const failedDrafts: Record<string, unknown>[] = []
     let saveCount = 0
-    console.info('[TEST] QuestionView reconciliation: saveDraft is expected to report a failed save below')
+    console.info('[TEST] QuestionView draft handoff: saveDraft is expected to report a failed save below')
     const props = {
       question,
       sessionId: 'session-1',
@@ -738,8 +741,8 @@ void test('QuestionView reconciles an unacknowledged draft when the question exp
         saveCount += 1
         return false
       },
-      onDraftUnconfirmed: () => {
-        unconfirmedCount += 1
+      onDraftSaveFailed: (payload: Record<string, unknown>) => {
+        failedDrafts.push(payload)
       },
     }
     const rendered = render(React.createElement(QuestionView, props))
@@ -747,11 +750,64 @@ void test('QuestionView reconciles an unacknowledged draft when the question exp
     fireEvent.change(rendered.getByLabelText(/your answer/i), {
       target: { value: 'Unacknowledged revision' },
     })
+    // This is the cleanup path taken when the student switches to another
+    // active-question tab before the debounce can complete.
+    await act(async () => {
+      rendered.unmount()
+      await Promise.resolve()
+    })
     await waitFor(() => assert.equal(saveCount, 1), { timeout: 1_000 })
-    assert.equal(unconfirmedCount, 0)
+    await waitFor(() => assert.equal(failedDrafts.length, 1))
+    const { activeQuestionDeadlineAt: _deadlineAt, ...failedDraftPayload } = failedDrafts[0]!
+    assert.deepEqual(failedDraftPayload, {
+      studentId: 'student-1',
+      questionId: 'q1',
+      activeQuestionRunStartedAt: 1_000,
+      editSequence: 1,
+      draftGeneration: 1,
+      answer: { type: 'free-response', text: 'Unacknowledged revision' },
+    })
+  } finally {
+    restoreDomEnvironment()
+  }
+})
 
+void test('QuestionView hands the newest failed in-flight edit to its parent once when the deadline disables the view', async () => {
+  const restoreDomEnvironment = installDomEnvironment()
+  const { act, fireEvent, render, waitFor } = await import('@testing-library/react')
+
+  try {
+    let settleFirstSave: ((saved: boolean) => void) | null = null
+    const failedDrafts: Record<string, unknown>[] = []
+    let saveCount = 0
+    const props = {
+      question: { id: 'q1', type: 'free-response' as const, text: 'Explain your reasoning.', order: 0 },
+      sessionId: 'session-1',
+      studentId: 'student-1',
+      activeQuestionRunStartedAt: 1_000,
+      saveDraft: () => {
+        saveCount += 1
+        return new Promise<boolean>((resolve) => { settleFirstSave = resolve })
+      },
+      onDraftSaveFailed: (payload: Record<string, unknown>) => failedDrafts.push(payload),
+    }
+    const rendered = render(React.createElement(QuestionView, props))
+    const textarea = rendered.getByLabelText(/your answer/i)
+    fireEvent.change(textarea, { target: { value: 'Older edit' } })
+    await waitFor(() => assert.equal(saveCount, 1), { timeout: 2_500 })
+
+    fireEvent.change(textarea, { target: { value: 'Newest edit' } })
+    // The deadline snapshot can disable the input before the newer debounce
+    // runs. Its failed predecessor must still transfer the newest value to
+    // the parent, without restarting this child effect and duplicating it.
     rendered.rerender(React.createElement(QuestionView, { ...props, disabled: true }))
-    await waitFor(() => assert.equal(unconfirmedCount, 1))
+    console.info('[TEST] the older in-flight save is expected to fail after the deadline disables QuestionView')
+    await act(async () => { settleFirstSave?.(false) })
+    await waitFor(() => assert.equal(failedDrafts.length, 1))
+    assert.deepEqual(failedDrafts[0]?.answer, { type: 'free-response', text: 'Newest edit' })
+    assert.equal(failedDrafts[0]?.draftGeneration, 2)
+    await new Promise((resolve) => setTimeout(resolve, 1_700))
+    assert.equal(saveCount, 1)
     rendered.unmount()
   } finally {
     restoreDomEnvironment()

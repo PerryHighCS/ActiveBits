@@ -446,6 +446,15 @@ Capture reusable test setup patterns, common failure modes, and reliability guid
 
 - React development Strict Mode mounts, cleans up, then remounts effects. For browser WebSockets that are opened from an effect, defer the actual `connect()` to a cancellable microtask and mark cleanup as disposed first. This prevents an intentionally discarded effect from creating a socket that is immediately closed before its handshake, while the retained effect opens the real connection. Verify the retained manager/student connection with browser coverage.
 - A resilient single-socket hook must ignore `open`, `message`, `error`, and `close` events from a socket it has already replaced. Otherwise a delayed close from the development-only socket can overwrite the current manager's connected state and trigger incorrect UI behavior. Keep the current socket identity as the event authority and regression-test replacement followed by a stale close.
+
+- Date: 2026-09-13
+- Scope: unit | Resonance student drafts
+- Pattern: When an activity renders only one item from a live tab stack, report a failed child persistence attempt to a parent-level retry owner before the child can unmount. Key retained work by both item ID and monotonic run revision; test the handoff payload and the reconnect retry separately.
+- Why it helps: A component-local failure flag vanishes on tab changes, while an ID-only retry can replay into a later run after an instructor advances or reactivates a question.
+- Example (file/path): `activities/resonance/client/student/QuestionInputs.test.tsx`; `activities/resonance/client/student/ResonanceStudent.tsx`; `activities/resonance/client/hooks/useResonanceSession.test.ts`.
+- Failure signal: An answer typed on one active question is absent after switching tabs during a socket failure, even though connectivity returns before the run deadline.
+- Follow-up action: Keep retry ownership at the activity mount lifetime and stop its timer on deadline or authoritative run/question change; do not restore a self-rescheduling loop to the keyed child component.
+- Owner: Codex
 - Date: 2026-09-02
 - Pattern: Concurrency regressions need assertions at both persistence and delivery boundaries. For optimistic session updates, cover compare-and-set revision behavior, duplicate command delivery, reordered public state revisions, and a non-owning secondary manager's natural-completion event. A green single-process route test that merely re-reads before `set()` does not prove the final read-to-write window is safe.
 - Evidence: `server/core/valkeyStore.test.ts`; `server/sessionStore.test.ts`; `activities/video-sync/server/routes.test.ts`; `activities/video-sync/client/syncMath.test.ts`.

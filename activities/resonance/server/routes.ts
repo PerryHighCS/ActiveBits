@@ -1,5 +1,5 @@
 import { timingSafeEqual } from 'crypto'
-import { createSession, type SessionRecord, type SessionStore } from 'activebits-server/core/sessions.js'
+import { createSession, getSessionCreatedIdentity, type SessionRecord, type SessionStore } from 'activebits-server/core/sessions.js'
 import { registerSessionNormalizer } from 'activebits-server/core/sessionNormalization.js'
 import {
   getActivityCapabilityCookieName,
@@ -33,6 +33,7 @@ import type {
 } from '../shared/types.js'
 import { isValidStudentReactionEmoji } from '../shared/emojiSet.js'
 import { getCorrectOptionIds, getMcqSelectionMode } from '../shared/mcq.js'
+import { runIdentitiesMatch } from '../shared/runIdentity.js'
 import { normalizePresentationMode, validateAnswerPayload, validateQuestion, validateQuestionSet, validateStudentRegistration } from '../shared/validation.js'
 import { decryptQuestions, encryptQuestions, MAX_ENCODED_PAYLOAD_CHARS } from './questionCrypto.js'
 import {
@@ -174,7 +175,16 @@ interface ResonanceSessionData extends Record<string, unknown> {
     updatedAt: number
     activeQuestionRunRevision?: number | null
     editSequence?: number
+    draftGeneration?: number
     answer: Response['answer']
+  }>
+  // Retain the generation after a clear so a delayed older write cannot
+  // recreate the draft. Entries are scoped by run revision.
+  responseDraftGenerations: Record<string, {
+    questionId: string
+    studentId: string
+    activeQuestionRunRevision?: number | null
+    draftGeneration: number
   }>
   annotations: Record<string, InstructorAnnotation>
   reveals: QuestionReveal[]
@@ -513,23 +523,55 @@ function getQuestionAnswerability(sessionData: ResonanceSessionData, questionId:
     : { ok: false, reason: 'choices-hidden' }
 }
 
+// A payload's revision/legacyStartedAt fields arrive as unknown (raw
+// client JSON); narrow them to the shared comparator's expected shape
+// rather than trusting their type. sessionData's own fields are always
+// clean number|null (set together — see setStagedActiveQuestion and
+// normalizeSessionData's backfill below), so no narrowing is needed there.
 function matchesActiveQuestionRun(
   sessionData: ResonanceSessionData,
   revision: unknown,
   legacyStartedAt: unknown,
 ): boolean {
-  if (typeof revision === 'number' && Number.isSafeInteger(revision)) {
-    return revision === sessionData.activeQuestionRunRevision
+  return runIdentitiesMatch(sessionData, {
+    activeQuestionRunRevision: typeof revision === 'number' ? revision : null,
+    activeQuestionRunStartedAt: typeof legacyStartedAt === 'number' ? legacyStartedAt : null,
+  })
+}
+
+// A stored response persisted before the revision rollout never had
+// activeQuestionRunRevision backfilled — unlike the session-level counter,
+// which normalizeSessionData always upgrades to at least 1 once a run is
+// active, normalizeStoredResponses leaves a legacy response's field
+// permanently `undefined`. A response carries no timestamp field of its own
+// the way a run does (no legacy start-time field), so this is a plain
+// revision-to-revision comparison, not a candidate-vs-run-identity match —
+// it deliberately doesn't delegate to runIdentitiesMatch, whose
+// legacy-timestamp branch would otherwise treat a response's *absent*
+// timestamp field as matching a session whose own start timestamp also
+// happens to be null (a real, reachable shape — see normalizeSessionData),
+// producing a false match.
+//
+// An undefined revision alone isn't enough to identify *which* run a legacy
+// response belongs to, though: a session can accumulate more than one
+// pre-rollout response (one per question) across several runs that all
+// predate the revision rollout, and only the run active at the moment of
+// the upgrade is ever backfilled to revision 1 — an earlier pre-rollout
+// run's leftover response is otherwise indistinguishable from the session's
+// current revision-1 run by the undefined marker alone. Mirror
+// draftMatchesCurrentRun's own migration-timestamp guard (there using
+// draft.updatedAt) using the response's own submittedAt: only a response
+// actually persisted at or after the current run's start could belong to it.
+function responseMatchesActiveRun(
+  response: Pick<Response, 'activeQuestionRunRevision' | 'submittedAt'>,
+  sessionData: ResonanceSessionData,
+): boolean {
+  if (response.activeQuestionRunRevision === undefined) {
+    return sessionData.activeQuestionRunRevision === 1 &&
+      sessionData.activeQuestionRunStartedAt !== null &&
+      response.submittedAt >= sessionData.activeQuestionRunStartedAt
   }
-  if (
-    revision == null &&
-    legacyStartedAt == null &&
-    sessionData.activeQuestionRunRevision === null &&
-    sessionData.activeQuestionRunStartedAt === null
-  ) {
-    return true
-  }
-  return sessionData.activeQuestionRunRevision === 1 && legacyStartedAt === sessionData.activeQuestionRunStartedAt
+  return response.activeQuestionRunRevision === sessionData.activeQuestionRunRevision
 }
 
 export function resolveAnswerabilityErrorMessage(reason: 'expired' | 'choices-hidden' | 'inactive'): string {
@@ -731,6 +773,10 @@ function resolveEditSequence(value: unknown): number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : 0
 }
 
+function resolveDraftGeneration(value: unknown): number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : 0
+}
+
 export function resolveSocketStudentId(payloadStudentId: unknown, clientStudentId: string | null | undefined): string | null {
   const studentId = clientStudentId ?? null
   if (!studentId || (typeof payloadStudentId === 'string' && payloadStudentId !== studentId)) {
@@ -832,6 +878,7 @@ function normalizeResponseDrafts(
         : undefined
     const answer = normalizeDraftAnswerPayload(rawDraft.answer, questionsById, questionId)
     const editSequence = resolveEditSequence(rawDraft.editSequence)
+    const draftGeneration = resolveDraftGeneration(rawDraft.draftGeneration)
 
     if (!questionId || !studentId || updatedAt <= 0 || answer === null) {
       continue
@@ -843,11 +890,37 @@ function normalizeResponseDrafts(
       updatedAt,
       ...(activeQuestionRunRevision !== undefined ? { activeQuestionRunRevision } : {}),
       editSequence,
+      ...(draftGeneration > 0 ? { draftGeneration } : {}),
       answer,
     }
   }
 
   return drafts
+}
+
+function normalizeResponseDraftGenerations(value: unknown): ResonanceSessionData['responseDraftGenerations'] {
+  if (!isPlainObject(value)) return {}
+  const generations: ResonanceSessionData['responseDraftGenerations'] = {}
+  for (const [key, rawGeneration] of Object.entries(value)) {
+    if (!isPlainObject(rawGeneration)) continue
+    const questionId = typeof rawGeneration.questionId === 'string' ? rawGeneration.questionId : ''
+    const studentId = typeof rawGeneration.studentId === 'string' ? rawGeneration.studentId : ''
+    const draftGeneration = resolveDraftGeneration(rawGeneration.draftGeneration)
+    if (!questionId || !studentId) continue
+    const activeQuestionRunRevision = rawGeneration.activeQuestionRunRevision === null
+      ? null
+      : typeof rawGeneration.activeQuestionRunRevision === 'number' &&
+          Number.isSafeInteger(rawGeneration.activeQuestionRunRevision) && rawGeneration.activeQuestionRunRevision > 0
+        ? rawGeneration.activeQuestionRunRevision
+        : undefined
+    generations[key] = {
+      questionId,
+      studentId,
+      ...(activeQuestionRunRevision !== undefined ? { activeQuestionRunRevision } : {}),
+      draftGeneration,
+    }
+  }
+  return generations
 }
 
 function normalizeSharedResponseReactions(value: unknown): Record<string, number> {
@@ -1116,6 +1189,7 @@ function normalizeSessionData(data: unknown): ResonanceSessionData {
     students: isPlainObject(source.students) ? (source.students as Record<string, Student>) : {},
     responses: normalizeStoredResponses(source.responses, questions),
     responseDrafts: normalizeResponseDrafts(source.responseDrafts, questions),
+    responseDraftGenerations: normalizeResponseDraftGenerations(source.responseDraftGenerations),
     annotations: isPlainObject(source.annotations)
       ? (source.annotations as Record<string, InstructorAnnotation>)
       : {},
@@ -1301,6 +1375,17 @@ function buildStudentSnapshotWithMode(
             .filter((response) => response.studentId === viewerStudentId)
             .map((response) => [response.questionId, response.editSequence ?? 0] satisfies [string, number]),
         )
+  const draftGenerations = viewerStudentId === null
+    ? {}
+    : Object.fromEntries(
+        Object.entries(session.data.responseDraftGenerations)
+          .flatMap(([, generation]) => {
+            return generation.studentId === viewerStudentId &&
+              generation.activeQuestionRunRevision === session.data.activeQuestionRunRevision
+              ? [[generation.questionId, generation.draftGeneration] satisfies [string, number]]
+              : []
+          }),
+      )
   const reviewedResponses =
     viewerStudentId === null
       ? []
@@ -1343,6 +1428,7 @@ function buildStudentSnapshotWithMode(
     reviewedResponses,
     submittedAnswers,
     submittedResponseEditSequences,
+    draftGenerations,
     revealedQuestions,
   }
 }
@@ -3033,6 +3119,17 @@ export default function setupResonanceRoutes(
     }
   }
 
+  // Thrown inside the draft-save updateAtomic callback below when the stored
+  // record is no longer the resonance session incarnation this handler was
+  // authorized against (wrong `type`, or a deleted-then-recreated id with a
+  // different `created`) — mirrors updateVideoSyncSessionAtomic's own guard
+  // in activities/video-sync/server/routes.ts. Without it, updateAtomic's
+  // own CAS only protects against a *concurrent* resonance write; it has no
+  // way to know the id now holds an entirely different session, so the
+  // callback would otherwise happily normalize and write resonance draft
+  // data into a foreign session's record.
+  class WrongResonanceIncarnationError extends Error {}
+
   async function handleStudentWsMessage(
     session: ResonanceSession,
     type: string,
@@ -3123,6 +3220,7 @@ export default function setupResonanceRoutes(
           ? payload.draftId
           : null
         const editSequence = resolveEditSequence(payload.editSequence)
+        const draftGeneration = resolveDraftGeneration(payload.draftGeneration)
 
         // A draft sent just before a submission can arrive here after the
         // submission already recorded a response and cleared the draft (the
@@ -3139,7 +3237,7 @@ export default function setupResonanceRoutes(
           (response) =>
             response.questionId === questionId &&
             response.studentId === studentId &&
-            response.activeQuestionRunRevision === session.data.activeQuestionRunRevision,
+            responseMatchesActiveRun(response, session.data),
         )
         if (confirmedResponseForRun !== undefined && editSequence <= (confirmedResponseForRun.editSequence ?? 0)) {
           if (draftId !== null) {
@@ -3149,34 +3247,139 @@ export default function setupResonanceRoutes(
         }
 
         const draftKey = buildDraftKey(questionId, studentId)
-        if (payload.answer === null) {
-          if (draftKey in session.data.responseDrafts) {
-            delete session.data.responseDrafts[draftKey]
-            await sessions.set(sessionId, session)
-            broadcastToRole('resonance:instructor-state', buildInstructorSnapshot(session), sessionId, true)
-          }
-          // Ack even when the draft was already absent, so a retried clear is
-          // idempotent instead of timing out and being reported as a failed save.
-          if (draftId !== null) {
-            sendToSocket(socket, 'resonance:draft-saved', { draftId }, sessionId)
-          }
+        const answer = payload.answer === null ? null : validateAnswerPayload(payload.answer, question)
+        if (payload.answer !== null && !answer) return
+        // Draft ordering is a cross-connection guarantee. A read/modify/write
+        // fallback could commit an older handler after a newer one, so fail
+        // safely on stores that cannot provide the required CAS primitive.
+        if (typeof sessions.updateAtomic !== 'function') {
+          console.error(JSON.stringify({ event: 'resonance.draft-save-unavailable', sessionId, studentId, questionId }))
           return
         }
 
-        const answer = validateAnswerPayload(payload.answer, question)
-        if (!answer) return
+        let persistedSession: ResonanceSession | null = null
+        let shouldAcknowledge = false
+        // Proof, from this handler's own pre-write read of `session`, of
+        // which incarnation of this id it was authorized against. Passed
+        // through so the callback can refuse to commit into a same-id
+        // record that was deleted and recreated (for resonance or any other
+        // activity) in between — updateAtomic's own CAS only protects
+        // against a concurrent *resonance* write, not a same-id swap.
+        const expectedCreated = getSessionCreatedIdentity(session)
+        let updated: SessionRecord | null
+        try {
+          updated = await sessions.updateAtomic(sessionId, (current) => {
+            persistedSession = null
+            shouldAcknowledge = false
+            if (
+              current.type !== 'resonance' ||
+              (expectedCreated !== null && getSessionCreatedIdentity(current) !== expectedCreated)
+            ) {
+              throw new WrongResonanceIncarnationError()
+            }
+            const currentSession = current as ResonanceSession
+            currentSession.data = normalizeSessionData(currentSession.data)
+            if (!matchesActiveQuestionRun(
+              currentSession.data,
+              payload.activeQuestionRunRevision,
+              payload.activeQuestionRunStartedAt,
+            )) return currentSession
+            if (
+              (currentSession.data.activeQuestionDeadlineAt !== null && Date.now() >= currentSession.data.activeQuestionDeadlineAt) ||
+              !isCurrentStagedQuestionAnswerable(currentSession.data, questionId)
+            ) return currentSession
 
-        session.data.responseDrafts[draftKey] = {
-          questionId,
-          studentId,
-          updatedAt: draftUpdatedAt,
-          activeQuestionRunRevision: session.data.activeQuestionRunRevision,
-          editSequence,
-          answer,
+            // Re-check against the freshest confirmed response inside the
+            // atomic mutation: a submission can commit between the pre-check
+            // above and this callback running, and only this current-run
+            // response/editSequence comparison can catch that race.
+            const currentConfirmedResponseForRun = currentSession.data.responses.find(
+              (response) =>
+                response.questionId === questionId &&
+                response.studentId === studentId &&
+                responseMatchesActiveRun(response, currentSession.data),
+            )
+            if (
+              currentConfirmedResponseForRun !== undefined &&
+              editSequence <= (currentConfirmedResponseForRun.editSequence ?? 0)
+            ) {
+              shouldAcknowledge = true
+              return currentSession
+            }
+
+            const currentDraft = currentSession.data.responseDrafts[draftKey]
+            const currentGeneration = currentSession.data.responseDraftGenerations[draftKey]
+            const generationForCurrentRun = currentGeneration?.activeQuestionRunRevision === currentSession.data.activeQuestionRunRevision
+              ? currentGeneration.draftGeneration
+              : 0
+            const storedGeneration = Math.max(
+              currentDraft?.activeQuestionRunRevision === currentSession.data.activeQuestionRunRevision
+                ? currentDraft.draftGeneration ?? 0
+                : 0,
+              generationForCurrentRun,
+            )
+            // Generation-zero payloads are from rolling/legacy clients that
+            // provide no ordering token. Their only compatible semantics are
+            // last arrival wins, including while a rolling deployment has a
+            // positive-generation draft from a newer client. Current clients
+            // send positive monotonic generations, whose tombstones remain
+            // protected by this strict lower-generation check.
+            if (draftGeneration > 0 && draftGeneration < storedGeneration) {
+              shouldAcknowledge = true
+              return currentSession
+            }
+
+            // A generation-zero (legacy/rolling-deploy) payload's content
+            // still wins unconditionally below — that's the whole point of
+            // the compatibility path above — but the stored watermark itself
+            // must never regress. Storing draftGeneration as-is here would
+            // reset an already-higher positive watermark back to 0, letting a
+            // later delayed lower-but-still-positive generation slip past the
+            // strict check above (which only rejects when draftGeneration is
+            // strictly less than storedGeneration) since it would then be
+            // comparing against a falsely-reset floor instead of the real one.
+            currentSession.data.responseDraftGenerations[draftKey] = {
+              questionId,
+              studentId,
+              activeQuestionRunRevision: currentSession.data.activeQuestionRunRevision,
+              draftGeneration: Math.max(storedGeneration, draftGeneration),
+            }
+            if (answer === null) {
+              delete currentSession.data.responseDrafts[draftKey]
+            } else {
+              currentSession.data.responseDrafts[draftKey] = {
+                questionId,
+                studentId,
+                updatedAt: draftUpdatedAt,
+                activeQuestionRunRevision: currentSession.data.activeQuestionRunRevision,
+                editSequence,
+                ...(draftGeneration > 0 ? { draftGeneration } : {}),
+                answer,
+              }
+            }
+            persistedSession = currentSession
+            shouldAcknowledge = true
+            return currentSession
+          })
+        } catch (error) {
+          if (error instanceof WrongResonanceIncarnationError) return
+          throw error
         }
-        await sessions.set(sessionId, session)
-        broadcastToRole('resonance:instructor-state', buildInstructorSnapshot(session), sessionId, true)
-        if (draftId !== null) {
+        if (updated === null) {
+          console.error(JSON.stringify({
+            component: 'resonance',
+            event: 'draft-save-atomic-update-failed',
+            sessionId,
+            studentId,
+            questionId,
+          }))
+          return
+        }
+        if (persistedSession !== null) persistedSession = updated as ResonanceSession
+        if (persistedSession !== null) {
+          broadcastToRole('resonance:instructor-state', buildInstructorSnapshot(persistedSession), sessionId, true)
+        }
+        if (shouldAcknowledge && draftId !== null) {
           sendToSocket(socket, 'resonance:draft-saved', { draftId }, sessionId)
         }
         break

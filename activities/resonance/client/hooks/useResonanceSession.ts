@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { isValidStudentReactionEmoji } from '../../shared/emojiSet.js'
 import { getMcqSelectionMode } from '../../shared/mcq.js'
+import { asRunIdentitySource, runIdentitiesMatch, type RunIdentitySource } from '../../shared/runIdentity.js'
+import { buildDraftRetryKey as getDraftRetryKey, resolveDraftGeneration as getDraftGeneration } from '../draftAttempt.js'
 import type {
   AnswerPayload,
   QuestionReveal,
@@ -17,14 +19,8 @@ import type {
 const FALLBACK_POLL_INTERVAL_MS = 15_000
 const DRAFT_SAVE_ACK_TIMEOUT_MS = 2_000
 
-function getDraftRetryKey(payload: Record<string, unknown>): string | null {
-  const questionId = typeof payload.questionId === 'string' ? payload.questionId : null
-  const runToken = typeof payload.activeQuestionRunRevision === 'number'
-    ? payload.activeQuestionRunRevision
-    : typeof payload.activeQuestionRunStartedAt === 'number'
-      ? payload.activeQuestionRunStartedAt
-      : null
-  return questionId === null ? null : `${questionId}:${runToken ?? 'self-paced'}`
+function isPayloadForSnapshotRun(payload: Record<string, unknown>, snapshot: StudentSessionSnapshot): boolean {
+  return runIdentitiesMatch(snapshot, asRunIdentitySource(payload))
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -431,6 +427,13 @@ export function normalizeStudentSessionSnapshot(
           ),
         )
       : {},
+    draftGenerations: isRecord(data.draftGenerations)
+      ? Object.fromEntries(
+          Object.entries(data.draftGenerations).filter(
+            (entry): entry is [string, number] => typeof entry[1] === 'number' && Number.isSafeInteger(entry[1]) && entry[1] >= 0,
+          ),
+        )
+      : {},
     revealedQuestions: Array.isArray(data.revealedQuestions)
       ? data.revealedQuestions
         .map(normalizeStudentQuestion)
@@ -520,7 +523,24 @@ export function selectStudentSessionSnapshot(
  * @param sessionId  - The session to connect to, or null to defer.
  * @param studentId  - The registered student ID, forwarded to the WS for identity.
  */
-export function useResonanceSession(sessionId: string | null, studentId?: string | null) {
+export function useResonanceSession(
+  sessionId: string | null,
+  studentId?: string | null,
+  options?: {
+    onDraftReplayAcknowledged?(questionId: string | null, runIdentity: RunIdentitySource, generation: number): void
+  },
+) {
+  // A reconnect-replay ack (retryDraftSavesRef, below) doesn't resolve any
+  // caller-held promise the way a direct saveDraft() call does — it's a
+  // fire-and-forget background resend. Without surfacing it here, a caller
+  // tracking its own retained-draft state (e.g. the parent student view) has
+  // no way to learn this specific attempt was persisted, and keeps retrying
+  // it independently until an unrelated retry happens to get acknowledged.
+  // Read from a ref so the reconnect effect below doesn't need this in its
+  // dependency array.
+  const onDraftReplayAcknowledgedRef = useRef(options?.onDraftReplayAcknowledged)
+  onDraftReplayAcknowledgedRef.current = options?.onDraftReplayAcknowledged
+
   const [snapshot, setSnapshot] = useState<StudentSessionSnapshot | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -533,10 +553,26 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
   const pendingDraftSavesRef = useRef(new Map<string, {
     resolve(saved: boolean): void
     timeoutId: ReturnType<typeof setTimeout>
+    retryKey: string | null
+    generation: number
+    payload: Record<string, unknown>
   }>())
   const queuedDraftRetriesRef = useRef(new Map<string, Record<string, unknown>>())
+  const latestDraftGenerationByKeyRef = useRef(new Map<string, number>())
+  // Separate from latestDraftGenerationByKeyRef: that map tracks the highest
+  // generation *attempted* so far and intentionally lets a generation equal
+  // to it still be queued (that's the attempt's own natural retry path).
+  // cancelDraftRetries needs the opposite: once a generation is explicitly
+  // cancelled, an attempt for that exact generation — e.g. its own pending
+  // send timing out moments later — must never be requeued. Tracking this
+  // as its own watermark keeps that "equal is still queueable" behavior
+  // intact for ordinary retries while still closing that gap.
+  const cancelledUpToGenerationByKeyRef = useRef(new Map<string, number>())
   const retryDraftSavesRef = useRef(new Map<string, {
     key: string
+    questionId: string | null
+    runIdentity: RunIdentitySource
+    generation: number
     timeoutId: ReturnType<typeof setTimeout>
   }>())
 
@@ -552,6 +588,8 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
     }
     retryDraftSavesRef.current.clear()
     queuedDraftRetriesRef.current.clear()
+    latestDraftGenerationByKeyRef.current.clear()
+    cancelledUpToGenerationByKeyRef.current.clear()
     snapshotRef.current = null
     latestActiveQuestionRunRevisionRef.current = null
     setSnapshot(null)
@@ -564,21 +602,25 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
     const currentSnapshot = snapshotRef.current
     if (currentWs?.readyState !== WebSocket.OPEN || currentSnapshot === null) return
 
-    const activeRunToken = currentSnapshot.activeQuestionRunRevision ?? currentSnapshot.activeQuestionRunStartedAt
     for (const [key, payload] of queuedDraftRetriesRef.current) {
-      const payloadRunToken = typeof payload.activeQuestionRunRevision === 'number'
-        ? payload.activeQuestionRunRevision
-        : typeof payload.activeQuestionRunStartedAt === 'number'
-          ? payload.activeQuestionRunStartedAt
-          : null
       const questionId = typeof payload.questionId === 'string' ? payload.questionId : null
       const isEligible =
         payload.studentId === studentId &&
-        payloadRunToken === activeRunToken &&
+        isPayloadForSnapshotRun(payload, currentSnapshot) &&
         questionId !== null &&
         currentSnapshot.activeQuestionIds.includes(questionId) &&
         (currentSnapshot.activeQuestionDeadlineAt === null || Date.now() < currentSnapshot.activeQuestionDeadlineAt)
       if (!isEligible) {
+        queuedDraftRetriesRef.current.delete(key)
+        continue
+      }
+      // A newer attempt for this key can already be known (recorded in
+      // saveDraft/queueDraftRetry) without yet having replaced this queued
+      // entry — e.g. it's still an in-flight direct send that onclose just
+      // requeued separately, or hasn't timed out yet. Sending this stale
+      // generation could let the server persist/finalize it ahead of the
+      // newer one.
+      if (getDraftGeneration(payload) < (latestDraftGenerationByKeyRef.current.get(key) ?? -1)) {
         queuedDraftRetriesRef.current.delete(key)
         continue
       }
@@ -588,7 +630,13 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
       const timeoutId = setTimeout(() => {
         retryDraftSavesRef.current.delete(draftId)
       }, DRAFT_SAVE_ACK_TIMEOUT_MS)
-      retryDraftSavesRef.current.set(draftId, { key, timeoutId })
+      retryDraftSavesRef.current.set(draftId, {
+        key,
+        questionId,
+        runIdentity: asRunIdentitySource(payload),
+        generation: getDraftGeneration(payload),
+        timeoutId,
+      })
       try {
         currentWs.send(JSON.stringify({
           type: 'resonance:update-draft',
@@ -600,6 +648,20 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
       }
     }
   }, [studentId])
+
+  const queueDraftRetry = useCallback((key: string | null, payload: Record<string, unknown>) => {
+    if (key === null) return
+    const generation = getDraftGeneration(payload)
+    const cancelledUpTo = cancelledUpToGenerationByKeyRef.current.get(key) ?? -1
+    if (generation <= cancelledUpTo) return
+    const latest = latestDraftGenerationByKeyRef.current.get(key) ?? -1
+    if (generation < latest) return
+    latestDraftGenerationByKeyRef.current.set(key, generation)
+    const queued = queuedDraftRetriesRef.current.get(key)
+    if (!queued || getDraftGeneration(queued) <= generation) {
+      queuedDraftRetriesRef.current.set(key, payload)
+    }
+  }, [])
 
   const fetchSnapshot = useCallback(async () => {
     if (sessionId === null) return
@@ -723,13 +785,27 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
             if (pending && draftId !== null) {
               clearTimeout(pending.timeoutId)
               pendingDraftSavesRef.current.delete(draftId)
+              // An acknowledged direct save can supersede an older queued
+              // reconnect retry for the same key that a prior timeout left
+              // behind — without this, that stale retry survives to be
+              // resent (and rebroadcast) on the next reconnect/flush.
+              if (pending.retryKey !== null) {
+                const queued = queuedDraftRetriesRef.current.get(pending.retryKey)
+                if (queued && getDraftGeneration(queued) <= pending.generation) {
+                  queuedDraftRetriesRef.current.delete(pending.retryKey)
+                }
+              }
               pending.resolve(true)
             } else if (draftId !== null) {
               const retry = retryDraftSavesRef.current.get(draftId)
               if (retry) {
                 clearTimeout(retry.timeoutId)
                 retryDraftSavesRef.current.delete(draftId)
-                queuedDraftRetriesRef.current.delete(retry.key)
+                const queued = queuedDraftRetriesRef.current.get(retry.key)
+                if (queued && getDraftGeneration(queued) <= retry.generation) {
+                  queuedDraftRetriesRef.current.delete(retry.key)
+                }
+                onDraftReplayAcknowledgedRef.current?.(retry.questionId, retry.runIdentity, retry.generation)
               }
             }
           } else if (
@@ -760,6 +836,18 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
           clearTimeout(pending.timeoutId)
         }
         retryDraftSavesRef.current.clear()
+        // A save still awaiting its ack when the socket drops will never
+        // receive it on this (now-dead) socket. Fail it immediately instead
+        // of waiting up to DRAFT_SAVE_ACK_TIMEOUT_MS: otherwise a stale
+        // generation already sitting in the reconnect queue can be flushed
+        // on the very next reconnect before this newer save's own timeout
+        // ever gets a chance to supersede it.
+        for (const [draftId, pending] of pendingDraftSavesRef.current) {
+          clearTimeout(pending.timeoutId)
+          pendingDraftSavesRef.current.delete(draftId)
+          queueDraftRetry(pending.retryKey, pending.payload)
+          pending.resolve(false)
+        }
         if (!closed && mountedRef.current) {
           reconnectTimeoutId = setTimeout(connect, reconnectDelay)
           reconnectDelay = Math.min(reconnectDelay * 2, 30_000)
@@ -783,7 +871,7 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
       if (ws !== null) ws.close()
       wsRef.current = null
     }
-  }, [sessionId, studentId, fetchSnapshot, flushQueuedDraftRetries])
+  }, [sessionId, studentId, fetchSnapshot, flushQueuedDraftRetries, queueDraftRetry])
 
   useEffect(() => {
     flushQueuedDraftRetries()
@@ -803,8 +891,14 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
   const saveDraft = useCallback((payload: Record<string, unknown>): Promise<boolean> => {
     const currentWs = wsRef.current
     const retryKey = getDraftRetryKey(payload)
+    if (retryKey !== null) {
+      latestDraftGenerationByKeyRef.current.set(
+        retryKey,
+        Math.max(latestDraftGenerationByKeyRef.current.get(retryKey) ?? -1, getDraftGeneration(payload)),
+      )
+    }
     if (currentWs?.readyState !== WebSocket.OPEN) {
-      if (retryKey !== null) queuedDraftRetriesRef.current.set(retryKey, payload)
+      queueDraftRetry(retryKey, payload)
       return Promise.resolve(false)
     }
 
@@ -812,9 +906,16 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
     return new Promise((resolve) => {
       const timeoutId = setTimeout(() => {
         pendingDraftSavesRef.current.delete(draftId)
+        queueDraftRetry(retryKey, payload)
         resolve(false)
       }, DRAFT_SAVE_ACK_TIMEOUT_MS)
-      pendingDraftSavesRef.current.set(draftId, { resolve, timeoutId })
+      pendingDraftSavesRef.current.set(draftId, {
+        resolve,
+        timeoutId,
+        retryKey,
+        generation: getDraftGeneration(payload),
+        payload,
+      })
       try {
         currentWs.send(JSON.stringify({
           type: 'resonance:update-draft',
@@ -827,11 +928,35 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
         // draft would silently never be marked/reconciled as unconfirmed.
         clearTimeout(timeoutId)
         pendingDraftSavesRef.current.delete(draftId)
-        if (retryKey !== null) queuedDraftRetriesRef.current.set(retryKey, payload)
+        queueDraftRetry(retryKey, payload)
         resolve(false)
       }
     })
+  }, [queueDraftRetry])
+
+  // Lets a caller that has independently learned a question+run's draft is
+  // superseded (a submission, or a newer generation's own successful save)
+  // stop this hook from replaying an older attempt on reconnect. Without
+  // this, a still-queued reconnect retry has no way to learn about either
+  // event — flushQueuedDraftRetries only compares against generations this
+  // hook has itself observed via saveDraft/queueDraftRetry — so it would
+  // still resend a stale draft after the run's answer is already settled.
+  const cancelDraftRetries = useCallback((key: string | null, atLeastGeneration: number) => {
+    if (key === null) return
+    // Never trust the caller's ceiling as-is: cap it at the highest
+    // generation this hook has itself actually seen attempted (via
+    // saveDraft) for this key. An unbounded or mistaken value (say,
+    // Number.MAX_SAFE_INTEGER) would otherwise permanently block every
+    // later generation for this key, since nothing could ever exceed it.
+    const attempted = latestDraftGenerationByKeyRef.current.get(key) ?? -1
+    const bounded = Math.min(atLeastGeneration, attempted)
+    const cancelledUpTo = cancelledUpToGenerationByKeyRef.current.get(key) ?? -1
+    cancelledUpToGenerationByKeyRef.current.set(key, Math.max(cancelledUpTo, bounded))
+    const queued = queuedDraftRetriesRef.current.get(key)
+    if (queued && getDraftGeneration(queued) <= bounded) {
+      queuedDraftRetriesRef.current.delete(key)
+    }
   }, [])
 
-  return { snapshot, loading, error, refresh: fetchSnapshot, sendMessage, saveDraft }
+  return { snapshot, loading, error, refresh: fetchSnapshot, sendMessage, saveDraft, cancelDraftRetries }
 }

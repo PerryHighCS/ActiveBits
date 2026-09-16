@@ -942,6 +942,298 @@ void test('a draft that arrives after its submission is dropped instead of resur
   await sessions.close()
 })
 
+void test('a submission that commits while a stale draft write is in flight is not overwritten by that draft', async () => {
+  // The update-draft handler's stale-response guard runs against the session
+  // it read at the start of the WS message. sessions.updateAtomic then reads
+  // the freshest stored session for its actual write. If a submission commits
+  // in that window, the outer guard never saw it — only re-checking the
+  // confirmed response inside the atomic mutator (against its fresh read)
+  // catches the race and keeps the draft from clobbering the submission.
+  const app = createMockApp()
+  const sessions = createSessionStore(null)
+  const session = createMultiQuestionSession()
+  const runStartedAt = Date.now() - 1_000
+  session.data.activeQuestionId = 'q1'
+  session.data.activeQuestionIds = ['q1']
+  session.data.activeQuestionRunStartedAt = runStartedAt
+  session.data.activeQuestionRunRevision = 1
+  session.data.lastActiveQuestionRunRevision = 1
+  const studentCookies = issueStudentCookies(session, 'student1')
+  await sessions.set(session.id, session)
+  const captured = createCapturingMockWs()
+  setupResonanceRoutes(app, sessions, captured.ws)
+
+  const handler = captured.getHandler()
+  const messageHandlers: Array<(message: string) => void> = []
+  const sentMessages: Array<{ type?: string; payload?: { draftId?: string } }> = []
+  assert.ok(handler)
+  handler({
+    readyState: 1,
+    upgradeHeaders: {
+      cookie: Object.entries(studentCookies).map(([name, value]) => `${name}=${value}`).join('; '),
+    },
+    send(message: string) {
+      sentMessages.push(JSON.parse(message) as { type?: string; payload?: { draftId?: string } })
+    },
+    on(event: string, callback: (message: string) => void) {
+      if (event === 'message') messageHandlers.push(callback)
+    },
+    once() {},
+    close() {},
+    terminate() {},
+    ping() {},
+  }, new URLSearchParams({ sessionId: session.id, role: 'student', studentId: 'student1' }), captured.ws.wss)
+  await waitForCondition(() => messageHandlers.length === 1)
+
+  // Pause the draft handler's session read right after it captures a
+  // pre-submission snapshot, so the confirmed-response guard evaluated
+  // against that snapshot cannot see the submission that lands next.
+  const originalGet = sessions.get.bind(sessions)
+  let sawDraftRead = false
+  let releaseDraftRead!: () => void
+  const draftReadGate = new Promise<void>((resolve) => {
+    releaseDraftRead = resolve
+  })
+  sessions.get = (async (id: string) => {
+    const result = await originalGet(id)
+    if (!sawDraftRead && id === session.id) {
+      sawDraftRead = true
+      await draftReadGate
+    }
+    return result
+  }) as SessionStore['get']
+
+  console.info('[TEST] a draft update racing an in-flight submission must not resurrect the pre-submission answer')
+  messageHandlers[0]?.(JSON.stringify({
+    type: 'resonance:update-draft',
+    payload: {
+      studentId: 'student1',
+      questionId: 'q1',
+      draftId: 'racing-draft',
+      activeQuestionRunRevision: 1,
+      editSequence: 1,
+      answer: { type: 'free-response', text: 'Stale draft racing the submission' },
+    },
+  }))
+  await waitForCondition(() => sawDraftRead)
+
+  const submitRes = createResponse()
+  await app.handlers.post['/api/resonance/:sessionId/submit-answer']?.({
+    params: { sessionId: session.id },
+    cookies: studentCookies,
+    body: {
+      studentId: 'student1',
+      questionId: 'q1',
+      activeQuestionRunRevision: 1,
+      editSequence: 1,
+      answer: { type: 'free-response', text: 'Submitted answer' },
+    },
+  }, submitRes)
+  assert.equal(submitRes.statusCode, 200)
+
+  releaseDraftRead()
+  await waitForCondition(() => sentMessages.some((message) =>
+    message.type === 'resonance:draft-saved' && message.payload?.draftId === 'racing-draft'
+  ))
+
+  const stored = await originalGet(session.id)
+  const storedData = stored?.data as {
+    responses?: Array<{ answer?: unknown }>
+    responseDrafts?: Record<string, unknown>
+  } | undefined
+  assert.deepEqual(storedData?.responses?.[0]?.answer, {
+    type: 'free-response',
+    text: 'Submitted answer',
+  })
+  assert.equal(Object.keys(storedData?.responseDrafts ?? {}).length, 0)
+
+  await sessions.close()
+})
+
+void test('a draft-save updateAtomic must not commit into a foreign session created at the same id mid-flight', async () => {
+  // Copilot's finding: the update-draft handler reads `session` once, but
+  // its updateAtomic callback blindly treats whatever record currently
+  // occupies `sessionId` as a ResonanceSession. If that id is deleted and
+  // recreated for a different activity between this handler's outer read
+  // and updateAtomic's own internal read, updateAtomic's CAS only protects
+  // against a *concurrent resonance* write — it has no way to know the
+  // record is now a different activity's session entirely — so the callback
+  // would normalize and write resonance draft data into a foreign record.
+  const app = createMockApp()
+  const sessions = createSessionStore(null)
+  const session = createMultiQuestionSession()
+  const runStartedAt = Date.now() - 1_000
+  session.data.activeQuestionId = 'q1'
+  session.data.activeQuestionIds = ['q1']
+  session.data.activeQuestionRunStartedAt = runStartedAt
+  session.data.activeQuestionRunRevision = 1
+  session.data.lastActiveQuestionRunRevision = 1
+  const studentCookies = issueStudentCookies(session, 'student1')
+  await sessions.set(session.id, session)
+  const captured = createCapturingMockWs()
+  setupResonanceRoutes(app, sessions, captured.ws)
+
+  const handler = captured.getHandler()
+  const messageHandlers: Array<(message: string) => void> = []
+  const sentMessages: Array<{ type?: string; payload?: { draftId?: string } }> = []
+  assert.ok(handler)
+  handler({
+    readyState: 1,
+    upgradeHeaders: {
+      cookie: Object.entries(studentCookies).map(([name, value]) => `${name}=${value}`).join('; '),
+    },
+    send(message: string) {
+      sentMessages.push(JSON.parse(message) as { type?: string; payload?: { draftId?: string } })
+    },
+    on(event: string, callback: (message: string) => void) {
+      if (event === 'message') messageHandlers.push(callback)
+    },
+    once() {},
+    close() {},
+    terminate() {},
+    ping() {},
+  }, new URLSearchParams({ sessionId: session.id, role: 'student', studentId: 'student1' }), captured.ws.wss)
+  await waitForCondition(() => messageHandlers.length === 1)
+
+  // The id is deleted and recreated as a foreign (non-resonance) session
+  // the first time this handler calls updateAtomic — simulating a
+  // delete-then-recreate race that lands strictly between this handler's
+  // outer session read and its atomic write.
+  const originalUpdateAtomic = sessions.updateAtomic!.bind(sessions)
+  let swapped = false
+  sessions.updateAtomic = (async (id: string, mutate: (session: SessionRecord) => SessionRecord) => {
+    if (!swapped && id === session.id) {
+      swapped = true
+      await sessions.delete(id)
+      await sessions.set(id, {
+        id,
+        type: 'other-activity',
+        created: Date.now(),
+        lastActivity: Date.now(),
+        data: { marker: 'do-not-touch' },
+      } as SessionRecord)
+    }
+    return originalUpdateAtomic(id, mutate)
+  }) as SessionStore['updateAtomic']
+
+  console.info('[TEST] a draft write must not commit into a same-id record recreated for a different activity')
+  messageHandlers[0]?.(JSON.stringify({
+    type: 'resonance:update-draft',
+    payload: {
+      studentId: 'student1',
+      questionId: 'q1',
+      draftId: 'swapped-draft',
+      activeQuestionRunRevision: 1,
+      editSequence: 1,
+      answer: { type: 'free-response', text: 'Must never reach the foreign session' },
+    },
+  }))
+  await waitForCondition(() => swapped)
+  // Give the aborted write's rejected promise a turn to settle before
+  // asserting nothing was ever acknowledged or persisted into it.
+  await new Promise((resolve) => setTimeout(resolve, 20))
+
+  assert.equal(sentMessages.some((message) => message.type === 'resonance:draft-saved'), false)
+  const stored = await sessions.get(session.id) as (SessionRecord & {
+    data: { marker?: string; responseDrafts?: Record<string, unknown> }
+  }) | null
+  assert.equal(stored?.type, 'other-activity')
+  assert.equal(stored?.data.marker, 'do-not-touch')
+  // The most direct signal that normalizeSessionData/the draft write never
+  // ran against this record at all: a resonance-shaped responseDrafts map
+  // (with the injected draft's answer in it) would exist here if the guard
+  // had not aborted the commit.
+  assert.equal(stored?.data.responseDrafts, undefined)
+
+  await sessions.close()
+})
+
+void test('a legacy response from an earlier pre-rollout run is not mistaken for a confirmation in the current revision-1 run', async () => {
+  // Copilot's finding: responseMatchesActiveRun treated every response with
+  // an omitted activeQuestionRunRevision as belonging to whichever run is
+  // *currently* revision 1 — but omitted revision is also how a response
+  // from an EARLIER pre-rollout run is stored (a session can accumulate
+  // more than one such response, one per question, across several runs that
+  // all predate the revision rollout). Only the run active at the moment of
+  // the upgrade is ever backfilled to revision 1; an older pre-rollout run's
+  // leftover response is otherwise indistinguishable from the session's
+  // current run by the undefined marker alone, so a legitimate
+  // low-editSequence draft in the brand new run was wrongly rejected as
+  // stale against a high-editSequence response that actually belongs to a
+  // run that ended before this one even started.
+  const app = createMockApp()
+  const sessions = createSessionStore(null)
+  const session = createMultiQuestionSession()
+  const priorRunSubmittedAt = Date.now() - 100_000
+  const currentRunStartedAt = Date.now() - 1_000
+  session.data.activeQuestionId = 'q1'
+  session.data.activeQuestionIds = ['q1']
+  session.data.activeQuestionRunStartedAt = currentRunStartedAt
+  session.data.activeQuestionRunRevision = 1
+  session.data.lastActiveQuestionRunRevision = 1
+  session.data.responses = [
+    {
+      id: 'r_legacy',
+      questionId: 'q1',
+      studentId: 'student1',
+      submittedAt: priorRunSubmittedAt,
+      editSequence: 5,
+      answer: { type: 'free-response', text: 'Answer from a run that ended before rollout' },
+    },
+  ]
+  const studentCookies = issueStudentCookies(session, 'student1')
+  await sessions.set(session.id, session)
+  const captured = createCapturingMockWs()
+  setupResonanceRoutes(app, sessions, captured.ws)
+
+  const handler = captured.getHandler()
+  const messageHandlers: Array<(message: string) => void> = []
+  const sentMessages: Array<{ type?: string; payload?: { draftId?: string } }> = []
+  assert.ok(handler)
+  handler({
+    readyState: 1,
+    upgradeHeaders: {
+      cookie: Object.entries(studentCookies).map(([name, value]) => `${name}=${value}`).join('; '),
+    },
+    send(message: string) {
+      sentMessages.push(JSON.parse(message) as { type?: string; payload?: { draftId?: string } })
+    },
+    on(event: string, callback: (message: string) => void) {
+      if (event === 'message') messageHandlers.push(callback)
+    },
+    once() {},
+    close() {},
+    terminate() {},
+    ping() {},
+  }, new URLSearchParams({ sessionId: session.id, role: 'student', studentId: 'student1' }), captured.ws.wss)
+  await waitForCondition(() => messageHandlers.length === 1)
+
+  console.info("[TEST] a fresh edit in the current run must not be rejected as stale against an older pre-rollout run's response")
+  messageHandlers[0]?.(JSON.stringify({
+    type: 'resonance:update-draft',
+    payload: {
+      studentId: 'student1',
+      questionId: 'q1',
+      draftId: 'new-run-draft',
+      activeQuestionRunRevision: 1,
+      editSequence: 1,
+      answer: { type: 'free-response', text: 'Fresh edit in the new run' },
+    },
+  }))
+  await waitForCondition(() => sentMessages.some((message) =>
+    message.type === 'resonance:draft-saved' && message.payload?.draftId === 'new-run-draft'
+  ))
+
+  const stored = await sessions.get(session.id)
+  const storedData = stored?.data as { responseDrafts?: Record<string, { answer?: unknown }> } | undefined
+  assert.deepEqual(storedData?.responseDrafts?.['q1:student1']?.answer, {
+    type: 'free-response',
+    text: 'Fresh edit in the new run',
+  })
+
+  await sessions.close()
+})
+
 void test('a draft made after revisiting an already-submitted question in the same run is persisted, not dropped as stale', async () => {
   const app = createMockApp()
   const sessions = createSessionStore(null)
@@ -1006,6 +1298,7 @@ void test('a draft made after revisiting an already-submitted question in the sa
       draftId: 'revisit-draft',
       activeQuestionRunRevision: 1,
       editSequence: 2,
+      draftGeneration: 2,
       answer: { type: 'free-response', text: 'Revised answer, not yet resubmitted' },
     },
   }))
@@ -1034,15 +1327,195 @@ void test('a draft made after revisiting an already-submitted question in the sa
       updatedAt: undefined,
       activeQuestionRunRevision: 1,
       editSequence: 2,
+      draftGeneration: 2,
       answer: { type: 'free-response', text: 'Revised answer, not yet resubmitted' },
     },
   )
+  console.info('[TEST] a delayed lower-generation draft must be acknowledged without replacing the newer persisted draft')
+  messageHandlers[0]?.(JSON.stringify({
+    type: 'resonance:update-draft',
+    payload: {
+      studentId: 'student1', questionId: 'q1', draftId: 'stale-generation-draft',
+      activeQuestionRunRevision: 1, editSequence: 2, draftGeneration: 1,
+      answer: { type: 'free-response', text: 'Older delayed draft' },
+    },
+  }))
+  await waitForCondition(() => sentMessages.some((message) =>
+    message.type === 'resonance:draft-saved' && message.payload?.draftId === 'stale-generation-draft'
+  ))
+  const preserved = (await sessions.get(session.id))?.data as { responseDrafts?: Record<string, { answer?: unknown; draftGeneration?: number }> }
+  assert.equal(preserved.responseDrafts?.['q1:student1']?.draftGeneration, 2)
+  assert.deepEqual(preserved.responseDrafts?.['q1:student1']?.answer, { type: 'free-response', text: 'Revised answer, not yet resubmitted' })
+  console.info('[TEST] a clear tombstone must prevent an older delayed draft from recreating the cleared value')
+  messageHandlers[0]?.(JSON.stringify({
+    type: 'resonance:update-draft',
+    payload: {
+      studentId: 'student1', questionId: 'q1', draftId: 'clear-generation-three',
+      activeQuestionRunRevision: 1, editSequence: 2, draftGeneration: 3, answer: null,
+    },
+  }))
+  await waitForCondition(() => sentMessages.some((message) =>
+    message.type === 'resonance:draft-saved' && message.payload?.draftId === 'clear-generation-three'
+  ))
+  messageHandlers[0]?.(JSON.stringify({
+    type: 'resonance:update-draft',
+    payload: {
+      studentId: 'student1', questionId: 'q1', draftId: 'stale-after-clear',
+      activeQuestionRunRevision: 1, editSequence: 2, draftGeneration: 2,
+      answer: { type: 'free-response', text: 'Must not resurrect' },
+    },
+  }))
+  await waitForCondition(() => sentMessages.some((message) =>
+    message.type === 'resonance:draft-saved' && message.payload?.draftId === 'stale-after-clear'
+  ))
+  const afterClear = (await sessions.get(session.id))?.data as { responseDrafts?: Record<string, unknown>; responseDraftGenerations?: Record<string, { draftGeneration?: number }> }
+  assert.equal(afterClear.responseDrafts?.['q1:student1'], undefined)
+  assert.equal(afterClear.responseDraftGenerations?.['q1:student1']?.draftGeneration, 3)
+  // Rolling/legacy clients do not send a generation, which resolves to zero.
+  // Even after this current client wrote the positive-generation tombstone,
+  // preserve the legacy client's last-arrival behavior during a deployment.
+  console.info('[TEST] a generation-zero legacy edit can follow a current-client tombstone')
+  messageHandlers[0]?.(JSON.stringify({
+    type: 'resonance:update-draft',
+    payload: {
+      studentId: 'student1', questionId: 'q1', draftId: 'legacy-delayed-update',
+      activeQuestionRunRevision: 1, editSequence: 2,
+      answer: { type: 'free-response', text: 'Persisted legacy edit after clear' },
+    },
+  }))
+  await waitForCondition(() => sentMessages.some((message) =>
+    message.type === 'resonance:draft-saved' && message.payload?.draftId === 'legacy-delayed-update'
+  ))
+  const afterLegacyEdit = (await sessions.get(session.id))?.data as {
+    responseDrafts?: Record<string, unknown>
+    responseDraftGenerations?: Record<string, { draftGeneration?: number }>
+  }
+  assert.deepEqual(afterLegacyEdit.responseDrafts?.['q1:student1'], {
+    questionId: 'q1', studentId: 'student1', updatedAt: (afterLegacyEdit.responseDrafts?.['q1:student1'] as { updatedAt: number }).updatedAt,
+    activeQuestionRunRevision: 1, editSequence: 2,
+    answer: { type: 'free-response', text: 'Persisted legacy edit after clear' },
+  })
+  // The legacy edit's own content still wins unconditionally (asserted
+  // above) — that's the "last arrival wins" compatibility path. But the
+  // stored watermark itself must never regress below the highest positive
+  // generation already seen (3, from the tombstone above): CodeRabbit
+  // flagged that storing draftGeneration as-is here reset the watermark to
+  // 0, which would let a later delayed lower-but-still-positive generation
+  // (e.g. 1 or 2) slip past the strict staleness check, since it would then
+  // be compared against a falsely-reset floor instead of the real one.
+  assert.equal(afterLegacyEdit.responseDraftGenerations?.['q1:student1']?.draftGeneration, 3)
+  console.info('[TEST] a delayed lower-positive-generation draft arriving after the legacy edit must still be rejected as stale')
+  messageHandlers[0]?.(JSON.stringify({
+    type: 'resonance:update-draft',
+    payload: {
+      studentId: 'student1', questionId: 'q1', draftId: 'delayed-generation-two-after-legacy',
+      activeQuestionRunRevision: 1, editSequence: 2, draftGeneration: 2,
+      answer: { type: 'free-response', text: 'Must not overwrite the legacy edit' },
+    },
+  }))
+  await waitForCondition(() => sentMessages.some((message) =>
+    message.type === 'resonance:draft-saved' && message.payload?.draftId === 'delayed-generation-two-after-legacy'
+  ))
+  const afterDelayedGenerationTwo = (await sessions.get(session.id))?.data as {
+    responseDrafts?: Record<string, { answer?: unknown }>
+  }
+  assert.deepEqual(afterDelayedGenerationTwo.responseDrafts?.['q1:student1']?.answer, {
+    type: 'free-response',
+    text: 'Persisted legacy edit after clear',
+  })
+
   // The confirmed response is untouched until the student resubmits or the
   // deadline finalizes the pending draft.
   assert.deepEqual(storedData?.responses?.[0]?.answer, {
     type: 'free-response',
     text: 'First answer',
   })
+
+  await sessions.close()
+})
+
+void test('a stale pre-rollout draft is rejected as already-superseded by a legacy confirmed response', async () => {
+  // Copilot's finding: the draft-save handler's freshness guard finds "the
+  // confirmed response for this run" by strictly comparing
+  // response.activeQuestionRunRevision to the session's own (now-normalized)
+  // revision. normalizeSessionData always upgrades the session-level
+  // counter to at least 1 once a run is active, but normalizeStoredResponses
+  // never backfills that field on an individual response — a response
+  // persisted before the revision rollout keeps activeQuestionRunRevision
+  // permanently undefined. That response would then never be recognized as
+  // "the confirmed response for the current run", so a stale pre-submission
+  // draft with a lower editSequence could sail past this guard and get
+  // persisted — later risking promotion over the already-confirmed answer
+  // at deadline finalization.
+  const app = createMockApp()
+  const sessions = createSessionStore(null)
+  const session = createMultiQuestionSession()
+  const runStartedAt = Date.now() - 1_000
+  session.data.activeQuestionId = 'q1'
+  session.data.activeQuestionIds = ['q1']
+  session.data.activeQuestionRunStartedAt = runStartedAt
+  session.data.activeQuestionRunRevision = 1
+  session.data.lastActiveQuestionRunRevision = 1
+  // A legacy confirmed response: no activeQuestionRunRevision field at all,
+  // as normalizeStoredResponses would leave one persisted before the
+  // revision rollout.
+  session.data.responses = [
+    {
+      id: 'legacy-response',
+      questionId: 'q1',
+      studentId: 'student1',
+      submittedAt: runStartedAt + 100,
+      editSequence: 3,
+      answer: { type: 'free-response', text: 'Confirmed before the revision rollout' },
+    },
+  ]
+  const studentCookies = issueStudentCookies(session, 'student1')
+  await sessions.set(session.id, session)
+  const captured = createCapturingMockWs()
+  setupResonanceRoutes(app, sessions, captured.ws)
+
+  const handler = captured.getHandler()
+  const messageHandlers: Array<(message: string) => void> = []
+  const sentMessages: Array<{ type?: string; payload?: { draftId?: string } }> = []
+  assert.ok(handler)
+  handler({
+    readyState: 1,
+    upgradeHeaders: {
+      cookie: Object.entries(studentCookies).map(([name, value]) => `${name}=${value}`).join('; '),
+    },
+    send(message: string) {
+      sentMessages.push(JSON.parse(message) as { type?: string; payload?: { draftId?: string } })
+    },
+    on(event: string, callback: (message: string) => void) {
+      if (event === 'message') messageHandlers.push(callback)
+    },
+    once() {},
+    close() {},
+    terminate() {},
+    ping() {},
+  }, new URLSearchParams({ sessionId: session.id, role: 'student', studentId: 'student1' }), captured.ws.wss)
+  await waitForCondition(() => messageHandlers.length === 1)
+
+  console.info('[TEST] a delayed pre-submission draft (lower editSequence than the legacy confirmed response) arrives')
+  messageHandlers[0]?.(JSON.stringify({
+    type: 'resonance:update-draft',
+    payload: {
+      studentId: 'student1', questionId: 'q1', draftId: 'stale-pre-submission-draft',
+      activeQuestionRunRevision: 1, editSequence: 1, draftGeneration: 1,
+      answer: { type: 'free-response', text: 'Stale draft from before the legacy submission' },
+    },
+  }))
+  await waitForCondition(() => sentMessages.some((message) =>
+    message.type === 'resonance:draft-saved' && message.payload?.draftId === 'stale-pre-submission-draft'
+  ))
+
+  console.info('[TEST] the stale draft must be acknowledged as a no-op, not stored where it could later overwrite the confirmed answer')
+  const stored = (await sessions.get(session.id))?.data as {
+    responseDrafts?: Record<string, unknown>
+    responses?: Array<{ answer?: unknown }>
+  } | undefined
+  assert.equal(stored?.responseDrafts?.['q1:student1'], undefined)
+  assert.deepEqual(stored?.responses?.[0]?.answer, { type: 'free-response', text: 'Confirmed before the revision rollout' })
 
   await sessions.close()
 })
@@ -1419,6 +1892,104 @@ void test('timed live runs finalize persisted drafts for every active question',
       { questionId: 'q2', answer: { type: 'multiple-choice', selectedOptionIds: ['q2_b'] } },
     ],
   )
+
+  await sessions.close()
+})
+
+void test('a student who never submits before the deadline keeps their answer editable after the instructor reactivates', async () => {
+  // The incident this whole draft-persistence effort was built to fix: a
+  // student runs out of time mid-answer without clicking Submit, and the
+  // instructor reactivates the question to give another round. The
+  // student's in-progress work must not be lost. This chains the two halves
+  // that are otherwise only tested separately — deadline finalization
+  // (draft -> response) and reactivation carry-forward (response stays
+  // editable) — to prove the actual end-to-end story holds.
+  const app = createMockApp()
+  const ws = createMockWs()
+  const sessions = createSessionStore(null)
+  const session = createMultiQuestionSession()
+  const studentCookies = issueStudentCookies(session, 'student1')
+  await sessions.set(session.id, session)
+
+  setupResonanceRoutes(app, sessions, ws)
+  const activateHandler = app.handlers.post['/api/resonance/:sessionId/activate-question']
+  const stateHandler = app.handlers.get['/api/resonance/:sessionId/state']
+  const responsesHandler = app.handlers.get['/api/resonance/:sessionId/responses']
+  const instructorHeaders = { 'x-instructor-passcode': 'TEACH123' }
+
+  console.info('[TEST] the instructor activates q1 and the student autosaves a draft but never submits')
+  const firstActivateRes = createResponse()
+  await activateHandler?.(
+    { params: { sessionId: session.id }, headers: instructorHeaders, body: { questionId: 'q1' } },
+    firstActivateRes,
+  )
+  assert.equal(firstActivateRes.statusCode, 200)
+
+  const activeSession = await sessions.get(session.id)
+  assert.ok(activeSession)
+  const activeSessionData = activeSession.data as {
+    responseDrafts: Record<string, unknown>
+    activeQuestionRunRevision: number | null
+    activeQuestionDeadlineAt: number | null
+  }
+  // Force the deadline into the past instead of waiting out the question's
+  // real responseTimeLimitMs, matching the other deadline-finalization
+  // tests — the draft must have been saved before that (backdated) deadline,
+  // not after it, or it's correctly treated as a late arrival.
+  const backdatedDeadline = Date.now() - 1_000
+  activeSessionData.responseDrafts['q1:student1'] = {
+    questionId: 'q1',
+    studentId: 'student1',
+    updatedAt: backdatedDeadline - 1_000,
+    activeQuestionRunRevision: activeSessionData.activeQuestionRunRevision,
+    answer: { type: 'free-response', text: 'Unfinished when time ran out' },
+  }
+  activeSessionData.activeQuestionDeadlineAt = backdatedDeadline
+  await sessions.set(session.id, activeSession)
+
+  console.info('[TEST] the deadline passes: the draft must be finalized into a real submitted response')
+  const finalizeRes = createResponse()
+  await stateHandler?.({ params: { sessionId: session.id }, query: { studentId: 'student1' }, cookies: studentCookies }, finalizeRes)
+  assert.equal(finalizeRes.statusCode, 200)
+  const finalizedSession = await sessions.get(session.id)
+  const finalizedSessionData = finalizedSession?.data as {
+    responses: Array<{ questionId: string; answer: unknown }>
+    responseDrafts: Record<string, unknown>
+  } | undefined
+  assert.deepEqual(
+    finalizedSessionData?.responses.map((r) => ({ questionId: r.questionId, answer: r.answer })),
+    [{ questionId: 'q1', answer: { type: 'free-response', text: 'Unfinished when time ran out' } }],
+  )
+  assert.equal(Object.keys(finalizedSessionData?.responseDrafts ?? {}).length, 0)
+
+  console.info('[TEST] the instructor reactivates q1 for another round')
+  const reactivateRes = createResponse()
+  await activateHandler?.(
+    { params: { sessionId: session.id }, headers: instructorHeaders, body: { questionId: 'q1' } },
+    reactivateRes,
+  )
+  assert.equal(reactivateRes.statusCode, 200)
+
+  console.info('[TEST] the student must still see their finalized answer as an editable starting point')
+  const studentStateRes = createResponse()
+  await stateHandler?.({ params: { sessionId: session.id }, query: { studentId: 'student1' }, cookies: studentCookies }, studentStateRes)
+  assert.equal(studentStateRes.statusCode, 200)
+  assert.deepEqual(
+    (studentStateRes.body as { submittedAnswers?: Record<string, unknown> }).submittedAnswers,
+    { q1: { type: 'free-response', text: 'Unfinished when time ran out' } },
+  )
+
+  const instructorProgressRes = createResponse()
+  await responsesHandler?.({ params: { sessionId: session.id }, headers: instructorHeaders }, instructorProgressRes)
+  assert.equal(instructorProgressRes.statusCode, 200)
+  const progress = (instructorProgressRes.body as {
+    progress?: Array<{ questionId?: string; studentId?: string; status?: string; answer?: { text?: string } }>
+  }).progress
+  assert.ok(progress?.some((entry) =>
+    entry.questionId === 'q1' &&
+    entry.studentId === 'student1' &&
+    entry.status === 'working' &&
+    entry.answer?.text === 'Unfinished when time ran out'))
 
   await sessions.close()
 })
@@ -4531,6 +5102,42 @@ void test('student state reports each confirmed response\'s editSequence, so a r
     submittedResponseEditSequences?: Record<string, number>
   }
   assert.equal(body.submittedResponseEditSequences?.q1, 2)
+
+  await sessions.close()
+})
+
+void test('student state projects persisted draft generations for both live and self-paced runs', async () => {
+  const app = createMockApp()
+  const sessions = createSessionStore(null)
+  const live = createMultiQuestionSession()
+  live.id = 'resonance-session-live-draft-generation'
+  live.data.activeQuestionId = 'q1'
+  live.data.activeQuestionIds = ['q1']
+  live.data.activeQuestionRunStartedAt = Date.now() - 1_000
+  live.data.activeQuestionRunRevision = 4
+  live.data.responseDraftGenerations = {
+    'q1:student1': { questionId: 'q1', studentId: 'student1', activeQuestionRunRevision: 4, draftGeneration: 8 },
+  }
+  const selfPaced = createMultiQuestionSession()
+  selfPaced.id = 'resonance-session-self-paced-draft-generation'
+  selfPaced.data.selfPacedMode = true
+  selfPaced.data.responseDraftGenerations = {
+    'q1:student1': { questionId: 'q1', studentId: 'student1', activeQuestionRunRevision: null, draftGeneration: 9 },
+  }
+  await sessions.set(live.id, live)
+  await sessions.set(selfPaced.id, selfPaced)
+  setupResonanceRoutes(app, sessions, createMockWs())
+  const stateHandler = app.handlers.get['/api/resonance/:sessionId/state']
+  assert.equal(typeof stateHandler, 'function')
+
+  for (const [session, expectedGeneration] of [[live, 8], [selfPaced, 9]] as const) {
+    const res = createResponse()
+    await stateHandler?.({
+      params: { sessionId: session.id }, query: { studentId: 'student1' }, cookies: issueStudentCookies(session, 'student1'),
+    }, res)
+    assert.equal(res.statusCode, 200)
+    assert.deepEqual((res.body as { draftGenerations?: Record<string, number> }).draftGenerations, { q1: expectedGeneration })
+  }
 
   await sessions.close()
 })

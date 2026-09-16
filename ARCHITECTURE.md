@@ -308,6 +308,31 @@ through activity-specific props.
   Direct-name registrations without an accepted-participant or capability principal are limited by
   session and trusted-proxy client IP before they mint capability records; a newer same-run draft
   takes precedence over its older confirmed response in instructor progress until submitted.
+- Resonance's student `QuestionView` is keyed by question ID and remounts on every stack-tab
+  switch, so a failed autosave cannot retain itself locally. Instead `ResonanceStudent` owns a
+  parent-level `Map<questionId, QuestionDraftState>` (one record per question, holding which run
+  it currently represents plus every run-scoped field — edit sequence, draft generation,
+  acknowledgement watermark, retained draft — together, so a run transition updates one record in
+  place instead of requiring values to be copied across a separate per-run key) and a 1-second
+  retry loop that survives that remounting; a monotonic draft generation (allocated by the
+  parent, not the child, for the same reason) lets both the client queue and the server's
+  `update-draft` handler discard an older attempt without dropping a newer one that raced ahead
+  of it. Run-identity comparison (a payload's revision or legacy pre-rollout timestamp against a
+  session/snapshot's current run) is centralized in `activities/resonance/shared/runIdentity.ts`,
+  shared by the client component, the client hook, and the server, rather than reimplemented at
+  each call site. The `useResonanceSession`
+  hook separately queues an unacknowledged or send-failed draft for replay on WebSocket reconnect,
+  again ordered by that same generation watermark so a stale queued attempt cannot win a race
+  against a newer one still in flight when the socket drops. A draft's disposition (retry / discard /
+  reconcile) is re-evaluated against the *live* snapshot on every tick: retries stop when the draft
+  or a newer generation is acknowledged as persisted, when a successful submission supersedes the
+  retained draft, or when it is discarded after a confirmed response at an equal or higher edit
+  sequence (self-paced runs have no deadline and keep every question in `activeQuestionIds`
+  indefinitely, so the other two paths matter there too, not just this one), and the draft is
+  reconciled from the server once its run's deadline has passed. A run restart (the same question reactivated under a new run
+  token) drops any locally cached answer that isn't stamped with the new run, since the merge that
+  layers server snapshot data under local state would otherwise let a stale prior-run answer stay
+  displayed, and resubmittable, under the new run.
 - Embedded instructor iframes receive a short-lived, server-issued manager-entry token only after
   the authenticated parent start response arrives. Credentialed children exchange it atomically for
   the child passcode and replace the iframe URL to remove the attempted token whether the exchange

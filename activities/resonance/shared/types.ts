@@ -166,6 +166,8 @@ export interface StudentSessionSnapshot {
    * counter from this value on reload instead of assuming 1.
    */
   submittedResponseEditSequences: Record<string, number>
+  /** Highest autosave generation for this student's drafts in the current run — including self-paced sessions, where the run revision is intentionally null. */
+  draftGenerations: Record<string, number>
   /** Student-safe versions of revealed questions, so clients can show option text alongside reveal data. */
   revealedQuestions: StudentQuestion[]
 }
