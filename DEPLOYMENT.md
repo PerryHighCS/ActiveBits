@@ -98,10 +98,11 @@ Before increasing the instance count:
 3. Ensure every instance uses the same `PERSISTENT_SESSION_SECRET` and relevant
    Learn integration secrets.
 4. Monitor Key Value connection use and memory as instances are added.
+5. Do not run Resonance with more than one app instance until its session writes
+   support safe multi-instance operation.
 
-The system uses Valkey pub/sub and atomic session updates for shared session
-coordination. See [Atomic Session Mutation](ARCHITECTURE.md#atomic-session-mutation)
-for the implementation and compatibility model.
+See [Atomic Session Mutation](ARCHITECTURE.md#atomic-session-mutation) for the
+session coordination model and compatibility requirements.
 
 On a normal redeploy, clients reconnect and Valkey-backed sessions remain
 available. Moving an existing deployment from in-memory storage to Valkey loses
