@@ -1279,6 +1279,72 @@ void test('cancelDraftRetries caps an unbounded cancellation ceiling at the high
   } finally { restore() }
 })
 
+void test('cancelDraftRetries does not permanently block a legacy client\'s later generation-0 drafts from being queued for reconnect replay', async () => {
+  // Copilot's finding: getDraftGeneration() resolves generation 0 for any
+  // payload without a draftGeneration field at all (not a real attempt
+  // counter — just "unknown"). cancelDraftRetries used to record that as a
+  // real cancellation watermark, and queueDraftRetry's `generation <=
+  // cancelledUpTo` check then rejected every future generation-0 draft
+  // forever (0 <= 0 is always true) — stranding an older/rolling client's
+  // offline edits after any one successful save/submission superseded an
+  // earlier generation-0 draft.
+  const restore = installWsTestEnvironment()
+  const { act, render, waitFor } = await import('@testing-library/react')
+
+  try {
+    const captured: {
+      saveDraft: ((payload: Record<string, unknown>) => Promise<boolean>) | null
+      cancelDraftRetries: ((key: string | null, atLeastGeneration: number) => void) | null
+    } = { saveDraft: null, cancelDraftRetries: null }
+    function Probe() {
+      const { saveDraft, cancelDraftRetries } = useResonanceSession('session-1', 'student-1')
+      captured.saveDraft = saveDraft
+      captured.cancelDraftRetries = cancelDraftRetries
+      return null
+    }
+    let rendered!: ReturnType<typeof render>
+    await act(async () => { rendered = render(React.createElement(Probe)); await Promise.resolve() })
+    await waitFor(() => assert.equal(FakeWebSocket.instances.length, 1))
+    const firstSocket = FakeWebSocket.instances[0]!
+    firstSocket.emitMessage({ type: 'resonance:session-state', payload: {
+      sessionId: 'session-1', activeQuestionIds: ['q1'], activeQuestionRunRevision: 3, activeQuestionDeadlineAt: Date.now() + 30_000,
+    } })
+
+    console.info('[TEST] a legacy client (no draftGeneration field) saves offline, gets queued at generation 0')
+    firstSocket.readyState = 3
+    await act(async () => {
+      assert.equal(await captured.saveDraft?.({
+        studentId: 'student-1', questionId: 'q1', activeQuestionRunRevision: 3,
+        answer: { type: 'free-response', text: 'Superseded by a submission' },
+      }), false)
+    })
+
+    console.info('[TEST] a submission confirms that answer, cancelling the generation-0 draft')
+    captured.cancelDraftRetries?.('q1:3', 0)
+
+    console.info('[TEST] the same legacy client makes a genuinely newer edit, still generation 0')
+    await act(async () => {
+      assert.equal(await captured.saveDraft?.({
+        studentId: 'student-1', questionId: 'q1', activeQuestionRunRevision: 3,
+        answer: { type: 'free-response', text: 'A later legacy-client edit' },
+      }), false)
+    })
+
+    console.info('[TEST] that later generation-0 draft must still be queued and replayed on reconnect')
+    firstSocket.onclose?.({})
+    await new Promise((resolve) => setTimeout(resolve, 1_100))
+    await waitFor(() => assert.equal(FakeWebSocket.instances.length, 2))
+    const secondSocket = FakeWebSocket.instances[1]!
+    const sentAfterReconnect: unknown[] = []
+    secondSocket.send = (message?: unknown) => { sentAfterReconnect.push(message) }
+    secondSocket.onopen?.()
+
+    await waitFor(() => assert.ok(sentAfterReconnect.some((message) => String(message).includes('A later legacy-client edit'))))
+
+    await act(async () => { rendered.unmount() })
+  } finally { restore() }
+})
+
 void test('a pending direct save whose generation was just cancelled is not requeued when its own ack times out', async () => {
   // Copilot's finding: cancelling retries only removes an already-queued
   // entry — it does nothing about a save that's still awaiting its own

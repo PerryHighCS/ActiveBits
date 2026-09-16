@@ -907,6 +907,82 @@ void test('QuestionView still hands off a pending edit when its run is relabeled
   }
 })
 
+void test('QuestionView preserves an in-progress edit across a same-run legacy-to-canonical relabel instead of resetting to the stale initial answer', async () => {
+  // Copilot's finding: the draft-reset effect's dependency array includes
+  // activeQuestionRunToken (a resolved scalar), so a server relabel of the
+  // SAME run from its legacy timestamp-only form to canonical revision 1
+  // changed that scalar and made this effect fire its full reset — wiping
+  // out whatever the student had typed since mount and replacing it with
+  // the parent's (stale) initialAnswer, even though the run never changed.
+  const restoreDomEnvironment = installDomEnvironment()
+  const { fireEvent, render, waitFor } = await import('@testing-library/react')
+
+  try {
+    const props = {
+      question: { id: 'q1', type: 'free-response' as const, text: 'Explain your reasoning.', order: 0 },
+      sessionId: 'session-1',
+      studentId: 'student-1',
+      initialAnswer: null,
+      activeQuestionRunRevision: null as number | null,
+      activeQuestionRunStartedAt: 1_000,
+      sendMessage: () => true,
+    }
+    const rendered = render(React.createElement(QuestionView, props))
+    const textarea = rendered.getByLabelText(/your answer/i) as HTMLTextAreaElement
+    fireEvent.change(textarea, { target: { value: 'In-progress edit' } })
+    await waitFor(() => assert.equal(textarea.value, 'In-progress edit'))
+
+    console.info('[TEST] the server relabels this same run from legacy timestamp form to canonical revision 1')
+    rendered.rerender(React.createElement(QuestionView, {
+      ...props,
+      activeQuestionRunRevision: 1,
+      activeQuestionRunStartedAt: 1_000,
+    }))
+
+    assert.equal(textarea.value, 'In-progress edit', 'a same-run relabel must not discard an unsent edit')
+    rendered.unmount()
+  } finally {
+    restoreDomEnvironment()
+  }
+})
+
+void test('QuestionView\'s draft payload preserves the run start timestamp alongside a canonical revision', async () => {
+  // Copilot's finding: buildDraftPayload dropped activeQuestionRunStartedAt
+  // whenever activeQuestionRunRevision was present, sending only
+  // { activeQuestionRunRevision }. That makes the reverse legacy/canonical
+  // bridge in runIdentity.ts unusable for real canonical payloads: a queued
+  // retry sent as `{ revision: 1 }` can't match a still-legacy snapshot
+  // `{ revision: null, startedAt: T }` mid-migration, since that bridge
+  // needs the candidate's own timestamp to disambiguate.
+  const restoreDomEnvironment = installDomEnvironment()
+  const { fireEvent, render, waitFor } = await import('@testing-library/react')
+
+  try {
+    const savedPayloads: Record<string, unknown>[] = []
+    const props = {
+      question: { id: 'q1', type: 'free-response' as const, text: 'Explain your reasoning.', order: 0 },
+      sessionId: 'session-1',
+      studentId: 'student-1',
+      activeQuestionRunRevision: 1,
+      activeQuestionRunStartedAt: 1_000,
+      saveDraft: (payload: Record<string, unknown>) => {
+        savedPayloads.push(payload)
+        return Promise.resolve(true)
+      },
+    }
+    const rendered = render(React.createElement(QuestionView, props))
+    const textarea = rendered.getByLabelText(/your answer/i)
+    fireEvent.change(textarea, { target: { value: 'Canonical-run edit' } })
+
+    await waitFor(() => assert.equal(savedPayloads.length, 1), { timeout: 3_000 })
+    assert.equal(savedPayloads[0]?.activeQuestionRunRevision, 1)
+    assert.equal(savedPayloads[0]?.activeQuestionRunStartedAt, 1_000, 'a canonical draft payload must still carry the run start timestamp')
+    rendered.unmount()
+  } finally {
+    restoreDomEnvironment()
+  }
+})
+
 void test('QuestionView shows only the stem for staged MCQs before choices are revealed', async () => {
   const restoreDomEnvironment = installDomEnvironment()
   const { render } = await import('@testing-library/react')

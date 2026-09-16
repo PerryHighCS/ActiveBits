@@ -111,14 +111,34 @@ export default function QuestionView({
     studentId,
     identity: { activeQuestionRunRevision, activeQuestionRunStartedAt },
   })
+  // Snapshot the draft-reset effect below compares each run against, to tell
+  // a genuine question/session/student/submitted-state/reset-version change
+  // from a same-run legacy-to-canonical relabel (see that effect's own
+  // comment) — the same pattern submissionInvalidationRef uses.
+  const draftResetInvalidationRef = useRef<{
+    draftResetVersion: number
+    questionId: string
+    isSubmitted: boolean
+    sessionId: string
+    studentId: string
+    identity: RunIdentitySource
+  }>({
+    draftResetVersion,
+    questionId: question.id,
+    isSubmitted,
+    sessionId,
+    studentId,
+    identity: { activeQuestionRunRevision, activeQuestionRunStartedAt },
+  })
   const disabledRef = useRef(disabled)
   const activeQuestionRunRevisionRef = useRef(activeQuestionRunToken)
-  // Unlike activeQuestionRunRevisionRef (a resolved scalar, used for the
-  // draft-save "is this still the current run" checks below), this keeps
-  // both raw identity fields — needed only where a legacy-timestamp run must
-  // still be recognized as equivalent to its since-canonicalized revision-1
-  // form (see submitAnswer's own stale-response guard and onSubmitted).
-  // Collapsing to a scalar first would lose which form produced it.
+  // Unlike activeQuestionRunRevisionRef (a resolved scalar, needed only to
+  // stamp the REST submit-answer body with whichever field is active), this
+  // keeps both raw identity fields — needed everywhere a legacy-timestamp
+  // run must still be recognized as equivalent to its since-canonicalized
+  // revision-1 form (draft-save "is this still the current run" checks,
+  // submitAnswer's stale-response guard, and onSubmitted). Collapsing to a
+  // scalar first would lose which form produced it.
   const activeQuestionRunIdentityRef = useRef<RunIdentitySource>({
     activeQuestionRunRevision,
     activeQuestionRunStartedAt,
@@ -155,6 +175,30 @@ export default function QuestionView({
     question.type === 'multiple-choice' && question.choicesRevealed === false
 
   useEffect(() => {
+    const previous = draftResetInvalidationRef.current
+    const currentIdentity: RunIdentitySource = { activeQuestionRunRevision, activeQuestionRunStartedAt }
+    // A legacy-timestamp run relabeled to its since-canonicalized revision-1
+    // form changes activeQuestionRunToken (a dependency below) even though
+    // it's the same real run. Resetting on that alone — as a raw scalar
+    // comparison would — overwrites lastSentDraftRef/draftAnswer with the
+    // (possibly stale) initialAnswer and clears the draft identity, so an
+    // in-progress local edit can be considered synchronized even though it
+    // was never persisted. Only a genuine question/session/student/
+    // submitted-state/reset-version change, or an actual run change, resets.
+    const previousRunMatches = runIdentitiesMatch(previous.identity, currentIdentity)
+    draftResetInvalidationRef.current = {
+      draftResetVersion, questionId: question.id, isSubmitted, sessionId, studentId, identity: currentIdentity,
+    }
+    if (
+      previous.draftResetVersion === draftResetVersion &&
+      previous.questionId === question.id &&
+      previous.isSubmitted === isSubmitted &&
+      previous.sessionId === sessionId &&
+      previous.studentId === studentId &&
+      previousRunMatches
+    ) {
+      return
+    }
     setDraftAnswer(initialAnswerRef.current)
     lastSentDraftRef.current = initialAnswerRef.current
     synchronizedInitialAnswerRef.current = initialAnswerRef.current
@@ -233,8 +277,13 @@ export default function QuestionView({
     const buildDraftPayload = (answer: AnswerPayload | null) => ({
       studentId,
       questionId: question.id,
+      // A canonical (revision-present) payload also carries its start
+      // timestamp, not just the revision, so the reverse legacy/canonical
+      // bridge in runIdentity.ts can disambiguate a migration mid-flight —
+      // dropping it made a queued retry sent as `{ revision: 1 }` unable to
+      // match a still-legacy snapshot `{ revision: null, startedAt: T }`.
       ...(activeQuestionRunRevision !== null
-        ? { activeQuestionRunRevision: activeQuestionRunToken }
+        ? { activeQuestionRunRevision, activeQuestionRunStartedAt }
         : { activeQuestionRunStartedAt: activeQuestionRunToken }),
       ...(activeQuestionDeadlineAt !== null ? { activeQuestionDeadlineAt } : {}),
       editSequence: editSequenceRef.current,
@@ -259,7 +308,13 @@ export default function QuestionView({
           if (sessionIdRef.current !== sessionId || studentIdRef.current !== studentId) {
             return
           }
-          const isCurrentRun = activeQuestionRunRevisionRef.current === activeQuestionRunToken
+          // runIdentitiesMatch (not a raw scalar ===), matching every other
+          // "is this still the current run" check in this file: a legacy
+          // run relabeled to its since-canonicalized revision-1 form while
+          // this save was in flight must not be mistaken for a run change,
+          // or a newer edit in the same run would get silently dropped
+          // instead of handed off below.
+          const isCurrentRun = runIdentitiesMatch(activeQuestionRunIdentityRef.current, effectRunIdentity)
           if (saved) {
             if (isCurrentRun && isSameAnswer(draftAnswerRef.current, pendingDraft)) {
               lastSentDraftRef.current = pendingDraft

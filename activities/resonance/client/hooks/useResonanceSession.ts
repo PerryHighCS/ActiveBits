@@ -950,8 +950,17 @@ export function useResonanceSession(
     // later generation for this key, since nothing could ever exceed it.
     const attempted = latestDraftGenerationByKeyRef.current.get(key) ?? -1
     const bounded = Math.min(atLeastGeneration, attempted)
-    const cancelledUpTo = cancelledUpToGenerationByKeyRef.current.get(key) ?? -1
-    cancelledUpToGenerationByKeyRef.current.set(key, Math.max(cancelledUpTo, bounded))
+    // Generation 0 is the fallback getDraftGeneration() resolves for legacy
+    // payloads that never carry a draftGeneration at all — not a real
+    // attempt number. Recording it as a cancellation watermark would permanently
+    // block every future generation-0 retry for this key (0 <= 0 is true
+    // forever), stranding an older/rolling client's offline edits after any
+    // one successful save/replacement. Only a positive generation is a real
+    // cancellation ceiling.
+    if (bounded > 0) {
+      const cancelledUpTo = cancelledUpToGenerationByKeyRef.current.get(key) ?? -1
+      cancelledUpToGenerationByKeyRef.current.set(key, Math.max(cancelledUpTo, bounded))
+    }
     const queued = queuedDraftRetriesRef.current.get(key)
     if (queued && getDraftGeneration(queued) <= bounded) {
       queuedDraftRetriesRef.current.delete(key)

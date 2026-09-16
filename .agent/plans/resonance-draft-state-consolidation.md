@@ -385,15 +385,10 @@ commit, full suite after each:
    (unrelated to local storage, still required).
 
    `legacyDraftKeyAliasRef` was **not** deleted in this step, contrary to
-   the original plan — see the checklist note. `clearRetainedDraftIfSuperseded`
-   (called from the hook's reconnect-replay ack path) only has a composite
-   key string to work from, not the original payload; a new
-   `parseDraftRetryKey` inverts `buildDraftRetryKey`'s format well enough
-   to resolve `(questionId, runToken)` from an *already-aliased* key, but
-   the alias resolution step itself (mapping a genuinely legacy key to its
-   canonical form) still depends on `legacyDraftKeyAliasRef` until the hook
-   is extended to carry a resolved `runToken` alongside its retry tracking
-   (see the still-open item in section 4).
+   the original plan — see the checklist note at the time. It was fully
+   deleted in step 4 below, once `retryDraftSavesRef` was extended to carry
+   the retry's own full `RunIdentitySource` instead of a bare key string —
+   see step 4's note for how that made the alias table unnecessary.
 3. ~~`editSequence` + `submittedEditSequence` together~~ **Done** —
    `resolveCurrentEditSequence`/`advanceEditSequenceForRevisit`/
    `seedEditSequenceFromConfirmedResponse` renamed to their `Question*`
