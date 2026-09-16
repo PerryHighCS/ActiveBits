@@ -1,5 +1,5 @@
 import { timingSafeEqual } from 'crypto'
-import { createSession, getSessionCreatedIdentity, type SessionRecord, type SessionStore } from 'activebits-server/core/sessions.js'
+import { createSession, getSessionCreatedIdentity, preserveSessionCreatedIdentity, type SessionRecord, type SessionStore } from 'activebits-server/core/sessions.js'
 import { registerSessionNormalizer } from 'activebits-server/core/sessionNormalization.js'
 import {
   getActivityCapabilityCookieName,
@@ -1777,7 +1777,12 @@ export default function setupResonanceRoutes(
     // SessionCache returns its live value by reference. Work on a detached
     // copy so a failed timeout-finalization write cannot make local reads look
     // expired and cancel the retry while durable storage still has the run.
-    const session = structuredClone(loadedSession)
+    // preserveSessionCreatedIdentity carries the legacy (no persisted
+    // `created`) marker across the clone: without it, a legacy record's
+    // synthetic timestamp looks like a genuine incarnation id on the clone,
+    // and the later updateAtomic incarnation guard rejects every draft-save
+    // write for that session as a wrong-incarnation mismatch.
+    const session = preserveSessionCreatedIdentity(loadedSession, structuredClone(loadedSession))
 
     const hadSelfPacedMode = session.data.selfPacedMode === true
     const resolvedSelfPacedMode =

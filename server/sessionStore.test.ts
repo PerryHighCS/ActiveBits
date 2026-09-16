@@ -2,7 +2,7 @@ import test, { type TestContext } from 'node:test'
 import assert from 'node:assert'
 import http from 'node:http'
 import { WebSocket } from 'ws'
-import { createSessionStore, createSession, type SessionRecord } from './core/sessions.js'
+import { createSessionStore, createSession, getSessionCreatedIdentity, preserveSessionCreatedIdentity, type SessionRecord } from './core/sessions.js'
 import { type ValkeySessionStore } from './core/valkeyStore.js'
 import { createWsRouter } from './core/wsRouter.js'
 import { EMBEDDED_CHILD_SESSION_PREFIX } from '../types/session.js'
@@ -75,6 +75,36 @@ void test('Valkey updateAtomic migrates a legacy record without created using re
   assert.equal(updated?.mutationRevision, 1)
   assert.equal(updated?.data.status, 'updated')
   assert.equal(typeof updated?.created, 'number', 'the successful write upgrades the legacy record')
+})
+
+void test('preserveSessionCreatedIdentity carries a legacy record\'s "no persisted created" marker across a structuredClone', async (t) => {
+  const records = new Map<string, SessionRecord>()
+  const legacy = {
+    id: 'legacy-session-clone',
+    mutationRevision: 0,
+    data: { status: 'old' },
+  } as unknown as SessionRecord
+  records.set(legacy.id, legacy)
+  const sessions = createSessionStore('redis://test', 1_000, valkeyStoreForTest(records, []))
+  t.after(async () => { await sessions.close() })
+
+  const loaded = await sessions.get(legacy.id)
+  assert.ok(loaded)
+  assert.equal(getSessionCreatedIdentity(loaded), null, 'a legacy record with no persisted created has no incarnation identity')
+
+  // A caller that clones a loaded record (e.g. to work on a detached copy
+  // before a later atomic write) loses that marking on its own: the clone
+  // is a new object, so its synthetic `created` timestamp looks like a
+  // genuine incarnation id unless the marker is explicitly carried over.
+  const plainClone = structuredClone(loaded)
+  assert.notEqual(
+    getSessionCreatedIdentity(plainClone),
+    null,
+    'demonstrates the bug: an unmarked clone of a legacy record looks like it has a real incarnation identity',
+  )
+
+  const preservedClone = preserveSessionCreatedIdentity(loaded, structuredClone(loaded))
+  assert.equal(getSessionCreatedIdentity(preservedClone), null, 'preserveSessionCreatedIdentity keeps the clone recognized as legacy')
 })
 
 void test('in-memory atomic update refreshes an embedded child session parent', async (t) => {

@@ -418,12 +418,33 @@ function isDeliberateReverseBridgeDivergence(snapshot: RunIdentitySource, payloa
     payload.activeQuestionRunStartedAt === 555
 }
 
-void test('runIdentitiesMatch matches isPayloadForSnapshotRun for every realistic snapshot shape, except the reverse-bridge fix', () => {
+// A second deliberate divergence (a later Copilot review round's finding):
+// the original reference collapses a payload that omits every run field
+// into the same "null" its own missing startedAt resolves to, and then
+// matches that null against a snapshot's *explicit* null startedAt on a
+// revision-1 run that has simply not been timestamped yet. A payload that
+// genuinely says nothing about its run is not the same claim as a snapshot
+// explicitly asserting "no timestamp yet on this active run" — the fixed
+// forwardCrossFormMatch now requires the payload to actually provide a
+// (possibly null) startedAt before treating it as a legacy/self-paced
+// assertion, rather than accepting a fully absent field the same way.
+function isDeliberateOmittedFieldDivergence(snapshot: RunIdentitySource, payload: RunIdentitySource): boolean {
+  return snapshot.activeQuestionRunRevision === 1 &&
+    snapshot.activeQuestionRunStartedAt === null &&
+    payload.activeQuestionRunRevision === undefined &&
+    payload.activeQuestionRunStartedAt === undefined
+}
+
+void test('runIdentitiesMatch matches isPayloadForSnapshotRun for every realistic snapshot shape, except the two deliberate fixes', () => {
   for (const snapshot of SNAPSHOT_SAMPLES) {
     for (const payload of PAYLOAD_SAMPLES) {
       const actual = runIdentitiesMatch(snapshot, payload)
       if (isDeliberateReverseBridgeDivergence(snapshot, payload)) {
         assert.equal(actual, true, `snapshot=${JSON.stringify(snapshot)} payload=${JSON.stringify(payload)}: expected the reverse bridge to match`)
+        continue
+      }
+      if (isDeliberateOmittedFieldDivergence(snapshot, payload)) {
+        assert.equal(actual, false, `snapshot=${JSON.stringify(snapshot)} payload=${JSON.stringify(payload)}: a payload that omits every run field must not match a not-yet-timestamped active run`)
         continue
       }
       const expected = referenceIsPayloadForSnapshotRun(payload, snapshot)
@@ -434,6 +455,53 @@ void test('runIdentitiesMatch matches isPayloadForSnapshotRun for every realisti
       )
     }
   }
+})
+
+void test('runIdentitiesMatch rejects a payload that omits every run field when the current run has started but has no timestamp yet', () => {
+  // Copilot's finding: matchesActiveQuestionRun calls this directly on raw
+  // request bodies, where a client that sends neither field at all (not
+  // even an explicit null) is a malformed/incomplete request, not a
+  // legitimate self-paced "no active run" assertion. Before this fix, the
+  // fully-absent case collapsed to the same null as an explicit one and
+  // could match a live run whose startedAt had not been backfilled yet.
+  assert.equal(
+    runIdentitiesMatch(
+      { activeQuestionRunRevision: 1, activeQuestionRunStartedAt: null },
+      {},
+    ),
+    false,
+  )
+  // An explicit null (a genuine legacy/self-paced assertion) still matches.
+  assert.equal(
+    runIdentitiesMatch(
+      { activeQuestionRunRevision: 1, activeQuestionRunStartedAt: null },
+      { activeQuestionRunStartedAt: null },
+    ),
+    true,
+  )
+})
+
+void test('runIdentitiesMatch does not let a legacy timestamp coincide numerically with an unrelated revision number', () => {
+  // Copilot's finding: resolveRunToken's scalar loses whether it came from
+  // a revision or a legacy timestamp, so a bare numeric equality on the
+  // resolved token let a candidate's tiny/crafted activeQuestionRunStartedAt
+  // (e.g. 1) match a current session's unrelated activeQuestionRunRevision
+  // of the same numeric value, without ever comparing real start times.
+  assert.equal(
+    runIdentitiesMatch(
+      { activeQuestionRunRevision: 1, activeQuestionRunStartedAt: 999 },
+      { activeQuestionRunStartedAt: 1 },
+    ),
+    false,
+  )
+  // The legitimate cross-form bridge (matching real timestamps) still works.
+  assert.equal(
+    runIdentitiesMatch(
+      { activeQuestionRunRevision: 1, activeQuestionRunStartedAt: 999 },
+      { activeQuestionRunStartedAt: 999 },
+    ),
+    true,
+  )
 })
 
 void test('runIdentitiesMatch recognizes a legacy-form current against a canonical revision-1 candidate (the reverse migration direction)', () => {

@@ -40,6 +40,19 @@ export function getSessionCreatedIdentity(session: object | null | undefined): n
   return typeof created === 'number' ? created : null
 }
 
+// A structuredClone (or other copy) of a legacy record is a new object, so
+// the WeakSet membership above does not carry over on its own: the clone's
+// `created` reads back as a real (non-legacy) identity even though the
+// original had none. Callers that clone a record before later checking its
+// created identity (e.g. building a detached working copy ahead of an
+// updateAtomic CAS) must re-mark the clone through this function, or the
+// clone's synthetic timestamp gets treated as a genuine incarnation id and
+// every write for that legacy record fails the incarnation check.
+export function preserveSessionCreatedIdentity<T extends object>(source: object, clone: T): T {
+  if (legacyCreatedSessions.has(source)) legacyCreatedSessions.add(clone)
+  return clone
+}
+
 function ensurePlainObject(value: unknown): Record<string, unknown> {
   return value != null && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
 }

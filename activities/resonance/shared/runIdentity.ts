@@ -40,15 +40,39 @@ export function resolveRunToken(source: RunIdentitySource): number | null {
   return null
 }
 
+// resolveRunToken's scalar loses which field produced it, so comparing two
+// resolved tokens for bare numeric equality is only sound when both sides
+// resolved from the same representation: a revision counter (small
+// integers starting at 1) and a legacy epoch-millisecond timestamp share
+// the same numeric space, so e.g. a crafted/degenerate
+// `activeQuestionRunStartedAt: 1` would otherwise equal a real revision 1
+// and be accepted as the same run. When only one side carries a revision,
+// this returns false and defers to crossFormMatch, which validates the
+// bridge (revision 1 vs. a real matching start timestamp) explicitly
+// instead of trusting the ambiguous scalar.
+function sameFormTokensMatch(a: RunIdentitySource, b: RunIdentitySource): boolean {
+  if (hasRevision(a) || hasRevision(b)) {
+    return hasRevision(a) && hasRevision(b) && a.activeQuestionRunRevision === b.activeQuestionRunRevision
+  }
+  return resolveRunToken(a) === resolveRunToken(b)
+}
+
 // `current` explicitly identifies revision 1 by number, and `candidate`
 // carries no revision of its own (a legacy timestamp-only form, or nothing
-// at all). They still identify the same run if their (possibly absent)
-// start timestamps agree — absent and explicit null both mean "no
-// timestamp provided" here.
+// at all). They still identify the same run if their start timestamps
+// agree — but an explicit `null` (candidate deliberately asserts no
+// timestamp, e.g. a genuine legacy/self-paced payload) and a genuinely
+// MISSING field (candidate never mentions a timestamp at all) are not the
+// same thing: only the former is a real assertion. Without distinguishing
+// them, a payload that omits both run-identity fields entirely (no
+// revision, no timestamp key at all) would collapse to the same "null"
+// as current's own not-yet-backfilled startedAt on a run that just
+// started, and be wrongly accepted as belonging to that live run.
 function forwardCrossFormMatch(current: RunIdentitySource, candidate: RunIdentitySource): boolean {
   if (current.activeQuestionRunRevision !== 1) return false
   if (typeof candidate.activeQuestionRunRevision === 'number') return false
-  return (current.activeQuestionRunStartedAt ?? null) === (candidate.activeQuestionRunStartedAt ?? null)
+  if (candidate.activeQuestionRunStartedAt === undefined) return false
+  return (current.activeQuestionRunStartedAt ?? null) === candidate.activeQuestionRunStartedAt
 }
 
 // The mirror image: `current` is itself still in legacy form and
@@ -100,17 +124,19 @@ function hasInvalidRunField(source: RunIdentitySource): boolean {
  * fields may be partial, or entirely absent for a pre-revision-rollout
  * legacy form)?
  *
- * The two are compared by their resolved tokens first (resolveRunToken
- * already prefers a revision over a legacy timestamp on each side
- * independently — this alone is enough whenever both sides use the same
- * representation, including the case where a session/snapshot itself is
- * still in legacy form: revision null, a real start timestamp — see
- * normalizeSessionData, which can leave a session's revision defaulted
- * without a timestamp, and the server, which can send a client a
- * genuinely pre-rollout snapshot). The remaining case — one side has been
- * canonicalized to revision 1 while the other is still timestamp-only —
- * needs the explicit bridge in crossFormMatch, checked in both directions
- * since either side can be the canonicalized one.
+ * The two are compared by their resolved tokens first (sameFormTokensMatch
+ * requires both sides to have resolved from the same representation before
+ * trusting a numeric match — a bare resolveRunToken equality would let a
+ * revision counter coincide with an unrelated legacy timestamp that
+ * happens to share its numeric value — this alone is enough whenever both
+ * sides use the same representation, including the case where a
+ * session/snapshot itself is still in legacy form: revision null, a real
+ * start timestamp — see normalizeSessionData, which can leave a session's
+ * revision defaulted without a timestamp, and the server, which can send a
+ * client a genuinely pre-rollout snapshot). The remaining case — one side
+ * has been canonicalized to revision 1 while the other is still
+ * timestamp-only — needs the explicit bridge in crossFormMatch, checked in
+ * both directions since either side can be the canonicalized one.
  *
  * Verified against the original matchesActiveQuestionRun (server) and
  * isPayloadForSnapshotRun (client hook) implementations by reproducing
@@ -143,7 +169,7 @@ function hasInvalidRunField(source: RunIdentitySource): boolean {
  */
 export function runIdentitiesMatch(current: RunIdentitySource, candidate: RunIdentitySource): boolean {
   if (hasInvalidRunField(current) || hasInvalidRunField(candidate)) return false
-  if (resolveRunToken(current) === resolveRunToken(candidate)) return true
+  if (sameFormTokensMatch(current, candidate)) return true
   return crossFormMatch(current, candidate)
 }
 
@@ -185,7 +211,7 @@ function snapshotsMigratedSameRun(legacySide: RunIdentitySource, canonicalSide: 
  */
 export function snapshotsIdentifySameRun(previous: RunIdentitySource, current: RunIdentitySource): boolean {
   if (hasInvalidRunField(previous) || hasInvalidRunField(current)) return false
-  if (resolveRunToken(previous) === resolveRunToken(current)) return true
+  if (sameFormTokensMatch(previous, current)) return true
   return snapshotsMigratedSameRun(previous, current) || snapshotsMigratedSameRun(current, previous)
 }
 
