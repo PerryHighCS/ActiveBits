@@ -891,7 +891,15 @@ export default function ResonanceStudent() {
               cancelDraftRetries(legacyKey, state.attemptedGeneration)
               cancelDraftRetries(canonicalKey, state.acknowledgedGeneration)
             }
-            draft = { ...draft, payload: canonicalPayload }
+            // retrying:false, not a spread-preserved true: if a save for the
+            // legacy-keyed object is still in flight, its completion handler
+            // identity-checks against that exact object reference, which
+            // state.unconfirmedDraft no longer is after this replacement —
+            // it will see the mismatch and return without ever resetting
+            // retrying on this new object. Left at true, `if (draft.retrying)
+            // continue` below would skip this record on every future retry
+            // tick forever, with nothing left to ever clear the flag.
+            draft = { ...draft, payload: canonicalPayload, retrying: false }
             state.unconfirmedDraft = draft
             changed = true
           }
@@ -1030,6 +1038,22 @@ export default function ResonanceStudent() {
     }
 
     const runToken = snapshot.activeQuestionRunRevision ?? activeRunStartedAt
+
+    // Capture every active question's *current* recorded runToken before
+    // anything below can move it onto the new one. The server's
+    // submittedResponseEditSequences isn't scoped to the current run — it
+    // reports every response the student has for a question regardless of
+    // which run confirmed it — so the seeding loop just below can call
+    // ensureQuestionDraftStateForRun(..., runToken) for a question whose
+    // record is still stamped with a *previous* run, resetting it to the
+    // new token right here. If the didRunRestart cleanup further down
+    // captured prior tokens only after this loop ran, it would already see
+    // the new token for exactly the questions a restart needs to catch,
+    // silently keeping a stale submittedAnswers entry from the old run in
+    // place instead of dropping it.
+    const priorRunTokenByQuestionId = new Map(
+      activeIds.map((questionId) => [questionId, getQuestionRunToken(questionDraftStateRef.current, questionId)]),
+    )
     for (const questionId of activeIds) {
       const confirmedEditSequence = snapshot.submittedResponseEditSequences[questionId]
       if (confirmedEditSequence !== undefined) {
@@ -1068,22 +1092,16 @@ export default function ResonanceStudent() {
       // the new run immediately, so QuestionView can't resurface or resend
       // them in the meantime.
       //
-      // Capture each question's *current* recorded runToken synchronously,
-      // right here — not inside the setSubmittedAnswers updater below. A
-      // functional setState updater's body doesn't run when it's passed to
-      // setState; React defers it to the next render's state computation,
-      // by which point every effect from this commit (including the
-      // generation-seeding effect declared below, which stamps a question's
-      // record to this same new run as a side effect of seeding its
-      // generation floor) has already run — so a live ref read inside the
-      // updater would always see the *post*-seeding value, defeating this
-      // check for exactly the questions it exists to catch. The seeding
-      // effect must also stay declared after this one: effects run in
-      // declaration order within a commit, and this capture only sees the
-      // pre-seeding value if it runs first.
-      const priorRunTokenByQuestionId = new Map(
-        activeIds.map((questionId) => [questionId, getQuestionRunToken(questionDraftStateRef.current, questionId)]),
-      )
+      // priorRunTokenByQuestionId (captured above, before the confirmed-
+      // edit-sequence seeding loop and before the generation-seeding effect
+      // declared below can each move a record onto this new runToken) is
+      // used here rather than a live ref read inside the setSubmittedAnswers
+      // updater below. A functional setState updater's body doesn't run
+      // when it's passed to setState; React defers it to the next render's
+      // state computation, by which point every effect from this commit has
+      // already run — so a live ref read inside the updater would always
+      // see the fully-seeded value, defeating this check for exactly the
+      // questions it exists to catch.
       setSubmittedAnswers((current) => {
         let changed = false
         const next = { ...current }
@@ -1433,11 +1451,26 @@ export default function ResonanceStudent() {
                   // from this component's own retained-draft state and has
                   // no other way to learn a submission already settled it.
                   const retainedDraft = getQuestionUnconfirmedDraft(questionDraftStateRef.current, questionId, runToken)
-                  const retainedDraftKey = buildDraftRetryKey({
-                    questionId,
-                    activeQuestionRunRevision: currentSnapshot.activeQuestionRunRevision,
-                    activeQuestionRunStartedAt: currentSnapshot.activeQuestionRunStartedAt,
-                  })
+                  // canonicalizeQuestionRunToken relabels a QuestionDraftState
+                  // record's runToken without rewriting its retained draft's
+                  // own payload, so — for the brief window before the retry
+                  // loop's own per-tick canonicalization pass (which rewrites
+                  // both) next runs — a record already relabeled to canonical
+                  // here can still hold a legacy-shaped payload, queued in the
+                  // hook's reconnect queue under *that* legacy key. Building
+                  // the cancellation key from the current snapshot instead
+                  // would target the canonical key nothing is queued under.
+                  // Using the retained payload's own key is simply the
+                  // correct key regardless of whether that window is
+                  // currently open; only fall back to the snapshot's key when
+                  // there's no retained entry to key off of.
+                  const retainedDraftKey = retainedDraft
+                    ? buildDraftRetryKey(retainedDraft.payload)
+                    : buildDraftRetryKey({
+                        questionId,
+                        activeQuestionRunRevision: currentSnapshot.activeQuestionRunRevision,
+                        activeQuestionRunStartedAt: currentSnapshot.activeQuestionRunStartedAt,
+                      })
                   if (retainedDraft) {
                     const retainedEditSequence =
                       typeof retainedDraft.payload.editSequence === 'number' ? retainedDraft.payload.editSequence : 0

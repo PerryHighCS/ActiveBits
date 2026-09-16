@@ -45,6 +45,42 @@ void test('runIdentitiesMatch: an empty candidate matches only a current with no
   )
 })
 
+void test('runIdentitiesMatch rejects a present-but-malformed run field instead of treating it as absent', () => {
+  // A non-integer revision fails hasRevision's Number.isSafeInteger check
+  // and falls through to hasStartedAt, which also fails (no timestamp
+  // field at all here) — resolveRunToken returns null for this candidate,
+  // the same null a current with no active run at all resolves to. Without
+  // the malformed-field guard, those two nulls would compare equal and this
+  // would wrongly return true.
+  assert.equal(
+    runIdentitiesMatch(
+      { activeQuestionRunRevision: null, activeQuestionRunStartedAt: null },
+      { activeQuestionRunRevision: 1.5 },
+    ),
+    false,
+  )
+  // Same shape, but the malformed field is on `current` instead.
+  assert.equal(
+    runIdentitiesMatch(
+      { activeQuestionRunRevision: 1.5 },
+      { activeQuestionRunRevision: null, activeQuestionRunStartedAt: null },
+    ),
+    false,
+  )
+  // A non-finite start timestamp is malformed the same way a non-integer
+  // revision is.
+  assert.equal(
+    runIdentitiesMatch(
+      { activeQuestionRunRevision: null, activeQuestionRunStartedAt: null },
+      { activeQuestionRunStartedAt: Number.NaN },
+    ),
+    false,
+  )
+  // A well-formed null/undefined field must still be treated as absent, not
+  // rejected — the guard only fires on a field that is present and invalid.
+  assert.equal(runIdentitiesMatch({ activeQuestionRunRevision: null }, {}), true)
+})
+
 void test('runIdentitiesMatch: a legacy timestamp-only candidate matches current revision 1 (including when current has no timestamp of its own)', () => {
   assert.equal(
     runIdentitiesMatch(

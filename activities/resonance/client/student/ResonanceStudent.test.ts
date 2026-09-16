@@ -711,6 +711,123 @@ void test('a delayed submission response from a run that has since restarted can
   }
 })
 
+void test('a newer local edit reaches the server when an older in-flight save succeeds, not just when it fails', async () => {
+  // Copilot's finding: QuestionView's saveDraft success branch only updates
+  // lastSentDraftRef when the just-acknowledged payload still matches the
+  // current draft. If a newer edit replaced it while that save was in
+  // flight, success used to just acknowledge the old payload and return —
+  // unlike the failure branch right below it, which already hands a
+  // superseded newer value to the parent (onDraftSaveFailed) for retry. That
+  // newer edit's own natural debounce would eventually send it too, but if
+  // the deadline disables the view first, it never gets the chance — the
+  // parent-level retained-draft retry loop is the only path left that can
+  // still deliver it, and it only gets a chance to if the success branch
+  // hands the edit off the same way the failure branch does.
+  const restore = installStudentDom()
+  const { act, fireEvent, render, waitFor } = await import('@testing-library/react')
+  try {
+    window.localStorage.setItem('student-name-session-1', 'Ari')
+    window.localStorage.setItem('student-id-session-1', 'student-1')
+    const rendered = render(React.createElement(MemoryRouter, { initialEntries: ['/session-1'] },
+      React.createElement(Routes, null, React.createElement(Route, { path: '/:sessionId', element: React.createElement(ResonanceStudent) })),
+    ))
+    await waitFor(() => assert.equal(StudentTestWebSocket.instances.length, 1))
+    const socket = StudentTestWebSocket.instances[0]!
+    socket.shouldFailDraft = false
+    await act(async () => {
+      socket.emit({ type: 'resonance:session-state', payload: {
+        sessionId: 'session-1', activeQuestionIds: ['q1'], activeQuestionRunRevision: 7,
+        activeQuestionDeadlineAt: Date.now() + 60_000,
+        activeQuestions: [{ id: 'q1', type: 'free-response', text: 'First', order: 1 }],
+      } })
+    })
+
+    console.info('[TEST] the first edit is sent and its ack is held back')
+    const input = await waitFor(() => rendered.getByLabelText(/your answer/i) as HTMLTextAreaElement)
+    fireEvent.change(input, { target: { value: 'first edit' } })
+    await waitFor(() => assert.ok(socket.sent.some((message) => message.includes('first edit'))), { timeout: 2_500 })
+    const firstSend = JSON.parse(socket.sent.find((message) => message.includes('first edit'))!) as { payload: { draftId: string } }
+
+    console.info('[TEST] a newer edit replaces it before the first save is acknowledged')
+    fireEvent.change(input, { target: { value: 'second edit' } })
+
+    console.info('[TEST] the first save now succeeds — the newer edit must still reach the server well before its own 1.5s debounce would fire on its own')
+    await act(async () => {
+      socket.emit({ type: 'resonance:draft-saved', payload: { draftId: firstSend.payload.draftId } })
+    })
+    await waitFor(() => assert.ok(socket.sent.some((message) => message.includes('second edit'))), { timeout: 700 })
+
+    rendered.unmount()
+  } finally {
+    restore()
+  }
+})
+
+void test('a retained legacy draft still retries after being canonicalized while its own save attempt is in flight', async () => {
+  // Copilot's finding: the retry loop's canonicalization step spreads the
+  // retained draft into a new object (`{...draft, payload: canonicalPayload}`)
+  // but used to carry over `retrying` unchanged. If a save attempt for the
+  // OLD (legacy) object is in flight at that moment, its completion handler
+  // identity-checks against that exact object reference — which
+  // state.unconfirmedDraft no longer is after the replacement — so it
+  // returns early without ever resetting `retrying`. Left at `true` on the
+  // new object, `if (draft.retrying) continue` skips it on every future
+  // retry tick forever, with nothing left to ever clear the flag: the
+  // canonicalized draft is retained but never actually retried again.
+  const restore = installStudentDom()
+  const { act, fireEvent, render, waitFor } = await import('@testing-library/react')
+  try {
+    window.localStorage.setItem('student-name-session-1', 'Ari')
+    window.localStorage.setItem('student-id-session-1', 'student-1')
+    const rendered = render(React.createElement(MemoryRouter, { initialEntries: ['/session-1'] },
+      React.createElement(Routes, null, React.createElement(Route, { path: '/:sessionId', element: React.createElement(ResonanceStudent) })),
+    ))
+    await waitFor(() => assert.equal(StudentTestWebSocket.instances.length, 1))
+    const socket = StudentTestWebSocket.instances[0]!
+    // Sends succeed; failures come from saveDraft's own ack-timeout, since no
+    // ack is ever emitted — a genuinely lost/delayed ack, not a dead socket.
+    socket.shouldFailDraft = false
+    await act(async () => {
+      socket.emit({ type: 'resonance:session-state', payload: {
+        sessionId: 'session-1', activeQuestionIds: ['q1'], activeQuestionRunStartedAt: 1_000,
+        activeQuestionDeadlineAt: Date.now() + 60_000,
+        activeQuestions: [{ id: 'q1', type: 'free-response', text: 'First', order: 1 }],
+      } })
+    })
+
+    console.info('[TEST] q1 is edited under the still-legacy run; the first save is sent but never acknowledged')
+    const input = await waitFor(() => rendered.getByLabelText(/your answer/i) as HTMLTextAreaElement)
+    fireEvent.change(input, { target: { value: 'legacy answer' } })
+    await waitFor(() => assert.ok(socket.sent.some((message) => message.includes('legacy answer'))), { timeout: 2_500 })
+
+    console.info('[TEST] the ack-timeout elapses; the draft is retained and the parent-owned retry loop takes over')
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 2_100))
+    })
+    const attemptsBeforeCanonicalization = socket.sent.filter((message) => message.includes('legacy answer')).length
+    assert.ok(attemptsBeforeCanonicalization >= 2, 'expected the retry loop to have already resent the retained legacy draft at least once')
+
+    console.info('[TEST] the run is canonicalized to revision 1 (same timestamp) while that retry attempt is still in flight, unacknowledged')
+    await act(async () => {
+      socket.emit({ type: 'resonance:session-state', payload: {
+        sessionId: 'session-1', activeQuestionIds: ['q1'], activeQuestionRunRevision: 1, activeQuestionRunStartedAt: 1_000,
+        activeQuestionDeadlineAt: Date.now() + 60_000,
+        activeQuestions: [{ id: 'q1', type: 'free-response', text: 'First', order: 1 }],
+      } })
+    })
+
+    console.info('[TEST] the canonicalized draft must still be retried, not stuck forever with retrying left true from the in-flight legacy attempt')
+    await waitFor(
+      () => assert.ok(socket.sent.some((message) => message.includes('legacy answer') && message.includes('"activeQuestionRunRevision":1'))),
+      { timeout: 1_500 },
+    )
+
+    rendered.unmount()
+  } finally {
+    restore()
+  }
+})
+
 void test('a delayed draft-save failure from an older run cannot wipe a QuestionDraftState record already advanced to a newer run', async () => {
   // Copilot's finding: resolveQuestionRunTokenForPayload correctly resolves
   // a stale run-7 failure to run 7's own token (it's genuinely not
@@ -1267,6 +1384,78 @@ void test('a run-restart cleanup must not be skipped just because a later effect
     })
 
     console.info('[TEST] the stale run-7 answer must not survive into run 8')
+    await waitFor(() => assert.equal((rendered.getByLabelText(/your answer/i) as HTMLTextAreaElement).value, ''))
+
+    rendered.unmount()
+  } finally {
+    restore()
+  }
+})
+
+void test('a confirmed-edit-sequence seed from a reactivation snapshot must not pre-empt the restart cleanup\'s own runToken check', async () => {
+  // Copilot's finding: submittedResponseEditSequences isn't scoped to the
+  // current run at all — the server reports it from every response the
+  // student has for a question, filtered only by studentId (see routes.ts's
+  // buildStudentSnapshot). So a run-8 reactivation snapshot for q1 can carry
+  // a submittedResponseEditSequences.q1 entry left over from q1's run-7
+  // confirmation. The confirmed-edit-sequence seeding loop ran BEFORE
+  // priorRunTokenByQuestionId was captured, and it calls
+  // ensureQuestionDraftStateForRun(..., runToken=8) for q1 as a side effect
+  // of seeding — resetting q1's QuestionDraftState.runToken to 8 right then.
+  // The capture (previously taken afterward) would already see 8, matching
+  // the new runToken, so the restart cleanup wrongly kept the stale run-7
+  // submittedAnswers entry instead of dropping it — letting an answer from
+  // an ended run keep overriding the new run's own (empty) authoritative
+  // state.
+  const restore = installStudentDom()
+  const { act, fireEvent, render, waitFor } = await import('@testing-library/react')
+  try {
+    window.localStorage.setItem('student-name-session-1', 'Ari')
+    window.localStorage.setItem('student-id-session-1', 'student-1')
+
+    Object.defineProperty(globalThis, 'fetch', {
+      configurable: true,
+      value: async (url: string, init?: RequestInit) => {
+        if (init?.method === 'POST' && url.includes('register-student')) {
+          return { ok: true, json: async () => ({ studentId: 'student-1', name: 'Ari' }) }
+        }
+        if (init?.method === 'POST' && url.includes('submit-answer')) {
+          return { ok: true, json: async () => ({ ok: true }) }
+        }
+        return { ok: true, json: async () => ({ sessionId: 'session-1', activeQuestionIds: [] }) }
+      },
+    })
+
+    const rendered = render(React.createElement(MemoryRouter, { initialEntries: ['/session-1'] },
+      React.createElement(Routes, null, React.createElement(Route, { path: '/:sessionId', element: React.createElement(ResonanceStudent) })),
+    ))
+    await waitFor(() => assert.equal(StudentTestWebSocket.instances.length, 1))
+    const socket = StudentTestWebSocket.instances[0]!
+
+    console.info('[TEST] q1 is answered and confirmed in run 7')
+    await act(async () => {
+      socket.emit({ type: 'resonance:session-state', payload: {
+        sessionId: 'session-1', activeQuestionIds: ['q1'], activeQuestionRunRevision: 7,
+        activeQuestionDeadlineAt: Date.now() + 30_000,
+        activeQuestions: [{ id: 'q1', type: 'free-response', text: 'First', order: 1 }],
+      } })
+    })
+    const input = await waitFor(() => rendered.getByLabelText(/your answer/i) as HTMLTextAreaElement)
+    fireEvent.change(input, { target: { value: 'run seven confirmed answer' } })
+    fireEvent.click(rendered.getByRole('button', { name: /submit answer/i }))
+    await waitFor(() => assert.equal(rendered.queryByRole('button', { name: /submit answer/i }), null))
+
+    console.info('[TEST] the instructor reactivates q1 as run 8; the server still reports q1\'s run-7 edit sequence')
+    await act(async () => {
+      socket.emit({ type: 'resonance:session-state', payload: {
+        sessionId: 'session-1', activeQuestionIds: ['q1'], activeQuestionRunRevision: 8,
+        activeQuestionDeadlineAt: Date.now() + 30_000,
+        activeQuestions: [{ id: 'q1', type: 'free-response', text: 'First', order: 1 }],
+        submittedResponseEditSequences: { q1: 0 },
+      } })
+    })
+
+    console.info('[TEST] run 8 must not display the confirmed run-7 answer as if it were already answered in run 8')
     await waitFor(() => assert.equal((rendered.getByLabelText(/your answer/i) as HTMLTextAreaElement).value, ''))
 
     rendered.unmount()

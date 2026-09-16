@@ -32,6 +32,15 @@ test('a draft dropped mid-send is durably persisted after the client reconnects 
     headers: instructorHeaders,
     data: { id: 'q1', type: 'free-response', text: 'Explain your reasoning.', order: 0 },
   })).ok()).toBe(true)
+  // A deterministic, short deadline lets this test prove the actual
+  // acceptance criterion (the retried draft is finalized into a submitted
+  // response) instead of only that a persisted draft round-tripped to the
+  // server — a passing "working" draft alone doesn't demonstrate the answer
+  // survives deadline finalization the way a real timed question would need.
+  expect((await page.request.post(`/api/resonance/${encodeURIComponent(sessionId)}/update-question-timer`, {
+    headers: instructorHeaders,
+    data: { questionId: 'q1', timeLimitMs: 8_000 },
+  })).ok()).toBe(true)
   expect((await page.request.post(`/api/resonance/${encodeURIComponent(sessionId)}/activate-question`, {
     headers: instructorHeaders,
     data: { questionId: 'q1' },
@@ -80,6 +89,24 @@ test('a draft dropped mid-send is durably persisted after the client reconnects 
   }, {
     message: 'expected the retried draft to be persisted and visible to the instructor',
     timeout: 10_000,
+  }).toBe(answerText)
+
+  // The deadline (armed above at 8s) finalizes the retried draft into a real
+  // submitted Response on the server's own schedule — no client interaction
+  // needed. This is the actual acceptance criterion: a draft reaching
+  // /responses as `status: 'working'` alone doesn't prove it survives that
+  // finalization step, only that the retry itself round-tripped.
+  await expect.poll(async () => {
+    const res = await page.request.get(`/api/resonance/${encodeURIComponent(sessionId)}/responses`, {
+      headers: instructorHeaders,
+    })
+    if (!res.ok()) return null
+    const body = await res.json() as { progress: InstructorProgressEntry[] }
+    const entry = body.progress.find((p) => p.questionId === 'q1')
+    return entry?.status === 'submitted' ? entry.answer?.text ?? null : null
+  }, {
+    message: 'expected the retried draft to be finalized into a submitted response once the deadline passes',
+    timeout: 20_000,
   }).toBe(answerText)
 })
 

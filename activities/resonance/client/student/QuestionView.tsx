@@ -206,6 +206,24 @@ export default function QuestionView({
             // one until some unrelated signal (a new snapshot, the deadline)
             // happened to clear it.
             onDraftSaved?.(payload)
+            // A newer local edit can have replaced pendingDraft while this
+            // save was in flight (the debounce for it is still pending, or
+            // was just cancelled by this same re-render's effect cleanup).
+            // That newer value isn't handed off anywhere else: it's not what
+            // was just acknowledged above, and unlike the failure branch
+            // below, success doesn't naturally trigger a retry. If the
+            // deadline disables this view before its own debounce fires,
+            // that edit would otherwise never reach the server at all.
+            if (isCurrentRun && !isSameAnswer(draftAnswerRef.current, lastSentDraftRef.current)) {
+              const currentDraft = draftAnswerRef.current
+              lastSentDraftRef.current = currentDraft
+              onDraftSaveFailed?.({
+                ...payload,
+                editSequence: editSequenceRef.current,
+                draftGeneration: nextDraftGeneration?.(question.id, activeQuestionRunToken) ?? ++draftGenerationRef.current,
+                answer: currentDraft,
+              })
+            }
             return
           }
           // QuestionView is keyed by question ID and unmounts when the

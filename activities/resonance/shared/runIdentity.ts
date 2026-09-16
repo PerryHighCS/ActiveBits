@@ -76,6 +76,24 @@ function crossFormMatch(current: RunIdentitySource, candidate: RunIdentitySource
   return forwardCrossFormMatch(current, candidate) || reverseCrossFormMatch(current, candidate)
 }
 
+// A field that's present but fails validation (wrong type, non-integer
+// revision, non-finite timestamp) must not be silently treated the same as
+// a field that's simply absent. resolveRunToken folds both cases to null,
+// which is correct for "absent" (a real, legitimate shape — see
+// asRunIdentitySource's callers) but wrong for "malformed": without this
+// check, a current with no active run at all (`{revision: null, startedAt:
+// null}`) and a candidate carrying a garbage revision like `1.5` both
+// resolve to null and match each other via the token-equality fast path in
+// runIdentitiesMatch, even though the candidate never validly claimed "no
+// run" — it claimed an invalid one.
+function hasInvalidRunField(source: RunIdentitySource): boolean {
+  const revision = source.activeQuestionRunRevision
+  if (revision !== undefined && revision !== null && !hasRevision(source)) return true
+  const startedAt = source.activeQuestionRunStartedAt
+  if (startedAt !== undefined && startedAt !== null && !hasStartedAt(source)) return true
+  return false
+}
+
 /**
  * Does `current` (a session or snapshot) identify the same run as
  * `candidate` (an incoming payload, response, or another snapshot — whose
@@ -113,8 +131,18 @@ function crossFormMatch(current: RunIdentitySource, candidate: RunIdentitySource
  * same timestamp) — a real gap in that original logic, not a preserved
  * quirk, so the equivalence test for that one shape asserts the corrected
  * behavior instead of exact reproduction.
+ *
+ * Before any of that, hasInvalidRunField rejects a present-but-malformed
+ * field on either side outright. Without it, a malformed candidate (e.g.
+ * `activeQuestionRunRevision: 1.5`) resolves to the same null token as a
+ * current with no active run at all, and the fast path above would treat
+ * "invalid" and "absent" as equivalent — this module's callers already
+ * narrow untrusted input at the boundary (see asRunIdentitySource), but
+ * that narrowing only changes the value's TypeScript type, not its runtime
+ * shape, so this check is the one that actually enforces it.
  */
 export function runIdentitiesMatch(current: RunIdentitySource, candidate: RunIdentitySource): boolean {
+  if (hasInvalidRunField(current) || hasInvalidRunField(candidate)) return false
   if (resolveRunToken(current) === resolveRunToken(candidate)) return true
   return crossFormMatch(current, candidate)
 }
