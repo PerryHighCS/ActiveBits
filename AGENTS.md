@@ -32,7 +32,12 @@ Before making changes, read these files when relevant:
 12. When adding or changing SyncDeck-embedded activity launch formats, update `skills/syncdeck/references/ACTIVITY_PAYLOADS.md` in the same branch so the shared skill docs stay aligned with the real payloads used by the repo.
 13. If a `skills/syncdeck/...` doc change is intended to be shared across repos, push the updated subtree back to `syncdeck-agent-skills` as part of the completion flow.
 14. Always perform `git subtree pull` and other subtree sync operations on a non-`main` branch. Keep local `main` aligned with `origin/main`, and branch first before pulling subtree updates.
-15. If three or more review rounds on the same PR surface bugs in the same subsystem or category (e.g. repeated staleness/ordering fixes), stop and do root-cause analysis instead of continuing to patch individual instances.
+15. For stateful behavior that crosses module, request, process, or asynchronous boundaries, make the contract explicit and keep its implementation cohesive:
+   - Centralize a shared decision or derivation in one named, exported, tested function instead of duplicating it across callers.
+   - Test semantic rules with a decision table or equivalence matrix that covers ordinary, boundary, missing/legacy, and conflicting inputs.
+   - Keep related mutable state for one entity in a single record, type, or explicitly owned state machine rather than parallel structures that can drift.
+   - Before introducing a non-trivial invariant (for example ordering, reconciliation, deduplication, or retry semantics), add a concise `.agent/plans/<name>.md` design note stating the invariant, owner, and failure behavior.
+   - If three or more review rounds on the same PR expose related defects, stop and perform root-cause analysis against that contract rather than continuing to patch symptoms.
  
 ## Preflight Checklist
 
