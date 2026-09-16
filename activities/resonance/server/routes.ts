@@ -573,9 +573,19 @@ function responseMatchesActiveRun(
   sessionData: ResonanceSessionData,
 ): boolean {
   if (response.activeQuestionRunRevision === undefined) {
-    return sessionData.activeQuestionRunRevision === 1 &&
-      sessionData.activeQuestionRunStartedAt !== null &&
-      response.submittedAt >= sessionData.activeQuestionRunStartedAt
+    if (sessionData.activeQuestionRunRevision !== 1) return false
+    // A normalized active session can legitimately have revision 1 with
+    // activeQuestionRunStartedAt still null (normalizeSessionData's general
+    // revision backfill does not require a valid stored startedAt). There is
+    // then no timestamp to disambiguate this legacy response against an
+    // earlier pre-rollout run's leftover response — but rejecting it
+    // outright is the worse failure: a subsequent revision-1 draft would
+    // pass this freshness guard unopposed (upsertResponse does not compare
+    // edit sequences) and could be finalized over an already-confirmed
+    // answer. Accept the legacy response rather than silently risk
+    // overwriting confirmed work when disambiguation isn't possible.
+    if (sessionData.activeQuestionRunStartedAt === null) return true
+    return response.submittedAt >= sessionData.activeQuestionRunStartedAt
   }
   return response.activeQuestionRunRevision === sessionData.activeQuestionRunRevision
 }

@@ -267,8 +267,11 @@ function referenceMatchesActiveQuestionRun(
 
 interface ReferenceResponse {
   activeQuestionRunRevision?: number | null
+  submittedAt: number
 }
 
+// The original, pre-timestamp-disambiguation reference: any legacy
+// (undefined-revision) response matches a revision-1 session outright.
 function referenceResponseMatchesActiveRun(response: ReferenceResponse, sessionData: RunIdentitySource): boolean {
   return response.activeQuestionRunRevision === sessionData.activeQuestionRunRevision ||
     (response.activeQuestionRunRevision === undefined && sessionData.activeQuestionRunRevision === 1)
@@ -277,14 +280,26 @@ function referenceResponseMatchesActiveRun(response: ReferenceResponse, sessionD
 // The actual routes.ts implementation (kept in sync by hand — see
 // responseMatchesActiveRun in routes.ts). It deliberately does NOT
 // delegate to runIdentitiesMatch: a stored Response has no timestamp field
-// at all, so routing it through the legacy-timestamp branch would treat a
-// response's absent timestamp as matching a session whose own start
-// timestamp also happens to be null (a real, reachable shape) — a false
-// positive. Only the explicit `undefined` ("legacy, unknown run") case
-// needs special handling; every other case is plain revision equality.
+// the way a run does, so routing it through the legacy-timestamp branch
+// would treat a response's absent timestamp as matching a session whose own
+// start timestamp also happens to be null (a real, reachable shape) — a
+// false positive. A session can accumulate more than one pre-rollout
+// response across several runs that all predate the revision rollout, and
+// only the run active at the moment of the upgrade is ever backfilled to
+// revision 1 — so an undefined revision alone isn't enough; the response's
+// own submittedAt must also be at or after the current run's start,
+// UNLESS that start timestamp itself is unavailable (also a real,
+// reachable shape — normalizeSessionData's revision backfill does not
+// require a valid stored startedAt), in which case there is no timestamp to
+// disambiguate against and rejecting the response outright risks letting a
+// stale duplicate draft get finalized over an already-confirmed answer —
+// the worse failure, so it's accepted instead (Copilot's finding).
 function responseMatchesActiveRunUnderTest(response: ReferenceResponse, sessionData: RunIdentitySource): boolean {
   if (response.activeQuestionRunRevision === undefined) {
-    return sessionData.activeQuestionRunRevision === 1
+    if (sessionData.activeQuestionRunRevision !== 1) return false
+    const startedAt = sessionData.activeQuestionRunStartedAt ?? null
+    if (startedAt === null) return true
+    return response.submittedAt >= startedAt
   }
   return response.activeQuestionRunRevision === sessionData.activeQuestionRunRevision
 }
@@ -567,17 +582,62 @@ void test('runIdentitiesMatch matches matchesActiveQuestionRun for every realist
   }
 })
 
-void test('the routes.ts responseMatchesActiveRun implementation matches the original for every realistic session shape', () => {
+const RESPONSE_SUBMITTED_AT_SAMPLES: number[] = [0, 555, 999, 1_500]
+
+// The one deliberate divergence from the original reference: a legacy
+// response submitted before the current revision-1 run's own recorded
+// start time belongs to an earlier pre-rollout run, not this one — an
+// earlier review round's fix, only exercisable once this matrix models
+// submittedAt at all.
+function isDeliberateTimestampDisambiguationDivergence(response: ReferenceResponse, sessionData: RunIdentitySource): boolean {
+  const startedAt = sessionData.activeQuestionRunStartedAt ?? null
+  return response.activeQuestionRunRevision === undefined &&
+    sessionData.activeQuestionRunRevision === 1 &&
+    startedAt !== null &&
+    response.submittedAt < startedAt
+}
+
+void test('the routes.ts responseMatchesActiveRun implementation matches the original except for its deliberate timestamp-disambiguation fix', () => {
   for (const sessionData of SESSION_DATA_SAMPLES) {
     for (const responseRevision of RESPONSE_REVISION_SAMPLES) {
-      const response: ReferenceResponse = { activeQuestionRunRevision: responseRevision }
-      const expected = referenceResponseMatchesActiveRun(response, sessionData)
-      const actual = responseMatchesActiveRunUnderTest(response, sessionData)
-      assert.equal(
-        actual,
-        expected,
-        `sessionData=${JSON.stringify(sessionData)} responseRevision=${responseRevision}: expected ${expected}, got ${actual}`,
-      )
+      for (const submittedAt of RESPONSE_SUBMITTED_AT_SAMPLES) {
+        const response: ReferenceResponse = { activeQuestionRunRevision: responseRevision, submittedAt }
+        const actual = responseMatchesActiveRunUnderTest(response, sessionData)
+        if (isDeliberateTimestampDisambiguationDivergence(response, sessionData)) {
+          assert.equal(
+            actual,
+            false,
+            `sessionData=${JSON.stringify(sessionData)} response=${JSON.stringify(response)}: an earlier pre-rollout run's response must not match`,
+          )
+          continue
+        }
+        const expected = referenceResponseMatchesActiveRun(response, sessionData)
+        assert.equal(
+          actual,
+          expected,
+          `sessionData=${JSON.stringify(sessionData)} response=${JSON.stringify(response)}: expected ${expected}, got ${actual}`,
+        )
+      }
     }
   }
+})
+
+void test('responseMatchesActiveRun accepts a legacy response when the current revision-1 run has no recorded start timestamp to disambiguate against', () => {
+  // Copilot's finding: normalizeSessionData's general revision backfill can
+  // default activeQuestionRunRevision to 1 without a valid stored
+  // activeQuestionRunStartedAt, so `{revision: 1, startedAt: null}` is a
+  // real, reachable active-session shape (also relied on elsewhere in this
+  // module). With no timestamp available, rejecting a legacy response
+  // outright let a subsequent revision-1 draft pass the freshness guard
+  // unopposed and risk being finalized over the already-confirmed answer.
+  const sessionWithNoStartedAt: RunIdentitySource = { activeQuestionRunRevision: 1, activeQuestionRunStartedAt: null }
+  assert.equal(
+    responseMatchesActiveRunUnderTest({ activeQuestionRunRevision: undefined, submittedAt: 1 }, sessionWithNoStartedAt),
+    true,
+  )
+  // A response for a genuinely different revision is still rejected.
+  assert.equal(
+    responseMatchesActiveRunUnderTest({ activeQuestionRunRevision: 2, submittedAt: 1 }, sessionWithNoStartedAt),
+    false,
+  )
 })

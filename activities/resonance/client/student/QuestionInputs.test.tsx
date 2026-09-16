@@ -814,6 +814,52 @@ void test('QuestionView hands the newest failed in-flight edit to its parent onc
   }
 })
 
+void test('QuestionView still hands off a pending edit when its run is relabeled from legacy to canonical form at the same moment the deadline disables it', async () => {
+  const restoreDomEnvironment = installDomEnvironment()
+  const { fireEvent, render, waitFor } = await import('@testing-library/react')
+
+  try {
+    const failedDrafts: Record<string, unknown>[] = []
+    const props = {
+      question: { id: 'q1', type: 'free-response' as const, text: 'Explain your reasoning.', order: 0 },
+      sessionId: 'session-1',
+      studentId: 'student-1',
+      activeQuestionRunRevision: null as number | null,
+      activeQuestionRunStartedAt: 1_000,
+      sendMessage: () => true,
+      onDraftSaveFailed: (payload: Record<string, unknown>) => failedDrafts.push(payload),
+    }
+    const rendered = render(React.createElement(QuestionView, props))
+    const textarea = rendered.getByLabelText(/your answer/i)
+    fireEvent.change(textarea, { target: { value: 'In-progress edit' } })
+
+    // Copilot's finding: the debounce cleanup compared a resolved scalar
+    // (activeQuestionRunRevision ?? activeQuestionRunStartedAt) instead of
+    // full run-identity equivalence. A server relabel of this SAME run from
+    // its legacy timestamp-only form to canonical revision 1 changes that
+    // scalar (1_000 -> 1) even though it's not a run change, so the old
+    // guard bailed out before flushing or handing off this pending edit —
+    // right before the reset effect would have overwritten it with the
+    // parent's stale initialAnswer.
+    console.info('[TEST] a same-run legacy-to-canonical relabel must not be mistaken for a run change that discards the pending edit')
+    rendered.rerender(React.createElement(QuestionView, {
+      ...props,
+      activeQuestionRunRevision: 1,
+      activeQuestionRunStartedAt: 1_000,
+      disabled: true,
+    }))
+
+    await waitFor(() => assert.equal(failedDrafts.length, 1))
+    assert.deepEqual(failedDrafts[0]?.answer, { type: 'free-response', text: 'In-progress edit' })
+
+    await new Promise((resolve) => setTimeout(resolve, 1_700))
+    assert.equal(failedDrafts.length, 1, 'the handoff must not repeat once the deadline-disabled cleanup has already fired')
+    rendered.unmount()
+  } finally {
+    restoreDomEnvironment()
+  }
+})
+
 void test('QuestionView shows only the stem for staged MCQs before choices are revealed', async () => {
   const restoreDomEnvironment = installDomEnvironment()
   const { render } = await import('@testing-library/react')

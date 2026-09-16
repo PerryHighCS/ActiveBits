@@ -109,7 +109,16 @@ export default function QuestionView({
     activeQuestionRunRevision,
     activeQuestionRunStartedAt,
   })
-  const draftAnswerRunRevisionRef = useRef<number | null>(null)
+  // Full identity (not a resolved scalar) of the run draftAnswer was last
+  // captured/edited under, for the same reason activeQuestionRunIdentityRef
+  // keeps both fields: a legacy-timestamp run being relabeled to its
+  // since-canonicalized revision-1 form changes the resolved scalar even
+  // though it's the same real run, and a scalar comparison would wrongly
+  // treat that relabeling as a run change.
+  const draftAnswerRunIdentityRef = useRef<RunIdentitySource>({
+    activeQuestionRunRevision: null,
+    activeQuestionRunStartedAt: null,
+  })
   // Mirrors the editSequence prop so the debounced draft-push effect and
   // submitAnswer (both defined below, outside the render body) always read
   // the current value without needing it in their dependency arrays.
@@ -135,7 +144,7 @@ export default function QuestionView({
     setDraftAnswer(initialAnswerRef.current)
     lastSentDraftRef.current = initialAnswerRef.current
     synchronizedInitialAnswerRef.current = initialAnswerRef.current
-    draftAnswerRunRevisionRef.current = null
+    draftAnswerRunIdentityRef.current = { activeQuestionRunRevision: null, activeQuestionRunStartedAt: null }
   }, [draftResetVersion, question.id, activeQuestionRunToken, isSubmitted, sessionId, studentId])
 
   useEffect(() => {
@@ -165,9 +174,10 @@ export default function QuestionView({
   }, [draftAnswer, initialAnswer])
 
   useEffect(() => {
-    const draftAnswerRunRevision = draftAnswerRunRevisionRef.current
+    const effectRunIdentity: RunIdentitySource = { activeQuestionRunRevision, activeQuestionRunStartedAt }
+    const draftAnswerRunIdentity = draftAnswerRunIdentityRef.current
     if (
-      draftAnswerRunRevision !== activeQuestionRunToken ||
+      !runIdentitiesMatch(draftAnswerRunIdentity, effectRunIdentity) ||
       disabled ||
       isWaitingForChoices ||
       isSubmitted ||
@@ -281,8 +291,15 @@ export default function QuestionView({
     return () => {
       window.clearTimeout(timeoutId)
       if (
-        activeQuestionRunRevisionRef.current !== activeQuestionRunToken ||
-        draftAnswerRunRevision !== activeQuestionRunToken ||
+        // A legacy-timestamp run relabeled to its since-canonicalized
+        // revision-1 form changes the raw props (and therefore
+        // activeQuestionRunToken) even though it's the same real run — a
+        // scalar comparison here would treat that relabeling as a run
+        // change and bail out without flushing or handing off the pending
+        // edit, right before the reset effect above overwrites draftAnswer
+        // with the parent's (possibly stale) initialAnswer.
+        !runIdentitiesMatch(activeQuestionRunIdentityRef.current, effectRunIdentity) ||
+        !runIdentitiesMatch(draftAnswerRunIdentity, effectRunIdentity) ||
         sessionIdRef.current !== sessionId ||
         studentIdRef.current !== studentId ||
         // On a draft value change React runs this cleanup before scheduling
@@ -377,7 +394,7 @@ export default function QuestionView({
       if (submissionAttempt === submissionAttemptRef.current) {
         setDraftAnswer(answer)
         lastSentDraftRef.current = answer
-        draftAnswerRunRevisionRef.current = activeQuestionRunToken
+        draftAnswerRunIdentityRef.current = { activeQuestionRunRevision, activeQuestionRunStartedAt }
       }
     } catch {
       if (
@@ -415,7 +432,7 @@ export default function QuestionView({
           onDraftChange={(text) => {
             const trimmed = text.trim()
             const answer = trimmed.length > 0 ? { type: 'free-response' as const, text: trimmed } : null
-            draftAnswerRunRevisionRef.current = activeQuestionRunToken
+            draftAnswerRunIdentityRef.current = { activeQuestionRunRevision, activeQuestionRunStartedAt }
             setDraftAnswer(answer)
             onDraftChanged?.(question.id, answer)
           }}
@@ -434,7 +451,7 @@ export default function QuestionView({
             const answer = selectedOptionIds.length > 0
               ? { type: 'multiple-choice' as const, selectedOptionIds }
               : null
-            draftAnswerRunRevisionRef.current = activeQuestionRunToken
+            draftAnswerRunIdentityRef.current = { activeQuestionRunRevision, activeQuestionRunStartedAt }
             setDraftAnswer(answer)
             onDraftChanged?.(question.id, answer)
           }}

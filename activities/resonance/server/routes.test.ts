@@ -5187,3 +5187,84 @@ void test('student state projects persisted draft generations for both live and 
 
   await sessions.close()
 })
+
+void test('update-draft rejects a stale draft against a legacy confirmed response even when the current run has no recorded start timestamp', async () => {
+  // Copilot's finding: normalizeSessionData's general revision backfill can
+  // leave a session at { activeQuestionRunRevision: 1, activeQuestionRunStartedAt: null }
+  // -- a real, reachable shape (see the shared runIdentity tests). A stored
+  // legacy response (persisted before the revision rollout, so its own
+  // activeQuestionRunRevision is undefined) then had no timestamp to be
+  // recognized against, so responseMatchesActiveRun wrongly rejected it as
+  // "not the current run's response" -- and with no confirmed response
+  // found, a stale draft (lower editSequence) sailed past the freshness
+  // guard and got persisted instead of rejected.
+  const app = createMockApp()
+  const sessions = createSessionStore(null)
+  const session = createMultiQuestionSession()
+  session.data.activeQuestionId = 'q1'
+  session.data.activeQuestionIds = ['q1']
+  session.data.activeQuestionRunRevision = 1
+  session.data.activeQuestionRunStartedAt = null
+  session.data.activeQuestionDeadlineAt = null
+  session.data.responses = [{
+    id: 'legacy-response-1',
+    questionId: 'q1',
+    studentId: 'student1',
+    submittedAt: 500,
+    activeQuestionRunRevision: undefined,
+    editSequence: 5,
+    answer: { type: 'free-response', text: 'Confirmed answer' },
+  }]
+  const studentCookies = issueStudentCookies(session, 'student1')
+  await sessions.set(session.id, session)
+  const captured = createCapturingMockWs()
+  setupResonanceRoutes(app, sessions, captured.ws)
+
+  const handler = captured.getHandler()
+  const messageHandlers: Array<(message: string) => void> = []
+  const sentMessages: Array<{ type?: string; payload?: { draftId?: string } }> = []
+  assert.ok(handler)
+  handler({
+    readyState: 1,
+    upgradeHeaders: {
+      cookie: Object.entries(studentCookies).map(([name, value]) => `${name}=${value}`).join('; '),
+    },
+    send(message: string) {
+      sentMessages.push(JSON.parse(message) as { type?: string; payload?: { draftId?: string } })
+    },
+    on(event: string, callback: (message: string) => void) {
+      if (event === 'message') messageHandlers.push(callback)
+    },
+    once() {},
+    close() {},
+    terminate() {},
+    ping() {},
+  }, new URLSearchParams({ sessionId: session.id, role: 'student', studentId: 'student1' }), captured.ws.wss)
+  await waitForCondition(() => messageHandlers.length === 1)
+
+  console.info('[TEST] a stale pre-submission draft must be rejected, not persisted over the confirmed answer')
+  messageHandlers[0]?.(JSON.stringify({
+    type: 'resonance:update-draft',
+    payload: {
+      studentId: 'student1',
+      questionId: 'q1',
+      draftId: 'draft-1',
+      activeQuestionRunRevision: 1,
+      editSequence: 3,
+      answer: { type: 'free-response', text: 'Stale draft text' },
+    },
+  }))
+  await waitForCondition(() => sentMessages.some((message) =>
+    message.type === 'resonance:draft-saved' && message.payload?.draftId === 'draft-1'
+  ))
+
+  const stored = await sessions.get(session.id)
+  const storedData = stored?.data as {
+    responses?: Array<{ answer?: unknown }>
+    responseDrafts?: Record<string, unknown>
+  } | undefined
+  assert.equal(storedData?.responseDrafts?.['q1:student1'], undefined, 'the stale draft must not be persisted')
+  assert.deepEqual(storedData?.responses?.[0]?.answer, { type: 'free-response', text: 'Confirmed answer' })
+
+  await sessions.close()
+})
