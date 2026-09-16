@@ -3292,9 +3292,17 @@ export default function setupResonanceRoutes(
           updated = await sessions.updateAtomic(sessionId, (current) => {
             persistedSession = null
             shouldAcknowledge = false
+            // Unconditional: now that updateAtomic's own clone preserves a
+            // legacy record's identity marker (see preserveSessionCreatedIdentity
+            // in sessions.ts), null-vs-null (both legacy, same incarnation) and
+            // null-vs-real (a legacy read racing a same-id recreate into a
+            // non-legacy record) are both meaningful comparisons — the old
+            // `expectedCreated !== null` short-circuit skipped this guard
+            // entirely for a legacy session, so a delayed write for it could
+            // land in a same-id-recreated, non-legacy replacement unchecked.
             if (
               current.type !== 'resonance' ||
-              (expectedCreated !== null && getSessionCreatedIdentity(current) !== expectedCreated)
+              getSessionCreatedIdentity(current) !== expectedCreated
             ) {
               throw new WrongResonanceIncarnationError()
             }

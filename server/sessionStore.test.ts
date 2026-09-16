@@ -107,6 +107,36 @@ void test('preserveSessionCreatedIdentity carries a legacy record\'s "no persist
   assert.equal(getSessionCreatedIdentity(preservedClone), null, 'preserveSessionCreatedIdentity keeps the clone recognized as legacy')
 })
 
+void test('updateAtomic hands its mutate callback a session that still reads as legacy (Valkey-backed store)', async (t) => {
+  // CodeRabbit's finding: updateAtomic's own internal structuredClone(current)
+  // -- not the caller's own earlier clone -- is what the mutate callback
+  // actually receives. Before this fix, a caller-side incarnation guard
+  // calling getSessionCreatedIdentity on that callback parameter would see a
+  // synthetic (non-legacy-looking) identity even for a genuinely legacy
+  // record, letting the guard's `expectedCreated !== null` short-circuit
+  // skip the incarnation check entirely -- so a delayed write for what was a
+  // legacy session could land unchecked in a same-id-recreated replacement.
+  // (The in-memory store's own updateAtomic got the equivalent fix too, for
+  // consistency, but a legacy -- no persisted `created` -- record only ever
+  // arises through toSessionRecord, which the in-memory store's set()/get()
+  // never call; there is no way to construct a discriminating in-memory
+  // test through the public API.)
+  const records = new Map<string, SessionRecord>()
+  records.set('legacy-valkey', {
+    id: 'legacy-valkey',
+    mutationRevision: 0,
+    data: {},
+  } as unknown as SessionRecord)
+  const valkeyBacked = createSessionStore('redis://test', 1_000, valkeyStoreForTest(records, []))
+  t.after(async () => { await valkeyBacked.close() })
+  let seenValkey: number | null | undefined
+  await valkeyBacked.updateAtomic?.('legacy-valkey', (current) => {
+    seenValkey = getSessionCreatedIdentity(current)
+    return current
+  })
+  assert.equal(seenValkey, null, 'Valkey-backed store: the mutate callback must see the legacy record as having no incarnation identity')
+})
+
 void test('in-memory atomic update refreshes an embedded child session parent', async (t) => {
   const sessions = createSessionStore(null, 1_000)
   t.after(async () => { await sessions.close() })

@@ -397,6 +397,53 @@ void test('QuestionView ignores a REST submission after its session identity cha
   }
 })
 
+void test('QuestionView still reports a failed REST submission after its run is relabeled from legacy to canonical form while the request is in flight', async () => {
+  const restoreDomEnvironment = installDomEnvironment()
+  const previousFetch = globalThis.fetch
+  const { fireEvent, render, waitFor } = await import('@testing-library/react')
+
+  try {
+    const deferredFetch: { reject: ((error: unknown) => void) | null } = { reject: null }
+    ;(globalThis as { fetch?: typeof fetch }).fetch = (() => new Promise<Response>((_resolve, reject) => {
+      deferredFetch.reject = reject
+    })) as typeof fetch
+
+    const question = { id: 'q1', type: 'free-response' as const, text: 'Explain.', order: 0 }
+    const renderQuestion = (activeQuestionRunRevision: number | null, activeQuestionRunStartedAt: number) =>
+      React.createElement(QuestionView, {
+        question,
+        sessionId: 'session-1',
+        studentId: 'student-1',
+        activeQuestionRunRevision,
+        activeQuestionRunStartedAt,
+        sendMessage: () => false,
+      })
+    const rendered = render(renderQuestion(null, 1_000))
+    fireEvent.change(rendered.getByLabelText(/your answer/i), { target: { value: 'In-flight answer' } })
+    fireEvent.click(rendered.getByRole('button', { name: /submit answer/i }))
+    await waitFor(() => assert.ok(deferredFetch.reject))
+    assert.match(rendered.getByRole('button', { name: /submitting/i }).textContent ?? '', /Submitting/)
+
+    // Copilot's finding: a server relabel of this SAME run from legacy
+    // timestamp-only form to canonical revision 1 changes the resolved
+    // scalar even though it isn't a run change. The catch/finally guards
+    // used to compare that scalar directly, so this relabel made a
+    // genuine network failure look like a stale/abandoned request:
+    // silently swallowing the error and leaving the button stuck showing
+    // "Submitting…" forever.
+    console.info('[TEST] a REST submission is expected to fail with a network error below')
+    rendered.rerender(renderQuestion(1, 1_000))
+    deferredFetch.reject?.(new Error('network down'))
+
+    await waitFor(() => assert.match(rendered.getByRole('alert').textContent ?? '', /network error/i))
+    await waitFor(() => assert.match(rendered.getByRole('button', { name: /submit answer/i }).textContent ?? '', /Submit answer/))
+    rendered.unmount()
+  } finally {
+    ;(globalThis as { fetch?: typeof fetch }).fetch = previousFetch
+    restoreDomEnvironment()
+  }
+})
+
 void test('QuestionView preserves a student draft when a same-run session update contains an older answer', async () => {
   const restoreDomEnvironment = installDomEnvironment()
   const { fireEvent, render, waitFor } = await import('@testing-library/react')

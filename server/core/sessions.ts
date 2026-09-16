@@ -213,8 +213,15 @@ class InMemorySessionStore implements SessionStore {
     const current = this.store[id]
     if (!current) return null
     const expectedRevision = current.mutationRevision ?? 0
-    const expectedCreated = typeof current.created === 'number' ? current.created : null
-    const draft = structuredClone(current)
+    const expectedCreated = getSessionCreatedIdentity(current)
+    // preserveSessionCreatedIdentity carries current's legacy marker onto
+    // the clone: mutate() below hands the clone (not current) to the
+    // caller, and a caller-side incarnation guard (e.g. Resonance's
+    // updateAtomic mutate callback) calls getSessionCreatedIdentity on
+    // whatever it's given. Without this, that guard would see a synthetic
+    // (non-legacy-looking) identity on a genuinely legacy record and could
+    // skip its own type/incarnation check entirely.
+    const draft = preserveSessionCreatedIdentity(current, structuredClone(current))
     return await this.compareAndSet(id, expectedRevision, mutate(draft), null, expectedCreated)
   }
 
@@ -467,6 +474,15 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
         ? null
         : getSessionCreatedIdentity(current)
       const draft = structuredClone(current)
+      // Mirror expectedCreated's own legacy determination onto the clone
+      // handed to the caller's mutate(): mutate() sees draft, not current,
+      // so a caller-side incarnation guard calling the public
+      // getSessionCreatedIdentity(draft) (which only consults
+      // legacyCreatedSessions, not this module's separate
+      // strictReadLegacyCreated tracking) would otherwise see a synthetic
+      // identity on a genuinely legacy record and could skip its own
+      // type/incarnation check entirely.
+      if (expectedCreated === null) legacyCreatedSessions.add(draft)
       const updated = await compareAndSet(id, expectedRevision, mutate(draft), ttl, expectedCreated)
       if (updated) return updated
     }

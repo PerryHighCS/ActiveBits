@@ -97,6 +97,20 @@ export default function QuestionView({
   const initialAnswerRef = useRef(initialAnswer)
   const synchronizedInitialAnswerRef = useRef(initialAnswer)
   const submissionAttemptRef = useRef(0)
+  // Snapshot the submission-invalidation effect below compares each run
+  // against, to tell a genuine question/session/student/run change from a
+  // same-run legacy-to-canonical relabel (see that effect's own comment).
+  const submissionInvalidationRef = useRef<{
+    questionId: string
+    sessionId: string
+    studentId: string
+    identity: RunIdentitySource
+  }>({
+    questionId: question.id,
+    sessionId,
+    studentId,
+    identity: { activeQuestionRunRevision, activeQuestionRunStartedAt },
+  })
   const disabledRef = useRef(disabled)
   const activeQuestionRunRevisionRef = useRef(activeQuestionRunToken)
   // Unlike activeQuestionRunRevisionRef (a resolved scalar, used for the
@@ -148,6 +162,28 @@ export default function QuestionView({
   }, [draftResetVersion, question.id, activeQuestionRunToken, isSubmitted, sessionId, studentId])
 
   useEffect(() => {
+    const previous = submissionInvalidationRef.current
+    const currentIdentity: RunIdentitySource = { activeQuestionRunRevision, activeQuestionRunStartedAt }
+    // A legacy-timestamp run relabeled to its since-canonicalized revision-1
+    // form changes activeQuestionRunToken (a dependency below) even though
+    // it's the same real run. Invalidating an in-flight submission's UI
+    // state (submitting/error) on every token change — as a raw scalar
+    // comparison would — abandons that submission's feedback mid-flight: the
+    // button silently flips back to "not submitting" while the request is
+    // still pending, inviting a confusing double-submit, and the eventual
+    // response/failure has nothing left to report to. Only question,
+    // session, and student identity changes are unconditional; a run
+    // "change" that's really just a relabel of the same run is not one.
+    const previousRunMatches = runIdentitiesMatch(previous.identity, currentIdentity)
+    submissionInvalidationRef.current = { questionId: question.id, sessionId, studentId, identity: currentIdentity }
+    if (
+      previous.questionId === question.id &&
+      previous.sessionId === sessionId &&
+      previous.studentId === studentId &&
+      previousRunMatches
+    ) {
+      return
+    }
     submissionAttemptRef.current += 1
     setSubmitting(false)
     setError(null)
@@ -397,9 +433,15 @@ export default function QuestionView({
         draftAnswerRunIdentityRef.current = { activeQuestionRunRevision, activeQuestionRunStartedAt }
       }
     } catch {
+      // runIdentitiesMatch (not a raw scalar ===), matching the success path
+      // above: a legacy-to-canonical relabel of the SAME run while this
+      // fetch was in flight must not be mistaken for a run change. Before
+      // this fix, that relabel made this check fail, suppressing the error
+      // and leaving submitting stuck at true even though the request had
+      // genuinely failed.
       if (
         submissionAttempt === submissionAttemptRef.current &&
-        submissionRunRevision === activeQuestionRunRevisionRef.current &&
+        runIdentitiesMatch(activeQuestionRunIdentityRef.current, submissionRunIdentity) &&
         sessionIdRef.current === sessionId &&
         studentIdRef.current === studentId
       ) {
@@ -408,7 +450,7 @@ export default function QuestionView({
     } finally {
       if (
         submissionAttempt === submissionAttemptRef.current &&
-        submissionRunRevision === activeQuestionRunRevisionRef.current &&
+        runIdentitiesMatch(activeQuestionRunIdentityRef.current, submissionRunIdentity) &&
         sessionIdRef.current === sessionId &&
         studentIdRef.current === studentId
       ) {
