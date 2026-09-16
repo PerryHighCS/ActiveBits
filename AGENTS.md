@@ -36,7 +36,11 @@ Before making changes, read these files when relevant:
    - Centralize a shared decision or derivation in one named, exported, tested function instead of duplicating it across callers.
    - Test semantic rules with a decision table or equivalence matrix that covers ordinary, boundary, missing/legacy, and conflicting inputs.
    - Keep related mutable state for one entity in a single record, type, or explicitly owned state machine rather than parallel structures that can drift.
-   - Before introducing a non-trivial invariant (for example ordering, reconciliation, deduplication, or retry semantics), add a concise `.agent/plans/<name>.md` design note stating the invariant, owner, and failure behavior.
+   - Before introducing a non-trivial invariant (for example ordering, reconciliation,
+     deduplication, or retry semantics), document its owner, invariant, and failure
+     behavior in the relevant active `.agent/plans/<name>.md`; create a new plan only
+     when no relevant active plan exists. Promote the final contract to `ARCHITECTURE.md`
+     or `.agent/knowledge/data-contracts.md` when future changes must preserve it.
 16. If three or more review rounds on the same PR expose related defects, stop and perform root-cause analysis against the relevant contract rather than continuing to patch symptoms.
  
 ## Preflight Checklist
