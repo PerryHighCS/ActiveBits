@@ -37,7 +37,7 @@ Before making changes, read these files when relevant:
    - Test semantic rules with a decision table or equivalence matrix that covers ordinary, boundary, missing/legacy, and conflicting inputs.
    - Keep related mutable state for one entity in a single record, type, or explicitly owned state machine rather than parallel structures that can drift.
    - Before introducing a non-trivial invariant (for example ordering, reconciliation, deduplication, or retry semantics), add a concise `.agent/plans/<name>.md` design note stating the invariant, owner, and failure behavior.
-   - If three or more review rounds on the same PR expose related defects, stop and perform root-cause analysis against that contract rather than continuing to patch symptoms.
+16. If three or more review rounds on the same PR expose related defects, stop and perform root-cause analysis against the relevant contract rather than continuing to patch symptoms.
  
 ## Preflight Checklist
 
