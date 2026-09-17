@@ -172,7 +172,7 @@ interface ResonanceSessionData extends Record<string, unknown> {
     questionId: string
     studentId: string
     updatedAt: number
-    activeQuestionRunRevision?: number | null
+    activeQuestionRunRevision: number | null
     editSequence?: number
     answer: Response['answer']
   }>
@@ -513,23 +513,15 @@ function getQuestionAnswerability(sessionData: ResonanceSessionData, questionId:
     : { ok: false, reason: 'choices-hidden' }
 }
 
-function matchesActiveQuestionRun(
-  sessionData: ResonanceSessionData,
-  revision: unknown,
-  legacyStartedAt: unknown,
-): boolean {
-  if (typeof revision === 'number' && Number.isSafeInteger(revision)) {
-    return revision === sessionData.activeQuestionRunRevision
-  }
-  if (
-    revision == null &&
-    legacyStartedAt == null &&
-    sessionData.activeQuestionRunRevision === null &&
-    sessionData.activeQuestionRunStartedAt === null
-  ) {
-    return true
-  }
-  return sessionData.activeQuestionRunRevision === 1 && legacyStartedAt === sessionData.activeQuestionRunStartedAt
+/**
+ * `activeQuestionRunRevision` is the sole run identity: it's always a real
+ * number whenever a run is active (see `nextActiveQuestionRunRevision`) and
+ * `null` only for self-paced/idle state, so a plain equality check (treating
+ * a missing/non-number client value as `null`) is always sufficient.
+ */
+function matchesActiveQuestionRun(sessionData: ResonanceSessionData, revision: unknown): boolean {
+  const normalizedRevision = typeof revision === 'number' && Number.isSafeInteger(revision) ? revision : null
+  return normalizedRevision === sessionData.activeQuestionRunRevision
 }
 
 export function resolveAnswerabilityErrorMessage(reason: 'expired' | 'choices-hidden' | 'inactive'): string {
@@ -632,14 +624,7 @@ function draftMatchesCurrentRun(
   sessionData: ResonanceSessionData,
   draft: ResonanceSessionData['responseDrafts'][string],
 ): boolean {
-  const runStartedAt = sessionData.activeQuestionRunStartedAt
-  const runRevision = sessionData.activeQuestionRunRevision
-  return draft.activeQuestionRunRevision !== undefined
-    ? draft.activeQuestionRunRevision === runRevision
-    // Pre-revision drafts remain visible for legacy/self-paced snapshots that
-    // have no run revision. Once a numbered run exists, use the migration
-    // timestamp guard so an older unversioned draft cannot cross into it.
-    : runRevision === null || (runRevision === 1 && runStartedAt !== null && draft.updatedAt >= runStartedAt)
+  return draft.activeQuestionRunRevision === sessionData.activeQuestionRunRevision
 }
 
 function finalizeActiveQuestionDrafts(
@@ -775,13 +760,12 @@ function normalizeStoredResponses(
         ? Math.round(rawResponse.submittedAt)
         : 0
     const answer = normalizeDraftAnswerPayload(rawResponse.answer, questionsById, questionId)
-    const activeQuestionRunRevision = rawResponse.activeQuestionRunRevision === null
-      ? null
-      : typeof rawResponse.activeQuestionRunRevision === 'number' &&
-          Number.isSafeInteger(rawResponse.activeQuestionRunRevision) &&
-          rawResponse.activeQuestionRunRevision > 0
+    const activeQuestionRunRevision =
+      typeof rawResponse.activeQuestionRunRevision === 'number' &&
+        Number.isSafeInteger(rawResponse.activeQuestionRunRevision) &&
+        rawResponse.activeQuestionRunRevision > 0
         ? rawResponse.activeQuestionRunRevision
-        : undefined
+        : null
     const editSequence = resolveEditSequence(rawResponse.editSequence)
 
     if (!id || !questionId || !studentId || submittedAt <= 0 || answer === null) {
@@ -793,7 +777,7 @@ function normalizeStoredResponses(
       questionId,
       studentId,
       submittedAt,
-      ...(activeQuestionRunRevision !== undefined ? { activeQuestionRunRevision } : {}),
+      activeQuestionRunRevision,
       editSequence,
       answer,
     })
@@ -823,13 +807,12 @@ function normalizeResponseDrafts(
     const updatedAt = typeof rawDraft.updatedAt === 'number' && Number.isFinite(rawDraft.updatedAt)
       ? Math.round(rawDraft.updatedAt)
       : 0
-    const activeQuestionRunRevision = rawDraft.activeQuestionRunRevision === null
-      ? null
-      : typeof rawDraft.activeQuestionRunRevision === 'number' &&
-          Number.isSafeInteger(rawDraft.activeQuestionRunRevision) &&
-          rawDraft.activeQuestionRunRevision > 0
+    const activeQuestionRunRevision =
+      typeof rawDraft.activeQuestionRunRevision === 'number' &&
+        Number.isSafeInteger(rawDraft.activeQuestionRunRevision) &&
+        rawDraft.activeQuestionRunRevision > 0
         ? rawDraft.activeQuestionRunRevision
-        : undefined
+        : null
     const answer = normalizeDraftAnswerPayload(rawDraft.answer, questionsById, questionId)
     const editSequence = resolveEditSequence(rawDraft.editSequence)
 
@@ -841,7 +824,7 @@ function normalizeResponseDrafts(
       questionId,
       studentId,
       updatedAt,
-      ...(activeQuestionRunRevision !== undefined ? { activeQuestionRunRevision } : {}),
+      activeQuestionRunRevision,
       editSequence,
       answer,
     }
@@ -1301,6 +1284,21 @@ function buildStudentSnapshotWithMode(
             .filter((response) => response.studentId === viewerStudentId)
             .map((response) => [response.questionId, response.editSequence ?? 0] satisfies [string, number]),
         )
+  // The viewer's own unsubmitted draft for each active question, so a
+  // remounted QuestionView (or a fresh page load) can recover an in-progress
+  // edit from the server instead of relying only on locally-cached state.
+  const draftAnswers =
+    viewerStudentId === null
+      ? {}
+      : Object.fromEntries(
+          Object.values(session.data.responseDrafts)
+            .filter((draft) =>
+              draft.studentId === viewerStudentId &&
+              fallbackQuestionIds.includes(draft.questionId) &&
+              draftMatchesCurrentRun(session.data, draft),
+            )
+            .map((draft) => [draft.questionId, draft.answer] satisfies [string, Response['answer']]),
+        )
   const reviewedResponses =
     viewerStudentId === null
       ? []
@@ -1342,6 +1340,7 @@ function buildStudentSnapshotWithMode(
     ],
     reviewedResponses,
     submittedAnswers,
+    draftAnswers,
     submittedResponseEditSequences,
     revealedQuestions,
   }
@@ -1355,9 +1354,7 @@ function isStaleActiveResponse(
   return (
     (activeQuestionIdSet?.has(response.questionId) ?? sessionData.activeQuestionIds.includes(response.questionId)) &&
     sessionData.activeQuestionRunRevision !== null &&
-    (response.activeQuestionRunRevision !== undefined
-      ? response.activeQuestionRunRevision !== sessionData.activeQuestionRunRevision
-      : sessionData.activeQuestionRunStartedAt !== null && response.submittedAt < sessionData.activeQuestionRunStartedAt)
+    response.activeQuestionRunRevision !== sessionData.activeQuestionRunRevision
   )
 }
 
@@ -2070,7 +2067,7 @@ export default function setupResonanceRoutes(
       res.status(403).json({ error: 'studentId does not match authenticated participant' })
       return
     }
-    if (!matchesActiveQuestionRun(session.data, body.activeQuestionRunRevision, body.activeQuestionRunStartedAt)) {
+    if (!matchesActiveQuestionRun(session.data, body.activeQuestionRunRevision)) {
       res.status(409).json({ error: 'question run changed' })
       return
     }
@@ -3045,11 +3042,7 @@ export default function setupResonanceRoutes(
       case 'resonance:submit-answer': {
         const studentId = resolveSocketStudentId(payload.studentId, clientStudentId)
         if (!studentId || !session.data.students[studentId]) return
-        if (!matchesActiveQuestionRun(
-          session.data,
-          payload.activeQuestionRunRevision,
-          payload.activeQuestionRunStartedAt,
-        )) return
+        if (!matchesActiveQuestionRun(session.data, payload.activeQuestionRunRevision)) return
         const requestedQuestionId = typeof payload.questionId === 'string' ? payload.questionId : null
         const selfPacedMode = await resolveSelfPacedMode(session, sessions)
         const availableQuestionIds = resolveStudentAvailableQuestionIds(session, selfPacedMode)
@@ -3092,11 +3085,7 @@ export default function setupResonanceRoutes(
       case 'resonance:update-draft': {
         const studentId = resolveSocketStudentId(payload.studentId, clientStudentId)
         if (!studentId || !session.data.students[studentId]) return
-        if (!matchesActiveQuestionRun(
-          session.data,
-          payload.activeQuestionRunRevision,
-          payload.activeQuestionRunStartedAt,
-        )) return
+        if (!matchesActiveQuestionRun(session.data, payload.activeQuestionRunRevision)) return
         const selfPacedMode = await resolveSelfPacedMode(session, sessions)
         // This runs after the final await in this handler. A deadline can pass
         // while resolving an embedded session mode, so validate and timestamp

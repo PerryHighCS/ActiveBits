@@ -304,7 +304,10 @@ through activity-specific props.
   the timing boundary. Timed runs install a server-owned deadline task when loaded or activated so
   persisted drafts are finalized and broadcast without client activity. Draft clients treat a
   WebSocket write as persisted only after the server returns a correlated `resonance:draft-saved`
-  acknowledgement; an unacknowledged deadline-window draft is reconciled from the student snapshot.
+  acknowledgement; the student component (not the per-question view, which is remounted on every
+  stack-tab switch) owns resending each active question's current answer on a short interval until
+  acknowledged, and the student snapshot separately carries the viewer's own current-run draft per
+  question so a reload or remount can recover it from the server.
   Direct-name registrations without an accepted-participant or capability principal are limited by
   session and trusted-proxy client IP before they mint capability records; a newer same-run draft
   takes precedence over its older confirmed response in instructor progress until submitted.

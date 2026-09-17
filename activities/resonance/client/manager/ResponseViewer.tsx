@@ -570,6 +570,7 @@ function FreeResponseList({
         questionId: entry.questionId,
         studentId: entry.studentId,
         submittedAt: entry.updatedAt,
+        activeQuestionRunRevision: null,
         answer: entry.answer ?? { type: 'free-response', text: '' },
         studentName: entry.studentName,
       } satisfies ResponseWithName,

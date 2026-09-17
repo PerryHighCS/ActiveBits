@@ -248,6 +248,7 @@ function createInstructorResonanceSession(): SessionRecord {
           questionId: 'q1',
           studentId: 'student1',
           submittedAt: now - 500,
+          activeQuestionRunRevision: 1,
           answer: {
             type: 'free-response',
             text: 'I think the loop exits when the counter reaches zero.',
@@ -259,6 +260,7 @@ function createInstructorResonanceSession(): SessionRecord {
           questionId: 'q1',
           studentId: 'student2',
           updatedAt: now - 100,
+          activeQuestionRunRevision: 1,
           answer: {
             type: 'free-response',
             text: 'Still working through the condition...',
@@ -1136,12 +1138,14 @@ void test('server deadline task finalizes and broadcasts drafts without post-dea
   session.data.activeQuestionId = 'q1'
   session.data.activeQuestionIds = ['q1']
   session.data.activeQuestionRunStartedAt = 800
+  session.data.activeQuestionRunRevision = 1
   session.data.activeQuestionDeadlineAt = 1_100
   session.data.responseDrafts = {
     'q1:student1': {
       questionId: 'q1',
       studentId: 'student1',
       updatedAt: 1_050,
+      activeQuestionRunRevision: 1,
       answer: { type: 'free-response', text: 'Saved before time ran out' },
     },
   }
@@ -1234,12 +1238,14 @@ void test('server deadline task retries after a strict session read failure', as
   session.data.activeQuestionId = 'q1'
   session.data.activeQuestionIds = ['q1']
   session.data.activeQuestionRunStartedAt = 800
+  session.data.activeQuestionRunRevision = 1
   session.data.activeQuestionDeadlineAt = 1_100
   session.data.responseDrafts = {
     'q1:student1': {
       questionId: 'q1',
       studentId: 'student1',
       updatedAt: 1_050,
+      activeQuestionRunRevision: 1,
       answer: { type: 'free-response', text: 'Retry this persisted draft' },
     },
   }
@@ -1294,12 +1300,14 @@ void test('server deadline task retries after a finalization write failure witho
   session.data.activeQuestionId = 'q1'
   session.data.activeQuestionIds = ['q1']
   session.data.activeQuestionRunStartedAt = 800
+  session.data.activeQuestionRunRevision = 1
   session.data.activeQuestionDeadlineAt = 1_100
   session.data.responseDrafts = {
     'q1:student1': {
       questionId: 'q1',
       studentId: 'student1',
       updatedAt: 1_050,
+      activeQuestionRunRevision: 1,
       answer: { type: 'free-response', text: 'Persist me after retry' },
     },
   }
@@ -1358,18 +1366,21 @@ void test('timed live runs finalize persisted drafts for every active question',
   session.data.activeQuestionId = 'q1'
   session.data.activeQuestionIds = ['q1', 'q2']
   session.data.activeQuestionRunStartedAt = now - 10_000
+  session.data.activeQuestionRunRevision = 1
   session.data.activeQuestionDeadlineAt = now - 1_000
   session.data.responseDrafts = {
     'q1:student1': {
       questionId: 'q1',
       studentId: 'student1',
       updatedAt: now - 2_000,
+      activeQuestionRunRevision: 1,
       answer: { type: 'free-response', text: 'First persisted draft' },
     },
     'q2:student1': {
       questionId: 'q2',
       studentId: 'student1',
       updatedAt: now - 2_000,
+      activeQuestionRunRevision: 1,
       answer: { type: 'multiple-choice', selectedOptionIds: ['q2_b'] },
     },
   }
@@ -2925,6 +2936,7 @@ void test('activate-question route can activate all questions with a shared coun
     activeQuestionIds?: string[]
     activeQuestions?: Array<{ id: string }>
     activeQuestionRunStartedAt?: number | null
+    activeQuestionRunRevision?: number | null
     activeQuestionDeadlineAt?: number | null
   }
   assert.deepEqual(stateBody.activeQuestionIds, ['q1', 'q2'])
@@ -2939,7 +2951,7 @@ void test('activate-question route can activate all questions with a shared coun
       body: {
         studentId: 'student1',
         questionId: 'q2',
-        activeQuestionRunStartedAt: stateBody.activeQuestionRunStartedAt,
+        activeQuestionRunRevision: stateBody.activeQuestionRunRevision,
         answer: {
           type: 'multiple-choice',
           selectedOptionIds: ['q2_b'],
@@ -3008,6 +3020,7 @@ void test('staged activate-question hides MCQ choices until reveal and then acce
   const storedAfterStagedActivate = await sessions.get(session.id)
   const stagedRunStartedAt = storedAfterStagedActivate?.data.activeQuestionRunStartedAt ?? null
   assert.equal(typeof stagedRunStartedAt, 'number')
+  const stagedRunRevision = (storedAfterStagedActivate?.data.activeQuestionRunRevision as number | null | undefined) ?? null
 
   const hiddenStateRes = createResponse()
   await stateHandler?.({ params: { sessionId: session.id } }, hiddenStateRes)
@@ -3035,7 +3048,7 @@ void test('staged activate-question hides MCQ choices until reveal and then acce
       body: {
         studentId: 'student1',
         questionId: 'q2',
-        activeQuestionRunStartedAt: stagedRunStartedAt,
+        activeQuestionRunRevision: stagedRunRevision,
         answer: {
           type: 'multiple-choice',
           selectedOptionIds: ['q2_b'],
@@ -3106,6 +3119,7 @@ void test('staged activate-question hides MCQ choices until reveal and then acce
       questionId: 'q2',
       studentId: 'student1',
       updatedAt: Date.now() - 2_000,
+      activeQuestionRunRevision: stagedRunRevision,
       answer: {
         type: 'multiple-choice',
         selectedOptionIds: ['q2_b'],
@@ -3124,7 +3138,7 @@ void test('staged activate-question hides MCQ choices until reveal and then acce
       body: {
         studentId: 'student1',
         questionId: 'q2',
-        activeQuestionRunStartedAt: expiredRunStartedAt,
+        activeQuestionRunRevision: stagedRunRevision,
         answer: {
           type: 'multiple-choice',
           selectedOptionIds: ['q2_b'],
@@ -3163,7 +3177,7 @@ void test('staged activate-question hides MCQ choices until reveal and then acce
       body: {
         studentId: 'student1',
         questionId: 'q2',
-        activeQuestionRunStartedAt: expiredRunStartedAt,
+        activeQuestionRunRevision: stagedRunRevision,
         answer: {
           type: 'multiple-choice',
           selectedOptionIds: ['q2_b'],
@@ -3500,7 +3514,7 @@ void test('submit-answer route broadcasts an updated instructor snapshot to inst
 
   assert.equal(activateRes.statusCode, 200)
   const activatedSession = await sessions.get(session.id)
-  const activeQuestionRunStartedAt = activatedSession?.data.activeQuestionRunStartedAt
+  const activeQuestionRunRevision = activatedSession?.data.activeQuestionRunRevision
 
   const submitRes = createResponse()
   await submitHandler?.(
@@ -3510,7 +3524,7 @@ void test('submit-answer route broadcasts an updated instructor snapshot to inst
       body: {
         studentId: 'student1',
         questionId: 'q1',
-        activeQuestionRunStartedAt,
+        activeQuestionRunRevision,
         answer: {
           type: 'free-response',
           text: 'Updated live answer',
@@ -3564,6 +3578,8 @@ void test('submit-answer route updates an existing response when a question is r
       ],
       activeQuestionId: 'q1',
       activeQuestionIds: ['q1'],
+      activeQuestionRunStartedAt: now - 1_000,
+      activeQuestionRunRevision: 1,
       activeQuestionDeadlineAt: null,
       students: {
         student1: { studentId: 'student1', name: 'Ada Lovelace', joinedAt: now - 1_000 },
@@ -3574,6 +3590,7 @@ void test('submit-answer route updates an existing response when a question is r
           questionId: 'q1',
           studentId: 'student1',
           submittedAt: now - 500,
+          activeQuestionRunRevision: 1,
           answer: {
             type: 'free-response',
             text: 'Initial answer',
@@ -3604,7 +3621,7 @@ void test('submit-answer route updates an existing response when a question is r
       body: {
         studentId: 'student1',
         questionId: 'q1',
-        activeQuestionRunStartedAt: null,
+        activeQuestionRunRevision: 1,
         answer: {
           type: 'free-response',
           text: 'Revised answer',

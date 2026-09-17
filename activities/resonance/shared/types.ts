@@ -52,7 +52,7 @@ export interface Response {
   questionId: string
   studentId: string
   submittedAt: number
-  activeQuestionRunRevision?: number | null
+  activeQuestionRunRevision: number | null
   /**
    * Client-assigned monotonic counter for this question/run's editing session,
    * bumped each time the student starts a fresh edit (initial answer, or
@@ -156,6 +156,13 @@ export interface StudentSessionSnapshot {
   reveals: QuestionReveal[]
   reviewedResponses: ReviewedResponse[]
   submittedAnswers: Record<string, AnswerPayload>
+  /**
+   * The viewer's own saved-but-not-yet-submitted answer for each active
+   * question, as currently held by the server. Lets a remounted QuestionView
+   * (or a freshly reloaded page) recover an in-progress edit from the server
+   * instead of relying solely on locally-cached, possibly-lost state.
+   */
+  draftAnswers: Record<string, AnswerPayload>
   /**
    * The `editSequence` recorded on each confirmed response in `submittedAnswers`.
    * A client that reloads mid-run has no local edit-sequence bookkeeping (that

@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import * as React from 'react'
+import { JSDOM } from 'jsdom'
 import { resolveNextSelfPacedQuestionId } from './ResonanceStudent.js'
 import { clearLiveQuestionSubmission, resolveQuestionAnswer } from './ResonanceStudent.js'
 import { resolveQuestionStatusBadge } from './ResonanceStudent.js'
@@ -9,6 +11,91 @@ import { hasActiveQuestionRunRestart } from './ResonanceStudent.js'
 import { shouldRetryRegistrationWithoutStudentId } from './ResonanceStudent.js'
 import { advanceEditSequenceForRevisit, resolveCurrentEditSequence } from './ResonanceStudent.js'
 import { seedEditSequenceFromConfirmedResponse } from './ResonanceStudent.js'
+import { selectUnconfirmedDraftQuestionIds, resetAnswersForRestartedQuestions } from './ResonanceStudent.js'
+import type { AnswerPayload, StudentSessionSnapshot } from '../../shared/types.js'
+
+;(globalThis as { React?: typeof React }).React = React
+
+class FakeWebSocket {
+  static instances: FakeWebSocket[] = []
+  static readonly OPEN = 1
+  onopen: (() => void) | null = null
+  onmessage: ((event: { data: string }) => void) | null = null
+  onerror: (() => void) | null = null
+  onclose: ((event: { code?: number }) => void) | null = null
+  readyState = 1
+  sent: unknown[] = []
+
+  constructor(public url: string) {
+    FakeWebSocket.instances.push(this)
+  }
+
+  send(message: string): void {
+    this.sent.push(JSON.parse(message))
+  }
+
+  close(): void {
+    this.readyState = 3
+  }
+
+  emitMessage(payload: unknown): void {
+    this.onmessage?.({ data: JSON.stringify(payload) })
+  }
+}
+
+function buildSnapshot(overrides: Partial<StudentSessionSnapshot> = {}): StudentSessionSnapshot {
+  return {
+    sessionId: 'session-1',
+    selfPacedMode: false,
+    presentationMode: 'standard',
+    stagedRun: null,
+    activeQuestion: null,
+    activeQuestions: [],
+    activeQuestionIds: [],
+    activeQuestionRunStartedAt: null,
+    activeQuestionRunRevision: null,
+    activeQuestionDeadlineAt: null,
+    lastActiveQuestionRunRevision: null,
+    reveals: [],
+    reviewedResponses: [],
+    submittedAnswers: {},
+    draftAnswers: {},
+    submittedResponseEditSequences: {},
+    revealedQuestions: [],
+    ...overrides,
+  }
+}
+
+function installResonanceStudentTestEnvironment(): () => void {
+  const dom = new JSDOM('<!doctype html><html><body></body></html>', {
+    url: 'https://activebits.local/s1',
+  })
+
+  const keys = ['window', 'document', 'navigator', 'WebSocket', 'fetch', 'localStorage', 'sessionStorage'] as const
+  const descriptors = new Map<string, PropertyDescriptor | undefined>()
+  for (const key of keys) {
+    descriptors.set(key, Object.getOwnPropertyDescriptor(globalThis, key))
+  }
+
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: dom.window })
+  Object.defineProperty(globalThis, 'document', { configurable: true, value: dom.window.document })
+  Object.defineProperty(globalThis, 'navigator', { configurable: true, value: dom.window.navigator })
+  Object.defineProperty(globalThis, 'WebSocket', { configurable: true, value: FakeWebSocket })
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: dom.window.localStorage })
+  Object.defineProperty(globalThis, 'sessionStorage', { configurable: true, value: dom.window.sessionStorage })
+
+  return () => {
+    for (const [key, descriptor] of descriptors) {
+      if (descriptor) {
+        Object.defineProperty(globalThis, key, descriptor)
+      } else {
+        Reflect.deleteProperty(globalThis, key)
+      }
+    }
+    dom.window.close()
+    FakeWebSocket.instances.length = 0
+  }
+}
 
 void test('registration retries without a stale restored student id after authorization is lost', () => {
   assert.equal(shouldRetryRegistrationWithoutStudentId(403, 'student-1'), true)
@@ -221,8 +308,6 @@ void test('hasActiveQuestionRunRestart ignores the initial live snapshot but det
       activeQuestionIds: ['q1'],
       activeQuestionRunRevision: 1,
       previousActiveQuestionRunRevision: null,
-      activeQuestionRunStartedAt: 2_000,
-      previousActiveQuestionRunStartedAt: null,
     }),
     false,
   )
@@ -232,23 +317,146 @@ void test('hasActiveQuestionRunRestart ignores the initial live snapshot but det
       activeQuestionIds: ['q1'],
       activeQuestionRunRevision: 1,
       previousActiveQuestionRunRevision: null,
-      activeQuestionRunStartedAt: 2_000,
-      previousActiveQuestionRunStartedAt: null,
     }),
     true,
   )
 })
 
-void test('hasActiveQuestionRunRestart detects a new revision when activation timestamps match', () => {
+void test('hasActiveQuestionRunRestart detects a new revision', () => {
   assert.equal(
     hasActiveQuestionRunRestart({
       hasObservedSnapshot: true,
       activeQuestionIds: ['q1'],
       activeQuestionRunRevision: 2,
       previousActiveQuestionRunRevision: 1,
-      activeQuestionRunStartedAt: 2_000,
-      previousActiveQuestionRunStartedAt: 2_000,
     }),
     true,
   )
+})
+
+void test('selectUnconfirmedDraftQuestionIds retries an unconfirmed question but not a submitted or already-confirmed one', () => {
+  assert.deepEqual(
+    selectUnconfirmedDraftQuestionIds({
+      activeQuestionIds: ['q1', 'q2', 'q3'],
+      submittedQuestionIds: new Set(['q2']),
+      unconfirmedQuestionIds: new Set(['q1', 'q2']),
+    }),
+    ['q1'],
+  )
+  assert.deepEqual(
+    selectUnconfirmedDraftQuestionIds({
+      activeQuestionIds: ['q1'],
+      submittedQuestionIds: new Set(),
+      unconfirmedQuestionIds: new Set(),
+    }),
+    [],
+  )
+})
+
+void test('resetAnswersForRestartedQuestions drops a restarted question’s cached answer, leaving others untouched', () => {
+  const submittedAnswers: Record<string, AnswerPayload | null> = {
+    q1: { type: 'free-response', text: 'Stale answer from the previous run' },
+    q2: { type: 'free-response', text: 'Unaffected answer' },
+  }
+  assert.deepEqual(
+    resetAnswersForRestartedQuestions({ submittedAnswers, questionIdsToReset: ['q1'] }),
+    { q2: { type: 'free-response', text: 'Unaffected answer' } },
+  )
+  assert.equal(
+    resetAnswersForRestartedQuestions({ submittedAnswers, questionIdsToReset: [] }),
+    submittedAnswers,
+  )
+})
+
+void test('an unconfirmed draft on a backgrounded question tab is retried and saved after its QuestionView unmounts', async () => {
+  // Regression test for issue #374: only the currently-selected question's
+  // QuestionView is mounted. A save that hasn't been confirmed yet must
+  // still reach the server after the student switches to another tab
+  // (unmounting that QuestionView) rather than being silently lost.
+  const restore = installResonanceStudentTestEnvironment()
+  const { persistSessionParticipantIdentity } = await import(
+    '@src/components/common/entryParticipantIdentityUtils'
+  )
+  const { MemoryRouter, Route, Routes } = await import('react-router')
+  const { default: ResonanceStudent, DRAFT_RETRY_INTERVAL_MS } = await import('./ResonanceStudent.js')
+  const { act, render, waitFor } = await import('@testing-library/react')
+
+  persistSessionParticipantIdentity(window.localStorage, 'session-1', 'Ada', 'student-1')
+
+  const snapshot = buildSnapshot({
+    activeQuestions: [
+      { id: 'q1', type: 'free-response', text: 'Question one', order: 0 },
+      { id: 'q2', type: 'free-response', text: 'Question two', order: 1 },
+    ],
+    activeQuestionIds: ['q1', 'q2'],
+    activeQuestionRunStartedAt: Date.now(),
+    activeQuestionRunRevision: 1,
+    activeQuestionDeadlineAt: Date.now() + 60_000,
+  })
+
+  ;(globalThis as { fetch?: typeof fetch }).fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input)
+    if (url.includes('/register-student')) {
+      return { ok: true, json: async () => ({ studentId: 'student-1', name: 'Ada' }) } as Response
+    }
+    if (url.includes('/state')) {
+      return { ok: true, json: async () => snapshot } as Response
+    }
+    throw new Error(`Unexpected fetch: ${url}`)
+  }) as typeof fetch
+
+  let rendered!: ReturnType<typeof render>
+  try {
+    await act(async () => {
+      rendered = render(
+        React.createElement(
+          MemoryRouter,
+          { initialEntries: ['/session-1'] },
+          React.createElement(
+            Routes,
+            null,
+            React.createElement(Route, { path: '/:sessionId', element: React.createElement(ResonanceStudent) }),
+          ),
+        ),
+      )
+      await Promise.resolve()
+    })
+
+    await waitFor(() => assert.equal(FakeWebSocket.instances.length, 1))
+    const socket = FakeWebSocket.instances[0]!
+    // Never acknowledge a draft-save — this is the "unconfirmed" scenario.
+    socket.send = (message: string) => { socket.sent.push(JSON.parse(message)) }
+
+    const firstTextarea = await waitFor(() => rendered.getByLabelText(/your answer/i))
+    await act(async () => {
+      const { fireEvent } = await import('@testing-library/react')
+      fireEvent.change(firstTextarea, { target: { value: 'Answer left unconfirmed' } })
+    })
+
+    console.info('[TEST] switching tabs before the first question’s draft is acknowledged')
+    await act(async () => {
+      const { fireEvent } = await import('@testing-library/react')
+      fireEvent.click(rendered.getByRole('button', { name: /^Q2/ }))
+    })
+
+    // The first question's QuestionView is now unmounted. Only the parent's
+    // retry loop can still resend its draft.
+    await new Promise((resolve) => setTimeout(resolve, DRAFT_RETRY_INTERVAL_MS + 500))
+
+    const draftMessages = socket.sent.filter(
+      (message): message is { type: string; payload: { questionId?: string; answer?: { text?: string } } } =>
+        typeof message === 'object' && message !== null && (message as { type?: string }).type === 'resonance:update-draft',
+    )
+    assert.ok(
+      draftMessages.some((message) =>
+        message.payload.questionId === 'q1' && message.payload.answer?.text === 'Answer left unconfirmed'),
+      `expected a retried draft for q1, got: ${JSON.stringify(draftMessages)}`,
+    )
+
+    await act(async () => {
+      rendered.unmount()
+    })
+  } finally {
+    restore()
+  }
 })

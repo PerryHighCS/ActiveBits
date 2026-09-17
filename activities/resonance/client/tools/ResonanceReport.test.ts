@@ -376,6 +376,7 @@ void test('ResonanceReportView does not show correct-response counts before resu
             studentId: 'student-1',
             studentName: 'Ada',
             submittedAt: Date.now(),
+            activeQuestionRunRevision: null,
             answer: {
               type: 'multiple-choice',
               selectedOptionIds: ['a'],
