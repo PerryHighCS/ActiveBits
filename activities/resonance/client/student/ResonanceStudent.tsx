@@ -234,6 +234,32 @@ export function selectUnconfirmedDraftQuestionIds(params: {
   )
 }
 
+/**
+ * The single place that abandons a question's draft-send tracking. Every
+ * site that stops caring about a question's outstanding draft attempt for a
+ * reason *other than that attempt's own acknowledgement* (the question was
+ * submitted, its run restarted or reactivated, or its deadline was
+ * reconciled) must clear both `unconfirmedQuestionIds` and
+ * `inFlightDraftQuestionIds` together. Leaving a stale in-flight marker set
+ * blocks `attemptDraftSend`'s guard from sending a fresh attempt for that
+ * question until the old one times out (up to `DRAFT_SAVE_ACK_TIMEOUT_MS`),
+ * which can delay or drop an edit made right at a deadline. A stale ack for
+ * the abandoned attempt is still handled safely on arrival — it no-ops
+ * against `attemptDraftSend`'s own revision/edit-sequence check — so
+ * clearing the in-flight marker here is always safe even if that attempt is
+ * still outstanding.
+ */
+export function clearDraftTracking(params: {
+  unconfirmedQuestionIds: Set<string>
+  inFlightDraftQuestionIds: Set<string>
+  questionIds: readonly string[]
+}): void {
+  for (const questionId of params.questionIds) {
+    params.unconfirmedQuestionIds.delete(questionId)
+    params.inFlightDraftQuestionIds.delete(questionId)
+  }
+}
+
 function formatRemainingTime(deadlineAt: number | null, now: number): string | null {
   if (deadlineAt === null) {
     return null
@@ -404,6 +430,7 @@ export default function ResonanceStudent() {
     hasObservedSnapshotRef.current = false
     editSequenceByKeyRef.current = {}
     unconfirmedQuestionIdsRef.current = new Set()
+    inFlightDraftQuestionIdsRef.current = new Set()
     for (const timeoutId of draftSendTimeoutsRef.current.values()) {
       window.clearTimeout(timeoutId)
     }
@@ -504,15 +531,11 @@ export default function ResonanceStudent() {
         submittedAnswers: current,
         questionIdsToReset: restartedIds,
       }))
-      for (const questionId of restartedIds) {
-        unconfirmedQuestionIdsRef.current.delete(questionId)
-        // A send from the old run may still be pending (no ack yet). Its
-        // eventual settlement will no-op once it can't match the new run's
-        // revision (see attemptDraftSend's ack check), but without also
-        // clearing this here, a new edit for the same question would be
-        // blocked from sending again until that stale attempt times out.
-        inFlightDraftQuestionIdsRef.current.delete(questionId)
-      }
+      clearDraftTracking({
+        unconfirmedQuestionIds: unconfirmedQuestionIdsRef.current,
+        inFlightDraftQuestionIds: inFlightDraftQuestionIdsRef.current,
+        questionIds: restartedIds,
+      })
     }
     hasObservedSnapshotRef.current = true
     previousActiveQuestionIdsRef.current = activeIds
@@ -637,9 +660,11 @@ export default function ResonanceStudent() {
           // never got confirmed before the deadline — refresh() below pulls
           // whatever the server actually finalized, and the snapshot-merge
           // effect above only lets that win when there's no local entry.
-          for (const questionId of questionIdsStillUnconfirmed) {
-            unconfirmedQuestionIdsRef.current.delete(questionId)
-          }
+          clearDraftTracking({
+            unconfirmedQuestionIds: unconfirmedQuestionIdsRef.current,
+            inFlightDraftQuestionIds: inFlightDraftQuestionIdsRef.current,
+            questionIds: questionIdsStillUnconfirmed,
+          })
           setSubmittedAnswers((current) => resetAnswersForRestartedQuestions({
             submittedAnswers: current,
             questionIdsToReset: questionIdsStillUnconfirmed,
@@ -835,7 +860,16 @@ export default function ResonanceStudent() {
                   scheduleDraftSend(questionId)
                 }}
                 onSubmitted={(questionId, answer) => {
-                  unconfirmedQuestionIdsRef.current.delete(questionId)
+                  // A draft send from before submission may still be
+                  // in-flight (unacked). Without also clearing it here, a
+                  // student who immediately revisits and edits this question
+                  // would have that new edit blocked from sending until the
+                  // old attempt times out (see clearDraftTracking).
+                  clearDraftTracking({
+                    unconfirmedQuestionIds: unconfirmedQuestionIdsRef.current,
+                    inFlightDraftQuestionIds: inFlightDraftQuestionIdsRef.current,
+                    questionIds: [questionId],
+                  })
                   setSubmittedAnswers((current) => ({
                     ...current,
                     [questionId]: answer,

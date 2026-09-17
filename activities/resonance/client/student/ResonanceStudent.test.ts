@@ -12,6 +12,7 @@ import { shouldRetryRegistrationWithoutStudentId } from './ResonanceStudent.js'
 import { advanceEditSequenceForRevisit, resolveCurrentEditSequence } from './ResonanceStudent.js'
 import { seedEditSequenceFromConfirmedResponse } from './ResonanceStudent.js'
 import { selectUnconfirmedDraftQuestionIds, resetAnswersForRestartedQuestions } from './ResonanceStudent.js'
+import { clearDraftTracking } from './ResonanceStudent.js'
 import type { AnswerPayload, StudentSessionSnapshot } from '../../shared/types.js'
 
 ;(globalThis as { React?: typeof React }).React = React
@@ -368,6 +369,87 @@ void test('resetAnswersForRestartedQuestions drops a restarted question’s cach
   )
 })
 
+void test('clearDraftTracking clears both unconfirmed and in-flight markers together, leaving other questions untouched', () => {
+  // Decision table: {present in unconfirmed} x {present in in-flight} x
+  // {named in questionIds}. This pairing exists because attemptDraftSend's
+  // in-flight guard would otherwise silently block a fresh attempt for a
+  // question whose prior attempt was abandoned for a reason other than its
+  // own acknowledgement (submission, run restart, deadline reconciliation).
+  const cases: Array<{
+    name: string
+    unconfirmed: string[]
+    inFlight: string[]
+    questionIds: string[]
+    expectedUnconfirmed: string[]
+    expectedInFlight: string[]
+  }> = [
+    {
+      name: 'in both sets and named: cleared from both',
+      unconfirmed: ['q1'],
+      inFlight: ['q1'],
+      questionIds: ['q1'],
+      expectedUnconfirmed: [],
+      expectedInFlight: [],
+    },
+    {
+      name: 'unconfirmed only (no attempt ever started): still safe to clear',
+      unconfirmed: ['q1'],
+      inFlight: [],
+      questionIds: ['q1'],
+      expectedUnconfirmed: [],
+      expectedInFlight: [],
+    },
+    {
+      name: 'in-flight only (already confirmed, still awaiting ack): still safe to clear',
+      unconfirmed: [],
+      inFlight: ['q1'],
+      questionIds: ['q1'],
+      expectedUnconfirmed: [],
+      expectedInFlight: [],
+    },
+    {
+      name: 'present in both but not named: left untouched',
+      unconfirmed: ['q1', 'q2'],
+      inFlight: ['q1', 'q2'],
+      questionIds: ['q2'],
+      expectedUnconfirmed: ['q1'],
+      expectedInFlight: ['q1'],
+    },
+    {
+      name: 'named but absent from both sets: no-op, no error',
+      unconfirmed: [],
+      inFlight: [],
+      questionIds: ['q1'],
+      expectedUnconfirmed: [],
+      expectedInFlight: [],
+    },
+    {
+      name: 'empty questionIds: no-op even when both sets are populated',
+      unconfirmed: ['q1'],
+      inFlight: ['q1'],
+      questionIds: [],
+      expectedUnconfirmed: ['q1'],
+      expectedInFlight: ['q1'],
+    },
+  ]
+
+  for (const testCase of cases) {
+    const unconfirmedQuestionIds = new Set(testCase.unconfirmed)
+    const inFlightDraftQuestionIds = new Set(testCase.inFlight)
+    clearDraftTracking({ unconfirmedQuestionIds, inFlightDraftQuestionIds, questionIds: testCase.questionIds })
+    assert.deepEqual(
+      [...unconfirmedQuestionIds].sort(),
+      [...testCase.expectedUnconfirmed].sort(),
+      `${testCase.name}: unconfirmed`,
+    )
+    assert.deepEqual(
+      [...inFlightDraftQuestionIds].sort(),
+      [...testCase.expectedInFlight].sort(),
+      `${testCase.name}: in-flight`,
+    )
+  }
+})
+
 void test('an unconfirmed draft on a backgrounded question tab is retried and saved after its QuestionView unmounts', async () => {
   // Regression test for issue #374: only the currently-selected question's
   // QuestionView is mounted. A save that hasn't been confirmed yet must
@@ -680,6 +762,120 @@ void test('a stale acknowledgement from a prior run does not confirm a new run�
     assert.ok(
       retriedRunTwoDraft,
       'expected the run-2 draft to still be retried after the stale run-1 ack, since it was never actually acknowledged',
+    )
+
+    await act(async () => {
+      rendered.unmount()
+    })
+  } finally {
+    restore()
+  }
+})
+
+void test('an edit made right after revisiting a just-submitted question is not blocked by its still-in-flight pre-submission draft', async () => {
+  // Regression test (found via Copilot review of PR #381): onSubmitted only
+  // cleared unconfirmedQuestionIdsRef, not inFlightDraftQuestionIdsRef. If a
+  // draft send from before submission is still awaiting its ack, a student
+  // who immediately revisits and edits the just-submitted question would
+  // have that new edit silently blocked from sending until the old attempt
+  // times out. clearDraftTracking (used from onSubmitted) fixes this by
+  // clearing both markers together.
+  const restore = installResonanceStudentTestEnvironment()
+  const { persistSessionParticipantIdentity } = await import(
+    '@src/components/common/entryParticipantIdentityUtils'
+  )
+  const { MemoryRouter, Route, Routes } = await import('react-router')
+  const { default: ResonanceStudent, DRAFT_EDIT_DEBOUNCE_MS } = await import('./ResonanceStudent.js')
+  const { act, render, waitFor, fireEvent } = await import('@testing-library/react')
+
+  persistSessionParticipantIdentity(window.localStorage, 'session-1', 'Ada', 'student-1')
+
+  const snapshot = buildSnapshot({
+    activeQuestions: [
+      { id: 'q1', type: 'free-response', text: 'Question one', order: 0 },
+      { id: 'q2', type: 'free-response', text: 'Question two', order: 1 },
+    ],
+    activeQuestionIds: ['q1', 'q2'],
+    activeQuestionRunStartedAt: Date.now(),
+    activeQuestionRunRevision: 1,
+    activeQuestionDeadlineAt: Date.now() + 60_000,
+  })
+
+  ;(globalThis as { fetch?: typeof fetch }).fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input)
+    if (url.includes('/register-student')) {
+      return { ok: true, json: async () => ({ studentId: 'student-1', name: 'Ada' }) } as Response
+    }
+    if (url.includes('/state')) {
+      return { ok: true, json: async () => snapshot } as Response
+    }
+    if (url.includes('/submit-answer')) {
+      return { ok: true, json: async () => ({ ok: true }) } as Response
+    }
+    throw new Error(`Unexpected fetch: ${url}`)
+  }) as typeof fetch
+
+  let rendered!: ReturnType<typeof render>
+  try {
+    await act(async () => {
+      rendered = render(
+        React.createElement(
+          MemoryRouter,
+          { initialEntries: ['/session-1'] },
+          React.createElement(
+            Routes,
+            null,
+            React.createElement(Route, { path: '/:sessionId', element: React.createElement(ResonanceStudent) }),
+          ),
+        ),
+      )
+      await Promise.resolve()
+    })
+
+    await waitFor(() => assert.equal(FakeWebSocket.instances.length, 1))
+    const socket = FakeWebSocket.instances[0]!
+    // Never auto-ack — the pre-submission draft send is left permanently
+    // in-flight, exactly the condition that exposes the bug.
+    socket.send = (message: string) => { socket.sent.push(JSON.parse(message)) }
+
+    const textarea = await waitFor(() => rendered.getByLabelText(/your answer/i))
+    console.info('[TEST] typing a draft that will never be acknowledged before submitting')
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: 'first answer' } })
+    })
+    await new Promise((resolve) => setTimeout(resolve, DRAFT_EDIT_DEBOUNCE_MS + 200))
+
+    type DraftMessage = { type: string; payload: { questionId?: string; answer?: { text?: string } } }
+    const isQ1Draft = (message: unknown): message is DraftMessage =>
+      typeof message === 'object' && message !== null &&
+      (message as { type?: string }).type === 'resonance:update-draft' &&
+      (message as DraftMessage).payload.questionId === 'q1'
+    assert.ok(socket.sent.some(isQ1Draft), 'expected the pre-submission draft to have been sent (and left unacked)')
+
+    console.info('[TEST] submitting the question while that draft is still unacknowledged')
+    await act(async () => {
+      fireEvent.click(rendered.getByRole('button', { name: /Submit answer/i }))
+      await Promise.resolve()
+    })
+    await waitFor(() => rendered.getByText(/answer submitted/i))
+
+    console.info('[TEST] immediately revisiting and editing the just-submitted question')
+    await act(async () => {
+      fireEvent.click(rendered.getByRole('button', { name: /^Q1/ }))
+    })
+    const sentBeforeRevisitEdit = socket.sent.length
+    await act(async () => {
+      fireEvent.change(rendered.getByLabelText(/your answer/i), { target: { value: 'revised answer' } })
+    })
+    await new Promise((resolve) => setTimeout(resolve, DRAFT_EDIT_DEBOUNCE_MS + 200))
+
+    const revisitDraft = socket.sent.slice(sentBeforeRevisitEdit).find(
+      (message): message is DraftMessage =>
+        isQ1Draft(message) && (message as DraftMessage).payload.answer?.text === 'revised answer',
+    )
+    assert.ok(
+      revisitDraft,
+      `expected the post-revisit edit to be sent promptly, not blocked by the stale pre-submission in-flight draft; sent since revisit: ${JSON.stringify(socket.sent.slice(sentBeforeRevisitEdit))}`,
     )
 
     await act(async () => {
