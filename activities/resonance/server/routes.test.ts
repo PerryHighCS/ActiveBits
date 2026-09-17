@@ -1049,6 +1049,158 @@ void test('a draft made after revisiting an already-submitted question in the sa
   await sessions.close()
 })
 
+void test('an older draft write cannot clobber a newer one for the same question that already landed first', async () => {
+  // Regression test (Copilot review of PR #381): each resonance:update-draft
+  // message is handled by its own async function starting from a fresh
+  // session read, so two overlapping sends for the same question (e.g. a
+  // client-side retry racing its own still-outstanding original attempt) can
+  // finish processing out of the order they were sent in. Without a guard
+  // here, a slower older write landing after a faster newer one would
+  // silently clobber it — this reproduces that by sending the "newer" write
+  // first and the "older" one second, which is exactly what an out-of-order
+  // completion looks like from the server's point of view.
+  const app = createMockApp()
+  const sessions = createSessionStore(null)
+  const session = createMultiQuestionSession()
+  const runStartedAt = Date.now() - 1_000
+  session.data.activeQuestionId = 'q1'
+  session.data.activeQuestionIds = ['q1']
+  session.data.activeQuestionRunStartedAt = runStartedAt
+  session.data.activeQuestionRunRevision = 1
+  session.data.lastActiveQuestionRunRevision = 1
+  const studentCookies = issueStudentCookies(session, 'student1')
+  await sessions.set(session.id, session)
+  const captured = createCapturingMockWs()
+  setupResonanceRoutes(app, sessions, captured.ws)
+
+  const handler = captured.getHandler()
+  const messageHandlers: Array<(message: string) => void> = []
+  const sentMessages: Array<{ type?: string; payload?: { draftId?: string } }> = []
+  assert.ok(handler)
+  handler({
+    readyState: 1,
+    upgradeHeaders: {
+      cookie: Object.entries(studentCookies).map(([name, value]) => `${name}=${value}`).join('; '),
+    },
+    send(message: string) {
+      sentMessages.push(JSON.parse(message) as { type?: string; payload?: { draftId?: string } })
+    },
+    on(event: string, callback: (message: string) => void) {
+      if (event === 'message') messageHandlers.push(callback)
+    },
+    once() {},
+    close() {},
+    terminate() {},
+    ping() {},
+  }, new URLSearchParams({ sessionId: session.id, role: 'student', studentId: 'student1' }), captured.ws.wss)
+  await waitForCondition(() => messageHandlers.length === 1)
+
+  type StoredData = {
+    responseDrafts?: Record<string, {
+      questionId?: string
+      studentId?: string
+      activeQuestionRunRevision?: number | null
+      editSequence?: number
+      updatedAt?: number
+      answer?: unknown
+    }>
+  }
+
+  // The student revisits (editSequence bumps to 2) and this newer write
+  // reaches and is processed by the server first.
+  console.info('[TEST] the newer (revisit) draft write lands first')
+  messageHandlers[0]?.(JSON.stringify({
+    type: 'resonance:update-draft',
+    payload: {
+      studentId: 'student1',
+      questionId: 'q1',
+      draftId: 'newer-draft',
+      activeQuestionRunRevision: 1,
+      editSequence: 2,
+      answer: { type: 'free-response', text: 'Newer, revisited answer' },
+    },
+  }))
+  await waitForCondition(() => sentMessages.some((message) =>
+    message.type === 'resonance:draft-saved' && message.payload?.draftId === 'newer-draft'
+  ))
+
+  // A straggling write from before the revisit (still editSequence 1, sent
+  // over the same connection but delayed in server-side processing) now
+  // arrives and is processed second.
+  console.info('[TEST] a straggling older (pre-revisit) draft write lands second, after the newer one')
+  messageHandlers[0]?.(JSON.stringify({
+    type: 'resonance:update-draft',
+    payload: {
+      studentId: 'student1',
+      questionId: 'q1',
+      draftId: 'older-straggler',
+      activeQuestionRunRevision: 1,
+      editSequence: 1,
+      answer: { type: 'free-response', text: 'Stale pre-revisit answer' },
+    },
+  }))
+  await waitForCondition(() => sentMessages.some((message) =>
+    message.type === 'resonance:draft-saved' && message.payload?.draftId === 'older-straggler'
+  ))
+
+  const storedAfterStraggler = (await sessions.get(session.id))?.data as StoredData | undefined
+  const draftAfterStraggler = storedAfterStraggler?.responseDrafts?.['q1:student1']
+  assert.equal(
+    draftAfterStraggler?.editSequence,
+    2,
+    'the older straggler must not have overwritten the newer draft’s editSequence',
+  )
+  assert.deepEqual(
+    draftAfterStraggler?.answer,
+    { type: 'free-response', text: 'Newer, revisited answer' },
+    'the older straggler must not have overwritten the newer draft’s content',
+  )
+
+  // Same-editSequence tiebreaker: seed a draft whose stored updatedAt is
+  // artificially in the future (simulating "this slot was already written by
+  // a request that resumed after this one"), then send a same-editSequence
+  // write — it must be rejected without moving updatedAt backwards.
+  const sessionBeforeTiebreakerCheck = await sessions.get(session.id)
+  assert.ok(sessionBeforeTiebreakerCheck)
+  const futureUpdatedAt = Date.now() + 60_000
+  ;(sessionBeforeTiebreakerCheck!.data as StoredData).responseDrafts!['q1:student1'] = {
+    questionId: 'q1',
+    studentId: 'student1',
+    activeQuestionRunRevision: 1,
+    editSequence: 2,
+    updatedAt: futureUpdatedAt,
+    answer: { type: 'free-response', text: 'Written by the request that resumed first' },
+  }
+  await sessions.set(session.id, sessionBeforeTiebreakerCheck!)
+
+  console.info('[TEST] a same-editSequence write older than the already-stored one is rejected, not merged in')
+  messageHandlers[0]?.(JSON.stringify({
+    type: 'resonance:update-draft',
+    payload: {
+      studentId: 'student1',
+      questionId: 'q1',
+      draftId: 'same-sequence-straggler',
+      activeQuestionRunRevision: 1,
+      editSequence: 2,
+      answer: { type: 'free-response', text: 'Chronologically earlier, same editSequence' },
+    },
+  }))
+  await waitForCondition(() => sentMessages.some((message) =>
+    message.type === 'resonance:draft-saved' && message.payload?.draftId === 'same-sequence-straggler'
+  ))
+
+  const storedAfterTiebreaker = (await sessions.get(session.id))?.data as StoredData | undefined
+  const draftAfterTiebreaker = storedAfterTiebreaker?.responseDrafts?.['q1:student1']
+  assert.equal(draftAfterTiebreaker?.updatedAt, futureUpdatedAt)
+  assert.deepEqual(
+    draftAfterTiebreaker?.answer,
+    { type: 'free-response', text: 'Written by the request that resumed first' },
+    'a same-editSequence write chronologically older than what’s stored must not overwrite it',
+  )
+
+  await sessions.close()
+})
+
 void test('clearing a draft over the websocket still acknowledges the write, present or absent', async () => {
   const app = createMockApp()
   const sessions = createSessionStore(null)

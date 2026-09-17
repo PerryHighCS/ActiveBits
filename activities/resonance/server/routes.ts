@@ -3138,6 +3138,35 @@ export default function setupResonanceRoutes(
         }
 
         const draftKey = buildDraftKey(questionId, studentId)
+
+        // Each `resonance:update-draft` message is handled by its own async
+        // function starting from a fresh `loadResonanceSession` read, so two
+        // overlapping sends for the same question (a legitimate client-side
+        // retry after its own ack timeout, racing the still-outstanding
+        // original attempt) can finish processing out of the order they were
+        // sent in. Without this guard, a slower older write landing after a
+        // faster newer one would silently clobber it. Ordered first by
+        // editSequence (a revisit's bump must always win over anything from
+        // before it), then by this handler's own resumption timestamp as a
+        // tiebreaker within the same editSequence — mirrors the
+        // confirmedResponseForRun staleness check above, and for the same
+        // reason acks anyway so a superseded retry doesn't get reported to
+        // its client as a failed save.
+        const existingDraft = session.data.responseDrafts[draftKey]
+        const existingDraftEditSequence = existingDraft?.editSequence ?? 0
+        const isStaleDraftWrite = existingDraft !== undefined &&
+          existingDraft.activeQuestionRunRevision === session.data.activeQuestionRunRevision &&
+          (
+            editSequence < existingDraftEditSequence ||
+            (editSequence === existingDraftEditSequence && draftUpdatedAt < existingDraft.updatedAt)
+          )
+        if (isStaleDraftWrite) {
+          if (draftId !== null) {
+            sendToSocket(socket, 'resonance:draft-saved', { draftId }, sessionId)
+          }
+          return
+        }
+
         if (payload.answer === null) {
           if (draftKey in session.data.responseDrafts) {
             delete session.data.responseDrafts[draftKey]

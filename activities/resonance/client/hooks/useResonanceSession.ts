@@ -15,7 +15,7 @@ import type {
 } from '../../shared/types.js'
 
 const FALLBACK_POLL_INTERVAL_MS = 15_000
-const DRAFT_SAVE_ACK_TIMEOUT_MS = 2_000
+export const DRAFT_SAVE_ACK_TIMEOUT_MS = 2_000
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value != null && typeof value === 'object' && !Array.isArray(value)

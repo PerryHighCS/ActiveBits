@@ -251,7 +251,7 @@ export function selectUnconfirmedDraftQuestionIds(params: {
  */
 export function clearDraftTracking(params: {
   unconfirmedQuestionIds: Set<string>
-  inFlightDraftQuestionIds: Set<string>
+  inFlightDraftQuestionIds: Map<string, number>
   questionIds: readonly string[]
 }): void {
   for (const questionId of params.questionIds) {
@@ -310,7 +310,14 @@ export default function ResonanceStudent() {
   // remount-survival reason as editSequenceByKeyRef — see the draft-retry
   // effect below and issue #374.
   const unconfirmedQuestionIdsRef = useRef<Set<string>>(new Set())
-  const inFlightDraftQuestionIdsRef = useRef<Set<string>>(new Set())
+  // Maps a question id to a token identifying whichever attemptDraftSend call
+  // is currently outstanding for it. A plain presence flag isn't enough: if
+  // attempt A is abandoned (clearDraftTracking) while still outstanding and a
+  // fresh attempt B then starts before A's saveDraft() promise settles, A's
+  // eventual settlement must not clear B's in-flight marker — only a
+  // settlement that still owns the current token may clear the entry.
+  const inFlightDraftQuestionIdsRef = useRef<Map<string, number>>(new Map())
+  const nextDraftAttemptTokenRef = useRef(0)
   // Per-question debounce timers that trigger an edit-triggered send attempt
   // shortly after the student stops typing (see DRAFT_EDIT_DEBOUNCE_MS).
   const draftSendTimeoutsRef = useRef<Map<string, number>>(new Map())
@@ -430,7 +437,7 @@ export default function ResonanceStudent() {
     hasObservedSnapshotRef.current = false
     editSequenceByKeyRef.current = {}
     unconfirmedQuestionIdsRef.current = new Set()
-    inFlightDraftQuestionIdsRef.current = new Set()
+    inFlightDraftQuestionIdsRef.current = new Map()
     for (const timeoutId of draftSendTimeoutsRef.current.values()) {
       window.clearTimeout(timeoutId)
     }
@@ -580,7 +587,8 @@ export default function ResonanceStudent() {
       questionId,
       sentRunRevision,
     )
-    inFlightDraftQuestionIdsRef.current.add(questionId)
+    const attemptToken = ++nextDraftAttemptTokenRef.current
+    inFlightDraftQuestionIdsRef.current.set(questionId, attemptToken)
     void saveDraft({
       studentId: studentIdRef.current,
       questionId,
@@ -588,7 +596,16 @@ export default function ResonanceStudent() {
       editSequence: sentEditSequence,
       answer,
     }).then((saved) => {
-      inFlightDraftQuestionIdsRef.current.delete(questionId)
+      // Only clear the in-flight marker if it still belongs to this attempt.
+      // If this attempt was abandoned (clearDraftTracking, e.g. on submit or
+      // run restart) and a fresh attempt already started for this question,
+      // the marker now belongs to that newer attempt — this settlement must
+      // not clear it out from under it, or the retry guard would let an
+      // overlapping duplicate send start while the newer attempt is still
+      // genuinely outstanding.
+      if (inFlightDraftQuestionIdsRef.current.get(questionId) === attemptToken) {
+        inFlightDraftQuestionIdsRef.current.delete(questionId)
+      }
       if (!saved) return
       // An ack can arrive after the run has since restarted/reactivated
       // (this same question, a coincidentally identical answer). Only clear

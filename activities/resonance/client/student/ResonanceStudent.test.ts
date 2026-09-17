@@ -435,7 +435,7 @@ void test('clearDraftTracking clears both unconfirmed and in-flight markers toge
 
   for (const testCase of cases) {
     const unconfirmedQuestionIds = new Set(testCase.unconfirmed)
-    const inFlightDraftQuestionIds = new Set(testCase.inFlight)
+    const inFlightDraftQuestionIds = new Map(testCase.inFlight.map((questionId) => [questionId, 1]))
     clearDraftTracking({ unconfirmedQuestionIds, inFlightDraftQuestionIds, questionIds: testCase.questionIds })
     assert.deepEqual(
       [...unconfirmedQuestionIds].sort(),
@@ -443,10 +443,135 @@ void test('clearDraftTracking clears both unconfirmed and in-flight markers toge
       `${testCase.name}: unconfirmed`,
     )
     assert.deepEqual(
-      [...inFlightDraftQuestionIds].sort(),
+      [...inFlightDraftQuestionIds.keys()].sort(),
       [...testCase.expectedInFlight].sort(),
       `${testCase.name}: in-flight`,
     )
+  }
+})
+
+void test('a stale settlement from an abandoned attempt does not let a newer attempt for the same question be duplicated', async () => {
+  // Regression test (Copilot review of PR #381): attemptDraftSend's ack
+  // continuation used to delete inFlightDraftQuestionIdsRef unconditionally
+  // on settlement. If an attempt is abandoned (clearDraftTracking, e.g. a run
+  // restart) while its saveDraft() promise is still outstanding, and a fresh
+  // attempt starts for the same question before that old promise settles,
+  // the old attempt's later settlement would wrongly clear the new attempt's
+  // in-flight marker — letting the retry loop fire a third, duplicate send
+  // for the same question while the second attempt was still genuinely
+  // outstanding (not yet acked or timed out).
+  const restore = installResonanceStudentTestEnvironment()
+  const { persistSessionParticipantIdentity } = await import(
+    '@src/components/common/entryParticipantIdentityUtils'
+  )
+  const { MemoryRouter, Route, Routes } = await import('react-router')
+  const { default: ResonanceStudent, DRAFT_EDIT_DEBOUNCE_MS, DRAFT_RETRY_INTERVAL_MS } = await import('./ResonanceStudent.js')
+  const { act, render, waitFor, fireEvent } = await import('@testing-library/react')
+
+  persistSessionParticipantIdentity(window.localStorage, 'session-1', 'Ada', 'student-1')
+
+  const snapshot = buildSnapshot({
+    activeQuestions: [
+      { id: 'q1', type: 'free-response', text: 'Question one', order: 0 },
+    ],
+    activeQuestionIds: ['q1'],
+    activeQuestionRunStartedAt: Date.now(),
+    activeQuestionRunRevision: 1,
+    activeQuestionDeadlineAt: Date.now() + 60_000,
+  })
+
+  ;(globalThis as { fetch?: typeof fetch }).fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input)
+    if (url.includes('/register-student')) {
+      return { ok: true, json: async () => ({ studentId: 'student-1', name: 'Ada' }) } as Response
+    }
+    if (url.includes('/state')) {
+      return { ok: true, json: async () => snapshot } as Response
+    }
+    throw new Error(`Unexpected fetch: ${url}`)
+  }) as typeof fetch
+
+  let rendered!: ReturnType<typeof render>
+  try {
+    await act(async () => {
+      rendered = render(
+        React.createElement(
+          MemoryRouter,
+          { initialEntries: ['/session-1'] },
+          React.createElement(
+            Routes,
+            null,
+            React.createElement(Route, { path: '/:sessionId', element: React.createElement(ResonanceStudent) }),
+          ),
+        ),
+      )
+      await Promise.resolve()
+    })
+
+    await waitFor(() => assert.equal(FakeWebSocket.instances.length, 1))
+    const socket = FakeWebSocket.instances[0]!
+    // Never auto-ack — attempt A is left permanently unsettled until we
+    // deliver its stale ack by hand, below.
+    socket.send = (message: string) => { socket.sent.push(JSON.parse(message)) }
+
+    type DraftMessage = { type: string; payload: { questionId?: string; activeQuestionRunRevision?: number | null; draftId?: string } }
+    const isQ1Draft = (message: unknown): message is DraftMessage =>
+      typeof message === 'object' && message !== null &&
+      (message as { type?: string }).type === 'resonance:update-draft' &&
+      (message as DraftMessage).payload.questionId === 'q1'
+
+    console.info('[TEST] sending attempt A under run 1, left permanently unacknowledged for now')
+    await act(async () => {
+      fireEvent.change(rendered.getByLabelText(/your answer/i), { target: { value: 'attempt A' } })
+    })
+    await new Promise((resolve) => setTimeout(resolve, DRAFT_EDIT_DEBOUNCE_MS + 200))
+    const attemptA = socket.sent.find(isQ1Draft)
+    assert.ok(attemptA, 'expected attempt A to have been sent')
+    const attemptADraftId = attemptA!.payload.draftId
+
+    console.info('[TEST] the run restarts before attempt A settles, abandoning it')
+    await act(async () => {
+      socket.emitMessage({
+        type: 'resonance:session-state',
+        payload: { ...snapshot, activeQuestionRunRevision: 2, activeQuestionRunStartedAt: Date.now() },
+      })
+    })
+
+    console.info('[TEST] a fresh attempt B starts for the same question under run 2')
+    await act(async () => {
+      fireEvent.change(rendered.getByLabelText(/your answer/i), { target: { value: 'attempt B' } })
+    })
+    await new Promise((resolve) => setTimeout(resolve, DRAFT_EDIT_DEBOUNCE_MS + 200))
+    const sentAfterAttemptB = socket.sent.length
+    assert.ok(
+      socket.sent.slice(0, sentAfterAttemptB).some(
+        (message) => isQ1Draft(message) && (message as DraftMessage).payload.activeQuestionRunRevision === 2,
+      ),
+      'expected attempt B to have been sent under run 2',
+    )
+
+    console.info('[TEST] attempt A’s stale ack now arrives, after B has already started')
+    await act(async () => {
+      socket.emitMessage({ type: 'resonance:draft-saved', payload: { draftId: attemptADraftId } })
+    })
+
+    // Attempt B is still genuinely outstanding (never acked, never timed
+    // out — DRAFT_SAVE_ACK_TIMEOUT_MS is 2s and we only wait one retry
+    // tick). If A's stale settlement wrongly cleared B's in-flight marker,
+    // the next retry tick would fire a third, duplicate send for q1.
+    await new Promise((resolve) => setTimeout(resolve, DRAFT_RETRY_INTERVAL_MS + 300))
+    const sentDuringRetryWindow = socket.sent.slice(sentAfterAttemptB).filter(isQ1Draft)
+    assert.deepEqual(
+      sentDuringRetryWindow,
+      [],
+      `expected no duplicate send while attempt B is still outstanding, got: ${JSON.stringify(sentDuringRetryWindow)}`,
+    )
+
+    await act(async () => {
+      rendered.unmount()
+    })
+  } finally {
+    restore()
   }
 })
 
@@ -662,6 +787,7 @@ void test('a stale acknowledgement from a prior run does not confirm a new run�
   )
   const { MemoryRouter, Route, Routes } = await import('react-router')
   const { default: ResonanceStudent, DRAFT_EDIT_DEBOUNCE_MS, DRAFT_RETRY_INTERVAL_MS } = await import('./ResonanceStudent.js')
+  const { DRAFT_SAVE_ACK_TIMEOUT_MS } = await import('../hooks/useResonanceSession.js')
   const { act, render, waitFor, fireEvent } = await import('@testing-library/react')
 
   persistSessionParticipantIdentity(window.localStorage, 'session-1', 'Ada', 'student-1')
@@ -751,9 +877,13 @@ void test('a stale acknowledgement from a prior run does not confirm a new run�
     })
 
     // If the stale ack wrongly cleared the run-2 draft's unconfirmed marker,
-    // nothing would resend it on the next retry tick.
+    // nothing would resend it once its own attempt naturally times out. The
+    // run-2 send is still legitimately in-flight (its own attempt-token guard
+    // correctly blocks a retry until it times out — see
+    // "a stale settlement from an abandoned attempt..." above) so this has to
+    // wait out that timeout before a genuinely new attempt can fire.
     const sentBeforeRetry = socket.sent.length
-    await new Promise((resolve) => setTimeout(resolve, DRAFT_RETRY_INTERVAL_MS + 300))
+    await new Promise((resolve) => setTimeout(resolve, DRAFT_SAVE_ACK_TIMEOUT_MS + DRAFT_RETRY_INTERVAL_MS + 300))
 
     const retriedRunTwoDraft = socket.sent
       .slice(sentBeforeRetry)
