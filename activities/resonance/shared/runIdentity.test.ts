@@ -358,22 +358,24 @@ const RESPONSE_REVISION_SAMPLES: Array<number | null | undefined> = [undefined, 
 
 const RESOLVED_TOKEN_STARTED_AT_SAMPLES: Array<number | null> = [null, 555, 999]
 
-// The old reference's ambiguous branch (runToken === 1, payload is a bare
-// legacy timestamp) accepted *any* startedAt — a session can accumulate
-// legacy drafts/acks from more than one pre-rollout run, and only one of
-// them is ever "the" run revision 1 actually identifies. The fixed
-// implementation additionally requires the payload's own startedAt to
-// match resolvedTokenStartedAt; every other branch is unchanged from the
-// original, already-verified behavior.
-void test('payloadMatchesResolvedRunToken matches the original scalar-runToken matrix everywhere except its one deliberately-fixed ambiguous branch', () => {
+// The old reference matched a bare legacy-timestamp payload against any
+// runToken via raw scalar equality. Two deliberate fixes narrow that: when
+// runToken === 1, the payload's own startedAt must actually match
+// resolvedTokenStartedAt (a session can accumulate legacy drafts/acks from
+// more than one pre-rollout run, and only one of them is "the" run revision
+// 1 identifies); when runToken !== 1, a timestamp-only payload can never
+// match at all, since a legacy timestamp-only identity can only ever
+// legitimately bridge to canonical revision 1. Every other branch is
+// unchanged from the original, already-verified behavior.
+void test('payloadMatchesResolvedRunToken matches the original scalar-runToken matrix everywhere except its two deliberately-fixed timestamp-only branches', () => {
   for (const payload of PAYLOAD_SAMPLES) {
     for (const runToken of RUN_TOKEN_SAMPLES) {
       for (const resolvedTokenStartedAt of RESOLVED_TOKEN_STARTED_AT_SAMPLES) {
-        const isAmbiguousLegacyBranch = runToken === 1 &&
+        const isTimestampOnlyPayload =
           typeof payload.activeQuestionRunRevision !== 'number' &&
           typeof payload.activeQuestionRunStartedAt === 'number'
-        const expected = isAmbiguousLegacyBranch
-          ? payload.activeQuestionRunStartedAt === resolvedTokenStartedAt
+        const expected = isTimestampOnlyPayload
+          ? (runToken === 1 ? payload.activeQuestionRunStartedAt === resolvedTokenStartedAt : false)
           : referencePayloadMatchesRunToken(payload, runToken)
         const actual = payloadMatchesResolvedRunToken(payload, runToken, resolvedTokenStartedAt)
         assert.equal(
@@ -415,6 +417,18 @@ void test('payloadMatchesResolvedRunToken does not let a legacy timestamp numeri
   assert.equal(payloadMatchesResolvedRunToken(degenerateLegacyPayload, 1, 999), false)
   // It still matches when its timestamp genuinely is the run's own start time.
   assert.equal(payloadMatchesResolvedRunToken(degenerateLegacyPayload, 1, 1), true)
+})
+
+void test('payloadMatchesResolvedRunToken does not let a legacy timestamp numerically collide with a resolvedToken other than 1', () => {
+  // Copilot's finding: the ambiguity guard on the bare scalar fast path only
+  // fired when resolvedToken === 1, so a timestamp-only payload whose
+  // activeQuestionRunStartedAt happened to equal a later canonical revision
+  // (e.g. 2) matched it outright — even though a legacy timestamp-only
+  // identity can never legitimately bridge to any revision other than 1.
+  const timestampOnlyPayload: RunIdentitySource = { activeQuestionRunStartedAt: 2 }
+  assert.equal(payloadMatchesResolvedRunToken(timestampOnlyPayload, 2, null), false)
+  // A payload that actually carries its own matching revision is unaffected.
+  assert.equal(payloadMatchesResolvedRunToken({ activeQuestionRunRevision: 2 }, 2, null), true)
 })
 
 void test('payloadMatchesResolvedRunToken rejects a present-but-malformed payload field, consistent with runIdentitiesMatch', () => {

@@ -240,18 +240,23 @@ export function payloadMatchesResolvedRunToken(
   resolvedTokenStartedAt: number | null,
 ): boolean {
   if (hasInvalidRunField(payload)) return false
-  // A timestamp-only payload must not match resolvedToken === 1 through
-  // this bare scalar equality: resolvedToken is ambiguous (it could be a
-  // real revision or a real legacy timestamp), and 1 is the one value a
-  // legacy run can genuinely correspond to, so a delayed/crafted legacy
-  // payload (e.g. activeQuestionRunStartedAt: 1) could otherwise collide
-  // numerically with canonical revision 1 before the guarded bridge below
-  // ever compares real start times against resolvedTokenStartedAt. Route
-  // that one ambiguous case through the bridge exclusively; every other
-  // combination (payload has its own revision, or resolvedToken isn't 1)
-  // is unambiguous and keeps the direct scalar comparison.
-  const isAmbiguousLegacyToken = resolvedToken === 1 && !hasRevision(payload) && hasStartedAt(payload)
-  if (!isAmbiguousLegacyToken && resolveRunToken(payload) === resolvedToken) return true
+  const isTimestampOnlyPayload = !hasRevision(payload) && hasStartedAt(payload)
+  // A timestamp-only payload must never take the bare scalar fast path
+  // below: resolvedToken is ambiguous (it could be a real revision or a
+  // real legacy timestamp), and a legacy timestamp-only identity can only
+  // ever legitimately bridge to canonical revision 1 (see the module doc
+  // comment) — never any other revision. Without this guard, a delayed/
+  // crafted legacy payload (e.g. activeQuestionRunStartedAt: 2) could
+  // collide numerically with an unrelated resolvedToken (a later revision
+  // 2's retained draft) and be wrongly accepted as the same run. Route the
+  // timestamp-only case through the guarded bridges below exclusively —
+  // straight to "no match" when resolvedToken isn't even 1, since no
+  // bridge below can ever apply otherwise.
+  if (isTimestampOnlyPayload) {
+    if (resolvedToken !== 1) return false
+  } else if (resolveRunToken(payload) === resolvedToken) {
+    return true
+  }
 
   // The cached scalar might itself be a legacy timestamp that this
   // canonicalized revision-1 payload's own startedAt still remembers.

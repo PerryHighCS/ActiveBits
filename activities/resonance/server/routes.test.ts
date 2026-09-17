@@ -1835,6 +1835,73 @@ void test('server deadline task retries after a strict session read failure', as
   await sessions.close()
 })
 
+void test('deadline finalization logs drafts-finalized-at-timeout only once, for the attempt that actually commits', async () => {
+  // Copilot's finding: updateAtomic may invoke its mutator repeatedly after
+  // a CAS conflict (the Valkey-backed store retries internally). The old
+  // code logged 'drafts-finalized-at-timeout' from inside the mutator
+  // itself, so a discarded losing attempt still produced a log claiming
+  // finalization happened, and a later winning retry could log again —
+  // false/duplicate operational events for what is really one commit.
+  // Simulate that retry shape (mutate invoked twice, only the second value
+  // actually persisted) even though the in-memory test store itself never
+  // needs to retry, since the bug is about how many times the *mutator*
+  // runs, not the store's own CAS mechanics.
+  const app = createMockApp()
+  const sessions = createSessionStore(null)
+  const session = createMultiQuestionSession()
+  const now = 1_000
+  session.data.activeQuestionId = 'q1'
+  session.data.activeQuestionIds = ['q1']
+  session.data.activeQuestionRunStartedAt = 800
+  session.data.activeQuestionDeadlineAt = 900
+  session.data.responseDrafts = {
+    'q1:student1': {
+      questionId: 'q1',
+      studentId: 'student1',
+      updatedAt: 850,
+      answer: { type: 'free-response', text: 'Finalize this at the deadline' },
+    },
+  }
+  await sessions.set(session.id, session)
+
+  const realUpdateAtomic = sessions.updateAtomic?.bind(sessions)
+  assert.ok(realUpdateAtomic)
+  sessions.updateAtomic = async (id, mutate) => {
+    const current = await sessions.get(id)
+    if (current) mutate(structuredClone(current))
+    return realUpdateAtomic(id, mutate)
+  }
+
+  setupResonanceRoutes(app, sessions, createMockWs(), {
+    now: () => now,
+    schedule() { return { unref() {} } },
+    cancel() {},
+  })
+
+  const previousInfo = console.info
+  const infoLogs: string[] = []
+  try {
+    console.info = (...args: unknown[]) => { infoLogs.push(args.map(String).join(' ')) }
+    await app.handlers.get['/api/resonance/:sessionId/state']?.(
+      { params: { sessionId: session.id } },
+      createResponse(),
+    )
+  } finally {
+    console.info = previousInfo
+  }
+
+  const finalizationLogs = infoLogs.filter((entry) => entry.includes('drafts-finalized-at-timeout'))
+  assert.equal(finalizationLogs.length, 1, 'exactly one commit happened, so exactly one log line is expected')
+  assert.deepEqual(JSON.parse(finalizationLogs[0] as string), {
+    component: 'resonance',
+    event: 'drafts-finalized-at-timeout',
+    sessionId: session.id,
+    finalizedDraftCount: 1,
+  })
+
+  await sessions.close()
+})
+
 void test('server deadline task retries after a finalization write failure without mutating its cached session', async () => {
   const app = createMockApp()
   const sessions = createSessionStore(null)

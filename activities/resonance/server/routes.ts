@@ -747,21 +747,17 @@ function expireActiveQuestionRunIfNeeded(
   }
 
   const result = finalizeActiveQuestionDrafts(session.data, deadlineAt)
-  const { finalizedDraftCount } = result
-  if (finalizedDraftCount > 0) {
-    console.info(JSON.stringify({
-      component: 'resonance',
-      event: 'drafts-finalized-at-timeout',
-      sessionId: session.id,
-      finalizedDraftCount,
-    }))
-  }
+  // Logging is the caller's responsibility, not this function's: updateAtomic
+  // may invoke its mutator (which calls this) repeatedly after a CAS
+  // conflict, and only the attempt that actually commits should ever be
+  // logged — logging here would report every discarded retry attempt too,
+  // producing false/duplicate drafts-finalized-at-timeout events.
   if (session.data.stagedRun !== null) {
     return result
   }
 
   clearActiveQuestions(session.data)
-  return { changed: true, finalizedDraftCount }
+  return { changed: true, finalizedDraftCount: result.finalizedDraftCount }
 }
 
 function resolveRequestedActiveQuestionIds(body: Record<string, unknown>): string[] | null | undefined {
@@ -1808,18 +1804,32 @@ export default function setupResonanceRoutes(
       // Derive the expiration transition from the mutation's fresh record so
       // it cannot write this detached pre-retry snapshot over a draft CAS.
       let expirationChanged = false
+      let expirationFinalizedDraftCount = 0
       const persisted = await sessions.updateAtomic(sessionId, (current) => {
         const currentSession = asResonanceSession(current)
         if (!currentSession) return current
         currentSession.data = normalizeSessionData(currentSession.data)
         const expiration = expireActiveQuestionRunIfNeeded(currentSession, deadlineNow)
         expirationChanged = expiration.changed
+        expirationFinalizedDraftCount = expiration.finalizedDraftCount
         return currentSession
       })
       const persistedSession = asResonanceSession(persisted)
       if (!persistedSession) return null
       session = persistedSession
       if (expirationChanged) {
+        // Only the attempt that actually committed reaches here — updateAtomic
+        // may have invoked the mutator above (and expireActiveQuestionRunIfNeeded
+        // with it) additional times after a CAS conflict, and those discarded
+        // attempts must not be logged as if they had persisted.
+        if (expirationFinalizedDraftCount > 0) {
+          console.info(JSON.stringify({
+            component: 'resonance',
+            event: 'drafts-finalized-at-timeout',
+            sessionId: session.id,
+            finalizedDraftCount: expirationFinalizedDraftCount,
+          }))
+        }
         await broadcastStudentSessionState(session, sessionId)
         broadcastToRole('resonance:instructor-state', buildInstructorSnapshot(session), sessionId, true)
       }
@@ -1829,6 +1839,14 @@ export default function setupResonanceRoutes(
       // older test/dummy stores while retaining the established behavior.
       const expiration = expireActiveQuestionRunIfNeeded(session, deadlineNow)
       if (expiration.changed) {
+        if (expiration.finalizedDraftCount > 0) {
+          console.info(JSON.stringify({
+            component: 'resonance',
+            event: 'drafts-finalized-at-timeout',
+            sessionId: session.id,
+            finalizedDraftCount: expiration.finalizedDraftCount,
+          }))
+        }
         await sessions.set(sessionId, session)
         await broadcastStudentSessionState(session, sessionId)
         broadcastToRole('resonance:instructor-state', buildInstructorSnapshot(session), sessionId, true)
