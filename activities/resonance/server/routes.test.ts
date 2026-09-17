@@ -1434,6 +1434,82 @@ void test('a draft made after revisiting an already-submitted question in the sa
   await sessions.close()
 })
 
+void test('update-draft still persists and acknowledges against a session store without updateAtomic support', async () => {
+  // Copilot's finding: updateAtomic is optional on the shared SessionStore
+  // contract, but the draft-save handler used to silently return (no
+  // persistence, no acknowledgement, no error to the client) whenever a
+  // store didn't provide it — a regression from the plain sessions.set()
+  // path this route used before atomic writes existed. It must fall back to
+  // a read/modify/write instead of dropping every draft on the floor.
+  const app = createMockApp()
+  const realSessions = createSessionStore(null)
+  const session = createMultiQuestionSession()
+  session.data.activeQuestionId = 'q1'
+  session.data.activeQuestionIds = ['q1']
+  session.data.activeQuestionRunRevision = 1
+  session.data.activeQuestionRunStartedAt = Date.now() - 1_000
+  const studentCookies = issueStudentCookies(session, 'student1')
+  await realSessions.set(session.id, session)
+
+  // A store that satisfies the SessionStore contract but omits the optional
+  // updateAtomic member, same as the contract explicitly permits.
+  // realSessions is a class instance (InMemorySessionStore) whose methods
+  // live on the prototype, not as own properties, so a plain object spread
+  // would silently drop every method, not just updateAtomic — Object.create
+  // instead chains to the real instance for everything except the one
+  // property explicitly shadowed here.
+  const sessionsWithoutAtomic = Object.create(realSessions, {
+    updateAtomic: { value: undefined, enumerable: true, configurable: true },
+  }) as SessionStore
+
+  const captured = createCapturingMockWs()
+  setupResonanceRoutes(app, sessionsWithoutAtomic, captured.ws)
+
+  const handler = captured.getHandler()
+  const messageHandlers: Array<(message: string) => void> = []
+  const sentMessages: Array<{ type?: string; payload?: { draftId?: string } }> = []
+  assert.ok(handler)
+  handler({
+    readyState: 1,
+    upgradeHeaders: {
+      cookie: Object.entries(studentCookies).map(([name, value]) => `${name}=${value}`).join('; '),
+    },
+    send(message: string) {
+      sentMessages.push(JSON.parse(message) as { type?: string; payload?: { draftId?: string } })
+    },
+    on(event: string, callback: (message: string) => void) {
+      if (event === 'message') messageHandlers.push(callback)
+    },
+    once() {},
+    close() {},
+    terminate() {},
+    ping() {},
+  }, new URLSearchParams({ sessionId: session.id, role: 'student', studentId: 'student1' }), captured.ws.wss)
+  await waitForCondition(() => messageHandlers.length === 1)
+
+  console.info('[TEST] a draft save must still persist and acknowledge without an atomic store')
+  messageHandlers[0]?.(JSON.stringify({
+    type: 'resonance:update-draft',
+    payload: {
+      studentId: 'student1', questionId: 'q1', draftId: 'no-atomic-store',
+      activeQuestionRunRevision: 1, editSequence: 1,
+      answer: { type: 'free-response', text: 'Saved without atomic support' },
+    },
+  }))
+  await waitForCondition(() => sentMessages.some((message) =>
+    message.type === 'resonance:draft-saved' && message.payload?.draftId === 'no-atomic-store'
+  ))
+
+  const stored = await realSessions.get(session.id)
+  const storedData = stored?.data as { responseDrafts?: Record<string, { answer?: unknown }> } | undefined
+  assert.deepEqual(storedData?.responseDrafts?.['q1:student1']?.answer, {
+    type: 'free-response',
+    text: 'Saved without atomic support',
+  })
+
+  await realSessions.close()
+})
+
 void test('a stale pre-rollout draft is rejected as already-superseded by a legacy confirmed response', async () => {
   // Copilot's finding: the draft-save handler's freshness guard finds "the
   // confirmed response for this run" by strictly comparing

@@ -3299,13 +3299,6 @@ export default function setupResonanceRoutes(
         const draftKey = buildDraftKey(questionId, studentId)
         const answer = payload.answer === null ? null : validateAnswerPayload(payload.answer, question)
         if (payload.answer !== null && !answer) return
-        // Draft ordering is a cross-connection guarantee. A read/modify/write
-        // fallback could commit an older handler after a newer one, so fail
-        // safely on stores that cannot provide the required CAS primitive.
-        if (typeof sessions.updateAtomic !== 'function') {
-          console.error(JSON.stringify({ event: 'resonance.draft-save-unavailable', sessionId, studentId, questionId }))
-          return
-        }
 
         let persistedSession: ResonanceSession | null = null
         let shouldAcknowledge = false
@@ -3316,109 +3309,128 @@ export default function setupResonanceRoutes(
         // activity) in between — updateAtomic's own CAS only protects
         // against a concurrent *resonance* write, not a same-id swap.
         const expectedCreated = getSessionCreatedIdentity(session)
-        let updated: SessionRecord | null
-        try {
-          updated = await sessions.updateAtomic(sessionId, (current) => {
-            persistedSession = null
-            shouldAcknowledge = false
-            // Unconditional: now that updateAtomic's own clone preserves a
-            // legacy record's identity marker (see preserveSessionCreatedIdentity
-            // in sessions.ts), null-vs-null (both legacy, same incarnation) and
-            // null-vs-real (a legacy read racing a same-id recreate into a
-            // non-legacy record) are both meaningful comparisons — the old
-            // `expectedCreated !== null` short-circuit skipped this guard
-            // entirely for a legacy session, so a delayed write for it could
-            // land in a same-id-recreated, non-legacy replacement unchecked.
-            if (
-              current.type !== 'resonance' ||
-              getSessionCreatedIdentity(current) !== expectedCreated
-            ) {
-              throw new WrongResonanceIncarnationError()
-            }
-            const currentSession = current as ResonanceSession
-            currentSession.data = normalizeSessionData(currentSession.data)
-            if (!matchesActiveQuestionRun(
-              currentSession.data,
-              payload.activeQuestionRunRevision,
-              payload.activeQuestionRunStartedAt,
-            )) return currentSession
-            if (
-              (currentSession.data.activeQuestionDeadlineAt !== null && Date.now() >= currentSession.data.activeQuestionDeadlineAt) ||
-              !isCurrentStagedQuestionAnswerable(currentSession.data, questionId)
-            ) return currentSession
+        const mutateDraftSession = (current: SessionRecord): SessionRecord => {
+          persistedSession = null
+          shouldAcknowledge = false
+          // Unconditional: now that updateAtomic's own clone preserves a
+          // legacy record's identity marker (see preserveSessionCreatedIdentity
+          // in sessions.ts), null-vs-null (both legacy, same incarnation) and
+          // null-vs-real (a legacy read racing a same-id recreate into a
+          // non-legacy record) are both meaningful comparisons — the old
+          // `expectedCreated !== null` short-circuit skipped this guard
+          // entirely for a legacy session, so a delayed write for it could
+          // land in a same-id-recreated, non-legacy replacement unchecked.
+          if (
+            current.type !== 'resonance' ||
+            getSessionCreatedIdentity(current) !== expectedCreated
+          ) {
+            throw new WrongResonanceIncarnationError()
+          }
+          const currentSession = current as ResonanceSession
+          currentSession.data = normalizeSessionData(currentSession.data)
+          if (!matchesActiveQuestionRun(
+            currentSession.data,
+            payload.activeQuestionRunRevision,
+            payload.activeQuestionRunStartedAt,
+          )) return currentSession
+          if (
+            (currentSession.data.activeQuestionDeadlineAt !== null && Date.now() >= currentSession.data.activeQuestionDeadlineAt) ||
+            !isCurrentStagedQuestionAnswerable(currentSession.data, questionId)
+          ) return currentSession
 
-            // Re-check against the freshest confirmed response inside the
-            // atomic mutation: a submission can commit between the pre-check
-            // above and this callback running, and only this current-run
-            // response/editSequence comparison can catch that race.
-            const currentConfirmedResponseForRun = currentSession.data.responses.find(
-              (response) =>
-                response.questionId === questionId &&
-                response.studentId === studentId &&
-                responseMatchesActiveRun(response, currentSession.data),
-            )
-            if (
-              currentConfirmedResponseForRun !== undefined &&
-              editSequence <= (currentConfirmedResponseForRun.editSequence ?? 0)
-            ) {
-              shouldAcknowledge = true
-              return currentSession
-            }
-
-            const currentDraft = currentSession.data.responseDrafts[draftKey]
-            const currentGeneration = currentSession.data.responseDraftGenerations[draftKey]
-            const generationForCurrentRun = currentGeneration?.activeQuestionRunRevision === currentSession.data.activeQuestionRunRevision
-              ? currentGeneration.draftGeneration
-              : 0
-            const storedGeneration = Math.max(
-              currentDraft?.activeQuestionRunRevision === currentSession.data.activeQuestionRunRevision
-                ? currentDraft.draftGeneration ?? 0
-                : 0,
-              generationForCurrentRun,
-            )
-            // Generation-zero payloads are from rolling/legacy clients that
-            // provide no ordering token. Their only compatible semantics are
-            // last arrival wins, including while a rolling deployment has a
-            // positive-generation draft from a newer client. Current clients
-            // send positive monotonic generations, whose tombstones remain
-            // protected by this strict lower-generation check.
-            if (draftGeneration > 0 && draftGeneration < storedGeneration) {
-              shouldAcknowledge = true
-              return currentSession
-            }
-
-            // A generation-zero (legacy/rolling-deploy) payload's content
-            // still wins unconditionally below — that's the whole point of
-            // the compatibility path above — but the stored watermark itself
-            // must never regress. Storing draftGeneration as-is here would
-            // reset an already-higher positive watermark back to 0, letting a
-            // later delayed lower-but-still-positive generation slip past the
-            // strict check above (which only rejects when draftGeneration is
-            // strictly less than storedGeneration) since it would then be
-            // comparing against a falsely-reset floor instead of the real one.
-            currentSession.data.responseDraftGenerations[draftKey] = {
-              questionId,
-              studentId,
-              activeQuestionRunRevision: currentSession.data.activeQuestionRunRevision,
-              draftGeneration: Math.max(storedGeneration, draftGeneration),
-            }
-            if (answer === null) {
-              delete currentSession.data.responseDrafts[draftKey]
-            } else {
-              currentSession.data.responseDrafts[draftKey] = {
-                questionId,
-                studentId,
-                updatedAt: draftUpdatedAt,
-                activeQuestionRunRevision: currentSession.data.activeQuestionRunRevision,
-                editSequence,
-                ...(draftGeneration > 0 ? { draftGeneration } : {}),
-                answer,
-              }
-            }
-            persistedSession = currentSession
+          // Re-check against the freshest confirmed response inside the
+          // atomic mutation: a submission can commit between the pre-check
+          // above and this callback running, and only this current-run
+          // response/editSequence comparison can catch that race.
+          const currentConfirmedResponseForRun = currentSession.data.responses.find(
+            (response) =>
+              response.questionId === questionId &&
+              response.studentId === studentId &&
+              responseMatchesActiveRun(response, currentSession.data),
+          )
+          if (
+            currentConfirmedResponseForRun !== undefined &&
+            editSequence <= (currentConfirmedResponseForRun.editSequence ?? 0)
+          ) {
             shouldAcknowledge = true
             return currentSession
-          })
+          }
+
+          const currentDraft = currentSession.data.responseDrafts[draftKey]
+          const currentGeneration = currentSession.data.responseDraftGenerations[draftKey]
+          const generationForCurrentRun = currentGeneration?.activeQuestionRunRevision === currentSession.data.activeQuestionRunRevision
+            ? currentGeneration.draftGeneration
+            : 0
+          const storedGeneration = Math.max(
+            currentDraft?.activeQuestionRunRevision === currentSession.data.activeQuestionRunRevision
+              ? currentDraft.draftGeneration ?? 0
+              : 0,
+            generationForCurrentRun,
+          )
+          // Generation-zero payloads are from rolling/legacy clients that
+          // provide no ordering token. Their only compatible semantics are
+          // last arrival wins, including while a rolling deployment has a
+          // positive-generation draft from a newer client. Current clients
+          // send positive monotonic generations, whose tombstones remain
+          // protected by this strict lower-generation check.
+          if (draftGeneration > 0 && draftGeneration < storedGeneration) {
+            shouldAcknowledge = true
+            return currentSession
+          }
+
+          // A generation-zero (legacy/rolling-deploy) payload's content
+          // still wins unconditionally below — that's the whole point of
+          // the compatibility path above — but the stored watermark itself
+          // must never regress. Storing draftGeneration as-is here would
+          // reset an already-higher positive watermark back to 0, letting a
+          // later delayed lower-but-still-positive generation slip past the
+          // strict check above (which only rejects when draftGeneration is
+          // strictly less than storedGeneration) since it would then be
+          // comparing against a falsely-reset floor instead of the real one.
+          currentSession.data.responseDraftGenerations[draftKey] = {
+            questionId,
+            studentId,
+            activeQuestionRunRevision: currentSession.data.activeQuestionRunRevision,
+            draftGeneration: Math.max(storedGeneration, draftGeneration),
+          }
+          if (answer === null) {
+            delete currentSession.data.responseDrafts[draftKey]
+          } else {
+            currentSession.data.responseDrafts[draftKey] = {
+              questionId,
+              studentId,
+              updatedAt: draftUpdatedAt,
+              activeQuestionRunRevision: currentSession.data.activeQuestionRunRevision,
+              editSequence,
+              ...(draftGeneration > 0 ? { draftGeneration } : {}),
+              answer,
+            }
+          }
+          persistedSession = currentSession
+          shouldAcknowledge = true
+          return currentSession
+        }
+
+        let updated: SessionRecord | null
+        try {
+          if (typeof sessions.updateAtomic === 'function') {
+            updated = await sessions.updateAtomic(sessionId, mutateDraftSession)
+          } else {
+            // Draft ordering is normally a cross-connection CAS guarantee, but
+            // a store that doesn't provide updateAtomic (permitted by the
+            // shared SessionStore contract, which marks it optional) still
+            // needs SOME write path — silently dropping every draft with no
+            // acknowledgement would be a regression from the plain-`set()`
+            // behavior this route had before atomic writes existed. Fall back
+            // to a read/modify/write: it loses the CAS's cross-instance race
+            // protection (the same risk `set()` always carried), but that's
+            // strictly better than never persisting or acknowledging at all.
+            const freshSession = await sessions.get(sessionId)
+            if (freshSession === null) return
+            const mutated = mutateDraftSession(freshSession)
+            await sessions.set(sessionId, mutated)
+            updated = mutated
+          }
         } catch (error) {
           if (error instanceof WrongResonanceIncarnationError) return
           throw error
