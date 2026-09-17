@@ -1029,7 +1029,13 @@ export default function ResonanceStudent() {
     const activeIds = snapshot.activeQuestions.map((question) => question.id)
     const previousActiveIds = previousActiveQuestionIdsRef.current
 
-    if (snapshot.activeQuestionRunRevision === 1) {
+    // Every same-revision-1 snapshot is accepted, including one whose
+    // activeRunStartedAt hasn't been backfilled yet (null) — overwriting
+    // unconditionally would erase an already-known real timestamp, making
+    // a later legacy timestamp-only ack/draft for this same run fail
+    // payloadMatchesResolvedRunToken and be wrongly discarded as a
+    // different run. Fill an unknown value, never erase a known one.
+    if (snapshot.activeQuestionRunRevision === 1 && activeRunStartedAt !== null) {
       revisionOneStartedAtRef.current = activeRunStartedAt
     }
 
