@@ -174,6 +174,12 @@ interface ResonanceSessionData extends Record<string, unknown> {
     updatedAt: number
     activeQuestionRunRevision: number | null
     editSequence?: number
+    // Client-assigned, monotonically increasing across every send attempt
+    // (not just revisits, unlike editSequence). Orders two same-editSequence
+    // draft writes for the same question by actual client send order,
+    // instead of by server-side write-completion timing — see the ordering
+    // guard in the resonance:update-draft handler.
+    draftSendSequence?: number
     answer: Response['answer']
   }>
   annotations: Record<string, InstructorAnnotation>
@@ -815,6 +821,7 @@ function normalizeResponseDrafts(
         : null
     const answer = normalizeDraftAnswerPayload(rawDraft.answer, questionsById, questionId)
     const editSequence = resolveEditSequence(rawDraft.editSequence)
+    const draftSendSequence = resolveEditSequence(rawDraft.draftSendSequence)
 
     if (!questionId || !studentId || updatedAt <= 0 || answer === null) {
       continue
@@ -826,6 +833,7 @@ function normalizeResponseDrafts(
       updatedAt,
       activeQuestionRunRevision,
       editSequence,
+      draftSendSequence,
       answer,
     }
   }
@@ -3112,6 +3120,7 @@ export default function setupResonanceRoutes(
           ? payload.draftId
           : null
         const editSequence = resolveEditSequence(payload.editSequence)
+        const draftSendSequence = resolveEditSequence(payload.draftSendSequence)
 
         // A draft sent just before a submission can arrive here after the
         // submission already recorded a response and cleared the draft (the
@@ -3147,18 +3156,43 @@ export default function setupResonanceRoutes(
         // sent in. Without this guard, a slower older write landing after a
         // faster newer one would silently clobber it. Ordered first by
         // editSequence (a revisit's bump must always win over anything from
-        // before it), then by this handler's own resumption timestamp as a
-        // tiebreaker within the same editSequence — mirrors the
-        // confirmedResponseForRun staleness check above, and for the same
-        // reason acks anyway so a superseded retry doesn't get reported to
-        // its client as a failed save.
+        // before it), then by draftSendSequence — a counter the *client*
+        // stamps on every send attempt — as a tiebreaker within the same
+        // editSequence. This handler's own resumption timestamp was tried
+        // first and rejected: it reflects when this handler resumed after
+        // its `await resolveSelfPacedMode(...)` above, not when the client
+        // actually sent the message, so a genuinely older send that happens
+        // to resume later could otherwise still win. draftSendSequence has
+        // no such ambiguity since the client assigns it once, at send time.
+        // Mirrors the confirmedResponseForRun staleness check above, and for
+        // the same reason acks anyway so a superseded retry doesn't get
+        // reported to its client as a failed save.
+        //
+        // What this guard does NOT close: two handlers whose own
+        // `loadResonanceSession` reads both complete before *either* has
+        // written yet would both see the same prior draft, both pass this
+        // check, and then whichever `sessions.set()` call physically
+        // executes last wins outright — this check can't see a write that
+        // hasn't happened yet. Closing that fully requires routing this
+        // write through `sessions.updateAtomic` — but every other writer
+        // touching a resonance session (submit-answer, deadline expiry,
+        // instructor actions, ...) still uses a plain, unconditional
+        // `sessions.set()`, and converting only this one handler would not
+        // actually close the race (a plain `set()` elsewhere can still land
+        // between an `updateAtomic` read and its write and get silently
+        // overwritten — see the "mixed writers" note in
+        // `server/core/sessions.ts`). That full migration is the
+        // project-wide atomic-session-mutation effort tracked in #313 and is
+        // out of scope here; this guard narrows the window (closing the
+        // sequential-completion case entirely) without claiming to close it.
         const existingDraft = session.data.responseDrafts[draftKey]
         const existingDraftEditSequence = existingDraft?.editSequence ?? 0
+        const existingDraftSendSequence = existingDraft?.draftSendSequence ?? 0
         const isStaleDraftWrite = existingDraft !== undefined &&
           existingDraft.activeQuestionRunRevision === session.data.activeQuestionRunRevision &&
           (
             editSequence < existingDraftEditSequence ||
-            (editSequence === existingDraftEditSequence && draftUpdatedAt < existingDraft.updatedAt)
+            (editSequence === existingDraftEditSequence && draftSendSequence < existingDraftSendSequence)
           )
         if (isStaleDraftWrite) {
           if (draftId !== null) {
@@ -3190,6 +3224,7 @@ export default function setupResonanceRoutes(
           updatedAt: draftUpdatedAt,
           activeQuestionRunRevision: session.data.activeQuestionRunRevision,
           editSequence,
+          draftSendSequence,
           answer,
         }
         await sessions.set(sessionId, session)

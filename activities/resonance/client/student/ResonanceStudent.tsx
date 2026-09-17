@@ -318,6 +318,15 @@ export default function ResonanceStudent() {
   // settlement that still owns the current token may clear the entry.
   const inFlightDraftQuestionIdsRef = useRef<Map<string, number>>(new Map())
   const nextDraftAttemptTokenRef = useRef(0)
+  // Monotonically increasing across every send attempt for every question
+  // (not per-question — a single shared counter is simpler and still totally
+  // orders any two sends for the same question, which is all the server-side
+  // guard that reads this ever compares). Sent as draftSendSequence so the
+  // server can order two same-editSequence writes for the same question by
+  // actual client send order — see the ordering guard in the
+  // resonance:update-draft handler for why its own resumption timestamp
+  // can't be used for this instead.
+  const nextDraftSendSequenceRef = useRef(0)
   // Per-question debounce timers that trigger an edit-triggered send attempt
   // shortly after the student stops typing (see DRAFT_EDIT_DEBOUNCE_MS).
   const draftSendTimeoutsRef = useRef<Map<string, number>>(new Map())
@@ -594,6 +603,7 @@ export default function ResonanceStudent() {
       questionId,
       activeQuestionRunRevision: sentRunRevision,
       editSequence: sentEditSequence,
+      draftSendSequence: ++nextDraftSendSequenceRef.current,
       answer,
     }).then((saved) => {
       // Only clear the in-flight marker if it still belongs to this attempt.

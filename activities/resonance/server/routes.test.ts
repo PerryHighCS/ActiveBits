@@ -1023,6 +1023,7 @@ void test('a draft made after revisiting an already-submitted question in the sa
       studentId?: string
       activeQuestionRunRevision?: number | null
       editSequence?: number
+      draftSendSequence?: number
       answer?: unknown
     }>
   } | undefined
@@ -1033,6 +1034,7 @@ void test('a draft made after revisiting an already-submitted question in the sa
     {
       questionId: 'q1',
       studentId: 'student1',
+      draftSendSequence: 0,
       updatedAt: undefined,
       activeQuestionRunRevision: 1,
       editSequence: 2,
@@ -1101,6 +1103,7 @@ void test('an older draft write cannot clobber a newer one for the same question
       studentId?: string
       activeQuestionRunRevision?: number | null
       editSequence?: number
+      draftSendSequence?: number
       updatedAt?: number
       answer?: unknown
     }>
@@ -1156,24 +1159,29 @@ void test('an older draft write cannot clobber a newer one for the same question
     'the older straggler must not have overwritten the newer draft’s content',
   )
 
-  // Same-editSequence tiebreaker: seed a draft whose stored updatedAt is
-  // artificially in the future (simulating "this slot was already written by
-  // a request that resumed after this one"), then send a same-editSequence
-  // write — it must be rejected without moving updatedAt backwards.
+  // Same-editSequence tiebreaker: seed a draft with a high draftSendSequence
+  // (simulating "this slot was already written by a later client send"),
+  // then send a same-editSequence write carrying a *lower* draftSendSequence
+  // — it must be rejected, even though it's processed later in wall-clock
+  // time. draftSendSequence (client-assigned at send time), not the
+  // handler's own resumption timestamp, is what orders same-editSequence
+  // writes — see the ordering guard's comment for why the timestamp was
+  // rejected as unsound (it reflects server resumption order, not client
+  // send order, and those can differ under overlapping sends).
   const sessionBeforeTiebreakerCheck = await sessions.get(session.id)
   assert.ok(sessionBeforeTiebreakerCheck)
-  const futureUpdatedAt = Date.now() + 60_000
   ;(sessionBeforeTiebreakerCheck!.data as StoredData).responseDrafts!['q1:student1'] = {
     questionId: 'q1',
     studentId: 'student1',
     activeQuestionRunRevision: 1,
     editSequence: 2,
-    updatedAt: futureUpdatedAt,
-    answer: { type: 'free-response', text: 'Written by the request that resumed first' },
+    draftSendSequence: 100,
+    updatedAt: Date.now(),
+    answer: { type: 'free-response', text: 'Sent later by the client, written first' },
   }
   await sessions.set(session.id, sessionBeforeTiebreakerCheck!)
 
-  console.info('[TEST] a same-editSequence write older than the already-stored one is rejected, not merged in')
+  console.info('[TEST] a same-editSequence write with a lower draftSendSequence is rejected, not merged in')
   messageHandlers[0]?.(JSON.stringify({
     type: 'resonance:update-draft',
     payload: {
@@ -1182,7 +1190,8 @@ void test('an older draft write cannot clobber a newer one for the same question
       draftId: 'same-sequence-straggler',
       activeQuestionRunRevision: 1,
       editSequence: 2,
-      answer: { type: 'free-response', text: 'Chronologically earlier, same editSequence' },
+      draftSendSequence: 99,
+      answer: { type: 'free-response', text: 'Sent earlier by the client, written second' },
     },
   }))
   await waitForCondition(() => sentMessages.some((message) =>
@@ -1191,11 +1200,11 @@ void test('an older draft write cannot clobber a newer one for the same question
 
   const storedAfterTiebreaker = (await sessions.get(session.id))?.data as StoredData | undefined
   const draftAfterTiebreaker = storedAfterTiebreaker?.responseDrafts?.['q1:student1']
-  assert.equal(draftAfterTiebreaker?.updatedAt, futureUpdatedAt)
+  assert.equal(draftAfterTiebreaker?.draftSendSequence, 100)
   assert.deepEqual(
     draftAfterTiebreaker?.answer,
-    { type: 'free-response', text: 'Written by the request that resumed first' },
-    'a same-editSequence write chronologically older than what’s stored must not overwrite it',
+    { type: 'free-response', text: 'Sent later by the client, written first' },
+    'a same-editSequence write with a lower draftSendSequence must not overwrite what’s stored',
   )
 
   await sessions.close()
