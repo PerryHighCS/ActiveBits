@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useParams } from 'react-router'
 import {
   persistSessionParticipantIdentity,
@@ -124,11 +124,14 @@ export function resolveQuestionAnswer(params: {
 }
 
 /**
- * Drops a restarted/reactivated question's locally-cached answer instead of
- * letting it survive into the new run. Without this, a question's prior-run
- * value would both wrongly prefill the reopened QuestionView and get resent
- * to the server as a "current" draft by the retry loop under the new run's
- * revision, once nothing else clears it.
+ * Drops a set of questions' locally-cached answers instead of letting them
+ * keep winning the local-cache-over-snapshot precedence in the snapshot
+ * merge effect. Used both when a question's run restarts/reactivates
+ * (without this, a stale prior-run value would both wrongly prefill the
+ * reopened QuestionView and get resent to the server as a "current" draft
+ * under the new run's revision) and when a draft is still unconfirmed past
+ * its deadline (the client should stop trusting its own optimistic value and
+ * let a subsequent snapshot's — possibly older — server-finalized answer win).
  */
 export function resetAnswersForRestartedQuestions(params: {
   submittedAnswers: Record<string, AnswerPayload | null>
@@ -207,6 +210,13 @@ export function hasActiveQuestionRunRestart(params: {
 // to avoid a network message on every keystroke.
 export const DRAFT_RETRY_INTERVAL_MS = 1_000
 
+// A short quiet-period debounce after an edit, separate from the retry
+// interval above: without it, an edit made shortly before a deadline could
+// wait up to DRAFT_RETRY_INTERVAL_MS for the next tick, which might not
+// arrive before the deadline passes. This fires an attempt soon after the
+// student stops typing regardless of where in the interval's cycle that is.
+export const DRAFT_EDIT_DEBOUNCE_MS = 400
+
 /**
  * Which currently-active questions have a locally-known answer the server
  * hasn't confirmed yet and should be (re)sent this tick. Owned by the parent
@@ -275,6 +285,13 @@ export default function ResonanceStudent() {
   // effect below and issue #374.
   const unconfirmedQuestionIdsRef = useRef<Set<string>>(new Set())
   const inFlightDraftQuestionIdsRef = useRef<Set<string>>(new Set())
+  // Per-question debounce timers that trigger an edit-triggered send attempt
+  // shortly after the student stops typing (see DRAFT_EDIT_DEBOUNCE_MS).
+  const draftSendTimeoutsRef = useRef<Map<string, number>>(new Map())
+  // Tracks the {revision, deadlineAt} pair already reconciled via refresh(),
+  // so a still-unconfirmed draft past its deadline triggers at most one
+  // refresh per run rather than one every retry-loop tick.
+  const reconciledExpiryRef = useRef<{ revision: number | null; deadlineAt: number | null } | null>(null)
   const submittedAnswersRef = useRef(submittedAnswers)
   submittedAnswersRef.current = submittedAnswers
   const submittedQuestionIdsRef = useRef(submittedQuestionIds)
@@ -370,7 +387,7 @@ export default function ResonanceStudent() {
     }
   }, [sessionId, nameSubmitted, registered, studentName, studentId])
 
-  const { snapshot, loading: sessionLoading, error: sessionError, sendMessage, saveDraft } = useResonanceSession(
+  const { snapshot, loading: sessionLoading, error: sessionError, refresh, sendMessage, saveDraft } = useResonanceSession(
     registered && sessionId ? sessionId : null,
     studentId,
   )
@@ -387,7 +404,23 @@ export default function ResonanceStudent() {
     hasObservedSnapshotRef.current = false
     editSequenceByKeyRef.current = {}
     unconfirmedQuestionIdsRef.current = new Set()
+    for (const timeoutId of draftSendTimeoutsRef.current.values()) {
+      window.clearTimeout(timeoutId)
+    }
+    draftSendTimeoutsRef.current.clear()
+    reconciledExpiryRef.current = null
   }, [sessionId, studentId])
+
+  // Debounce timers are per-question and independent of the retry interval's
+  // own effect lifecycle, so they need their own unmount cleanup.
+  useEffect(() => {
+    return () => {
+      for (const timeoutId of draftSendTimeoutsRef.current.values()) {
+        window.clearTimeout(timeoutId)
+      }
+      draftSendTimeoutsRef.current.clear()
+    }
+  }, [])
 
   useEffect(() => {
     const intervalId = window.setInterval(() => {
@@ -473,6 +506,12 @@ export default function ResonanceStudent() {
       }))
       for (const questionId of restartedIds) {
         unconfirmedQuestionIdsRef.current.delete(questionId)
+        // A send from the old run may still be pending (no ack yet). Its
+        // eventual settlement will no-op once it can't match the new run's
+        // revision (see attemptDraftSend's ack check), but without also
+        // clearing this here, a new edit for the same question would be
+        // blocked from sending again until that stale attempt times out.
+        inFlightDraftQuestionIdsRef.current.delete(questionId)
       }
     }
     hasObservedSnapshotRef.current = true
@@ -487,61 +526,137 @@ export default function ResonanceStudent() {
     setSelectedQuestionId((current) => (current && activeIds.includes(current) ? current : activeIds[0] ?? null))
   }, [snapshot])
 
-  // Resends any active question's current answer until the server confirms
-  // it, surviving QuestionView being remounted on every stack-tab switch
-  // (see issue #374). Always sends the *current* value read fresh each tick,
-  // never a captured historical one, so a retry can never race an edit into
-  // producing a wrong result and no generation/ordering bookkeeping is
-  // needed. A question stops retrying once saveDraft acknowledges the exact
-  // value most recently sent for it, the question is submitted, or its run's
-  // deadline passes (a permanently offline client cannot be synced regardless
-  // of retry mechanism, so no special handling is added for that case).
+  // Attempts to (re)send one question's *current* answer, surviving
+  // QuestionView being remounted on every stack-tab switch (see issue #374).
+  // Always reads the value fresh at call time, never a captured historical
+  // one, so a retry can never race an edit into producing a wrong result —
+  // no generation/ordering bookkeeping is needed for the send itself. Called
+  // both from the edit-triggered debounce and the periodic retry below.
+  //
+  // Deliberately does not skip sending once the run's deadline has passed:
+  // the server is the actual authority on whether a draft still counts (see
+  // its own deadlineAt check in the update-draft handler), and a rejected
+  // late send is a harmless no-op, but guessing "too late" here on the
+  // client's own clock risks dropping an edit still in flight right at the
+  // boundary — the exact failure mode issue #374 was about.
+  const attemptDraftSend = useCallback((questionId: string) => {
+    const currentSnapshot = snapshotRef.current
+    if (
+      currentSnapshot === null ||
+      inFlightDraftQuestionIdsRef.current.has(questionId) ||
+      !unconfirmedQuestionIdsRef.current.has(questionId) ||
+      submittedQuestionIdsRef.current.has(questionId)
+    ) {
+      return
+    }
+
+    const answer = submittedAnswersRef.current[questionId] ?? null
+    const sentRunRevision = currentSnapshot.activeQuestionRunRevision
+    const sentEditSequence = resolveCurrentEditSequence(
+      editSequenceByKeyRef.current,
+      questionId,
+      sentRunRevision,
+    )
+    inFlightDraftQuestionIdsRef.current.add(questionId)
+    void saveDraft({
+      studentId: studentIdRef.current,
+      questionId,
+      activeQuestionRunRevision: sentRunRevision,
+      editSequence: sentEditSequence,
+      answer,
+    }).then((saved) => {
+      inFlightDraftQuestionIdsRef.current.delete(questionId)
+      if (!saved) return
+      // An ack can arrive after the run has since restarted/reactivated
+      // (this same question, a coincidentally identical answer). Only clear
+      // the unconfirmed marker if the run revision and edit sequence in
+      // effect *now* still match what was actually sent — content equality
+      // alone can't tell "this ack is for the current attempt" from "this
+      // ack is a stale confirmation from a superseded run or edit session."
+      const snapshotAtAck = snapshotRef.current
+      if (snapshotAtAck === null || snapshotAtAck.activeQuestionRunRevision !== sentRunRevision) return
+      const currentEditSequence = resolveCurrentEditSequence(
+        editSequenceByKeyRef.current,
+        questionId,
+        snapshotAtAck.activeQuestionRunRevision,
+      )
+      const currentAnswer = submittedAnswersRef.current[questionId] ?? null
+      if (currentEditSequence === sentEditSequence && isSameAnswer(currentAnswer, answer)) {
+        unconfirmedQuestionIdsRef.current.delete(questionId)
+      }
+    })
+  }, [saveDraft])
+
+  // Fires an attempt shortly after the student stops typing a given
+  // question, independent of the periodic retry's fixed schedule below —
+  // without this, an edit made shortly before a deadline could wait up to
+  // DRAFT_RETRY_INTERVAL_MS for the next tick, which might not arrive before
+  // the deadline passes.
+  const scheduleDraftSend = useCallback((questionId: string) => {
+    const existingTimeoutId = draftSendTimeoutsRef.current.get(questionId)
+    if (existingTimeoutId !== undefined) {
+      window.clearTimeout(existingTimeoutId)
+    }
+    draftSendTimeoutsRef.current.set(questionId, window.setTimeout(() => {
+      draftSendTimeoutsRef.current.delete(questionId)
+      attemptDraftSend(questionId)
+    }, DRAFT_EDIT_DEBOUNCE_MS))
+  }, [attemptDraftSend])
+
+  // Backstop retry for anything the edit-triggered debounce didn't manage to
+  // get confirmed (a failed send, a disconnect, ...), and the trigger for
+  // reconciling from the server once a draft is still unconfirmed past its
+  // run's deadline.
   useEffect(() => {
     const intervalId = window.setInterval(() => {
       const currentSnapshot = snapshotRef.current
       if (currentSnapshot === null) return
-      if (
-        currentSnapshot.activeQuestionDeadlineAt !== null &&
-        Date.now() >= currentSnapshot.activeQuestionDeadlineAt
-      ) {
-        return
-      }
 
-      const questionIdsToRetry = selectUnconfirmedDraftQuestionIds({
+      const questionIdsStillUnconfirmed = selectUnconfirmedDraftQuestionIds({
         activeQuestionIds: currentSnapshot.activeQuestions.map((question) => question.id),
         submittedQuestionIds: submittedQuestionIdsRef.current,
         unconfirmedQuestionIds: unconfirmedQuestionIdsRef.current,
       })
 
-      for (const questionId of questionIdsToRetry) {
-        if (inFlightDraftQuestionIdsRef.current.has(questionId)) continue
+      const isPastDeadline =
+        currentSnapshot.activeQuestionDeadlineAt !== null &&
+        Date.now() >= currentSnapshot.activeQuestionDeadlineAt
 
-        const answer = submittedAnswersRef.current[questionId] ?? null
-        inFlightDraftQuestionIdsRef.current.add(questionId)
-        void saveDraft({
-          studentId: studentIdRef.current,
-          questionId,
-          activeQuestionRunRevision: currentSnapshot.activeQuestionRunRevision,
-          editSequence: resolveCurrentEditSequence(
-            editSequenceByKeyRef.current,
-            questionId,
-            currentSnapshot.activeQuestionRunRevision,
-          ),
-          answer,
-        }).then((saved) => {
-          inFlightDraftQuestionIdsRef.current.delete(questionId)
-          const currentAnswer = submittedAnswersRef.current[questionId] ?? null
-          if (saved && isSameAnswer(currentAnswer, answer)) {
+      if (isPastDeadline && questionIdsStillUnconfirmed.length > 0) {
+        const reconciliationKey = {
+          revision: currentSnapshot.activeQuestionRunRevision,
+          deadlineAt: currentSnapshot.activeQuestionDeadlineAt,
+        }
+        const alreadyReconciled =
+          reconciledExpiryRef.current !== null &&
+          reconciledExpiryRef.current.revision === reconciliationKey.revision &&
+          reconciledExpiryRef.current.deadlineAt === reconciliationKey.deadlineAt
+        if (!alreadyReconciled) {
+          reconciledExpiryRef.current = reconciliationKey
+          // Stop trusting our own optimistic local value for a draft that
+          // never got confirmed before the deadline — refresh() below pulls
+          // whatever the server actually finalized, and the snapshot-merge
+          // effect above only lets that win when there's no local entry.
+          for (const questionId of questionIdsStillUnconfirmed) {
             unconfirmedQuestionIdsRef.current.delete(questionId)
           }
-        })
+          setSubmittedAnswers((current) => resetAnswersForRestartedQuestions({
+            submittedAnswers: current,
+            questionIdsToReset: questionIdsStillUnconfirmed,
+          }))
+          void refresh()
+        }
+      }
+
+      for (const questionId of questionIdsStillUnconfirmed) {
+        attemptDraftSend(questionId)
       }
     }, DRAFT_RETRY_INTERVAL_MS)
 
     return () => {
       window.clearInterval(intervalId)
     }
-  }, [saveDraft])
+  }, [attemptDraftSend, refresh])
 
   // ── Guards ──────────────────────────────────────────────────────────────────
 
@@ -717,6 +832,7 @@ export default function ResonanceStudent() {
                     ...current,
                     [questionId]: answer,
                   }))
+                  scheduleDraftSend(questionId)
                 }}
                 onSubmitted={(questionId, answer) => {
                   unconfirmedQuestionIdsRef.current.delete(questionId)

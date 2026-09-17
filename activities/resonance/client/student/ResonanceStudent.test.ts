@@ -460,3 +460,212 @@ void test('an unconfirmed draft on a backgrounded question tab is retried and sa
     restore()
   }
 })
+
+void test('an edit made shortly before a deadline is still sent, even once the deadline has passed by the time it fires', async () => {
+  // Regression test: the retry interval fires on a fixed schedule from
+  // mount, not re-armed by edits, so an edit made just before a deadline
+  // could otherwise wait past it for the next tick. The edit-triggered
+  // debounce (DRAFT_EDIT_DEBOUNCE_MS) must fire regardless, and the send
+  // itself must not skip just because the client's own clock now reads
+  // past the deadline — the server is the actual authority on that.
+  const restore = installResonanceStudentTestEnvironment()
+  const { persistSessionParticipantIdentity } = await import(
+    '@src/components/common/entryParticipantIdentityUtils'
+  )
+  const { MemoryRouter, Route, Routes } = await import('react-router')
+  const { default: ResonanceStudent, DRAFT_EDIT_DEBOUNCE_MS } = await import('./ResonanceStudent.js')
+  const { act, render, waitFor, fireEvent } = await import('@testing-library/react')
+
+  persistSessionParticipantIdentity(window.localStorage, 'session-1', 'Ada', 'student-1')
+
+  const snapshot = buildSnapshot({
+    activeQuestions: [
+      { id: 'q1', type: 'free-response', text: 'Question one', order: 0 },
+    ],
+    activeQuestionIds: ['q1'],
+    activeQuestionRunStartedAt: Date.now(),
+    activeQuestionRunRevision: 1,
+    // Deliberately earlier than DRAFT_EDIT_DEBOUNCE_MS, so the debounced
+    // send fires *after* this deadline has already passed.
+    activeQuestionDeadlineAt: Date.now() + Math.floor(DRAFT_EDIT_DEBOUNCE_MS / 2),
+  })
+
+  ;(globalThis as { fetch?: typeof fetch }).fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input)
+    if (url.includes('/register-student')) {
+      return { ok: true, json: async () => ({ studentId: 'student-1', name: 'Ada' }) } as Response
+    }
+    if (url.includes('/state')) {
+      return { ok: true, json: async () => snapshot } as Response
+    }
+    throw new Error(`Unexpected fetch: ${url}`)
+  }) as typeof fetch
+
+  let rendered!: ReturnType<typeof render>
+  try {
+    await act(async () => {
+      rendered = render(
+        React.createElement(
+          MemoryRouter,
+          { initialEntries: ['/session-1'] },
+          React.createElement(
+            Routes,
+            null,
+            React.createElement(Route, { path: '/:sessionId', element: React.createElement(ResonanceStudent) }),
+          ),
+        ),
+      )
+      await Promise.resolve()
+    })
+
+    await waitFor(() => assert.equal(FakeWebSocket.instances.length, 1))
+    const socket = FakeWebSocket.instances[0]!
+
+    const textarea = await waitFor(() => rendered.getByLabelText(/your answer/i))
+    console.info('[TEST] editing right at the deadline boundary; the debounced send fires after it has passed')
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: 'Last-second answer' } })
+    })
+
+    await new Promise((resolve) => setTimeout(resolve, DRAFT_EDIT_DEBOUNCE_MS + 300))
+
+    const draftMessages = socket.sent.filter(
+      (message): message is { type: string; payload: { questionId?: string; answer?: { text?: string } } } =>
+        typeof message === 'object' && message !== null && (message as { type?: string }).type === 'resonance:update-draft',
+    )
+    assert.ok(
+      draftMessages.some((message) =>
+        message.payload.questionId === 'q1' && message.payload.answer?.text === 'Last-second answer'),
+      `expected the last-second answer to still be sent, got: ${JSON.stringify(draftMessages)}`,
+    )
+
+    await act(async () => {
+      rendered.unmount()
+    })
+  } finally {
+    restore()
+  }
+})
+
+void test('a stale acknowledgement from a prior run does not confirm a new run’s coincidentally identical answer', async () => {
+  // Regression test: content-only comparison (isSameAnswer) can't tell a
+  // late ack for a superseded run's send apart from one for the current
+  // run's send if the student types the same text again after a restart.
+  // The ack must also be checked against the run revision and edit
+  // sequence actually sent, or the new run's still-unconfirmed draft gets
+  // wrongly marked confirmed before it was ever actually saved.
+  const restore = installResonanceStudentTestEnvironment()
+  const { persistSessionParticipantIdentity } = await import(
+    '@src/components/common/entryParticipantIdentityUtils'
+  )
+  const { MemoryRouter, Route, Routes } = await import('react-router')
+  const { default: ResonanceStudent, DRAFT_EDIT_DEBOUNCE_MS, DRAFT_RETRY_INTERVAL_MS } = await import('./ResonanceStudent.js')
+  const { act, render, waitFor, fireEvent } = await import('@testing-library/react')
+
+  persistSessionParticipantIdentity(window.localStorage, 'session-1', 'Ada', 'student-1')
+
+  const snapshot = buildSnapshot({
+    activeQuestions: [
+      { id: 'q1', type: 'free-response', text: 'Question one', order: 0 },
+    ],
+    activeQuestionIds: ['q1'],
+    activeQuestionRunStartedAt: Date.now(),
+    activeQuestionRunRevision: 1,
+    activeQuestionDeadlineAt: Date.now() + 60_000,
+  })
+
+  ;(globalThis as { fetch?: typeof fetch }).fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input)
+    if (url.includes('/register-student')) {
+      return { ok: true, json: async () => ({ studentId: 'student-1', name: 'Ada' }) } as Response
+    }
+    if (url.includes('/state')) {
+      return { ok: true, json: async () => snapshot } as Response
+    }
+    throw new Error(`Unexpected fetch: ${url}`)
+  }) as typeof fetch
+
+  let rendered!: ReturnType<typeof render>
+  try {
+    await act(async () => {
+      rendered = render(
+        React.createElement(
+          MemoryRouter,
+          { initialEntries: ['/session-1'] },
+          React.createElement(
+            Routes,
+            null,
+            React.createElement(Route, { path: '/:sessionId', element: React.createElement(ResonanceStudent) }),
+          ),
+        ),
+      )
+      await Promise.resolve()
+    })
+
+    await waitFor(() => assert.equal(FakeWebSocket.instances.length, 1))
+    const socket = FakeWebSocket.instances[0]!
+    // Never auto-ack — the test manually acknowledges specific draftIds below.
+    socket.send = (message: string) => { socket.sent.push(JSON.parse(message)) }
+
+    const textarea = await waitFor(() => rendered.getByLabelText(/your answer/i))
+    console.info('[TEST] sending a draft under run 1 that is never acknowledged until after a restart')
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: 'hello' } })
+    })
+    await new Promise((resolve) => setTimeout(resolve, DRAFT_EDIT_DEBOUNCE_MS + 200))
+
+    type DraftMessage = { type: string; payload: { questionId?: string; activeQuestionRunRevision?: number | null; draftId?: string; answer?: { text?: string } } }
+    const isDraftMessage = (message: unknown): message is DraftMessage =>
+      typeof message === 'object' && message !== null && (message as { type?: string }).type === 'resonance:update-draft'
+    const firstRunDraft = socket.sent.filter(isDraftMessage).find((message) => message.payload.activeQuestionRunRevision === 1)
+    assert.ok(firstRunDraft, 'expected the run-1 draft to have been sent')
+    const staleDraftId = firstRunDraft!.payload.draftId
+    assert.equal(typeof staleDraftId, 'string')
+
+    console.info('[TEST] the run restarts before that draft is acknowledged')
+    await act(async () => {
+      socket.emitMessage({
+        type: 'resonance:session-state',
+        payload: {
+          ...snapshot,
+          activeQuestionRunRevision: 2,
+          activeQuestionRunStartedAt: Date.now(),
+        },
+      })
+    })
+
+    console.info('[TEST] the student retypes the exact same answer under the new run')
+    await act(async () => {
+      fireEvent.change(rendered.getByLabelText(/your answer/i), { target: { value: 'hello' } })
+    })
+    await new Promise((resolve) => setTimeout(resolve, DRAFT_EDIT_DEBOUNCE_MS + 200))
+
+    const secondRunDraft = socket.sent.filter(isDraftMessage).find((message) => message.payload.activeQuestionRunRevision === 2)
+    assert.ok(secondRunDraft, 'expected a run-2 draft to have been sent')
+
+    console.info('[TEST] the stale run-1 acknowledgement now arrives')
+    await act(async () => {
+      socket.emitMessage({ type: 'resonance:draft-saved', payload: { draftId: staleDraftId } })
+    })
+
+    // If the stale ack wrongly cleared the run-2 draft's unconfirmed marker,
+    // nothing would resend it on the next retry tick.
+    const sentBeforeRetry = socket.sent.length
+    await new Promise((resolve) => setTimeout(resolve, DRAFT_RETRY_INTERVAL_MS + 300))
+
+    const retriedRunTwoDraft = socket.sent
+      .slice(sentBeforeRetry)
+      .filter(isDraftMessage)
+      .find((message) => message.payload.activeQuestionRunRevision === 2)
+    assert.ok(
+      retriedRunTwoDraft,
+      'expected the run-2 draft to still be retried after the stale run-1 ack, since it was never actually acknowledged',
+    )
+
+    await act(async () => {
+      rendered.unmount()
+    })
+  } finally {
+    restore()
+  }
+})

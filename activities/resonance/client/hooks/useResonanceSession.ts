@@ -690,6 +690,16 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
         if (!isCurrent()) return
         wsRef.current = null
         ws = null
+        // Settle every pending saveDraft() immediately instead of leaving it
+        // to time out over DRAFT_SAVE_ACK_TIMEOUT_MS: the caller (the parent's
+        // draft retry loop) treats a question as in-flight until its promise
+        // settles, so leaving these pending would delay that question's next
+        // retry attempt by up to the full ack timeout after a disconnect.
+        for (const pending of pendingDraftSavesRef.current.values()) {
+          clearTimeout(pending.timeoutId)
+          pending.resolve(false)
+        }
+        pendingDraftSavesRef.current.clear()
         if (!closed && mountedRef.current) {
           reconnectTimeoutId = setTimeout(connect, reconnectDelay)
           reconnectDelay = Math.min(reconnectDelay * 2, 30_000)

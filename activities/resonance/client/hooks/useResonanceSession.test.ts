@@ -799,3 +799,57 @@ void test('saveDraft resolves false instead of rejecting when the socket throws 
     restore()
   }
 })
+
+void test('saveDraft settles pending saves immediately when the socket closes, instead of waiting for the ack timeout', async () => {
+  // A caller (ResonanceStudent's draft retry loop) treats a question as
+  // in-flight until this promise settles, so leaving it pending until
+  // DRAFT_SAVE_ACK_TIMEOUT_MS elapses would delay that question's next
+  // retry attempt on the new connection by up to that full timeout.
+  const restore = installWsTestEnvironment()
+  const { act, render } = await import('@testing-library/react')
+
+  try {
+    const captured: { saveDraft: ((payload: Record<string, unknown>) => Promise<boolean>) | null } = { saveDraft: null }
+    function Probe() {
+      const { saveDraft } = useResonanceSession('session-1', 'student-1')
+      captured.saveDraft = saveDraft
+      return null
+    }
+
+    let rendered!: ReturnType<typeof render>
+    await act(async () => {
+      rendered = render(React.createElement(Probe))
+    })
+    const socket = FakeWebSocket.instances[0]!
+
+    console.info('[TEST] a pending saveDraft is expected to settle false as soon as the socket closes, well before the 2s ack timeout')
+    let result: boolean | undefined
+    const pending = captured.saveDraft!({ questionId: 'q1', answer: null }).then((value) => {
+      result = value
+    })
+    // A sentinel that resolves first only if `pending` is still unsettled
+    // after a short grace period — proves the close, not the ack timeout,
+    // is what settled it.
+    let timedOut = false
+    const sentinel = new Promise<void>((resolve) => {
+      setTimeout(() => {
+        timedOut = true
+        resolve()
+      }, 300)
+    })
+
+    await act(async () => {
+      socket.onclose?.({})
+      await Promise.race([pending, sentinel])
+    })
+
+    assert.equal(timedOut, false, 'saveDraft should have settled well before the 300ms sentinel, not waited for the 2s ack timeout')
+    assert.equal(result, false)
+
+    await act(async () => {
+      rendered.unmount()
+    })
+  } finally {
+    restore()
+  }
+})
