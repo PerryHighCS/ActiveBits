@@ -443,14 +443,34 @@ void test('an unconfirmed draft on a backgrounded question tab is retried and sa
     // retry loop can still resend its draft.
     await new Promise((resolve) => setTimeout(resolve, DRAFT_RETRY_INTERVAL_MS + 500))
 
-    const draftMessages = socket.sent.filter(
-      (message): message is { type: string; payload: { questionId?: string; answer?: { text?: string } } } =>
-        typeof message === 'object' && message !== null && (message as { type?: string }).type === 'resonance:update-draft',
-    )
+    type DraftMessage = { type: string; payload: { questionId?: string; draftId?: string; answer?: { text?: string } } }
+    const isDraftMessage = (message: unknown): message is DraftMessage =>
+      typeof message === 'object' && message !== null && (message as { type?: string }).type === 'resonance:update-draft'
+    const q1Drafts = socket.sent.filter(isDraftMessage).filter((message) => message.payload.questionId === 'q1')
     assert.ok(
-      draftMessages.some((message) =>
-        message.payload.questionId === 'q1' && message.payload.answer?.text === 'Answer left unconfirmed'),
-      `expected a retried draft for q1, got: ${JSON.stringify(draftMessages)}`,
+      q1Drafts.some((message) => message.payload.answer?.text === 'Answer left unconfirmed'),
+      `expected a retried draft for q1, got: ${JSON.stringify(q1Drafts)}`,
+    )
+
+    console.info('[TEST] the server now acknowledges the retried draft')
+    const lastQ1DraftId = q1Drafts[q1Drafts.length - 1]!.payload.draftId
+    assert.equal(typeof lastQ1DraftId, 'string')
+    await act(async () => {
+      socket.emitMessage({ type: 'resonance:draft-saved', payload: { draftId: lastQ1DraftId } })
+    })
+
+    // Once acknowledged, the retry marker must clear: no further q1 draft
+    // should be sent on subsequent retry ticks with nothing having changed.
+    const sentBeforeFurtherRetries = socket.sent.length
+    await new Promise((resolve) => setTimeout(resolve, DRAFT_RETRY_INTERVAL_MS * 2 + 500))
+    const furtherQ1Drafts = socket.sent
+      .slice(sentBeforeFurtherRetries)
+      .filter(isDraftMessage)
+      .filter((message) => message.payload.questionId === 'q1')
+    assert.deepEqual(
+      furtherQ1Drafts,
+      [],
+      `expected no further q1 retries after acknowledgement, got: ${JSON.stringify(furtherQ1Drafts)}`,
     )
 
     await act(async () => {
