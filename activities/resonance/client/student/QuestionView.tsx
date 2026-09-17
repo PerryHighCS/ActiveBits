@@ -203,7 +203,7 @@ export default function QuestionView({
     lastSentDraftRef.current = initialAnswerRef.current
     synchronizedInitialAnswerRef.current = initialAnswerRef.current
     draftAnswerRunIdentityRef.current = { activeQuestionRunRevision: null, activeQuestionRunStartedAt: null }
-  }, [draftResetVersion, question.id, activeQuestionRunToken, isSubmitted, sessionId, studentId])
+  }, [draftResetVersion, question.id, activeQuestionRunRevision, activeQuestionRunStartedAt, activeQuestionRunToken, isSubmitted, sessionId, studentId])
 
   useEffect(() => {
     const previous = submissionInvalidationRef.current
@@ -234,7 +234,7 @@ export default function QuestionView({
     return () => {
       submissionAttemptRef.current += 1
     }
-  }, [question.id, activeQuestionRunToken, sessionId, studentId])
+  }, [question.id, activeQuestionRunRevision, activeQuestionRunStartedAt, activeQuestionRunToken, sessionId, studentId])
 
   // Closes a same-question run-restart race: the reset effect above fires
   // (activeQuestionRunToken changed) and seeds draftAnswer from whatever
@@ -415,7 +415,7 @@ export default function QuestionView({
       // this timeout well past its nominal delay.
       handOffCurrentDraft()
     }
-  }, [activeQuestionDeadlineAt, activeQuestionRunRevision, activeQuestionRunToken, disabled, draftAnswer, isSubmitted, isWaitingForChoices, nextDraftGeneration, onDraftSaveFailed, onDraftSaved, question.id, saveDraft, sendMessage, sessionId, studentId])
+  }, [activeQuestionDeadlineAt, activeQuestionRunRevision, activeQuestionRunStartedAt, activeQuestionRunToken, disabled, draftAnswer, isSubmitted, isWaitingForChoices, nextDraftGeneration, onDraftSaveFailed, onDraftSaved, question.id, saveDraft, sendMessage, sessionId, studentId])
 
   async function submitAnswer(
     answer: { type: 'free-response'; text: string } | { type: 'multiple-choice'; selectedOptionIds: string[] },

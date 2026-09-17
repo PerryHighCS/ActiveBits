@@ -53,6 +53,15 @@ export function preserveSessionCreatedIdentity<T extends object>(source: object,
   return clone
 }
 
+// A successful whole-record write serializes the synthetic `created` value
+// carried by a legacy record. From that point it is a durable incarnation id,
+// so the in-memory marker must be removed before the object is retained in a
+// cache; otherwise a later atomic read can disagree with Valkey about whether
+// the record has an identity.
+export function markSessionCreatedIdentityPersisted(session: object): void {
+  legacyCreatedSessions.delete(session)
+}
+
 function ensurePlainObject(value: unknown): Record<string, unknown> {
   return value != null && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
 }
@@ -170,7 +179,9 @@ class InMemorySessionStore implements SessionStore {
   }
 
   async set(id: string, session: SessionRecord): Promise<void> {
-    this.store[id] = normalizeSessionData(session)
+    const normalized = normalizeSessionData(session)
+    this.store[id] = normalized
+    markSessionCreatedIdentityPersisted(normalized)
   }
 
   async compareAndSet(
@@ -426,6 +437,7 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
   const set = async (id: string, session: SessionRecord, ttl: number | null = null): Promise<void> => {
     const normalized = normalizeSessionData(session)
     await valkeyStore.set(id, normalized, ttl)
+    markSessionCreatedIdentityPersisted(normalized)
     cache.set(id, normalized, false)
   }
 

@@ -137,6 +137,30 @@ void test('updateAtomic hands its mutate callback a session that still reads as 
   assert.equal(seenValkey, null, 'Valkey-backed store: the mutate callback must see the legacy record as having no incarnation identity')
 })
 
+void test('a successful plain write upgrades a cached legacy record to its persisted incarnation identity', async (t) => {
+  const records = new Map<string, SessionRecord>()
+  records.set('legacy-write', {
+    id: 'legacy-write',
+    mutationRevision: 0,
+    data: { status: 'old' },
+  } as unknown as SessionRecord)
+  const sessions = createSessionStore('redis://test', 1_000, valkeyStoreForTest(records, []))
+  t.after(async () => { await sessions.close() })
+
+  const legacy = await sessions.get('legacy-write')
+  assert.ok(legacy)
+  assert.equal(getSessionCreatedIdentity(legacy), null)
+
+  await sessions.set('legacy-write', legacy)
+  const cachedAfterWrite = await sessions.get('legacy-write')
+  assert.ok(cachedAfterWrite)
+  assert.equal(
+    getSessionCreatedIdentity(cachedAfterWrite),
+    cachedAfterWrite.created,
+    'the cache must agree with the now-persisted Valkey incarnation identity',
+  )
+})
+
 void test('in-memory atomic update refreshes an embedded child session parent', async (t) => {
   const sessions = createSessionStore(null, 1_000)
   t.after(async () => { await sessions.close() })

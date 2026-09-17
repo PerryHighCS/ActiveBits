@@ -2,6 +2,8 @@
 
 ## Status
 
+- [x] Latest PR #375 review follow-up: successful plain session writes now promote a legacy synthetic `created` value to a durable identity in both the cache and store; QuestionView effects observe a later start-timestamp backfill as part of their full run identity; deadline finalization derives its transition through `updateAtomic` so it cannot overwrite a concurrent draft commit.
+
 - [x] Root-cause catalog reviewed and agreed
 - [x] Shared `runIdentity` module added, unit-tested against reference copies of all four original comparators, and wired into the server
 - [x] Server: `matchesActiveQuestionRun` now delegates to the shared `runIdentitiesMatch`. `responseMatchesActiveRun` stays a small standalone function rather than delegating — see note below

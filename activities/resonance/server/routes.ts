@@ -1792,18 +1792,47 @@ export default function setupResonanceRoutes(
     // synthetic timestamp looks like a genuine incarnation id on the clone,
     // and the later updateAtomic incarnation guard rejects every draft-save
     // write for that session as a wrong-incarnation mismatch.
-    const session = preserveSessionCreatedIdentity(loadedSession, structuredClone(loadedSession))
+    let session = preserveSessionCreatedIdentity(loadedSession, structuredClone(loadedSession))
 
     const hadSelfPacedMode = session.data.selfPacedMode === true
     const resolvedSelfPacedMode =
       hadSelfPacedMode
         ? true
         : await resolveSelfPacedMode(session, sessions)
-    const expiration = expireActiveQuestionRunIfNeeded(session, deadlineTaskRunner.now())
-    if (expiration.changed) {
-      await sessions.set(sessionId, session)
-      await broadcastStudentSessionState(session, sessionId)
-      broadcastToRole('resonance:instructor-state', buildInstructorSnapshot(session), sessionId, true)
+    const deadlineNow = deadlineTaskRunner.now()
+    const expirationIsDue =
+      session.data.activeQuestionDeadlineAt !== null &&
+      session.data.activeQuestionDeadlineAt <= deadlineNow
+    if (expirationIsDue && sessions.updateAtomic) {
+      // Deadline finalization and a student draft retry can arrive together.
+      // Derive the expiration transition from the mutation's fresh record so
+      // it cannot write this detached pre-retry snapshot over a draft CAS.
+      let expirationChanged = false
+      const persisted = await sessions.updateAtomic(sessionId, (current) => {
+        const currentSession = asResonanceSession(current)
+        if (!currentSession) return current
+        currentSession.data = normalizeSessionData(currentSession.data)
+        const expiration = expireActiveQuestionRunIfNeeded(currentSession, deadlineNow)
+        expirationChanged = expiration.changed
+        return currentSession
+      })
+      const persistedSession = asResonanceSession(persisted)
+      if (!persistedSession) return null
+      session = persistedSession
+      if (expirationChanged) {
+        await broadcastStudentSessionState(session, sessionId)
+        broadcastToRole('resonance:instructor-state', buildInstructorSnapshot(session), sessionId, true)
+      }
+    } else if (expirationIsDue) {
+      // Compatibility fallback for a custom store that predates updateAtomic.
+      // The production stores provide it; this keeps the route functional for
+      // older test/dummy stores while retaining the established behavior.
+      const expiration = expireActiveQuestionRunIfNeeded(session, deadlineNow)
+      if (expiration.changed) {
+        await sessions.set(sessionId, session)
+        await broadcastStudentSessionState(session, sessionId)
+        broadcastToRole('resonance:instructor-state', buildInstructorSnapshot(session), sessionId, true)
+      }
     } else if (!hadSelfPacedMode && resolvedSelfPacedMode && session.data.selfPacedMode === true) {
       await sessions.set(sessionId, session)
     }

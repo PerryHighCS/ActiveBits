@@ -1778,14 +1778,14 @@ void test('server deadline task retries after a finalization write failure witho
   }
   await sessions.set(session.id, session)
 
-  const originalSet = sessions.set.bind(sessions)
+  const originalUpdateAtomic = sessions.updateAtomic!.bind(sessions)
   let failNextWrite = true
-  sessions.set = async (...args) => {
+  sessions.updateAtomic = async (...args) => {
     if (failNextWrite) {
       failNextWrite = false
       throw new Error('simulated deadline finalization write failure')
     }
-    await originalSet(...args)
+    return await originalUpdateAtomic(...args)
   }
   const scheduled: Array<{ callback: () => void; delayMs: number; cancelled: boolean }> = []
   setupResonanceRoutes(app, sessions, createMockWs(), {
