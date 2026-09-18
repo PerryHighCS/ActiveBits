@@ -248,6 +248,7 @@ function createInstructorResonanceSession(): SessionRecord {
           questionId: 'q1',
           studentId: 'student1',
           submittedAt: now - 500,
+          activeQuestionRunRevision: 1,
           answer: {
             type: 'free-response',
             text: 'I think the loop exits when the counter reaches zero.',
@@ -259,6 +260,7 @@ function createInstructorResonanceSession(): SessionRecord {
           questionId: 'q1',
           studentId: 'student2',
           updatedAt: now - 100,
+          activeQuestionRunRevision: 1,
           answer: {
             type: 'free-response',
             text: 'Still working through the condition...',
@@ -731,7 +733,8 @@ void test('self-paced students can persist drafts and submit without an active r
       studentId: 'student1',
       questionId: 'q1',
       draftId: 'draft-1',
-      activeQuestionRunStartedAt: null,
+      activeQuestionRunRevision: null,
+      draftSendSequence: 1,
       answer: { type: 'free-response', text: 'Self-paced draft' },
     },
   }))
@@ -751,7 +754,7 @@ void test('self-paced students can persist drafts and submit without an active r
     body: {
       studentId: 'student1',
       questionId: 'q1',
-      activeQuestionRunStartedAt: null,
+      activeQuestionRunRevision: null,
       answer: { type: 'free-response', text: 'Self-paced answer' },
     },
   }, submitRes)
@@ -767,6 +770,67 @@ void test('self-paced students can persist drafts and submit without an active r
     text: 'Self-paced answer',
   })
   assert.equal(storedData?.responseDrafts?.['q1:student1'], undefined)
+
+  await sessions.close()
+})
+
+void test('the submit-answer route rejects a malformed activeQuestionRunRevision instead of silently matching a self-paced session', async () => {
+  // CodeRabbit review of PR #381: matchesActiveQuestionRun used to normalize
+  // *any* non-number client value (omitted, a string, NaN, a negative
+  // number) down to `null` before comparing it against the session's run
+  // identity. That's fine when the session has a real active run (nothing
+  // normalizes to a positive integer by accident), but when the session is
+  // self-paced/idle (activeQuestionRunRevision === null), a malformed value
+  // would silently normalize to `null` too and incorrectly "match" — letting
+  // a corrupted or buggy payload through as if it had explicitly, correctly
+  // asserted "no active run". The real client always sends either an
+  // explicit `null` or a genuine positive revision number, never omits the
+  // field or sends a non-number, so requiring exactly that costs nothing.
+  const app = createMockApp()
+  const sessions = createSessionStore(null)
+  const session = createMultiQuestionSession()
+  session.data.selfPacedMode = true
+  const studentCookies = issueStudentCookies(session, 'student1')
+  await sessions.set(session.id, session)
+  setupResonanceRoutes(app, sessions, createMockWs())
+
+  for (const malformedRevision of [undefined, 'not-a-number', Number.NaN, -1, 1.5]) {
+    console.info(`[TEST] activeQuestionRunRevision ${JSON.stringify(malformedRevision)} must be rejected, not treated as self-paced null`)
+    const res = createResponse()
+    await app.handlers.post['/api/resonance/:sessionId/submit-answer']?.({
+      params: { sessionId: session.id },
+      cookies: studentCookies,
+      body: {
+        studentId: 'student1',
+        questionId: 'q1',
+        ...(malformedRevision === undefined ? {} : { activeQuestionRunRevision: malformedRevision }),
+        answer: { type: 'free-response', text: `Should not be stored (${String(malformedRevision)})` },
+      },
+    }, res)
+    assert.equal(res.statusCode, 409, `expected a malformed activeQuestionRunRevision of ${JSON.stringify(malformedRevision)} to be rejected`)
+  }
+
+  console.info('[TEST] an explicit null activeQuestionRunRevision is still accepted for a genuinely self-paced session')
+  const acceptedRes = createResponse()
+  await app.handlers.post['/api/resonance/:sessionId/submit-answer']?.({
+    params: { sessionId: session.id },
+    cookies: studentCookies,
+    body: {
+      studentId: 'student1',
+      questionId: 'q1',
+      activeQuestionRunRevision: null,
+      answer: { type: 'free-response', text: 'Genuinely self-paced answer' },
+    },
+  }, acceptedRes)
+  assert.equal(acceptedRes.statusCode, 200)
+
+  const stored = await sessions.get(session.id)
+  const storedData = stored?.data as { responses?: Array<{ answer?: { text?: string } }> } | undefined
+  assert.deepEqual(
+    storedData?.responses?.map((response) => response.answer?.text),
+    ['Genuinely self-paced answer'],
+    'expected only the explicitly-null submission to have been stored',
+  )
 
   await sessions.close()
 })
@@ -820,7 +884,7 @@ void test('a self-paced draft that arrives after its submission is dropped, not 
     body: {
       studentId: 'student1',
       questionId: 'q1',
-      activeQuestionRunStartedAt: null,
+      activeQuestionRunRevision: null,
       editSequence: 1,
       answer: { type: 'free-response', text: 'Submitted answer' },
     },
@@ -834,8 +898,9 @@ void test('a self-paced draft that arrives after its submission is dropped, not 
       studentId: 'student1',
       questionId: 'q1',
       draftId: 'late-self-paced-draft',
-      activeQuestionRunStartedAt: null,
+      activeQuestionRunRevision: null,
       editSequence: 1,
+      draftSendSequence: 1,
       answer: { type: 'free-response', text: 'Stale pre-submission draft' },
     },
   }))
@@ -921,6 +986,7 @@ void test('a draft that arrives after its submission is dropped instead of resur
       draftId: 'late-draft',
       activeQuestionRunRevision: 1,
       editSequence: 1,
+      draftSendSequence: 1,
       answer: { type: 'free-response', text: 'Stale pre-submission draft' },
     },
   }))
@@ -1006,6 +1072,7 @@ void test('a draft made after revisiting an already-submitted question in the sa
       draftId: 'revisit-draft',
       activeQuestionRunRevision: 1,
       editSequence: 2,
+      draftSendSequence: 1,
       answer: { type: 'free-response', text: 'Revised answer, not yet resubmitted' },
     },
   }))
@@ -1021,6 +1088,7 @@ void test('a draft made after revisiting an already-submitted question in the sa
       studentId?: string
       activeQuestionRunRevision?: number | null
       editSequence?: number
+      draftSendSequence?: number
       answer?: unknown
     }>
   } | undefined
@@ -1031,6 +1099,7 @@ void test('a draft made after revisiting an already-submitted question in the sa
     {
       questionId: 'q1',
       studentId: 'student1',
+      draftSendSequence: 1,
       updatedAt: undefined,
       activeQuestionRunRevision: 1,
       editSequence: 2,
@@ -1043,6 +1112,425 @@ void test('a draft made after revisiting an already-submitted question in the sa
     type: 'free-response',
     text: 'First answer',
   })
+
+  await sessions.close()
+})
+
+void test('an older draft write cannot clobber a newer one for the same question that already landed first', async () => {
+  // Regression test (Copilot review of PR #381): each resonance:update-draft
+  // message is handled by its own async function starting from a fresh
+  // session read, so two overlapping sends for the same question (e.g. a
+  // client-side retry racing its own still-outstanding original attempt) can
+  // finish processing out of the order they were sent in. Without a guard
+  // here, a slower older write landing after a faster newer one would
+  // silently clobber it — this reproduces that by sending the "newer" write
+  // first and the "older" one second, which is exactly what an out-of-order
+  // completion looks like from the server's point of view.
+  const app = createMockApp()
+  const sessions = createSessionStore(null)
+  const session = createMultiQuestionSession()
+  const runStartedAt = Date.now() - 1_000
+  session.data.activeQuestionId = 'q1'
+  session.data.activeQuestionIds = ['q1']
+  session.data.activeQuestionRunStartedAt = runStartedAt
+  session.data.activeQuestionRunRevision = 1
+  session.data.lastActiveQuestionRunRevision = 1
+  const studentCookies = issueStudentCookies(session, 'student1')
+  await sessions.set(session.id, session)
+  const captured = createCapturingMockWs()
+  setupResonanceRoutes(app, sessions, captured.ws)
+
+  const handler = captured.getHandler()
+  const messageHandlers: Array<(message: string) => void> = []
+  const sentMessages: Array<{ type?: string; payload?: { draftId?: string } }> = []
+  assert.ok(handler)
+  handler({
+    readyState: 1,
+    upgradeHeaders: {
+      cookie: Object.entries(studentCookies).map(([name, value]) => `${name}=${value}`).join('; '),
+    },
+    send(message: string) {
+      sentMessages.push(JSON.parse(message) as { type?: string; payload?: { draftId?: string } })
+    },
+    on(event: string, callback: (message: string) => void) {
+      if (event === 'message') messageHandlers.push(callback)
+    },
+    once() {},
+    close() {},
+    terminate() {},
+    ping() {},
+  }, new URLSearchParams({ sessionId: session.id, role: 'student', studentId: 'student1' }), captured.ws.wss)
+  await waitForCondition(() => messageHandlers.length === 1)
+
+  type StoredData = {
+    responseDrafts?: Record<string, {
+      questionId?: string
+      studentId?: string
+      activeQuestionRunRevision?: number | null
+      editSequence?: number
+      draftSendSequence?: number
+      updatedAt?: number
+      answer?: unknown
+    }>
+  }
+
+  // The student revisits (editSequence bumps to 2) and this newer write
+  // reaches and is processed by the server first.
+  console.info('[TEST] the newer (revisit) draft write lands first')
+  messageHandlers[0]?.(JSON.stringify({
+    type: 'resonance:update-draft',
+    payload: {
+      studentId: 'student1',
+      questionId: 'q1',
+      draftId: 'newer-draft',
+      activeQuestionRunRevision: 1,
+      editSequence: 2,
+      draftSendSequence: 2,
+      answer: { type: 'free-response', text: 'Newer, revisited answer' },
+    },
+  }))
+  await waitForCondition(() => sentMessages.some((message) =>
+    message.type === 'resonance:draft-saved' && message.payload?.draftId === 'newer-draft'
+  ))
+
+  // A straggling write from before the revisit (still editSequence 1, sent
+  // over the same connection but delayed in server-side processing) now
+  // arrives and is processed second.
+  console.info('[TEST] a straggling older (pre-revisit) draft write lands second, after the newer one')
+  messageHandlers[0]?.(JSON.stringify({
+    type: 'resonance:update-draft',
+    payload: {
+      studentId: 'student1',
+      questionId: 'q1',
+      draftId: 'older-straggler',
+      activeQuestionRunRevision: 1,
+      editSequence: 1,
+      draftSendSequence: 1,
+      answer: { type: 'free-response', text: 'Stale pre-revisit answer' },
+    },
+  }))
+  // This straggler's content differs from what's stored, so it must not be
+  // acknowledged as saved (see the "second concurrent tab" test below);
+  // wait for a settled tick instead of an ack that will never come.
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  assert.ok(
+    !sentMessages.some((message) => message.payload?.draftId === 'older-straggler'),
+    'a rejected write whose content differs from what’s stored must not be acknowledged as saved',
+  )
+
+  const storedAfterStraggler = (await sessions.get(session.id))?.data as StoredData | undefined
+  const draftAfterStraggler = storedAfterStraggler?.responseDrafts?.['q1:student1']
+  assert.equal(
+    draftAfterStraggler?.editSequence,
+    2,
+    'the older straggler must not have overwritten the newer draft’s editSequence',
+  )
+  assert.deepEqual(
+    draftAfterStraggler?.answer,
+    { type: 'free-response', text: 'Newer, revisited answer' },
+    'the older straggler must not have overwritten the newer draft’s content',
+  )
+
+  // Same-editSequence tiebreaker: seed a draft with a high draftSendSequence
+  // (simulating "this slot was already written by a later client send"),
+  // then send a same-editSequence write carrying a *lower* draftSendSequence
+  // — it must be rejected, even though it's processed later in wall-clock
+  // time. draftSendSequence (client-assigned at send time), not the
+  // handler's own resumption timestamp, is what orders same-editSequence
+  // writes — see the ordering guard's comment for why the timestamp was
+  // rejected as unsound (it reflects server resumption order, not client
+  // send order, and those can differ under overlapping sends).
+  const sessionBeforeTiebreakerCheck = await sessions.get(session.id)
+  assert.ok(sessionBeforeTiebreakerCheck)
+  ;(sessionBeforeTiebreakerCheck!.data as StoredData).responseDrafts!['q1:student1'] = {
+    questionId: 'q1',
+    studentId: 'student1',
+    activeQuestionRunRevision: 1,
+    editSequence: 2,
+    draftSendSequence: 100,
+    updatedAt: Date.now(),
+    answer: { type: 'free-response', text: 'Sent later by the client, written first' },
+  }
+  await sessions.set(session.id, sessionBeforeTiebreakerCheck!)
+
+  console.info('[TEST] a same-editSequence write with a lower draftSendSequence is rejected, not merged in')
+  messageHandlers[0]?.(JSON.stringify({
+    type: 'resonance:update-draft',
+    payload: {
+      studentId: 'student1',
+      questionId: 'q1',
+      draftId: 'same-sequence-straggler',
+      activeQuestionRunRevision: 1,
+      editSequence: 2,
+      draftSendSequence: 99,
+      answer: { type: 'free-response', text: 'Sent earlier by the client, written second' },
+    },
+  }))
+  // This straggler's content differs from what's stored, so — unlike a
+  // same-content retry — it must not be acknowledged as saved (see the
+  // "second concurrent tab" test below for why); wait for a settled tick
+  // instead of an ack that will never come.
+  await new Promise((resolve) => setTimeout(resolve, 0))
+
+  const storedAfterTiebreaker = (await sessions.get(session.id))?.data as StoredData | undefined
+  const draftAfterTiebreaker = storedAfterTiebreaker?.responseDrafts?.['q1:student1']
+  assert.equal(draftAfterTiebreaker?.draftSendSequence, 100)
+  assert.deepEqual(
+    draftAfterTiebreaker?.answer,
+    { type: 'free-response', text: 'Sent later by the client, written first' },
+    'a same-editSequence write with a lower draftSendSequence must not overwrite what’s stored',
+  )
+  assert.ok(
+    !sentMessages.some((message) => message.payload?.draftId === 'same-sequence-straggler'),
+    'a rejected write whose content differs from what’s stored must not be acknowledged as saved',
+  )
+
+  console.info('[TEST] a same-editSequence write with a lower draftSendSequence but identical content is still acknowledged')
+  messageHandlers[0]?.(JSON.stringify({
+    type: 'resonance:update-draft',
+    payload: {
+      studentId: 'student1',
+      questionId: 'q1',
+      draftId: 'same-sequence-same-content-straggler',
+      activeQuestionRunRevision: 1,
+      editSequence: 2,
+      draftSendSequence: 99,
+      answer: { type: 'free-response', text: 'Sent later by the client, written first' },
+    },
+  }))
+  await waitForCondition(() => sentMessages.some((message) =>
+    message.type === 'resonance:draft-saved' && message.payload?.draftId === 'same-sequence-same-content-straggler'
+  ))
+
+  await sessions.close()
+})
+
+void test('a stale draft write from a second concurrent tab is not acknowledged as saved when its content was actually discarded', async () => {
+  // Copilot review of PR #381: draftSendSequence is a per-mount counter
+  // (nextDraftSendSequenceRef in ResonanceStudent.tsx starts at 0 on every
+  // mount), so it only totally orders sends from a *single* ResonanceStudent
+  // instance. It carries no meaning across two concurrent mounts for the
+  // same student — e.g. the same student's capability open in two browser
+  // tabs. If tab A has sent several drafts (its counter is now high) and tab
+  // B, a fresh mount, sends its own first edit (draftSendSequence 1), tab
+  // B's genuinely different, more-recent-from-its-own-perspective content
+  // loses the isStaleDraftWrite tiebreaker purely because its local counter
+  // is smaller — not because it's actually older. The guard was previously
+  // acking every rejected write unconditionally ("so a superseded retry
+  // doesn't get reported as a failed save"), which is only true when the
+  // rejected write's content is subsumed by what's already stored (the
+  // single-tab retry case this guard was built for). Acking tab B's write
+  // here would tell it the edit was persisted — it isn't — and tab B's own
+  // unconfirmed-draft tracking would stop retrying it, silently losing the
+  // student's actual latest edit.
+  const app = createMockApp()
+  const sessions = createSessionStore(null)
+  const session = createMultiQuestionSession()
+  session.data.activeQuestionId = 'q1'
+  session.data.activeQuestionIds = ['q1']
+  session.data.activeQuestionRunStartedAt = Date.now() - 1_000
+  session.data.activeQuestionRunRevision = 1
+  session.data.lastActiveQuestionRunRevision = 1
+  const studentCookies = issueStudentCookies(session, 'student1')
+  await sessions.set(session.id, session)
+  const captured = createCapturingMockWs()
+  setupResonanceRoutes(app, sessions, captured.ws)
+
+  const handler = captured.getHandler()
+  const messageHandlers: Array<(message: string) => void> = []
+  const sentMessages: Array<{ type?: string; payload?: { draftId?: string } }> = []
+  assert.ok(handler)
+  handler({
+    readyState: 1,
+    upgradeHeaders: {
+      cookie: Object.entries(studentCookies).map(([name, value]) => `${name}=${value}`).join('; '),
+    },
+    send(message: string) {
+      sentMessages.push(JSON.parse(message) as { type?: string; payload?: { draftId?: string } })
+    },
+    on(event: string, callback: (message: string) => void) {
+      if (event === 'message') messageHandlers.push(callback)
+    },
+    once() {},
+    close() {},
+    terminate() {},
+    ping() {},
+  }, new URLSearchParams({ sessionId: session.id, role: 'student', studentId: 'student1' }), captured.ws.wss)
+  await waitForCondition(() => messageHandlers.length === 1)
+
+  type StoredData = {
+    responseDrafts?: Record<string, {
+      draftSendSequence?: number
+      answer?: unknown
+    }>
+  }
+
+  console.info('[TEST] tab A has already sent several drafts, ratcheting its send counter up')
+  messageHandlers[0]?.(JSON.stringify({
+    type: 'resonance:update-draft',
+    payload: {
+      studentId: 'student1',
+      questionId: 'q1',
+      draftId: 'tab-a-draft',
+      activeQuestionRunRevision: 1,
+      editSequence: 1,
+      draftSendSequence: 10,
+      answer: { type: 'free-response', text: 'Tab A content' },
+    },
+  }))
+  await waitForCondition(() => sentMessages.some((message) =>
+    message.type === 'resonance:draft-saved' && message.payload?.draftId === 'tab-a-draft'
+  ))
+
+  console.info('[TEST] tab B, a fresh mount, sends its own genuinely different first edit')
+  messageHandlers[0]?.(JSON.stringify({
+    type: 'resonance:update-draft',
+    payload: {
+      studentId: 'student1',
+      questionId: 'q1',
+      draftId: 'tab-b-draft',
+      activeQuestionRunRevision: 1,
+      editSequence: 1,
+      draftSendSequence: 1,
+      answer: { type: 'free-response', text: 'Tab B content' },
+    },
+  }))
+  // No ack should ever arrive for tab B's rejected, actually-discarded write.
+  await new Promise((resolve) => setTimeout(resolve, 0))
+
+  const storedAfterTabB = (await sessions.get(session.id))?.data as StoredData | undefined
+  const draftAfterTabB = storedAfterTabB?.responseDrafts?.['q1:student1']
+  assert.deepEqual(
+    draftAfterTabB?.answer,
+    { type: 'free-response', text: 'Tab A content' },
+    'tab B’s write must not have overwritten tab A’s already-stored content',
+  )
+  assert.ok(
+    !sentMessages.some((message) => message.payload?.draftId === 'tab-b-draft'),
+    'tab B’s discarded write must not be acknowledged as saved',
+  )
+
+  console.info('[TEST] tab B’s own retry loop resends its current value with a fresh, higher send sequence')
+  messageHandlers[0]?.(JSON.stringify({
+    type: 'resonance:update-draft',
+    payload: {
+      studentId: 'student1',
+      questionId: 'q1',
+      draftId: 'tab-b-retry',
+      activeQuestionRunRevision: 1,
+      editSequence: 1,
+      draftSendSequence: 11,
+      answer: { type: 'free-response', text: 'Tab B content' },
+    },
+  }))
+  await waitForCondition(() => sentMessages.some((message) =>
+    message.type === 'resonance:draft-saved' && message.payload?.draftId === 'tab-b-retry'
+  ))
+
+  const storedAfterRetry = (await sessions.get(session.id))?.data as StoredData | undefined
+  assert.deepEqual(
+    storedAfterRetry?.responseDrafts?.['q1:student1']?.answer,
+    { type: 'free-response', text: 'Tab B content' },
+    'a genuine retry with a higher send sequence eventually lands, so the edit is never permanently lost',
+  )
+
+  await sessions.close()
+})
+
+void test('an update-draft write with a missing or invalid draftSendSequence is dropped, not silently coerced to zero', async () => {
+  // CodeRabbit review of PR #381: resolveEditSequence's zero-fallback exists
+  // to normalize historical *stored* drafts, not to validate a live write —
+  // silently coercing a missing/malformed draftSendSequence to 0 would let a
+  // malformed payload masquerade as a legitimate "first send" and jump the
+  // same-editSequence tiebreaker ahead of a write that's genuinely first. A
+  // real client always sends a positive integer (it pre-increments before
+  // every send), so the handler now requires one and drops anything else.
+  const app = createMockApp()
+  const sessions = createSessionStore(null)
+  const session = createMultiQuestionSession()
+  session.data.activeQuestionId = 'q1'
+  session.data.activeQuestionIds = ['q1']
+  session.data.activeQuestionRunStartedAt = Date.now() - 1_000
+  session.data.activeQuestionRunRevision = 1
+  session.data.lastActiveQuestionRunRevision = 1
+  const studentCookies = issueStudentCookies(session, 'student1')
+  await sessions.set(session.id, session)
+  const captured = createCapturingMockWs()
+  setupResonanceRoutes(app, sessions, captured.ws)
+
+  const handler = captured.getHandler()
+  const messageHandlers: Array<(message: string) => void> = []
+  const sentMessages: Array<{ type?: string; payload?: { draftId?: string } }> = []
+  assert.ok(handler)
+  handler({
+    readyState: 1,
+    upgradeHeaders: {
+      cookie: Object.entries(studentCookies).map(([name, value]) => `${name}=${value}`).join('; '),
+    },
+    send(message: string) {
+      sentMessages.push(JSON.parse(message) as { type?: string; payload?: { draftId?: string } })
+    },
+    on(event: string, callback: (message: string) => void) {
+      if (event === 'message') messageHandlers.push(callback)
+    },
+    once() {},
+    close() {},
+    terminate() {},
+    ping() {},
+  }, new URLSearchParams({ sessionId: session.id, role: 'student', studentId: 'student1' }), captured.ws.wss)
+  await waitForCondition(() => messageHandlers.length === 1)
+
+  const invalidPayloads: Array<{ label: string; draftSendSequence?: unknown }> = [
+    { label: 'missing' },
+    { label: 'string', draftSendSequence: 'not-a-number' },
+    { label: 'zero', draftSendSequence: 0 },
+    { label: 'negative', draftSendSequence: -1 },
+    { label: 'non-integer', draftSendSequence: 1.5 },
+  ]
+  for (const { label, draftSendSequence } of invalidPayloads) {
+    console.info(`[TEST] a draft write with a ${label} draftSendSequence must be dropped`)
+    messageHandlers[0]?.(JSON.stringify({
+      type: 'resonance:update-draft',
+      payload: {
+        studentId: 'student1',
+        questionId: 'q1',
+        draftId: `invalid-${label}`,
+        activeQuestionRunRevision: 1,
+        editSequence: 1,
+        ...(draftSendSequence === undefined ? {} : { draftSendSequence }),
+        answer: { type: 'free-response', text: 'Should not be stored' },
+      },
+    }))
+  }
+
+  console.info('[TEST] a draft write with a valid draftSendSequence is accepted afterward')
+  messageHandlers[0]?.(JSON.stringify({
+    type: 'resonance:update-draft',
+    payload: {
+      studentId: 'student1',
+      questionId: 'q1',
+      draftId: 'valid-draft',
+      activeQuestionRunRevision: 1,
+      editSequence: 1,
+      draftSendSequence: 1,
+      answer: { type: 'free-response', text: 'Should be stored' },
+    },
+  }))
+  await waitForCondition(() => sentMessages.some((message) =>
+    message.type === 'resonance:draft-saved' && message.payload?.draftId === 'valid-draft'
+  ))
+
+  assert.deepEqual(
+    sentMessages
+      .filter((message) => message.type === 'resonance:draft-saved')
+      .map((message) => message.payload?.draftId),
+    ['valid-draft'],
+    `expected only the valid write to be acknowledged, got: ${JSON.stringify(sentMessages)}`,
+  )
+
+  const stored = await sessions.get(session.id)
+  const storedData = stored?.data as { responseDrafts?: Record<string, { answer?: { text?: string } }> } | undefined
+  assert.equal(storedData?.responseDrafts?.['q1:student1']?.answer?.text, 'Should be stored')
 
   await sessions.close()
 })
@@ -1100,6 +1588,7 @@ void test('clearing a draft over the websocket still acknowledges the write, pre
       questionId: 'q1',
       draftId: 'clear-existing',
       activeQuestionRunRevision: 1,
+      draftSendSequence: 1,
       answer: null,
     },
   }))
@@ -1118,6 +1607,7 @@ void test('clearing a draft over the websocket still acknowledges the write, pre
       questionId: 'q1',
       draftId: 'clear-already-absent',
       activeQuestionRunRevision: 1,
+      draftSendSequence: 1,
       answer: null,
     },
   }))
@@ -1136,12 +1626,14 @@ void test('server deadline task finalizes and broadcasts drafts without post-dea
   session.data.activeQuestionId = 'q1'
   session.data.activeQuestionIds = ['q1']
   session.data.activeQuestionRunStartedAt = 800
+  session.data.activeQuestionRunRevision = 1
   session.data.activeQuestionDeadlineAt = 1_100
   session.data.responseDrafts = {
     'q1:student1': {
       questionId: 'q1',
       studentId: 'student1',
       updatedAt: 1_050,
+      activeQuestionRunRevision: 1,
       answer: { type: 'free-response', text: 'Saved before time ran out' },
     },
   }
@@ -1234,12 +1726,14 @@ void test('server deadline task retries after a strict session read failure', as
   session.data.activeQuestionId = 'q1'
   session.data.activeQuestionIds = ['q1']
   session.data.activeQuestionRunStartedAt = 800
+  session.data.activeQuestionRunRevision = 1
   session.data.activeQuestionDeadlineAt = 1_100
   session.data.responseDrafts = {
     'q1:student1': {
       questionId: 'q1',
       studentId: 'student1',
       updatedAt: 1_050,
+      activeQuestionRunRevision: 1,
       answer: { type: 'free-response', text: 'Retry this persisted draft' },
     },
   }
@@ -1294,12 +1788,14 @@ void test('server deadline task retries after a finalization write failure witho
   session.data.activeQuestionId = 'q1'
   session.data.activeQuestionIds = ['q1']
   session.data.activeQuestionRunStartedAt = 800
+  session.data.activeQuestionRunRevision = 1
   session.data.activeQuestionDeadlineAt = 1_100
   session.data.responseDrafts = {
     'q1:student1': {
       questionId: 'q1',
       studentId: 'student1',
       updatedAt: 1_050,
+      activeQuestionRunRevision: 1,
       answer: { type: 'free-response', text: 'Persist me after retry' },
     },
   }
@@ -1358,18 +1854,21 @@ void test('timed live runs finalize persisted drafts for every active question',
   session.data.activeQuestionId = 'q1'
   session.data.activeQuestionIds = ['q1', 'q2']
   session.data.activeQuestionRunStartedAt = now - 10_000
+  session.data.activeQuestionRunRevision = 1
   session.data.activeQuestionDeadlineAt = now - 1_000
   session.data.responseDrafts = {
     'q1:student1': {
       questionId: 'q1',
       studentId: 'student1',
       updatedAt: now - 2_000,
+      activeQuestionRunRevision: 1,
       answer: { type: 'free-response', text: 'First persisted draft' },
     },
     'q2:student1': {
       questionId: 'q2',
       studentId: 'student1',
       updatedAt: now - 2_000,
+      activeQuestionRunRevision: 1,
       answer: { type: 'multiple-choice', selectedOptionIds: ['q2_b'] },
     },
   }
@@ -1787,6 +2286,7 @@ void test('self-paced embedded resonance sessions reveal MCQ correctness after t
       questionId: 'q1',
       studentId: 'student1',
       submittedAt: now - 100,
+      activeQuestionRunRevision: null,
       answer: {
         type: 'free-response',
         text: 'Because the condition becomes false.',
@@ -1797,6 +2297,7 @@ void test('self-paced embedded resonance sessions reveal MCQ correctness after t
       questionId: 'q2',
       studentId: 'student1',
       submittedAt: now - 50,
+      activeQuestionRunRevision: null,
       answer: {
         type: 'multiple-choice',
         selectedOptionIds: ['q2_b'],
@@ -1866,6 +2367,7 @@ void test('student state normalizes legacy reveal answers that still use selecte
       questionId: 'q2',
       studentId: 'student1',
       submittedAt: now - 50,
+      activeQuestionRunRevision: 1,
       answer: {
         type: 'multiple-choice',
         selectedOptionIds: ['q2_b'],
@@ -2053,6 +2555,7 @@ void test('self-paced embedded resonance sessions still surface annotated review
       questionId: 'q1',
       studentId: 'student1',
       submittedAt: now - 200,
+      activeQuestionRunRevision: null,
       answer: {
         type: 'free-response',
         text: 'My answer',
@@ -2160,6 +2663,9 @@ void test('self-paced embedded resonance sessions switch back to live-run snapsh
       questionId: 'q1',
       studentId: 'student1',
       submittedAt: now - 200,
+      // Submitted while this was still self-paced, before the instructor
+      // activated q2 as a live question below.
+      activeQuestionRunRevision: null,
       answer: {
         type: 'free-response',
         text: 'Earlier answer',
@@ -2925,6 +3431,7 @@ void test('activate-question route can activate all questions with a shared coun
     activeQuestionIds?: string[]
     activeQuestions?: Array<{ id: string }>
     activeQuestionRunStartedAt?: number | null
+    activeQuestionRunRevision?: number | null
     activeQuestionDeadlineAt?: number | null
   }
   assert.deepEqual(stateBody.activeQuestionIds, ['q1', 'q2'])
@@ -2939,7 +3446,7 @@ void test('activate-question route can activate all questions with a shared coun
       body: {
         studentId: 'student1',
         questionId: 'q2',
-        activeQuestionRunStartedAt: stateBody.activeQuestionRunStartedAt,
+        activeQuestionRunRevision: stateBody.activeQuestionRunRevision,
         answer: {
           type: 'multiple-choice',
           selectedOptionIds: ['q2_b'],
@@ -3008,6 +3515,7 @@ void test('staged activate-question hides MCQ choices until reveal and then acce
   const storedAfterStagedActivate = await sessions.get(session.id)
   const stagedRunStartedAt = storedAfterStagedActivate?.data.activeQuestionRunStartedAt ?? null
   assert.equal(typeof stagedRunStartedAt, 'number')
+  const stagedRunRevision = (storedAfterStagedActivate?.data.activeQuestionRunRevision as number | null | undefined) ?? null
 
   const hiddenStateRes = createResponse()
   await stateHandler?.({ params: { sessionId: session.id } }, hiddenStateRes)
@@ -3035,7 +3543,7 @@ void test('staged activate-question hides MCQ choices until reveal and then acce
       body: {
         studentId: 'student1',
         questionId: 'q2',
-        activeQuestionRunStartedAt: stagedRunStartedAt,
+        activeQuestionRunRevision: stagedRunRevision,
         answer: {
           type: 'multiple-choice',
           selectedOptionIds: ['q2_b'],
@@ -3106,6 +3614,7 @@ void test('staged activate-question hides MCQ choices until reveal and then acce
       questionId: 'q2',
       studentId: 'student1',
       updatedAt: Date.now() - 2_000,
+      activeQuestionRunRevision: stagedRunRevision,
       answer: {
         type: 'multiple-choice',
         selectedOptionIds: ['q2_b'],
@@ -3124,7 +3633,7 @@ void test('staged activate-question hides MCQ choices until reveal and then acce
       body: {
         studentId: 'student1',
         questionId: 'q2',
-        activeQuestionRunStartedAt: expiredRunStartedAt,
+        activeQuestionRunRevision: stagedRunRevision,
         answer: {
           type: 'multiple-choice',
           selectedOptionIds: ['q2_b'],
@@ -3163,7 +3672,7 @@ void test('staged activate-question hides MCQ choices until reveal and then acce
       body: {
         studentId: 'student1',
         questionId: 'q2',
-        activeQuestionRunStartedAt: expiredRunStartedAt,
+        activeQuestionRunRevision: stagedRunRevision,
         answer: {
           type: 'multiple-choice',
           selectedOptionIds: ['q2_b'],
@@ -3500,7 +4009,7 @@ void test('submit-answer route broadcasts an updated instructor snapshot to inst
 
   assert.equal(activateRes.statusCode, 200)
   const activatedSession = await sessions.get(session.id)
-  const activeQuestionRunStartedAt = activatedSession?.data.activeQuestionRunStartedAt
+  const activeQuestionRunRevision = activatedSession?.data.activeQuestionRunRevision
 
   const submitRes = createResponse()
   await submitHandler?.(
@@ -3510,7 +4019,7 @@ void test('submit-answer route broadcasts an updated instructor snapshot to inst
       body: {
         studentId: 'student1',
         questionId: 'q1',
-        activeQuestionRunStartedAt,
+        activeQuestionRunRevision,
         answer: {
           type: 'free-response',
           text: 'Updated live answer',
@@ -3564,6 +4073,8 @@ void test('submit-answer route updates an existing response when a question is r
       ],
       activeQuestionId: 'q1',
       activeQuestionIds: ['q1'],
+      activeQuestionRunStartedAt: now - 1_000,
+      activeQuestionRunRevision: 1,
       activeQuestionDeadlineAt: null,
       students: {
         student1: { studentId: 'student1', name: 'Ada Lovelace', joinedAt: now - 1_000 },
@@ -3574,6 +4085,7 @@ void test('submit-answer route updates an existing response when a question is r
           questionId: 'q1',
           studentId: 'student1',
           submittedAt: now - 500,
+          activeQuestionRunRevision: 1,
           answer: {
             type: 'free-response',
             text: 'Initial answer',
@@ -3604,7 +4116,7 @@ void test('submit-answer route updates an existing response when a question is r
       body: {
         studentId: 'student1',
         questionId: 'q1',
-        activeQuestionRunStartedAt: null,
+        activeQuestionRunRevision: 1,
         answer: {
           type: 'free-response',
           text: 'Revised answer',
@@ -3964,6 +4476,7 @@ void test('student state includes the viewer response and marks when their share
           questionId: 'q1',
           studentId: 'student1',
           submittedAt,
+          activeQuestionRunRevision: null,
           answer: {
             type: 'free-response',
             text: 'My answer',
@@ -4082,6 +4595,7 @@ void test('annotate-response route updates the student viewer response emoji for
           questionId: 'q1',
           studentId: 'student1',
           submittedAt,
+          activeQuestionRunRevision: null,
           answer: {
             type: 'free-response',
             text: 'My answer',
@@ -4277,6 +4791,130 @@ void test('student state sanitizes malformed stored reveal reactions', async () 
   await sessions.close()
 })
 
+void test('a stored response or draft with a corrupted or absent activeQuestionRunRevision is dropped, not treated as self-paced', async () => {
+  // Copilot review of PR #381 (two rounds): normalizeStoredResponses/
+  // normalizeResponseDrafts used to coerce ANY invalid activeQuestionRunRevision
+  // (a string, NaN, a negative number, or an omitted field) down to `null` —
+  // the same value a genuine self-paced/idle write uses. `activeQuestionRunRevision`
+  // is a required `number | null` field on both `Response` and a stored
+  // draft, and `upsertResponse`/the update-draft handler always write it
+  // explicitly (never omit it); per AGENTS.md rule 17 (no legacy-session
+  // migration — this is a from-scratch field with a single writer, not one
+  // predated by an older shape), a stored value that's neither an explicit
+  // `null` nor a positive safe integer — including the field being entirely
+  // absent — can only be data corruption. Coercing it to `null` made it
+  // indistinguishable from a legitimate self-paced record, letting it
+  // silently match a self-paced/idle session's run identity (the same
+  // hazard fixed for incoming live writes in matchesActiveQuestionRun,
+  // follow-up 5). A corrupted response could then wrongly satisfy the
+  // update-draft handler's confirmedResponseForRun staleness check and block
+  // a genuinely new self-paced edit. Fixed by dropping the entry entirely
+  // whenever its activeQuestionRunRevision fails validation (present-and-invalid
+  // or absent), matching how the same functions already drop entries with
+  // other invalid required fields (missing id/questionId/studentId, invalid
+  // answer).
+  const app = createMockApp()
+  const ws = createMockWs()
+  const sessions = createSessionStore(null)
+  const now = Date.now()
+  const session: SessionRecord = {
+    id: 'resonance-session-corrupted-run-revision',
+    type: 'resonance',
+    created: now,
+    lastActivity: now,
+    data: {
+      instructorPasscode: 'TEACH123',
+      selfPacedMode: true,
+      questions: [
+        { id: 'q1', type: 'free-response', text: 'Explain your reasoning.', order: 0 },
+        { id: 'q2', type: 'free-response', text: 'Explain further.', order: 1 },
+        { id: 'q3', type: 'free-response', text: 'Explain once more.', order: 2 },
+      ],
+      activeQuestionId: null,
+      activeQuestionIds: [],
+      activeQuestionDeadlineAt: null,
+      students: {
+        student1: { studentId: 'student1', name: 'Ada Lovelace', joinedAt: now - 1_000 },
+      },
+      responses: [
+        {
+          id: 'r-corrupt',
+          questionId: 'q1',
+          studentId: 'student1',
+          submittedAt: now - 500,
+          activeQuestionRunRevision: 'not-a-number',
+          editSequence: 5,
+          answer: { type: 'free-response', text: 'Corrupted-revision answer' },
+        },
+        {
+          id: 'r-genuine',
+          questionId: 'q2',
+          studentId: 'student1',
+          submittedAt: now - 500,
+          activeQuestionRunRevision: null,
+          editSequence: 1,
+          answer: { type: 'free-response', text: 'Genuine self-paced answer' },
+        },
+        {
+          id: 'r-absent',
+          questionId: 'q3',
+          studentId: 'student1',
+          submittedAt: now - 500,
+          editSequence: 3,
+          answer: { type: 'free-response', text: 'Absent-revision answer' },
+        },
+      ],
+      responseDrafts: {
+        'q1:student1': {
+          questionId: 'q1',
+          studentId: 'student1',
+          updatedAt: now - 100,
+          activeQuestionRunRevision: -1,
+          editSequence: 2,
+          draftSendSequence: 1,
+          answer: { type: 'free-response', text: 'Corrupted-revision draft' },
+        },
+      },
+      annotations: {},
+      reveals: [],
+      sharedResponseReactions: {},
+      responseOrderOverrides: {},
+      persistentHash: null,
+    },
+  }
+  const studentCookies = issueStudentCookies(session, 'student1')
+  await sessions.set(session.id, session)
+
+  setupResonanceRoutes(app, sessions, ws)
+
+  const stateHandler = app.handlers.get['/api/resonance/:sessionId/state']
+  assert.equal(typeof stateHandler, 'function')
+
+  const res = createResponse()
+  await stateHandler?.(
+    {
+      params: { sessionId: session.id },
+      query: { studentId: 'student1' },
+      cookies: studentCookies,
+    },
+    res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  const body = res.body as {
+    submittedAnswers?: Record<string, { text?: string }>
+    submittedResponseEditSequences?: Record<string, number>
+    draftAnswers?: Record<string, { text?: string }>
+  }
+  assert.equal(body.submittedAnswers?.q1, undefined, 'the corrupted-revision response must not surface')
+  assert.equal(body.submittedResponseEditSequences?.q1, undefined)
+  assert.equal(body.submittedAnswers?.q2?.text, 'Genuine self-paced answer', 'the genuine self-paced response must still surface')
+  assert.equal(body.submittedAnswers?.q3, undefined, 'the absent-revision response must not surface')
+  assert.equal(body.draftAnswers?.q1, undefined, 'the corrupted-revision draft must not surface')
+
+  await sessions.close()
+})
+
 void test('student state includes reviewed responses for annotated answers that were not shared publicly', async () => {
   const app = createMockApp()
   const ws = createMockWs()
@@ -4309,6 +4947,7 @@ void test('student state includes reviewed responses for annotated answers that 
           questionId: 'q1',
           studentId: 'student1',
           submittedAt: now - 500,
+          activeQuestionRunRevision: null,
           answer: {
             type: 'free-response',
             text: 'My answer',
@@ -4398,6 +5037,8 @@ void test('student state hides reviewed responses for annotated answers when the
           questionId: 'q1',
           studentId: 'student1',
           submittedAt: now - 500,
+          // Submitted before this reactivation.
+          activeQuestionRunRevision: null,
           answer: {
             type: 'free-response',
             text: 'My answer',
@@ -4531,6 +5172,92 @@ void test('student state reports each confirmed response\'s editSequence, so a r
     submittedResponseEditSequences?: Record<string, number>
   }
   assert.equal(body.submittedResponseEditSequences?.q1, 2)
+
+  await sessions.close()
+})
+
+void test('student state reports each draft\'s draftSendSequence, so a reloaded client can seed its own send counter past it', async () => {
+  // Regression test (Copilot review of PR #381): the client's own
+  // draftSendSequence counter is component-local and restarts at 0 on a
+  // page reload, while the server retains whatever value was already
+  // stored on the draft. Without exposing that stored value back to the
+  // client, its first post-reload send (even a plain, non-revisit edit —
+  // same editSequence as what's already stored) would carry a lower
+  // draftSendSequence than the server already has, and the update-draft
+  // ordering guard would reject it as stale, silently dropping the edit.
+  const app = createMockApp()
+  const ws = createMockWs()
+  const sessions = createSessionStore(null)
+  const now = Date.now()
+  const session: SessionRecord = {
+    id: 'resonance-session-reload-draft-send-sequence',
+    type: 'resonance',
+    created: now,
+    lastActivity: now,
+    data: {
+      instructorPasscode: 'TEACH123',
+      questions: [
+        {
+          id: 'q1',
+          type: 'free-response',
+          text: 'Explain your reasoning.',
+          order: 0,
+        },
+      ],
+      activeQuestionId: 'q1',
+      activeQuestionIds: ['q1'],
+      activeQuestionRunStartedAt: now - 5_000,
+      activeQuestionRunRevision: 1,
+      activeQuestionDeadlineAt: null,
+      students: {
+        student1: { studentId: 'student1', name: 'Ada Lovelace', joinedAt: now - 1_000 },
+      },
+      responses: [],
+      responseDrafts: {
+        'q1:student1': {
+          questionId: 'q1',
+          studentId: 'student1',
+          updatedAt: now - 200,
+          activeQuestionRunRevision: 1,
+          editSequence: 1,
+          draftSendSequence: 7,
+          answer: { type: 'free-response', text: 'Typed before the reload' },
+        },
+      },
+      annotations: {},
+      reveals: [],
+      sharedResponseReactions: {},
+      responseOrderOverrides: {},
+      persistentHash: null,
+    },
+  }
+  const studentCookies = issueStudentCookies(session, 'student1')
+  await sessions.set(session.id, session)
+
+  setupResonanceRoutes(app, sessions, ws)
+
+  const stateHandler = app.handlers.get['/api/resonance/:sessionId/state']
+  assert.equal(typeof stateHandler, 'function')
+
+  const res = createResponse()
+  await stateHandler?.(
+    {
+      params: { sessionId: session.id },
+      query: {
+        studentId: 'student1',
+      },
+      cookies: studentCookies,
+    },
+    res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  const body = res.body as {
+    draftAnswers?: Record<string, unknown>
+    draftSendSequences?: Record<string, number>
+  }
+  assert.deepEqual(body.draftAnswers?.q1, { type: 'free-response', text: 'Typed before the reload' })
+  assert.equal(body.draftSendSequences?.q1, 7)
 
   await sessions.close()
 })

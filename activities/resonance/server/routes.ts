@@ -32,7 +32,7 @@ import type {
   Student,
 } from '../shared/types.js'
 import { isValidStudentReactionEmoji } from '../shared/emojiSet.js'
-import { getCorrectOptionIds, getMcqSelectionMode } from '../shared/mcq.js'
+import { getCorrectOptionIds, getMcqSelectionMode, isSameAnswer } from '../shared/mcq.js'
 import { normalizePresentationMode, validateAnswerPayload, validateQuestion, validateQuestionSet, validateStudentRegistration } from '../shared/validation.js'
 import { decryptQuestions, encryptQuestions, MAX_ENCODED_PAYLOAD_CHARS } from './questionCrypto.js'
 import {
@@ -172,8 +172,14 @@ interface ResonanceSessionData extends Record<string, unknown> {
     questionId: string
     studentId: string
     updatedAt: number
-    activeQuestionRunRevision?: number | null
+    activeQuestionRunRevision: number | null
     editSequence?: number
+    // Client-assigned, monotonically increasing across every send attempt
+    // (not just revisits, unlike editSequence). Orders two same-editSequence
+    // draft writes for the same question by actual client send order,
+    // instead of by server-side write-completion timing — see the ordering
+    // guard in the resonance:update-draft handler.
+    draftSendSequence?: number
     answer: Response['answer']
   }>
   annotations: Record<string, InstructorAnnotation>
@@ -513,23 +519,27 @@ function getQuestionAnswerability(sessionData: ResonanceSessionData, questionId:
     : { ok: false, reason: 'choices-hidden' }
 }
 
-function matchesActiveQuestionRun(
-  sessionData: ResonanceSessionData,
-  revision: unknown,
-  legacyStartedAt: unknown,
-): boolean {
-  if (typeof revision === 'number' && Number.isSafeInteger(revision)) {
-    return revision === sessionData.activeQuestionRunRevision
+/**
+ * `activeQuestionRunRevision` is the sole run identity: it's always a real
+ * number whenever a run is active (see `nextActiveQuestionRunRevision`) and
+ * `null` only for self-paced/idle state. The client always sends one of
+ * those two shapes explicitly (never omits the field or sends a malformed
+ * value) — so `null` matches self-paced/idle only when sent as literal
+ * `null`, and anything else must be a positive safe integer equal to the
+ * active revision. A missing/string/unsafe value must NOT be normalized to
+ * `null`, or a malformed payload would silently pass as "matches self-paced"
+ * whenever the session happens to be self-paced/idle.
+ */
+function matchesActiveQuestionRun(sessionData: ResonanceSessionData, revision: unknown): boolean {
+  if (revision === null) {
+    return sessionData.activeQuestionRunRevision === null
   }
-  if (
-    revision == null &&
-    legacyStartedAt == null &&
-    sessionData.activeQuestionRunRevision === null &&
-    sessionData.activeQuestionRunStartedAt === null
-  ) {
-    return true
-  }
-  return sessionData.activeQuestionRunRevision === 1 && legacyStartedAt === sessionData.activeQuestionRunStartedAt
+  return (
+    typeof revision === 'number' &&
+    Number.isSafeInteger(revision) &&
+    revision > 0 &&
+    revision === sessionData.activeQuestionRunRevision
+  )
 }
 
 export function resolveAnswerabilityErrorMessage(reason: 'expired' | 'choices-hidden' | 'inactive'): string {
@@ -632,14 +642,7 @@ function draftMatchesCurrentRun(
   sessionData: ResonanceSessionData,
   draft: ResonanceSessionData['responseDrafts'][string],
 ): boolean {
-  const runStartedAt = sessionData.activeQuestionRunStartedAt
-  const runRevision = sessionData.activeQuestionRunRevision
-  return draft.activeQuestionRunRevision !== undefined
-    ? draft.activeQuestionRunRevision === runRevision
-    // Pre-revision drafts remain visible for legacy/self-paced snapshots that
-    // have no run revision. Once a numbered run exists, use the migration
-    // timestamp guard so an older unversioned draft cannot cross into it.
-    : runRevision === null || (runRevision === 1 && runStartedAt !== null && draft.updatedAt >= runStartedAt)
+  return draft.activeQuestionRunRevision === sessionData.activeQuestionRunRevision
 }
 
 function finalizeActiveQuestionDrafts(
@@ -731,6 +734,28 @@ function resolveEditSequence(value: unknown): number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : 0
 }
 
+/**
+ * Parses a *stored* `activeQuestionRunRevision` field (a response or draft
+ * read back from the session store), distinguishing a genuine self-paced/
+ * idle identity (an explicit `null`) from an invalid one — anything else
+ * that isn't a positive safe integer, including the field being absent.
+ * `activeQuestionRunRevision` is a required `number | null` field on both
+ * `Response` and a stored draft, and `upsertResponse`/the update-draft
+ * handler always write it explicitly; per AGENTS.md rule 17 (no
+ * legacy-session migration needed — this is a from-scratch field with a
+ * single writer, not one predated by an older shape), a stored entry
+ * missing it is not a legacy record to tolerate, it's corrupt. Returns
+ * `undefined` for an invalid value so the caller can drop the entry:
+ * silently normalizing it to `null` would make it indistinguishable from a
+ * genuine self-paced write and let it incorrectly match a self-paced/idle
+ * session (the same hazard `matchesActiveQuestionRun` guards against for
+ * incoming live writes).
+ */
+function resolveStoredActiveQuestionRunRevision(value: unknown): number | null | undefined {
+  if (value === null) return null
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : undefined
+}
+
 export function resolveSocketStudentId(payloadStudentId: unknown, clientStudentId: string | null | undefined): string | null {
   const studentId = clientStudentId ?? null
   if (!studentId || (typeof payloadStudentId === 'string' && payloadStudentId !== studentId)) {
@@ -775,16 +800,10 @@ function normalizeStoredResponses(
         ? Math.round(rawResponse.submittedAt)
         : 0
     const answer = normalizeDraftAnswerPayload(rawResponse.answer, questionsById, questionId)
-    const activeQuestionRunRevision = rawResponse.activeQuestionRunRevision === null
-      ? null
-      : typeof rawResponse.activeQuestionRunRevision === 'number' &&
-          Number.isSafeInteger(rawResponse.activeQuestionRunRevision) &&
-          rawResponse.activeQuestionRunRevision > 0
-        ? rawResponse.activeQuestionRunRevision
-        : undefined
+    const activeQuestionRunRevision = resolveStoredActiveQuestionRunRevision(rawResponse.activeQuestionRunRevision)
     const editSequence = resolveEditSequence(rawResponse.editSequence)
 
-    if (!id || !questionId || !studentId || submittedAt <= 0 || answer === null) {
+    if (!id || !questionId || !studentId || submittedAt <= 0 || answer === null || activeQuestionRunRevision === undefined) {
       continue
     }
 
@@ -793,7 +812,7 @@ function normalizeStoredResponses(
       questionId,
       studentId,
       submittedAt,
-      ...(activeQuestionRunRevision !== undefined ? { activeQuestionRunRevision } : {}),
+      activeQuestionRunRevision,
       editSequence,
       answer,
     })
@@ -823,17 +842,12 @@ function normalizeResponseDrafts(
     const updatedAt = typeof rawDraft.updatedAt === 'number' && Number.isFinite(rawDraft.updatedAt)
       ? Math.round(rawDraft.updatedAt)
       : 0
-    const activeQuestionRunRevision = rawDraft.activeQuestionRunRevision === null
-      ? null
-      : typeof rawDraft.activeQuestionRunRevision === 'number' &&
-          Number.isSafeInteger(rawDraft.activeQuestionRunRevision) &&
-          rawDraft.activeQuestionRunRevision > 0
-        ? rawDraft.activeQuestionRunRevision
-        : undefined
+    const activeQuestionRunRevision = resolveStoredActiveQuestionRunRevision(rawDraft.activeQuestionRunRevision)
     const answer = normalizeDraftAnswerPayload(rawDraft.answer, questionsById, questionId)
     const editSequence = resolveEditSequence(rawDraft.editSequence)
+    const draftSendSequence = resolveEditSequence(rawDraft.draftSendSequence)
 
-    if (!questionId || !studentId || updatedAt <= 0 || answer === null) {
+    if (!questionId || !studentId || updatedAt <= 0 || answer === null || activeQuestionRunRevision === undefined) {
       continue
     }
 
@@ -841,8 +855,9 @@ function normalizeResponseDrafts(
       questionId,
       studentId,
       updatedAt,
-      ...(activeQuestionRunRevision !== undefined ? { activeQuestionRunRevision } : {}),
+      activeQuestionRunRevision,
       editSequence,
+      draftSendSequence,
       answer,
     }
   }
@@ -1301,6 +1316,31 @@ function buildStudentSnapshotWithMode(
             .filter((response) => response.studentId === viewerStudentId)
             .map((response) => [response.questionId, response.editSequence ?? 0] satisfies [string, number]),
         )
+  // The viewer's own unsubmitted draft for each active question, so a
+  // remounted QuestionView (or a fresh page load) can recover an in-progress
+  // edit from the server instead of relying only on locally-cached state.
+  const viewerActiveDrafts =
+    viewerStudentId === null
+      ? []
+      : Object.values(session.data.responseDrafts).filter((draft) =>
+          draft.studentId === viewerStudentId &&
+          fallbackQuestionIds.includes(draft.questionId) &&
+          draftMatchesCurrentRun(session.data, draft),
+        )
+  const draftAnswers = Object.fromEntries(
+    viewerActiveDrafts.map((draft) => [draft.questionId, draft.answer] satisfies [string, Response['answer']]),
+  )
+  // The draftSendSequence each draft above was stored under (parallels
+  // submittedResponseEditSequences below). A client that reloads mid-edit has
+  // no local memory of how many times it already sent this question's draft
+  // — its own send counter restarts at 0 — so without this it would stamp
+  // its first post-reload send with a draftSendSequence lower than what's
+  // already stored, and the update-draft handler's ordering guard would
+  // reject that genuinely newer edit as stale. Clients ratchet their local
+  // counter up to at least this value on load instead of assuming 0.
+  const draftSendSequences = Object.fromEntries(
+    viewerActiveDrafts.map((draft) => [draft.questionId, draft.draftSendSequence ?? 0] satisfies [string, number]),
+  )
   const reviewedResponses =
     viewerStudentId === null
       ? []
@@ -1342,6 +1382,8 @@ function buildStudentSnapshotWithMode(
     ],
     reviewedResponses,
     submittedAnswers,
+    draftAnswers,
+    draftSendSequences,
     submittedResponseEditSequences,
     revealedQuestions,
   }
@@ -1355,9 +1397,7 @@ function isStaleActiveResponse(
   return (
     (activeQuestionIdSet?.has(response.questionId) ?? sessionData.activeQuestionIds.includes(response.questionId)) &&
     sessionData.activeQuestionRunRevision !== null &&
-    (response.activeQuestionRunRevision !== undefined
-      ? response.activeQuestionRunRevision !== sessionData.activeQuestionRunRevision
-      : sessionData.activeQuestionRunStartedAt !== null && response.submittedAt < sessionData.activeQuestionRunStartedAt)
+    response.activeQuestionRunRevision !== sessionData.activeQuestionRunRevision
   )
 }
 
@@ -2070,7 +2110,7 @@ export default function setupResonanceRoutes(
       res.status(403).json({ error: 'studentId does not match authenticated participant' })
       return
     }
-    if (!matchesActiveQuestionRun(session.data, body.activeQuestionRunRevision, body.activeQuestionRunStartedAt)) {
+    if (!matchesActiveQuestionRun(session.data, body.activeQuestionRunRevision)) {
       res.status(409).json({ error: 'question run changed' })
       return
     }
@@ -3045,11 +3085,7 @@ export default function setupResonanceRoutes(
       case 'resonance:submit-answer': {
         const studentId = resolveSocketStudentId(payload.studentId, clientStudentId)
         if (!studentId || !session.data.students[studentId]) return
-        if (!matchesActiveQuestionRun(
-          session.data,
-          payload.activeQuestionRunRevision,
-          payload.activeQuestionRunStartedAt,
-        )) return
+        if (!matchesActiveQuestionRun(session.data, payload.activeQuestionRunRevision)) return
         const requestedQuestionId = typeof payload.questionId === 'string' ? payload.questionId : null
         const selfPacedMode = await resolveSelfPacedMode(session, sessions)
         const availableQuestionIds = resolveStudentAvailableQuestionIds(session, selfPacedMode)
@@ -3092,11 +3128,7 @@ export default function setupResonanceRoutes(
       case 'resonance:update-draft': {
         const studentId = resolveSocketStudentId(payload.studentId, clientStudentId)
         if (!studentId || !session.data.students[studentId]) return
-        if (!matchesActiveQuestionRun(
-          session.data,
-          payload.activeQuestionRunRevision,
-          payload.activeQuestionRunStartedAt,
-        )) return
+        if (!matchesActiveQuestionRun(session.data, payload.activeQuestionRunRevision)) return
         const selfPacedMode = await resolveSelfPacedMode(session, sessions)
         // This runs after the final await in this handler. A deadline can pass
         // while resolving an embedded session mode, so validate and timestamp
@@ -3123,6 +3155,22 @@ export default function setupResonanceRoutes(
           ? payload.draftId
           : null
         const editSequence = resolveEditSequence(payload.editSequence)
+        // Unlike editSequence (whose legitimate first value is 0, before any
+        // revisit bump), draftSendSequence is always >= 1 the first time our
+        // own client ever sends one (it pre-increments before every send —
+        // see ResonanceStudent.tsx). resolveEditSequence's zero-fallback
+        // exists only to normalize historical stored drafts written before
+        // this field existed; silently coercing a missing/invalid value on
+        // an incoming write would let a malformed payload masquerade as a
+        // legitimate "first send" and be ordered ahead of writes that
+        // actually are the first send, defeating the tiebreaker below.
+        const rawDraftSendSequence = payload.draftSendSequence
+        if (
+          typeof rawDraftSendSequence !== 'number' ||
+          !Number.isSafeInteger(rawDraftSendSequence) ||
+          rawDraftSendSequence <= 0
+        ) return
+        const draftSendSequence = rawDraftSendSequence
 
         // A draft sent just before a submission can arrive here after the
         // submission already recorded a response and cleared the draft (the
@@ -3149,7 +3197,87 @@ export default function setupResonanceRoutes(
         }
 
         const draftKey = buildDraftKey(questionId, studentId)
-        if (payload.answer === null) {
+
+        // Each `resonance:update-draft` message is handled by its own async
+        // function starting from a fresh `loadResonanceSession` read, so two
+        // overlapping sends for the same question (a legitimate client-side
+        // retry after its own ack timeout, racing the still-outstanding
+        // original attempt) can finish processing out of the order they were
+        // sent in. Without this guard, a slower older write landing after a
+        // faster newer one would silently clobber it. Ordered first by
+        // editSequence (a revisit's bump must always win over anything from
+        // before it), then by draftSendSequence — a counter the *client*
+        // stamps on every send attempt — as a tiebreaker within the same
+        // editSequence. This handler's own resumption timestamp was tried
+        // first and rejected: it reflects when this handler resumed after
+        // its `await resolveSelfPacedMode(...)` above, not when the client
+        // actually sent the message, so a genuinely older send that happens
+        // to resume later could otherwise still win. draftSendSequence has
+        // no such ambiguity since the client assigns it once, at send time.
+        // Mirrors the confirmedResponseForRun staleness check above, and for
+        // the same reason acks anyway so a superseded retry doesn't get
+        // reported to its client as a failed save.
+        //
+        // What this guard does NOT close: two handlers whose own
+        // `loadResonanceSession` reads both complete before *either* has
+        // written yet would both see the same prior draft, both pass this
+        // check, and then whichever `sessions.set()` call physically
+        // executes last wins outright — this check can't see a write that
+        // hasn't happened yet. Closing that fully requires routing this
+        // write through `sessions.updateAtomic` — but every other writer
+        // touching a resonance session (submit-answer, deadline expiry,
+        // instructor actions, ...) still uses a plain, unconditional
+        // `sessions.set()`, and converting only this one handler would not
+        // actually close the race (a plain `set()` elsewhere can still land
+        // between an `updateAtomic` read and its write and get silently
+        // overwritten — see the "mixed writers" note in
+        // `server/core/sessions.ts`). That full migration is the
+        // project-wide atomic-session-mutation effort tracked in #313 and is
+        // out of scope here; this guard narrows the window (closing the
+        // sequential-completion case entirely) without claiming to close it.
+        const existingDraft = session.data.responseDrafts[draftKey]
+        const existingDraftEditSequence = existingDraft?.editSequence ?? 0
+        const existingDraftSendSequence = existingDraft?.draftSendSequence ?? 0
+        const isStaleDraftWrite = existingDraft !== undefined &&
+          existingDraft.activeQuestionRunRevision === session.data.activeQuestionRunRevision &&
+          (
+            editSequence < existingDraftEditSequence ||
+            (editSequence === existingDraftEditSequence && draftSendSequence < existingDraftSendSequence)
+          )
+
+        // Resolved ahead of the staleness check below so a rejected write's
+        // content can be compared against what's actually stored, not just
+        // its ordering. `null` here always means "clear the draft."
+        const intendedAnswer = payload.answer === null ? null : validateAnswerPayload(payload.answer, question)
+        if (payload.answer !== null && !intendedAnswer) return
+
+        if (isStaleDraftWrite) {
+          // draftSendSequence only totally orders sends from a single
+          // ResonanceStudent mount (see its own docstring above and in
+          // ResonanceStudent.tsx) — a per-mount counter carries no meaning
+          // across two concurrent mounts for the same student, e.g. the same
+          // student open in two browser tabs. A lower sequence there does
+          // not imply older, subsumed content the way it does for a retry
+          // from the *same* mount. Acking unconditionally would tell the
+          // losing tab its (actually-discarded) edit was persisted, and its
+          // own unconfirmed-draft tracking would stop retrying it — silent
+          // data loss. Only ack "saved" when the rejected write's content
+          // already matches what's actually stored (the common single-tab
+          // case this guard was built for: a superseded retry of already-
+          // landed content); otherwise stay silent so the sender's own
+          // retry loop keeps resending its current value until a send
+          // actually lands. See "a stale draft write from a second
+          // concurrent tab is not acknowledged as saved when its content
+          // was actually discarded".
+          const alreadyMatchesStored = existingDraft !== undefined &&
+            isSameAnswer(existingDraft.answer, intendedAnswer)
+          if (draftId !== null && alreadyMatchesStored) {
+            sendToSocket(socket, 'resonance:draft-saved', { draftId }, sessionId)
+          }
+          return
+        }
+
+        if (intendedAnswer === null) {
           if (draftKey in session.data.responseDrafts) {
             delete session.data.responseDrafts[draftKey]
             await sessions.set(sessionId, session)
@@ -3163,16 +3291,14 @@ export default function setupResonanceRoutes(
           return
         }
 
-        const answer = validateAnswerPayload(payload.answer, question)
-        if (!answer) return
-
         session.data.responseDrafts[draftKey] = {
           questionId,
           studentId,
           updatedAt: draftUpdatedAt,
           activeQuestionRunRevision: session.data.activeQuestionRunRevision,
           editSequence,
-          answer,
+          draftSendSequence,
+          answer: intendedAnswer,
         }
         await sessions.set(sessionId, session)
         broadcastToRole('resonance:instructor-state', buildInstructorSnapshot(session), sessionId, true)

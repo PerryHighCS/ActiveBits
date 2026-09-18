@@ -800,9 +800,13 @@ void test('saveDraft resolves false instead of rejecting when the socket throws 
   }
 })
 
-void test('saveDraft retries a failed send after reconnecting within the same active run', async () => {
+void test('saveDraft settles pending saves immediately when the socket closes, instead of waiting for the ack timeout', async () => {
+  // A caller (ResonanceStudent's draft retry loop) treats a question as
+  // in-flight until this promise settles, so leaving it pending until
+  // DRAFT_SAVE_ACK_TIMEOUT_MS elapses would delay that question's next
+  // retry attempt on the new connection by up to that full timeout.
   const restore = installWsTestEnvironment()
-  const { act, render, waitFor } = await import('@testing-library/react')
+  const { act, render } = await import('@testing-library/react')
 
   try {
     const captured: { saveDraft: ((payload: Record<string, unknown>) => Promise<boolean>) | null } = { saveDraft: null }
@@ -815,48 +819,113 @@ void test('saveDraft retries a failed send after reconnecting within the same ac
     let rendered!: ReturnType<typeof render>
     await act(async () => {
       rendered = render(React.createElement(Probe))
-      await Promise.resolve()
     })
-    await waitFor(() => assert.equal(FakeWebSocket.instances.length, 1))
-    const firstSocket = FakeWebSocket.instances[0]!
-    firstSocket.emitMessage({
-      type: 'resonance:session-state',
-      payload: {
-        sessionId: 'session-1',
-        activeQuestionIds: ['q1'],
-        activeQuestionRunRevision: 3,
-        activeQuestionDeadlineAt: Date.now() + 10_000,
-      },
+    const socket = FakeWebSocket.instances[0]!
+
+    console.info('[TEST] a pending saveDraft is expected to settle false as soon as the socket closes, well before the 2s ack timeout')
+    let result: boolean | undefined
+    const pending = captured.saveDraft!({ questionId: 'q1', answer: null }).then((value) => {
+      result = value
     })
-    firstSocket.send = () => {
-      throw new Error('socket closed mid-send')
+    // A sentinel that resolves first only if `pending` is still unsettled
+    // after a short grace period — proves the close, not the ack timeout,
+    // is what settled it.
+    let timedOut = false
+    const sentinel = new Promise<void>((resolve) => {
+      setTimeout(() => {
+        timedOut = true
+        resolve()
+      }, 300)
+    })
+
+    await act(async () => {
+      socket.onclose?.({})
+      await Promise.race([pending, sentinel])
+    })
+
+    assert.equal(timedOut, false, 'saveDraft should have settled well before the 300ms sentinel, not waited for the 2s ack timeout')
+    assert.equal(result, false)
+
+    await act(async () => {
+      rendered.unmount()
+    })
+  } finally {
+    restore()
+  }
+})
+
+void test('fetchSnapshot resolves false when its response is rejected as stale, not applied', async () => {
+  // CodeRabbit review of PR #381: fetchSnapshot (exposed as `refresh`) used
+  // to return `true` unconditionally whenever the HTTP request itself
+  // succeeded, regardless of whether selectStudentSessionSnapshot actually
+  // accepted the response as the new current snapshot. A caller relying on
+  // that return value to mean "the server's current state was retrieved"
+  // (deadline reconciliation in ResonanceStudent.tsx) would be misled by a
+  // technically-200-OK response that shouldApplyStudentSessionSnapshot
+  // rejected as older/out-of-order than what a WebSocket push already
+  // delivered — treating a rejected, no-op fetch as a successful refresh.
+  const restore = installWsTestEnvironment()
+  const { act, render } = await import('@testing-library/react')
+
+  try {
+    const captured: {
+      snapshot: StudentSessionSnapshot | null
+      refresh: (() => Promise<boolean>) | null
+    } = { snapshot: null, refresh: null }
+    function Probe({ sessionId, studentId }: { sessionId: string; studentId: string }) {
+      const { snapshot, refresh } = useResonanceSession(sessionId, studentId)
+      captured.snapshot = snapshot
+      captured.refresh = refresh
+      return null
     }
 
-    console.info('[TEST] a failed draft send is expected to retry after the socket reconnects')
+    let stateResponse: Record<string, unknown> = {
+      sessionId: 'session-1',
+      activeQuestionIds: ['q1'],
+      activeQuestionRunStartedAt: 3_000,
+    }
+    ;(globalThis as { fetch?: typeof fetch }).fetch = (async (url: string) => {
+      if (typeof url === 'string' && url.includes('/state')) {
+        return { ok: true, json: async () => stateResponse } as Response
+      }
+      throw new Error(`Unexpected fetch: ${url}`)
+    }) as typeof fetch
+
+    let rendered!: ReturnType<typeof render>
     await act(async () => {
-      assert.equal(await captured.saveDraft?.({
-        studentId: 'student-1',
-        questionId: 'q1',
-        activeQuestionRunRevision: 3,
-        answer: { type: 'free-response', text: 'Retry me' },
-      }), false)
+      rendered = render(React.createElement(Probe, { sessionId: 'session-1', studentId: 'student-1' }))
+      await Promise.resolve()
+    })
+    assert.equal(FakeWebSocket.instances.length, 1)
+    assert.equal(captured.snapshot?.activeQuestionRunStartedAt, 3_000, 'expected the initial mount fetch to be accepted (nothing observed yet)')
+
+    console.info('[TEST] a WebSocket push delivers a newer run than the mount fetch saw')
+    const socket = FakeWebSocket.instances[0]!
+    await act(async () => {
+      socket.emitMessage({
+        type: 'resonance:session-state',
+        payload: { sessionId: 'session-1', activeQuestionIds: ['q1'], activeQuestionRunStartedAt: 5_000 },
+      })
+    })
+    assert.equal(captured.snapshot?.activeQuestionRunStartedAt, 5_000)
+
+    console.info('[TEST] refresh() now returns a technically-successful but stale (older) response')
+    stateResponse = { sessionId: 'session-1', activeQuestionIds: ['q1'], activeQuestionRunStartedAt: 1_000 }
+    let refreshResult: boolean | undefined
+    await act(async () => {
+      refreshResult = await captured.refresh!()
     })
 
-    firstSocket.onclose?.({})
-    await new Promise((resolve) => setTimeout(resolve, 1_100))
-    await waitFor(() => assert.equal(FakeWebSocket.instances.length, 2))
-    const secondSocket = FakeWebSocket.instances[1]!
-    const sent: unknown[] = []
-    secondSocket.send = (message?: unknown) => { sent.push(message) }
-    secondSocket.onopen?.()
+    assert.equal(refreshResult, false, 'a stale, rejected response must not resolve true')
+    assert.equal(
+      captured.snapshot?.activeQuestionRunStartedAt,
+      5_000,
+      'the rejected stale response must not have overwritten the newer WebSocket-delivered snapshot',
+    )
 
-    await waitFor(() => assert.equal(sent.length, 1))
-    const sentMessage = JSON.parse(String(sent[0])) as { payload?: { draftId?: string; answer?: { text?: string } } }
-    assert.equal(sentMessage.payload?.answer?.text, 'Retry me')
-    assert.equal(typeof sentMessage.payload?.draftId, 'string')
-    secondSocket.emitMessage({ type: 'resonance:draft-saved', payload: { draftId: sentMessage.payload?.draftId } })
-
-    await act(async () => { rendered.unmount() })
+    await act(async () => {
+      rendered.unmount()
+    })
   } finally {
     restore()
   }

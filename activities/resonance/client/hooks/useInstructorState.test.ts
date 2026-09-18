@@ -181,6 +181,7 @@ void test('normalizeInstructorStateSnapshot prefers explicit working progress ov
     sessionId: 'session-1',
     responses: [{
       id: 'response-1', questionId: 'q1', studentId: 'student-1', studentName: 'Ada', submittedAt: 1_000,
+      activeQuestionRunRevision: null,
       answer: { type: 'free-response', text: 'Original submitted answer' },
     }],
     progress: [{

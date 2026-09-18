@@ -52,7 +52,7 @@ export interface Response {
   questionId: string
   studentId: string
   submittedAt: number
-  activeQuestionRunRevision?: number | null
+  activeQuestionRunRevision: number | null
   /**
    * Client-assigned monotonic counter for this question/run's editing session,
    * bumped each time the student starts a fresh edit (initial answer, or
@@ -156,6 +156,25 @@ export interface StudentSessionSnapshot {
   reveals: QuestionReveal[]
   reviewedResponses: ReviewedResponse[]
   submittedAnswers: Record<string, AnswerPayload>
+  /**
+   * The viewer's own saved-but-not-yet-submitted answer for each active
+   * question, as currently held by the server. Lets a remounted QuestionView
+   * (or a freshly reloaded page) recover an in-progress edit from the server
+   * instead of relying solely on locally-cached, possibly-lost state.
+   */
+  draftAnswers: Record<string, AnswerPayload>
+  /**
+   * The `draftSendSequence` recorded on each draft in `draftAnswers` — the
+   * client-assigned counter the server's update-draft ordering guard compares
+   * same-editSequence writes by. A client that reloads mid-edit has no local
+   * memory of how many times it already sent this question's draft (its own
+   * counter restarts at 0), so without this it would stamp its first
+   * post-reload send with a value lower than what's already stored, and the
+   * server would reject that genuinely newer edit as stale. Clients ratchet
+   * their local counter up to at least this value on load instead of
+   * assuming 0.
+   */
+  draftSendSequences: Record<string, number>
   /**
    * The `editSequence` recorded on each confirmed response in `submittedAnswers`.
    * A client that reloads mid-run has no local edit-sequence bookkeeping (that
