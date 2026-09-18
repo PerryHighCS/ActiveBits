@@ -164,6 +164,18 @@ export interface StudentSessionSnapshot {
    */
   draftAnswers: Record<string, AnswerPayload>
   /**
+   * The `draftSendSequence` recorded on each draft in `draftAnswers` — the
+   * client-assigned counter the server's update-draft ordering guard compares
+   * same-editSequence writes by. A client that reloads mid-edit has no local
+   * memory of how many times it already sent this question's draft (its own
+   * counter restarts at 0), so without this it would stamp its first
+   * post-reload send with a value lower than what's already stored, and the
+   * server would reject that genuinely newer edit as stale. Clients ratchet
+   * their local counter up to at least this value on load instead of
+   * assuming 0.
+   */
+  draftSendSequences: Record<string, number>
+  /**
    * The `editSequence` recorded on each confirmed response in `submittedAnswers`.
    * A client that reloads mid-run has no local edit-sequence bookkeeping (that
    * counter lives only in memory), so without this it would default a

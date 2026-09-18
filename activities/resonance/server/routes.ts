@@ -1295,18 +1295,28 @@ function buildStudentSnapshotWithMode(
   // The viewer's own unsubmitted draft for each active question, so a
   // remounted QuestionView (or a fresh page load) can recover an in-progress
   // edit from the server instead of relying only on locally-cached state.
-  const draftAnswers =
+  const viewerActiveDrafts =
     viewerStudentId === null
-      ? {}
-      : Object.fromEntries(
-          Object.values(session.data.responseDrafts)
-            .filter((draft) =>
-              draft.studentId === viewerStudentId &&
-              fallbackQuestionIds.includes(draft.questionId) &&
-              draftMatchesCurrentRun(session.data, draft),
-            )
-            .map((draft) => [draft.questionId, draft.answer] satisfies [string, Response['answer']]),
+      ? []
+      : Object.values(session.data.responseDrafts).filter((draft) =>
+          draft.studentId === viewerStudentId &&
+          fallbackQuestionIds.includes(draft.questionId) &&
+          draftMatchesCurrentRun(session.data, draft),
         )
+  const draftAnswers = Object.fromEntries(
+    viewerActiveDrafts.map((draft) => [draft.questionId, draft.answer] satisfies [string, Response['answer']]),
+  )
+  // The draftSendSequence each draft above was stored under (parallels
+  // submittedResponseEditSequences below). A client that reloads mid-edit has
+  // no local memory of how many times it already sent this question's draft
+  // — its own send counter restarts at 0 — so without this it would stamp
+  // its first post-reload send with a draftSendSequence lower than what's
+  // already stored, and the update-draft handler's ordering guard would
+  // reject that genuinely newer edit as stale. Clients ratchet their local
+  // counter up to at least this value on load instead of assuming 0.
+  const draftSendSequences = Object.fromEntries(
+    viewerActiveDrafts.map((draft) => [draft.questionId, draft.draftSendSequence ?? 0] satisfies [string, number]),
+  )
   const reviewedResponses =
     viewerStudentId === null
       ? []
@@ -1349,6 +1359,7 @@ function buildStudentSnapshotWithMode(
     reviewedResponses,
     submittedAnswers,
     draftAnswers,
+    draftSendSequences,
     submittedResponseEditSequences,
     revealedQuestions,
   }

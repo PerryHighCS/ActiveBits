@@ -417,6 +417,14 @@ export function normalizeStudentSessionSnapshot(
       isRecord(data.draftAnswers)
         ? (data.draftAnswers as StudentSessionSnapshot['draftAnswers'])
         : {},
+    draftSendSequences: isRecord(data.draftSendSequences)
+      ? Object.fromEntries(
+          Object.entries(data.draftSendSequences).filter(
+            (entry): entry is [string, number] =>
+              typeof entry[1] === 'number' && Number.isSafeInteger(entry[1]) && entry[1] >= 0,
+          ),
+        )
+      : {},
     submittedResponseEditSequences: isRecord(data.submittedResponseEditSequences)
       ? Object.fromEntries(
           Object.entries(data.submittedResponseEditSequences).filter(

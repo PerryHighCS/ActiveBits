@@ -4712,3 +4712,89 @@ void test('student state reports each confirmed response\'s editSequence, so a r
 
   await sessions.close()
 })
+
+void test('student state reports each draft\'s draftSendSequence, so a reloaded client can seed its own send counter past it', async () => {
+  // Regression test (Copilot review of PR #381): the client's own
+  // draftSendSequence counter is component-local and restarts at 0 on a
+  // page reload, while the server retains whatever value was already
+  // stored on the draft. Without exposing that stored value back to the
+  // client, its first post-reload send (even a plain, non-revisit edit —
+  // same editSequence as what's already stored) would carry a lower
+  // draftSendSequence than the server already has, and the update-draft
+  // ordering guard would reject it as stale, silently dropping the edit.
+  const app = createMockApp()
+  const ws = createMockWs()
+  const sessions = createSessionStore(null)
+  const now = Date.now()
+  const session: SessionRecord = {
+    id: 'resonance-session-reload-draft-send-sequence',
+    type: 'resonance',
+    created: now,
+    lastActivity: now,
+    data: {
+      instructorPasscode: 'TEACH123',
+      questions: [
+        {
+          id: 'q1',
+          type: 'free-response',
+          text: 'Explain your reasoning.',
+          order: 0,
+        },
+      ],
+      activeQuestionId: 'q1',
+      activeQuestionIds: ['q1'],
+      activeQuestionRunStartedAt: now - 5_000,
+      activeQuestionRunRevision: 1,
+      activeQuestionDeadlineAt: null,
+      students: {
+        student1: { studentId: 'student1', name: 'Ada Lovelace', joinedAt: now - 1_000 },
+      },
+      responses: [],
+      responseDrafts: {
+        'q1:student1': {
+          questionId: 'q1',
+          studentId: 'student1',
+          updatedAt: now - 200,
+          activeQuestionRunRevision: 1,
+          editSequence: 1,
+          draftSendSequence: 7,
+          answer: { type: 'free-response', text: 'Typed before the reload' },
+        },
+      },
+      annotations: {},
+      reveals: [],
+      sharedResponseReactions: {},
+      responseOrderOverrides: {},
+      persistentHash: null,
+    },
+  }
+  const studentCookies = issueStudentCookies(session, 'student1')
+  await sessions.set(session.id, session)
+
+  setupResonanceRoutes(app, sessions, ws)
+
+  const stateHandler = app.handlers.get['/api/resonance/:sessionId/state']
+  assert.equal(typeof stateHandler, 'function')
+
+  const res = createResponse()
+  await stateHandler?.(
+    {
+      params: { sessionId: session.id },
+      query: {
+        studentId: 'student1',
+      },
+      cookies: studentCookies,
+    },
+    res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  const body = res.body as {
+    draftAnswers?: Record<string, unknown>
+    draftSendSequences?: Record<string, number>
+  }
+  assert.deepEqual(body.draftAnswers?.q1, { type: 'free-response', text: 'Typed before the reload' })
+  assert.equal(body.draftSendSequences?.q1, 7)
+
+  await sessions.close()
+})

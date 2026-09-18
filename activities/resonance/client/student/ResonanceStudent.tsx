@@ -486,6 +486,17 @@ export default function ResonanceStudent() {
       ...current,
     }))
 
+    // A page reload restarts nextDraftSendSequenceRef at 0, but the server
+    // may already hold a higher draftSendSequence for a restored draft (see
+    // draftSendSequences' docstring). Ratchet up so the next send — even one
+    // that isn't a revisit and so carries the same editSequence as what's
+    // already stored — can't be rejected as stale for looking older than a
+    // send from before this reload.
+    const highestKnownDraftSendSequence = Math.max(0, ...Object.values(snapshot.draftSendSequences))
+    if (highestKnownDraftSendSequence > nextDraftSendSequenceRef.current) {
+      nextDraftSendSequenceRef.current = highestKnownDraftSendSequence
+    }
+
     if (snapshot.selfPacedMode) {
       setSubmittedQuestionIds((current) => {
         const next = new Set(current)
@@ -623,6 +634,13 @@ export default function ResonanceStudent() {
       // effect *now* still match what was actually sent — content equality
       // alone can't tell "this ack is for the current attempt" from "this
       // ack is a stale confirmation from a superseded run or edit session."
+      // (A stale ack from a *different* session/student identity can't reach
+      // here at all: useResonanceSession's `saveDraft` only ever resolves
+      // `true` from its own socket's `onmessage`, which is gated by
+      // `isCurrent()` — a message on an abandoned socket, from before a
+      // session/student change tore it down, is dropped before it's even
+      // parsed. See "a stale acknowledgement delivered on an abandoned
+      // identity's connection..." below.)
       const snapshotAtAck = snapshotRef.current
       if (snapshotAtAck === null || snapshotAtAck.activeQuestionRunRevision !== sentRunRevision) return
       const currentEditSequence = resolveCurrentEditSequence(

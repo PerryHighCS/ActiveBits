@@ -61,6 +61,7 @@ function buildSnapshot(overrides: Partial<StudentSessionSnapshot> = {}): Student
     reviewedResponses: [],
     submittedAnswers: {},
     draftAnswers: {},
+    draftSendSequences: {},
     submittedResponseEditSequences: {},
     revealedQuestions: [],
     ...overrides,
@@ -1006,6 +1007,347 @@ void test('an edit made right after revisiting a just-submitted question is not 
     assert.ok(
       revisitDraft,
       `expected the post-revisit edit to be sent promptly, not blocked by the stale pre-submission in-flight draft; sent since revisit: ${JSON.stringify(socket.sent.slice(sentBeforeRevisitEdit))}`,
+    )
+
+    await act(async () => {
+      rendered.unmount()
+    })
+  } finally {
+    restore()
+  }
+})
+
+void test('an edit after a simulated reload is sent with a draftSendSequence higher than what the server already has', async () => {
+  // Regression test (Copilot review of PR #381): nextDraftSendSequenceRef is
+  // component-local and restarts at 0 on mount (simulating a page reload).
+  // Without seeding it from the server's draftSendSequences, a plain,
+  // non-revisit edit of a restored draft (same editSequence as what's
+  // already stored) would be sent with draftSendSequence 1 — lower than
+  // whatever the server already has — and the update-draft ordering guard
+  // would reject it as stale, silently dropping the edit.
+  const restore = installResonanceStudentTestEnvironment()
+  const { persistSessionParticipantIdentity } = await import(
+    '@src/components/common/entryParticipantIdentityUtils'
+  )
+  const { MemoryRouter, Route, Routes } = await import('react-router')
+  const { default: ResonanceStudent, DRAFT_EDIT_DEBOUNCE_MS } = await import('./ResonanceStudent.js')
+  const { act, render, waitFor, fireEvent } = await import('@testing-library/react')
+
+  persistSessionParticipantIdentity(window.localStorage, 'session-1', 'Ada', 'student-1')
+
+  // Simulates a page reload: the server already holds a draft (from before
+  // the reload) with a draftSendSequence of 7, at the same editSequence the
+  // client will resolve to (no revisit has happened).
+  const snapshot = buildSnapshot({
+    activeQuestions: [
+      { id: 'q1', type: 'free-response', text: 'Question one', order: 0 },
+    ],
+    activeQuestionIds: ['q1'],
+    activeQuestionRunStartedAt: Date.now(),
+    activeQuestionRunRevision: 1,
+    activeQuestionDeadlineAt: Date.now() + 60_000,
+    draftAnswers: { q1: { type: 'free-response', text: 'Typed before the reload' } },
+    draftSendSequences: { q1: 7 },
+  })
+
+  ;(globalThis as { fetch?: typeof fetch }).fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input)
+    if (url.includes('/register-student')) {
+      return { ok: true, json: async () => ({ studentId: 'student-1', name: 'Ada' }) } as Response
+    }
+    if (url.includes('/state')) {
+      return { ok: true, json: async () => snapshot } as Response
+    }
+    throw new Error(`Unexpected fetch: ${url}`)
+  }) as typeof fetch
+
+  let rendered!: ReturnType<typeof render>
+  try {
+    await act(async () => {
+      rendered = render(
+        React.createElement(
+          MemoryRouter,
+          { initialEntries: ['/session-1'] },
+          React.createElement(
+            Routes,
+            null,
+            React.createElement(Route, { path: '/:sessionId', element: React.createElement(ResonanceStudent) }),
+          ),
+        ),
+      )
+      await Promise.resolve()
+    })
+
+    await waitFor(() => assert.equal(FakeWebSocket.instances.length, 1))
+    const socket = FakeWebSocket.instances[0]!
+    socket.send = (message: string) => { socket.sent.push(JSON.parse(message)) }
+
+    const textarea = await waitFor(() => rendered.getByLabelText(/your answer/i))
+    assert.equal((textarea as HTMLTextAreaElement).value, 'Typed before the reload')
+
+    console.info('[TEST] editing the restored draft without a revisit')
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: 'Typed after the reload' } })
+    })
+    await new Promise((resolve) => setTimeout(resolve, DRAFT_EDIT_DEBOUNCE_MS + 200))
+
+    type DraftMessage = { type: string; payload: { questionId?: string; draftSendSequence?: number; answer?: { text?: string } } }
+    const isDraftMessage = (message: unknown): message is DraftMessage =>
+      typeof message === 'object' && message !== null && (message as { type?: string }).type === 'resonance:update-draft'
+    const postReloadDraft = socket.sent.filter(isDraftMessage).find(
+      (message) => message.payload.answer?.text === 'Typed after the reload',
+    )
+    assert.ok(postReloadDraft, `expected the post-reload edit to have been sent, got: ${JSON.stringify(socket.sent)}`)
+    assert.ok(
+      (postReloadDraft!.payload.draftSendSequence ?? 0) > 7,
+      `expected draftSendSequence to be ratcheted above the server's stored value (7), got: ${postReloadDraft!.payload.draftSendSequence}`,
+    )
+
+    await act(async () => {
+      rendered.unmount()
+    })
+  } finally {
+    restore()
+  }
+})
+
+void test('a message delivered on an abandoned identity’s connection cannot confirm a new identity’s coincidentally identical answer', async () => {
+  // Investigated after a Copilot review of PR #381 suggested attemptDraftSend's
+  // ack continuation needed to check which session/student a draft was sent
+  // under, since pendingDraftSavesRef (in useResonanceSession) is a ref tied
+  // to the mounted ResonanceStudent instance, not to any one sessionId/studentId
+  // pairing, and so survives an identity change. Investigation found that scoping
+  // check unnecessary: useResonanceSession's ws.onmessage handler is gated by
+  // its own isCurrent() check (`wsRef.current === socket`), which is already
+  // false the instant an identity change's cleanup runs (wsRef.current is set
+  // to null synchronously, before the new socket is even created) — so a
+  // message arriving on an abandoned identity's socket is dropped before it's
+  // even parsed, regardless of whether/when that real WebSocket's own close
+  // event eventually fires. This test locks in that existing protection: it
+  // delivers a message on an abandoned session's socket that would otherwise
+  // wrongly confirm a new session's coincidentally identical answer, and
+  // confirms it has no effect.
+  const restore = installResonanceStudentTestEnvironment()
+  const { persistSessionParticipantIdentity } = await import(
+    '@src/components/common/entryParticipantIdentityUtils'
+  )
+  const { createMemoryRouter, RouterProvider } = await import('react-router')
+  const { default: ResonanceStudent, DRAFT_EDIT_DEBOUNCE_MS, DRAFT_RETRY_INTERVAL_MS } = await import('./ResonanceStudent.js')
+  const { DRAFT_SAVE_ACK_TIMEOUT_MS } = await import('../hooks/useResonanceSession.js')
+  const { act, render, waitFor, fireEvent } = await import('@testing-library/react')
+
+  persistSessionParticipantIdentity(window.localStorage, 'session-1', 'Ada', 'student-1')
+  persistSessionParticipantIdentity(window.localStorage, 'session-2', 'Bea', 'student-2')
+
+  const buildSessionSnapshot = (sessionId: string) => buildSnapshot({
+    sessionId,
+    activeQuestions: [
+      { id: 'q1', type: 'free-response', text: 'Question one', order: 0 },
+    ],
+    activeQuestionIds: ['q1'],
+    activeQuestionRunStartedAt: Date.now(),
+    activeQuestionRunRevision: 1,
+    activeQuestionDeadlineAt: Date.now() + 60_000,
+  })
+  const snapshotsBySessionId: Record<string, StudentSessionSnapshot> = {
+    'session-1': buildSessionSnapshot('session-1'),
+    'session-2': buildSessionSnapshot('session-2'),
+  }
+
+  ;(globalThis as { fetch?: typeof fetch }).fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input)
+    if (url.includes('/session-1/register-student')) {
+      return { ok: true, json: async () => ({ studentId: 'student-1', name: 'Ada' }) } as Response
+    }
+    if (url.includes('/session-2/register-student')) {
+      return { ok: true, json: async () => ({ studentId: 'student-2', name: 'Bea' }) } as Response
+    }
+    if (url.includes('/session-1/state')) {
+      return { ok: true, json: async () => snapshotsBySessionId['session-1'] } as Response
+    }
+    if (url.includes('/session-2/state')) {
+      return { ok: true, json: async () => snapshotsBySessionId['session-2'] } as Response
+    }
+    throw new Error(`Unexpected fetch: ${url}`)
+  }) as typeof fetch
+
+  const router = createMemoryRouter(
+    [{ path: '/:sessionId', element: React.createElement(ResonanceStudent) }],
+    { initialEntries: ['/session-1'] },
+  )
+
+  let rendered!: ReturnType<typeof render>
+  try {
+    await act(async () => {
+      rendered = render(React.createElement(RouterProvider, { router }))
+      await Promise.resolve()
+    })
+
+    await waitFor(() => assert.equal(FakeWebSocket.instances.length, 1))
+    const session1Socket = FakeWebSocket.instances[0]!
+    // Never auto-ack — the test manually delivers the stale ack below.
+    session1Socket.send = (message: string) => { session1Socket.sent.push(JSON.parse(message)) }
+
+    type DraftMessage = { type: string; payload: { questionId?: string; draftId?: string; answer?: { text?: string } } }
+    const isDraftMessage = (message: unknown): message is DraftMessage =>
+      typeof message === 'object' && message !== null && (message as { type?: string }).type === 'resonance:update-draft'
+
+    console.info('[TEST] session-1/student-1 sends a draft that is never acknowledged before the identity changes')
+    await act(async () => {
+      fireEvent.change(rendered.getByLabelText(/your answer/i), { target: { value: 'hello' } })
+    })
+    await new Promise((resolve) => setTimeout(resolve, DRAFT_EDIT_DEBOUNCE_MS + 200))
+    const session1Draft = session1Socket.sent.find(isDraftMessage)
+    assert.ok(session1Draft, 'expected a draft to have been sent for session-1')
+    const staleDraftId = session1Draft!.payload.draftId
+    assert.equal(typeof staleDraftId, 'string')
+
+    console.info('[TEST] navigating to a different session (a different identity) before that draft is acknowledged')
+    await act(async () => {
+      await router.navigate('/session-2')
+    })
+    await waitFor(() => assert.equal(FakeWebSocket.instances.length, 2))
+    const session2Socket = FakeWebSocket.instances[1]!
+    session2Socket.send = (message: string) => { session2Socket.sent.push(JSON.parse(message)) }
+
+    console.info('[TEST] the new identity answers the same question with the same, coincidentally identical text')
+    const session2Textarea = await waitFor(() => rendered.getByLabelText(/your answer/i))
+    await act(async () => {
+      fireEvent.change(session2Textarea, { target: { value: 'hello' } })
+    })
+    await new Promise((resolve) => setTimeout(resolve, DRAFT_EDIT_DEBOUNCE_MS + 200))
+    const session2Draft = session2Socket.sent.find(isDraftMessage)
+    assert.ok(session2Draft, 'expected a draft to have been sent for session-2')
+
+    console.info('[TEST] a message for the abandoned session-1 draft arrives on session-1’s old socket object')
+    await act(async () => {
+      session1Socket.emitMessage({ type: 'resonance:draft-saved', payload: { draftId: staleDraftId } })
+    })
+
+    // session-2's own send is still legitimately in flight (never acked) —
+    // it only becomes retriable once its own ack timeout elapses. If the
+    // message on session-1's abandoned socket had wrongly reached
+    // session-2's tracking and confirmed it, nothing would resend it here.
+    const sentBeforeRetry = session2Socket.sent.length
+    await new Promise((resolve) => setTimeout(resolve, DRAFT_SAVE_ACK_TIMEOUT_MS + DRAFT_RETRY_INTERVAL_MS + 300))
+    const retriedSession2Draft = session2Socket.sent.slice(sentBeforeRetry).find(isDraftMessage)
+    assert.ok(
+      retriedSession2Draft,
+      'expected session-2’s draft to still be retried once its own ack timeout elapsed, since it was never actually acknowledged',
+    )
+
+    await act(async () => {
+      rendered.unmount()
+    })
+  } finally {
+    restore()
+  }
+})
+
+void test('a prior-run confirmed answer resurfacing from a later snapshot is not auto-resent as a live draft', async () => {
+  // Investigated after a Copilot review of PR #381 suggested that
+  // resetAnswersForRestartedQuestions's local-cache reset is undone by the
+  // very next snapshot merge (since snapshot.submittedAnswers is
+  // intentionally run-independent — see "reactivating a question keeps
+  // prior answers editable for students" in routes.test.ts — so a
+  // reactivated question's prior confirmed answer legitimately resurfaces
+  // there), and that this could "let the retry path resend the stale
+  // answer under the new run."
+  //
+  // Investigation found that specific claim doesn't hold: attemptDraftSend
+  // only ever resends a question that's in unconfirmedQuestionIdsRef, and
+  // nothing adds a question there except an actual edit (onDraftChanged) —
+  // the snapshot-merge effect that resurfaces the prior answer never
+  // touches that set. So the prior answer resurfacing (intended, matching
+  // "editable prior answer") and it getting auto-resent as a live draft
+  // (not intended, and not what happens) are two different things. This
+  // test locks in the second half: reactivating a question does not, on
+  // its own, cause anything to be sent to the server.
+  const restore = installResonanceStudentTestEnvironment()
+  const { persistSessionParticipantIdentity } = await import(
+    '@src/components/common/entryParticipantIdentityUtils'
+  )
+  const { MemoryRouter, Route, Routes } = await import('react-router')
+  const { default: ResonanceStudent, DRAFT_RETRY_INTERVAL_MS } = await import('./ResonanceStudent.js')
+  const { act, render, waitFor } = await import('@testing-library/react')
+
+  persistSessionParticipantIdentity(window.localStorage, 'session-1', 'Ada', 'student-1')
+
+  const priorAnswer = { type: 'free-response' as const, text: 'Prior confirmed answer' }
+  const snapshot = buildSnapshot({
+    activeQuestions: [
+      { id: 'q1', type: 'free-response', text: 'Question one', order: 0 },
+    ],
+    activeQuestionIds: ['q1'],
+    activeQuestionRunStartedAt: Date.now(),
+    activeQuestionRunRevision: 1,
+    activeQuestionDeadlineAt: Date.now() + 60_000,
+    submittedAnswers: { q1: priorAnswer },
+  })
+
+  ;(globalThis as { fetch?: typeof fetch }).fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input)
+    if (url.includes('/register-student')) {
+      return { ok: true, json: async () => ({ studentId: 'student-1', name: 'Ada' }) } as Response
+    }
+    if (url.includes('/state')) {
+      return { ok: true, json: async () => snapshot } as Response
+    }
+    throw new Error(`Unexpected fetch: ${url}`)
+  }) as typeof fetch
+
+  let rendered!: ReturnType<typeof render>
+  try {
+    await act(async () => {
+      rendered = render(
+        React.createElement(
+          MemoryRouter,
+          { initialEntries: ['/session-1'] },
+          React.createElement(
+            Routes,
+            null,
+            React.createElement(Route, { path: '/:sessionId', element: React.createElement(ResonanceStudent) }),
+          ),
+        ),
+      )
+      await Promise.resolve()
+    })
+
+    await waitFor(() => assert.equal(FakeWebSocket.instances.length, 1))
+    const socket = FakeWebSocket.instances[0]!
+    socket.send = (message: string) => { socket.sent.push(JSON.parse(message)) }
+
+    console.info('[TEST] the run restarts, reactivating q1 with its prior confirmed answer still on the snapshot')
+    await act(async () => {
+      socket.emitMessage({
+        type: 'resonance:session-state',
+        payload: { ...snapshot, activeQuestionRunRevision: 2, activeQuestionRunStartedAt: Date.now() },
+      })
+    })
+
+    console.info('[TEST] a later snapshot update re-merges the same (run-independent) prior confirmed answer')
+    await act(async () => {
+      socket.emitMessage({
+        type: 'resonance:session-state',
+        payload: { ...snapshot, activeQuestionRunRevision: 2, activeQuestionRunStartedAt: Date.now() },
+      })
+    })
+
+    const textarea = await waitFor(() => rendered.getByLabelText(/your answer/i))
+    assert.equal(
+      (textarea as HTMLTextAreaElement).value,
+      priorAnswer.text,
+      'expected the reactivated question to prefill with the prior answer (matching "reactivating a question keeps prior answers editable")',
+    )
+
+    await new Promise((resolve) => setTimeout(resolve, DRAFT_RETRY_INTERVAL_MS + 300))
+    const draftMessages = socket.sent.filter(
+      (message): message is { type: string } => typeof message === 'object' && message !== null && (message as { type?: string }).type === 'resonance:update-draft',
+    )
+    assert.deepEqual(
+      draftMessages,
+      [],
+      `expected nothing to be sent to the server without an actual edit, got: ${JSON.stringify(draftMessages)}`,
     )
 
     await act(async () => {
