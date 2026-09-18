@@ -2126,6 +2126,7 @@ void test('self-paced embedded resonance sessions reveal MCQ correctness after t
       questionId: 'q1',
       studentId: 'student1',
       submittedAt: now - 100,
+      activeQuestionRunRevision: null,
       answer: {
         type: 'free-response',
         text: 'Because the condition becomes false.',
@@ -2136,6 +2137,7 @@ void test('self-paced embedded resonance sessions reveal MCQ correctness after t
       questionId: 'q2',
       studentId: 'student1',
       submittedAt: now - 50,
+      activeQuestionRunRevision: null,
       answer: {
         type: 'multiple-choice',
         selectedOptionIds: ['q2_b'],
@@ -2205,6 +2207,7 @@ void test('student state normalizes legacy reveal answers that still use selecte
       questionId: 'q2',
       studentId: 'student1',
       submittedAt: now - 50,
+      activeQuestionRunRevision: 1,
       answer: {
         type: 'multiple-choice',
         selectedOptionIds: ['q2_b'],
@@ -2392,6 +2395,7 @@ void test('self-paced embedded resonance sessions still surface annotated review
       questionId: 'q1',
       studentId: 'student1',
       submittedAt: now - 200,
+      activeQuestionRunRevision: null,
       answer: {
         type: 'free-response',
         text: 'My answer',
@@ -2499,6 +2503,9 @@ void test('self-paced embedded resonance sessions switch back to live-run snapsh
       questionId: 'q1',
       studentId: 'student1',
       submittedAt: now - 200,
+      // Submitted while this was still self-paced, before the instructor
+      // activated q2 as a live question below.
+      activeQuestionRunRevision: null,
       answer: {
         type: 'free-response',
         text: 'Earlier answer',
@@ -4309,6 +4316,7 @@ void test('student state includes the viewer response and marks when their share
           questionId: 'q1',
           studentId: 'student1',
           submittedAt,
+          activeQuestionRunRevision: null,
           answer: {
             type: 'free-response',
             text: 'My answer',
@@ -4427,6 +4435,7 @@ void test('annotate-response route updates the student viewer response emoji for
           questionId: 'q1',
           studentId: 'student1',
           submittedAt,
+          activeQuestionRunRevision: null,
           answer: {
             type: 'free-response',
             text: 'My answer',
@@ -4622,23 +4631,28 @@ void test('student state sanitizes malformed stored reveal reactions', async () 
   await sessions.close()
 })
 
-void test('a stored response or draft with a corrupted activeQuestionRunRevision is dropped, not treated as self-paced', async () => {
-  // Copilot review of PR #381: normalizeStoredResponses/normalizeResponseDrafts
-  // used to coerce ANY invalid activeQuestionRunRevision (a string, NaN, a
-  // negative number, or an omitted field) down to `null` — the same value a
-  // genuine self-paced/idle write uses. `upsertResponse` and the
-  // update-draft handler always write either `null` or a real positive
-  // integer (never omit the field), so a stored value that's neither can
-  // only be data corruption — but coercing it to `null` made it
+void test('a stored response or draft with a corrupted or absent activeQuestionRunRevision is dropped, not treated as self-paced', async () => {
+  // Copilot review of PR #381 (two rounds): normalizeStoredResponses/
+  // normalizeResponseDrafts used to coerce ANY invalid activeQuestionRunRevision
+  // (a string, NaN, a negative number, or an omitted field) down to `null` —
+  // the same value a genuine self-paced/idle write uses. `activeQuestionRunRevision`
+  // is a required `number | null` field on both `Response` and a stored
+  // draft, and `upsertResponse`/the update-draft handler always write it
+  // explicitly (never omit it); per AGENTS.md rule 17 (no legacy-session
+  // migration — this is a from-scratch field with a single writer, not one
+  // predated by an older shape), a stored value that's neither an explicit
+  // `null` nor a positive safe integer — including the field being entirely
+  // absent — can only be data corruption. Coercing it to `null` made it
   // indistinguishable from a legitimate self-paced record, letting it
   // silently match a self-paced/idle session's run identity (the same
   // hazard fixed for incoming live writes in matchesActiveQuestionRun,
   // follow-up 5). A corrupted response could then wrongly satisfy the
   // update-draft handler's confirmedResponseForRun staleness check and block
   // a genuinely new self-paced edit. Fixed by dropping the entry entirely
-  // when its activeQuestionRunRevision is present but invalid, matching how
-  // the same functions already drop entries with other invalid required
-  // fields (missing id/questionId/studentId, invalid answer).
+  // whenever its activeQuestionRunRevision fails validation (present-and-invalid
+  // or absent), matching how the same functions already drop entries with
+  // other invalid required fields (missing id/questionId/studentId, invalid
+  // answer).
   const app = createMockApp()
   const ws = createMockWs()
   const sessions = createSessionStore(null)
@@ -4654,6 +4668,7 @@ void test('a stored response or draft with a corrupted activeQuestionRunRevision
       questions: [
         { id: 'q1', type: 'free-response', text: 'Explain your reasoning.', order: 0 },
         { id: 'q2', type: 'free-response', text: 'Explain further.', order: 1 },
+        { id: 'q3', type: 'free-response', text: 'Explain once more.', order: 2 },
       ],
       activeQuestionId: null,
       activeQuestionIds: [],
@@ -4679,6 +4694,14 @@ void test('a stored response or draft with a corrupted activeQuestionRunRevision
           activeQuestionRunRevision: null,
           editSequence: 1,
           answer: { type: 'free-response', text: 'Genuine self-paced answer' },
+        },
+        {
+          id: 'r-absent',
+          questionId: 'q3',
+          studentId: 'student1',
+          submittedAt: now - 500,
+          editSequence: 3,
+          answer: { type: 'free-response', text: 'Absent-revision answer' },
         },
       ],
       responseDrafts: {
@@ -4726,6 +4749,7 @@ void test('a stored response or draft with a corrupted activeQuestionRunRevision
   assert.equal(body.submittedAnswers?.q1, undefined, 'the corrupted-revision response must not surface')
   assert.equal(body.submittedResponseEditSequences?.q1, undefined)
   assert.equal(body.submittedAnswers?.q2?.text, 'Genuine self-paced answer', 'the genuine self-paced response must still surface')
+  assert.equal(body.submittedAnswers?.q3, undefined, 'the absent-revision response must not surface')
   assert.equal(body.draftAnswers?.q1, undefined, 'the corrupted-revision draft must not surface')
 
   await sessions.close()
@@ -4763,6 +4787,7 @@ void test('student state includes reviewed responses for annotated answers that 
           questionId: 'q1',
           studentId: 'student1',
           submittedAt: now - 500,
+          activeQuestionRunRevision: null,
           answer: {
             type: 'free-response',
             text: 'My answer',
@@ -4852,6 +4877,8 @@ void test('student state hides reviewed responses for annotated answers when the
           questionId: 'q1',
           studentId: 'student1',
           submittedAt: now - 500,
+          // Submitted before this reactivation.
+          activeQuestionRunRevision: null,
           answer: {
             type: 'free-response',
             text: 'My answer',

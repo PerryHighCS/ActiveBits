@@ -737,20 +737,22 @@ function resolveEditSequence(value: unknown): number {
 /**
  * Parses a *stored* `activeQuestionRunRevision` field (a response or draft
  * read back from the session store), distinguishing a genuine self-paced/
- * idle identity (`null`, or the field simply absent — plain-object test
- * fixtures and any future spread/serialization path commonly omit a null
- * field rather than writing it explicitly) from corrupted data — a *present*
- * value that isn't a positive safe integer (a string, `NaN`, zero, a
- * negative or non-integer number). Returns `undefined` for the latter so the
- * caller can drop the entry: silently normalizing a wrong-typed/wrong-signed
- * value to `null` would make it indistinguishable from a genuine self-paced
- * write and let it incorrectly match a self-paced/idle session (the same
- * hazard `matchesActiveQuestionRun` guards against for incoming live
- * writes) — whereas the field simply being absent is not itself evidence of
- * corruption.
+ * idle identity (an explicit `null`) from an invalid one — anything else
+ * that isn't a positive safe integer, including the field being absent.
+ * `activeQuestionRunRevision` is a required `number | null` field on both
+ * `Response` and a stored draft, and `upsertResponse`/the update-draft
+ * handler always write it explicitly; per AGENTS.md rule 17 (no
+ * legacy-session migration needed — this is a from-scratch field with a
+ * single writer, not one predated by an older shape), a stored entry
+ * missing it is not a legacy record to tolerate, it's corrupt. Returns
+ * `undefined` for an invalid value so the caller can drop the entry:
+ * silently normalizing it to `null` would make it indistinguishable from a
+ * genuine self-paced write and let it incorrectly match a self-paced/idle
+ * session (the same hazard `matchesActiveQuestionRun` guards against for
+ * incoming live writes).
  */
 function resolveStoredActiveQuestionRunRevision(value: unknown): number | null | undefined {
-  if (value === null || value === undefined) return null
+  if (value === null) return null
   return typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : undefined
 }
 
