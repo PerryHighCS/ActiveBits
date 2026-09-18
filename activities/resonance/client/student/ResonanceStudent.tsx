@@ -330,10 +330,21 @@ export default function ResonanceStudent() {
   // Per-question debounce timers that trigger an edit-triggered send attempt
   // shortly after the student stops typing (see DRAFT_EDIT_DEBOUNCE_MS).
   const draftSendTimeoutsRef = useRef<Map<string, number>>(new Map())
-  // Tracks the {revision, deadlineAt} pair already reconciled via refresh(),
-  // so a still-unconfirmed draft past its deadline triggers at most one
-  // refresh per run rather than one every retry-loop tick.
+  // Tracks the {revision, deadlineAt} pair already reconciled via a
+  // *successful* refresh(), so a still-unconfirmed draft past its deadline
+  // triggers at most one refresh per run rather than one every retry-loop
+  // tick.
   const reconciledExpiryRef = useRef<{ revision: number | null; deadlineAt: number | null } | null>(null)
+  // The {revision, deadlineAt} pair currently awaiting refresh()'s result,
+  // separate from reconciledExpiryRef (which only records success). Without
+  // this split, a transient network failure would still have already
+  // cleared draft tracking and marked the pair reconciled before the fetch
+  // even settled — permanently skipping any further reconciliation attempt
+  // for this run's deadline even though the server's finalized state was
+  // never actually retrieved. Also doubles as an in-flight guard so a slow
+  // refresh() doesn't get kicked off again on every retry tick while it's
+  // still outstanding.
+  const inFlightReconciliationRef = useRef<{ revision: number | null; deadlineAt: number | null } | null>(null)
   const submittedAnswersRef = useRef(submittedAnswers)
   submittedAnswersRef.current = submittedAnswers
   const submittedQuestionIdsRef = useRef(submittedQuestionIds)
@@ -452,6 +463,7 @@ export default function ResonanceStudent() {
     }
     draftSendTimeoutsRef.current.clear()
     reconciledExpiryRef.current = null
+    inFlightReconciliationRef.current = null
   }, [sessionId, studentId])
 
   // Debounce timers are per-question and independent of the retry interval's
@@ -740,26 +752,44 @@ export default function ResonanceStudent() {
           revision: currentSnapshot.activeQuestionRunRevision,
           deadlineAt: currentSnapshot.activeQuestionDeadlineAt,
         }
-        const alreadyReconciled =
-          reconciledExpiryRef.current !== null &&
-          reconciledExpiryRef.current.revision === reconciliationKey.revision &&
-          reconciledExpiryRef.current.deadlineAt === reconciliationKey.deadlineAt
-        if (!alreadyReconciled) {
-          reconciledExpiryRef.current = reconciliationKey
-          // Stop trusting our own optimistic local value for a draft that
-          // never got confirmed before the deadline — refresh() below pulls
-          // whatever the server actually finalized, and the snapshot-merge
-          // effect above only lets that win when there's no local entry.
-          clearDraftTracking({
-            unconfirmedQuestionIds: unconfirmedQuestionIdsRef.current,
-            inFlightDraftQuestionIds: inFlightDraftQuestionIdsRef.current,
-            questionIds: questionIdsStillUnconfirmed,
+        const matchesReconciliationKey = (
+          key: { revision: number | null; deadlineAt: number | null } | null,
+        ): boolean =>
+          key !== null && key.revision === reconciliationKey.revision && key.deadlineAt === reconciliationKey.deadlineAt
+        const alreadyReconciled = matchesReconciliationKey(reconciledExpiryRef.current)
+        const reconciliationInFlight = matchesReconciliationKey(inFlightReconciliationRef.current)
+        if (!alreadyReconciled && !reconciliationInFlight) {
+          inFlightReconciliationRef.current = reconciliationKey
+          void refresh().then((succeeded) => {
+            // A newer reconciliation attempt (a later run/deadline) may have
+            // already superseded this one by the time refresh() settles —
+            // don't let a stale settlement clear a newer attempt's in-flight
+            // marker or apply this attempt's now-stale reset, mirroring the
+            // same stale-settlement guard attemptDraftSend already uses for
+            // its own in-flight marker.
+            if (!matchesReconciliationKey(inFlightReconciliationRef.current)) return
+            inFlightReconciliationRef.current = null
+            if (!succeeded) return
+            // Only now — once refresh() has actually pulled whatever the
+            // server finalized — stop trusting our own optimistic local
+            // value for a draft that never got confirmed before the
+            // deadline (the snapshot-merge effect above only lets the
+            // server's value win when there's no local entry) and mark this
+            // run's deadline reconciled. A failed refresh() must not do
+            // either: it would strand the client trusting a stale local
+            // value with no further reconciliation attempt for this run,
+            // since reconciledExpiryRef would already claim it's handled.
+            reconciledExpiryRef.current = reconciliationKey
+            clearDraftTracking({
+              unconfirmedQuestionIds: unconfirmedQuestionIdsRef.current,
+              inFlightDraftQuestionIds: inFlightDraftQuestionIdsRef.current,
+              questionIds: questionIdsStillUnconfirmed,
+            })
+            setSubmittedAnswers((current) => resetAnswersForRestartedQuestions({
+              submittedAnswers: current,
+              questionIdsToReset: questionIdsStillUnconfirmed,
+            }))
           })
-          setSubmittedAnswers((current) => resetAnswersForRestartedQuestions({
-            submittedAnswers: current,
-            questionIdsToReset: questionIdsStillUnconfirmed,
-          }))
-          void refresh()
         }
       }
 
