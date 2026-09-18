@@ -480,6 +480,38 @@ export default function ResonanceStudent() {
       return
     }
 
+    // Entering self-paced mode from a live run leaves a live question's
+    // unconfirmed local answer/tracking dangling unless explicitly reset
+    // here — the mirror-image of the reactivation reset below, which already
+    // resets the opposite direction (self-paced/idle -> live). Without this,
+    // a draft that never got confirmed under the live run's revision keeps
+    // its unconfirmed marker and gets resent by the retry loop under the new
+    // (self-paced, revision-null) identity. Because a draft's server-side
+    // storage slot is keyed only by questionId+studentId (not revision), and
+    // the update-draft ordering guard's same-editSequence tiebreaker
+    // (draftSendSequence) is a session-global counter blind to which
+    // revision an attempt "belongs" to, that stale retry can silently win
+    // over — and overwrite — a genuinely different, already-legitimate
+    // self-paced draft for the same question (one that predates this live
+    // run and was never touched by it, because none of the live attempts
+    // ever reached the server). Resetting here, before the merge below,
+    // means the merge picks up the server's own (possibly different)
+    // self-paced draftAnswers value for that question instead of the local
+    // cache. See "an unconfirmed live-run draft does not overwrite an
+    // unrelated pre-existing self-paced draft" for the regression this
+    // guards against.
+    const wasLiveRun = hasObservedSnapshotRef.current && previousActiveQuestionRunRevisionRef.current !== null
+    const idsLeavingLiveContext = snapshot.selfPacedMode && wasLiveRun
+      ? previousActiveQuestionIdsRef.current
+      : []
+    if (idsLeavingLiveContext.length > 0) {
+      clearDraftTracking({
+        unconfirmedQuestionIds: unconfirmedQuestionIdsRef.current,
+        inFlightDraftQuestionIds: inFlightDraftQuestionIdsRef.current,
+        questionIds: idsLeavingLiveContext,
+      })
+    }
+
     // draftAnswers must win over submittedAnswers when both exist for the
     // same question: a post-submission revisit's draft is strictly newer
     // than the (now-stale) confirmed response it revised, and draftAnswers
@@ -487,11 +519,16 @@ export default function ResonanceStudent() {
     // edit (see draftAnswers' own docstring) rather than showing what's
     // already been superseded. current (already-locally-known state) still
     // wins over both, since only the very first merge after mount can ever
-    // have neither draftAnswers nor submittedAnswers already reflected there.
+    // have neither draftAnswers nor submittedAnswers already reflected there
+    // — except for a question leaving a live context above, whose local
+    // value is dropped first so the snapshot's own (possibly different)
+    // value can win instead.
     setSubmittedAnswers((current) => ({
       ...snapshot.submittedAnswers,
       ...snapshot.draftAnswers,
-      ...current,
+      ...(idsLeavingLiveContext.length > 0
+        ? resetAnswersForRestartedQuestions({ submittedAnswers: current, questionIdsToReset: idsLeavingLiveContext })
+        : current),
     }))
 
     // A page reload restarts nextDraftSendSequenceRef at 0, but the server

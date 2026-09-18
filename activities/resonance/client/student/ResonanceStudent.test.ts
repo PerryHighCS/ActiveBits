@@ -587,6 +587,7 @@ void test('an unconfirmed draft on a backgrounded question tab is retried and sa
   )
   const { MemoryRouter, Route, Routes } = await import('react-router')
   const { default: ResonanceStudent, DRAFT_RETRY_INTERVAL_MS } = await import('./ResonanceStudent.js')
+  const { DRAFT_SAVE_ACK_TIMEOUT_MS } = await import('../hooks/useResonanceSession.js')
   const { act, render, waitFor } = await import('@testing-library/react')
 
   persistSessionParticipantIdentity(window.localStorage, 'session-1', 'Ada', 'student-1')
@@ -648,16 +649,29 @@ void test('an unconfirmed draft on a backgrounded question tab is retried and sa
     })
 
     // The first question's QuestionView is now unmounted. Only the parent's
-    // retry loop can still resend its draft.
-    await new Promise((resolve) => setTimeout(resolve, DRAFT_RETRY_INTERVAL_MS + 500))
+    // retry loop can still resend its draft. Wait past the debounced first
+    // attempt's own ack timeout (DRAFT_SAVE_ACK_TIMEOUT_MS) plus another
+    // retry tick, so the retry loop actually gets a chance to notice that
+    // first attempt failed and send a second, distinct one — waiting only
+    // one retry tick (as this test previously did) can't tell "the retry
+    // loop resent a failed draft" apart from "only the original debounced
+    // send happened," since the first attempt is still in flight (blocked
+    // by its own ack timeout) at that point and the retry loop's own guard
+    // skips a question with an attempt already in flight.
+    await new Promise((resolve) => setTimeout(resolve, DRAFT_SAVE_ACK_TIMEOUT_MS + DRAFT_RETRY_INTERVAL_MS + 500))
 
     type DraftMessage = { type: string; payload: { questionId?: string; draftId?: string; answer?: { text?: string } } }
     const isDraftMessage = (message: unknown): message is DraftMessage =>
       typeof message === 'object' && message !== null && (message as { type?: string }).type === 'resonance:update-draft'
     const q1Drafts = socket.sent.filter(isDraftMessage).filter((message) => message.payload.questionId === 'q1')
     assert.ok(
-      q1Drafts.some((message) => message.payload.answer?.text === 'Answer left unconfirmed'),
-      `expected a retried draft for q1, got: ${JSON.stringify(q1Drafts)}`,
+      q1Drafts.every((message) => message.payload.answer?.text === 'Answer left unconfirmed'),
+      `expected every q1 draft attempt to carry the unconfirmed answer, got: ${JSON.stringify(q1Drafts)}`,
+    )
+    const distinctQ1DraftIds = new Set(q1Drafts.map((message) => message.payload.draftId))
+    assert.ok(
+      distinctQ1DraftIds.size >= 2,
+      `expected the first attempt's ack timeout to trigger a second, distinct retry attempt for q1, got: ${JSON.stringify(q1Drafts)}`,
     )
 
     console.info('[TEST] the server now acknowledges the retried draft')
@@ -1541,24 +1555,30 @@ void test('a prior-run confirmed answer resurfacing from a later snapshot is not
   }
 })
 
-void test('an unconfirmed draft survives a live-to-self-paced mode transition and is still retried', async () => {
-  // CodeRabbit review of PR #381: the selfPacedMode branch of the
-  // snapshot-merge effect never calls clearDraftTracking (unlike the
-  // live-mode branch, which does so on a run restart/reactivation), and
-  // flagged that as a gap that could strand an unconfirmed draft's tracking
-  // across a live-to-self-paced transition.
+void test('an unconfirmed live-run draft is not retried into self-paced mode and does not overwrite an unrelated pre-existing self-paced draft', async () => {
+  // CodeRabbit flagged (PR #381) that the selfPacedMode branch of the
+  // snapshot-merge effect never calls clearDraftTracking on a live-run
+  // transition, unlike the live-mode branch (which does so on a run
+  // restart/reactivation). An earlier investigation of that same claim
+  // concluded no fix was needed, reasoning only about whether the draft's
+  // tracking survives the transition (it does, since self-paced exposes a
+  // superset of whatever was live-active) — not about what happens if the
+  // retried write actually reaches the server under the new identity.
   //
-  // Investigation: unconfirmedQuestionIdsRef/inFlightDraftQuestionIdsRef are
-  // keyed by questionId only, not by run identity, and the periodic retry
-  // loop (selectUnconfirmedDraftQuestionIds) filters by whatever the
-  // *current* snapshot's activeQuestions are — it doesn't care whether that
-  // snapshot is live or self-paced, or whether the run revision changed
-  // underneath it. So as long as the question stays present in the new
-  // snapshot's activeQuestions (self-paced makes every question available,
-  // a superset of whatever was live-active), an unconfirmed draft's tracking
-  // survives the transition intact and keeps retrying under the new
-  // (self-paced, revision-null) context. This test locks in that no fix is
-  // needed here: the mode transition must not strand the draft.
+  // A closer trace (Copilot review, same PR) found a real corruption path
+  // that reasoning missed: a draft's server-side storage slot is keyed only
+  // by questionId+studentId, not by run revision (see buildDraftKey in
+  // routes.ts), and the update-draft ordering guard's same-editSequence
+  // tiebreaker (draftSendSequence) is a session-global counter, blind to
+  // which run an attempt conceptually belongs to. So a stale unconfirmed
+  // live-run edit — never actually persisted, because it never got acked —
+  // retried under self-paced's null revision can still win that tiebreak
+  // against, and silently overwrite, a genuinely different self-paced draft
+  // for the same question that predates the live run and was never touched
+  // by it. This test locks in the corrected behavior: a question leaving a
+  // live context has its stale local tracking reset, so the retry loop
+  // stops resending it and the snapshot's own (different) self-paced draft
+  // is recovered instead.
   const restore = installResonanceStudentTestEnvironment()
   const { persistSessionParticipantIdentity } = await import(
     '@src/components/common/entryParticipantIdentityUtils'
@@ -1629,7 +1649,12 @@ void test('an unconfirmed draft survives a live-to-self-paced mode transition an
       'expected the live-mode attempt to have been sent',
     )
 
-    console.info('[TEST] the session transitions to self-paced mode before that draft is acknowledged')
+    // The server never acknowledged that attempt, so the draft it's storing
+    // for q1 is still whatever pre-existing self-paced draft was there
+    // before this live run started — unrelated content the live edit never
+    // touched. The self-paced push below reports that value back, exactly
+    // as the server would.
+    console.info('[TEST] the session transitions to self-paced mode before that draft is acknowledged, reporting an unrelated pre-existing self-paced draft')
     const sentBeforeTransition = socket.sent.length
     await act(async () => {
       socket.emitMessage({
@@ -1646,17 +1671,22 @@ void test('an unconfirmed draft survives a live-to-self-paced mode transition an
           // looks indistinguishable from a stale delayed idle push and gets
           // rejected by the client's own ordering guard.
           lastActiveQuestionRunRevision: 1,
+          draftAnswers: { q1: { type: 'free-response', text: 'Pre-existing self-paced draft' } },
+          draftSendSequences: { q1: 1 },
         },
       })
     })
 
     await new Promise((resolve) => setTimeout(resolve, DRAFT_SAVE_ACK_TIMEOUT_MS + DRAFT_RETRY_INTERVAL_MS + 300))
-    const retriedUnderSelfPaced = socket.sent
-      .slice(sentBeforeTransition)
-      .filter((message) => isQ1Draft(message) && message.payload.activeQuestionRunRevision === null)
+    const sentAfterTransition = socket.sent.slice(sentBeforeTransition)
     assert.ok(
-      retriedUnderSelfPaced.some((message) => (message as DraftMessage).payload.answer?.text === 'live-mode answer'),
-      `expected the still-unconfirmed draft to be retried under self-paced mode, got: ${JSON.stringify(socket.sent.slice(sentBeforeTransition))}`,
+      !sentAfterTransition.some((message) => isQ1Draft(message) && (message as DraftMessage).payload.answer?.text === 'live-mode answer'),
+      `expected the stale live-mode draft not to be retried into self-paced mode, got: ${JSON.stringify(sentAfterTransition)}`,
+    )
+    assert.equal(
+      (rendered.getByLabelText(/your answer/i) as HTMLTextAreaElement).value,
+      'Pre-existing self-paced draft',
+      'expected the unrelated pre-existing self-paced draft to be recovered instead of the stale live-mode edit',
     )
 
     await act(async () => {
