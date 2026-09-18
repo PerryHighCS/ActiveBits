@@ -480,9 +480,17 @@ export default function ResonanceStudent() {
       return
     }
 
+    // draftAnswers must win over submittedAnswers when both exist for the
+    // same question: a post-submission revisit's draft is strictly newer
+    // than the (now-stale) confirmed response it revised, and draftAnswers
+    // exists specifically so a reload/remount can recover that in-progress
+    // edit (see draftAnswers' own docstring) rather than showing what's
+    // already been superseded. current (already-locally-known state) still
+    // wins over both, since only the very first merge after mount can ever
+    // have neither draftAnswers nor submittedAnswers already reflected there.
     setSubmittedAnswers((current) => ({
-      ...snapshot.draftAnswers,
       ...snapshot.submittedAnswers,
+      ...snapshot.draftAnswers,
       ...current,
     }))
 

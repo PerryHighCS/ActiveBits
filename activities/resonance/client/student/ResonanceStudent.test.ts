@@ -1111,6 +1111,189 @@ void test('an edit after a simulated reload is sent with a draftSendSequence hig
   }
 })
 
+void test('a restored draft answer wins over a stale submitted answer on initial load', async () => {
+  // Copilot review of PR #381: the snapshot-merge effect spread
+  // snapshot.submittedAnswers *after* snapshot.draftAnswers, so on the very
+  // first merge after mount (a fresh page load/remount, before local state
+  // has any value for the question yet) a stale confirmed answer would win
+  // over a strictly newer, still-unconfirmed post-submission-revisit draft —
+  // exactly the in-progress edit draftAnswers exists to recover.
+  const restore = installResonanceStudentTestEnvironment()
+  const { persistSessionParticipantIdentity } = await import(
+    '@src/components/common/entryParticipantIdentityUtils'
+  )
+  const { MemoryRouter, Route, Routes } = await import('react-router')
+  const { default: ResonanceStudent } = await import('./ResonanceStudent.js')
+  const { render, waitFor, act } = await import('@testing-library/react')
+
+  persistSessionParticipantIdentity(window.localStorage, 'session-1', 'Ada', 'student-1')
+
+  const snapshot = buildSnapshot({
+    activeQuestions: [
+      { id: 'q1', type: 'free-response', text: 'Question one', order: 0 },
+    ],
+    activeQuestionIds: ['q1'],
+    activeQuestionRunStartedAt: Date.now(),
+    activeQuestionRunRevision: 1,
+    activeQuestionDeadlineAt: Date.now() + 60_000,
+    submittedAnswers: { q1: { type: 'free-response', text: 'Old confirmed answer' } },
+    submittedResponseEditSequences: { q1: 1 },
+    draftAnswers: { q1: { type: 'free-response', text: 'Newer unconfirmed revision' } },
+    draftSendSequences: { q1: 2 },
+  })
+
+  ;(globalThis as { fetch?: typeof fetch }).fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input)
+    if (url.includes('/register-student')) {
+      return { ok: true, json: async () => ({ studentId: 'student-1', name: 'Ada' }) } as Response
+    }
+    if (url.includes('/state')) {
+      return { ok: true, json: async () => snapshot } as Response
+    }
+    throw new Error(`Unexpected fetch: ${url}`)
+  }) as typeof fetch
+
+  let rendered!: ReturnType<typeof render>
+  try {
+    await act(async () => {
+      rendered = render(
+        React.createElement(
+          MemoryRouter,
+          { initialEntries: ['/session-1'] },
+          React.createElement(
+            Routes,
+            null,
+            React.createElement(Route, { path: '/:sessionId', element: React.createElement(ResonanceStudent) }),
+          ),
+        ),
+      )
+      await Promise.resolve()
+    })
+
+    const textarea = await waitFor(() => rendered.getByLabelText(/your answer/i))
+    assert.equal(
+      (textarea as HTMLTextAreaElement).value,
+      'Newer unconfirmed revision',
+      'expected the restored draft to win over the stale confirmed answer',
+    )
+
+    await act(async () => {
+      rendered.unmount()
+    })
+  } finally {
+    restore()
+  }
+})
+
+void test('an edit after a simulated reload during a revisit is sent with the same editSequence the stored draft already has', async () => {
+  // Copilot review of PR #381: claimed the snapshot restores draftSendSequence
+  // but not the stored draft's own editSequence, so after a reload mid-revisit
+  // the client would seed its edit-sequence counter only from
+  // submittedResponseEditSequences (the *confirmed* response's sequence) and
+  // send the next edit at a lower editSequence than the stored draft already
+  // has, getting rejected as stale by the server's ordering guard.
+  //
+  // Investigation: seedEditSequenceFromConfirmedResponse's floor is
+  // `confirmedEditSequence + 1` — and that's exactly the value
+  // advanceEditSequenceForRevisit itself would have produced for a single
+  // revisit against that same confirmed value (the only way a draft's
+  // editSequence gets bumped past 1 in the first place). So as long as at
+  // most one revisit happened since the last confirmed submission (the only
+  // way to reach a second revisit is to resubmit first, which advances the
+  // confirmed value the next seed would use), the seeded floor always
+  // reconstructs exactly what the stored draft already has. This test builds
+  // exactly the scenario described — submit, revisit, edit (leaving a draft
+  // stored server-side at editSequence 2), reload — and confirms the very
+  // next post-reload send already carries editSequence 2, matching what's
+  // stored, not editSequence 1.
+  const restore = installResonanceStudentTestEnvironment()
+  const { persistSessionParticipantIdentity } = await import(
+    '@src/components/common/entryParticipantIdentityUtils'
+  )
+  const { MemoryRouter, Route, Routes } = await import('react-router')
+  const { default: ResonanceStudent, DRAFT_EDIT_DEBOUNCE_MS } = await import('./ResonanceStudent.js')
+  const { act, render, waitFor, fireEvent } = await import('@testing-library/react')
+
+  persistSessionParticipantIdentity(window.localStorage, 'session-1', 'Ada', 'student-1')
+
+  // Simulates a reload after: submit (editSequence 1, confirmed) -> revisit
+  // (bumps to editSequence 2) -> edit, saved as a draft server-side at
+  // editSequence 2, draftSendSequence 9 -> reload, before resubmitting again.
+  const snapshot = buildSnapshot({
+    activeQuestions: [
+      { id: 'q1', type: 'free-response', text: 'Question one', order: 0 },
+    ],
+    activeQuestionIds: ['q1'],
+    activeQuestionRunStartedAt: Date.now(),
+    activeQuestionRunRevision: 1,
+    activeQuestionDeadlineAt: Date.now() + 60_000,
+    submittedResponseEditSequences: { q1: 1 },
+    draftAnswers: { q1: { type: 'free-response', text: 'Revised after the first submission' } },
+    draftSendSequences: { q1: 9 },
+  })
+
+  ;(globalThis as { fetch?: typeof fetch }).fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input)
+    if (url.includes('/register-student')) {
+      return { ok: true, json: async () => ({ studentId: 'student-1', name: 'Ada' }) } as Response
+    }
+    if (url.includes('/state')) {
+      return { ok: true, json: async () => snapshot } as Response
+    }
+    throw new Error(`Unexpected fetch: ${url}`)
+  }) as typeof fetch
+
+  let rendered!: ReturnType<typeof render>
+  try {
+    await act(async () => {
+      rendered = render(
+        React.createElement(
+          MemoryRouter,
+          { initialEntries: ['/session-1'] },
+          React.createElement(
+            Routes,
+            null,
+            React.createElement(Route, { path: '/:sessionId', element: React.createElement(ResonanceStudent) }),
+          ),
+        ),
+      )
+      await Promise.resolve()
+    })
+
+    await waitFor(() => assert.equal(FakeWebSocket.instances.length, 1))
+    const socket = FakeWebSocket.instances[0]!
+    socket.send = (message: string) => { socket.sent.push(JSON.parse(message)) }
+
+    const textarea = await waitFor(() => rendered.getByLabelText(/your answer/i))
+    assert.equal((textarea as HTMLTextAreaElement).value, 'Revised after the first submission')
+
+    console.info('[TEST] editing the restored draft further, without another explicit revisit')
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: 'Revised again after the reload' } })
+    })
+    await new Promise((resolve) => setTimeout(resolve, DRAFT_EDIT_DEBOUNCE_MS + 200))
+
+    type DraftMessage = { type: string; payload: { questionId?: string; editSequence?: number; answer?: { text?: string } } }
+    const isDraftMessage = (message: unknown): message is DraftMessage =>
+      typeof message === 'object' && message !== null && (message as { type?: string }).type === 'resonance:update-draft'
+    const postReloadDraft = socket.sent.filter(isDraftMessage).find(
+      (message) => message.payload.answer?.text === 'Revised again after the reload',
+    )
+    assert.ok(postReloadDraft, `expected the post-reload edit to have been sent, got: ${JSON.stringify(socket.sent)}`)
+    assert.equal(
+      postReloadDraft!.payload.editSequence,
+      2,
+      `expected the seeded editSequence to match the stored draft's own editSequence (2), got: ${postReloadDraft!.payload.editSequence}`,
+    )
+
+    await act(async () => {
+      rendered.unmount()
+    })
+  } finally {
+    restore()
+  }
+})
+
 void test('a message delivered on an abandoned identity’s connection cannot confirm a new identity’s coincidentally identical answer', async () => {
   // Investigated after a Copilot review of PR #381 suggested attemptDraftSend's
   // ack continuation needed to check which session/student a draft was sent
