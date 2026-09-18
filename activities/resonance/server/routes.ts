@@ -734,6 +734,26 @@ function resolveEditSequence(value: unknown): number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : 0
 }
 
+/**
+ * Parses a *stored* `activeQuestionRunRevision` field (a response or draft
+ * read back from the session store), distinguishing a genuine self-paced/
+ * idle identity (`null`, or the field simply absent — plain-object test
+ * fixtures and any future spread/serialization path commonly omit a null
+ * field rather than writing it explicitly) from corrupted data — a *present*
+ * value that isn't a positive safe integer (a string, `NaN`, zero, a
+ * negative or non-integer number). Returns `undefined` for the latter so the
+ * caller can drop the entry: silently normalizing a wrong-typed/wrong-signed
+ * value to `null` would make it indistinguishable from a genuine self-paced
+ * write and let it incorrectly match a self-paced/idle session (the same
+ * hazard `matchesActiveQuestionRun` guards against for incoming live
+ * writes) — whereas the field simply being absent is not itself evidence of
+ * corruption.
+ */
+function resolveStoredActiveQuestionRunRevision(value: unknown): number | null | undefined {
+  if (value === null || value === undefined) return null
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : undefined
+}
+
 export function resolveSocketStudentId(payloadStudentId: unknown, clientStudentId: string | null | undefined): string | null {
   const studentId = clientStudentId ?? null
   if (!studentId || (typeof payloadStudentId === 'string' && payloadStudentId !== studentId)) {
@@ -778,15 +798,10 @@ function normalizeStoredResponses(
         ? Math.round(rawResponse.submittedAt)
         : 0
     const answer = normalizeDraftAnswerPayload(rawResponse.answer, questionsById, questionId)
-    const activeQuestionRunRevision =
-      typeof rawResponse.activeQuestionRunRevision === 'number' &&
-        Number.isSafeInteger(rawResponse.activeQuestionRunRevision) &&
-        rawResponse.activeQuestionRunRevision > 0
-        ? rawResponse.activeQuestionRunRevision
-        : null
+    const activeQuestionRunRevision = resolveStoredActiveQuestionRunRevision(rawResponse.activeQuestionRunRevision)
     const editSequence = resolveEditSequence(rawResponse.editSequence)
 
-    if (!id || !questionId || !studentId || submittedAt <= 0 || answer === null) {
+    if (!id || !questionId || !studentId || submittedAt <= 0 || answer === null || activeQuestionRunRevision === undefined) {
       continue
     }
 
@@ -825,17 +840,12 @@ function normalizeResponseDrafts(
     const updatedAt = typeof rawDraft.updatedAt === 'number' && Number.isFinite(rawDraft.updatedAt)
       ? Math.round(rawDraft.updatedAt)
       : 0
-    const activeQuestionRunRevision =
-      typeof rawDraft.activeQuestionRunRevision === 'number' &&
-        Number.isSafeInteger(rawDraft.activeQuestionRunRevision) &&
-        rawDraft.activeQuestionRunRevision > 0
-        ? rawDraft.activeQuestionRunRevision
-        : null
+    const activeQuestionRunRevision = resolveStoredActiveQuestionRunRevision(rawDraft.activeQuestionRunRevision)
     const answer = normalizeDraftAnswerPayload(rawDraft.answer, questionsById, questionId)
     const editSequence = resolveEditSequence(rawDraft.editSequence)
     const draftSendSequence = resolveEditSequence(rawDraft.draftSendSequence)
 
-    if (!questionId || !studentId || updatedAt <= 0 || answer === null) {
+    if (!questionId || !studentId || updatedAt <= 0 || answer === null || activeQuestionRunRevision === undefined) {
       continue
     }
 

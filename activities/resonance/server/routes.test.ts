@@ -4622,6 +4622,115 @@ void test('student state sanitizes malformed stored reveal reactions', async () 
   await sessions.close()
 })
 
+void test('a stored response or draft with a corrupted activeQuestionRunRevision is dropped, not treated as self-paced', async () => {
+  // Copilot review of PR #381: normalizeStoredResponses/normalizeResponseDrafts
+  // used to coerce ANY invalid activeQuestionRunRevision (a string, NaN, a
+  // negative number, or an omitted field) down to `null` — the same value a
+  // genuine self-paced/idle write uses. `upsertResponse` and the
+  // update-draft handler always write either `null` or a real positive
+  // integer (never omit the field), so a stored value that's neither can
+  // only be data corruption — but coercing it to `null` made it
+  // indistinguishable from a legitimate self-paced record, letting it
+  // silently match a self-paced/idle session's run identity (the same
+  // hazard fixed for incoming live writes in matchesActiveQuestionRun,
+  // follow-up 5). A corrupted response could then wrongly satisfy the
+  // update-draft handler's confirmedResponseForRun staleness check and block
+  // a genuinely new self-paced edit. Fixed by dropping the entry entirely
+  // when its activeQuestionRunRevision is present but invalid, matching how
+  // the same functions already drop entries with other invalid required
+  // fields (missing id/questionId/studentId, invalid answer).
+  const app = createMockApp()
+  const ws = createMockWs()
+  const sessions = createSessionStore(null)
+  const now = Date.now()
+  const session: SessionRecord = {
+    id: 'resonance-session-corrupted-run-revision',
+    type: 'resonance',
+    created: now,
+    lastActivity: now,
+    data: {
+      instructorPasscode: 'TEACH123',
+      selfPacedMode: true,
+      questions: [
+        { id: 'q1', type: 'free-response', text: 'Explain your reasoning.', order: 0 },
+        { id: 'q2', type: 'free-response', text: 'Explain further.', order: 1 },
+      ],
+      activeQuestionId: null,
+      activeQuestionIds: [],
+      activeQuestionDeadlineAt: null,
+      students: {
+        student1: { studentId: 'student1', name: 'Ada Lovelace', joinedAt: now - 1_000 },
+      },
+      responses: [
+        {
+          id: 'r-corrupt',
+          questionId: 'q1',
+          studentId: 'student1',
+          submittedAt: now - 500,
+          activeQuestionRunRevision: 'not-a-number',
+          editSequence: 5,
+          answer: { type: 'free-response', text: 'Corrupted-revision answer' },
+        },
+        {
+          id: 'r-genuine',
+          questionId: 'q2',
+          studentId: 'student1',
+          submittedAt: now - 500,
+          activeQuestionRunRevision: null,
+          editSequence: 1,
+          answer: { type: 'free-response', text: 'Genuine self-paced answer' },
+        },
+      ],
+      responseDrafts: {
+        'q1:student1': {
+          questionId: 'q1',
+          studentId: 'student1',
+          updatedAt: now - 100,
+          activeQuestionRunRevision: -1,
+          editSequence: 2,
+          draftSendSequence: 1,
+          answer: { type: 'free-response', text: 'Corrupted-revision draft' },
+        },
+      },
+      annotations: {},
+      reveals: [],
+      sharedResponseReactions: {},
+      responseOrderOverrides: {},
+      persistentHash: null,
+    },
+  }
+  const studentCookies = issueStudentCookies(session, 'student1')
+  await sessions.set(session.id, session)
+
+  setupResonanceRoutes(app, sessions, ws)
+
+  const stateHandler = app.handlers.get['/api/resonance/:sessionId/state']
+  assert.equal(typeof stateHandler, 'function')
+
+  const res = createResponse()
+  await stateHandler?.(
+    {
+      params: { sessionId: session.id },
+      query: { studentId: 'student1' },
+      cookies: studentCookies,
+    },
+    res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  const body = res.body as {
+    submittedAnswers?: Record<string, { text?: string }>
+    submittedResponseEditSequences?: Record<string, number>
+    draftAnswers?: Record<string, { text?: string }>
+  }
+  assert.equal(body.submittedAnswers?.q1, undefined, 'the corrupted-revision response must not surface')
+  assert.equal(body.submittedResponseEditSequences?.q1, undefined)
+  assert.equal(body.submittedAnswers?.q2?.text, 'Genuine self-paced answer', 'the genuine self-paced response must still surface')
+  assert.equal(body.draftAnswers?.q1, undefined, 'the corrupted-revision draft must not surface')
+
+  await sessions.close()
+})
+
 void test('student state includes reviewed responses for annotated answers that were not shared publicly', async () => {
   const app = createMockApp()
   const ws = createMockWs()
