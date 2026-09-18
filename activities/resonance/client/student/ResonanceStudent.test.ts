@@ -703,23 +703,37 @@ void test('an unconfirmed draft on a backgrounded question tab is retried and sa
   }
 })
 
-void test('an edit made shortly before a deadline is still sent, even once the deadline has passed by the time it fires', async () => {
-  // Regression test: the retry interval fires on a fixed schedule from
-  // mount, not re-armed by edits, so an edit made just before a deadline
-  // could otherwise wait past it for the next tick. The edit-triggered
-  // debounce (DRAFT_EDIT_DEBOUNCE_MS) must fire regardless, and the send
-  // itself must not skip just because the client's own clock now reads
-  // past the deadline — the server is the actual authority on that.
+void test('an edit made shortly before a deadline is sent — and acknowledged — before that deadline passes', async () => {
+  // Copilot review of PR #381: the debounce previously waited a fixed
+  // DRAFT_EDIT_DEBOUNCE_MS (400ms) regardless of how little time was left
+  // before the run's deadline. The server's update-draft handler silently
+  // rejects (no ack) any write whose arrival time is at or past the
+  // deadline (routes.ts), so an edit made in the final 400ms before a
+  // deadline would debounce to *after* it and be guaranteed-rejected —
+  // losing the student's last edit even though the client believed it was
+  // "sent." A prior version of this test only asserted the message was
+  // sent, which passed even for a doomed-to-be-rejected late send.
+  // scheduleDraftSend now bounds its delay to the remaining time before the
+  // deadline (leaving DRAFT_DEADLINE_BUFFER_MS of margin), so this test
+  // both types with only DRAFT_DEADLINE_BUFFER_MS + a small margin left
+  // before the deadline (proving the send fires quickly, not after the
+  // full fixed debounce) and confirms the server would actually accept it
+  // by simulating an acknowledgement and confirming the retry loop then
+  // stops, rather than merely checking a message left the client.
   const restore = installResonanceStudentTestEnvironment()
   const { persistSessionParticipantIdentity } = await import(
     '@src/components/common/entryParticipantIdentityUtils'
   )
   const { MemoryRouter, Route, Routes } = await import('react-router')
-  const { default: ResonanceStudent, DRAFT_EDIT_DEBOUNCE_MS } = await import('./ResonanceStudent.js')
+  const { default: ResonanceStudent, DRAFT_EDIT_DEBOUNCE_MS, DRAFT_RETRY_INTERVAL_MS } = await import('./ResonanceStudent.js')
   const { act, render, waitFor, fireEvent } = await import('@testing-library/react')
 
   persistSessionParticipantIdentity(window.localStorage, 'session-1', 'Ada', 'student-1')
 
+  // Deliberately earlier than DRAFT_EDIT_DEBOUNCE_MS: the un-bounded 400ms
+  // debounce would fire after this deadline; a bounded one fires well
+  // before it (with DRAFT_DEADLINE_BUFFER_MS of margin still intact).
+  const remainingBeforeDeadlineMs = Math.floor(DRAFT_EDIT_DEBOUNCE_MS * 0.75)
   const snapshot = buildSnapshot({
     activeQuestions: [
       { id: 'q1', type: 'free-response', text: 'Question one', order: 0 },
@@ -727,9 +741,7 @@ void test('an edit made shortly before a deadline is still sent, even once the d
     activeQuestionIds: ['q1'],
     activeQuestionRunStartedAt: Date.now(),
     activeQuestionRunRevision: 1,
-    // Deliberately earlier than DRAFT_EDIT_DEBOUNCE_MS, so the debounced
-    // send fires *after* this deadline has already passed.
-    activeQuestionDeadlineAt: Date.now() + Math.floor(DRAFT_EDIT_DEBOUNCE_MS / 2),
+    activeQuestionDeadlineAt: Date.now() + remainingBeforeDeadlineMs,
   })
 
   ;(globalThis as { fetch?: typeof fetch }).fetch = (async (input: RequestInfo | URL) => {
@@ -762,23 +774,46 @@ void test('an edit made shortly before a deadline is still sent, even once the d
 
     await waitFor(() => assert.equal(FakeWebSocket.instances.length, 1))
     const socket = FakeWebSocket.instances[0]!
+    socket.send = (message: string) => { socket.sent.push(JSON.parse(message)) }
 
     const textarea = await waitFor(() => rendered.getByLabelText(/your answer/i))
-    console.info('[TEST] editing right at the deadline boundary; the debounced send fires after it has passed')
+    console.info('[TEST] editing right at the deadline boundary')
     await act(async () => {
       fireEvent.change(textarea, { target: { value: 'Last-second answer' } })
     })
 
-    await new Promise((resolve) => setTimeout(resolve, DRAFT_EDIT_DEBOUNCE_MS + 300))
+    type DraftMessage = { type: string; payload: { questionId?: string; draftId?: string; answer?: { text?: string } } }
+    const isQ1Draft = (message: unknown): message is DraftMessage =>
+      typeof message === 'object' && message !== null &&
+      (message as { type?: string }).type === 'resonance:update-draft' &&
+      (message as DraftMessage).payload.questionId === 'q1'
 
-    const draftMessages = socket.sent.filter(
-      (message): message is { type: string; payload: { questionId?: string; answer?: { text?: string } } } =>
-        typeof message === 'object' && message !== null && (message as { type?: string }).type === 'resonance:update-draft',
-    )
+    // Comfortably past the bounded delay's expected fire time (deadline
+    // minus the buffer) but well under the un-bounded DRAFT_EDIT_DEBOUNCE_MS
+    // — if the debounce still waited the full fixed delay, nothing would
+    // have been sent yet.
+    await new Promise((resolve) => setTimeout(resolve, remainingBeforeDeadlineMs - 50))
+    const draftMessages = socket.sent.filter(isQ1Draft)
     assert.ok(
-      draftMessages.some((message) =>
-        message.payload.questionId === 'q1' && message.payload.answer?.text === 'Last-second answer'),
-      `expected the last-second answer to still be sent, got: ${JSON.stringify(draftMessages)}`,
+      draftMessages.some((message) => message.payload.answer?.text === 'Last-second answer'),
+      `expected the last-second answer to have been sent well before the fixed debounce delay, got: ${JSON.stringify(draftMessages)}`,
+    )
+
+    console.info('[TEST] the server accepts it (it genuinely arrived before the deadline) and acknowledges it')
+    const draftId = draftMessages[0]!.payload.draftId
+    assert.equal(typeof draftId, 'string')
+    await act(async () => {
+      socket.emitMessage({ type: 'resonance:draft-saved', payload: { draftId } })
+    })
+
+    // Once acknowledged, the retry loop must not keep resending it.
+    const sentBeforeFurtherRetries = socket.sent.length
+    await new Promise((resolve) => setTimeout(resolve, DRAFT_RETRY_INTERVAL_MS + 300))
+    const furtherQ1Drafts = socket.sent.slice(sentBeforeFurtherRetries).filter(isQ1Draft)
+    assert.deepEqual(
+      furtherQ1Drafts,
+      [],
+      `expected no further retries after acknowledgement, got: ${JSON.stringify(furtherQ1Drafts)}`,
     )
 
     await act(async () => {
@@ -1688,6 +1723,134 @@ void test('an unconfirmed live-run draft is not retried into self-paced mode and
       'Pre-existing self-paced draft',
       'expected the unrelated pre-existing self-paced draft to be recovered instead of the stale live-mode edit',
     )
+
+    await act(async () => {
+      rendered.unmount()
+    })
+  } finally {
+    restore()
+  }
+})
+
+void test('a live run ending into a fully idle state does not leave an unconfirmed draft stranded', async () => {
+  // Copilot review of PR #381: the live-to-self-paced fix above only resets
+  // stale draft tracking/local answer cache when the destination snapshot
+  // is self-paced. A live run can also end into a fully idle state — no
+  // active questions at all, and not self-paced (the server clears
+  // activeQuestionIds and reverts activeQuestionRunRevision to null either
+  // way; see setActiveQuestions/clearActiveQuestions in routes.ts) — which
+  // that fix's `snapshot.selfPacedMode` condition didn't cover. This case
+  // is actually worse than the self-paced one: since the question is no
+  // longer in activeQuestionIds at all, selectUnconfirmedDraftQuestionIds's
+  // filter drops it from every future retry tick regardless of tracking
+  // state, so the retry-interval effect's own deadline-reconciliation
+  // branch never even runs for it — nothing was ever going to clear the
+  // stale marker/local cache on its own.
+  //
+  // The bug isn't observable at the idle state itself (no active question
+  // is rendered there to show a stale value), so this test makes it
+  // observable the same way the self-paced test above does: transition
+  // through idle first, then into self-paced later, and confirm the
+  // self-paced snapshot's own (different) draft is recovered instead of
+  // the stale live-mode edit surviving untouched through the idle step.
+  const restore = installResonanceStudentTestEnvironment()
+  const { persistSessionParticipantIdentity } = await import(
+    '@src/components/common/entryParticipantIdentityUtils'
+  )
+  const { MemoryRouter, Route, Routes } = await import('react-router')
+  const { default: ResonanceStudent, DRAFT_EDIT_DEBOUNCE_MS, DRAFT_RETRY_INTERVAL_MS } = await import('./ResonanceStudent.js')
+  const { act, render, waitFor, fireEvent } = await import('@testing-library/react')
+
+  persistSessionParticipantIdentity(window.localStorage, 'session-1', 'Ada', 'student-1')
+
+  const snapshot = buildSnapshot({
+    activeQuestions: [
+      { id: 'q1', type: 'free-response', text: 'Question one', order: 0 },
+    ],
+    activeQuestionIds: ['q1'],
+    activeQuestionRunStartedAt: Date.now(),
+    activeQuestionRunRevision: 1,
+    activeQuestionDeadlineAt: Date.now() + 60_000,
+  })
+
+  ;(globalThis as { fetch?: typeof fetch }).fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input)
+    if (url.includes('/register-student')) {
+      return { ok: true, json: async () => ({ studentId: 'student-1', name: 'Ada' }) } as Response
+    }
+    if (url.includes('/state')) {
+      return { ok: true, json: async () => snapshot } as Response
+    }
+    throw new Error(`Unexpected fetch: ${url}`)
+  }) as typeof fetch
+
+  let rendered!: ReturnType<typeof render>
+  try {
+    await act(async () => {
+      rendered = render(
+        React.createElement(
+          MemoryRouter,
+          { initialEntries: ['/session-1'] },
+          React.createElement(
+            Routes,
+            null,
+            React.createElement(Route, { path: '/:sessionId', element: React.createElement(ResonanceStudent) }),
+          ),
+        ),
+      )
+      await Promise.resolve()
+    })
+
+    await waitFor(() => assert.equal(FakeWebSocket.instances.length, 1))
+    const socket = FakeWebSocket.instances[0]!
+    // Never auto-ack — this draft stays unconfirmed across both transitions.
+    socket.send = (message: string) => { socket.sent.push(JSON.parse(message)) }
+
+    console.info('[TEST] typing an answer under live mode, left unacknowledged')
+    await act(async () => {
+      fireEvent.change(rendered.getByLabelText(/your answer/i), { target: { value: 'live-mode answer' } })
+    })
+    await new Promise((resolve) => setTimeout(resolve, DRAFT_EDIT_DEBOUNCE_MS + 200))
+
+    console.info('[TEST] the run ends into a fully idle state (no self-paced fallback) before that draft is acknowledged')
+    await act(async () => {
+      socket.emitMessage({
+        type: 'resonance:session-state',
+        payload: {
+          ...snapshot,
+          selfPacedMode: false,
+          activeQuestions: [],
+          activeQuestionIds: [],
+          activeQuestionRunRevision: null,
+          activeQuestionRunStartedAt: null,
+          activeQuestionDeadlineAt: null,
+          lastActiveQuestionRunRevision: 1,
+        },
+      })
+    })
+    await new Promise((resolve) => setTimeout(resolve, DRAFT_RETRY_INTERVAL_MS + 300))
+
+    console.info('[TEST] the session later turns on self-paced mode, reporting an unrelated pre-existing self-paced draft')
+    await act(async () => {
+      socket.emitMessage({
+        type: 'resonance:session-state',
+        payload: {
+          ...snapshot,
+          selfPacedMode: true,
+          activeQuestionRunRevision: null,
+          activeQuestionRunStartedAt: null,
+          activeQuestionDeadlineAt: null,
+          lastActiveQuestionRunRevision: 1,
+          draftAnswers: { q1: { type: 'free-response', text: 'Pre-existing self-paced draft' } },
+          draftSendSequences: { q1: 1 },
+        },
+      })
+    })
+
+    await waitFor(() => assert.equal(
+      (rendered.getByLabelText(/your answer/i) as HTMLTextAreaElement).value,
+      'Pre-existing self-paced draft',
+    ))
 
     await act(async () => {
       rendered.unmount()

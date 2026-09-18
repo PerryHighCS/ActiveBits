@@ -217,6 +217,18 @@ export const DRAFT_RETRY_INTERVAL_MS = 1_000
 // student stops typing regardless of where in the interval's cycle that is.
 export const DRAFT_EDIT_DEBOUNCE_MS = 400
 
+// The update-draft handler rejects (silently, no ack) any write whose
+// server-side arrival time is at or past the run's deadline — see its own
+// `draftUpdatedAt >= activeQuestionDeadlineAt` check in routes.ts. A fixed
+// DRAFT_EDIT_DEBOUNCE_MS delay ignores how little time is actually left: an
+// edit made in the final DRAFT_EDIT_DEBOUNCE_MS before a deadline would
+// debounce to *after* it, guaranteeing the server rejects it — losing the
+// student's last edit even though it was "sent." scheduleDraftSend shortens
+// its delay as the deadline approaches (down to an immediate send) so the
+// attempt has a real chance of arriving before the server's own clock does,
+// leaving this much margin for network/processing latency.
+const DRAFT_DEADLINE_BUFFER_MS = 100
+
 /**
  * Which currently-active questions have a locally-known answer the server
  * hasn't confirmed yet and should be (re)sent this tick. Owned by the parent
@@ -492,28 +504,44 @@ export default function ResonanceStudent() {
       return
     }
 
-    // Entering self-paced mode from a live run leaves a live question's
-    // unconfirmed local answer/tracking dangling unless explicitly reset
-    // here — the mirror-image of the reactivation reset below, which already
-    // resets the opposite direction (self-paced/idle -> live). Without this,
-    // a draft that never got confirmed under the live run's revision keeps
-    // its unconfirmed marker and gets resent by the retry loop under the new
-    // (self-paced, revision-null) identity. Because a draft's server-side
-    // storage slot is keyed only by questionId+studentId (not revision), and
-    // the update-draft ordering guard's same-editSequence tiebreaker
-    // (draftSendSequence) is a session-global counter blind to which
-    // revision an attempt "belongs" to, that stale retry can silently win
-    // over — and overwrite — a genuinely different, already-legitimate
-    // self-paced draft for the same question (one that predates this live
-    // run and was never touched by it, because none of the live attempts
-    // ever reached the server). Resetting here, before the merge below,
-    // means the merge picks up the server's own (possibly different)
-    // self-paced draftAnswers value for that question instead of the local
-    // cache. See "an unconfirmed live-run draft does not overwrite an
-    // unrelated pre-existing self-paced draft" for the regression this
-    // guards against.
+    // A live run ending — whether it falls back to self-paced mode, or ends
+    // into a fully idle state with no active questions at all (the server
+    // clears activeQuestionIds and reverts activeQuestionRunRevision to
+    // null either way, see setActiveQuestions/clearActiveQuestions) — leaves
+    // a still-unconfirmed question's local answer/tracking dangling unless
+    // explicitly reset here. This is the mirror-image of the reactivation
+    // reset below, which already resets the opposite direction (self-paced/
+    // idle -> live). `activeQuestionRunRevision === null` is checked instead
+    // of `snapshot.selfPacedMode` alone because both destinations need the
+    // same treatment, for different reasons:
+    // - Self-paced: a draft that never got confirmed under the live run's
+    //   revision keeps its unconfirmed marker and gets resent by the retry
+    //   loop under the new (self-paced, revision-null) identity. Because a
+    //   draft's server-side storage slot is keyed only by
+    //   questionId+studentId (not revision), and the update-draft ordering
+    //   guard's same-editSequence tiebreaker (draftSendSequence) is a
+    //   session-global counter blind to which revision an attempt "belongs"
+    //   to, that stale retry can silently win over — and overwrite — a
+    //   genuinely different, already-legitimate self-paced draft for the
+    //   same question. See "an unconfirmed live-run draft does not
+    //   overwrite an unrelated pre-existing self-paced draft".
+    // - Fully idle (no active questions, not self-paced): the question is
+    //   no longer in activeQuestionIds at all, so
+    //   selectUnconfirmedDraftQuestionIds's activeQuestionIds filter drops
+    //   it from every future retry tick regardless of tracking state — the
+    //   retry-interval effect's own deadline-reconciliation branch (which
+    //   would otherwise refresh() and clear this once the deadline passes)
+    //   never even runs for it, since it's gated on the same
+    //   still-unconfirmed selection. Left unhandled, the stale local answer
+    //   and dangling unconfirmed marker would never be reconciled at all —
+    //   worse than the self-paced case, which can at least still recover
+    //   via a later retry tick. See "a live run ending into a fully idle
+    //   state does not leave an unconfirmed draft stranded".
+    // Resetting here, before the merge below, means the merge picks up the
+    // snapshot's own (possibly different, possibly empty) submittedAnswers/
+    // draftAnswers value for that question instead of the stale local cache.
     const wasLiveRun = hasObservedSnapshotRef.current && previousActiveQuestionRunRevisionRef.current !== null
-    const idsLeavingLiveContext = snapshot.selfPacedMode && wasLiveRun
+    const idsLeavingLiveContext = wasLiveRun && snapshot.activeQuestionRunRevision === null
       ? previousActiveQuestionIdsRef.current
       : []
     if (idsLeavingLiveContext.length > 0) {
@@ -722,10 +750,21 @@ export default function ResonanceStudent() {
     if (existingTimeoutId !== undefined) {
       window.clearTimeout(existingTimeoutId)
     }
+    // Bound the debounce to whatever time is actually left before the run's
+    // deadline (see DRAFT_DEADLINE_BUFFER_MS) instead of always waiting the
+    // full DRAFT_EDIT_DEBOUNCE_MS — an edit made right at (or past) the
+    // boundary must still get a real chance to arrive before the server's
+    // own deadline check does, clamped to an effectively-immediate send
+    // rather than a negative/zero delay.
+    const deadlineAt = snapshotRef.current?.activeQuestionDeadlineAt ?? null
+    const remainingBeforeDeadline = deadlineAt === null ? null : deadlineAt - Date.now()
+    const delayMs = remainingBeforeDeadline === null
+      ? DRAFT_EDIT_DEBOUNCE_MS
+      : Math.max(0, Math.min(DRAFT_EDIT_DEBOUNCE_MS, remainingBeforeDeadline - DRAFT_DEADLINE_BUFFER_MS))
     draftSendTimeoutsRef.current.set(questionId, window.setTimeout(() => {
       draftSendTimeoutsRef.current.delete(questionId)
       attemptDraftSend(questionId)
-    }, DRAFT_EDIT_DEBOUNCE_MS))
+    }, delayMs))
   }, [attemptDraftSend])
 
   // Backstop retry for anything the edit-triggered debounce didn't manage to
