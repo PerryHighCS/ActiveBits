@@ -551,13 +551,15 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
     setError(null)
   }, [sessionId, studentId])
 
-  // Resolves `true` only once this fetch's snapshot (or a newer one that
-  // superseded it) has actually been applied — `false` on a network/response
-  // failure, or when a newer request supersedes this one before it can tell.
-  // Callers that need to know whether the server's current state was truly
-  // retrieved (not just requested) — e.g. deadline reconciliation deciding
-  // whether it's safe to drop its own optimistic local value — must not
-  // treat a resolved promise alone as success.
+  // Resolves `true` only once this fetch's own response was actually applied
+  // as the current snapshot — `false` on a network/response failure, when a
+  // newer request supersedes this one before it can tell, or when the
+  // response arrives but shouldApplyStudentSessionSnapshot rejects it as
+  // stale/out-of-order relative to what's already known (e.g. a WebSocket
+  // push that arrived first). Callers that need to know whether the server's
+  // *current* state was truly retrieved (not just requested) — e.g. deadline
+  // reconciliation deciding whether it's safe to drop its own optimistic
+  // local value — must not treat a resolved promise alone as success.
   const fetchSnapshot = useCallback(async (): Promise<boolean> => {
     if (sessionId === null) return false
     const requestId = latestSnapshotRequestRef.current + 1
@@ -593,7 +595,11 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
       setSnapshot(selection.snapshot)
       setError(null)
       setLoading(false)
-      return true
+      // A candidate rejected as stale/out-of-order (selection.accepted ===
+      // false) never actually replaced the snapshot the caller already has —
+      // it's not a "success" from the caller's point of view (see the
+      // docstring above), even though the fetch itself completed cleanly.
+      return selection.accepted
     } catch {
       if (mountedRef.current && isLatestStudentSnapshotRequest(requestId, latestSnapshotRequestRef.current)) {
         setError('Network error — retrying…')

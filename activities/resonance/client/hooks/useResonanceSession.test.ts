@@ -853,3 +853,80 @@ void test('saveDraft settles pending saves immediately when the socket closes, i
     restore()
   }
 })
+
+void test('fetchSnapshot resolves false when its response is rejected as stale, not applied', async () => {
+  // CodeRabbit review of PR #381: fetchSnapshot (exposed as `refresh`) used
+  // to return `true` unconditionally whenever the HTTP request itself
+  // succeeded, regardless of whether selectStudentSessionSnapshot actually
+  // accepted the response as the new current snapshot. A caller relying on
+  // that return value to mean "the server's current state was retrieved"
+  // (deadline reconciliation in ResonanceStudent.tsx) would be misled by a
+  // technically-200-OK response that shouldApplyStudentSessionSnapshot
+  // rejected as older/out-of-order than what a WebSocket push already
+  // delivered — treating a rejected, no-op fetch as a successful refresh.
+  const restore = installWsTestEnvironment()
+  const { act, render } = await import('@testing-library/react')
+
+  try {
+    const captured: {
+      snapshot: StudentSessionSnapshot | null
+      refresh: (() => Promise<boolean>) | null
+    } = { snapshot: null, refresh: null }
+    function Probe({ sessionId, studentId }: { sessionId: string; studentId: string }) {
+      const { snapshot, refresh } = useResonanceSession(sessionId, studentId)
+      captured.snapshot = snapshot
+      captured.refresh = refresh
+      return null
+    }
+
+    let stateResponse: Record<string, unknown> = {
+      sessionId: 'session-1',
+      activeQuestionIds: ['q1'],
+      activeQuestionRunStartedAt: 3_000,
+    }
+    ;(globalThis as { fetch?: typeof fetch }).fetch = (async (url: string) => {
+      if (typeof url === 'string' && url.includes('/state')) {
+        return { ok: true, json: async () => stateResponse } as Response
+      }
+      throw new Error(`Unexpected fetch: ${url}`)
+    }) as typeof fetch
+
+    let rendered!: ReturnType<typeof render>
+    await act(async () => {
+      rendered = render(React.createElement(Probe, { sessionId: 'session-1', studentId: 'student-1' }))
+      await Promise.resolve()
+    })
+    assert.equal(FakeWebSocket.instances.length, 1)
+    assert.equal(captured.snapshot?.activeQuestionRunStartedAt, 3_000, 'expected the initial mount fetch to be accepted (nothing observed yet)')
+
+    console.info('[TEST] a WebSocket push delivers a newer run than the mount fetch saw')
+    const socket = FakeWebSocket.instances[0]!
+    await act(async () => {
+      socket.emitMessage({
+        type: 'resonance:session-state',
+        payload: { sessionId: 'session-1', activeQuestionIds: ['q1'], activeQuestionRunStartedAt: 5_000 },
+      })
+    })
+    assert.equal(captured.snapshot?.activeQuestionRunStartedAt, 5_000)
+
+    console.info('[TEST] refresh() now returns a technically-successful but stale (older) response')
+    stateResponse = { sessionId: 'session-1', activeQuestionIds: ['q1'], activeQuestionRunStartedAt: 1_000 }
+    let refreshResult: boolean | undefined
+    await act(async () => {
+      refreshResult = await captured.refresh!()
+    })
+
+    assert.equal(refreshResult, false, 'a stale, rejected response must not resolve true')
+    assert.equal(
+      captured.snapshot?.activeQuestionRunStartedAt,
+      5_000,
+      'the rejected stale response must not have overwritten the newer WebSocket-delivered snapshot',
+    )
+
+    await act(async () => {
+      rendered.unmount()
+    })
+  } finally {
+    restore()
+  }
+})
