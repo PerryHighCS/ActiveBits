@@ -1357,3 +1357,129 @@ void test('a prior-run confirmed answer resurfacing from a later snapshot is not
     restore()
   }
 })
+
+void test('an unconfirmed draft survives a live-to-self-paced mode transition and is still retried', async () => {
+  // CodeRabbit review of PR #381: the selfPacedMode branch of the
+  // snapshot-merge effect never calls clearDraftTracking (unlike the
+  // live-mode branch, which does so on a run restart/reactivation), and
+  // flagged that as a gap that could strand an unconfirmed draft's tracking
+  // across a live-to-self-paced transition.
+  //
+  // Investigation: unconfirmedQuestionIdsRef/inFlightDraftQuestionIdsRef are
+  // keyed by questionId only, not by run identity, and the periodic retry
+  // loop (selectUnconfirmedDraftQuestionIds) filters by whatever the
+  // *current* snapshot's activeQuestions are — it doesn't care whether that
+  // snapshot is live or self-paced, or whether the run revision changed
+  // underneath it. So as long as the question stays present in the new
+  // snapshot's activeQuestions (self-paced makes every question available,
+  // a superset of whatever was live-active), an unconfirmed draft's tracking
+  // survives the transition intact and keeps retrying under the new
+  // (self-paced, revision-null) context. This test locks in that no fix is
+  // needed here: the mode transition must not strand the draft.
+  const restore = installResonanceStudentTestEnvironment()
+  const { persistSessionParticipantIdentity } = await import(
+    '@src/components/common/entryParticipantIdentityUtils'
+  )
+  const { MemoryRouter, Route, Routes } = await import('react-router')
+  const { default: ResonanceStudent, DRAFT_EDIT_DEBOUNCE_MS, DRAFT_RETRY_INTERVAL_MS } = await import('./ResonanceStudent.js')
+  const { DRAFT_SAVE_ACK_TIMEOUT_MS } = await import('../hooks/useResonanceSession.js')
+  const { act, render, waitFor, fireEvent } = await import('@testing-library/react')
+
+  persistSessionParticipantIdentity(window.localStorage, 'session-1', 'Ada', 'student-1')
+
+  const snapshot = buildSnapshot({
+    activeQuestions: [
+      { id: 'q1', type: 'free-response', text: 'Question one', order: 0 },
+    ],
+    activeQuestionIds: ['q1'],
+    activeQuestionRunStartedAt: Date.now(),
+    activeQuestionRunRevision: 1,
+    activeQuestionDeadlineAt: Date.now() + 60_000,
+  })
+
+  ;(globalThis as { fetch?: typeof fetch }).fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input)
+    if (url.includes('/register-student')) {
+      return { ok: true, json: async () => ({ studentId: 'student-1', name: 'Ada' }) } as Response
+    }
+    if (url.includes('/state')) {
+      return { ok: true, json: async () => snapshot } as Response
+    }
+    throw new Error(`Unexpected fetch: ${url}`)
+  }) as typeof fetch
+
+  let rendered!: ReturnType<typeof render>
+  try {
+    await act(async () => {
+      rendered = render(
+        React.createElement(
+          MemoryRouter,
+          { initialEntries: ['/session-1'] },
+          React.createElement(
+            Routes,
+            null,
+            React.createElement(Route, { path: '/:sessionId', element: React.createElement(ResonanceStudent) }),
+          ),
+        ),
+      )
+      await Promise.resolve()
+    })
+
+    await waitFor(() => assert.equal(FakeWebSocket.instances.length, 1))
+    const socket = FakeWebSocket.instances[0]!
+    // Never auto-ack — this draft stays unconfirmed across the transition.
+    socket.send = (message: string) => { socket.sent.push(JSON.parse(message)) }
+
+    type DraftMessage = { type: string; payload: { questionId?: string; activeQuestionRunRevision?: number | null; answer?: { text?: string } } }
+    const isQ1Draft = (message: unknown): message is DraftMessage =>
+      typeof message === 'object' && message !== null &&
+      (message as { type?: string }).type === 'resonance:update-draft' &&
+      (message as DraftMessage).payload.questionId === 'q1'
+
+    console.info('[TEST] typing an answer under live mode, left unacknowledged')
+    await act(async () => {
+      fireEvent.change(rendered.getByLabelText(/your answer/i), { target: { value: 'live-mode answer' } })
+    })
+    await new Promise((resolve) => setTimeout(resolve, DRAFT_EDIT_DEBOUNCE_MS + 200))
+    assert.ok(
+      socket.sent.some((message) => isQ1Draft(message) && message.payload.activeQuestionRunRevision === 1),
+      'expected the live-mode attempt to have been sent',
+    )
+
+    console.info('[TEST] the session transitions to self-paced mode before that draft is acknowledged')
+    const sentBeforeTransition = socket.sent.length
+    await act(async () => {
+      socket.emitMessage({
+        type: 'resonance:session-state',
+        payload: {
+          ...snapshot,
+          selfPacedMode: true,
+          activeQuestionRunRevision: null,
+          activeQuestionRunStartedAt: null,
+          activeQuestionDeadlineAt: null,
+          // The server always stamps the highest live revision it has ever
+          // assigned here, even on a self-paced/idle snapshot (see
+          // shouldApplyStudentSessionSnapshot) — without it, this snapshot
+          // looks indistinguishable from a stale delayed idle push and gets
+          // rejected by the client's own ordering guard.
+          lastActiveQuestionRunRevision: 1,
+        },
+      })
+    })
+
+    await new Promise((resolve) => setTimeout(resolve, DRAFT_SAVE_ACK_TIMEOUT_MS + DRAFT_RETRY_INTERVAL_MS + 300))
+    const retriedUnderSelfPaced = socket.sent
+      .slice(sentBeforeTransition)
+      .filter((message) => isQ1Draft(message) && message.payload.activeQuestionRunRevision === null)
+    assert.ok(
+      retriedUnderSelfPaced.some((message) => (message as DraftMessage).payload.answer?.text === 'live-mode answer'),
+      `expected the still-unconfirmed draft to be retried under self-paced mode, got: ${JSON.stringify(socket.sent.slice(sentBeforeTransition))}`,
+    )
+
+    await act(async () => {
+      rendered.unmount()
+    })
+  } finally {
+    restore()
+  }
+})

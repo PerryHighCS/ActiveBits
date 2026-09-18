@@ -733,7 +733,8 @@ void test('self-paced students can persist drafts and submit without an active r
       studentId: 'student1',
       questionId: 'q1',
       draftId: 'draft-1',
-      activeQuestionRunStartedAt: null,
+      activeQuestionRunRevision: null,
+      draftSendSequence: 1,
       answer: { type: 'free-response', text: 'Self-paced draft' },
     },
   }))
@@ -753,7 +754,7 @@ void test('self-paced students can persist drafts and submit without an active r
     body: {
       studentId: 'student1',
       questionId: 'q1',
-      activeQuestionRunStartedAt: null,
+      activeQuestionRunRevision: null,
       answer: { type: 'free-response', text: 'Self-paced answer' },
     },
   }, submitRes)
@@ -769,6 +770,67 @@ void test('self-paced students can persist drafts and submit without an active r
     text: 'Self-paced answer',
   })
   assert.equal(storedData?.responseDrafts?.['q1:student1'], undefined)
+
+  await sessions.close()
+})
+
+void test('the submit-answer route rejects a malformed activeQuestionRunRevision instead of silently matching a self-paced session', async () => {
+  // CodeRabbit review of PR #381: matchesActiveQuestionRun used to normalize
+  // *any* non-number client value (omitted, a string, NaN, a negative
+  // number) down to `null` before comparing it against the session's run
+  // identity. That's fine when the session has a real active run (nothing
+  // normalizes to a positive integer by accident), but when the session is
+  // self-paced/idle (activeQuestionRunRevision === null), a malformed value
+  // would silently normalize to `null` too and incorrectly "match" — letting
+  // a corrupted or buggy payload through as if it had explicitly, correctly
+  // asserted "no active run". The real client always sends either an
+  // explicit `null` or a genuine positive revision number, never omits the
+  // field or sends a non-number, so requiring exactly that costs nothing.
+  const app = createMockApp()
+  const sessions = createSessionStore(null)
+  const session = createMultiQuestionSession()
+  session.data.selfPacedMode = true
+  const studentCookies = issueStudentCookies(session, 'student1')
+  await sessions.set(session.id, session)
+  setupResonanceRoutes(app, sessions, createMockWs())
+
+  for (const malformedRevision of [undefined, 'not-a-number', Number.NaN, -1, 1.5]) {
+    console.info(`[TEST] activeQuestionRunRevision ${JSON.stringify(malformedRevision)} must be rejected, not treated as self-paced null`)
+    const res = createResponse()
+    await app.handlers.post['/api/resonance/:sessionId/submit-answer']?.({
+      params: { sessionId: session.id },
+      cookies: studentCookies,
+      body: {
+        studentId: 'student1',
+        questionId: 'q1',
+        ...(malformedRevision === undefined ? {} : { activeQuestionRunRevision: malformedRevision }),
+        answer: { type: 'free-response', text: `Should not be stored (${String(malformedRevision)})` },
+      },
+    }, res)
+    assert.equal(res.statusCode, 409, `expected a malformed activeQuestionRunRevision of ${JSON.stringify(malformedRevision)} to be rejected`)
+  }
+
+  console.info('[TEST] an explicit null activeQuestionRunRevision is still accepted for a genuinely self-paced session')
+  const acceptedRes = createResponse()
+  await app.handlers.post['/api/resonance/:sessionId/submit-answer']?.({
+    params: { sessionId: session.id },
+    cookies: studentCookies,
+    body: {
+      studentId: 'student1',
+      questionId: 'q1',
+      activeQuestionRunRevision: null,
+      answer: { type: 'free-response', text: 'Genuinely self-paced answer' },
+    },
+  }, acceptedRes)
+  assert.equal(acceptedRes.statusCode, 200)
+
+  const stored = await sessions.get(session.id)
+  const storedData = stored?.data as { responses?: Array<{ answer?: { text?: string } }> } | undefined
+  assert.deepEqual(
+    storedData?.responses?.map((response) => response.answer?.text),
+    ['Genuinely self-paced answer'],
+    'expected only the explicitly-null submission to have been stored',
+  )
 
   await sessions.close()
 })
@@ -822,7 +884,7 @@ void test('a self-paced draft that arrives after its submission is dropped, not 
     body: {
       studentId: 'student1',
       questionId: 'q1',
-      activeQuestionRunStartedAt: null,
+      activeQuestionRunRevision: null,
       editSequence: 1,
       answer: { type: 'free-response', text: 'Submitted answer' },
     },
@@ -836,8 +898,9 @@ void test('a self-paced draft that arrives after its submission is dropped, not 
       studentId: 'student1',
       questionId: 'q1',
       draftId: 'late-self-paced-draft',
-      activeQuestionRunStartedAt: null,
+      activeQuestionRunRevision: null,
       editSequence: 1,
+      draftSendSequence: 1,
       answer: { type: 'free-response', text: 'Stale pre-submission draft' },
     },
   }))
@@ -923,6 +986,7 @@ void test('a draft that arrives after its submission is dropped instead of resur
       draftId: 'late-draft',
       activeQuestionRunRevision: 1,
       editSequence: 1,
+      draftSendSequence: 1,
       answer: { type: 'free-response', text: 'Stale pre-submission draft' },
     },
   }))
@@ -1008,6 +1072,7 @@ void test('a draft made after revisiting an already-submitted question in the sa
       draftId: 'revisit-draft',
       activeQuestionRunRevision: 1,
       editSequence: 2,
+      draftSendSequence: 1,
       answer: { type: 'free-response', text: 'Revised answer, not yet resubmitted' },
     },
   }))
@@ -1034,7 +1099,7 @@ void test('a draft made after revisiting an already-submitted question in the sa
     {
       questionId: 'q1',
       studentId: 'student1',
-      draftSendSequence: 0,
+      draftSendSequence: 1,
       updatedAt: undefined,
       activeQuestionRunRevision: 1,
       editSequence: 2,
@@ -1120,6 +1185,7 @@ void test('an older draft write cannot clobber a newer one for the same question
       draftId: 'newer-draft',
       activeQuestionRunRevision: 1,
       editSequence: 2,
+      draftSendSequence: 2,
       answer: { type: 'free-response', text: 'Newer, revisited answer' },
     },
   }))
@@ -1139,6 +1205,7 @@ void test('an older draft write cannot clobber a newer one for the same question
       draftId: 'older-straggler',
       activeQuestionRunRevision: 1,
       editSequence: 1,
+      draftSendSequence: 1,
       answer: { type: 'free-response', text: 'Stale pre-revisit answer' },
     },
   }))
@@ -1210,6 +1277,104 @@ void test('an older draft write cannot clobber a newer one for the same question
   await sessions.close()
 })
 
+void test('an update-draft write with a missing or invalid draftSendSequence is dropped, not silently coerced to zero', async () => {
+  // CodeRabbit review of PR #381: resolveEditSequence's zero-fallback exists
+  // to normalize historical *stored* drafts, not to validate a live write —
+  // silently coercing a missing/malformed draftSendSequence to 0 would let a
+  // malformed payload masquerade as a legitimate "first send" and jump the
+  // same-editSequence tiebreaker ahead of a write that's genuinely first. A
+  // real client always sends a positive integer (it pre-increments before
+  // every send), so the handler now requires one and drops anything else.
+  const app = createMockApp()
+  const sessions = createSessionStore(null)
+  const session = createMultiQuestionSession()
+  session.data.activeQuestionId = 'q1'
+  session.data.activeQuestionIds = ['q1']
+  session.data.activeQuestionRunStartedAt = Date.now() - 1_000
+  session.data.activeQuestionRunRevision = 1
+  session.data.lastActiveQuestionRunRevision = 1
+  const studentCookies = issueStudentCookies(session, 'student1')
+  await sessions.set(session.id, session)
+  const captured = createCapturingMockWs()
+  setupResonanceRoutes(app, sessions, captured.ws)
+
+  const handler = captured.getHandler()
+  const messageHandlers: Array<(message: string) => void> = []
+  const sentMessages: Array<{ type?: string; payload?: { draftId?: string } }> = []
+  assert.ok(handler)
+  handler({
+    readyState: 1,
+    upgradeHeaders: {
+      cookie: Object.entries(studentCookies).map(([name, value]) => `${name}=${value}`).join('; '),
+    },
+    send(message: string) {
+      sentMessages.push(JSON.parse(message) as { type?: string; payload?: { draftId?: string } })
+    },
+    on(event: string, callback: (message: string) => void) {
+      if (event === 'message') messageHandlers.push(callback)
+    },
+    once() {},
+    close() {},
+    terminate() {},
+    ping() {},
+  }, new URLSearchParams({ sessionId: session.id, role: 'student', studentId: 'student1' }), captured.ws.wss)
+  await waitForCondition(() => messageHandlers.length === 1)
+
+  const invalidPayloads: Array<{ label: string; draftSendSequence?: unknown }> = [
+    { label: 'missing' },
+    { label: 'string', draftSendSequence: 'not-a-number' },
+    { label: 'zero', draftSendSequence: 0 },
+    { label: 'negative', draftSendSequence: -1 },
+    { label: 'non-integer', draftSendSequence: 1.5 },
+  ]
+  for (const { label, draftSendSequence } of invalidPayloads) {
+    console.info(`[TEST] a draft write with a ${label} draftSendSequence must be dropped`)
+    messageHandlers[0]?.(JSON.stringify({
+      type: 'resonance:update-draft',
+      payload: {
+        studentId: 'student1',
+        questionId: 'q1',
+        draftId: `invalid-${label}`,
+        activeQuestionRunRevision: 1,
+        editSequence: 1,
+        ...(draftSendSequence === undefined ? {} : { draftSendSequence }),
+        answer: { type: 'free-response', text: 'Should not be stored' },
+      },
+    }))
+  }
+
+  console.info('[TEST] a draft write with a valid draftSendSequence is accepted afterward')
+  messageHandlers[0]?.(JSON.stringify({
+    type: 'resonance:update-draft',
+    payload: {
+      studentId: 'student1',
+      questionId: 'q1',
+      draftId: 'valid-draft',
+      activeQuestionRunRevision: 1,
+      editSequence: 1,
+      draftSendSequence: 1,
+      answer: { type: 'free-response', text: 'Should be stored' },
+    },
+  }))
+  await waitForCondition(() => sentMessages.some((message) =>
+    message.type === 'resonance:draft-saved' && message.payload?.draftId === 'valid-draft'
+  ))
+
+  assert.deepEqual(
+    sentMessages
+      .filter((message) => message.type === 'resonance:draft-saved')
+      .map((message) => message.payload?.draftId),
+    ['valid-draft'],
+    `expected only the valid write to be acknowledged, got: ${JSON.stringify(sentMessages)}`,
+  )
+
+  const stored = await sessions.get(session.id)
+  const storedData = stored?.data as { responseDrafts?: Record<string, { answer?: { text?: string } }> } | undefined
+  assert.equal(storedData?.responseDrafts?.['q1:student1']?.answer?.text, 'Should be stored')
+
+  await sessions.close()
+})
+
 void test('clearing a draft over the websocket still acknowledges the write, present or absent', async () => {
   const app = createMockApp()
   const sessions = createSessionStore(null)
@@ -1263,6 +1428,7 @@ void test('clearing a draft over the websocket still acknowledges the write, pre
       questionId: 'q1',
       draftId: 'clear-existing',
       activeQuestionRunRevision: 1,
+      draftSendSequence: 1,
       answer: null,
     },
   }))
@@ -1281,6 +1447,7 @@ void test('clearing a draft over the websocket still acknowledges the write, pre
       questionId: 'q1',
       draftId: 'clear-already-absent',
       activeQuestionRunRevision: 1,
+      draftSendSequence: 1,
       answer: null,
     },
   }))

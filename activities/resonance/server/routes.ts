@@ -522,12 +522,24 @@ function getQuestionAnswerability(sessionData: ResonanceSessionData, questionId:
 /**
  * `activeQuestionRunRevision` is the sole run identity: it's always a real
  * number whenever a run is active (see `nextActiveQuestionRunRevision`) and
- * `null` only for self-paced/idle state, so a plain equality check (treating
- * a missing/non-number client value as `null`) is always sufficient.
+ * `null` only for self-paced/idle state. The client always sends one of
+ * those two shapes explicitly (never omits the field or sends a malformed
+ * value) — so `null` matches self-paced/idle only when sent as literal
+ * `null`, and anything else must be a positive safe integer equal to the
+ * active revision. A missing/string/unsafe value must NOT be normalized to
+ * `null`, or a malformed payload would silently pass as "matches self-paced"
+ * whenever the session happens to be self-paced/idle.
  */
 function matchesActiveQuestionRun(sessionData: ResonanceSessionData, revision: unknown): boolean {
-  const normalizedRevision = typeof revision === 'number' && Number.isSafeInteger(revision) ? revision : null
-  return normalizedRevision === sessionData.activeQuestionRunRevision
+  if (revision === null) {
+    return sessionData.activeQuestionRunRevision === null
+  }
+  return (
+    typeof revision === 'number' &&
+    Number.isSafeInteger(revision) &&
+    revision > 0 &&
+    revision === sessionData.activeQuestionRunRevision
+  )
 }
 
 export function resolveAnswerabilityErrorMessage(reason: 'expired' | 'choices-hidden' | 'inactive'): string {
@@ -3131,7 +3143,22 @@ export default function setupResonanceRoutes(
           ? payload.draftId
           : null
         const editSequence = resolveEditSequence(payload.editSequence)
-        const draftSendSequence = resolveEditSequence(payload.draftSendSequence)
+        // Unlike editSequence (whose legitimate first value is 0, before any
+        // revisit bump), draftSendSequence is always >= 1 the first time our
+        // own client ever sends one (it pre-increments before every send —
+        // see ResonanceStudent.tsx). resolveEditSequence's zero-fallback
+        // exists only to normalize historical stored drafts written before
+        // this field existed; silently coercing a missing/invalid value on
+        // an incoming write would let a malformed payload masquerade as a
+        // legitimate "first send" and be ordered ahead of writes that
+        // actually are the first send, defeating the tiebreaker below.
+        const rawDraftSendSequence = payload.draftSendSequence
+        if (
+          typeof rawDraftSendSequence !== 'number' ||
+          !Number.isSafeInteger(rawDraftSendSequence) ||
+          rawDraftSendSequence <= 0
+        ) return
+        const draftSendSequence = rawDraftSendSequence
 
         // A draft sent just before a submission can arrive here after the
         // submission already recorded a response and cleared the draft (the
