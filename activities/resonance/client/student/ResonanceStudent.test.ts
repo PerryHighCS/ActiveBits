@@ -1860,6 +1860,135 @@ void test('a live run ending into a fully idle state does not leave an unconfirm
   }
 })
 
+void test('a staged run\'s superseded question does not resurrect a stale answer after the run ends', async () => {
+  // Copilot review of PR #381: a staged run advancing to its next question
+  // bumps activeQuestionRunRevision (see advance-staged-question in
+  // routes.ts) and narrows activeQuestionIds down to just the next
+  // question. The reactivatedIds/didRunRestart reset in the snapshot-merge
+  // effect only resets the *incoming* ids (activeIds when didRunRestart),
+  // never the id that just left — so a still-unconfirmed draft/local answer
+  // for the question that was just advanced away from is left tracked.
+  // previousActiveQuestionIdsRef is then overwritten to the new (narrower)
+  // active set on every merge, so that orphaned id also falls out of
+  // idsLeavingLiveContext's own reach once the run eventually ends — it
+  // only ever remembers the *last* active set, not one from several stages
+  // back. Left unfixed, the stale answer can resurface and retry once the
+  // run ends, silently overwriting an unrelated, already-legitimate draft
+  // for the same question.
+  //
+  // Not observable while the superseded question is off-screen (nothing
+  // renders it), so this test makes it observable the same way the
+  // idle-ending test above does: advance the staged run away from q1, let
+  // the run end into self-paced reporting a different, pre-existing q1
+  // draft, and confirm that pre-existing draft is what's actually shown.
+  const restore = installResonanceStudentTestEnvironment()
+  const { persistSessionParticipantIdentity } = await import(
+    '@src/components/common/entryParticipantIdentityUtils'
+  )
+  const { MemoryRouter, Route, Routes } = await import('react-router')
+  const { default: ResonanceStudent, DRAFT_EDIT_DEBOUNCE_MS, DRAFT_RETRY_INTERVAL_MS } = await import('./ResonanceStudent.js')
+  const { act, render, waitFor, fireEvent } = await import('@testing-library/react')
+
+  persistSessionParticipantIdentity(window.localStorage, 'session-1', 'Ada', 'student-1')
+
+  const snapshot = buildSnapshot({
+    presentationMode: 'staged',
+    activeQuestions: [
+      { id: 'q1', type: 'free-response', text: 'Question one', order: 0 },
+    ],
+    activeQuestionIds: ['q1'],
+    activeQuestionRunStartedAt: Date.now(),
+    activeQuestionRunRevision: 1,
+    activeQuestionDeadlineAt: Date.now() + 60_000,
+  })
+
+  ;(globalThis as { fetch?: typeof fetch }).fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input)
+    if (url.includes('/register-student')) {
+      return { ok: true, json: async () => ({ studentId: 'student-1', name: 'Ada' }) } as Response
+    }
+    if (url.includes('/state')) {
+      return { ok: true, json: async () => snapshot } as Response
+    }
+    throw new Error(`Unexpected fetch: ${url}`)
+  }) as typeof fetch
+
+  let rendered!: ReturnType<typeof render>
+  try {
+    await act(async () => {
+      rendered = render(
+        React.createElement(
+          MemoryRouter,
+          { initialEntries: ['/session-1'] },
+          React.createElement(
+            Routes,
+            null,
+            React.createElement(Route, { path: '/:sessionId', element: React.createElement(ResonanceStudent) }),
+          ),
+        ),
+      )
+      await Promise.resolve()
+    })
+
+    await waitFor(() => assert.equal(FakeWebSocket.instances.length, 1))
+    const socket = FakeWebSocket.instances[0]!
+    // Never auto-ack — this draft stays unconfirmed through the advance.
+    socket.send = (message: string) => { socket.sent.push(JSON.parse(message)) }
+
+    console.info('[TEST] typing an answer for the first staged question, left unacknowledged')
+    await act(async () => {
+      fireEvent.change(rendered.getByLabelText(/your answer/i), { target: { value: 'live-mode answer' } })
+    })
+    await new Promise((resolve) => setTimeout(resolve, DRAFT_EDIT_DEBOUNCE_MS + 200))
+
+    console.info('[TEST] the staged run advances to its next question, superseding q1 before its draft is acknowledged')
+    await act(async () => {
+      socket.emitMessage({
+        type: 'resonance:session-state',
+        payload: {
+          ...snapshot,
+          activeQuestions: [
+            { id: 'q2', type: 'free-response', text: 'Question two', order: 1 },
+          ],
+          activeQuestionIds: ['q2'],
+          activeQuestionRunRevision: 2,
+          activeQuestionRunStartedAt: Date.now(),
+          activeQuestionDeadlineAt: Date.now() + 60_000,
+        },
+      })
+    })
+    await new Promise((resolve) => setTimeout(resolve, DRAFT_RETRY_INTERVAL_MS + 300))
+
+    console.info('[TEST] the staged run ends into self-paced mode, reporting an unrelated pre-existing q1 draft')
+    await act(async () => {
+      socket.emitMessage({
+        type: 'resonance:session-state',
+        payload: {
+          ...snapshot,
+          selfPacedMode: true,
+          activeQuestionRunRevision: null,
+          activeQuestionRunStartedAt: null,
+          activeQuestionDeadlineAt: null,
+          lastActiveQuestionRunRevision: 2,
+          draftAnswers: { q1: { type: 'free-response', text: 'Pre-existing self-paced draft' } },
+          draftSendSequences: { q1: 1 },
+        },
+      })
+    })
+
+    await waitFor(() => assert.equal(
+      (rendered.getByLabelText(/your answer/i) as HTMLTextAreaElement).value,
+      'Pre-existing self-paced draft',
+    ))
+
+    await act(async () => {
+      rendered.unmount()
+    })
+  } finally {
+    restore()
+  }
+})
+
 void test('a failed deadline reconciliation refresh does not strand the client, and retries on the next tick', async () => {
   // CodeRabbit review of PR #381: the deadline-reconciliation branch of the
   // retry-interval effect used to mark reconciledExpiryRef and clear draft

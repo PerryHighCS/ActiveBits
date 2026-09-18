@@ -623,6 +623,24 @@ export default function ResonanceStudent() {
     const reactivatedIds = hasObservedSnapshot
       ? activeIds.filter((questionId) => !previousActiveIds.includes(questionId))
       : []
+    // A question dropping out of the active set entirely — a staged run
+    // advancing to its next question, in particular — leaves this question's
+    // unconfirmed marker and locally-cached answer behind with nothing to
+    // reconcile them: once it's off activeIds, selectUnconfirmedDraftQuestionIds's
+    // own filter (and the reactivatedIds/didRunRestart reset below, which
+    // only resets the *incoming* ids) never touches it again. previousActiveQuestionIdsRef
+    // is overwritten on every merge (below), so if this id isn't captured
+    // here as it leaves, it's lost from tracking forever — including from
+    // idsLeavingLiveContext above, which by the time the run eventually ends
+    // into self-paced/idle only remembers the *last* active set, not this
+    // long-superseded one. Left unhandled, the stale local answer can then
+    // resurface and retry under whatever context comes later, silently
+    // overwriting a legitimate draft for the same question. See "a staged
+    // run's superseded question does not resurrect a stale answer after the
+    // run ends".
+    const deactivatedIds = hasObservedSnapshot
+      ? previousActiveIds.filter((questionId) => !activeIds.includes(questionId))
+      : []
     const didRunRestart = hasActiveQuestionRunRestart({
       hasObservedSnapshot,
       activeQuestionIds: activeIds,
@@ -630,8 +648,11 @@ export default function ResonanceStudent() {
       previousActiveQuestionRunRevision: previousActiveQuestionRunRevisionRef.current,
     })
 
-    if (reactivatedIds.length > 0 || didRunRestart) {
-      const restartedIds = didRunRestart ? activeIds : reactivatedIds
+    if (reactivatedIds.length > 0 || didRunRestart || deactivatedIds.length > 0) {
+      const restartedIds = Array.from(new Set([
+        ...(didRunRestart ? activeIds : reactivatedIds),
+        ...deactivatedIds,
+      ]))
       setSubmittedQuestionIds((current) => {
         const next = new Set(current)
         for (const questionId of restartedIds) {

@@ -1209,9 +1209,14 @@ void test('an older draft write cannot clobber a newer one for the same question
       answer: { type: 'free-response', text: 'Stale pre-revisit answer' },
     },
   }))
-  await waitForCondition(() => sentMessages.some((message) =>
-    message.type === 'resonance:draft-saved' && message.payload?.draftId === 'older-straggler'
-  ))
+  // This straggler's content differs from what's stored, so it must not be
+  // acknowledged as saved (see the "second concurrent tab" test below);
+  // wait for a settled tick instead of an ack that will never come.
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  assert.ok(
+    !sentMessages.some((message) => message.payload?.draftId === 'older-straggler'),
+    'a rejected write whose content differs from what’s stored must not be acknowledged as saved',
+  )
 
   const storedAfterStraggler = (await sessions.get(session.id))?.data as StoredData | undefined
   const draftAfterStraggler = storedAfterStraggler?.responseDrafts?.['q1:student1']
@@ -1261,9 +1266,11 @@ void test('an older draft write cannot clobber a newer one for the same question
       answer: { type: 'free-response', text: 'Sent earlier by the client, written second' },
     },
   }))
-  await waitForCondition(() => sentMessages.some((message) =>
-    message.type === 'resonance:draft-saved' && message.payload?.draftId === 'same-sequence-straggler'
-  ))
+  // This straggler's content differs from what's stored, so — unlike a
+  // same-content retry — it must not be acknowledged as saved (see the
+  // "second concurrent tab" test below for why); wait for a settled tick
+  // instead of an ack that will never come.
+  await new Promise((resolve) => setTimeout(resolve, 0))
 
   const storedAfterTiebreaker = (await sessions.get(session.id))?.data as StoredData | undefined
   const draftAfterTiebreaker = storedAfterTiebreaker?.responseDrafts?.['q1:student1']
@@ -1272,6 +1279,159 @@ void test('an older draft write cannot clobber a newer one for the same question
     draftAfterTiebreaker?.answer,
     { type: 'free-response', text: 'Sent later by the client, written first' },
     'a same-editSequence write with a lower draftSendSequence must not overwrite what’s stored',
+  )
+  assert.ok(
+    !sentMessages.some((message) => message.payload?.draftId === 'same-sequence-straggler'),
+    'a rejected write whose content differs from what’s stored must not be acknowledged as saved',
+  )
+
+  console.info('[TEST] a same-editSequence write with a lower draftSendSequence but identical content is still acknowledged')
+  messageHandlers[0]?.(JSON.stringify({
+    type: 'resonance:update-draft',
+    payload: {
+      studentId: 'student1',
+      questionId: 'q1',
+      draftId: 'same-sequence-same-content-straggler',
+      activeQuestionRunRevision: 1,
+      editSequence: 2,
+      draftSendSequence: 99,
+      answer: { type: 'free-response', text: 'Sent later by the client, written first' },
+    },
+  }))
+  await waitForCondition(() => sentMessages.some((message) =>
+    message.type === 'resonance:draft-saved' && message.payload?.draftId === 'same-sequence-same-content-straggler'
+  ))
+
+  await sessions.close()
+})
+
+void test('a stale draft write from a second concurrent tab is not acknowledged as saved when its content was actually discarded', async () => {
+  // Copilot review of PR #381: draftSendSequence is a per-mount counter
+  // (nextDraftSendSequenceRef in ResonanceStudent.tsx starts at 0 on every
+  // mount), so it only totally orders sends from a *single* ResonanceStudent
+  // instance. It carries no meaning across two concurrent mounts for the
+  // same student — e.g. the same student's capability open in two browser
+  // tabs. If tab A has sent several drafts (its counter is now high) and tab
+  // B, a fresh mount, sends its own first edit (draftSendSequence 1), tab
+  // B's genuinely different, more-recent-from-its-own-perspective content
+  // loses the isStaleDraftWrite tiebreaker purely because its local counter
+  // is smaller — not because it's actually older. The guard was previously
+  // acking every rejected write unconditionally ("so a superseded retry
+  // doesn't get reported as a failed save"), which is only true when the
+  // rejected write's content is subsumed by what's already stored (the
+  // single-tab retry case this guard was built for). Acking tab B's write
+  // here would tell it the edit was persisted — it isn't — and tab B's own
+  // unconfirmed-draft tracking would stop retrying it, silently losing the
+  // student's actual latest edit.
+  const app = createMockApp()
+  const sessions = createSessionStore(null)
+  const session = createMultiQuestionSession()
+  session.data.activeQuestionId = 'q1'
+  session.data.activeQuestionIds = ['q1']
+  session.data.activeQuestionRunStartedAt = Date.now() - 1_000
+  session.data.activeQuestionRunRevision = 1
+  session.data.lastActiveQuestionRunRevision = 1
+  const studentCookies = issueStudentCookies(session, 'student1')
+  await sessions.set(session.id, session)
+  const captured = createCapturingMockWs()
+  setupResonanceRoutes(app, sessions, captured.ws)
+
+  const handler = captured.getHandler()
+  const messageHandlers: Array<(message: string) => void> = []
+  const sentMessages: Array<{ type?: string; payload?: { draftId?: string } }> = []
+  assert.ok(handler)
+  handler({
+    readyState: 1,
+    upgradeHeaders: {
+      cookie: Object.entries(studentCookies).map(([name, value]) => `${name}=${value}`).join('; '),
+    },
+    send(message: string) {
+      sentMessages.push(JSON.parse(message) as { type?: string; payload?: { draftId?: string } })
+    },
+    on(event: string, callback: (message: string) => void) {
+      if (event === 'message') messageHandlers.push(callback)
+    },
+    once() {},
+    close() {},
+    terminate() {},
+    ping() {},
+  }, new URLSearchParams({ sessionId: session.id, role: 'student', studentId: 'student1' }), captured.ws.wss)
+  await waitForCondition(() => messageHandlers.length === 1)
+
+  type StoredData = {
+    responseDrafts?: Record<string, {
+      draftSendSequence?: number
+      answer?: unknown
+    }>
+  }
+
+  console.info('[TEST] tab A has already sent several drafts, ratcheting its send counter up')
+  messageHandlers[0]?.(JSON.stringify({
+    type: 'resonance:update-draft',
+    payload: {
+      studentId: 'student1',
+      questionId: 'q1',
+      draftId: 'tab-a-draft',
+      activeQuestionRunRevision: 1,
+      editSequence: 1,
+      draftSendSequence: 10,
+      answer: { type: 'free-response', text: 'Tab A content' },
+    },
+  }))
+  await waitForCondition(() => sentMessages.some((message) =>
+    message.type === 'resonance:draft-saved' && message.payload?.draftId === 'tab-a-draft'
+  ))
+
+  console.info('[TEST] tab B, a fresh mount, sends its own genuinely different first edit')
+  messageHandlers[0]?.(JSON.stringify({
+    type: 'resonance:update-draft',
+    payload: {
+      studentId: 'student1',
+      questionId: 'q1',
+      draftId: 'tab-b-draft',
+      activeQuestionRunRevision: 1,
+      editSequence: 1,
+      draftSendSequence: 1,
+      answer: { type: 'free-response', text: 'Tab B content' },
+    },
+  }))
+  // No ack should ever arrive for tab B's rejected, actually-discarded write.
+  await new Promise((resolve) => setTimeout(resolve, 0))
+
+  const storedAfterTabB = (await sessions.get(session.id))?.data as StoredData | undefined
+  const draftAfterTabB = storedAfterTabB?.responseDrafts?.['q1:student1']
+  assert.deepEqual(
+    draftAfterTabB?.answer,
+    { type: 'free-response', text: 'Tab A content' },
+    'tab B’s write must not have overwritten tab A’s already-stored content',
+  )
+  assert.ok(
+    !sentMessages.some((message) => message.payload?.draftId === 'tab-b-draft'),
+    'tab B’s discarded write must not be acknowledged as saved',
+  )
+
+  console.info('[TEST] tab B’s own retry loop resends its current value with a fresh, higher send sequence')
+  messageHandlers[0]?.(JSON.stringify({
+    type: 'resonance:update-draft',
+    payload: {
+      studentId: 'student1',
+      questionId: 'q1',
+      draftId: 'tab-b-retry',
+      activeQuestionRunRevision: 1,
+      editSequence: 1,
+      draftSendSequence: 11,
+      answer: { type: 'free-response', text: 'Tab B content' },
+    },
+  }))
+  await waitForCondition(() => sentMessages.some((message) =>
+    message.type === 'resonance:draft-saved' && message.payload?.draftId === 'tab-b-retry'
+  ))
+
+  const storedAfterRetry = (await sessions.get(session.id))?.data as StoredData | undefined
+  assert.deepEqual(
+    storedAfterRetry?.responseDrafts?.['q1:student1']?.answer,
+    { type: 'free-response', text: 'Tab B content' },
+    'a genuine retry with a higher send sequence eventually lands, so the edit is never permanently lost',
   )
 
   await sessions.close()

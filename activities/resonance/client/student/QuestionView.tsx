@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { AnswerPayload, StudentQuestion } from '../../shared/types.js'
-import { areMcqSelectionsEqual } from '../../shared/mcq.js'
+import { isSameAnswer } from '../../shared/mcq.js'
 import FormattedMarkdown from '../components/FormattedMarkdown.js'
 import FreeResponseInput from './FreeResponseInput.js'
 import MCQInput from './MCQInput.js'
@@ -30,15 +30,7 @@ interface Props {
   onSubmitted?(questionId: string, answer: AnswerPayload): void
 }
 
-export function isSameAnswer(left: AnswerPayload | null, right: AnswerPayload | null): boolean {
-  if (left === right) return true
-  if (left === null || right === null) return false
-  if (left.type !== right.type) return false
-  return left.type === 'free-response'
-    ? right.type === 'free-response' && left.text === right.text
-    : right.type === 'multiple-choice' &&
-        areMcqSelectionsEqual(left.selectedOptionIds, right.selectedOptionIds)
-}
+export { isSameAnswer }
 
 /**
  * Renders one question's answer input and handles its own submission.

@@ -37,6 +37,16 @@ export function areMcqSelectionsEqual(
   return [...rightSet].every((optionId) => leftSet.has(optionId))
 }
 
+export function isSameAnswer(left: AnswerPayload | null, right: AnswerPayload | null): boolean {
+  if (left === right) return true
+  if (left === null || right === null) return false
+  if (left.type !== right.type) return false
+  return left.type === 'free-response'
+    ? right.type === 'free-response' && left.text === right.text
+    : right.type === 'multiple-choice' &&
+        areMcqSelectionsEqual(left.selectedOptionIds, right.selectedOptionIds)
+}
+
 export function isMcqAnswerCorrect(
   selectedOptionIds: readonly string[],
   correctOptionIds: readonly string[],

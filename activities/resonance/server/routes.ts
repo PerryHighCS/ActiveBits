@@ -32,7 +32,7 @@ import type {
   Student,
 } from '../shared/types.js'
 import { isValidStudentReactionEmoji } from '../shared/emojiSet.js'
-import { getCorrectOptionIds, getMcqSelectionMode } from '../shared/mcq.js'
+import { getCorrectOptionIds, getMcqSelectionMode, isSameAnswer } from '../shared/mcq.js'
 import { normalizePresentationMode, validateAnswerPayload, validateQuestion, validateQuestionSet, validateStudentRegistration } from '../shared/validation.js'
 import { decryptQuestions, encryptQuestions, MAX_ENCODED_PAYLOAD_CHARS } from './questionCrypto.js'
 import {
@@ -3244,14 +3244,40 @@ export default function setupResonanceRoutes(
             editSequence < existingDraftEditSequence ||
             (editSequence === existingDraftEditSequence && draftSendSequence < existingDraftSendSequence)
           )
+
+        // Resolved ahead of the staleness check below so a rejected write's
+        // content can be compared against what's actually stored, not just
+        // its ordering. `null` here always means "clear the draft."
+        const intendedAnswer = payload.answer === null ? null : validateAnswerPayload(payload.answer, question)
+        if (payload.answer !== null && !intendedAnswer) return
+
         if (isStaleDraftWrite) {
-          if (draftId !== null) {
+          // draftSendSequence only totally orders sends from a single
+          // ResonanceStudent mount (see its own docstring above and in
+          // ResonanceStudent.tsx) — a per-mount counter carries no meaning
+          // across two concurrent mounts for the same student, e.g. the same
+          // student open in two browser tabs. A lower sequence there does
+          // not imply older, subsumed content the way it does for a retry
+          // from the *same* mount. Acking unconditionally would tell the
+          // losing tab its (actually-discarded) edit was persisted, and its
+          // own unconfirmed-draft tracking would stop retrying it — silent
+          // data loss. Only ack "saved" when the rejected write's content
+          // already matches what's actually stored (the common single-tab
+          // case this guard was built for: a superseded retry of already-
+          // landed content); otherwise stay silent so the sender's own
+          // retry loop keeps resending its current value until a send
+          // actually lands. See "a stale draft write from a second
+          // concurrent tab is not acknowledged as saved when its content
+          // was actually discarded".
+          const alreadyMatchesStored = existingDraft !== undefined &&
+            isSameAnswer(existingDraft.answer, intendedAnswer)
+          if (draftId !== null && alreadyMatchesStored) {
             sendToSocket(socket, 'resonance:draft-saved', { draftId }, sessionId)
           }
           return
         }
 
-        if (payload.answer === null) {
+        if (intendedAnswer === null) {
           if (draftKey in session.data.responseDrafts) {
             delete session.data.responseDrafts[draftKey]
             await sessions.set(sessionId, session)
@@ -3265,9 +3291,6 @@ export default function setupResonanceRoutes(
           return
         }
 
-        const answer = validateAnswerPayload(payload.answer, question)
-        if (!answer) return
-
         session.data.responseDrafts[draftKey] = {
           questionId,
           studentId,
@@ -3275,7 +3298,7 @@ export default function setupResonanceRoutes(
           activeQuestionRunRevision: session.data.activeQuestionRunRevision,
           editSequence,
           draftSendSequence,
-          answer,
+          answer: intendedAnswer,
         }
         await sessions.set(sessionId, session)
         broadcastToRole('resonance:instructor-state', buildInstructorSnapshot(session), sessionId, true)
