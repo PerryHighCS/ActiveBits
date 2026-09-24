@@ -312,6 +312,10 @@ through activity-specific props.
   current send-attempt token, and whether that attempt needs an immediate retry. Run-specific edit
   sequences remain separately keyed by question and run; abandoning a draft clears the transport
   record without resetting its edit-sequence history.
+  Deadline expiry is stated by the server, not inferred: every student snapshot carries
+  `activeQuestionDeadlineExpired`, derived from the same clock sample the expiry finalization used,
+  and the client discards an unconfirmed local answer at a deadline only when a refreshed snapshot
+  reports it (or the run was replaced or ended), never from its own clock or a successful fetch.
   Direct-name registrations without an accepted-participant or capability principal are limited by
   session and trusted-proxy client IP before they mint capability records; a newer same-run draft
   takes precedence over its older confirmed response in instructor progress until submitted.
