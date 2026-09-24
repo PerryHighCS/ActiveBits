@@ -280,12 +280,14 @@ export function clearDraftTracking(params: {
   unconfirmedQuestionIds: Set<string>
   inFlightDraftQuestionIds: Map<string, number>
   unconfirmedQuestionRunRevisions: Map<string, number | null>
+  pendingRetryAfterInFlightQuestionIds: Set<string>
   questionIds: readonly string[]
 }): void {
   for (const questionId of params.questionIds) {
     params.unconfirmedQuestionIds.delete(questionId)
     params.inFlightDraftQuestionIds.delete(questionId)
     params.unconfirmedQuestionRunRevisions.delete(questionId)
+    params.pendingRetryAfterInFlightQuestionIds.delete(questionId)
   }
 }
 
@@ -402,6 +404,17 @@ export default function ResonanceStudent() {
   // eventual settlement must not clear B's in-flight marker — only a
   // settlement that still owns the current token may clear the entry.
   const inFlightDraftQuestionIdsRef = useRef<Map<string, number>>(new Map())
+  // Questions attemptDraftSend was asked to send while an earlier attempt for
+  // that same question was still in flight. attemptDraftSend never queues a
+  // second concurrent send — but silently dropping the request instead of
+  // remembering it would lose the student's newest edit until the next fixed
+  // DRAFT_RETRY_INTERVAL_MS tick, which runs on its own schedule unrelated to
+  // this event and can easily land after a near-deadline edit's one real
+  // chance to beat it. The in-flight attempt's own settlement below consults
+  // this and immediately tries again (reading whatever the *current* value is
+  // by then — no captured payload, same no-generation-bookkeeping design as
+  // the rest of this send path) instead of waiting for that tick.
+  const pendingRetryAfterInFlightQuestionIdsRef = useRef<Set<string>>(new Set())
   const nextDraftAttemptTokenRef = useRef(0)
   // Monotonically increasing across every send attempt for every question
   // (not per-question — a single shared counter is simpler and still totally
@@ -545,6 +558,7 @@ export default function ResonanceStudent() {
     unconfirmedQuestionIdsRef.current = new Set()
     unconfirmedQuestionRunRevisionsRef.current = new Map()
     inFlightDraftQuestionIdsRef.current = new Map()
+    pendingRetryAfterInFlightQuestionIdsRef.current = new Set()
     for (const timeoutId of draftSendTimeoutsRef.current.values()) {
       window.clearTimeout(timeoutId)
     }
@@ -624,6 +638,7 @@ export default function ResonanceStudent() {
         unconfirmedQuestionIds: unconfirmedQuestionIdsRef.current,
         inFlightDraftQuestionIds: inFlightDraftQuestionIdsRef.current,
         unconfirmedQuestionRunRevisions: unconfirmedQuestionRunRevisionsRef.current,
+        pendingRetryAfterInFlightQuestionIds: pendingRetryAfterInFlightQuestionIdsRef.current,
         questionIds: idsLeavingLiveContext,
       })
     }
@@ -745,6 +760,7 @@ export default function ResonanceStudent() {
         unconfirmedQuestionIds: unconfirmedQuestionIdsRef.current,
         inFlightDraftQuestionIds: inFlightDraftQuestionIdsRef.current,
         unconfirmedQuestionRunRevisions: unconfirmedQuestionRunRevisionsRef.current,
+        pendingRetryAfterInFlightQuestionIds: pendingRetryAfterInFlightQuestionIdsRef.current,
         questionIds: restartedIds,
       })
     }
@@ -777,7 +793,6 @@ export default function ResonanceStudent() {
     const currentSnapshot = snapshotRef.current
     if (
       currentSnapshot === null ||
-      inFlightDraftQuestionIdsRef.current.has(questionId) ||
       !unconfirmedQuestionIdsRef.current.has(questionId) ||
       submittedQuestionIdsRef.current.has(questionId) ||
       !isDraftStillCurrentForRevision({
@@ -786,6 +801,16 @@ export default function ResonanceStudent() {
         currentRunRevision: currentSnapshot.activeQuestionRunRevision,
       })
     ) {
+      return
+    }
+
+    if (inFlightDraftQuestionIdsRef.current.has(questionId)) {
+      // Don't queue a second concurrent send for the same question — but
+      // remember that a newer attempt was requested, so the in-flight one's
+      // own settlement below can immediately try again (see this ref's own
+      // docstring for why that matters right at a deadline) instead of
+      // silently dropping this request until the next retry tick.
+      pendingRetryAfterInFlightQuestionIdsRef.current.add(questionId)
       return
     }
 
@@ -815,6 +840,15 @@ export default function ResonanceStudent() {
       // genuinely outstanding.
       if (inFlightDraftQuestionIdsRef.current.get(questionId) === attemptToken) {
         inFlightDraftQuestionIdsRef.current.delete(questionId)
+        // A newer attempt was requested for this question while this one was
+        // still outstanding (see the in-flight guard above). Try again right
+        // away, reading whatever the *current* answer is by now, instead of
+        // waiting for the next periodic retry tick — this is what actually
+        // closes the near-deadline gap the guard above exists to avoid, not
+        // just recording that it was hit.
+        if (pendingRetryAfterInFlightQuestionIdsRef.current.delete(questionId)) {
+          attemptDraftSend(questionId)
+        }
       }
       if (!saved) return
       // An ack can arrive after the run has since restarted/reactivated
@@ -927,6 +961,7 @@ export default function ResonanceStudent() {
               unconfirmedQuestionIds: unconfirmedQuestionIdsRef.current,
               inFlightDraftQuestionIds: inFlightDraftQuestionIdsRef.current,
               unconfirmedQuestionRunRevisions: unconfirmedQuestionRunRevisionsRef.current,
+              pendingRetryAfterInFlightQuestionIds: pendingRetryAfterInFlightQuestionIdsRef.current,
               questionIds: questionIdsStillUnconfirmed,
             })
             setSubmittedAnswers((current) => resetAnswersForRestartedQuestions({
@@ -1141,6 +1176,7 @@ export default function ResonanceStudent() {
                     unconfirmedQuestionIds: unconfirmedQuestionIdsRef.current,
                     inFlightDraftQuestionIds: inFlightDraftQuestionIdsRef.current,
                     unconfirmedQuestionRunRevisions: unconfirmedQuestionRunRevisionsRef.current,
+                    pendingRetryAfterInFlightQuestionIds: pendingRetryAfterInFlightQuestionIdsRef.current,
                     questionIds: [questionId],
                   })
                   setSubmittedAnswers((current) => ({

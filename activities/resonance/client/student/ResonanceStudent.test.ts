@@ -382,70 +382,96 @@ void test('clearDraftTracking clears both unconfirmed and in-flight markers toge
     unconfirmed: string[]
     inFlight: string[]
     dirtyRevisions: string[]
+    pendingRetry: string[]
     questionIds: string[]
     expectedUnconfirmed: string[]
     expectedInFlight: string[]
     expectedDirtyRevisions: string[]
+    expectedPendingRetry: string[]
   }> = [
     {
-      name: 'in all three and named: cleared from all three',
+      name: 'in all four and named: cleared from all four',
       unconfirmed: ['q1'],
       inFlight: ['q1'],
       dirtyRevisions: ['q1'],
+      pendingRetry: ['q1'],
       questionIds: ['q1'],
       expectedUnconfirmed: [],
       expectedInFlight: [],
       expectedDirtyRevisions: [],
+      expectedPendingRetry: [],
     },
     {
       name: 'unconfirmed only (no attempt ever started): still safe to clear',
       unconfirmed: ['q1'],
       inFlight: [],
       dirtyRevisions: ['q1'],
+      pendingRetry: [],
       questionIds: ['q1'],
       expectedUnconfirmed: [],
       expectedInFlight: [],
       expectedDirtyRevisions: [],
+      expectedPendingRetry: [],
     },
     {
       name: 'in-flight only (already confirmed, still awaiting ack): still safe to clear',
       unconfirmed: [],
       inFlight: ['q1'],
       dirtyRevisions: [],
+      pendingRetry: [],
       questionIds: ['q1'],
       expectedUnconfirmed: [],
       expectedInFlight: [],
       expectedDirtyRevisions: [],
+      expectedPendingRetry: [],
     },
     {
-      name: 'present in all three but not named: left untouched',
+      name: 'pending retry only (a newer edit was requested while the prior attempt was in flight, then abandoned): still safe to clear',
+      unconfirmed: [],
+      inFlight: [],
+      dirtyRevisions: [],
+      pendingRetry: ['q1'],
+      questionIds: ['q1'],
+      expectedUnconfirmed: [],
+      expectedInFlight: [],
+      expectedDirtyRevisions: [],
+      expectedPendingRetry: [],
+    },
+    {
+      name: 'present in all four but not named: left untouched',
       unconfirmed: ['q1', 'q2'],
       inFlight: ['q1', 'q2'],
       dirtyRevisions: ['q1', 'q2'],
+      pendingRetry: ['q1', 'q2'],
       questionIds: ['q2'],
       expectedUnconfirmed: ['q1'],
       expectedInFlight: ['q1'],
       expectedDirtyRevisions: ['q1'],
+      expectedPendingRetry: ['q1'],
     },
     {
-      name: 'named but absent from all three: no-op, no error',
+      name: 'named but absent from all four: no-op, no error',
       unconfirmed: [],
       inFlight: [],
       dirtyRevisions: [],
+      pendingRetry: [],
       questionIds: ['q1'],
       expectedUnconfirmed: [],
       expectedInFlight: [],
       expectedDirtyRevisions: [],
+      expectedPendingRetry: [],
     },
     {
-      name: 'empty questionIds: no-op even when all three are populated',
+      name: 'empty questionIds: no-op even when all four are populated',
       unconfirmed: ['q1'],
       inFlight: ['q1'],
       dirtyRevisions: ['q1'],
+      pendingRetry: ['q1'],
       questionIds: [],
       expectedUnconfirmed: ['q1'],
       expectedInFlight: ['q1'],
       expectedDirtyRevisions: ['q1'],
+      expectedPendingRetry: ['q1'],
     },
   ]
 
@@ -453,10 +479,12 @@ void test('clearDraftTracking clears both unconfirmed and in-flight markers toge
     const unconfirmedQuestionIds = new Set(testCase.unconfirmed)
     const inFlightDraftQuestionIds = new Map(testCase.inFlight.map((questionId) => [questionId, 1]))
     const unconfirmedQuestionRunRevisions = new Map(testCase.dirtyRevisions.map((questionId) => [questionId, 1]))
+    const pendingRetryAfterInFlightQuestionIds = new Set(testCase.pendingRetry)
     clearDraftTracking({
       unconfirmedQuestionIds,
       inFlightDraftQuestionIds,
       unconfirmedQuestionRunRevisions,
+      pendingRetryAfterInFlightQuestionIds,
       questionIds: testCase.questionIds,
     })
     assert.deepEqual(
@@ -473,6 +501,11 @@ void test('clearDraftTracking clears both unconfirmed and in-flight markers toge
       [...unconfirmedQuestionRunRevisions.keys()].sort(),
       [...testCase.expectedDirtyRevisions].sort(),
       `${testCase.name}: dirty revisions`,
+    )
+    assert.deepEqual(
+      [...pendingRetryAfterInFlightQuestionIds].sort(),
+      [...testCase.expectedPendingRetry].sort(),
+      `${testCase.name}: pending retry`,
     )
   }
 })
@@ -924,6 +957,115 @@ void test('an edit made shortly before a deadline is sent — and acknowledged �
       furtherQ1Drafts,
       [],
       `expected no further retries after acknowledgement, got: ${JSON.stringify(furtherQ1Drafts)}`,
+    )
+
+    await act(async () => {
+      rendered.unmount()
+    })
+  } finally {
+    restore()
+  }
+})
+
+void test('an edit made while an earlier attempt is still in flight is retried immediately once that attempt settles, not on the next interval tick', async () => {
+  // Copilot review of PR #381: attemptDraftSend's in-flight guard silently
+  // dropped a request to send whenever an earlier attempt for the same
+  // question hadn't acked yet — it never queued or remembered that a newer
+  // edit was waiting. The only thing left to pick it up was the fixed
+  // DRAFT_RETRY_INTERVAL_MS backstop, running on its own schedule unrelated
+  // to this event. Made close to a deadline (the scenario this most
+  // matters for — see the "shortly before a deadline" test above), that gap
+  // can easily exceed however much time is actually left, silently losing
+  // the student's last edit even though scheduleDraftSend's own
+  // deadline-clamping logic exists specifically to give it a fast chance to
+  // beat the deadline.
+  const restore = installResonanceStudentTestEnvironment()
+  const { persistSessionParticipantIdentity } = await import(
+    '@src/components/common/entryParticipantIdentityUtils'
+  )
+  const { MemoryRouter, Route, Routes } = await import('react-router')
+  const { default: ResonanceStudent, DRAFT_EDIT_DEBOUNCE_MS } = await import('./ResonanceStudent.js')
+  const { act, render, waitFor, fireEvent } = await import('@testing-library/react')
+
+  persistSessionParticipantIdentity(window.localStorage, 'session-1', 'Ada', 'student-1')
+
+  const snapshot = buildSnapshot({
+    activeQuestions: [
+      { id: 'q1', type: 'free-response', text: 'Question one', order: 0 },
+    ],
+    activeQuestionIds: ['q1'],
+    activeQuestionRunStartedAt: Date.now(),
+    activeQuestionRunRevision: 1,
+    activeQuestionDeadlineAt: null,
+  })
+
+  ;(globalThis as { fetch?: typeof fetch }).fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input)
+    if (url.includes('/register-student')) {
+      return { ok: true, json: async () => ({ studentId: 'student-1', name: 'Ada' }) } as Response
+    }
+    if (url.includes('/state')) {
+      return { ok: true, json: async () => snapshot } as Response
+    }
+    throw new Error(`Unexpected fetch: ${url}`)
+  }) as typeof fetch
+
+  let rendered!: ReturnType<typeof render>
+  try {
+    await act(async () => {
+      rendered = render(
+        React.createElement(
+          MemoryRouter,
+          { initialEntries: ['/session-1'] },
+          React.createElement(
+            Routes,
+            null,
+            React.createElement(Route, { path: '/:sessionId', element: React.createElement(ResonanceStudent) }),
+          ),
+        ),
+      )
+      await Promise.resolve()
+    })
+
+    await waitFor(() => assert.equal(FakeWebSocket.instances.length, 1))
+    const socket = FakeWebSocket.instances[0]!
+
+    const textarea = await waitFor(() => rendered.getByLabelText(/your answer/i))
+
+    type DraftMessage = { type: string; payload: { questionId?: string; draftId?: string; answer?: { text?: string } } }
+    const isQ1Draft = (message: unknown): message is DraftMessage =>
+      typeof message === 'object' && message !== null &&
+      (message as { type?: string }).type === 'resonance:update-draft' &&
+      (message as DraftMessage).payload.questionId === 'q1'
+
+    console.info('[TEST] a first edit debounces and sends, left unacknowledged (still in flight)')
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: 'First answer' } })
+    })
+    await new Promise((resolve) => setTimeout(resolve, DRAFT_EDIT_DEBOUNCE_MS + 100))
+    const firstDrafts = socket.sent.filter(isQ1Draft)
+    assert.equal(firstDrafts.length, 1, `expected exactly one send so far, got: ${JSON.stringify(socket.sent)}`)
+    const firstDraftId = firstDrafts[0]!.payload.draftId
+
+    console.info('[TEST] a second edit arrives, debounces, and its own send attempt finds the first still in flight')
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: 'Second answer' } })
+    })
+    await new Promise((resolve) => setTimeout(resolve, DRAFT_EDIT_DEBOUNCE_MS + 100))
+    assert.equal(
+      socket.sent.filter(isQ1Draft).length,
+      1,
+      'the second edit must not be sent as a concurrent duplicate while the first is still in flight',
+    )
+
+    console.info('[TEST] the first (now-stale) attempt is acknowledged, and the second edit must be sent right away — in the same settlement, not on the next retry-interval tick')
+    await act(async () => {
+      socket.emitMessage({ type: 'resonance:draft-saved', payload: { draftId: firstDraftId } })
+    })
+    const draftsAfterAck = socket.sent.filter(isQ1Draft)
+    assert.ok(
+      draftsAfterAck.some((message) => message.payload.answer?.text === 'Second answer'),
+      `expected the second edit to have been sent immediately upon the first's settlement, got: ${JSON.stringify(draftsAfterAck)}`,
     )
 
     await act(async () => {
@@ -1872,6 +2014,23 @@ void test('a prior-run confirmed answer resurfacing from a later snapshot is not
         payload: { ...snapshot, activeQuestionRunRevision: 2, activeQuestionRunStartedAt: Date.now() },
       })
     })
+
+    // A second, later Copilot review flagged this same reset as blanking the
+    // reactivated question until "some unrelated later snapshot arrives,"
+    // reasoning that resetAnswersForRestartedQuestions deletes the local
+    // cache entry the merge just above it had set. Investigated directly:
+    // deleting the local entry does not blank the *display*, because
+    // QuestionView's initialAnswer is computed by resolveQuestionAnswer,
+    // which falls back to snapshot.submittedAnswers precisely when the local
+    // cache has no entry for a question — and that's exactly this snapshot's
+    // own submittedAnswers, still holding the prior confirmed answer. This
+    // assertion (checking after only the *one* reactivation snapshot, not
+    // the second one below) locks that in.
+    assert.equal(
+      (rendered.getByLabelText(/your answer/i) as HTMLTextAreaElement).value,
+      priorAnswer.text,
+      'expected the prior confirmed answer to still be visible right after the single reactivation snapshot, not just after a later one',
+    )
 
     console.info('[TEST] a later snapshot update re-merges the same (run-independent) prior confirmed answer')
     await act(async () => {

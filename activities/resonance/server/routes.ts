@@ -1369,26 +1369,48 @@ function buildStudentSnapshotWithMode(
   const draftAnswers = Object.fromEntries(
     viewerActiveDrafts.map((draft) => [draft.questionId, draft.answer] satisfies [string, Response['answer']]),
   )
-  // The draftSendSequence each draft above was stored under (parallels
-  // submittedResponseEditSequences below). A client that reloads mid-edit has
-  // no local memory of how many times it already sent this question's draft
-  // — its own send counter restarts at 0 — so without this it would stamp
-  // its first post-reload send with a draftSendSequence lower than what's
-  // already stored, and the update-draft handler's ordering guard would
-  // reject that genuinely newer edit as stale. Clients ratchet their local
-  // counter up to at least this value on load instead of assuming 0.
+  // draftSendSequences/draftEditSequences below are read from
+  // draftOrderingWatermarks, not from viewerActiveDrafts directly: a
+  // watermark, when present for the current run, always reflects an
+  // ordering key at least as high as its question's own draft (if any) —
+  // both are updated together on every accepted write — but a watermark
+  // also survives a clear that deleted its draft outright (see
+  // draftOrderingWatermarks' own docstring in the session data shape).
+  // Deriving straight from viewerActiveDrafts would silently drop that
+  // floor the moment a question's draft was cleared, letting a client that
+  // reloads afterward reseed below it — a write at that lower ordering key
+  // would then be permanently rejected as stale by the very guard this
+  // exists to satisfy.
+  const viewerDraftOrderingWatermarks =
+    viewerStudentId === null
+      ? []
+      : fallbackQuestionIds.flatMap((questionId) => {
+          const watermark = session.data.draftOrderingWatermarks[buildDraftKey(questionId, viewerStudentId)]
+          return watermark !== undefined && watermark.activeQuestionRunRevision === session.data.activeQuestionRunRevision
+            ? [[questionId, watermark] as const]
+            : []
+        })
+  // The draftSendSequence each active question's ordering watermark has
+  // reached (parallels submittedResponseEditSequences below). A client that
+  // reloads mid-edit has no local memory of how many times it already sent
+  // this question's draft — its own send counter restarts at 0 — so without
+  // this it would stamp its first post-reload send with a draftSendSequence
+  // lower than what's already stored, and the update-draft handler's
+  // ordering guard would reject that genuinely newer edit as stale. Clients
+  // ratchet their local counter up to at least this value on load instead
+  // of assuming 0.
   const draftSendSequences = Object.fromEntries(
-    viewerActiveDrafts.map((draft) => [draft.questionId, draft.draftSendSequence ?? 0] satisfies [string, number]),
+    viewerDraftOrderingWatermarks.map(([questionId, watermark]) => [questionId, watermark.draftSendSequence] satisfies [string, number]),
   )
-  // The editSequence each draft above was stored under (parallels
-  // submittedResponseEditSequences below, for the same reason). A revisit
-  // can bump a draft's editSequence above confirmedEditSequence + 1 (see
-  // this field's own docstring in shared/types.ts), so a client reloading
+  // The editSequence each active question's ordering watermark has reached
+  // (parallels submittedResponseEditSequences below, for the same reason).
+  // A revisit can bump this above confirmedEditSequence + 1 (see this
+  // field's own docstring in shared/types.ts), so a client reloading
   // mid-edit that only seeds from the confirmed response's editSequence can
   // seed *lower* than what's already stored here, and the update-draft
   // ordering guard would reject every subsequent edit as stale.
   const draftEditSequences = Object.fromEntries(
-    viewerActiveDrafts.map((draft) => [draft.questionId, draft.editSequence ?? 0] satisfies [string, number]),
+    viewerDraftOrderingWatermarks.map(([questionId, watermark]) => [questionId, watermark.editSequence] satisfies [string, number]),
   )
   const reviewedResponses =
     viewerStudentId === null

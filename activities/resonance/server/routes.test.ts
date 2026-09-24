@@ -5482,6 +5482,13 @@ void test('student state reports each draft\'s draftSendSequence, so a reloaded 
           answer: { type: 'free-response', text: 'Typed before the reload' },
         },
       },
+      // A real write producing this draft would have moved the ordering
+      // watermark to match — draftSendSequences/draftEditSequences are
+      // derived from this, not from responseDrafts directly (see Follow-up
+      // 17's follow-through), so this fixture needs it too.
+      draftOrderingWatermarks: {
+        'q1:student1': { activeQuestionRunRevision: 1, editSequence: 1, draftSendSequence: 7 },
+      },
       annotations: {},
       reveals: [],
       sharedResponseReactions: {},
@@ -5584,6 +5591,13 @@ void test('student state reports each draft\'s editSequence, so a reloaded clien
           answer: { type: 'free-response', text: 'Revised after two revisits' },
         },
       },
+      // A real write producing this draft would have moved the ordering
+      // watermark to match — draftSendSequences/draftEditSequences are
+      // derived from this, not from responseDrafts directly (see Follow-up
+      // 17's follow-through), so this fixture needs it too.
+      draftOrderingWatermarks: {
+        'q1:student1': { activeQuestionRunRevision: 1, editSequence: 3, draftSendSequence: 2 },
+      },
       annotations: {},
       reveals: [],
       sharedResponseReactions: {},
@@ -5620,6 +5634,100 @@ void test('student state reports each draft\'s editSequence, so a reloaded clien
   assert.deepEqual(body.draftAnswers?.q1, { type: 'free-response', text: 'Revised after two revisits' })
   assert.equal(body.submittedResponseEditSequences?.q1, 1)
   assert.equal(body.draftEditSequences?.q1, 3)
+
+  await sessions.close()
+})
+
+void test('student state reports a cleared draft\'s retained ordering watermark, so a reloaded client cannot reseed below it', async () => {
+  // Copilot review of PR #381 (Follow-up 17 follow-through): draftOrderingWatermarks
+  // is retained on the server specifically so a delayed older write can't
+  // resurrect a draft a newer clear already removed — but draftEditSequences/
+  // draftSendSequences used to be derived only from responseDrafts entries
+  // that still exist. Once a question's draft was cleared, the watermark it
+  // left behind was never surfaced to the client, so a reload afterward had
+  // no way to know about it: it would reseed its local counters from
+  // scratch (or from confirmedEditSequence + 1, with no confirmed response
+  // here at all), potentially landing *below* the retained watermark — and
+  // every subsequent send for that question would be rejected as stale by
+  // the update-draft ordering guard forever, since draftSendSequence only
+  // ever increases from wherever the client (wrongly) restarted it.
+  const app = createMockApp()
+  const ws = createMockWs()
+  const sessions = createSessionStore(null)
+  const now = Date.now()
+  const session: SessionRecord = {
+    id: 'resonance-session-reload-cleared-draft-watermark',
+    type: 'resonance',
+    created: now,
+    lastActivity: now,
+    data: {
+      instructorPasscode: 'TEACH123',
+      questions: [
+        {
+          id: 'q1',
+          type: 'free-response',
+          text: 'Explain your reasoning.',
+          order: 0,
+        },
+      ],
+      activeQuestionId: 'q1',
+      activeQuestionIds: ['q1'],
+      activeQuestionRunStartedAt: now - 5_000,
+      activeQuestionRunRevision: 1,
+      activeQuestionDeadlineAt: null,
+      students: {
+        student1: { studentId: 'student1', name: 'Ada Lovelace', joinedAt: now - 1_000 },
+      },
+      responses: [],
+      // No draft for q1 — the student revisited, typed, and then cleared it
+      // entirely, so the update-draft handler already deleted this entry.
+      responseDrafts: {},
+      // ...but the ordering watermark that clear left behind is still here,
+      // reflecting the revisit (editSequence 3) and however many sends it
+      // took to get there (draftSendSequence 5).
+      draftOrderingWatermarks: {
+        'q1:student1': {
+          activeQuestionRunRevision: 1,
+          editSequence: 3,
+          draftSendSequence: 5,
+        },
+      },
+      annotations: {},
+      reveals: [],
+      sharedResponseReactions: {},
+      responseOrderOverrides: {},
+      persistentHash: null,
+    },
+  }
+  const studentCookies = issueStudentCookies(session, 'student1')
+  await sessions.set(session.id, session)
+
+  setupResonanceRoutes(app, sessions, ws)
+
+  const stateHandler = app.handlers.get['/api/resonance/:sessionId/state']
+  assert.equal(typeof stateHandler, 'function')
+
+  const res = createResponse()
+  await stateHandler?.(
+    {
+      params: { sessionId: session.id },
+      query: {
+        studentId: 'student1',
+      },
+      cookies: studentCookies,
+    },
+    res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  const body = res.body as {
+    draftAnswers?: Record<string, unknown>
+    draftEditSequences?: Record<string, number>
+    draftSendSequences?: Record<string, number>
+  }
+  assert.equal(body.draftAnswers?.q1, undefined, 'there is genuinely no draft content to show after a clear')
+  assert.equal(body.draftEditSequences?.q1, 3, 'the retained watermark\'s editSequence must survive the clear')
+  assert.equal(body.draftSendSequences?.q1, 5, 'the retained watermark\'s draftSendSequence must survive the clear')
 
   await sessions.close()
 })
