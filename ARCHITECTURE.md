@@ -307,7 +307,11 @@ through activity-specific props.
   acknowledgement; the student component (not the per-question view, which is remounted on every
   stack-tab switch) owns resending each active question's current answer on a short interval until
   acknowledged, and the student snapshot separately carries the viewer's own current-run draft per
-  question so a reload or remount can recover it from the server.
+  question so a reload or remount can recover it from the server. Client draft transport state is
+  one record per question: whether it is unconfirmed, the run revision when it became dirty, the
+  current send-attempt token, and whether that attempt needs an immediate retry. Run-specific edit
+  sequences remain separately keyed by question and run; abandoning a draft clears the transport
+  record without resetting its edit-sequence history.
   Direct-name registrations without an accepted-participant or capability principal are limited by
   session and trusted-proxy client IP before they mint capability records; a newer same-run draft
   takes precedence over its older confirmed response in instructor progress until submitted.

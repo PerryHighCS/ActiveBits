@@ -2,11 +2,18 @@
 
 ## Status
 
-- [ ] Step 1: Add `QuestionDraftState` + accessor, and migrate the 4 draft-tracking fields in the same step; delete the 4 old trackers
-- [ ] Step 2: Re-read the file against its own accumulated comments; update/delete stale docstrings; record the 5-trackers-to-2 reduction
-- [ ] Full `npm test` green after every step above
-- [ ] Full contract re-read, PR description update, and an explicit documented decision on the server's concurrent-write gap (#313) before resuming ad hoc review responses
-- [ ] `ARCHITECTURE.md` / `.agent/knowledge/data-contracts.md` updated to describe the consolidated contract
+- [x] Step 1: Add `QuestionDraftState` + accessor, and migrate the 4 draft-tracking fields in the same step; delete the 4 old trackers
+- [x] Step 2: Re-read the file against its own accumulated comments; update/delete stale docstrings; record the 5-trackers-to-2 reduction
+- [x] Full verification after every step (`npm run test:codex` after Step 1; `npm test` with port binding after Step 2)
+- [x] Full contract re-read, PR description update, and an explicit documented decision on the server's concurrent-write gap (#313) before resuming ad hoc review responses
+- [x] `ARCHITECTURE.md` / `.agent/knowledge/data-contracts.md` updated to describe the consolidated contract
+
+## Implementation record
+
+- Step 1: Activities typecheck and the mounted `ResonanceStudent.test.ts` suite passed. The full `npm run test:codex` gate passed (156 activity test files); the initial `npm test` run reached its final server check but could not bind port 4010 (`EPERM`) in the default sandbox.
+- Step 2 measurement, scoped to the five named trackers: 5 structures became 2 (`questionDraftStateRef` and the independent `editSequenceByKeyRef`). `clearDraftTracking`'s signature fell from 7 to 4 lines; its four calls fell from 7 to 4 lines each (28 to 16 combined). The tracker-declaration comment block fell from 37 to 4 lines. `ResonanceStudent.tsx` fell from 1,278 to 1,245 lines at this checkpoint. This measures this client-side refactor only, not the PR as a whole.
+- Final gate: `npm test` passed with local port binding enabled, including the server health check on port 4010. The consolidated client, the independent edit-sequence map, server draft/watermark ordering, and their tests were re-read together. PR #381's title and description were updated to state the current contract and the remaining concurrent-write limit.
+- Server concurrency scope: The client consolidation leaves whole-session `sessions.set()` races unresolved, including races possible within one instance. Migrating only the draft handler to `updateAtomic` would leave mixed writers, so this PR will not claim atomic draft persistence. Issue #313 remains the owner for an all-writer migration; the single-instance deployment limit remains in force.
 
 ## Context
 

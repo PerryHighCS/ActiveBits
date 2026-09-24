@@ -262,41 +262,55 @@ const DRAFT_DEADLINE_BUFFER_MS = 100
 export function selectUnconfirmedDraftQuestionIds(params: {
   activeQuestionIds: string[]
   submittedQuestionIds: ReadonlySet<string>
-  unconfirmedQuestionIds: ReadonlySet<string>
+  draftState: ReadonlyMap<string, QuestionDraftState>
 }): string[] {
   return params.activeQuestionIds.filter(
     (questionId) =>
-      params.unconfirmedQuestionIds.has(questionId) && !params.submittedQuestionIds.has(questionId),
+      params.draftState.get(questionId)?.unconfirmed === true && !params.submittedQuestionIds.has(questionId),
   )
 }
 
+export interface QuestionDraftState {
+  unconfirmed: boolean
+  dirtyRunRevision: number | null | undefined
+  inFlightAttemptToken: number | undefined
+  pendingRetryAfterInFlight: boolean
+}
+
+export function getOrCreateQuestionDraftState(
+  draftState: Map<string, QuestionDraftState>,
+  questionId: string,
+): QuestionDraftState {
+  let state = draftState.get(questionId)
+  if (state === undefined) {
+    state = {
+      unconfirmed: false,
+      dirtyRunRevision: undefined,
+      inFlightAttemptToken: undefined,
+      pendingRetryAfterInFlight: false,
+    }
+    draftState.set(questionId, state)
+  }
+  return state
+}
+
 /**
- * The single place that abandons a question's draft-send tracking. Every
- * site that stops caring about a question's outstanding draft attempt for a
- * reason *other than that attempt's own acknowledgement* (the question was
- * submitted, its run restarted or reactivated, or its deadline was
- * reconciled) must clear both `unconfirmedQuestionIds` and
- * `inFlightDraftQuestionIds` together. Leaving a stale in-flight marker set
- * blocks `attemptDraftSend`'s guard from sending a fresh attempt for that
- * question until the old one times out (up to `DRAFT_SAVE_ACK_TIMEOUT_MS`),
- * which can delay or drop an edit made right at a deadline. A stale ack for
- * the abandoned attempt is still handled safely on arrival — it no-ops
- * against `attemptDraftSend`'s own revision/edit-sequence check — so
- * clearing the in-flight marker here is always safe even if that attempt is
- * still outstanding.
+ * Abandon all transport state for a question after submission, a run change,
+ * or deadline reconciliation. The edit-sequence map is independent and is
+ * deliberately left alone. A late settlement can only clear an in-flight
+ * token it still owns, so it cannot erase a newer attempt.
  */
 export function clearDraftTracking(params: {
-  unconfirmedQuestionIds: Set<string>
-  inFlightDraftQuestionIds: Map<string, number>
-  unconfirmedQuestionRunRevisions: Map<string, number | null>
-  pendingRetryAfterInFlightQuestionIds: Set<string>
+  draftState: Map<string, QuestionDraftState>
   questionIds: readonly string[]
 }): void {
   for (const questionId of params.questionIds) {
-    params.unconfirmedQuestionIds.delete(questionId)
-    params.inFlightDraftQuestionIds.delete(questionId)
-    params.unconfirmedQuestionRunRevisions.delete(questionId)
-    params.pendingRetryAfterInFlightQuestionIds.delete(questionId)
+    const state = params.draftState.get(questionId)
+    if (state === undefined) continue
+    state.unconfirmed = false
+    state.dirtyRunRevision = undefined
+    state.inFlightAttemptToken = undefined
+    state.pendingRetryAfterInFlight = false
   }
 }
 
@@ -308,10 +322,9 @@ export function clearDraftTracking(params: {
  * A run transition's own cleanup (clearDraftTracking, from the snapshot-merge
  * effect) runs in a passive effect, which React schedules *after* the render
  * that already updated the current snapshot — an already-due debounce/retry
- * timer can fire in that window, before cleanup has removed the question from
- * unconfirmedQuestionIds. Checking set-membership alone (as the other guard
- * conditions in attemptDraftSend do) can't see that window: the question is
- * still nominally "unconfirmed" even though the context it was dirtied under
+ * timer can fire in that window, before cleanup clears the question's record.
+ * Checking `unconfirmed` alone can't see that window: the question is
+ * still nominally unconfirmed even though the context it was dirtied under
  * has already moved on. Comparing against the revision actually recorded at
  * the moment the question became dirty (onDraftChanged) closes that window
  * directly, independent of whether cleanup has run yet — a mismatch means the
@@ -321,11 +334,10 @@ export function clearDraftTracking(params: {
  * a context it was never part of.
  */
 export function isDraftStillCurrentForRevision(params: {
-  unconfirmedQuestionRunRevisions: ReadonlyMap<string, number | null>
-  questionId: string
+  dirtyRunRevision: number | null | undefined
   currentRunRevision: number | null
 }): boolean {
-  return params.unconfirmedQuestionRunRevisions.get(params.questionId) === params.currentRunRevision
+  return params.dirtyRunRevision === params.currentRunRevision
 }
 
 function formatRemainingTime(deadlineAt: number | null, now: number): string | null {
@@ -387,43 +399,10 @@ export default function ResonanceStudent() {
   // recorded on a confirmed response and causing a legitimate revisit edit to
   // be dropped as stale. See resolveCurrentEditSequence/advanceEditSequenceForRevisit.
   const editSequenceByKeyRef = useRef<Record<string, number>>({})
-  // Question ids whose current submittedAnswers[] value hasn't been confirmed
-  // saved by the server yet. Owned here (not QuestionView) for the same
-  // remount-survival reason as editSequenceByKeyRef — see the draft-retry
-  // effect below and issue #374.
-  const unconfirmedQuestionIdsRef = useRef<Set<string>>(new Set())
-  // The run revision in effect at the moment each question in
-  // unconfirmedQuestionIdsRef became dirty (onDraftChanged). Run-transition
-  // cleanup (clearDraftTracking, called from the snapshot-merge effect and
-  // the deadline-reconciliation branch below) runs in a passive effect,
-  // which is scheduled *after* the render that already updated snapshotRef
-  // to the new revision — an already-due debounce/interval timer can fire
-  // in that window, before cleanup has removed the question from
-  // unconfirmedQuestionIdsRef. Without recording the revision a question
-  // was actually dirtied under, attemptDraftSend would stamp that stale
-  // send with whichever revision is current *now*, not the one the local
-  // answer actually belongs to — letting a stale answer be accepted as
-  // legitimate content for a new run/self-paced context it was never part
-  // of. See attemptDraftSend's own revision check below.
-  const unconfirmedQuestionRunRevisionsRef = useRef<Map<string, number | null>>(new Map())
-  // Maps a question id to a token identifying whichever attemptDraftSend call
-  // is currently outstanding for it. A plain presence flag isn't enough: if
-  // attempt A is abandoned (clearDraftTracking) while still outstanding and a
-  // fresh attempt B then starts before A's saveDraft() promise settles, A's
-  // eventual settlement must not clear B's in-flight marker — only a
-  // settlement that still owns the current token may clear the entry.
-  const inFlightDraftQuestionIdsRef = useRef<Map<string, number>>(new Map())
-  // Questions attemptDraftSend was asked to send while an earlier attempt for
-  // that same question was still in flight. attemptDraftSend never queues a
-  // second concurrent send — but silently dropping the request instead of
-  // remembering it would lose the student's newest edit until the next fixed
-  // DRAFT_RETRY_INTERVAL_MS tick, which runs on its own schedule unrelated to
-  // this event and can easily land after a near-deadline edit's one real
-  // chance to beat it. The in-flight attempt's own settlement below consults
-  // this and immediately tries again (reading whatever the *current* value is
-  // by then — no captured payload, same no-generation-bookkeeping design as
-  // the rest of this send path) instead of waiting for that tick.
-  const pendingRetryAfterInFlightQuestionIdsRef = useRef<Set<string>>(new Set())
+  // Owned here rather than QuestionView so draft retries survive a question
+  // tab switch. Each question's dirty revision, pending attempt, and retry
+  // request share one record; clearDraftTracking abandons them together.
+  const questionDraftStateRef = useRef(new Map<string, QuestionDraftState>())
   const nextDraftAttemptTokenRef = useRef(0)
   // Monotonically increasing across every send attempt for every question
   // (not per-question — a single shared counter is simpler and still totally
@@ -564,10 +543,7 @@ export default function ResonanceStudent() {
     previousActiveQuestionRunRevisionRef.current = null
     hasObservedSnapshotRef.current = false
     editSequenceByKeyRef.current = {}
-    unconfirmedQuestionIdsRef.current = new Set()
-    unconfirmedQuestionRunRevisionsRef.current = new Map()
-    inFlightDraftQuestionIdsRef.current = new Map()
-    pendingRetryAfterInFlightQuestionIdsRef.current = new Set()
+    questionDraftStateRef.current = new Map()
     for (const timeoutId of draftSendTimeoutsRef.current.values()) {
       window.clearTimeout(timeoutId)
     }
@@ -644,10 +620,7 @@ export default function ResonanceStudent() {
       : []
     if (idsLeavingLiveContext.length > 0) {
       clearDraftTracking({
-        unconfirmedQuestionIds: unconfirmedQuestionIdsRef.current,
-        inFlightDraftQuestionIds: inFlightDraftQuestionIdsRef.current,
-        unconfirmedQuestionRunRevisions: unconfirmedQuestionRunRevisionsRef.current,
-        pendingRetryAfterInFlightQuestionIds: pendingRetryAfterInFlightQuestionIdsRef.current,
+        draftState: questionDraftStateRef.current,
         questionIds: idsLeavingLiveContext,
       })
     }
@@ -772,10 +745,7 @@ export default function ResonanceStudent() {
         questionIdsToReset: restartedIds,
       }))
       clearDraftTracking({
-        unconfirmedQuestionIds: unconfirmedQuestionIdsRef.current,
-        inFlightDraftQuestionIds: inFlightDraftQuestionIdsRef.current,
-        unconfirmedQuestionRunRevisions: unconfirmedQuestionRunRevisionsRef.current,
-        pendingRetryAfterInFlightQuestionIds: pendingRetryAfterInFlightQuestionIdsRef.current,
+        draftState: questionDraftStateRef.current,
         questionIds: restartedIds,
       })
     }
@@ -806,26 +776,25 @@ export default function ResonanceStudent() {
   // boundary — the exact failure mode issue #374 was about.
   const attemptDraftSend = useCallback((questionId: string) => {
     const currentSnapshot = snapshotRef.current
+    const draftState = questionDraftStateRef.current.get(questionId)
     if (
       currentSnapshot === null ||
-      !unconfirmedQuestionIdsRef.current.has(questionId) ||
+      draftState?.unconfirmed !== true ||
       submittedQuestionIdsRef.current.has(questionId) ||
       !isDraftStillCurrentForRevision({
-        unconfirmedQuestionRunRevisions: unconfirmedQuestionRunRevisionsRef.current,
-        questionId,
+        dirtyRunRevision: draftState.dirtyRunRevision,
         currentRunRevision: currentSnapshot.activeQuestionRunRevision,
       })
     ) {
       return
     }
 
-    if (inFlightDraftQuestionIdsRef.current.has(questionId)) {
+    if (draftState.inFlightAttemptToken !== undefined) {
       // Don't queue a second concurrent send for the same question — but
       // remember that a newer attempt was requested, so the in-flight one's
-      // own settlement below can immediately try again (see this ref's own
-      // docstring for why that matters right at a deadline) instead of
-      // silently dropping this request until the next retry tick.
-      pendingRetryAfterInFlightQuestionIdsRef.current.add(questionId)
+      // own settlement below can immediately try again near the deadline
+      // instead of dropping this request until the next retry tick.
+      draftState.pendingRetryAfterInFlight = true
       return
     }
 
@@ -837,7 +806,7 @@ export default function ResonanceStudent() {
       sentRunRevision,
     )
     const attemptToken = ++nextDraftAttemptTokenRef.current
-    inFlightDraftQuestionIdsRef.current.set(questionId, attemptToken)
+    draftState.inFlightAttemptToken = attemptToken
     void saveDraft({
       studentId: studentIdRef.current,
       questionId,
@@ -853,15 +822,17 @@ export default function ResonanceStudent() {
       // not clear it out from under it, or the retry guard would let an
       // overlapping duplicate send start while the newer attempt is still
       // genuinely outstanding.
-      if (inFlightDraftQuestionIdsRef.current.get(questionId) === attemptToken) {
-        inFlightDraftQuestionIdsRef.current.delete(questionId)
+      const stateAtSettlement = questionDraftStateRef.current.get(questionId)
+      if (stateAtSettlement?.inFlightAttemptToken === attemptToken) {
+        stateAtSettlement.inFlightAttemptToken = undefined
         // A newer attempt was requested for this question while this one was
         // still outstanding (see the in-flight guard above). Try again right
         // away, reading whatever the *current* answer is by now, instead of
         // waiting for the next periodic retry tick — this is what actually
         // closes the near-deadline gap the guard above exists to avoid, not
         // just recording that it was hit.
-        if (pendingRetryAfterInFlightQuestionIdsRef.current.delete(questionId)) {
+        if (stateAtSettlement.pendingRetryAfterInFlight) {
+          stateAtSettlement.pendingRetryAfterInFlight = false
           attemptDraftSend(questionId)
         }
       }
@@ -888,7 +859,8 @@ export default function ResonanceStudent() {
       )
       const currentAnswer = submittedAnswersRef.current[questionId] ?? null
       if (currentEditSequence === sentEditSequence && isSameAnswer(currentAnswer, answer)) {
-        unconfirmedQuestionIdsRef.current.delete(questionId)
+        const stateAtAck = questionDraftStateRef.current.get(questionId)
+        if (stateAtAck !== undefined) stateAtAck.unconfirmed = false
       }
     })
   }, [saveDraft])
@@ -932,7 +904,7 @@ export default function ResonanceStudent() {
       const questionIdsStillUnconfirmed = selectUnconfirmedDraftQuestionIds({
         activeQuestionIds: currentSnapshot.activeQuestions.map((question) => question.id),
         submittedQuestionIds: submittedQuestionIdsRef.current,
-        unconfirmedQuestionIds: unconfirmedQuestionIdsRef.current,
+        draftState: questionDraftStateRef.current,
       })
 
       const isPastDeadline =
@@ -973,10 +945,7 @@ export default function ResonanceStudent() {
             // since reconciledExpiryRef would already claim it's handled.
             reconciledExpiryRef.current = reconciliationKey
             clearDraftTracking({
-              unconfirmedQuestionIds: unconfirmedQuestionIdsRef.current,
-              inFlightDraftQuestionIds: inFlightDraftQuestionIdsRef.current,
-              unconfirmedQuestionRunRevisions: unconfirmedQuestionRunRevisionsRef.current,
-              pendingRetryAfterInFlightQuestionIds: pendingRetryAfterInFlightQuestionIdsRef.current,
+              draftState: questionDraftStateRef.current,
               questionIds: questionIdsStillUnconfirmed,
             })
             setSubmittedAnswers((current) => resetAnswersForRestartedQuestions({
@@ -1173,8 +1142,9 @@ export default function ResonanceStudent() {
                 submittedMessage={submittedMessage}
                 announceSubmittedMessage={!snapshot.selfPacedMode}
                 onDraftChanged={(questionId, answer) => {
-                  unconfirmedQuestionIdsRef.current.add(questionId)
-                  unconfirmedQuestionRunRevisionsRef.current.set(questionId, snapshot.activeQuestionRunRevision)
+                  const draftState = getOrCreateQuestionDraftState(questionDraftStateRef.current, questionId)
+                  draftState.unconfirmed = true
+                  draftState.dirtyRunRevision = snapshot.activeQuestionRunRevision
                   setSubmittedAnswers((current) => ({
                     ...current,
                     [questionId]: answer,
@@ -1188,10 +1158,7 @@ export default function ResonanceStudent() {
                   // would have that new edit blocked from sending until the
                   // old attempt times out (see clearDraftTracking).
                   clearDraftTracking({
-                    unconfirmedQuestionIds: unconfirmedQuestionIdsRef.current,
-                    inFlightDraftQuestionIds: inFlightDraftQuestionIdsRef.current,
-                    unconfirmedQuestionRunRevisions: unconfirmedQuestionRunRevisionsRef.current,
-                    pendingRetryAfterInFlightQuestionIds: pendingRetryAfterInFlightQuestionIdsRef.current,
+                    draftState: questionDraftStateRef.current,
                     questionIds: [questionId],
                   })
                   setSubmittedAnswers((current) => ({

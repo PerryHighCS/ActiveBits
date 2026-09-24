@@ -12,7 +12,8 @@ import { shouldRetryRegistrationWithoutStudentId } from './ResonanceStudent.js'
 import { advanceEditSequenceForRevisit, resolveCurrentEditSequence } from './ResonanceStudent.js'
 import { seedEditSequenceFromConfirmedResponse } from './ResonanceStudent.js'
 import { selectUnconfirmedDraftQuestionIds, resetAnswersForRestartedQuestions } from './ResonanceStudent.js'
-import { clearDraftTracking, isDraftStillCurrentForRevision } from './ResonanceStudent.js'
+import { clearDraftTracking, getOrCreateQuestionDraftState, isDraftStillCurrentForRevision } from './ResonanceStudent.js'
+import type { QuestionDraftState } from './ResonanceStudent.js'
 import type { AnswerPayload, StudentSessionSnapshot } from '../../shared/types.js'
 
 ;(globalThis as { React?: typeof React }).React = React
@@ -338,11 +339,14 @@ void test('hasActiveQuestionRunRestart detects a new revision', () => {
 })
 
 void test('selectUnconfirmedDraftQuestionIds retries an unconfirmed question but not a submitted or already-confirmed one', () => {
+  const draftState = new Map<string, QuestionDraftState>()
+  getOrCreateQuestionDraftState(draftState, 'q1').unconfirmed = true
+  getOrCreateQuestionDraftState(draftState, 'q2').unconfirmed = true
   assert.deepEqual(
     selectUnconfirmedDraftQuestionIds({
       activeQuestionIds: ['q1', 'q2', 'q3'],
       submittedQuestionIds: new Set(['q2']),
-      unconfirmedQuestionIds: new Set(['q1', 'q2']),
+      draftState,
     }),
     ['q1'],
   )
@@ -350,7 +354,7 @@ void test('selectUnconfirmedDraftQuestionIds retries an unconfirmed question but
     selectUnconfirmedDraftQuestionIds({
       activeQuestionIds: ['q1'],
       submittedQuestionIds: new Set(),
-      unconfirmedQuestionIds: new Set(),
+      draftState: new Map(),
     }),
     [],
   )
@@ -476,38 +480,64 @@ void test('clearDraftTracking clears both unconfirmed and in-flight markers toge
   ]
 
   for (const testCase of cases) {
-    const unconfirmedQuestionIds = new Set(testCase.unconfirmed)
-    const inFlightDraftQuestionIds = new Map(testCase.inFlight.map((questionId) => [questionId, 1]))
-    const unconfirmedQuestionRunRevisions = new Map(testCase.dirtyRevisions.map((questionId) => [questionId, 1]))
-    const pendingRetryAfterInFlightQuestionIds = new Set(testCase.pendingRetry)
+    const draftState = new Map<string, QuestionDraftState>()
+    const trackedIds = new Set([
+      ...testCase.unconfirmed,
+      ...testCase.inFlight,
+      ...testCase.dirtyRevisions,
+      ...testCase.pendingRetry,
+    ])
+    for (const questionId of trackedIds) {
+      const state = getOrCreateQuestionDraftState(draftState, questionId)
+      state.unconfirmed = testCase.unconfirmed.includes(questionId)
+      state.inFlightAttemptToken = testCase.inFlight.includes(questionId) ? 1 : undefined
+      state.dirtyRunRevision = testCase.dirtyRevisions.includes(questionId) ? 1 : undefined
+      state.pendingRetryAfterInFlight = testCase.pendingRetry.includes(questionId)
+    }
     clearDraftTracking({
-      unconfirmedQuestionIds,
-      inFlightDraftQuestionIds,
-      unconfirmedQuestionRunRevisions,
-      pendingRetryAfterInFlightQuestionIds,
+      draftState,
       questionIds: testCase.questionIds,
     })
     assert.deepEqual(
-      [...unconfirmedQuestionIds].sort(),
+      [...draftState].filter(([, state]) => state.unconfirmed).map(([id]) => id).sort(),
       [...testCase.expectedUnconfirmed].sort(),
       `${testCase.name}: unconfirmed`,
     )
     assert.deepEqual(
-      [...inFlightDraftQuestionIds.keys()].sort(),
+      [...draftState].filter(([, state]) => state.inFlightAttemptToken !== undefined).map(([id]) => id).sort(),
       [...testCase.expectedInFlight].sort(),
       `${testCase.name}: in-flight`,
     )
     assert.deepEqual(
-      [...unconfirmedQuestionRunRevisions.keys()].sort(),
+      [...draftState].filter(([, state]) => state.dirtyRunRevision !== undefined).map(([id]) => id).sort(),
       [...testCase.expectedDirtyRevisions].sort(),
       `${testCase.name}: dirty revisions`,
     )
     assert.deepEqual(
-      [...pendingRetryAfterInFlightQuestionIds].sort(),
+      [...draftState].filter(([, state]) => state.pendingRetryAfterInFlight).map(([id]) => id).sort(),
       [...testCase.expectedPendingRetry].sort(),
       `${testCase.name}: pending retry`,
     )
   }
+})
+
+void test('a new edit and an in-flight retry request preserve each other in one question draft record', () => {
+  const draftState = new Map<string, QuestionDraftState>()
+  const pending = getOrCreateQuestionDraftState(draftState, 'q1')
+  pending.inFlightAttemptToken = 7
+  pending.pendingRetryAfterInFlight = true
+
+  const edited = getOrCreateQuestionDraftState(draftState, 'q1')
+  edited.unconfirmed = true
+  edited.dirtyRunRevision = 3
+  assert.equal(edited.inFlightAttemptToken, 7)
+  assert.equal(edited.pendingRetryAfterInFlight, true)
+
+  const nextAttempt = getOrCreateQuestionDraftState(draftState, 'q1')
+  nextAttempt.inFlightAttemptToken = 8
+  assert.equal(nextAttempt.unconfirmed, true)
+  assert.equal(nextAttempt.dirtyRunRevision, 3)
+  assert.equal(draftState.size, 1)
 })
 
 void test('isDraftStillCurrentForRevision rejects a question whose dirty revision no longer matches the current one', () => {
@@ -584,8 +614,7 @@ void test('isDraftStillCurrentForRevision rejects a question whose dirty revisio
     const unconfirmedQuestionRunRevisions = new Map(testCase.dirtyRevisions)
     assert.equal(
       isDraftStillCurrentForRevision({
-        unconfirmedQuestionRunRevisions,
-        questionId: testCase.questionId,
+        dirtyRunRevision: unconfirmedQuestionRunRevisions.get(testCase.questionId),
         currentRunRevision: testCase.currentRunRevision,
       }),
       testCase.expected,
