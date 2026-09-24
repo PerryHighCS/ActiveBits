@@ -21,6 +21,7 @@ import setupResonanceRoutes, {
   generateImportedQuestionId,
   resolveAnswerabilityErrorMessage,
   resolveSocketStudentId,
+  shouldAcknowledgeRejectedDraft,
   resolveStoredDraftOrdering,
   scheduleParticipantCapabilityExpiryClose,
 } from './routes.js'
@@ -1120,6 +1121,23 @@ void test('a stale pre-submission draft whose content differs from what was subm
   await sessions.close()
 })
 
+void test('a rejected draft is acknowledged only when its intended content is already persisted', () => {
+  const confirmed = { type: 'free-response' as const, text: 'Confirmed A' }
+  const draft = { type: 'free-response' as const, text: 'Newer draft B' }
+  const cases = [
+    { label: 'newer draft outranks matching confirmed content', intendedAnswer: confirmed, currentDraftAnswer: draft, confirmedAnswer: confirmed, expected: false },
+    { label: 'clear cannot match a stored draft', intendedAnswer: null, currentDraftAnswer: draft, confirmedAnswer: confirmed, expected: false },
+    { label: 'matching current draft can be acknowledged', intendedAnswer: draft, currentDraftAnswer: draft, confirmedAnswer: confirmed, expected: true },
+    { label: 'matching confirmed content applies without a draft', intendedAnswer: confirmed, currentDraftAnswer: null, confirmedAnswer: confirmed, expected: true },
+    { label: 'absent draft matches a clear', intendedAnswer: null, currentDraftAnswer: null, confirmedAnswer: confirmed, expected: true },
+    { label: 'different content cannot match confirmed content', intendedAnswer: draft, currentDraftAnswer: null, confirmedAnswer: confirmed, expected: false },
+    { label: 'non-null content cannot match an empty store', intendedAnswer: draft, currentDraftAnswer: null, confirmedAnswer: null, expected: false },
+  ]
+  for (const { label, expected, ...state } of cases) {
+    assert.equal(shouldAcknowledgeRejectedDraft(state), expected, label)
+  }
+})
+
 void test('a draft made after revisiting an already-submitted question in the same run is persisted, not dropped as stale', async () => {
   const app = createMockApp()
   const sessions = createSessionStore(null)
@@ -1224,6 +1242,42 @@ void test('a draft made after revisiting an already-submitted question in the sa
     type: 'free-response',
     text: 'First answer',
   })
+
+  for (const { draftId, answer } of [
+    { draftId: 'stale-confirmed-copy', answer: { type: 'free-response', text: 'First answer' } },
+    { draftId: 'stale-clear', answer: null },
+  ]) {
+    console.info(`[TEST] ${draftId} must not be acknowledged while the newer revisit draft remains stored`)
+    messageHandlers[0]?.(JSON.stringify({
+      type: 'resonance:update-draft',
+      payload: {
+        studentId: 'student1', questionId: 'q1', draftId,
+        activeQuestionRunRevision: 1, editSequence: 1, draftSendSequence: 2,
+        answer,
+      },
+    }))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    assert.ok(!sentMessages.some((message) => message.payload?.draftId === draftId))
+    const afterStaleWrite = (await sessions.get(session.id))?.data as {
+      responseDrafts?: Record<string, { answer?: unknown }>
+    } | undefined
+    assert.deepEqual(afterStaleWrite?.responseDrafts?.['q1:student1']?.answer, {
+      type: 'free-response', text: 'Revised answer, not yet resubmitted',
+    })
+  }
+
+  console.info('[TEST] the same low edit sequence is acknowledged when its content matches the saved revisit draft')
+  messageHandlers[0]?.(JSON.stringify({
+    type: 'resonance:update-draft',
+    payload: {
+      studentId: 'student1', questionId: 'q1', draftId: 'matching-revisit-draft',
+      activeQuestionRunRevision: 1, editSequence: 1, draftSendSequence: 3,
+      answer: { type: 'free-response', text: 'Revised answer, not yet resubmitted' },
+    },
+  }))
+  await waitForCondition(() => sentMessages.some((message) =>
+    message.type === 'resonance:draft-saved' && message.payload?.draftId === 'matching-revisit-draft'
+  ))
 
   await sessions.close()
 })

@@ -353,3 +353,10 @@ Owner: Resonance `resonance:update-draft` handler. The invariant is that an ackn
 - [x] Require valid stored ordering counters: draft edit sequence is a nonnegative safe integer, draft send sequence is a positive safe integer, and retained watermark counters obey the same rules. The session normalizer owns this invariant and drops an invalid record; it never invents a zero floor.
 - [x] Document snapshot ordering maps as retained floors that may exist without draft content.
 - [x] Add a decision-table normalization regression and run the full test gate. `npm test` passed: typecheck, lint, all workspace tests (activities: 1,427), production build, and server health check.
+
+## Post-consolidation review: stale acknowledgement content
+
+- [x] Root-cause the new Copilot finding against both stale-write branches and the current-run draft contract.
+- [x] Centralize acknowledgement eligibility in one tested decision: a current-run draft is authoritative when present; otherwise a confirmed response may justify acknowledgement only in the confirmed-response guard. An absent draft matches a clear. A rejected write with different content is never acknowledged, so the sender keeps retrying.
+- [x] Add route coverage for stale confirmed-answer content and a stale clear while a newer current-run draft remains stored.
+- [x] Run the full test gate and record the result. `npm test` passed: typecheck, lint, all workspace tests (activities: 1,428), production build, and server health check.

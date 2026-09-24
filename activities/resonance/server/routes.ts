@@ -757,6 +757,19 @@ export function resolveStoredDraftOrdering(
   return { editSequence, draftSendSequence }
 }
 
+/** A rejected draft is saved only when its intended state already exists. */
+export function shouldAcknowledgeRejectedDraft(params: {
+  intendedAnswer: Response['answer'] | null
+  currentDraftAnswer: Response['answer'] | null
+  confirmedAnswer: Response['answer'] | null
+}): boolean {
+  if (params.currentDraftAnswer !== null) {
+    return params.intendedAnswer !== null && isSameAnswer(params.currentDraftAnswer, params.intendedAnswer)
+  }
+  if (params.intendedAnswer === null) return true
+  return params.confirmedAnswer !== null && isSameAnswer(params.confirmedAnswer, params.intendedAnswer)
+}
+
 /**
  * Parses a *stored* `activeQuestionRunRevision` field (a response or draft
  * read back from the session store), distinguishing a genuine self-paced/
@@ -3270,6 +3283,11 @@ export default function setupResonanceRoutes(
         // stale. Otherwise timeout finalization could either overwrite the
         // confirmed answer with a stale draft, or silently drop a genuine
         // revision the student made after resubmitting was already locked.
+        const draftKey = buildDraftKey(questionId, studentId)
+        const storedDraft = session.data.responseDrafts[draftKey]
+        const currentRunDraft = storedDraft !== undefined && draftMatchesCurrentRun(session.data, storedDraft)
+          ? storedDraft
+          : undefined
         const confirmedResponseForRun = session.data.responses.find(
           (response) =>
             response.questionId === questionId &&
@@ -3293,19 +3311,19 @@ export default function setupResonanceRoutes(
           // retry marker, silently losing it. Compare content instead of
           // trusting editSequence ordering alone for that purpose; the
           // sender's own retry loop keeps going otherwise, and naturally
-          // recovers once it processes this same response's broadcast (its
-          // local edit-sequence counter auto-seeds past this response's, see
-          // seedEditSequenceFromConfirmedResponse) and its next retry clears
-          // this branch entirely.
-          const alreadyMatchesConfirmed = intendedAnswer === null ||
-            isSameAnswer(confirmedResponseForRun.answer, intendedAnswer)
-          if (draftId !== null && alreadyMatchesConfirmed) {
+          // recovers once it processes a newer snapshot. A current-run draft
+          // takes precedence over the confirmed answer: that answer may
+          // already have been revised in another tab.
+          const alreadyMatchesPersisted = shouldAcknowledgeRejectedDraft({
+            intendedAnswer,
+            currentDraftAnswer: currentRunDraft?.answer ?? null,
+            confirmedAnswer: confirmedResponseForRun.answer,
+          })
+          if (draftId !== null && alreadyMatchesPersisted) {
             sendToSocket(socket, 'resonance:draft-saved', { draftId }, sessionId)
           }
           return
         }
-
-        const draftKey = buildDraftKey(questionId, studentId)
 
         // Each `resonance:update-draft` message is handled by its own async
         // function starting from a fresh `loadResonanceSession` read, so two
@@ -3348,14 +3366,13 @@ export default function setupResonanceRoutes(
         // record still exists: a newer `answer: null` clear deletes
         // `responseDrafts[draftKey]` outright, so a delayed *older*,
         // still-in-flight non-null write that finishes processing after it
-        // would otherwise see `existingDraft === undefined`, bypass this
+        // would otherwise see no stored draft, bypass this
         // check entirely, and resurrect the stale draft the clear had
         // already superseded. `draftOrderingWatermarks[draftKey]` exists to
         // outlive exactly that deletion: every accepted write or clear below
         // updates it to that write's ordering key, so the ordering
         // comparison always has a floor to check against regardless of
         // whether the draft itself is still present.
-        const existingDraft = session.data.responseDrafts[draftKey]
         const orderingWatermark = session.data.draftOrderingWatermarks[draftKey]
         const isStaleDraftWrite = orderingWatermark !== undefined &&
           orderingWatermark.activeQuestionRunRevision === session.data.activeQuestionRunRevision &&
@@ -3384,9 +3401,11 @@ export default function setupResonanceRoutes(
           // actually lands. See "a stale draft write from a second
           // concurrent tab is not acknowledged as saved when its content
           // was actually discarded".
-          const alreadyMatchesStored = intendedAnswer === null
-            ? existingDraft === undefined
-            : existingDraft !== undefined && isSameAnswer(existingDraft.answer, intendedAnswer)
+          const alreadyMatchesStored = shouldAcknowledgeRejectedDraft({
+            intendedAnswer,
+            currentDraftAnswer: currentRunDraft?.answer ?? null,
+            confirmedAnswer: null,
+          })
           if (draftId !== null && alreadyMatchesStored) {
             sendToSocket(socket, 'resonance:draft-saved', { draftId }, sessionId)
           }

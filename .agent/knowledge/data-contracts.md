@@ -1071,3 +1071,10 @@ that document rather than creating activity-specific authentication payloads.
 - Invariant: Both a stored draft and a retained watermark carry an `editSequence` that is a nonnegative safe integer and a `draftSendSequence` that is a positive safe integer. Missing or malformed counters cause that record to be dropped, rather than normalized to zero. These are current required fields; no legacy draft ordering shape is supported.
 - Snapshot contract: `draftEditSequences` and `draftSendSequences` expose retained per-question ordering floors for the viewer's active questions. A floor may survive a clear after `draftAnswers` loses the corresponding content.
 - Evidence: `resolveStoredDraftOrdering`, its decision table and the student-state normalization regression in `activities/resonance/server/routes.test.ts`.
+
+### Rejected draft acknowledgement precedence
+
+- Owner: Resonance `resonance:update-draft` handler.
+- Invariant: A rejected write is acknowledged as saved only when its intended state already exists. A current-run draft takes precedence over the confirmed response for the same question and student. With no current-run draft, a clear matches the absent draft; the confirmed-response staleness guard may also acknowledge content equal to that response. The watermark staleness guard has no confirmed-response fallback.
+- Failure behavior: A mismatched write receives no acknowledgement and remains eligible for the sending client's retry. This does not close the overlapping whole-session clone race tracked in #313.
+- Evidence: `shouldAcknowledgeRejectedDraft` decision table and the post-submission revisit route regression in `activities/resonance/server/routes.test.ts`.
