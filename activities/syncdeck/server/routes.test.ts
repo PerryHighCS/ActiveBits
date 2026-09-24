@@ -1,6 +1,6 @@
 import type { SessionRecord, SessionStore } from 'activebits-server/core/sessions.js'
 import { consumeSessionDataToken } from 'activebits-server/core/sessionTokenUtils.js'
-import { acceptEntryParticipant, findAcceptedEntryParticipant, getSessionParticipantCookieName, issueAcceptedEntryParticipantToken, resolveAcceptedEntryParticipantToken } from 'activebits-server/core/acceptedEntryParticipants.js'
+import { acceptEntryParticipant, findAcceptedEntryParticipant, getSessionParticipantCookieName, issueAcceptedEntryParticipantToken, resolveAcceptedEntryParticipantToken, revokeAcceptedEntryParticipant } from 'activebits-server/core/acceptedEntryParticipants.js'
 import { consumeSessionEntryParticipant, storeTrustedSessionEntryParticipant } from 'activebits-server/core/sessionEntryParticipants.js'
 import {
   computePersistentLinkUrlHash,
@@ -4323,6 +4323,57 @@ void test('solo activity entry carries only the parent-cookie student id into th
     consumeSessionEntryParticipant(state.store[child.id]!, body.entryParticipantToken),
     { displayName: 'Ada', participantId: 'student-1' },
   )
+})
+
+void test('solo activity entry accepts a standalone student who has no roster record', async () => {
+  // Standalone students never open the SyncDeck WebSocket, so the roster stays empty.
+  const parent = createSyncDeckSession('s1')
+  parent.data.standaloneMode = true
+  acceptEntryParticipant(parent, { participantId: 'student-1', displayName: 'Ada' })
+  const token = issueAcceptedEntryParticipantToken(parent, 'student-1')
+  assert.ok(token)
+  const child: SessionRecord = { id: 'solo-child', type: 'resonance', created: 2, lastActivity: 2, data: {} }
+  const state = createSessionStore({ s1: parent, [child.id]: child })
+  const app = createMockApp()
+  setupSyncDeckRoutes(app, state.sessions, createMockWs())
+  const handler = app.handlers.post['/api/syncdeck/:sessionId/solo-activity/entry']
+  assert.ok(handler)
+
+  const res = createResponse()
+  await handler(createRequest(
+    { sessionId: 's1' },
+    { childSessionId: child.id },
+    { [getSessionParticipantCookieName('s1')]: token },
+  ), res)
+  assert.equal(res.statusCode, 200)
+  const body = res.body as { entryParticipantToken: string }
+  assert.deepEqual(
+    consumeSessionEntryParticipant(state.store[child.id]!, body.entryParticipantToken),
+    { displayName: 'Ada', participantId: 'student-1' },
+  )
+})
+
+void test('solo activity entry rejects a student whose accepted entry was revoked', async () => {
+  const parent = createSyncDeckSession('s1')
+  acceptEntryParticipant(parent, { participantId: 'student-1', displayName: 'Ada' })
+  const token = issueAcceptedEntryParticipantToken(parent, 'student-1')
+  assert.ok(token)
+  assert.equal(revokeAcceptedEntryParticipant(parent, 'student-1'), true)
+  const child: SessionRecord = { id: 'solo-child', type: 'resonance', created: 2, lastActivity: 2, data: {} }
+  const state = createSessionStore({ s1: parent, [child.id]: child })
+  const app = createMockApp()
+  setupSyncDeckRoutes(app, state.sessions, createMockWs())
+  const handler = app.handlers.post['/api/syncdeck/:sessionId/solo-activity/entry']
+  assert.ok(handler)
+
+  const res = createResponse()
+  await handler(createRequest(
+    { sessionId: 's1' },
+    { childSessionId: child.id },
+    { [getSessionParticipantCookieName('s1')]: token },
+  ), res)
+  assert.equal(res.statusCode, 403)
+  assert.equal(state.store[child.id]!.data.entryParticipants, undefined)
 })
 
 void test('embedded-activity auto-activate route marks released resonance children to activate all questions', async () => {

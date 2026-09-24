@@ -12,7 +12,7 @@
 
 - Date: 2026-09-24
 - Area: waiting-room entry | SyncDeck embedded and solo child sessions
-- Contract: Public live and persistent entry stores always mint an ID; request `participantId` is ignored. The separate trusted store function accepts an explicit ID only after the SyncDeck parent session's accepted-entry cookie resolves to a current roster student. Embedded WS delivery and recovery HTTP routes require this parent proof before issuing a child-scoped token. The solo child entry route derives its ID from the parent cookie, not the request body.
+- Contract: Public live and persistent entry stores always mint an ID; request `participantId` is ignored. The separate trusted store function accepts an explicit ID only after the SyncDeck parent session's accepted-entry cookie resolves to an accepted student (embedded routes also require a current roster record). Embedded WS delivery and recovery HTTP routes require this parent proof before issuing a child-scoped token. The solo child entry route derives its ID (and fallback display name) from the parent's accepted-entry record, not the request body, and does not require a roster record because standalone students never open the SyncDeck WebSocket. It does not yet verify that the child belongs to the parent; see the solo child binding design in `.agent/plans/shared-activity-runtime-authentication.md`.
 - Validation: `server/entryParticipants.test.ts`; `server/sessionEntryRoutes.test.ts`; `server/persistentSessionRoutes.test.ts`; `activities/syncdeck/server/routes.test.ts`; `activities/syncdeck/playwright/student-return.spec.ts`.
 - Follow-up: #313 must make the shared entry and child-token writes safe against concurrent whole-session writers.
 

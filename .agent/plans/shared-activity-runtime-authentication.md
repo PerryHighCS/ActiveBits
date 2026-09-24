@@ -4,7 +4,7 @@
 
 This sequence coordinates [#352](https://github.com/PerryHighCS/ActiveBits/issues/352), [#383](https://github.com/PerryHighCS/ActiveBits/issues/383), [#344](https://github.com/PerryHighCS/ActiveBits/issues/344), and [#353](https://github.com/PerryHighCS/ActiveBits/issues/353). Keep each phase independently reviewable. [#313](https://github.com/PerryHighCS/ActiveBits/issues/313) owns the broader atomic session-write migration and follows as a separate workstream; shared entry and lifecycle writes touched here must still use its safe mutation contract.
 
-**Current delivery state:** [PR #387](https://github.com/PerryHighCS/ActiveBits/pull/387) contains the three implemented Phase A slices. It passed CI and was marked ready for review on 2026-09-24; it has not merged. CodeRabbit's first review identified two solo-entry gaps recorded below, so Phase A is still under review. The original Phases 0–8 farther down are the long-range design/audit checklist; this near-term sequence is the current delivery tracker.
+**Current delivery state:** [PR #387](https://github.com/PerryHighCS/ActiveBits/pull/387) contains the three implemented Phase A slices. It passed CI and was marked ready for review on 2026-09-24; it has not merged. CodeRabbit's first review identified two solo-entry gaps: the standalone roster gap is fixed in #387, and parent binding for solo children is tracked in [#388](https://github.com/PerryHighCS/ActiveBits/issues/388). Phase A is still under review. The original Phases 0–8 farther down are the long-range design/audit checklist; this near-term sequence is the current delivery tracker.
 
 ### Contract and observed failure
 
@@ -18,14 +18,28 @@ The #383 browser report had a deterministic path: Resonance registration revokes
 - [x] Make public live/persistent stores mint IDs, and use parent-cookie-authorized SyncDeck embedded and solo child handoffs for identity continuity (#352 slice).
 - [x] Move SyncDeck's remaining student WebSocket admission and student-ID HTTP routes to the accepted-entry principal contract; WebSocket join, embedded context, and auto-activation now require cookie authority and reject mismatched ID hints.
 - [x] Update `ARCHITECTURE.md`, `.agent/knowledge/data-contracts.md`, and `.agent/knowledge/security-notes.md` for the delivered student-entry behavior.
-- [ ] Restore solo child handoff for an accepted standalone SyncDeck student who has no WebSocket roster record; derive the ID from the accepted-entry token and test that path.
-- [ ] Require proof that a solo child belongs to the requesting SyncDeck parent before issuing its trusted entry token; reject an unrelated existing session ID. Record the owner, binding, and failure behavior before implementation.
-- [ ] Resolve those two CodeRabbit findings, complete review, and merge PR #387; close #352 and #383 only after the merged behavior is verified.
+- [x] Restore solo child handoff for an accepted standalone SyncDeck student who has no WebSocket roster record; derive the ID from the accepted-entry token and test that path. `solo-activity/entry` now uses `resolveAcceptedSyncDeckEntryIdentity`, which takes the ID and fallback name from the accepted-entry record and uses the roster only for the display name. Removal revokes the parent accepted entry, so a removed student is still denied.
+- [ ] Require proof that a solo child belongs to the requesting SyncDeck parent before issuing its trusted entry token; reject an unrelated existing session ID. Design recorded below; implementation tracked in [#388](https://github.com/PerryHighCS/ActiveBits/issues/388), outside PR #387.
+  - [ ] Add an activity-agnostic server hook for creating a solo session from `selectedOptions` (for example `createSoloSession` on the server activity registry), and move each solo-capable activity's create validation behind it: Resonance, Video Sync, MobCode.
+  - [ ] Add `POST /api/syncdeck/:sessionId/solo-activity/start`, which authorizes the accepted-entry cookie, creates the child through the hook, and records the binding before returning the child ID.
+  - [ ] Change `solo-activity/entry` to require a matching binding; switch `SyncDeckStudent` to the start route instead of calling each activity's client `launchPersistentSoloEntry`.
+  - [ ] Route tests: unbound existing session, binding owned by another student, other parent's child, missing/expired child, revoked parent entry, a student who relaunches the same slide (binding reused or replaced), plus a standalone browser smoke test.
+- [ ] Resolve CodeRabbit's first review (roster finding fixed in #387; parent-binding finding deferred to #388), complete review, and merge PR #387; close #352 and #383 only after the merged behavior is verified.
 - [ ] Record the proof accepted by standalone, persistent, and SyncDeck embedded entry, including the parent-roster and session-incarnation checks for child handoffs. Keep the rule in the shared principal layer.
 - [ ] Complete the accepted-entry-to-registered transition matrix: explicit new entry in a shared browser must supersede stale authority without replaying a consumed handoff; cookie loss, expiry, and wrong-session proof must reach a controlled entry path.
 - [ ] Reconcile route and browser coverage against that matrix, including the existing Resonance draft/reload test and an additional activity's reload path. Put any demonstrated gap in a focused follow-up rather than widening PR #387 during review.
 
 **Exit gate:** A valid registered student reloads under the same server-authorized ID; a new or unauthorized visitor cannot claim that ID; SyncDeck embedded identity continuity still works.
+
+#### Solo child binding (CodeRabbit finding on PR #387)
+
+**Owner:** SyncDeck's server routes own the binding. The parent SyncDeck session record keeps `soloChildren[childSessionId] = { studentId, activityId, createdAt }`, written only by `solo-activity/start` in the same request that creates the child. The shared layer owns only the generic solo-create hook; it never learns about SyncDeck.
+
+**Invariant:** `solo-activity/entry` issues a trusted child entry token only when the parent's accepted-entry cookie resolves to student S, `soloChildren[childSessionId]` exists, its `studentId` is S, and the child session still exists with the recorded `activityId` as its type. A client-supplied child ID never proves ownership on its own. Record count per student is capped, and records are pruned when the child is missing, so the parent record cannot grow without limit.
+
+**Failure behavior:** A missing or mismatched binding returns 403 with no write to the child session. A missing child returns 404, and the stale binding is removed. The client shows the existing "Unable to launch this solo activity" notice; it never falls back to an unauthenticated child entry. Removing a student deletes that student's bindings along with the accepted-entry revocation.
+
+**Why server-side creation rather than a post-create registration step:** A registration call made after the client created the child cannot prove the caller created it, so it would still accept any known session ID. The cost is the new activity hook: each activity's solo create validation currently lives only behind its own `/api/<activity>/create` route. Phase B's planned creator capability (an httpOnly cookie issued when a session is created) could replace the parent-held binding with direct proof of creation. If Phase B lands first, re-evaluate before building the hook.
 
 ### Phase B: Establish the temporary manager contract (#344)
 

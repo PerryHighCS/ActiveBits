@@ -395,6 +395,30 @@ function resolveAcceptedSyncDeckStudent(
   return findSyncDeckStudentById(session.data.students, accepted?.participantId ?? null)
 }
 
+/**
+ * Resolves the student proven by the parent's accepted-entry cookie without
+ * requiring a roster record. Standalone students never open the SyncDeck
+ * WebSocket, so the roster may not contain them; the roster only refines the
+ * display name when present.
+ */
+function resolveAcceptedSyncDeckEntryIdentity(
+  session: SyncDeckSession,
+  cookies: Record<string, unknown> | undefined,
+): { studentId: string; name: string | null } | null {
+  const accepted = resolveAcceptedEntryParticipantToken(
+    session,
+    cookies?.[getSessionParticipantCookieName(session.id)],
+  )
+  if (!accepted) {
+    return null
+  }
+  const rosterStudent = findSyncDeckStudentById(session.data.students, accepted.participantId)
+  return {
+    studentId: accepted.participantId,
+    name: rosterStudent?.name ?? accepted.displayName,
+  }
+}
+
 function resolveSocketAcceptedSyncDeckParticipantId(
   session: SyncDeckSession,
   socket: SyncDeckSocket,
@@ -2540,7 +2564,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
         res.status(404).json({ error: 'invalid session' })
         return
       }
-      const student = resolveAcceptedSyncDeckStudent(parent, req.cookies)
+      const student = resolveAcceptedSyncDeckEntryIdentity(parent, req.cookies)
       if (!student) {
         res.status(403).json({ error: 'forbidden' })
         return
@@ -2555,7 +2579,11 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
         res.status(404).json({ error: 'invalid child session' })
         return
       }
-      const stored = storeTrustedSessionEntryParticipant(child, { displayName: student.name }, student.studentId)
+      const stored = storeTrustedSessionEntryParticipant(
+        child,
+        student.name ? { displayName: student.name } : {},
+        student.studentId,
+      )
       await sessions.set(childSessionId, child)
       res.json({ entryParticipantToken: stored.token, values: stored.values })
     } catch (error) {
