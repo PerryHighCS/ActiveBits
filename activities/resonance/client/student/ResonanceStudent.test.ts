@@ -13,6 +13,7 @@ import { advanceEditSequenceForRevisit, resolveCurrentEditSequence } from './Res
 import { seedEditSequenceFromConfirmedResponse } from './ResonanceStudent.js'
 import { selectUnconfirmedDraftQuestionIds, resetAnswersForRestartedQuestions } from './ResonanceStudent.js'
 import { clearDraftTracking, getOrCreateQuestionDraftState, isDraftStillCurrentForRevision } from './ResonanceStudent.js'
+import { selectServerFinalizedQuestionIds } from './ResonanceStudent.js'
 import type { QuestionDraftState } from './ResonanceStudent.js'
 import type { AnswerPayload, StudentSessionSnapshot } from '../../shared/types.js'
 
@@ -347,6 +348,41 @@ void test('hasActiveQuestionRunRestart detects a new revision', () => {
     }),
     true,
   )
+})
+
+void test('selectServerFinalizedQuestionIds only counts a confirmed response at or beyond the local edit sequence', () => {
+  // CodeRabbit review of PR #381: a revisit leaves the earlier confirmed
+  // response in submittedAnswers, so membership alone wrongly treated a newer
+  // unconfirmed revisit edit as finalized (submit -> revisit -> edit -> staged
+  // deadline refresh).
+  const key = { revision: 2, deadlineAt: 5000 }
+  const answer = { type: 'free-response', text: 'x' } as AnswerPayload
+  const cases: Array<{
+    name: string
+    snapshot: Partial<StudentSessionSnapshot>
+    dirtySequence: number | undefined
+    expected: string[]
+  }> = [
+    { name: 'run identity changed: resolved regardless of responses', snapshot: { activeQuestionRunRevision: null, activeQuestionDeadlineAt: null }, dirtySequence: 3, expected: ['q1'] },
+    { name: 'same run, no confirmed response', snapshot: { activeQuestionRunRevision: 2, activeQuestionDeadlineAt: 5000 }, dirtySequence: 1, expected: [] },
+    { name: 'same run, confirmed sequence below the dirty sequence (revisit edit pending)', snapshot: { activeQuestionRunRevision: 2, activeQuestionDeadlineAt: 5000, submittedAnswers: { q1: answer }, submittedResponseEditSequences: { q1: 1 } }, dirtySequence: 2, expected: [] },
+    { name: 'same run, confirmed sequence equals the dirty sequence (finalized)', snapshot: { activeQuestionRunRevision: 2, activeQuestionDeadlineAt: 5000, submittedAnswers: { q1: answer }, submittedResponseEditSequences: { q1: 2 } }, dirtySequence: 2, expected: ['q1'] },
+    { name: 'same run, confirmed sequence above the dirty sequence', snapshot: { activeQuestionRunRevision: 2, activeQuestionDeadlineAt: 5000, submittedAnswers: { q1: answer }, submittedResponseEditSequences: { q1: 4 } }, dirtySequence: 2, expected: ['q1'] },
+    { name: 'same run, answer present but sequence missing', snapshot: { activeQuestionRunRevision: 2, activeQuestionDeadlineAt: 5000, submittedAnswers: { q1: answer } }, dirtySequence: 1, expected: [] },
+  ]
+  cases.push({ name: 'same run, no recorded dirty sequence', snapshot: { activeQuestionRunRevision: 2, activeQuestionDeadlineAt: 5000, submittedAnswers: { q1: answer }, submittedResponseEditSequences: { q1: 9 } }, dirtySequence: undefined, expected: [] })
+  for (const testCase of cases) {
+    assert.deepEqual(
+      selectServerFinalizedQuestionIds({
+        refreshedSnapshot: buildSnapshot(testCase.snapshot),
+        reconciliationKey: key,
+        questionIds: ['q1'],
+        draftState: new Map([['q1', { ...getOrCreateQuestionDraftState(new Map(), 'q1'), dirtyEditSequence: testCase.dirtySequence }]]),
+      }),
+      testCase.expected,
+      testCase.name,
+    )
+  }
 })
 
 void test('selectUnconfirmedDraftQuestionIds retries an unconfirmed question but not a submitted or already-confirmed one', () => {
@@ -2694,6 +2730,7 @@ void test('a failed deadline reconciliation refresh does not strand the client, 
         json: async () => ({
           ...snapshot,
           submittedAnswers: { q1: { type: 'free-response', text: 'Server-finalized answer' } },
+          submittedResponseEditSequences: { q1: 1 },
         }),
       } as Response
     }

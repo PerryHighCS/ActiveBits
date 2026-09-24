@@ -274,6 +274,7 @@ export function selectUnconfirmedDraftQuestionIds(params: {
 export interface QuestionDraftState {
   unconfirmed: boolean
   dirtyRunRevision: number | null | undefined
+  dirtyEditSequence: number | undefined
   inFlightAttemptToken: number | undefined
   pendingRetryAfterInFlight: boolean
 }
@@ -287,6 +288,7 @@ export function getOrCreateQuestionDraftState(
     state = {
       unconfirmed: false,
       dirtyRunRevision: undefined,
+      dirtyEditSequence: undefined,
       inFlightAttemptToken: undefined,
       pendingRetryAfterInFlight: false,
     }
@@ -310,6 +312,7 @@ export function clearDraftTracking(params: {
     if (state === undefined) continue
     state.unconfirmed = false
     state.dirtyRunRevision = undefined
+    state.dirtyEditSequence = undefined
     state.inFlightAttemptToken = undefined
     state.pendingRetryAfterInFlight = false
   }
@@ -359,13 +362,14 @@ export function isDraftStillCurrentForRevision(params: {
  * server's own expiry ran — see expireActiveQuestionRunIfNeeded in
  * routes.ts, which clears activeQuestionRunRevision/activeQuestionDeadlineAt
  * for a non-staged run) or that the server now holds a confirmed answer for
- * it (a staged run's finalization instead leaves the run/deadline
+ * it at or beyond the local edit sequence (a staged run's finalization instead leaves the run/deadline
  * unchanged and only finalizes the individual draft into a response).
  */
 export function selectServerFinalizedQuestionIds(params: {
   refreshedSnapshot: StudentSessionSnapshot
   reconciliationKey: { revision: number | null; deadlineAt: number | null }
   questionIds: readonly string[]
+  draftState: ReadonlyMap<string, QuestionDraftState>
 }): string[] {
   const runStillActiveAtReconciliationKey =
     params.refreshedSnapshot.activeQuestionRunRevision === params.reconciliationKey.revision &&
@@ -373,7 +377,21 @@ export function selectServerFinalizedQuestionIds(params: {
 
   return params.questionIds.filter((questionId) => {
     if (!runStillActiveAtReconciliationKey) return true
-    return questionId in params.refreshedSnapshot.submittedAnswers
+    // A revisit leaves the earlier confirmed response in submittedAnswers, so
+    // presence alone can't distinguish "finalized" from "an earlier
+    // submission." Finalization stores the draft's own editSequence on the
+    // response, so it only counts once that sequence reaches the one the
+    // unconfirmed draft was dirtied under. (The live local counter can't be
+    // used: the snapshot-merge seeding raises it to confirmed + 1 as soon as
+    // any snapshot carrying a confirmed response is applied.)
+    const dirtyEditSequence = params.draftState.get(questionId)?.dirtyEditSequence
+    const confirmedEditSequence = params.refreshedSnapshot.submittedResponseEditSequences[questionId]
+    return (
+      questionId in params.refreshedSnapshot.submittedAnswers &&
+      dirtyEditSequence !== undefined &&
+      confirmedEditSequence !== undefined &&
+      confirmedEditSequence >= dirtyEditSequence
+    )
   })
 }
 
@@ -990,6 +1008,7 @@ export default function ResonanceStudent() {
               refreshedSnapshot,
               reconciliationKey,
               questionIds: questionIdsStillUnconfirmed,
+              draftState: questionDraftStateRef.current,
             })
             if (resolvedIds.length === 0) return
             // Only mark this run's deadline fully reconciled once every
@@ -1204,6 +1223,11 @@ export default function ResonanceStudent() {
                   const draftState = getOrCreateQuestionDraftState(questionDraftStateRef.current, questionId)
                   draftState.unconfirmed = true
                   draftState.dirtyRunRevision = snapshot.activeQuestionRunRevision
+                  draftState.dirtyEditSequence = resolveCurrentEditSequence(
+                    editSequenceByKeyRef.current,
+                    questionId,
+                    snapshot.activeQuestionRunRevision,
+                  )
                   setSubmittedAnswers((current) => ({
                     ...current,
                     [questionId]: answer,
