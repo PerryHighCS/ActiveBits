@@ -88,8 +88,11 @@ cookie or a session-scoped registered participant capability. An activity may
 consume and revoke the accepted-entry token when it registers the student; its
 registered capability then carries the same student's authority across a page
 reload. Local browser storage is only an identity hint for the activity client,
-not proof of student authority. The public waiting-room supplied-ID weakness is
-tracked separately in #352.
+not proof of student authority. Public live and persistent waiting-room store
+routes always mint the participant ID, even when the request includes one.
+SyncDeck carries a parent student's ID into an embedded or standalone solo
+child only after validating the parent's accepted-entry cookie against its
+roster; the child receives a scoped, one-time handoff token.
 
 For live MobCode sessions, the instructor workspace remains `groups.default`. Newly initialized sessions broadcast instructor changes by default unless they begin with Try it enabled. When the instructor enables Try it, MobCode creates one private, server-backed workspace per accepted waiting-room participant from an explicit starter snapshot. The instructor controls whether their code is broadcast live or students keep the last published version. Student responses are participant-scoped and never include peer names or files; instructors may inspect named workspaces and publish one anonymous shared copy that they can edit and broadcast to the class in real time.
 

@@ -1,7 +1,7 @@
 import type { SessionRecord, SessionStore } from 'activebits-server/core/sessions.js'
 import { consumeSessionDataToken } from 'activebits-server/core/sessionTokenUtils.js'
-import { acceptEntryParticipant, findAcceptedEntryParticipant, issueAcceptedEntryParticipantToken, resolveAcceptedEntryParticipantToken } from 'activebits-server/core/acceptedEntryParticipants.js'
-import { storeSessionEntryParticipant } from 'activebits-server/core/sessionEntryParticipants.js'
+import { acceptEntryParticipant, findAcceptedEntryParticipant, getSessionParticipantCookieName, issueAcceptedEntryParticipantToken, resolveAcceptedEntryParticipantToken } from 'activebits-server/core/acceptedEntryParticipants.js'
+import { consumeSessionEntryParticipant, storeTrustedSessionEntryParticipant } from 'activebits-server/core/sessionEntryParticipants.js'
 import {
   computePersistentLinkUrlHash,
   type PersistentLinkUrlState,
@@ -271,7 +271,7 @@ void test('SyncDeck instructor can return an accepted student to the waiting roo
   const child = createSyncDeckSession('CHILD:return-session:resonance')
   acceptEntryParticipant(child, { participantId: 'student-1', displayName: 'Ada' })
   const childToken = issueAcceptedEntryParticipantToken(child, 'student-1')
-  const childEntryToken = storeSessionEntryParticipant(child, { participantId: 'student-1', displayName: 'Ada' }).token
+  const childEntryToken = storeTrustedSessionEntryParticipant(child, { displayName: 'Ada' }, 'student-1').token
   ;(session.data as { embeddedActivities: Record<string, unknown> }).embeddedActivities['resonance:0:0'] = { childSessionId: child.id, activityId: 'resonance', startedAt: 1, owner: 'syncdeck-instructor' }
   const state = createSessionStore({ [session.id]: session, [child.id]: child })
   const app = createMockApp()
@@ -399,6 +399,7 @@ class MockSocket implements ActiveBitsWebSocket {
   ignoreDisconnect?: boolean
   isAlive?: boolean
   clientIp?: string
+  upgradeHeaders?: Record<string, string | string[] | undefined>
   readyState = 1
   sent: string[] = []
   closeCalls: Array<{ code?: number; reason?: string }> = []
@@ -613,12 +614,17 @@ void test('syncdeck websocket replays existing embedded activity starts to stude
     },
     'child-video-1': childSession,
   })
+  const parentSession = state.store.s1!
+  acceptEntryParticipant(parentSession, { participantId: 'student-1', displayName: 'Ada Lovelace' })
+  const acceptedToken = issueAcceptedEntryParticipantToken(parentSession, 'student-1')
+  assert.ok(acceptedToken)
 
   setupSyncDeckRoutes(app, state.sessions, ws)
   const handler = ws.registered['/ws/syncdeck']
   assert.equal(typeof handler, 'function')
 
   const studentSocket = new MockSocket()
+  studentSocket.upgradeHeaders = { cookie: `${getSessionParticipantCookieName('s1')}=${acceptedToken}` }
   ws.wss.clients.add(studentSocket)
 
   handler?.(
@@ -646,6 +652,19 @@ void test('syncdeck websocket replays existing embedded activity starts to stude
   const entryParticipants = asRecord(updatedChildSession.data)?.entryParticipants
   const entryParticipantToken = embeddedStart?.entryParticipantToken as string
   assert.notEqual(asRecord(entryParticipants)?.[entryParticipantToken], undefined)
+
+  const untrustedSocket = new MockSocket()
+  ws.wss.clients.add(untrustedSocket)
+  handler?.(
+    untrustedSocket,
+    new URLSearchParams({ sessionId: 's1', studentId: 'student-1' }),
+    ws.wss,
+  )
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  const untrustedStart = untrustedSocket.sent
+    .map((entry) => JSON.parse(entry) as { payload?: Record<string, unknown> })
+    .find((entry) => entry.payload?.type === 'embedded-activity-start')
+  assert.equal(untrustedStart?.payload?.entryParticipantToken, null)
 })
 
 void test('syncdeck websocket closes duplicate student sockets for the same session participant', async () => {
@@ -2481,6 +2500,10 @@ void test('embedded-activity start route creates a child session, stores keyed m
       },
     },
   })
+  const parent = storeState.store.s1!
+  acceptEntryParticipant(parent, { participantId: 'student-1', displayName: 'Ada Lovelace' })
+  const token = issueAcceptedEntryParticipantToken(parent, 'student-1')
+  assert.ok(token)
   setupSyncDeckRoutes(app, storeState.sessions, ws)
 
   const handler = app.handlers.post['/api/syncdeck/:sessionId/embedded-activity/start']
@@ -2492,6 +2515,7 @@ void test('embedded-activity start route creates a child session, stores keyed m
   const studentSocket = new MockSocket()
   studentSocket.sessionId = 's1'
   studentSocket.studentId = 'student-1'
+  studentSocket.upgradeHeaders = { cookie: `${getSessionParticipantCookieName('s1')}=${token}` }
   ;(studentSocket as MockSocket & { isInstructor?: boolean }).isInstructor = false
   ws.wss.clients.add(instructorSocket)
   ws.wss.clients.add(studentSocket)
@@ -4145,10 +4169,22 @@ void test('embedded-activity entry route issues a fresh token for a registered p
       data: {},
     },
   })
+  const parentSession = storeState.store.s1!
+  acceptEntryParticipant(parentSession, { participantId: 'student-1', displayName: 'Ada Lovelace' })
+  const acceptedToken = issueAcceptedEntryParticipantToken(parentSession, 'student-1')
+  assert.ok(acceptedToken)
   setupSyncDeckRoutes(app, storeState.sessions, ws)
 
   const handler = app.handlers.post['/api/syncdeck/:sessionId/embedded-activity/entry']
   assert.equal(typeof handler, 'function')
+
+  for (const cookies of [{}, { [getSessionParticipantCookieName('s1')]: 'forged' }]) {
+    const denied = createResponse()
+    await handler?.(createRequest({ sessionId: 's1' }, {
+      instanceKey: 'video-sync:3:0', childSessionId, studentId: 'student-1',
+    }, cookies), denied)
+    assert.equal(denied.statusCode, 403)
+  }
 
   const res = createResponse()
   await handler?.(
@@ -4159,6 +4195,7 @@ void test('embedded-activity entry route issues a fresh token for a registered p
         childSessionId,
         studentId: 'student-1',
       },
+      { [getSessionParticipantCookieName('s1')]: acceptedToken },
     ),
     res,
   )
@@ -4177,6 +4214,41 @@ void test('embedded-activity entry route issues a fresh token for a registered p
   assert.equal(typeof body.entryParticipantToken, 'string')
   assert.equal(body.values.participantId, 'student-1')
   assert.equal(body.values.displayName, 'Ada Lovelace')
+})
+
+void test('solo activity entry carries only the parent-cookie student id into the child', async () => {
+  const parent = createSyncDeckSession('s1')
+  parent.data.students = [{
+    studentId: 'student-1', name: 'Ada', joinedAt: 1, lastSeenAt: 1,
+    lastIndices: null, lastStudentStateAt: null,
+  }]
+  acceptEntryParticipant(parent, { participantId: 'student-1', displayName: 'Ada' })
+  const token = issueAcceptedEntryParticipantToken(parent, 'student-1')
+  assert.ok(token)
+  const child: SessionRecord = { id: 'solo-child', type: 'resonance', created: 2, lastActivity: 2, data: {} }
+  const state = createSessionStore({ s1: parent, [child.id]: child })
+  const app = createMockApp()
+  setupSyncDeckRoutes(app, state.sessions, createMockWs())
+  const handler = app.handlers.post['/api/syncdeck/:sessionId/solo-activity/entry']
+  assert.ok(handler)
+
+  const denied = createResponse()
+  await handler(createRequest({ sessionId: 's1' }, { childSessionId: child.id, studentId: 'student-1' }), denied)
+  assert.equal(denied.statusCode, 403)
+
+  const accepted = createResponse()
+  await handler(createRequest(
+    { sessionId: 's1' },
+    { childSessionId: child.id, studentId: 'different-student' },
+    { [getSessionParticipantCookieName('s1')]: token },
+  ), accepted)
+  assert.equal(accepted.statusCode, 200)
+  const body = accepted.body as { entryParticipantToken: string; values: { participantId: string } }
+  assert.equal(body.values.participantId, 'student-1')
+  assert.deepEqual(
+    consumeSessionEntryParticipant(state.store[child.id]!, body.entryParticipantToken),
+    { displayName: 'Ada', participantId: 'student-1' },
+  )
 })
 
 void test('embedded-activity auto-activate route marks released resonance children to activate all questions', async () => {

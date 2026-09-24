@@ -6,7 +6,15 @@
 - Area: shared live-session entry | Resonance student recovery
 - Contract: `GET /api/session/:id/entry` reports `participantAuthenticated: true` for either a valid accepted-entry cookie or a valid session-scoped registered participant capability. Resonance consumes and revokes its accepted-entry record during registration; the registered capability remains the server authority for reloading the same student ID. Browser-stored student IDs are hints and cannot grant activity access.
 - Validation: `server/sessionEntryRoutes.test.ts`; `activities/resonance/playwright/auth.spec.ts` (saved draft survives a real-browser reload).
-- Follow-up: #352 must remove public supplied-ID trust; #313 must protect concurrent whole-session writers.
+- Follow-up: #313 must protect concurrent whole-session writers.
+
+## Public and SyncDeck child participant IDs
+
+- Date: 2026-09-24
+- Area: waiting-room entry | SyncDeck embedded and solo child sessions
+- Contract: Public live and persistent entry stores always mint an ID; request `participantId` is ignored. The separate trusted store function accepts an explicit ID only after the SyncDeck parent session's accepted-entry cookie resolves to a current roster student. Embedded WS delivery and recovery HTTP routes require this parent proof before issuing a child-scoped token. The solo child entry route derives its ID from the parent cookie, not the request body.
+- Validation: `server/entryParticipants.test.ts`; `server/sessionEntryRoutes.test.ts`; `server/persistentSessionRoutes.test.ts`; `activities/syncdeck/server/routes.test.ts`; `activities/syncdeck/playwright/student-return.spec.ts`.
+- Follow-up: #313 must make the shared entry and child-token writes safe against concurrent whole-session writers.
 
 ## MobCode live-session defaults
 

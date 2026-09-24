@@ -13,10 +13,6 @@ import {
   readStoredSessionParticipantIdentity,
   resolveInitialEntryParticipantIdentity,
 } from '@src/components/common/entryParticipantIdentityUtils'
-import {
-  buildSessionEntryParticipantSubmitApiUrl,
-} from '@src/components/common/entryParticipantStorage'
-import { persistWaitingRoomServerBackedHandoff } from '@src/components/common/waitingRoomHandoffUtils'
 import { handleReturnedToWaitingRoom } from './returnedToWaitingRoomUtils.js'
 import {
   REVEAL_SYNC_PROTOCOL_VERSION,
@@ -3380,24 +3376,35 @@ const SyncDeckStudent: FC = () => {
             && registeredStudentName.trim().length > 0
             && registeredStudentId.trim().length > 0
           ) {
+            if (!sessionId) throw new Error('Parent session is unavailable')
             const launchedSessionId = launchResult.sessionId
+            const entryResponse = await fetch(`/api/syncdeck/${encodeURIComponent(sessionId)}/solo-activity/entry`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'include',
+              body: JSON.stringify({ childSessionId: launchedSessionId }),
+            })
+            if (!entryResponse.ok) throw new Error('Solo activity entry was denied')
+            const entry = await entryResponse.json() as {
+              entryParticipantToken?: unknown
+              values?: { participantId?: unknown }
+            }
+            if (isCancelled) return
+            if (
+              typeof entry.entryParticipantToken !== 'string'
+              || entry.values?.participantId !== registeredStudentId
+            ) throw new Error('Solo activity entry was invalid')
+            const storageKey = buildSessionEntryParticipantStorageKey(overlay.activityId, launchedSessionId)
+            persistEntryParticipantToken(window.sessionStorage, storageKey, entry.entryParticipantToken)
+            if (!hasValidEntryParticipantHandoffStorageValue(window.sessionStorage, storageKey)) {
+              throw new Error('Solo activity entry could not be saved')
+            }
             persistSessionParticipantIdentity(
               window.localStorage,
               launchedSessionId,
               registeredStudentName,
               registeredStudentId,
             )
-            void persistWaitingRoomServerBackedHandoff({
-              storage: window.sessionStorage,
-              storageKey: buildSessionEntryParticipantStorageKey(overlay.activityId, launchedSessionId),
-              values: {
-                displayName: registeredStudentName,
-                participantId: registeredStudentId,
-              },
-              submitApiUrl: buildSessionEntryParticipantSubmitApiUrl(launchedSessionId),
-              participantContextStorage: window.localStorage,
-              sessionParticipantContextSessionId: launchedSessionId,
-            })
           }
 
           setSoloOverlays((current) => {

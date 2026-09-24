@@ -19,9 +19,18 @@ Track security-relevant boundaries, risks, and mitigation decisions.
 - Area: shared live-session entry after activity registration
 - Threat or risk: Resonance revoked its one-time accepted-entry token after issuing a participant capability, but shared `/entry` checked only the revoked token. Reloading therefore returned a valid student to the waiting room and a new join orphaned work under a new ID.
 - Control or mitigation: Shared `/entry` also recognizes a valid session-scoped participant capability. The browser's stored student ID remains a hint; the capability is verified against the session record before bypassing the waiting room.
-- Residual risk: #352 still allows a public waiting-room caller to supply a participant ID; SyncDeck embedded handoffs need a separate trusted path. Do not close Phase A until that is fixed.
+- Residual risk: The public supplied-ID path was closed in the subsequent #352 slice. Shared session-write races remain tracked in #313.
 - Validation (test/review/path): `server/sessionEntryRoutes.test.ts`; `activities/resonance/playwright/auth.spec.ts`.
 - Follow-up action: Complete #352 and the rest of Phase A in `.agent/plans/shared-activity-runtime-authentication.md`.
+- Owner: Codex
+
+- Date: 2026-09-24
+- Area: public waiting-room entry and SyncDeck child handoff
+- Threat or risk: Public entry stores previously accepted `participantId` from the request, allowing a caller to claim and rotate another student's accepted-entry identity. SyncDeck needed parent-to-child continuity, including standalone solo overlays, so simply minting every ID would break that flow.
+- Control or mitigation: Public stores now always mint IDs. A separate trusted store preserves an ID only for a SyncDeck child handoff authorized by the parent accepted-entry cookie and current roster. SyncDeck normalizes and retains the token map used to verify that cookie. Its embedded WS and HTTP token paths do not issue child tokens to unverified student IDs; the solo overlay uses a parent-cookie-authorized endpoint.
+- Residual risk: SyncDeck's broader student WebSocket still identifies a registered student by a client-supplied ID for non-handoff state; its full principal migration remains in the shared runtime plan. Concurrent session writes remain tracked in #313.
+- Validation (test/review/path): `server/entryParticipants.test.ts`; `server/sessionEntryRoutes.test.ts`; `server/persistentSessionRoutes.test.ts`; `activities/syncdeck/server/routes.test.ts`; `activities/syncdeck/playwright/student-return.spec.ts`.
+- Follow-up action: Complete the shared student-principal and atomic-write migrations before treating all SyncDeck student state as protected.
 - Owner: Codex
 
 - Date: 2026-09-13

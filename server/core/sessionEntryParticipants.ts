@@ -3,6 +3,7 @@ import {
   consumeEntryParticipant,
   normalizeEntryParticipantValues,
   storeEntryParticipant,
+  storeTrustedEntryParticipant,
   type EntryParticipantValues,
 } from './entryParticipants.js'
 
@@ -64,8 +65,27 @@ export function storeSessionEntryParticipant(
   session: SessionRecord,
   values: unknown,
 ): { token: string; values: SessionEntryParticipantValues } {
+  return storeSessionEntryParticipantWithId(session, values, null)
+}
+
+/** Store a handoff after a server-side parent-principal check. */
+export function storeTrustedSessionEntryParticipant(
+  session: SessionRecord,
+  values: unknown,
+  participantId: string,
+): { token: string; values: SessionEntryParticipantValues } {
+  return storeSessionEntryParticipantWithId(session, values, participantId)
+}
+
+function storeSessionEntryParticipantWithId(
+  session: SessionRecord,
+  values: unknown,
+  participantId: string | null,
+): { token: string; values: SessionEntryParticipantValues } {
   const container = getSessionEntryParticipantContainer(session)
-  const stored = storeEntryParticipant(container, values)
+  const stored = participantId === null
+    ? storeEntryParticipant(container, values)
+    : storeTrustedEntryParticipant(container, values, participantId)
   const valuesBytes = Buffer.byteLength(JSON.stringify(stored.values), 'utf8')
 
   if (valuesBytes > MAX_SESSION_ENTRY_PARTICIPANT_VALUES_BYTES) {

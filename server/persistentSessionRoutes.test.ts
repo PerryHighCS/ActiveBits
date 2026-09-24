@@ -1821,6 +1821,7 @@ void test('persistent entry participant routes store and consume values by token
     body: {
       values: {
         displayName: 'Ada',
+        participantId: 'victim-id',
         ignored: () => 'x',
       },
     },
@@ -1831,6 +1832,7 @@ void test('persistent entry participant routes store and consume values by token
   const token = typeof storeRes.jsonBody?.entryParticipantToken === 'string' ? storeRes.jsonBody.entryParticipantToken : null
   assert.equal(typeof token, 'string')
   assert.equal(typeof (storeRes.jsonBody?.values as Record<string, unknown> | undefined)?.participantId, 'string')
+  assert.notEqual((storeRes.jsonBody?.values as Record<string, unknown>).participantId, 'victim-id')
 
   const consumeHandler = getRoute(app, 'POST', '/api/persistent-session/:hash/entry-participant/consume')
   const consumeRes = createMockRes()

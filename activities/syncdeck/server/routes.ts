@@ -16,7 +16,11 @@ import {
   normalizePossiblyEncodedHttpUrl,
 } from 'activebits-server/core/httpUrlUtils.js'
 import { closeDuplicateParticipantSockets, closeParticipantSockets } from 'activebits-server/core/participantSockets.js'
-import { revokeAcceptedEntryParticipant } from 'activebits-server/core/acceptedEntryParticipants.js'
+import {
+  getSessionParticipantCookieName,
+  resolveAcceptedEntryParticipantToken,
+  revokeAcceptedEntryParticipant,
+} from 'activebits-server/core/acceptedEntryParticipants.js'
 import {
   createSession,
   EMBEDDED_CHILD_SESSION_PREFIX,
@@ -25,9 +29,9 @@ import {
   type SessionRecord,
   type SessionStore,
 } from 'activebits-server/core/sessions.js'
-import { storeSessionEntryParticipant } from 'activebits-server/core/sessionEntryParticipants.js'
+import { storeTrustedSessionEntryParticipant } from 'activebits-server/core/sessionEntryParticipants.js'
 import { revokeSessionEntryParticipants } from 'activebits-server/core/sessionEntryParticipants.js'
-import { issueActivityCapability, issueManagerCapabilityAtomically, writeActivityCapabilityCookie } from 'activebits-server/core/activityCapabilities.js'
+import { issueActivityCapability, issueManagerCapabilityAtomically, readCookieValue, writeActivityCapabilityCookie } from 'activebits-server/core/activityCapabilities.js'
 import { randomBytes, timingSafeEqual } from 'node:crypto'
 import type { ActiveBitsWebSocket, WsRouter } from '../../../types/websocket.js'
 import {
@@ -380,6 +384,31 @@ function findSyncDeckStudentById(
   return students.find((student) => student.studentId === studentId) ?? null
 }
 
+function resolveAcceptedSyncDeckStudent(
+  session: SyncDeckSession,
+  cookies: Record<string, unknown> | undefined,
+): SyncDeckStudent | null {
+  const accepted = resolveAcceptedEntryParticipantToken(
+    session,
+    cookies?.[getSessionParticipantCookieName(session.id)],
+  )
+  return findSyncDeckStudentById(session.data.students, accepted?.participantId ?? null)
+}
+
+function resolveSocketAcceptedSyncDeckStudent(
+  session: SyncDeckSession,
+  socket: SyncDeckSocket,
+): SyncDeckStudent | null {
+  const cookieName = getSessionParticipantCookieName(session.id)
+  const cookieHeader = socket.upgradeHeaders?.cookie
+  return resolveAcceptedSyncDeckStudent(session, {
+    [cookieName]: readCookieValue(
+      Array.isArray(cookieHeader) ? cookieHeader[0] : cookieHeader,
+      cookieName,
+    ),
+  })
+}
+
 function normalizeStudents(value: unknown): SyncDeckStudent[] {
   if (!Array.isArray(value)) {
     return []
@@ -589,6 +618,9 @@ export function normalizeSyncDeckSessionData(data: unknown): SyncDeckSessionData
   const preservedAcceptedEntryParticipants = isPlainObject(source.acceptedEntryParticipants)
     ? source.acceptedEntryParticipants
     : undefined
+  const preservedParticipantAuthTokens = isPlainObject(source.participantAuthTokens)
+    ? source.participantAuthTokens
+    : undefined
   const preservedEntryParticipants = isPlainObject(source.entryParticipants)
     ? source.entryParticipants
     : undefined
@@ -598,6 +630,7 @@ export function normalizeSyncDeckSessionData(data: unknown): SyncDeckSessionData
       ? { linkedSessionId: source.linkedSessionId.trim() }
       : {}),
     ...(preservedAcceptedEntryParticipants ? { acceptedEntryParticipants: preservedAcceptedEntryParticipants } : {}),
+    ...(preservedParticipantAuthTokens ? { participantAuthTokens: preservedParticipantAuthTokens } : {}),
     ...(preservedEntryParticipants ? { entryParticipants: preservedEntryParticipants } : {}),
     presentationUrl: typeof source.presentationUrl === 'string' ? source.presentationUrl : null,
     standaloneMode: source.standaloneMode === true,
@@ -1638,7 +1671,8 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
         peer.readyState !== WS_OPEN_READY_STATE ||
         peer.sessionId !== session.id ||
         peer.isInstructor !== false ||
-        typeof peer.studentId !== 'string'
+        typeof peer.studentId !== 'string' ||
+        resolveSocketAcceptedSyncDeckStudent(session, peer)?.studentId !== peer.studentId
       ) {
         continue
       }
@@ -1650,10 +1684,9 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
 
     const tokensByStudentId = new Map<string, string>()
     for (const student of connectedStudents.values()) {
-      const stored = storeSessionEntryParticipant(childSession, {
-        participantId: student.studentId,
+      const stored = storeTrustedSessionEntryParticipant(childSession, {
         displayName: student.name,
-      })
+      }, student.studentId)
       tokensByStudentId.set(student.studentId, stored.token)
     }
     await sessions.set(childSession.id, childSession)
@@ -1666,6 +1699,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       const entryParticipantToken = peer.isInstructor
         ? null
         : typeof peer.studentId === 'string'
+          && resolveSocketAcceptedSyncDeckStudent(session, peer)?.studentId === peer.studentId
           ? tokensByStudentId.get(peer.studentId) ?? null
           : null
       sendSyncDeckState(peer, buildEmbeddedActivityStartPayload(
@@ -1697,11 +1731,10 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       }
 
       let entryParticipantToken: string | null = null
-      if (student) {
-        const stored = storeSessionEntryParticipant(childSession, {
-          participantId: student.studentId,
+      if (student && resolveSocketAcceptedSyncDeckStudent(session, socket)?.studentId === student.studentId) {
+        const stored = storeTrustedSessionEntryParticipant(childSession, {
           displayName: student.name,
-        })
+        }, student.studentId)
         entryParticipantToken = stored.token
         await sessions.set(childSession.id, childSession)
       }
@@ -2463,8 +2496,8 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
     }
 
     const studentId = normalizeStudentId(readStringField(req.body, 'studentId'))
-    const student = findSyncDeckStudentById(session.data.students, studentId)
-    if (!student) {
+    const student = resolveAcceptedSyncDeckStudent(session, req.cookies)
+    if (!student || student.studentId !== studentId) {
       res.status(403).json({ error: 'forbidden' })
       return
     }
@@ -2475,10 +2508,9 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       return
     }
 
-    const stored = storeSessionEntryParticipant(childSession, {
-      participantId: student.studentId,
+    const stored = storeTrustedSessionEntryParticipant(childSession, {
       displayName: student.name,
-    })
+    }, student.studentId)
     await sessions.set(childSession.id, childSession)
 
     res.json({
@@ -2488,6 +2520,48 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       entryParticipantToken: stored.token,
       values: stored.values,
     })
+  })
+
+  // A SyncDeck student can create a standalone solo child. Carry only the ID
+  // proven by the parent session's accepted-entry cookie into that new session.
+  app.post('/api/syncdeck/:sessionId/solo-activity/entry', async (req, res) => {
+    res.setHeader?.('Cache-Control', 'no-store')
+    const sessionId = req.params.sessionId
+    if (!sessionId) {
+      res.status(400).json({ error: 'missing sessionId' })
+      return
+    }
+    try {
+      const parent = await getSyncDeckSessionWithEmbeddedKeepalive(sessions, sessionId)
+      if (!parent) {
+        res.status(404).json({ error: 'invalid session' })
+        return
+      }
+      const student = resolveAcceptedSyncDeckStudent(parent, req.cookies)
+      if (!student) {
+        res.status(403).json({ error: 'forbidden' })
+        return
+      }
+      const childSessionId = readStringField(req.body, 'childSessionId')
+      if (!childSessionId || childSessionId === sessionId || childSessionId.startsWith(EMBEDDED_CHILD_SESSION_PREFIX)) {
+        res.status(400).json({ error: 'invalid child session' })
+        return
+      }
+      const child = await sessions.get(childSessionId)
+      if (!child) {
+        res.status(404).json({ error: 'invalid child session' })
+        return
+      }
+      const stored = storeTrustedSessionEntryParticipant(child, { displayName: student.name }, student.studentId)
+      await sessions.set(childSessionId, child)
+      res.json({ entryParticipantToken: stored.token, values: stored.values })
+    } catch (error) {
+      console.error(JSON.stringify({
+        activity: 'syncdeck', event: 'solo-activity-entry-failed', sessionId,
+        error: error instanceof Error ? error.message : String(error),
+      }))
+      res.status(500).json({ error: 'solo activity entry unavailable' })
+    }
   })
 
   app.post('/api/syncdeck/:sessionId/embedded-activity/auto-activate', async (req, res) => {

@@ -404,6 +404,7 @@ void test('session entry participant routes store and consume waiting-room value
     body: {
       values: {
         displayName: 'Ada',
+        participantId: 'victim-id',
         ignored: () => 'x',
       },
     },
@@ -417,6 +418,7 @@ void test('session entry participant routes store and consume waiting-room value
     ? (storeRes.jsonBody?.values as Record<string, unknown>).participantId as string
     : null
   assert.equal(typeof participantId, 'string')
+  assert.notEqual(participantId, 'victim-id')
   assert.deepEqual(
     storeRes.jsonBody?.values,
     {
