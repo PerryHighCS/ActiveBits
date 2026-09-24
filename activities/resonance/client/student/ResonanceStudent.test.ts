@@ -1524,6 +1524,105 @@ void test('a reload after a revisit whose local counter was already auto-seeded 
   }
 })
 
+void test('a reload after a revisit-then-clear with no confirmed response still seeds past the retained watermark', async () => {
+  // Copilot review of PR #381: the snapshot-merge effect's seeding loop only
+  // called seedEditSequenceFromConfirmedResponse when
+  // submittedResponseEditSequences[questionId] was defined — i.e. only when
+  // a confirmed response exists. Follow-up 18 item 1 made draftEditSequences
+  // populate from the server's retained draftOrderingWatermarks even when a
+  // question was only ever drafted, revisited, and cleared — never
+  // submitted — specifically so that watermark survives a reload. But this
+  // loop's own condition meant that value was never even looked at when
+  // there was no confirmed response to go with it: a reload of exactly that
+  // scenario left the local counter at its in-memory baseline (1), and
+  // every subsequent edit or clear would be rejected as stale by the
+  // server's ordering guard forever, since draftSendSequence retries alone
+  // can't correct an editSequence that's actually too low.
+  const restore = installResonanceStudentTestEnvironment()
+  const { persistSessionParticipantIdentity } = await import(
+    '@src/components/common/entryParticipantIdentityUtils'
+  )
+  const { MemoryRouter, Route, Routes } = await import('react-router')
+  const { default: ResonanceStudent, DRAFT_EDIT_DEBOUNCE_MS } = await import('./ResonanceStudent.js')
+  const { act, render, waitFor, fireEvent } = await import('@testing-library/react')
+
+  persistSessionParticipantIdentity(window.localStorage, 'session-1', 'Ada', 'student-1')
+
+  // No confirmed response at all for q1 — only a retained ordering
+  // watermark (editSequence 3) from an earlier revisit-then-clear, and no
+  // draft content to restore (it was cleared).
+  const snapshot = buildSnapshot({
+    activeQuestions: [
+      { id: 'q1', type: 'free-response', text: 'Question one', order: 0 },
+    ],
+    activeQuestionIds: ['q1'],
+    activeQuestionRunStartedAt: Date.now(),
+    activeQuestionRunRevision: 1,
+    activeQuestionDeadlineAt: Date.now() + 60_000,
+    draftEditSequences: { q1: 3 },
+  })
+
+  ;(globalThis as { fetch?: typeof fetch }).fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input)
+    if (url.includes('/register-student')) {
+      return { ok: true, json: async () => ({ studentId: 'student-1', name: 'Ada' }) } as Response
+    }
+    if (url.includes('/state')) {
+      return { ok: true, json: async () => snapshot } as Response
+    }
+    throw new Error(`Unexpected fetch: ${url}`)
+  }) as typeof fetch
+
+  let rendered!: ReturnType<typeof render>
+  try {
+    await act(async () => {
+      rendered = render(
+        React.createElement(
+          MemoryRouter,
+          { initialEntries: ['/session-1'] },
+          React.createElement(
+            Routes,
+            null,
+            React.createElement(Route, { path: '/:sessionId', element: React.createElement(ResonanceStudent) }),
+          ),
+        ),
+      )
+      await Promise.resolve()
+    })
+
+    await waitFor(() => assert.equal(FakeWebSocket.instances.length, 1))
+    const socket = FakeWebSocket.instances[0]!
+    socket.send = (message: string) => { socket.sent.push(JSON.parse(message)) }
+
+    console.info('[TEST] editing after the reload, with no confirmed response and no revisit')
+    const textarea = await waitFor(() => rendered.getByLabelText(/your answer/i))
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: 'typed after reload' } })
+    })
+    await new Promise((resolve) => setTimeout(resolve, DRAFT_EDIT_DEBOUNCE_MS + 200))
+
+    type DraftMessage = { type: string; payload: { questionId?: string; editSequence?: number; answer?: { text?: string } } }
+    const draftMessage = socket.sent.find(
+      (message): message is DraftMessage =>
+        typeof message === 'object' && message !== null &&
+        (message as { type?: string }).type === 'resonance:update-draft' &&
+        (message as DraftMessage).payload.questionId === 'q1',
+    )
+    assert.ok(draftMessage, `expected a draft to have been sent, got: ${JSON.stringify(socket.sent)}`)
+    assert.equal(
+      draftMessage!.payload.editSequence,
+      3,
+      'the post-reload edit must be seeded from the retained watermark (3), not the in-memory baseline (1) — the server would reject 1 as stale',
+    )
+
+    await act(async () => {
+      rendered.unmount()
+    })
+  } finally {
+    restore()
+  }
+})
+
 void test('an edit after a simulated reload is sent with a draftSendSequence higher than what the server already has', async () => {
   // Regression test (Copilot review of PR #381): nextDraftSendSequenceRef is
   // component-local and restarts at 0 on mount (simulating a page reload).

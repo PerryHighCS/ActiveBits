@@ -112,16 +112,25 @@ export function advanceEditSequenceForRevisit(
  * — the stored draft's own editSequence from the snapshot, when there is an
  * unconfirmed draft — reconstructs the true floor directly instead of
  * re-deriving it from the confirmed value's assumed history.
+ *
+ * `confirmedEditSequence` is `null` when there is no confirmed response at
+ * all (the question was only ever drafted, never submitted) — the floor is
+ * then `draftEditSequence` alone, with no `+ 1`, since there is no
+ * confirmation to be "past". This matters because a draft's own retained
+ * ordering watermark (see `draftOrderingWatermarks` in routes.ts) survives
+ * even a *clear* of that draft, independently of whether it was ever
+ * submitted — a reload after a revisit-then-clear, with nothing ever
+ * confirmed, still needs this floor to avoid re-seeding below it.
  */
 export function seedEditSequenceFromConfirmedResponse(
   editSequenceByKey: Record<string, number>,
   questionId: string,
   runToken: number | null,
-  confirmedEditSequence: number,
+  confirmedEditSequence: number | null,
   draftEditSequence = 0,
 ): Record<string, number> {
   const key = buildEditSequenceKey(questionId, runToken)
-  const floor = Math.max(confirmedEditSequence + 1, draftEditSequence)
+  const floor = Math.max(confirmedEditSequence === null ? 0 : confirmedEditSequence + 1, draftEditSequence)
   if ((editSequenceByKey[key] ?? 1) >= floor) {
     return editSequenceByKey
   }
@@ -700,14 +709,20 @@ export default function ResonanceStudent() {
     const previousActiveIds = previousActiveQuestionIdsRef.current
 
     for (const questionId of activeIds) {
-      const confirmedEditSequence = snapshot.submittedResponseEditSequences[questionId]
-      if (confirmedEditSequence !== undefined) {
+      const confirmedEditSequence = snapshot.submittedResponseEditSequences[questionId] ?? null
+      const draftEditSequence = snapshot.draftEditSequences[questionId] ?? 0
+      // A retained draft-ordering watermark (see draftOrderingWatermarks in
+      // routes.ts) can exist with no confirmed response at all — a question
+      // that was only ever drafted, revisited, and cleared, never submitted.
+      // Seeding must still run in that case, or a reload re-seeds this
+      // counter at its in-memory baseline instead of past the watermark.
+      if (confirmedEditSequence !== null || draftEditSequence > 0) {
         editSequenceByKeyRef.current = seedEditSequenceFromConfirmedResponse(
           editSequenceByKeyRef.current,
           questionId,
           snapshot.activeQuestionRunRevision,
           confirmedEditSequence,
-          snapshot.draftEditSequences[questionId] ?? 0,
+          draftEditSequence,
         )
       }
     }
