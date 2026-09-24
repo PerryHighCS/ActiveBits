@@ -176,6 +176,21 @@ export interface StudentSessionSnapshot {
    */
   draftSendSequences: Record<string, number>
   /**
+   * The `editSequence` recorded on each draft in `draftAnswers`. A revisit
+   * (`advanceEditSequenceForRevisit` in `ResonanceStudent.tsx`) can bump a
+   * draft's `editSequence` above `confirmedEditSequence + 1` (e.g. a second
+   * revisit, or a revisit whose local counter was already seeded past the
+   * confirmed value by the time the student clicked it — see the
+   * `seedEditSequenceFromConfirmedResponse` call site). A client that
+   * reloads mid-edit has no local memory of that, so seeding only from
+   * `submittedResponseEditSequences` can seed a *lower* value than what's
+   * already stored, causing every post-reload edit to be rejected as stale
+   * by the server's update-draft ordering guard. Clients seed the greater
+   * of `confirmedEditSequence + 1` and this value instead of assuming the
+   * former alone is always correct.
+   */
+  draftEditSequences: Record<string, number>
+  /**
    * The `editSequence` recorded on each confirmed response in `submittedAnswers`.
    * A client that reloads mid-run has no local edit-sequence bookkeeping (that
    * counter lives only in memory), so without this it would default a

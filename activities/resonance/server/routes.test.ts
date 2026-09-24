@@ -5261,3 +5261,107 @@ void test('student state reports each draft\'s draftSendSequence, so a reloaded 
 
   await sessions.close()
 })
+
+void test('student state reports each draft\'s editSequence, so a reloaded client can seed past a revisit\'s true value, not just confirmedEditSequence + 1', async () => {
+  // CodeRabbit review of PR #381 (Follow-up 13): a revisit's local edit
+  // counter is bumped from whatever it *already* holds, not recomputed from
+  // the confirmed response directly — and the snapshot reflecting a just-
+  // confirmed submission typically reaches the client (auto-seeding its
+  // counter to confirmedEditSequence + 1) before a human can click revisit,
+  // so a real revisit usually lands on confirmedEditSequence + 2, not + 1.
+  // Without exposing the stored draft's own editSequence back to the client,
+  // a reload after that revisit's own edit would re-seed from
+  // confirmedEditSequence + 1 alone — one below what's actually stored —
+  // and every subsequent edit would be rejected as stale by the update-draft
+  // ordering guard forever.
+  const app = createMockApp()
+  const ws = createMockWs()
+  const sessions = createSessionStore(null)
+  const now = Date.now()
+  const session: SessionRecord = {
+    id: 'resonance-session-reload-draft-edit-sequence',
+    type: 'resonance',
+    created: now,
+    lastActivity: now,
+    data: {
+      instructorPasscode: 'TEACH123',
+      questions: [
+        {
+          id: 'q1',
+          type: 'free-response',
+          text: 'Explain your reasoning.',
+          order: 0,
+        },
+      ],
+      activeQuestionId: 'q1',
+      activeQuestionIds: ['q1'],
+      activeQuestionRunStartedAt: now - 5_000,
+      activeQuestionRunRevision: 1,
+      activeQuestionDeadlineAt: null,
+      students: {
+        student1: { studentId: 'student1', name: 'Ada Lovelace', joinedAt: now - 1_000 },
+      },
+      // A response confirmed at editSequence 1, and a draft that has since
+      // been revisited twice past it (editSequence 3) — the scenario
+      // confirmedEditSequence + 1 alone cannot reconstruct.
+      responses: [
+        {
+          id: 'r1',
+          questionId: 'q1',
+          studentId: 'student1',
+          submittedAt: now - 10_000,
+          activeQuestionRunRevision: 1,
+          editSequence: 1,
+          answer: { type: 'free-response', text: 'First answer' },
+        },
+      ],
+      responseDrafts: {
+        'q1:student1': {
+          questionId: 'q1',
+          studentId: 'student1',
+          updatedAt: now - 200,
+          activeQuestionRunRevision: 1,
+          editSequence: 3,
+          draftSendSequence: 2,
+          answer: { type: 'free-response', text: 'Revised after two revisits' },
+        },
+      },
+      annotations: {},
+      reveals: [],
+      sharedResponseReactions: {},
+      responseOrderOverrides: {},
+      persistentHash: null,
+    },
+  }
+  const studentCookies = issueStudentCookies(session, 'student1')
+  await sessions.set(session.id, session)
+
+  setupResonanceRoutes(app, sessions, ws)
+
+  const stateHandler = app.handlers.get['/api/resonance/:sessionId/state']
+  assert.equal(typeof stateHandler, 'function')
+
+  const res = createResponse()
+  await stateHandler?.(
+    {
+      params: { sessionId: session.id },
+      query: {
+        studentId: 'student1',
+      },
+      cookies: studentCookies,
+    },
+    res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  const body = res.body as {
+    draftAnswers?: Record<string, unknown>
+    draftEditSequences?: Record<string, number>
+    submittedResponseEditSequences?: Record<string, number>
+  }
+  assert.deepEqual(body.draftAnswers?.q1, { type: 'free-response', text: 'Revised after two revisits' })
+  assert.equal(body.submittedResponseEditSequences?.q1, 1)
+  assert.equal(body.draftEditSequences?.q1, 3)
+
+  await sessions.close()
+})

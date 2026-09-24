@@ -98,15 +98,30 @@ export function advanceEditSequenceForRevisit(
  * server's draft guard. Seed the counter from the server-confirmed response's
  * own editSequence (floor = confirmed + 1) whenever it would otherwise leave
  * a lower value in place; never lowers an already-advanced local counter.
+ *
+ * `confirmed + 1` alone is only correct when at most one revisit has ever
+ * happened since that confirmation. A revisit's bump
+ * (`advanceEditSequenceForRevisit`) reads whatever the local counter
+ * *already* holds, not the confirmed value directly — and a snapshot
+ * reflecting the just-confirmed response typically arrives (and this same
+ * seed already runs once) before a human has a chance to click revisit, so
+ * a real revisit usually lands on `confirmed + 2`, not `confirmed + 1`. A
+ * reload after that revisit's own edit would otherwise re-seed too low and
+ * have every subsequent edit rejected as stale forever (the server's
+ * ordering guard never lets a lower editSequence back in). `draftEditSequence`
+ * — the stored draft's own editSequence from the snapshot, when there is an
+ * unconfirmed draft — reconstructs the true floor directly instead of
+ * re-deriving it from the confirmed value's assumed history.
  */
 export function seedEditSequenceFromConfirmedResponse(
   editSequenceByKey: Record<string, number>,
   questionId: string,
   runToken: number | null,
   confirmedEditSequence: number,
+  draftEditSequence = 0,
 ): Record<string, number> {
   const key = buildEditSequenceKey(questionId, runToken)
-  const floor = confirmedEditSequence + 1
+  const floor = Math.max(confirmedEditSequence + 1, draftEditSequence)
   if ((editSequenceByKey[key] ?? 1) >= floor) {
     return editSequenceByKey
   }
@@ -616,6 +631,7 @@ export default function ResonanceStudent() {
           questionId,
           snapshot.activeQuestionRunRevision,
           confirmedEditSequence,
+          snapshot.draftEditSequences[questionId] ?? 0,
         )
       }
     }

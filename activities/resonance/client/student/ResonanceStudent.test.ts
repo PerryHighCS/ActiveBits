@@ -62,6 +62,7 @@ function buildSnapshot(overrides: Partial<StudentSessionSnapshot> = {}): Student
     submittedAnswers: {},
     draftAnswers: {},
     draftSendSequences: {},
+    draftEditSequences: {},
     submittedResponseEditSequences: {},
     revealedQuestions: [],
     ...overrides,
@@ -1060,6 +1061,212 @@ void test('an edit made right after revisiting a just-submitted question is not 
 
     await act(async () => {
       rendered.unmount()
+    })
+  } finally {
+    restore()
+  }
+})
+
+void test('a reload after a revisit whose local counter was already auto-seeded past the confirmed value still seeds correctly', async () => {
+  // CodeRabbit review of PR #381: a prior investigation (Follow-up 7 item 2)
+  // concluded seedEditSequenceFromConfirmedResponse's floor
+  // (confirmedEditSequence + 1) always reconstructs a revisited draft's true
+  // editSequence, reasoning that a revisit is the *only* way that counter
+  // exceeds 1 and always computes `(current local value) + 1` against the
+  // just-confirmed value. That reasoning missed a race: this same seed
+  // effect runs automatically on *every* snapshot merge for a question with
+  // a confirmed response, not just in response to an explicit revisit — and
+  // the snapshot reflecting a just-submitted response (broadcast via
+  // broadcastStudentSessionState) reaches this same client and gets merged
+  // essentially immediately, well before a human can click a stack tab to
+  // revisit. So by the time an explicit revisit happens, the local counter
+  // has typically *already* been auto-seeded to confirmedEditSequence + 1,
+  // and advanceEditSequenceForRevisit bumps *that* by one more — landing on
+  // confirmedEditSequence + 2, not + 1. A reload after that revisit's own
+  // edit would then re-seed from confirmedEditSequence + 1 alone, one below
+  // what's actually stored, and every subsequent edit would be rejected as
+  // stale by the server's ordering guard forever (nothing else ever bumps
+  // the local counter again for a question the reloaded client doesn't
+  // think is submitted — submittedQuestionIds isn't seeded from the
+  // snapshot in live mode).
+  //
+  // Fixed by exposing draftEditSequences in StudentSessionSnapshot (the
+  // stored draft's own editSequence, parallel to draftSendSequences) and
+  // seeding from the greater of confirmedEditSequence + 1 and that value.
+  //
+  // This test drives the real sequence end to end: submit (real UI
+  // interaction) -> the resulting broadcast snapshot lands (the automatic
+  // seed) -> an explicit revisit -> an edit, landing at editSequence 3 ->
+  // simulated reload reporting draftEditSequences: { q1: 3 } -> a further
+  // edit, asserting it is sent at editSequence 3 (matching what is actually
+  // stored), not 2.
+  const restore = installResonanceStudentTestEnvironment()
+  const { persistSessionParticipantIdentity } = await import(
+    '@src/components/common/entryParticipantIdentityUtils'
+  )
+  const { MemoryRouter, Route, Routes } = await import('react-router')
+  const { default: ResonanceStudent, DRAFT_EDIT_DEBOUNCE_MS } = await import('./ResonanceStudent.js')
+  const { act, render, waitFor, fireEvent } = await import('@testing-library/react')
+
+  persistSessionParticipantIdentity(window.localStorage, 'session-1', 'Ada', 'student-1')
+
+  const snapshot = buildSnapshot({
+    activeQuestions: [
+      { id: 'q1', type: 'free-response', text: 'Question one', order: 0 },
+      { id: 'q2', type: 'free-response', text: 'Question two', order: 1 },
+    ],
+    activeQuestionIds: ['q1', 'q2'],
+    activeQuestionRunStartedAt: Date.now(),
+    activeQuestionRunRevision: 1,
+    activeQuestionDeadlineAt: Date.now() + 60_000,
+  })
+
+  ;(globalThis as { fetch?: typeof fetch }).fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input)
+    if (url.includes('/register-student')) {
+      return { ok: true, json: async () => ({ studentId: 'student-1', name: 'Ada' }) } as Response
+    }
+    if (url.includes('/state')) {
+      return { ok: true, json: async () => snapshot } as Response
+    }
+    if (url.includes('/submit-answer')) {
+      return { ok: true, json: async () => ({ ok: true }) } as Response
+    }
+    throw new Error(`Unexpected fetch: ${url}`)
+  }) as typeof fetch
+
+  let rendered!: ReturnType<typeof render>
+  try {
+    await act(async () => {
+      rendered = render(
+        React.createElement(
+          MemoryRouter,
+          { initialEntries: ['/session-1'] },
+          React.createElement(
+            Routes,
+            null,
+            React.createElement(Route, { path: '/:sessionId', element: React.createElement(ResonanceStudent) }),
+          ),
+        ),
+      )
+      await Promise.resolve()
+    })
+
+    await waitFor(() => assert.equal(FakeWebSocket.instances.length, 1))
+    const socket = FakeWebSocket.instances[0]!
+    socket.send = (message: string) => { socket.sent.push(JSON.parse(message)) }
+
+    console.info('[TEST] submitting q1 through the real UI flow')
+    const textarea = await waitFor(() => rendered.getByLabelText(/your answer/i))
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: 'first answer' } })
+    })
+    await new Promise((resolve) => setTimeout(resolve, DRAFT_EDIT_DEBOUNCE_MS + 200))
+    await act(async () => {
+      fireEvent.click(rendered.getByRole('button', { name: /Submit answer/i }))
+      await Promise.resolve()
+    })
+    await waitFor(() => rendered.getByText(/answer submitted/i))
+
+    console.info('[TEST] the broadcast session-state reflecting the confirmed response lands before any revisit')
+    await act(async () => {
+      socket.emitMessage({
+        type: 'resonance:session-state',
+        payload: {
+          ...snapshot,
+          submittedAnswers: { q1: { type: 'free-response', text: 'first answer' } },
+          submittedResponseEditSequences: { q1: 1 },
+        },
+      })
+    })
+
+    console.info('[TEST] revisiting and editing q1')
+    await act(async () => {
+      fireEvent.click(rendered.getByRole('button', { name: /^Q1/ }))
+    })
+    const sentBeforeRevisitEdit = socket.sent.length
+    await act(async () => {
+      fireEvent.change(rendered.getByLabelText(/your answer/i), { target: { value: 'revised answer' } })
+    })
+    await new Promise((resolve) => setTimeout(resolve, DRAFT_EDIT_DEBOUNCE_MS + 200))
+
+    type DraftMessage = { type: string; payload: { questionId?: string; editSequence?: number; answer?: { text?: string } } }
+    const isDraftMessage = (message: unknown): message is DraftMessage =>
+      typeof message === 'object' && message !== null && (message as { type?: string }).type === 'resonance:update-draft'
+    const revisitDraft = socket.sent.slice(sentBeforeRevisitEdit).find(
+      (message): message is DraftMessage =>
+        isDraftMessage(message) && message.payload.questionId === 'q1' && message.payload.answer?.text === 'revised answer',
+    )
+    assert.ok(revisitDraft, `expected the revisit edit to have been sent, got: ${JSON.stringify(socket.sent.slice(sentBeforeRevisitEdit))}`)
+    assert.equal(
+      revisitDraft!.payload.editSequence,
+      3,
+      'a revisit whose local counter was already auto-seeded to 2 must land on 3, not 2 — this is what the server actually stores',
+    )
+
+    console.info('[TEST] simulating a reload: remount reporting the server’s actual stored draft, including its editSequence')
+    await act(async () => {
+      rendered.unmount()
+    })
+    const postReloadSnapshot = {
+      ...snapshot,
+      submittedAnswers: { q1: { type: 'free-response', text: 'first answer' } },
+      submittedResponseEditSequences: { q1: 1 },
+      draftAnswers: { q1: { type: 'free-response', text: 'revised answer' } },
+      draftSendSequences: { q1: 1 },
+      draftEditSequences: { q1: 3 },
+    }
+    ;(globalThis as { fetch?: typeof fetch }).fetch = (async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/register-student')) {
+        return { ok: true, json: async () => ({ studentId: 'student-1', name: 'Ada' }) } as Response
+      }
+      if (url.includes('/state')) {
+        return { ok: true, json: async () => postReloadSnapshot } as Response
+      }
+      throw new Error(`Unexpected fetch: ${url}`)
+    }) as typeof fetch
+
+    let reloaded!: ReturnType<typeof render>
+    await act(async () => {
+      reloaded = render(
+        React.createElement(
+          MemoryRouter,
+          { initialEntries: ['/session-1'] },
+          React.createElement(
+            Routes,
+            null,
+            React.createElement(Route, { path: '/:sessionId', element: React.createElement(ResonanceStudent) }),
+          ),
+        ),
+      )
+      await Promise.resolve()
+    })
+    await waitFor(() => assert.equal(FakeWebSocket.instances.length, 2))
+    const reloadedSocket = FakeWebSocket.instances[1]!
+    reloadedSocket.send = (message: string) => { reloadedSocket.sent.push(JSON.parse(message)) }
+
+    const restoredTextarea = await waitFor(() => reloaded.getByLabelText(/your answer/i))
+    assert.equal((restoredTextarea as HTMLTextAreaElement).value, 'revised answer')
+
+    console.info('[TEST] editing again post-reload, without another explicit revisit')
+    await act(async () => {
+      fireEvent.change(restoredTextarea, { target: { value: 'revised again after reload' } })
+    })
+    await new Promise((resolve) => setTimeout(resolve, DRAFT_EDIT_DEBOUNCE_MS + 200))
+
+    const postReloadDraft = reloadedSocket.sent.filter(isDraftMessage).find(
+      (message) => message.payload.questionId === 'q1' && message.payload.answer?.text === 'revised again after reload',
+    )
+    assert.ok(postReloadDraft, `expected the post-reload edit to have been sent, got: ${JSON.stringify(reloadedSocket.sent)}`)
+    assert.equal(
+      postReloadDraft!.payload.editSequence,
+      3,
+      'the post-reload edit must be seeded from the stored draft’s own editSequence (3), not confirmedEditSequence + 1 (2) alone',
+    )
+
+    await act(async () => {
+      reloaded.unmount()
     })
   } finally {
     restore()

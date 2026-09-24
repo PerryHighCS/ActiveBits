@@ -425,6 +425,14 @@ export function normalizeStudentSessionSnapshot(
           ),
         )
       : {},
+    draftEditSequences: isRecord(data.draftEditSequences)
+      ? Object.fromEntries(
+          Object.entries(data.draftEditSequences).filter(
+            (entry): entry is [string, number] =>
+              typeof entry[1] === 'number' && Number.isSafeInteger(entry[1]) && entry[1] >= 0,
+          ),
+        )
+      : {},
     submittedResponseEditSequences: isRecord(data.submittedResponseEditSequences)
       ? Object.fromEntries(
           Object.entries(data.submittedResponseEditSequences).filter(

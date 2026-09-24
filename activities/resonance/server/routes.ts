@@ -1341,6 +1341,16 @@ function buildStudentSnapshotWithMode(
   const draftSendSequences = Object.fromEntries(
     viewerActiveDrafts.map((draft) => [draft.questionId, draft.draftSendSequence ?? 0] satisfies [string, number]),
   )
+  // The editSequence each draft above was stored under (parallels
+  // submittedResponseEditSequences below, for the same reason). A revisit
+  // can bump a draft's editSequence above confirmedEditSequence + 1 (see
+  // this field's own docstring in shared/types.ts), so a client reloading
+  // mid-edit that only seeds from the confirmed response's editSequence can
+  // seed *lower* than what's already stored here, and the update-draft
+  // ordering guard would reject every subsequent edit as stale.
+  const draftEditSequences = Object.fromEntries(
+    viewerActiveDrafts.map((draft) => [draft.questionId, draft.editSequence ?? 0] satisfies [string, number]),
+  )
   const reviewedResponses =
     viewerStudentId === null
       ? []
@@ -1384,6 +1394,7 @@ function buildStudentSnapshotWithMode(
     submittedAnswers,
     draftAnswers,
     draftSendSequences,
+    draftEditSequences,
     submittedResponseEditSequences,
     revealedQuestions,
   }
