@@ -4,23 +4,26 @@
 
 This sequence coordinates [#352](https://github.com/PerryHighCS/ActiveBits/issues/352), [#383](https://github.com/PerryHighCS/ActiveBits/issues/383), [#344](https://github.com/PerryHighCS/ActiveBits/issues/344), and [#353](https://github.com/PerryHighCS/ActiveBits/issues/353). Keep each phase independently reviewable. [#313](https://github.com/PerryHighCS/ActiveBits/issues/313) owns the broader atomic session-write migration and follows as a separate workstream; shared entry and lifecycle writes touched here must still use its safe mutation contract.
 
+**Current delivery state:** [PR #387](https://github.com/PerryHighCS/ActiveBits/pull/387) contains the three implemented Phase A slices. It passed CI and was marked ready for review on 2026-09-24; it has not merged. CodeRabbit's first review identified two solo-entry gaps recorded below, so Phase A is still under review. The original Phases 0–8 farther down are the long-range design/audit checklist; this near-term sequence is the current delivery tracker.
+
 ### Contract and observed failure
 
 **Owner:** The shared entry and principal layer decides whether a session-scoped student may enter an activity; the activity owns its student record and private state. **Invariant:** A public waiting-room request cannot claim an arbitrary participant ID. An accepted, registered student with a valid server-issued principal can reload into the same student ID. An explicit fresh join in a shared browser can create a different student. A consumed one-time handoff cannot issue a second capability. **Failure behavior:** Missing, expired, wrong-session, or revoked authority returns to normal waiting-room acceptance or a controlled authorization error; it never silently adopts a local-storage ID or an old browser user's capability.
 
-The #383 browser report had a deterministic path: Resonance registration revokes `acceptedEntryParticipants[studentId]` after issuing an activity participant capability. Previously, `GET /api/session/:id/entry` checked only the revoked accepted-entry token, so it omitted `participantAuthenticated` and the router showed the waiting room. The subsequent join minted a new ID. The first Phase A slice now recognizes a valid registered capability at `/entry` and covers the saved-draft reload in Chromium. The next slice removes #352's public supplied-ID trust and requires parent-cookie proof for SyncDeck child tokens. #313 races remain possible.
+The #383 browser report had a deterministic path: Resonance registration revokes `acceptedEntryParticipants[studentId]` after issuing an activity participant capability. Previously, `GET /api/session/:id/entry` checked only the revoked accepted-entry token, so it omitted `participantAuthenticated` and the router showed the waiting room. The subsequent join minted a new ID. PR #387 recognizes a valid registered capability at `/entry`, covers the saved-draft reload in Chromium, removes #352's public supplied-ID trust, and requires parent-cookie proof for SyncDeck child tokens and student transport. #313 races remain possible.
 
 ### Phase A: Secure student entry and restore reload identity (#352, #383)
 
 - [x] Restore `/entry` recognition of a valid registered participant capability and prove Resonance's saved-draft reload retains its student ID (#383 first slice).
 - [x] Make public live/persistent stores mint IDs, and use parent-cookie-authorized SyncDeck embedded and solo child handoffs for identity continuity (#352 slice).
 - [x] Move SyncDeck's remaining student WebSocket admission and student-ID HTTP routes to the accepted-entry principal contract; WebSocket join, embedded context, and auto-activation now require cookie authority and reject mismatched ID hints.
-- [ ] Map standalone, persistent, and SyncDeck embedded entry paths and record which server-issued proof may carry an existing participant ID. Decide the shared authority rule once; do not add an activity-specific exception in the shared router.
-- [ ] Reject or ignore caller-supplied `participantId` on public entry routes. Preserve SyncDeck parent-to-child identity only through a child-scoped, server-authorized handoff, including the parent-roster and session-incarnation checks. Keep display names as hints, not identity proof.
-- [ ] Give the shared `/entry` decision a generic way to recognize a valid registered student principal after its one-time handoff is consumed. Make the accepted-entry-to-registered transition explicit and retry-safe. A registered capability must remain bound to its session and subject; explicit new entry must supersede a stale shared-browser capability without allowing replay of the old handoff.
-- [ ] Align Resonance registration with that transition, preserving its capability-backed `/state` and WebSocket authorization. Ensure a same-session reload reuses the student ID and reaches the saved drafts/submissions; cookie loss follows the intentional new-entry path.
-- [ ] Add a decision table for fresh join, same-browser reload, cookie loss/expiry, wrong-session token, forged ID, replayed handoff, shared-browser second student, and embedded child handoff. Cover the contract with route tests and a real-browser Resonance draft/save/reload test. Add at least one other activity to the browser probe to confirm the shared behavior.
-- [ ] Update the authoritative student-entry contract in `ARCHITECTURE.md`, `.agent/knowledge/data-contracts.md`, and `.agent/knowledge/security-notes.md` when implemented.
+- [x] Update `ARCHITECTURE.md`, `.agent/knowledge/data-contracts.md`, and `.agent/knowledge/security-notes.md` for the delivered student-entry behavior.
+- [ ] Restore solo child handoff for an accepted standalone SyncDeck student who has no WebSocket roster record; derive the ID from the accepted-entry token and test that path.
+- [ ] Require proof that a solo child belongs to the requesting SyncDeck parent before issuing its trusted entry token; reject an unrelated existing session ID. Record the owner, binding, and failure behavior before implementation.
+- [ ] Resolve those two CodeRabbit findings, complete review, and merge PR #387; close #352 and #383 only after the merged behavior is verified.
+- [ ] Record the proof accepted by standalone, persistent, and SyncDeck embedded entry, including the parent-roster and session-incarnation checks for child handoffs. Keep the rule in the shared principal layer.
+- [ ] Complete the accepted-entry-to-registered transition matrix: explicit new entry in a shared browser must supersede stale authority without replaying a consumed handoff; cookie loss, expiry, and wrong-session proof must reach a controlled entry path.
+- [ ] Reconcile route and browser coverage against that matrix, including the existing Resonance draft/reload test and an additional activity's reload path. Put any demonstrated gap in a focused follow-up rather than widening PR #387 during review.
 
 **Exit gate:** A valid registered student reloads under the same server-authorized ID; a new or unauthorized visitor cannot claim that ID; SyncDeck embedded identity continuity still works.
 
@@ -323,7 +326,7 @@ Do not begin with all activities at once.
 
 - [ ] Use Video Sync or MobCode to prove persistent/embedded adapters without replacing their domain protocols prematurely.
 
-#### Current Slice C branch: `feat/persistent-manager-capability-adapter` (Video Sync)
+#### Historical Slice C branch: `feat/persistent-manager-capability-adapter` (Video Sync)
 
 - [x] Select Video Sync because its persistent-teacher and SyncDeck-parent recovery paths are already server-verified and its manager surface is narrower than MobCode's private-workspace model.
 - [x] Audit the existing adapter: verified persistent/parent authority currently reaches the manager by returning `instructorPasscode` from `GET /api/video-sync/:sessionId/instructor-passcode`.
@@ -465,4 +468,5 @@ For every migration:
 
 - [x] Complete Phase 1 as a read-only audit before implementing issue #344.
 - [x] Review the completed matrix and extract the versioned principal, capability, projection, and transport threat model before implementation begins.
-- [ ] Review the contract for cookie-record layout and temporary-manager browser-restart behavior, then open the first shared-primitives implementation PR.
+- [x] Open the first shared-primitives implementation PR and record its pilot results in the Phase 6 checklist above.
+- [ ] Fix and verify PR #387's two solo-entry review findings, then complete review and merge its Phase A issue fixes. Reconcile the remaining Phase A contract matrix before starting the #344/#353 manager and termination pilot on a fresh branch.
