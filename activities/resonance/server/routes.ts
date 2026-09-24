@@ -1336,11 +1336,13 @@ function toStudentQuestionForSession(sessionData: ResonanceSessionData, question
   return toStudentQuestion(question, areChoicesVisibleToStudents(sessionData, question))
 }
 
+/** Clock sample each loaded session clone's expiry finalization ran against. */
+const expiryEvaluatedAt = new WeakMap<ResonanceSession, number>()
+
 function buildStudentSnapshotWithMode(
   session: ResonanceSession,
   viewerStudentId: string | null,
   selfPacedMode: boolean,
-  now: number,
 ) {
   const { activeQuestionId, activeQuestionIds, activeQuestionRunStartedAt, activeQuestionRunRevision, activeQuestionDeadlineAt, questions, reveals } = session.data
   const effectiveSelfPacedMode = selfPacedMode && activeQuestionIds.length === 0
@@ -1469,12 +1471,15 @@ function buildStudentSnapshotWithMode(
     activeQuestionRunStartedAt: effectiveSelfPacedMode ? null : activeQuestionRunStartedAt,
     activeQuestionRunRevision: effectiveSelfPacedMode ? null : activeQuestionRunRevision,
     activeQuestionDeadlineAt: effectiveSelfPacedMode ? null : activeQuestionDeadlineAt,
-    // The server's own verdict on its own clock, so clients never have to infer
-    // expiry from their (possibly skewed) clock or from snapshot shape. Every
-    // caller builds this after loadResonanceSession has already finalized an
-    // expired run's drafts.
+    // The server's own verdict, so clients never have to infer expiry from
+    // their (possibly skewed) clock or from snapshot shape. Uses the clock
+    // sample loadResonanceSession finalized against, never a fresh one: a
+    // second sample could report expiry for a session clone whose drafts were
+    // not finalized. A session that never went through the load reports false.
     activeQuestionDeadlineExpired:
-      !effectiveSelfPacedMode && activeQuestionDeadlineAt !== null && now >= activeQuestionDeadlineAt,
+      !effectiveSelfPacedMode &&
+      activeQuestionDeadlineAt !== null &&
+      (expiryEvaluatedAt.get(session) ?? -Infinity) >= activeQuestionDeadlineAt,
     lastActiveQuestionRunRevision:
       session.data.lastActiveQuestionRunRevision > 0 ? session.data.lastActiveQuestionRunRevision : null,
     reveals: [
@@ -1834,7 +1839,9 @@ export default function setupResonanceRoutes(
       hadSelfPacedMode
         ? true
         : await resolveSelfPacedMode(session, sessions)
-    const expiration = expireActiveQuestionRunIfNeeded(session, deadlineTaskRunner.now())
+    const expiryEvaluatedAtNow = deadlineTaskRunner.now()
+    const expiration = expireActiveQuestionRunIfNeeded(session, expiryEvaluatedAtNow)
+    expiryEvaluatedAt.set(session, expiryEvaluatedAtNow)
     if (expiration.changed) {
       await sessions.set(sessionId, session)
       await broadcastStudentSessionState(session, sessionId)
@@ -1906,7 +1913,7 @@ export default function setupResonanceRoutes(
           sendToSocket(
             socket,
             'resonance:session-state',
-            buildStudentSnapshotWithMode(session, socket.studentId ?? null, selfPacedMode, deadlineTaskRunner.now()),
+            buildStudentSnapshotWithMode(session, socket.studentId ?? null, selfPacedMode),
             sessionId,
           )
         }
@@ -2300,7 +2307,7 @@ export default function setupResonanceRoutes(
     }
     const selfPacedMode = await resolveSelfPacedMode(session, sessions)
     res.setHeader?.('Cache-Control', 'no-store')
-    res.json(buildStudentSnapshotWithMode(session, authenticatedStudentId, selfPacedMode, deadlineTaskRunner.now()))
+    res.json(buildStudentSnapshotWithMode(session, authenticatedStudentId, selfPacedMode))
   })
 
   // GET /api/resonance/:sessionId/responses
@@ -3620,7 +3627,7 @@ export default function setupResonanceRoutes(
         sendToSocket(
           client,
           'resonance:session-state',
-          buildStudentSnapshotWithMode(session, client.studentId ?? null, selfPacedMode, deadlineTaskRunner.now()),
+          buildStudentSnapshotWithMode(session, client.studentId ?? null, selfPacedMode),
           sessionId,
         )
       }

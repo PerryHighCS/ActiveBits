@@ -2154,6 +2154,54 @@ void test('student snapshots report the server-side deadline expiry, including f
   await sessions.close()
 })
 
+void test('a snapshot never reports expiry from a later clock sample than the one finalization used', async () => {
+  // Copilot review of PR #381: the deadline can elapse between the load's
+  // expiry sample and a second sample taken while building the snapshot,
+  // which reported expiry for a clone that never ran finalization.
+  initializePersistentStorage(null)
+  const app = createMockApp()
+  const sessions = createSessionStore(null)
+  const session = createMultiQuestionSession()
+  let now = 1_000
+  let advancePerRead = 0
+  session.data.activeQuestionId = 'q1'
+  session.data.activeQuestionIds = ['q1']
+  session.data.activeQuestionRunStartedAt = 800
+  session.data.activeQuestionRunRevision = 1
+  session.data.activeQuestionDeadlineAt = 1_050
+  await sessions.set(session.id, session)
+  setupResonanceRoutes(app, sessions, createMockWs(), {
+    now: () => {
+      const sample = now
+      now += advancePerRead
+      return sample
+    },
+    schedule(callback, delayMs) {
+      return { callback, delayMs, cancelled: false, unref() {} }
+    },
+    cancel() {},
+  })
+  const registerRes = createResponse()
+  await app.handlers.post['/api/resonance/:sessionId/register-student']?.(
+    { params: { sessionId: session.id }, body: { name: 'Ada' } },
+    registerRes,
+  )
+  const studentId = (registerRes.body as { studentId?: string }).studentId
+  const cookies = { [registerRes.cookies[0]!.name]: registerRes.cookies[0]!.value }
+
+  advancePerRead = 100
+  const res = createResponse()
+  await app.handlers.get['/api/resonance/:sessionId/state']?.(
+    { params: { sessionId: session.id }, query: { studentId }, cookies },
+    res,
+  )
+  const body = res.body as { activeQuestionRunRevision: number | null; activeQuestionDeadlineExpired: boolean }
+  assert.equal(body.activeQuestionRunRevision, 1, 'the load sampled before the deadline, so the run was not finalized')
+  assert.equal(body.activeQuestionDeadlineExpired, false)
+
+  await sessions.close()
+})
+
 void test('server deadline task retries after a strict session read failure', async () => {
   const app = createMockApp()
   const sessions = createSessionStore(null)
