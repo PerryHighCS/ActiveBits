@@ -53,8 +53,13 @@ function installWsTestEnvironment(): () => void {
   Object.defineProperty(globalThis, 'document', { configurable: true, value: dom.window.document })
   Object.defineProperty(globalThis, 'navigator', { configurable: true, value: dom.window.navigator })
   Object.defineProperty(globalThis, 'WebSocket', { configurable: true, value: FakeWebSocket })
+  // writable: true is explicit here (not just inherited from Node's own
+  // fetch global already being writable) because a later test in this file
+  // reassigns globalThis.fetch directly rather than going through another
+  // defineProperty call.
   Object.defineProperty(globalThis, 'fetch', {
     configurable: true,
+    writable: true,
     value: async (url: string) => {
       const sessionId = /\/api\/resonance\/([^/]+)\/state/.exec(url)?.[1] ?? 'unknown'
       return {
