@@ -140,11 +140,12 @@ export function seedEditSequenceFromConfirmedResponse(
 export function resolveQuestionAnswer(params: {
   localAnswers: Record<string, AnswerPayload | null>
   snapshotAnswers: Record<string, AnswerPayload>
+  snapshotDraftAnswers: Record<string, AnswerPayload>
   questionId: string
 }): AnswerPayload | null {
   return Object.prototype.hasOwnProperty.call(params.localAnswers, params.questionId)
     ? params.localAnswers[params.questionId] ?? null
-    : params.snapshotAnswers[params.questionId] ?? null
+    : params.snapshotDraftAnswers[params.questionId] ?? params.snapshotAnswers[params.questionId] ?? null
 }
 
 /**
@@ -740,10 +741,19 @@ export default function ResonanceStudent() {
         }
         return next
       })
-      setSubmittedAnswers((current) => resetAnswersForRestartedQuestions({
-        submittedAnswers: current,
-        questionIdsToReset: restartedIds,
-      }))
+      setSubmittedAnswers((current) => {
+        const next = resetAnswersForRestartedQuestions({
+          submittedAnswers: current,
+          questionIdsToReset: restartedIds,
+        })
+        // The reset removes prior-run local state, but this snapshot may
+        // already contain a draft written in the new run by another tab.
+        for (const questionId of restartedIds) {
+          const authoritativeDraft = snapshot.draftAnswers[questionId]
+          if (authoritativeDraft !== undefined) next[questionId] = authoritativeDraft
+        }
+        return next
+      })
       clearDraftTracking({
         draftState: questionDraftStateRef.current,
         questionIds: restartedIds,
@@ -1129,6 +1139,7 @@ export default function ResonanceStudent() {
                 initialAnswer={resolveQuestionAnswer({
                   localAnswers: submittedAnswers,
                   snapshotAnswers: snapshot.submittedAnswers,
+                  snapshotDraftAnswers: snapshot.draftAnswers,
                   questionId: activeQuestion.id,
                 })}
                 activeQuestionRunRevision={snapshot.activeQuestionRunRevision}

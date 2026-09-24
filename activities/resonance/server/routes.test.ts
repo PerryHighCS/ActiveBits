@@ -1424,6 +1424,34 @@ void test('an older draft write cannot clobber a newer one for the same question
     message.type === 'resonance:draft-saved' && message.payload?.draftId === 'same-sequence-same-content-straggler'
   ))
 
+  console.info('[TEST] equal keys from separate mounts cannot overwrite different saved content')
+  messageHandlers[0]?.(JSON.stringify({
+    type: 'resonance:update-draft',
+    payload: {
+      studentId: 'student1', questionId: 'q1', draftId: 'equal-key-conflict',
+      activeQuestionRunRevision: 1, editSequence: 2, draftSendSequence: 100,
+      answer: { type: 'free-response', text: 'Different tab content' },
+    },
+  }))
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  assert.ok(!sentMessages.some((message) => message.payload?.draftId === 'equal-key-conflict'))
+  assert.deepEqual(
+    ((await sessions.get(session.id))?.data as StoredData | undefined)?.responseDrafts?.['q1:student1']?.answer,
+    { type: 'free-response', text: 'Sent later by the client, written first' },
+  )
+
+  messageHandlers[0]?.(JSON.stringify({
+    type: 'resonance:update-draft',
+    payload: {
+      studentId: 'student1', questionId: 'q1', draftId: 'equal-key-identical-retry',
+      activeQuestionRunRevision: 1, editSequence: 2, draftSendSequence: 100,
+      answer: { type: 'free-response', text: 'Sent later by the client, written first' },
+    },
+  }))
+  await waitForCondition(() => sentMessages.some((message) =>
+    message.type === 'resonance:draft-saved' && message.payload?.draftId === 'equal-key-identical-retry'
+  ))
+
   await sessions.close()
 })
 
@@ -1871,6 +1899,18 @@ void test('clearing a draft over the websocket still acknowledges the write, pre
   }))
   await waitForCondition(() => sentMessages.some((message) =>
     message.type === 'resonance:draft-saved' && message.payload?.draftId === 'clear-already-absent'
+  ))
+
+  console.info('[TEST] an equal-key retry of an already-accepted clear is acknowledged')
+  messageHandlers[0]?.(JSON.stringify({
+    type: 'resonance:update-draft',
+    payload: {
+      studentId: 'student1', questionId: 'q1', draftId: 'clear-equal-key-retry',
+      activeQuestionRunRevision: 1, draftSendSequence: 3, answer: null,
+    },
+  }))
+  await waitForCondition(() => sentMessages.some((message) =>
+    message.type === 'resonance:draft-saved' && message.payload?.draftId === 'clear-equal-key-retry'
   ))
 
   console.info('[TEST] an older draft arriving after an absent-draft clear must not recreate the draft')

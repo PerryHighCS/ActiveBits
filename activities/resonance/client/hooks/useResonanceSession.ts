@@ -466,18 +466,17 @@ export function shouldApplyStudentSessionSnapshot(
       // highest live revision it has ever assigned. Accept the candidate only
       // when that stamp is at least as recent as the most recent live run
       // this client has observed, so a genuine live-to-self-paced/idle
-      // transition is admitted while a stale legacy snapshot — or a delayed
-      // idle snapshot generated before a newer run already started — is
+      // transition is admitted while a delayed idle snapshot generated
+      // before a newer run already started is
       // still rejected instead of blanking the current live question.
       return (
         candidate.lastActiveQuestionRunRevision !== null &&
         candidate.lastActiveQuestionRunRevision >= latestActiveQuestionRunRevision
       )
     }
-    if (current.activeQuestionIds.length === 0) return true
-    const candidateStartedAt = candidate.activeQuestionRunStartedAt
-    const currentStartedAt = current.activeQuestionRunStartedAt
-    return candidateStartedAt === null || currentStartedAt === null || candidateStartedAt >= currentStartedAt
+    // Neither snapshot identifies a live run. Their arrival order is all
+    // that remains relevant; timestamps are deadline data, not identity.
+    return true
   }
 
   if (latestActiveQuestionRunRevision === null) return true

@@ -185,6 +185,7 @@ void test('resolveQuestionAnswer preserves a revised local draft over an older s
       snapshotAnswers: {
         q1: { type: 'free-response', text: 'Previously submitted answer' },
       },
+      snapshotDraftAnswers: {},
       questionId: 'q1',
     }),
     { type: 'free-response', text: 'Revised answer' },
@@ -198,10 +199,20 @@ void test('resolveQuestionAnswer preserves an intentionally cleared local draft'
       snapshotAnswers: {
         q1: { type: 'free-response', text: 'Previously submitted answer' },
       },
+      snapshotDraftAnswers: {},
       questionId: 'q1',
     }),
     null,
   )
+})
+
+void test('resolveQuestionAnswer prefers an authoritative draft after a local run reset', () => {
+  assert.deepEqual(resolveQuestionAnswer({
+    localAnswers: {},
+    snapshotAnswers: { q1: { type: 'free-response', text: 'Prior submission' } },
+    snapshotDraftAnswers: { q1: { type: 'free-response', text: 'Current run draft' } },
+    questionId: 'q1',
+  }), { type: 'free-response', text: 'Current run draft' })
 })
 
 void test('resolveNextSelfPacedQuestionId advances to the next unanswered question', () => {
@@ -2173,6 +2184,23 @@ void test('a prior-run confirmed answer resurfacing from a later snapshot is not
       (textarea as HTMLTextAreaElement).value,
       priorAnswer.text,
       'expected the reactivated question to prefill with the prior answer (matching "reactivating a question keeps prior answers editable")',
+    )
+
+    console.info('[TEST] a further restart retains a draft supplied by that restart snapshot')
+    await act(async () => {
+      socket.emitMessage({
+        type: 'resonance:session-state',
+        payload: {
+          ...snapshot,
+          activeQuestionRunRevision: 3,
+          activeQuestionRunStartedAt: Date.now(),
+          draftAnswers: { q1: { type: 'free-response', text: 'Current run draft from another tab' } },
+        },
+      })
+    })
+    assert.equal(
+      (rendered.getByLabelText(/your answer/i) as HTMLTextAreaElement).value,
+      'Current run draft from another tab',
     )
 
     await new Promise((resolve) => setTimeout(resolve, DRAFT_RETRY_INTERVAL_MS + 300))

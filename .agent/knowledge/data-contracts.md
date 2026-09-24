@@ -1057,3 +1057,10 @@ that document rather than creating activity-specific authentication payloads.
 - Invariant: An accepted `answer: null` write advances and persists `draftOrderingWatermarks[draftKey]` before acknowledging, whether or not `responseDrafts[draftKey]` currently exists. An older message handled afterward is rejected by that persisted floor. Instructor-state broadcast still requires an actual draft deletion.
 - Failure behavior: If the store write fails, the clear is not acknowledged; the client retains its unconfirmed state for retry. This closes sequential stale-message arrival after an absent-draft clear. It does not close two handlers that already hold stale whole-session clones, which requires the #313 all-writer atomic migration.
 - Evidence: `activities/resonance/server/routes.ts` and the absent-clear/older-write regression in `activities/resonance/server/routes.test.ts`.
+
+### Draft ordering keys and restart snapshots
+
+- Owner: Resonance `resonance:update-draft` and `ResonanceStudent` snapshot merge.
+- Invariant: For one question/student/run, a write with an ordering key equal to or below the retained watermark cannot replace differing content. Matching content may be acknowledged without writing again; an absent draft matches a repeated clear. A restart drops the prior local answer, then restores any current-run draft in the new snapshot. When no live run revision exists, student snapshots are ordered by delivery and observed revision watermark, never by `activeQuestionRunStartedAt`.
+- Failure behavior: A conflicting draft receives no saved acknowledgement, leaving the client's retry state active. This handles sequential delivery; overlapping whole-session clones remain subject to #313.
+- Evidence: the equal-key and clear retry tests in `routes.test.ts`, the restart draft test in `ResonanceStudent.test.ts`, and the revision-based stale refresh test in `useResonanceSession.test.ts`.

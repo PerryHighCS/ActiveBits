@@ -128,16 +128,19 @@ void test('shouldApplyStudentSessionSnapshot rejects a delayed older run even wh
     sessionId: 'session-1',
     activeQuestionIds: ['q1'],
     activeQuestionRunStartedAt: 2_000,
+    activeQuestionRunRevision: 2,
   })
   const delayed = normalizeStudentSessionSnapshot({
     sessionId: 'session-1',
     activeQuestionIds: ['q2'],
     activeQuestionRunStartedAt: 1_000,
+    activeQuestionRunRevision: 1,
   })
   const newer = normalizeStudentSessionSnapshot({
     sessionId: 'session-1',
     activeQuestionIds: ['q1'],
     activeQuestionRunStartedAt: 3_000,
+    activeQuestionRunRevision: 3,
   })
 
   assert.ok(current)
@@ -164,25 +167,6 @@ void test('shouldApplyStudentSessionSnapshot rejects an older revision when two 
   assert.ok(current)
   assert.ok(delayed)
   assert.equal(shouldApplyStudentSessionSnapshot(current, delayed), false)
-})
-
-void test('shouldApplyStudentSessionSnapshot rejects a delayed active legacy snapshot after an explicit revision', () => {
-  const current = normalizeStudentSessionSnapshot({
-    sessionId: 'session-1',
-    activeQuestionIds: ['q1'],
-    activeQuestionRunStartedAt: 1_000,
-    activeQuestionRunRevision: 2,
-  })
-  const delayedLegacy = normalizeStudentSessionSnapshot({
-    sessionId: 'session-1',
-    activeQuestionIds: ['q2'],
-    activeQuestionRunStartedAt: 2_000,
-  })
-
-  assert.ok(current)
-  assert.ok(delayedLegacy)
-  assert.equal(delayedLegacy.activeQuestionRunRevision, null)
-  assert.equal(shouldApplyStudentSessionSnapshot(current, delayedLegacy, 2), false)
 })
 
 void test('shouldApplyStudentSessionSnapshot accepts a self-paced fallback that reflects the most recent live run', () => {
@@ -427,16 +411,19 @@ void test('a rejected stale WebSocket snapshot does not invalidate a newer defer
     sessionId: 'session-1',
     activeQuestionIds: ['q1'],
     activeQuestionRunStartedAt: 2_000,
+    activeQuestionRunRevision: 2,
   })
   const staleWebSocketSnapshot = normalizeStudentSessionSnapshot({
     sessionId: 'session-1',
     activeQuestionIds: ['q2'],
     activeQuestionRunStartedAt: 1_000,
+    activeQuestionRunRevision: 1,
   })
   const newerRestSnapshot = normalizeStudentSessionSnapshot({
     sessionId: 'session-1',
     activeQuestionIds: ['q3'],
     activeQuestionRunStartedAt: 3_000,
+    activeQuestionRunRevision: 3,
   })
 
   assert.ok(current)
@@ -888,6 +875,7 @@ void test('fetchSnapshot resolves false when its response is rejected as stale, 
       sessionId: 'session-1',
       activeQuestionIds: ['q1'],
       activeQuestionRunStartedAt: 3_000,
+      activeQuestionRunRevision: 3,
     }
     ;(globalThis as { fetch?: typeof fetch }).fetch = (async (url: string) => {
       if (typeof url === 'string' && url.includes('/state')) {
@@ -909,13 +897,13 @@ void test('fetchSnapshot resolves false when its response is rejected as stale, 
     await act(async () => {
       socket.emitMessage({
         type: 'resonance:session-state',
-        payload: { sessionId: 'session-1', activeQuestionIds: ['q1'], activeQuestionRunStartedAt: 5_000 },
+        payload: { sessionId: 'session-1', activeQuestionIds: ['q1'], activeQuestionRunStartedAt: 5_000, activeQuestionRunRevision: 5 },
       })
     })
     assert.equal(captured.snapshot?.activeQuestionRunStartedAt, 5_000)
 
     console.info('[TEST] refresh() now returns a technically-successful but stale (older) response')
-    stateResponse = { sessionId: 'session-1', activeQuestionIds: ['q1'], activeQuestionRunStartedAt: 1_000 }
+    stateResponse = { sessionId: 'session-1', activeQuestionIds: ['q1'], activeQuestionRunStartedAt: 1_000, activeQuestionRunRevision: 1 }
     let refreshResult: boolean | undefined
     await act(async () => {
       refreshResult = await captured.refresh!()

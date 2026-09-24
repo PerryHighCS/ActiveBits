@@ -3353,10 +3353,12 @@ export default function setupResonanceRoutes(
           orderingWatermark.activeQuestionRunRevision === session.data.activeQuestionRunRevision &&
           (
             editSequence < orderingWatermark.editSequence ||
-            (editSequence === orderingWatermark.editSequence && draftSendSequence < orderingWatermark.draftSendSequence)
+            (editSequence === orderingWatermark.editSequence && draftSendSequence <= orderingWatermark.draftSendSequence)
           )
 
         if (isStaleDraftWrite) {
+          // Equal keys can also come from separate mounts seeded from the
+          // same snapshot; only matching stored content can be acknowledged.
           // draftSendSequence only totally orders sends from a single
           // ResonanceStudent mount (see its own docstring above and in
           // ResonanceStudent.tsx) — a per-mount counter carries no meaning
@@ -3374,8 +3376,9 @@ export default function setupResonanceRoutes(
           // actually lands. See "a stale draft write from a second
           // concurrent tab is not acknowledged as saved when its content
           // was actually discarded".
-          const alreadyMatchesStored = existingDraft !== undefined &&
-            isSameAnswer(existingDraft.answer, intendedAnswer)
+          const alreadyMatchesStored = intendedAnswer === null
+            ? existingDraft === undefined
+            : existingDraft !== undefined && isSameAnswer(existingDraft.answer, intendedAnswer)
           if (draftId !== null && alreadyMatchesStored) {
             sendToSocket(socket, 'resonance:draft-saved', { draftId }, sessionId)
           }

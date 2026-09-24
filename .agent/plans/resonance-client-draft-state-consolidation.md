@@ -338,3 +338,11 @@ being handled one at a time, same as before.
 - [x] Keep the separate #313 limit explicit: a handler that loaded a stale whole-session clone before the clear can still overwrite it, so this change must not claim full concurrency safety.
 
 Owner: Resonance `resonance:update-draft` handler. The invariant is that an acknowledged clear has a durable ordering floor even when it deleted no draft. If persistence fails, no acknowledgement is sent and the client's retry state remains active. The focused route test, activities typecheck, and full `npm test` gate passed, including the server health check.
+
+## Post-consolidation review: equal keys, restart drafts, run identity
+
+- [x] Trace the three Copilot findings against the server ordering, client snapshot merge, and revision contract.
+- [x] Reject equal ordering keys with differing content; acknowledge identical retries, including clears. The handler owns the watermark; a rejected conflict remains unacknowledged so the sender retries. This guarantees sequential conflict detection only; overlapping stale whole-session writers remain #313.
+- [x] On restart, discard the prior local answer and retain any draft supplied by the incoming authoritative snapshot. The client snapshot merge owns this transition.
+- [x] Remove timestamp ordering for revision-null snapshots and use revision-bearing fixtures for live runs. The snapshot selector owns run ordering; an idle or self-paced snapshot has no live run identity.
+- [x] Run the full test gate and record the result. `npm test` passed: typecheck, lint, all workspace suites (activities: 1,425 tests), production build, and server health check.
