@@ -1024,7 +1024,7 @@ void test('an edit made while an earlier attempt is still in flight is retried i
     '@src/components/common/entryParticipantIdentityUtils'
   )
   const { MemoryRouter, Route, Routes } = await import('react-router')
-  const { default: ResonanceStudent, DRAFT_EDIT_DEBOUNCE_MS } = await import('./ResonanceStudent.js')
+  const { default: ResonanceStudent, DRAFT_EDIT_DEBOUNCE_MS, DRAFT_RETRY_INTERVAL_MS } = await import('./ResonanceStudent.js')
   const { act, render, waitFor, fireEvent } = await import('@testing-library/react')
 
   persistSessionParticipantIdentity(window.localStorage, 'session-1', 'Ada', 'student-1')
@@ -1087,25 +1087,44 @@ void test('an edit made while an earlier attempt is still in flight is retried i
     assert.equal(firstDrafts.length, 1, `expected exactly one send so far, got: ${JSON.stringify(socket.sent)}`)
     const firstDraftId = firstDrafts[0]!.payload.draftId
 
-    console.info('[TEST] a second edit arrives, debounces, and its own send attempt finds the first still in flight')
+    console.info('[TEST] a periodic tick requests a retry for unchanged content while the first save is in flight')
+    await new Promise((resolve) => setTimeout(resolve, DRAFT_RETRY_INTERVAL_MS + 100))
+    assert.equal(socket.sent.filter(isQ1Draft).length, 1)
+    await act(async () => {
+      socket.emitMessage({ type: 'resonance:draft-saved', payload: { draftId: firstDraftId } })
+    })
+    assert.equal(
+      socket.sent.filter(isQ1Draft).length,
+      1,
+      'a matching acknowledgement must clear the queued tick before it can send a duplicate',
+    )
+
+    console.info('[TEST] a second edit starts a new save, then a third edit queues behind it')
     await act(async () => {
       fireEvent.change(textarea, { target: { value: 'Second answer' } })
     })
     await new Promise((resolve) => setTimeout(resolve, DRAFT_EDIT_DEBOUNCE_MS + 100))
+    const secondDrafts = socket.sent.filter(isQ1Draft)
+    assert.equal(secondDrafts.length, 2)
+    const secondDraftId = secondDrafts[1]!.payload.draftId
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: 'Third answer' } })
+    })
+    await new Promise((resolve) => setTimeout(resolve, DRAFT_EDIT_DEBOUNCE_MS + 100))
     assert.equal(
       socket.sent.filter(isQ1Draft).length,
-      1,
-      'the second edit must not be sent as a concurrent duplicate while the first is still in flight',
+      2,
+      'the third edit must wait for the second save to settle',
     )
 
-    console.info('[TEST] the first (now-stale) attempt is acknowledged, and the second edit must be sent right away — in the same settlement, not on the next retry-interval tick')
+    console.info('[TEST] the second attempt settles and the third edit is sent immediately')
     await act(async () => {
-      socket.emitMessage({ type: 'resonance:draft-saved', payload: { draftId: firstDraftId } })
+      socket.emitMessage({ type: 'resonance:draft-saved', payload: { draftId: secondDraftId } })
     })
     const draftsAfterAck = socket.sent.filter(isQ1Draft)
     assert.ok(
-      draftsAfterAck.some((message) => message.payload.answer?.text === 'Second answer'),
-      `expected the second edit to have been sent immediately upon the first's settlement, got: ${JSON.stringify(draftsAfterAck)}`,
+      draftsAfterAck.some((message) => message.payload.answer?.text === 'Third answer'),
+      `expected the third edit to have been sent immediately upon the second's settlement, got: ${JSON.stringify(draftsAfterAck)}`,
     )
 
     await act(async () => {

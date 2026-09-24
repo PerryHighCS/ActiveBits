@@ -360,3 +360,25 @@ Owner: Resonance `resonance:update-draft` handler. The invariant is that an ackn
 - [x] Centralize acknowledgement eligibility in one tested decision: a current-run draft is authoritative when present; otherwise a confirmed response may justify acknowledgement only in the confirmed-response guard. An absent draft matches a clear. A rejected write with different content is never acknowledged, so the sender keeps retrying.
 - [x] Add route coverage for stale confirmed-answer content and a stale clear while a newer current-run draft remains stored.
 - [x] Run the full test gate and record the result. `npm test` passed: typecheck, lint, all workspace tests (activities: 1,428), production build, and server health check.
+
+## Review-cycle root cause: asynchronous settlement authority
+
+- [x] Audit the two new Copilot overview findings together. Both are real: a started reconnect fetch invalidates a usable earlier response before it succeeds, and the retry continuation checks a queued request before applying a successful acknowledgement. Both treat a pending operation as authoritative before its outcome is known.
+- [x] Snapshot owner (`useResonanceSession`): assign monotonically increasing request IDs, but advance the REST application floor only when a response is accepted; a WebSocket snapshot immediately invalidates older REST requests. Keep fallback polling active through reconnect until an accepted full snapshot arrives. A failed post-open fetch leaves an older successful response usable and schedules another refresh.
+- [x] Draft owner (`ResonanceStudent`): settle the attempt's acknowledgement before draining `pendingRetryAfterInFlight`; retry only if the question is still unconfirmed and the attempt still owns its in-flight token. A queued tick alone does not create a duplicate after a matching acknowledgement, while an edit during flight still retries immediately on settlement.
+- [x] Test the request ordering and retry decisions, including failed post-open refresh, an in-flight initial fetch, an unchanged-answer tick, and an edited answer.
+- [x] Run full verification and re-read both transitions as one lifecycle before replying to the PR review overview. `npm test` passed: typecheck, lint, all workspace tests (activities: 1,429), production build, and server health check. The focused hook and student suites also passed.
+
+The audited transitions are:
+
+| Pending work | Outcome | State transition |
+|---|---|---|
+| Initial REST A or a pre-open poll, then post-open REST B | B fails | Earlier response may still apply; polling continues |
+| Initial REST A, then post-open REST B | B applies first | A is rejected; polling stops on the open socket |
+| Any pending REST | Full WebSocket snapshot applies | Pending older REST is rejected; polling stops |
+| Pre-open poll completes after the socket opens | Its response applies | Polling continues until a post-open refresh or full WebSocket snapshot applies |
+| Draft A in flight; periodic tick queues a retry | A acknowledges current content | Clear `unconfirmed`; discard queued duplicate |
+| Draft A in flight; newer edit queues a retry | A settles | Keep `unconfirmed`; send current content immediately |
+| Draft A was abandoned and B owns the token | A settles | Leave B's state untouched |
+
+Scope audit: issue #374 asks for parent-owned retry and reconciliation across a `QuestionView` unmount. PR #381 now spans 30 commits, 20 files, and 6,435 additions before this follow-up; roughly 4,600 additions are in the two largest test files. Review findings in unchanged code show that the current broad diff remains difficult to audit. This lifecycle correction closes the two reported paths, but it is not evidence that another bot pass will find no more. The next review decision should be whether to replace #381 with a smaller #374-only branch, rather than automatically adding another isolated follow-up to this PR.

@@ -1078,3 +1078,10 @@ that document rather than creating activity-specific authentication payloads.
 - Invariant: A rejected write is acknowledged as saved only when its intended state already exists. A current-run draft takes precedence over the confirmed response for the same question and student. With no current-run draft, a clear matches the absent draft; the confirmed-response staleness guard may also acknowledge content equal to that response. The watermark staleness guard has no confirmed-response fallback.
 - Failure behavior: A mismatched write receives no acknowledgement and remains eligible for the sending client's retry. This does not close the overlapping whole-session clone race tracked in #313.
 - Evidence: `shouldAcknowledgeRejectedDraft` decision table and the post-submission revisit route regression in `activities/resonance/server/routes.test.ts`.
+
+### Student snapshot resync and draft settlement
+
+- Owner: `useResonanceSession` owns full-snapshot application; `ResonanceStudent` owns each question's draft attempt record.
+- Snapshot invariant: Starting a REST request does not make an older in-flight response unusable. Only an accepted newer REST or WebSocket snapshot advances the application barrier. Fallback polling remains active while the socket is disconnected and after it opens until a full post-open refresh or WebSocket snapshot is accepted. A failed post-open request leaves polling active and an older usable response eligible.
+- Draft invariant: An attempt may release only its own in-flight token. Its acknowledgement is applied before a queued retry is drained. A matching acknowledgement clears `unconfirmed`, so a periodic tick queued during the send does not launch a duplicate; a changed answer remains unconfirmed and retries immediately after settlement.
+- Evidence: the post-open failure/initial-response test in `useResonanceSession.test.ts` and the unchanged-tick/changed-answer settlement test in `ResonanceStudent.test.ts`.

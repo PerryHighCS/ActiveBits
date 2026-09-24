@@ -3,7 +3,7 @@ import test from 'node:test'
 import * as React from 'react'
 import { JSDOM } from 'jsdom'
 import {
-  isLatestStudentSnapshotRequest,
+  canApplyStudentSnapshotRequest,
   normalizeStudentSessionSnapshot,
   resolveObservedRunRevision,
   selectStudentSessionSnapshot,
@@ -401,9 +401,11 @@ void test('shouldApplyStudentSessionSnapshot accepts a new session with an earli
   assert.equal(shouldApplyStudentSessionSnapshot(current, nextSession), true)
 })
 
-void test('isLatestStudentSnapshotRequest accepts only the most recent fetch', () => {
-  assert.equal(isLatestStudentSnapshotRequest(2, 2), true)
-  assert.equal(isLatestStudentSnapshotRequest(1, 2), false)
+void test('a started request remains eligible until a newer snapshot is applied', () => {
+  assert.equal(canApplyStudentSnapshotRequest(1, 0), true)
+  assert.equal(canApplyStudentSnapshotRequest(2, 0), true)
+  assert.equal(canApplyStudentSnapshotRequest(2, 2), true)
+  assert.equal(canApplyStudentSnapshotRequest(1, 2), false)
 })
 
 void test('a rejected stale WebSocket snapshot does not invalidate a newer deferred REST response', () => {
@@ -430,15 +432,15 @@ void test('a rejected stale WebSocket snapshot does not invalidate a newer defer
   assert.ok(staleWebSocketSnapshot)
   assert.ok(newerRestSnapshot)
 
-  let latestRequestId = 1
-  const deferredRestRequestId = latestRequestId
+  let latestAppliedRequestId = 0
+  const deferredRestRequestId = 1
   const staleSelection = selectStudentSessionSnapshot(current, staleWebSocketSnapshot)
   if (staleSelection.accepted) {
-    latestRequestId += 1
+    latestAppliedRequestId = 2
   }
 
   assert.equal(staleSelection.accepted, false)
-  assert.equal(isLatestStudentSnapshotRequest(deferredRestRequestId, latestRequestId), true)
+  assert.equal(canApplyStudentSnapshotRequest(deferredRestRequestId, latestAppliedRequestId), true)
 
   const restSelection = selectStudentSessionSnapshot(staleSelection.snapshot, newerRestSnapshot)
   assert.equal(restSelection.accepted, true)
@@ -971,6 +973,103 @@ void test('a socket reconnect re-fetches the snapshot, so a broadcast missed whi
       rendered.unmount()
     })
   } finally {
+    restore()
+  }
+})
+
+void test('a failed post-open refresh keeps the initial response usable and fallback polling active', async () => {
+  const restore = installWsTestEnvironment()
+  const originalSetInterval = globalThis.setInterval
+  const originalClearInterval = globalThis.clearInterval
+  const fallbackHandle = {}
+  let fallbackTick: (() => void) | null = null
+  let fallbackActive = false
+  Object.defineProperty(globalThis, 'setInterval', {
+    configurable: true,
+    value: (callback: () => void, delay: number) => {
+      if (delay !== 15_000) return originalSetInterval(callback, delay)
+      fallbackTick = callback
+      fallbackActive = true
+      return fallbackHandle
+    },
+  })
+  Object.defineProperty(globalThis, 'clearInterval', {
+    configurable: true,
+    value: (handle: unknown) => {
+      if (handle === fallbackHandle) {
+        fallbackActive = false
+        return
+      }
+      originalClearInterval(handle as ReturnType<typeof setInterval>)
+    },
+  })
+  const { act, render } = await import('@testing-library/react')
+
+  try {
+    let resolveInitial!: (value: Response) => void
+    let resolvePreOpenPoll!: (value: Response) => void
+    let fetchCount = 0
+    ;(globalThis as { fetch?: typeof fetch }).fetch = (async () => {
+      fetchCount += 1
+      if (fetchCount === 1) return new Promise<Response>((resolve) => { resolveInitial = resolve })
+      if (fetchCount === 2) return new Promise<Response>((resolve) => { resolvePreOpenPoll = resolve })
+      if (fetchCount === 3) throw new Error('transient post-open failure')
+      return {
+        ok: true,
+        json: async () => ({ sessionId: 'session-1', activeQuestionRunRevision: 2, activeQuestionIds: ['q1'] }),
+      } as Response
+    }) as typeof fetch
+
+    const captured: { snapshot: StudentSessionSnapshot | null } = { snapshot: null }
+    function Probe() {
+      captured.snapshot = useResonanceSession('session-1', 'student-1').snapshot
+      return null
+    }
+    let rendered!: ReturnType<typeof render>
+    await act(async () => { rendered = render(React.createElement(Probe)) })
+    assert.equal(fetchCount, 1)
+    assert.equal(fallbackActive, true)
+
+    const socket = FakeWebSocket.instances[0]!
+    socket.readyState = 0
+    console.info('[TEST] a fallback poll begins before the socket opens')
+    await act(async () => { fallbackTick?.(); await Promise.resolve() })
+    assert.equal(fetchCount, 2)
+
+    console.info('[TEST] the socket opens but its resync fetch fails while the initial fetch is still pending')
+    socket.readyState = FakeWebSocket.OPEN
+    await act(async () => { socket.onopen?.() })
+    assert.equal(fetchCount, 3)
+    assert.equal(fallbackActive, true)
+
+    await act(async () => {
+      resolveInitial({
+        ok: true,
+        json: async () => ({ sessionId: 'session-1', activeQuestionRunRevision: 1, activeQuestionIds: ['q1'] }),
+      } as Response)
+      await Promise.resolve()
+    })
+    assert.equal(captured.snapshot?.activeQuestionRunRevision, 1, 'the failed newer fetch must not invalidate the usable initial response')
+
+    await act(async () => {
+      resolvePreOpenPoll({
+        ok: true,
+        json: async () => ({ sessionId: 'session-1', activeQuestionRunRevision: 1, activeQuestionIds: ['q1'] }),
+      } as Response)
+      await Promise.resolve()
+    })
+    assert.equal(fallbackActive, true, 'a poll started before open cannot substitute for post-open resync')
+
+    console.info('[TEST] the fallback tick succeeds and then stops polling on the open socket')
+    await act(async () => { fallbackTick?.(); await Promise.resolve() })
+    assert.equal(fetchCount, 4)
+    assert.equal(captured.snapshot?.activeQuestionRunRevision, 2)
+    assert.equal(fallbackActive, false)
+
+    await act(async () => { rendered.unmount() })
+  } finally {
+    Object.defineProperty(globalThis, 'setInterval', { configurable: true, value: originalSetInterval })
+    Object.defineProperty(globalThis, 'clearInterval', { configurable: true, value: originalClearInterval })
     restore()
   }
 })

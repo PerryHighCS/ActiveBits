@@ -493,8 +493,9 @@ export function shouldApplyStudentSessionSnapshot(
   return candidate.activeQuestionRunRevision >= latestActiveQuestionRunRevision
 }
 
-export function isLatestStudentSnapshotRequest(requestId: number, latestRequestId: number): boolean {
-  return requestId === latestRequestId
+/** A started request remains usable until a newer snapshot is actually applied. */
+export function canApplyStudentSnapshotRequest(requestId: number, latestAppliedRequestId: number): boolean {
+  return requestId >= latestAppliedRequestId
 }
 
 /**
@@ -524,7 +525,8 @@ export function selectStudentSessionSnapshot(
 
 /**
  * Connects to the Resonance WebSocket as a student for real-time session state.
- * Falls back to REST polling while the WebSocket is reconnecting.
+ * Polls REST while disconnected and until an opened socket has received a
+ * full, accepted snapshot.
  *
  * @param sessionId  - The session to connect to, or null to defer.
  * @param studentId  - The registered student ID, forwarded to the WS for identity.
@@ -535,7 +537,8 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
   const [error, setError] = useState<string | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
   const mountedRef = useRef(true)
-  const latestSnapshotRequestRef = useRef(0)
+  const nextSnapshotRequestIdRef = useRef(0)
+  const latestAppliedSnapshotRequestIdRef = useRef(0)
   const snapshotRef = useRef<StudentSessionSnapshot | null>(null)
   const latestActiveQuestionRunRevisionRef = useRef<number | null>(null)
   const draftSaveSequenceRef = useRef(0)
@@ -545,7 +548,7 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
   }>())
 
   useLayoutEffect(() => {
-    latestSnapshotRequestRef.current += 1
+    latestAppliedSnapshotRequestIdRef.current = ++nextSnapshotRequestIdRef.current
     for (const pending of pendingDraftSavesRef.current.values()) {
       clearTimeout(pending.timeoutId)
       pending.resolve(false)
@@ -569,19 +572,18 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
   // local value — must not treat a resolved promise alone as success.
   const fetchSnapshot = useCallback(async (): Promise<boolean> => {
     if (sessionId === null) return false
-    const requestId = latestSnapshotRequestRef.current + 1
-    latestSnapshotRequestRef.current = requestId
+    const requestId = ++nextSnapshotRequestIdRef.current
     try {
       const query = studentId ? `?studentId=${encodeURIComponent(studentId)}` : ''
       const resp = await fetch(`/api/resonance/${sessionId}/state${query}`)
-      if (!mountedRef.current || !isLatestStudentSnapshotRequest(requestId, latestSnapshotRequestRef.current)) return false
+      if (!mountedRef.current || !canApplyStudentSnapshotRequest(requestId, latestAppliedSnapshotRequestIdRef.current)) return false
       if (!resp.ok) {
         setError('Could not load session state')
         setLoading(false)
         return false
       }
       const data = normalizeStudentSessionSnapshot((await resp.json()) as Partial<StudentSessionSnapshot>)
-      if (!mountedRef.current || !isLatestStudentSnapshotRequest(requestId, latestSnapshotRequestRef.current)) return false
+      if (!mountedRef.current || !canApplyStudentSnapshotRequest(requestId, latestAppliedSnapshotRequestIdRef.current)) return false
       if (data === null) {
         setError('Could not load session state')
         setLoading(false)
@@ -594,6 +596,7 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
       )
       snapshotRef.current = selection.snapshot
       if (selection.accepted) {
+        latestAppliedSnapshotRequestIdRef.current = requestId
         const observedRevision = resolveObservedRunRevision(data)
         if (observedRevision !== null) {
           latestActiveQuestionRunRevisionRef.current = observedRevision
@@ -608,7 +611,7 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
       // docstring above), even though the fetch itself completed cleanly.
       return selection.accepted
     } catch {
-      if (mountedRef.current && isLatestStudentSnapshotRequest(requestId, latestSnapshotRequestRef.current)) {
+      if (mountedRef.current && canApplyStudentSnapshotRequest(requestId, latestAppliedSnapshotRequestIdRef.current)) {
         setError('Network error — retrying…')
       }
       return false
@@ -618,9 +621,6 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
   useEffect(() => {
     if (sessionId === null) return
     mountedRef.current = true
-
-    // Initial REST fetch for immediate state
-    void fetchSnapshot()
 
     const params = new URLSearchParams({ sessionId, role: 'student' })
     if (studentId) params.set('studentId', studentId)
@@ -635,7 +635,13 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
 
     function startFallback() {
       if (fallbackIntervalId !== null) return
-      fallbackIntervalId = setInterval(() => void fetchSnapshot(), FALLBACK_POLL_INTERVAL_MS)
+      fallbackIntervalId = setInterval(() => {
+        const socketAtRequest = wsRef.current
+        const startedOnOpenSocket = socketAtRequest?.readyState === WebSocket.OPEN
+        void fetchSnapshot().then((applied) => {
+          if (applied && startedOnOpenSocket && wsRef.current === socketAtRequest) stopFallback()
+        })
+      }, FALLBACK_POLL_INTERVAL_MS)
     }
 
     function stopFallback() {
@@ -661,7 +667,6 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
       ws.onopen = () => {
         if (!isCurrent()) return
         reconnectDelay = 1_000
-        stopFallback()
         // A broadcast for state that changed while this socket was
         // disconnected (e.g. another tab's submission) is only ever sent to
         // sockets that were connected at the moment it fired — a socket that
@@ -670,7 +675,9 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
         // was the only other thing that would have refreshed it. Re-fetch on
         // every open (including the first) so a missed broadcast cannot
         // strand this connection on a stale snapshot indefinitely.
-        void fetchSnapshot()
+        void fetchSnapshot().then((applied) => {
+          if (applied && isCurrent()) stopFallback()
+        })
       }
 
       ws.onmessage = (event) => {
@@ -686,7 +693,7 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
                 latestActiveQuestionRunRevisionRef.current,
               )
               if (selection.accepted) {
-                latestSnapshotRequestRef.current += 1
+                latestAppliedSnapshotRequestIdRef.current = ++nextSnapshotRequestIdRef.current
                 snapshotRef.current = selection.snapshot
                 const observedRevision = resolveObservedRunRevision(normalized)
                 if (observedRevision !== null) {
@@ -695,6 +702,7 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
                 setSnapshot(selection.snapshot)
                 setLoading(false)
                 setError(null)
+                stopFallback()
               }
             }
           } else if (msg.type === 'resonance:draft-saved' && isRecord(msg.payload)) {
@@ -747,6 +755,11 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
         }
       }
     }
+
+    // Poll until the first full snapshot arrives and whenever the socket is
+    // disconnected. Opening the socket alone does not prove resync succeeded.
+    startFallback()
+    void fetchSnapshot()
 
     // Strict Mode discards its first effect setup. Deferring construction lets
     // that cleanup cancel before it opens a socket that immediately closes.

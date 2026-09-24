@@ -833,20 +833,10 @@ export default function ResonanceStudent() {
       // overlapping duplicate send start while the newer attempt is still
       // genuinely outstanding.
       const stateAtSettlement = questionDraftStateRef.current.get(questionId)
-      if (stateAtSettlement?.inFlightAttemptToken === attemptToken) {
-        stateAtSettlement.inFlightAttemptToken = undefined
-        // A newer attempt was requested for this question while this one was
-        // still outstanding (see the in-flight guard above). Try again right
-        // away, reading whatever the *current* answer is by now, instead of
-        // waiting for the next periodic retry tick — this is what actually
-        // closes the near-deadline gap the guard above exists to avoid, not
-        // just recording that it was hit.
-        if (stateAtSettlement.pendingRetryAfterInFlight) {
-          stateAtSettlement.pendingRetryAfterInFlight = false
-          attemptDraftSend(questionId)
-        }
-      }
-      if (!saved) return
+      if (stateAtSettlement?.inFlightAttemptToken !== attemptToken) return
+      stateAtSettlement.inFlightAttemptToken = undefined
+      const pendingRetry = stateAtSettlement.pendingRetryAfterInFlight
+      stateAtSettlement.pendingRetryAfterInFlight = false
       // An ack can arrive after the run has since restarted/reactivated
       // (this same question, a coincidentally identical answer). Only clear
       // the unconfirmed marker if the run revision and edit sequence in
@@ -861,16 +851,22 @@ export default function ResonanceStudent() {
       // parsed. See "a stale acknowledgement delivered on an abandoned
       // identity's connection..." below.)
       const snapshotAtAck = snapshotRef.current
-      if (snapshotAtAck === null || snapshotAtAck.activeQuestionRunRevision !== sentRunRevision) return
-      const currentEditSequence = resolveCurrentEditSequence(
-        editSequenceByKeyRef.current,
-        questionId,
-        snapshotAtAck.activeQuestionRunRevision,
-      )
-      const currentAnswer = submittedAnswersRef.current[questionId] ?? null
-      if (currentEditSequence === sentEditSequence && isSameAnswer(currentAnswer, answer)) {
-        const stateAtAck = questionDraftStateRef.current.get(questionId)
-        if (stateAtAck !== undefined) stateAtAck.unconfirmed = false
+      if (saved && snapshotAtAck?.activeQuestionRunRevision === sentRunRevision) {
+        const currentEditSequence = resolveCurrentEditSequence(
+          editSequenceByKeyRef.current,
+          questionId,
+          snapshotAtAck.activeQuestionRunRevision,
+        )
+        const currentAnswer = submittedAnswersRef.current[questionId] ?? null
+        if (currentEditSequence === sentEditSequence && isSameAnswer(currentAnswer, answer)) {
+          stateAtSettlement.unconfirmed = false
+        }
+      }
+      // A periodic tick may have queued a retry without any edit. Settle the
+      // acknowledgement first, so that tick cannot launch a duplicate after
+      // a matching save. A changed answer stays unconfirmed and retries now.
+      if (pendingRetry && stateAtSettlement.unconfirmed) {
+        attemptDraftSend(questionId)
       }
     })
   }, [saveDraft])
