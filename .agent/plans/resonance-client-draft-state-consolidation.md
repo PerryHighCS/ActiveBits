@@ -346,3 +346,10 @@ Owner: Resonance `resonance:update-draft` handler. The invariant is that an ackn
 - [x] On restart, discard the prior local answer and retain any draft supplied by the incoming authoritative snapshot. The client snapshot merge owns this transition.
 - [x] Remove timestamp ordering for revision-null snapshots and use revision-bearing fixtures for live runs. The snapshot selector owns run ordering; an idle or self-paced snapshot has no live run identity.
 - [x] Run the full test gate and record the result. `npm test` passed: typecheck, lint, all workspace suites (activities: 1,425 tests), production build, and server health check.
+
+## Post-consolidation review: stored ordering fields
+
+- [x] Check the four Copilot overview findings against the stored draft and retained watermark contract.
+- [x] Require valid stored ordering counters: draft edit sequence is a nonnegative safe integer, draft send sequence is a positive safe integer, and retained watermark counters obey the same rules. The session normalizer owns this invariant and drops an invalid record; it never invents a zero floor.
+- [x] Document snapshot ordering maps as retained floors that may exist without draft content.
+- [x] Add a decision-table normalization regression and run the full test gate. `npm test` passed: typecheck, lint, all workspace tests (activities: 1,427), production build, and server health check.

@@ -21,6 +21,7 @@ import setupResonanceRoutes, {
   generateImportedQuestionId,
   resolveAnswerabilityErrorMessage,
   resolveSocketStudentId,
+  resolveStoredDraftOrdering,
   scheduleParticipantCapabilityExpiryClose,
 } from './routes.js'
 
@@ -261,6 +262,8 @@ function createInstructorResonanceSession(): SessionRecord {
           studentId: 'student2',
           updatedAt: now - 100,
           activeQuestionRunRevision: 1,
+          editSequence: 0,
+          draftSendSequence: 1,
           answer: {
             type: 'free-response',
             text: 'Still working through the condition...',
@@ -623,8 +626,8 @@ void test('instructor progress shows a newer revisit draft as working while reta
   data.activeQuestionRunRevision = 3
   data.responses[0]!.activeQuestionRunRevision = 3
   data.responses[0]!.editSequence = 1
-  data.responseDrafts['q1:student1'] = { activeQuestionRunRevision: 3, editSequence: 2, updatedAt: 9_999, questionId: 'q1', studentId: 'student1', answer: { type: 'free-response', text: 'Revised but not submitted yet.' } }
-  data.responseDrafts['q1:student2'] = { activeQuestionRunRevision: 2, editSequence: 1, updatedAt: 9_998, questionId: 'q1', studentId: 'student2', answer: { type: 'free-response', text: 'Stale prior-run draft.' } }
+  data.responseDrafts['q1:student1'] = { activeQuestionRunRevision: 3, editSequence: 2, draftSendSequence: 1, updatedAt: 9_999, questionId: 'q1', studentId: 'student1', answer: { type: 'free-response', text: 'Revised but not submitted yet.' } }
+  data.responseDrafts['q1:student2'] = { activeQuestionRunRevision: 2, editSequence: 1, draftSendSequence: 1, updatedAt: 9_998, questionId: 'q1', studentId: 'student2', answer: { type: 'free-response', text: 'Stale prior-run draft.' } }
   await sessions.set(session.id, session)
   setupResonanceRoutes(app, sessions, createMockWs())
   const responseHandler = app.handlers.get['/api/resonance/:sessionId/responses']
@@ -1724,10 +1727,9 @@ void test('a stale draft write from a second concurrent tab is not acknowledged 
 })
 
 void test('an update-draft write with a missing or invalid draftSendSequence is dropped, not silently coerced to zero', async () => {
-  // CodeRabbit review of PR #381: resolveEditSequence's zero-fallback exists
-  // to normalize historical *stored* drafts, not to validate a live write —
-  // silently coercing a missing/malformed draftSendSequence to 0 would let a
-  // malformed payload masquerade as a legitimate "first send" and jump the
+  // CodeRabbit review of PR #381: silently coercing a missing/malformed
+  // draftSendSequence to 0 would let it masquerade as a legitimate
+  // "first send" and jump the
   // same-editSequence tiebreaker ahead of a write that's genuinely first. A
   // real client always sends a positive integer (it pre-increments before
   // every send), so the handler now requires one and drops anything else.
@@ -1954,6 +1956,8 @@ void test('server deadline task finalizes and broadcasts drafts without post-dea
       studentId: 'student1',
       updatedAt: 1_050,
       activeQuestionRunRevision: 1,
+      editSequence: 0,
+      draftSendSequence: 1,
       answer: { type: 'free-response', text: 'Saved before time ran out' },
     },
   }
@@ -2054,6 +2058,8 @@ void test('server deadline task retries after a strict session read failure', as
       studentId: 'student1',
       updatedAt: 1_050,
       activeQuestionRunRevision: 1,
+      editSequence: 0,
+      draftSendSequence: 1,
       answer: { type: 'free-response', text: 'Retry this persisted draft' },
     },
   }
@@ -2116,6 +2122,8 @@ void test('server deadline task retries after a finalization write failure witho
       studentId: 'student1',
       updatedAt: 1_050,
       activeQuestionRunRevision: 1,
+      editSequence: 0,
+      draftSendSequence: 1,
       answer: { type: 'free-response', text: 'Persist me after retry' },
     },
   }
@@ -2182,6 +2190,8 @@ void test('timed live runs finalize persisted drafts for every active question',
       studentId: 'student1',
       updatedAt: now - 2_000,
       activeQuestionRunRevision: 1,
+      editSequence: 0,
+      draftSendSequence: 1,
       answer: { type: 'free-response', text: 'First persisted draft' },
     },
     'q2:student1': {
@@ -2189,6 +2199,8 @@ void test('timed live runs finalize persisted drafts for every active question',
       studentId: 'student1',
       updatedAt: now - 2_000,
       activeQuestionRunRevision: 1,
+      editSequence: 0,
+      draftSendSequence: 2,
       answer: { type: 'multiple-choice', selectedOptionIds: ['q2_b'] },
     },
   }
@@ -3935,6 +3947,8 @@ void test('staged activate-question hides MCQ choices until reveal and then acce
       studentId: 'student1',
       updatedAt: Date.now() - 2_000,
       activeQuestionRunRevision: stagedRunRevision,
+      editSequence: 0,
+      draftSendSequence: 1,
       answer: {
         type: 'multiple-choice',
         selectedOptionIds: ['q2_b'],
@@ -5108,6 +5122,66 @@ void test('student state sanitizes malformed stored reveal reactions', async () 
     '🔥': 2,
   })
 
+  await sessions.close()
+})
+
+void test('stored draft ordering requires both counters without inventing a zero floor', () => {
+  const cases: Array<{ edit: unknown; send: unknown; expected: { editSequence: number; draftSendSequence: number } | null }> = [
+    { edit: 0, send: 1, expected: { editSequence: 0, draftSendSequence: 1 } },
+    { edit: 3, send: 8, expected: { editSequence: 3, draftSendSequence: 8 } },
+    { edit: undefined, send: 1, expected: null },
+    { edit: -1, send: 1, expected: null },
+    { edit: 1.5, send: 1, expected: null },
+    { edit: 1, send: undefined, expected: null },
+    { edit: 1, send: 0, expected: null },
+    { edit: 1, send: -1, expected: null },
+    { edit: 1, send: Number.MAX_SAFE_INTEGER + 1, expected: null },
+  ]
+  for (const { edit, send, expected } of cases) {
+    assert.deepEqual(resolveStoredDraftOrdering(edit, send), expected)
+  }
+})
+
+void test('student state drops a corrupt stored draft and watermark without discarding a valid retained floor', async () => {
+  const app = createMockApp()
+  const sessions = createSessionStore(null)
+  const session = createMultiQuestionSession()
+  const now = Date.now()
+  session.data.selfPacedMode = true
+  session.data.responseDrafts = {
+    'q1:student1': {
+      questionId: 'q1', studentId: 'student1', updatedAt: now,
+      activeQuestionRunRevision: null, editSequence: 2, draftSendSequence: 0,
+      answer: { type: 'free-response', text: 'Corrupt draft' },
+    },
+  }
+  session.data.draftOrderingWatermarks = {
+    'q1:student1': { activeQuestionRunRevision: null, editSequence: 2, draftSendSequence: 3 },
+    'q2:student1': { activeQuestionRunRevision: null, editSequence: 'bad', draftSendSequence: 4 },
+  }
+  const studentCookies = issueStudentCookies(session, 'student1')
+  await sessions.set(session.id, session)
+  setupResonanceRoutes(app, sessions, createMockWs())
+
+  const stateHandler = app.handlers.get['/api/resonance/:sessionId/state']
+  assert.equal(typeof stateHandler, 'function')
+  const res = createResponse()
+  await stateHandler?.({
+    params: { sessionId: session.id },
+    query: { studentId: 'student1' },
+    cookies: studentCookies,
+  }, res)
+  assert.equal(res.statusCode, 200)
+  const body = res.body as {
+    draftAnswers?: Record<string, unknown>
+    draftEditSequences?: Record<string, number>
+    draftSendSequences?: Record<string, number>
+  }
+  assert.equal(body.draftAnswers?.q1, undefined)
+  assert.equal(body.draftEditSequences?.q1, 2)
+  assert.equal(body.draftSendSequences?.q1, 3)
+  assert.equal(body.draftEditSequences?.q2, undefined)
+  assert.equal(body.draftSendSequences?.q2, undefined)
   await sessions.close()
 })
 

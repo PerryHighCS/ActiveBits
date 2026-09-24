@@ -1064,3 +1064,10 @@ that document rather than creating activity-specific authentication payloads.
 - Invariant: For one question/student/run, a write with an ordering key equal to or below the retained watermark cannot replace differing content. Matching content may be acknowledged without writing again; an absent draft matches a repeated clear. A restart drops the prior local answer, then restores any current-run draft in the new snapshot. When no live run revision exists, student snapshots are ordered by delivery and observed revision watermark, never by `activeQuestionRunStartedAt`.
 - Failure behavior: A conflicting draft receives no saved acknowledgement, leaving the client's retry state active. This handles sequential delivery; overlapping whole-session clones remain subject to #313.
 - Evidence: the equal-key and clear retry tests in `routes.test.ts`, the restart draft test in `ResonanceStudent.test.ts`, and the revision-based stale refresh test in `useResonanceSession.test.ts`.
+
+### Stored draft ordering validation
+
+- Owner: Resonance session normalization in `routes.ts`.
+- Invariant: Both a stored draft and a retained watermark carry an `editSequence` that is a nonnegative safe integer and a `draftSendSequence` that is a positive safe integer. Missing or malformed counters cause that record to be dropped, rather than normalized to zero. These are current required fields; no legacy draft ordering shape is supported.
+- Snapshot contract: `draftEditSequences` and `draftSendSequences` expose retained per-question ordering floors for the viewer's active questions. A floor may survive a clear after `draftAnswers` loses the corresponding content.
+- Evidence: `resolveStoredDraftOrdering`, its decision table and the student-state normalization regression in `activities/resonance/server/routes.test.ts`.

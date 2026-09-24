@@ -164,9 +164,11 @@ export interface StudentSessionSnapshot {
    */
   draftAnswers: Record<string, AnswerPayload>
   /**
-   * The `draftSendSequence` recorded on each draft in `draftAnswers` — the
-   * client-assigned counter the server's update-draft ordering guard compares
-   * same-editSequence writes by. A client that reloads mid-edit has no local
+   * The retained per-question `draftSendSequence` ordering floor for the
+   * viewer's active questions. This may exist after a clear has removed the
+   * corresponding `draftAnswers` entry. The server's update-draft guard
+   * compares same-editSequence writes by this client-assigned counter.
+   * A client that reloads mid-edit has no local
    * memory of how many times it already sent this question's draft (its own
    * counter restarts at 0), so without this it would stamp its first
    * post-reload send with a value lower than what's already stored, and the
@@ -176,7 +178,9 @@ export interface StudentSessionSnapshot {
    */
   draftSendSequences: Record<string, number>
   /**
-   * The `editSequence` recorded on each draft in `draftAnswers`. A revisit
+   * The retained per-question `editSequence` ordering floor for the viewer's
+   * active questions. This may exist after a clear has removed the matching
+   * `draftAnswers` entry. A revisit
    * (`advanceEditSequenceForRevisit` in `ResonanceStudent.tsx`) can bump a
    * draft's `editSequence` above `confirmedEditSequence + 1` (e.g. a second
    * revisit, or a revisit whose local counter was already seeded past the

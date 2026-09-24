@@ -173,13 +173,13 @@ interface ResonanceSessionData extends Record<string, unknown> {
     studentId: string
     updatedAt: number
     activeQuestionRunRevision: number | null
-    editSequence?: number
+    editSequence: number
     // Client-assigned, monotonically increasing across every send attempt
     // (not just revisits, unlike editSequence). Orders two same-editSequence
     // draft writes for the same question by actual client send order,
     // instead of by server-side write-completion timing — see the ordering
     // guard in the resonance:update-draft handler.
-    draftSendSequence?: number
+    draftSendSequence: number
     answer: Response['answer']
   }>
   // Outlives its draftKey's entry in `responseDrafts`: a cleared draft is
@@ -682,7 +682,7 @@ function finalizeActiveQuestionDrafts(
         draft.studentId,
         draft.answer,
         sessionData.activeQuestionRunRevision,
-        draft.editSequence ?? 0,
+        draft.editSequence,
       )
       finalizedCount += 1
     }
@@ -743,6 +743,18 @@ function buildDraftKey(questionId: string, studentId: string): string {
 
 function resolveEditSequence(value: unknown): number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : 0
+}
+
+/** Stored draft and watermark counters are required; no legacy zero floor is inferred. */
+export function resolveStoredDraftOrdering(
+  editSequence: unknown,
+  draftSendSequence: unknown,
+): { editSequence: number; draftSendSequence: number } | null {
+  if (
+    typeof editSequence !== 'number' || !Number.isSafeInteger(editSequence) || editSequence < 0 ||
+    typeof draftSendSequence !== 'number' || !Number.isSafeInteger(draftSendSequence) || draftSendSequence <= 0
+  ) return null
+  return { editSequence, draftSendSequence }
 }
 
 /**
@@ -855,10 +867,9 @@ function normalizeResponseDrafts(
       : 0
     const activeQuestionRunRevision = resolveStoredActiveQuestionRunRevision(rawDraft.activeQuestionRunRevision)
     const answer = normalizeDraftAnswerPayload(rawDraft.answer, questionsById, questionId)
-    const editSequence = resolveEditSequence(rawDraft.editSequence)
-    const draftSendSequence = resolveEditSequence(rawDraft.draftSendSequence)
+    const ordering = resolveStoredDraftOrdering(rawDraft.editSequence, rawDraft.draftSendSequence)
 
-    if (!questionId || !studentId || updatedAt <= 0 || answer === null || activeQuestionRunRevision === undefined) {
+    if (!questionId || !studentId || updatedAt <= 0 || answer === null || activeQuestionRunRevision === undefined || ordering === null) {
       continue
     }
 
@@ -867,8 +878,7 @@ function normalizeResponseDrafts(
       studentId,
       updatedAt,
       activeQuestionRunRevision,
-      editSequence,
-      draftSendSequence,
+      ...ordering,
       answer,
     }
   }
@@ -889,14 +899,14 @@ function normalizeDraftOrderingWatermarks(value: unknown): ResonanceSessionData[
     }
 
     const activeQuestionRunRevision = resolveStoredActiveQuestionRunRevision(rawWatermark.activeQuestionRunRevision)
-    if (activeQuestionRunRevision === undefined) {
+    const ordering = resolveStoredDraftOrdering(rawWatermark.editSequence, rawWatermark.draftSendSequence)
+    if (activeQuestionRunRevision === undefined || ordering === null) {
       continue
     }
 
     watermarks[key] = {
       activeQuestionRunRevision,
-      editSequence: resolveEditSequence(rawWatermark.editSequence),
-      draftSendSequence: resolveEditSequence(rawWatermark.draftSendSequence),
+      ...ordering,
     }
   }
 
@@ -3230,9 +3240,7 @@ export default function setupResonanceRoutes(
         // Unlike editSequence (whose legitimate first value is 0, before any
         // revisit bump), draftSendSequence is always >= 1 the first time our
         // own client ever sends one (it pre-increments before every send —
-        // see ResonanceStudent.tsx). resolveEditSequence's zero-fallback
-        // exists only to normalize historical stored drafts written before
-        // this field existed; silently coercing a missing/invalid value on
+        // see ResonanceStudent.tsx). Silently coercing a missing/invalid value on
         // an incoming write would let a malformed payload masquerade as a
         // legitimate "first send" and be ordered ahead of writes that
         // actually are the first send, defeating the tiebreaker below.
