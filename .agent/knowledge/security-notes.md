@@ -454,3 +454,9 @@ Track security-relevant boundaries, risks, and mitigation decisions.
 - Fix: capture the socket instance in a local `const socket = new WebSocket(...)` and gate every handler on `isCurrent = () => !closed && wsRef.current === socket`, mirroring the identical pattern already used in the student hook (`useResonanceSession.ts`), which had this exact class of bug fixed earlier in the same PR review cycle. Whenever adding a new WS-consuming hook in this activity, check it uses per-socket identity guards, not just a shared `mountedRef`.
 - Validation: `activities/resonance/client/hooks/useInstructorState.test.ts` — "a queued message from a prior instructor session cannot leak into the new session" (confirmed to fail with `isCurrent` stubbed to always-true).
 - Owner: Claude Sonnet 5
+
+# npm audit scope for workspace lockfiles
+
+- Date: 2026-09-24
+- The root `npm audit` uses the root dependency tree; it does not audit the separate `client/`, `server/`, and `activities/` lockfiles as independent projects. GitHub Dependabot tracks alerts per manifest, so the same advisory can produce multiple repository alerts.
+- Audit each nested lockfile from its directory with `npm audit --package-lock-only --workspaces=false`. In September 2026, this exposed `brace-expansion` 5.0.7 in the server and activities locks even though those findings were absent from GitHub's seven open alerts. Keep all four locks in scope when resolving dependency alerts.
