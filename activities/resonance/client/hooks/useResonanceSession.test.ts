@@ -935,3 +935,54 @@ void test('fetchSnapshot resolves false when its response is rejected as stale, 
     restore()
   }
 })
+
+void test('a socket reconnect re-fetches the snapshot, so a broadcast missed while disconnected is not stranded forever', async () => {
+  // Copilot review of PR #381: a broadcast (e.g. another tab's submission)
+  // is only sent to sockets connected at the moment it fires. A socket that
+  // reconnects afterward previously had no way to learn it was missed — the
+  // fallback poll that would have caught it is stopped on open, and nothing
+  // else triggers a re-sync. That stranded the reconnected tab's retry loop
+  // permanently against the stale snapshot it already had.
+  const restore = installWsTestEnvironment()
+  const { act, render } = await import('@testing-library/react')
+
+  try {
+    let fetchCount = 0
+    ;(globalThis as { fetch?: typeof fetch }).fetch = (async (url: string) => {
+      if (typeof url === 'string' && url.includes('/state')) {
+        fetchCount += 1
+        return { ok: true, json: async () => ({ sessionId: 'session-1', activeQuestionIds: [] }) } as Response
+      }
+      throw new Error(`Unexpected fetch: ${url}`)
+    }) as typeof fetch
+
+    function Probe() {
+      useResonanceSession('session-1', 'student-1')
+      return null
+    }
+
+    let rendered!: ReturnType<typeof render>
+    await act(async () => {
+      rendered = render(React.createElement(Probe))
+    })
+    assert.equal(fetchCount, 1, 'the initial mount already fetches a snapshot once')
+
+    console.info('[TEST] the socket (re)opens after a state-changing broadcast could have been missed while it was down')
+    const socket = FakeWebSocket.instances[0]!
+    await act(async () => {
+      socket.onopen?.()
+    })
+
+    assert.equal(
+      fetchCount,
+      2,
+      'opening (or reopening) the socket must re-fetch the snapshot so a broadcast missed while disconnected is not stranded',
+    )
+
+    await act(async () => {
+      rendered.unmount()
+    })
+  } finally {
+    restore()
+  }
+})

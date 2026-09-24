@@ -663,6 +663,15 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
         if (!isCurrent()) return
         reconnectDelay = 1_000
         stopFallback()
+        // A broadcast for state that changed while this socket was
+        // disconnected (e.g. another tab's submission) is only ever sent to
+        // sockets that were connected at the moment it fired — a socket that
+        // reconnects afterward never receives it and has no other trigger to
+        // learn the newer state, since the fallback poll this just stopped
+        // was the only other thing that would have refreshed it. Re-fetch on
+        // every open (including the first) so a missed broadcast cannot
+        // strand this connection on a stale snapshot indefinitely.
+        void fetchSnapshot()
       }
 
       ws.onmessage = (event) => {
