@@ -1281,6 +1281,11 @@ void test('an older draft write cannot clobber a newer one for the same question
       updatedAt?: number
       answer?: unknown
     }>
+    draftOrderingWatermarks?: Record<string, {
+      activeQuestionRunRevision?: number | null
+      editSequence?: number
+      draftSendSequence?: number
+    }>
   }
 
   // The student revisits (editSequence bumps to 2) and this newer write
@@ -1360,6 +1365,14 @@ void test('an older draft write cannot clobber a newer one for the same question
     updatedAt: Date.now(),
     answer: { type: 'free-response', text: 'Sent later by the client, written first' },
   }
+  // A real write with this ordering key would have moved the ordering
+  // watermark to match (see the "resurrect a draft" test below) — seed it
+  // here too so this direct store injection accurately simulates one.
+  ;(sessionBeforeTiebreakerCheck!.data as StoredData).draftOrderingWatermarks!['q1:student1'] = {
+    activeQuestionRunRevision: 1,
+    editSequence: 2,
+    draftSendSequence: 100,
+  }
   await sessions.set(session.id, sessionBeforeTiebreakerCheck!)
 
   console.info('[TEST] a same-editSequence write with a lower draftSendSequence is rejected, not merged in')
@@ -1410,6 +1423,142 @@ void test('an older draft write cannot clobber a newer one for the same question
   await waitForCondition(() => sentMessages.some((message) =>
     message.type === 'resonance:draft-saved' && message.payload?.draftId === 'same-sequence-same-content-straggler'
   ))
+
+  await sessions.close()
+})
+
+void test('a delayed older draft write cannot resurrect a draft that a newer clear already removed', async () => {
+  // Copilot review of PR #381: the ordering guard above only protects a
+  // write while its prior draft record still exists in responseDrafts. A
+  // newer `answer: null` clear deletes that record outright — so a
+  // delayed, older, still-in-flight non-null write that finishes
+  // processing *after* the clear previously saw `existingDraft ===
+  // undefined`, bypassed the guard entirely (nothing to compare against),
+  // and resurrected the stale draft the clear had already superseded.
+  const app = createMockApp()
+  const sessions = createSessionStore(null)
+  const session = createMultiQuestionSession()
+  const runStartedAt = Date.now() - 1_000
+  session.data.activeQuestionId = 'q1'
+  session.data.activeQuestionIds = ['q1']
+  session.data.activeQuestionRunStartedAt = runStartedAt
+  session.data.activeQuestionRunRevision = 1
+  session.data.lastActiveQuestionRunRevision = 1
+  const studentCookies = issueStudentCookies(session, 'student1')
+  await sessions.set(session.id, session)
+  const captured = createCapturingMockWs()
+  setupResonanceRoutes(app, sessions, captured.ws)
+
+  const handler = captured.getHandler()
+  const messageHandlers: Array<(message: string) => void> = []
+  const sentMessages: Array<{ type?: string; payload?: { draftId?: string } }> = []
+  assert.ok(handler)
+  handler({
+    readyState: 1,
+    upgradeHeaders: {
+      cookie: Object.entries(studentCookies).map(([name, value]) => `${name}=${value}`).join('; '),
+    },
+    send(message: string) {
+      sentMessages.push(JSON.parse(message) as { type?: string; payload?: { draftId?: string } })
+    },
+    on(event: string, callback: (message: string) => void) {
+      if (event === 'message') messageHandlers.push(callback)
+    },
+    once() {},
+    close() {},
+    terminate() {},
+    ping() {},
+  }, new URLSearchParams({ sessionId: session.id, role: 'student', studentId: 'student1' }), captured.ws.wss)
+  await waitForCondition(() => messageHandlers.length === 1)
+
+  type StoredData = {
+    responseDrafts?: Record<string, {
+      questionId?: string
+      studentId?: string
+      activeQuestionRunRevision?: number | null
+      editSequence?: number
+      draftSendSequence?: number
+      updatedAt?: number
+      answer?: unknown
+    }>
+  }
+
+  console.info('[TEST] a first draft write lands and is stored')
+  messageHandlers[0]?.(JSON.stringify({
+    type: 'resonance:update-draft',
+    payload: {
+      studentId: 'student1',
+      questionId: 'q1',
+      draftId: 'original-draft',
+      activeQuestionRunRevision: 1,
+      editSequence: 1,
+      draftSendSequence: 1,
+      answer: { type: 'free-response', text: 'Original answer' },
+    },
+  }))
+  await waitForCondition(() => sentMessages.some((message) =>
+    message.type === 'resonance:draft-saved' && message.payload?.draftId === 'original-draft'
+  ))
+
+  // The student then clears the field entirely (editSequence bumps to 2 —
+  // any distinct client action, revisit or otherwise, bumps it), and this
+  // newer clear reaches and is processed by the server first.
+  console.info('[TEST] a newer clear lands first, removing the draft entirely')
+  messageHandlers[0]?.(JSON.stringify({
+    type: 'resonance:update-draft',
+    payload: {
+      studentId: 'student1',
+      questionId: 'q1',
+      draftId: 'clear',
+      activeQuestionRunRevision: 1,
+      editSequence: 2,
+      draftSendSequence: 2,
+      answer: null,
+    },
+  }))
+  await waitForCondition(() => sentMessages.some((message) =>
+    message.type === 'resonance:draft-saved' && message.payload?.draftId === 'clear'
+  ))
+
+  const storedAfterClear = (await sessions.get(session.id))?.data as StoredData | undefined
+  assert.equal(
+    storedAfterClear?.responseDrafts?.['q1:student1'],
+    undefined,
+    'the draft must actually be gone after the clear',
+  )
+
+  // A straggling write from before the clear (still editSequence 1, sent
+  // over the same connection but delayed in server-side processing) now
+  // arrives and is processed second — after the record it would have
+  // clobbered was already deleted.
+  console.info('[TEST] a straggling pre-clear draft write lands second, after the clear already removed the draft')
+  messageHandlers[0]?.(JSON.stringify({
+    type: 'resonance:update-draft',
+    payload: {
+      studentId: 'student1',
+      questionId: 'q1',
+      draftId: 'older-straggler',
+      activeQuestionRunRevision: 1,
+      editSequence: 1,
+      draftSendSequence: 1,
+      answer: { type: 'free-response', text: 'Original answer' },
+    },
+  }))
+  // This straggler must not be acknowledged as saved (it was correctly
+  // rejected, not silently dropped after a successful write) — wait for a
+  // settled tick instead of an ack that will never come.
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  assert.ok(
+    !sentMessages.some((message) => message.payload?.draftId === 'older-straggler'),
+    'a rejected write that would have resurrected a cleared draft must not be acknowledged as saved',
+  )
+
+  const storedAfterStraggler = (await sessions.get(session.id))?.data as StoredData | undefined
+  assert.equal(
+    storedAfterStraggler?.responseDrafts?.['q1:student1'],
+    undefined,
+    'the delayed older write must not have resurrected the draft the newer clear already removed',
+  )
 
   await sessions.close()
 })

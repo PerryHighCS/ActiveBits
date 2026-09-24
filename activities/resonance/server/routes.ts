@@ -182,6 +182,17 @@ interface ResonanceSessionData extends Record<string, unknown> {
     draftSendSequence?: number
     answer: Response['answer']
   }>
+  // Outlives its draftKey's entry in `responseDrafts`: a cleared draft is
+  // deleted from that map (there's nothing left to display or finalize),
+  // but a delayed, older concurrent write for the same key must still be
+  // recognized as superseded by the clear that already happened, not just
+  // by whatever (if anything) currently occupies the map. See the ordering
+  // guard in the resonance:update-draft handler.
+  draftOrderingWatermarks: Record<string, {
+    activeQuestionRunRevision: number | null
+    editSequence: number
+    draftSendSequence: number
+  }>
   annotations: Record<string, InstructorAnnotation>
   reveals: QuestionReveal[]
   sharedResponseReactions: Record<string, Record<string, string>>
@@ -865,6 +876,33 @@ function normalizeResponseDrafts(
   return drafts
 }
 
+function normalizeDraftOrderingWatermarks(value: unknown): ResonanceSessionData['draftOrderingWatermarks'] {
+  if (!isPlainObject(value)) {
+    return {}
+  }
+
+  const watermarks: ResonanceSessionData['draftOrderingWatermarks'] = {}
+
+  for (const [key, rawWatermark] of Object.entries(value)) {
+    if (!isPlainObject(rawWatermark)) {
+      continue
+    }
+
+    const activeQuestionRunRevision = resolveStoredActiveQuestionRunRevision(rawWatermark.activeQuestionRunRevision)
+    if (activeQuestionRunRevision === undefined) {
+      continue
+    }
+
+    watermarks[key] = {
+      activeQuestionRunRevision,
+      editSequence: resolveEditSequence(rawWatermark.editSequence),
+      draftSendSequence: resolveEditSequence(rawWatermark.draftSendSequence),
+    }
+  }
+
+  return watermarks
+}
+
 function normalizeSharedResponseReactions(value: unknown): Record<string, number> {
   if (!isPlainObject(value)) {
     return {}
@@ -1131,6 +1169,7 @@ function normalizeSessionData(data: unknown): ResonanceSessionData {
     students: isPlainObject(source.students) ? (source.students as Record<string, Student>) : {},
     responses: normalizeStoredResponses(source.responses, questions),
     responseDrafts: normalizeResponseDrafts(source.responseDrafts, questions),
+    draftOrderingWatermarks: normalizeDraftOrderingWatermarks(source.draftOrderingWatermarks),
     annotations: isPlainObject(source.annotations)
       ? (source.annotations as Record<string, InstructorAnnotation>)
       : {},
@@ -3275,14 +3314,24 @@ export default function setupResonanceRoutes(
         // project-wide atomic-session-mutation effort tracked in #313 and is
         // out of scope here; this guard narrows the window (closing the
         // sequential-completion case entirely) without claiming to close it.
+        // This guard alone only protects a write while its prior draft
+        // record still exists: a newer `answer: null` clear deletes
+        // `responseDrafts[draftKey]` outright, so a delayed *older*,
+        // still-in-flight non-null write that finishes processing after it
+        // would otherwise see `existingDraft === undefined`, bypass this
+        // check entirely, and resurrect the stale draft the clear had
+        // already superseded. `draftOrderingWatermarks[draftKey]` exists to
+        // outlive exactly that deletion: every accepted write or clear below
+        // updates it to that write's ordering key, so the ordering
+        // comparison always has a floor to check against regardless of
+        // whether the draft itself is still present.
         const existingDraft = session.data.responseDrafts[draftKey]
-        const existingDraftEditSequence = existingDraft?.editSequence ?? 0
-        const existingDraftSendSequence = existingDraft?.draftSendSequence ?? 0
-        const isStaleDraftWrite = existingDraft !== undefined &&
-          existingDraft.activeQuestionRunRevision === session.data.activeQuestionRunRevision &&
+        const orderingWatermark = session.data.draftOrderingWatermarks[draftKey]
+        const isStaleDraftWrite = orderingWatermark !== undefined &&
+          orderingWatermark.activeQuestionRunRevision === session.data.activeQuestionRunRevision &&
           (
-            editSequence < existingDraftEditSequence ||
-            (editSequence === existingDraftEditSequence && draftSendSequence < existingDraftSendSequence)
+            editSequence < orderingWatermark.editSequence ||
+            (editSequence === orderingWatermark.editSequence && draftSendSequence < orderingWatermark.draftSendSequence)
           )
 
         if (isStaleDraftWrite) {
@@ -3311,12 +3360,30 @@ export default function setupResonanceRoutes(
           return
         }
 
+        // Every accepted write, clear included, moves this key's ordering
+        // watermark forward — never deleted, unlike the draft record itself,
+        // so a later-arriving older write can still be recognized as stale
+        // even after whatever it would have clobbered is long gone.
+        session.data.draftOrderingWatermarks[draftKey] = {
+          activeQuestionRunRevision: session.data.activeQuestionRunRevision,
+          editSequence,
+          draftSendSequence,
+        }
+
         if (intendedAnswer === null) {
           if (draftKey in session.data.responseDrafts) {
             delete session.data.responseDrafts[draftKey]
             await sessions.set(sessionId, session)
             broadcastToRole('resonance:instructor-state', buildInstructorSnapshot(session), sessionId, true)
           }
+          // When there was nothing to delete, the watermark bump above is
+          // never persisted (this function returns without calling
+          // `sessions.set`) — deliberately: the only case that needs a
+          // floor here is exactly the one above, where a draft this clear
+          // actually removed could otherwise be resurrected by a delayed
+          // older write. With nothing removed, there is nothing left for
+          // such a write to resurrect.
+          //
           // Ack even when the draft was already absent, so a retried clear is
           // idempotent instead of timing out and being reported as a failed save.
           if (draftId !== null) {
