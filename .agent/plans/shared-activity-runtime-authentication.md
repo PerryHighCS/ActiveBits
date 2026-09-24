@@ -1,5 +1,59 @@
 # Shared Activity Runtime and Authentication Plan
 
+## Near-term delivery sequence (2026-09-24)
+
+This sequence coordinates [#352](https://github.com/PerryHighCS/ActiveBits/issues/352), [#383](https://github.com/PerryHighCS/ActiveBits/issues/383), [#344](https://github.com/PerryHighCS/ActiveBits/issues/344), and [#353](https://github.com/PerryHighCS/ActiveBits/issues/353). Keep each phase independently reviewable. [#313](https://github.com/PerryHighCS/ActiveBits/issues/313) owns the broader atomic session-write migration and follows as a separate workstream; shared entry and lifecycle writes touched here must still use its safe mutation contract.
+
+### Contract and observed failure
+
+**Owner:** The shared entry and principal layer decides whether a session-scoped student may enter an activity; the activity owns its student record and private state. **Invariant:** A public waiting-room request cannot claim an arbitrary participant ID. An accepted, registered student with a valid server-issued principal can reload into the same student ID. An explicit fresh join in a shared browser can create a different student. A consumed one-time handoff cannot issue a second capability. **Failure behavior:** Missing, expired, wrong-session, or revoked authority returns to normal waiting-room acceptance or a controlled authorization error; it never silently adopts a local-storage ID or an old browser user's capability.
+
+The #383 browser report had a deterministic path: Resonance registration revokes `acceptedEntryParticipants[studentId]` after issuing an activity participant capability. Previously, `GET /api/session/:id/entry` checked only the revoked accepted-entry token, so it omitted `participantAuthenticated` and the router showed the waiting room. The subsequent join minted a new ID. The first Phase A slice now recognizes a valid registered capability at `/entry` and covers the saved-draft reload in Chromium. This did not require a stale session write to explain the observed reload, although #313 races remain possible. #352's untrusted supplied-ID path remains open and must be closed before treating a waiting-room ID as authority.
+
+### Phase A: Secure student entry and restore reload identity (#352, #383)
+
+- [x] Restore `/entry` recognition of a valid registered participant capability and prove Resonance's saved-draft reload retains its student ID (#383 first slice).
+- [ ] Map standalone, persistent, and SyncDeck embedded entry paths and record which server-issued proof may carry an existing participant ID. Decide the shared authority rule once; do not add an activity-specific exception in the shared router.
+- [ ] Reject or ignore caller-supplied `participantId` on public entry routes. Preserve SyncDeck parent-to-child identity only through a child-scoped, server-authorized handoff, including the parent-roster and session-incarnation checks. Keep display names as hints, not identity proof.
+- [ ] Give the shared `/entry` decision a generic way to recognize a valid registered student principal after its one-time handoff is consumed. Make the accepted-entry-to-registered transition explicit and retry-safe. A registered capability must remain bound to its session and subject; explicit new entry must supersede a stale shared-browser capability without allowing replay of the old handoff.
+- [ ] Align Resonance registration with that transition, preserving its capability-backed `/state` and WebSocket authorization. Ensure a same-session reload reuses the student ID and reaches the saved drafts/submissions; cookie loss follows the intentional new-entry path.
+- [ ] Add a decision table for fresh join, same-browser reload, cookie loss/expiry, wrong-session token, forged ID, replayed handoff, shared-browser second student, and embedded child handoff. Cover the contract with route tests and a real-browser Resonance draft/save/reload test. Add at least one other activity to the browser probe to confirm the shared behavior.
+- [ ] Update the authoritative student-entry contract in `ARCHITECTURE.md`, `.agent/knowledge/data-contracts.md`, and `.agent/knowledge/security-notes.md` when implemented.
+
+**Exit gate:** A valid registered student reloads under the same server-authorized ID; a new or unauthorized visitor cannot claim that ID; SyncDeck embedded identity continuity still works.
+
+### Phase B: Establish the temporary manager contract (#344)
+
+- [ ] Reconcile #344's old stacked-on-#342 delivery note with the current branch/PR state; implement this as a focused successor rather than depending on the unmerged audit branch.
+- [ ] Define and apply a generic temporary-session creator capability at creation, verified for manager REST and WebSocket access. Preserve zero-prompt instructor startup, cookie-backed reload, and the existing verified persistent and embedded manager adapters. Never place instructor passcodes or manager credentials in browser storage.
+- [ ] Prove the contract on one representative activity, using Java Format's existing capability work where appropriate. Pair its manager-route migration with Phase C before treating the activity as fully protected.
+- [ ] Test forged `role=manager`, absent/expired/wrong-session cookie, shared-browser student/manager tabs, persistent and embedded recovery, and browser reload for the pilot.
+
+**Exit gate:** The shared contract and one pilot derive manager REST and WebSocket authority from the same server-verifiable principal. Its shared End Session path remains an explicit Phase C gate.
+
+### Phase C: Protect shared session termination (#353)
+
+- [ ] Extend the shared HTTP principal contract to `DELETE /api/session/:sessionId` and any equivalent end-session path, with an activity-agnostic policy declaration. Gate each migrated activity's End Session with the same manager principal as its other manager routes. Avoid a one-off Java Format branch or a blanket change that breaks unmigrated activities.
+- [ ] Check the session type and incarnation inside the authorized termination boundary, and ensure denial has no delete or broadcast side effect.
+- [ ] Add route and browser tests for authorized end, known-ID unauthenticated delete, student cookie, wrong-session manager cookie, expired manager cookie, and embedded parent-controlled end. Document the lifecycle authorization rule.
+
+**Exit gate:** A known session ID alone cannot end the pilot activity; the legitimate manager and parent-owned embedded lifecycle still work. Apply this gate with each subsequent manager migration.
+
+### Phase D: Roll out manager protection in reviewable slices (#344, #353)
+
+- [ ] Complete or verify Python List, Binary Breach, Java String, Java Format, and Traveling Salesman against the Phase B manager contract; keep activity-specific domain commands inside each activity.
+- [ ] For each activity, protect manager REST, manager WebSocket, and shared End Session in the same slice. Include temporary, persistent, embedded, and reload paths that activity supports.
+- [ ] Add the Phase B/C authorization matrix and browser smoke coverage for each slice before marking that activity complete.
+
+**Exit gate:** Every activity named in #344 has consistent manager authority across its control surfaces, including session termination.
+
+### Phase E: Complete atomic session-write migration (#313)
+
+- [ ] Use #313's writer inventory to migrate complete session-type writer sets, including the shared entry/consume and lifecycle routes changed above. Do not mix plain `set()` and atomic writers for one session type.
+- [ ] Verify overlapping entry, registration, manager, and end-session operations against the chosen in-memory and Valkey stores. Preserve session-incarnation, TTL, and cache behavior.
+
+**Exit gate:** The identity and authorization guarantees from Phases A–D survive concurrent writers and scale-out; #313 retains the detailed project-wide checklist.
+
 ## Status
 
 - [x] Recognize the repository-wide architecture problem exposed by issue #341 and PR #342.

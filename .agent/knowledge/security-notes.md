@@ -15,6 +15,15 @@ Track security-relevant boundaries, risks, and mitigation decisions.
 
 ## Notes
 
+- Date: 2026-09-24
+- Area: shared live-session entry after activity registration
+- Threat or risk: Resonance revoked its one-time accepted-entry token after issuing a participant capability, but shared `/entry` checked only the revoked token. Reloading therefore returned a valid student to the waiting room and a new join orphaned work under a new ID.
+- Control or mitigation: Shared `/entry` also recognizes a valid session-scoped participant capability. The browser's stored student ID remains a hint; the capability is verified against the session record before bypassing the waiting room.
+- Residual risk: #352 still allows a public waiting-room caller to supply a participant ID; SyncDeck embedded handoffs need a separate trusted path. Do not close Phase A until that is fixed.
+- Validation (test/review/path): `server/sessionEntryRoutes.test.ts`; `activities/resonance/playwright/auth.spec.ts`.
+- Follow-up action: Complete #352 and the rest of Phase A in `.agent/plans/shared-activity-runtime-authentication.md`.
+- Owner: Codex
+
 - Date: 2026-09-13
 - Area: Resonance student WebSocket lifecycle (`activities/resonance/client/hooks/useResonanceSession.ts`)
 - Threat or risk: The WS effect guarded every socket handler with a shared `mountedRef` that the *next* effect run resets to `true` at the top of its own body. When the session/student identity changed (e.g. a new student registering in the same tab, or a SyncDeck embedded re-launch), a message already in flight on the *old* socket could be dispatched after the new effect had already reset `mountedRef` and pointed `wsRef.current` at the new socket. The stale handler's `!mountedRef.current` check no longer blocked it, so the old identity's queued `resonance:session-state` payload (another participant's retained answers/state) could be applied under the new identity — CWE-200 exposure of sensitive information to an unauthorized actor, found by CodeRabbit's security scan on PR #372.

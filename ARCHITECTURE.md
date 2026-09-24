@@ -83,6 +83,14 @@ session.
 5. Student is shown the appropriate activity component
 6. Student interacts with the activity
 
+The live-session `/entry` response recognizes either a valid accepted-entry
+cookie or a session-scoped registered participant capability. An activity may
+consume and revoke the accepted-entry token when it registers the student; its
+registered capability then carries the same student's authority across a page
+reload. Local browser storage is only an identity hint for the activity client,
+not proof of student authority. The public waiting-room supplied-ID weakness is
+tracked separately in #352.
+
 For live MobCode sessions, the instructor workspace remains `groups.default`. Newly initialized sessions broadcast instructor changes by default unless they begin with Try it enabled. When the instructor enables Try it, MobCode creates one private, server-backed workspace per accepted waiting-room participant from an explicit starter snapshot. The instructor controls whether their code is broadcast live or students keep the last published version. Student responses are participant-scoped and never include peer names or files; instructors may inspect named workspaces and publish one anonymous shared copy that they can edit and broadcast to the class in real time.
 
 ### Session Lifecycle

@@ -23,6 +23,7 @@ import {
   issueAcceptedEntryParticipantToken,
   resolveAcceptedEntryParticipantToken,
 } from './acceptedEntryParticipants.js'
+import { resolveActivityPrincipalFromCookies } from './activityCapabilities.js'
 import { consumeSessionDataToken } from './sessionTokenUtils.js'
 
 export interface SessionRecord extends SharedSession<Record<string, unknown>> {
@@ -679,10 +680,15 @@ export function setupSessionRoutes(app: {
 
     const activityName = typeof session.type === 'string' ? session.type : ''
     const waitingRoomFieldCount = activityName ? getActivityWaitingRoomFieldCount(activityName) : 0
-    const participantAuthenticated = Boolean(resolveAcceptedEntryParticipantToken(
-      session,
-      req.cookies?.[getSessionParticipantCookieName(sessionId)],
-    ))
+    // The accepted-entry cookie is a one-time registration handoff. Activities
+    // that issue a participant capability may revoke it after registration;
+    // that registered principal must still be able to reload the live session.
+    const participantAuthenticated = Boolean(
+      resolveAcceptedEntryParticipantToken(
+        session,
+        req.cookies?.[getSessionParticipantCookieName(sessionId)],
+      ) || resolveActivityPrincipalFromCookies(session, sessionId, 'participant', req.cookies),
+    )
     const payload = {
       ...buildSessionEntryStatus({
         sessionId,

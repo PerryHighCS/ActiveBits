@@ -52,6 +52,63 @@ test('Resonance binds student REST and WebSocket identity to an httpOnly capabil
   await context.close()
 })
 
+test('Resonance reload keeps the registered student and its saved draft (#383)', async ({ browser }) => {
+  test.skip(test.info().project.name !== 'chromium', 'WebKit request contexts do not retain Set-Cookie responses in this harness.')
+  const context = await browser.newContext()
+  const page = await context.newPage()
+  const created = await page.request.post('/api/resonance/create', { data: {} })
+  expect(created.ok()).toBe(true)
+  const { id: sessionId, instructorPasscode } = await created.json() as {
+    id: string
+    instructorPasscode: string
+  }
+  const base = `/api/resonance/${encodeURIComponent(sessionId)}`
+  const headers = { 'x-instructor-passcode': instructorPasscode }
+  expect((await page.request.post(`${base}/add-question`, {
+    headers,
+    data: { id: 'q1', type: 'free-response', text: 'Reload draft question', order: 0 },
+  })).ok()).toBe(true)
+  expect((await page.request.post(`${base}/activate-question`, {
+    headers,
+    data: { questionId: 'q1' },
+  })).ok()).toBe(true)
+
+  await page.goto(`/${encodeURIComponent(sessionId)}`)
+  await page.getByLabel('Your name *').fill('Ada')
+  await page.getByRole('button', { name: 'Join Session' }).click()
+  await expect(page.getByLabel('Your answer')).toBeVisible()
+  const studentId = await page.evaluate((id) => {
+    const raw = localStorage.getItem(`session-participant:${id}`)
+    return raw ? (JSON.parse(raw) as { studentId?: string }).studentId : undefined
+  }, sessionId)
+  expect(studentId).toBeTruthy()
+
+  await page.getByLabel('Your answer').fill('Saved before reload')
+  await expect.poll(async () => {
+    return page.evaluate(async ({ url, id }) => {
+      const response = await fetch(`${url}/state?studentId=${encodeURIComponent(id)}`)
+      if (!response.ok) return null
+      const state = await response.json() as { draftAnswers?: Record<string, { text?: string }> }
+      return state.draftAnswers?.q1?.text ?? null
+    }, { url: base, id: studentId! })
+  }).toBe('Saved before reload')
+
+  const entryAuthenticated = await page.evaluate(async (id) => {
+    const response = await fetch(`/api/session/${encodeURIComponent(id)}/entry`)
+    return (await response.json() as { participantAuthenticated?: boolean }).participantAuthenticated
+  }, sessionId)
+  expect(entryAuthenticated).toBe(true)
+  await page.reload()
+  await expect(page.getByLabel('Your answer')).toHaveValue('Saved before reload')
+  await expect(page.getByRole('button', { name: 'Join Session' })).toHaveCount(0)
+  const reloadedStudentId = await page.evaluate((id) => {
+    const raw = localStorage.getItem(`session-participant:${id}`)
+    return raw ? (JSON.parse(raw) as { studentId?: string }).studentId : undefined
+  }, sessionId)
+  expect(reloadedStudentId).toBe(studentId)
+  await context.close()
+})
+
 test('Resonance replaces a restored direct-entry identity after its capability is lost', async ({ browser }) => {
   test.skip(test.info().project.name !== 'chromium', 'WebKit request contexts do not retain Set-Cookie responses in this harness.')
   const context = await browser.newContext()

@@ -2,7 +2,14 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { initializeActivityRegistry } from './activities/activityRegistry.js'
 import { EMBEDDED_CHILD_SESSION_PREFIX, setupSessionRoutes, type SessionRecord } from './core/sessions.js'
-import { resolveAcceptedEntryParticipantToken } from './core/acceptedEntryParticipants.js'
+import {
+  acceptEntryParticipant,
+  getSessionParticipantCookieName,
+  issueAcceptedEntryParticipantToken,
+  revokeAcceptedEntryParticipant,
+  resolveAcceptedEntryParticipantToken,
+} from './core/acceptedEntryParticipants.js'
+import { getActivityCapabilityCookieName, issueActivityCapability } from './core/activityCapabilities.js'
 
 interface MockResponse {
   statusCode: number
@@ -141,6 +148,58 @@ void test('session entry route returns render-ui for activities with waiting-roo
     entryOutcome: 'join-live',
     presentationMode: 'render-ui',
   })
+})
+
+void test('session entry recognizes a registered participant after its one-time handoff is revoked', async () => {
+  await initializeActivityRegistry()
+  const session = createSessionRecord('resonance-reload', 'resonance')
+  acceptEntryParticipant(session, { participantId: 'student-1', displayName: 'Ada' })
+  const acceptedToken = issueAcceptedEntryParticipantToken(session, 'student-1')
+  const capability = issueActivityCapability(session, 'participant', 'student-1')
+  assert.ok(acceptedToken)
+  const acceptedCookieName = getSessionParticipantCookieName(session.id)
+  const capabilityCookieName = getActivityCapabilityCookieName('participant', session.id)
+  const otherSession = createSessionRecord('different-session', 'resonance')
+  const sessions = {
+    get: async (id: string) => id === session.id ? session : id === otherSession.id ? otherSession : null,
+    set: async () => {},
+    delete: async () => true,
+    touch: async () => true,
+    getAll: async () => [],
+    getAllIds: async () => [],
+    cleanup: () => {},
+    close: async () => {},
+  }
+  const app = createMockApp()
+  setupSessionRoutes(app as unknown as Parameters<typeof setupSessionRoutes>[0], sessions)
+  const entry = getRoute(app, 'get', '/api/session/:sessionId/entry')
+
+  const cases = [
+    { label: 'accepted handoff', cookies: { [acceptedCookieName]: acceptedToken }, authenticated: true },
+    { label: 'registered capability', cookies: { [capabilityCookieName]: capability.token }, authenticated: true },
+    { label: 'forged capability', cookies: { [capabilityCookieName]: 'forged' }, authenticated: false },
+    { label: 'no cookie', cookies: {}, authenticated: false },
+  ]
+  for (const candidate of cases) {
+    const response = createMockResponse()
+    await entry({ params: { sessionId: session.id }, cookies: candidate.cookies }, response)
+    assert.equal(response.jsonBody?.participantAuthenticated === true, candidate.authenticated, candidate.label)
+  }
+
+  revokeAcceptedEntryParticipant(session, 'student-1')
+  const revokedResponse = createMockResponse()
+  await entry({
+    params: { sessionId: session.id },
+    cookies: { [acceptedCookieName]: acceptedToken, [capabilityCookieName]: capability.token },
+  }, revokedResponse)
+  assert.equal(revokedResponse.jsonBody?.participantAuthenticated, true)
+
+  const wrongSessionResponse = createMockResponse()
+  await entry({
+    params: { sessionId: otherSession.id },
+    cookies: { [capabilityCookieName]: capability.token },
+  }, wrongSessionResponse)
+  assert.equal(wrongSessionResponse.jsonBody?.participantAuthenticated, undefined)
 })
 
 void test('session entry route returns pass-through for activities without waiting-room fields', async () => {

@@ -1,5 +1,13 @@
 # Data Contracts
 
+## Registered participant reload at shared entry
+
+- Date: 2026-09-24
+- Area: shared live-session entry | Resonance student recovery
+- Contract: `GET /api/session/:id/entry` reports `participantAuthenticated: true` for either a valid accepted-entry cookie or a valid session-scoped registered participant capability. Resonance consumes and revokes its accepted-entry record during registration; the registered capability remains the server authority for reloading the same student ID. Browser-stored student IDs are hints and cannot grant activity access.
+- Validation: `server/sessionEntryRoutes.test.ts`; `activities/resonance/playwright/auth.spec.ts` (saved draft survives a real-browser reload).
+- Follow-up: #352 must remove public supplied-ID trust; #313 must protect concurrent whole-session writers.
+
 ## MobCode live-session defaults
 
 - Date: 2026-08-19
