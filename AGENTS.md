@@ -42,7 +42,8 @@ Before making changes, read these files when relevant:
      when no relevant active plan exists. Promote the final contract to `ARCHITECTURE.md`
      or `.agent/knowledge/data-contracts.md` when future changes must preserve it.
 16. If three or more review rounds on the same PR expose related defects, stop and perform root-cause analysis against the relevant contract rather than continuing to patch symptoms.
- 
+17. Resonance has no legacy-session migration requirement: it is a single-operator deployment with a direct cutover, and no pre-existing session data needs to be read by new code. Do not add legacy-shape fallbacks, dual-representation identity bridges, or "what if an old client/session sends the old shape" branches to Resonance. If a past design decision seems to require one, treat that as a signal to simplify the design rather than to add a compatibility path.
+
 ## Preflight Checklist
 
 Before making code changes:

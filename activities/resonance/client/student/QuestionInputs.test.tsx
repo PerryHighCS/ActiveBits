@@ -164,7 +164,7 @@ void test('submitted inputs render the provided submitted message consistently',
   }
 })
 
-void test('QuestionView waits for REST confirmation when draft websocket messaging is available', async () => {
+void test('QuestionView submits an answer via REST and reports it to the parent', async () => {
   const restoreDomEnvironment = installDomEnvironment()
   const previousFetch = globalThis.fetch
   const { fireEvent, render, waitFor } = await import('@testing-library/react')
@@ -177,7 +177,6 @@ void test('QuestionView waits for REST confirmation when draft websocket messagi
     }) as typeof fetch
 
     const submitted: Array<{ questionId: string; answer: { type: string; text?: string } }> = []
-    const wsMessages: Array<{ type: string; payload: unknown }> = []
 
     const rendered = render(
       React.createElement(QuestionView, {
@@ -189,11 +188,7 @@ void test('QuestionView waits for REST confirmation when draft websocket messagi
         },
         sessionId: 'session-1',
         studentId: 'student-1',
-        activeQuestionRunStartedAt: 1_000,
-        sendMessage: (type: string, payload: unknown) => {
-          wsMessages.push({ type, payload })
-          return true
-        },
+        activeQuestionRunRevision: 1,
         onSubmitted: (questionId, answer) => {
           submitted.push({ questionId, answer })
         },
@@ -206,11 +201,10 @@ void test('QuestionView waits for REST confirmation when draft websocket messagi
 
     await waitFor(() => assert.equal(submitted.length, 1))
 
-    assert.deepEqual(wsMessages, [])
     assert.deepEqual(submittedBody, {
       studentId: 'student-1',
       questionId: 'q1',
-      activeQuestionRunStartedAt: 1_000,
+      activeQuestionRunRevision: 1,
       editSequence: 1,
       answer: { type: 'free-response', text: 'Fast path answer' },
     })
@@ -250,7 +244,7 @@ void test('QuestionView sends whatever editSequence prop it is given, rather tha
         },
         sessionId: 'session-1',
         studentId: 'student-1',
-        activeQuestionRunStartedAt: 1_000,
+        activeQuestionRunRevision: 1,
         editSequence: 3,
         onSubmitted: (questionId, answer) => {
           submitted.push({ questionId, answer })
@@ -267,7 +261,7 @@ void test('QuestionView sends whatever editSequence prop it is given, rather tha
     assert.deepEqual(submittedBody, {
       studentId: 'student-1',
       questionId: 'q1',
-      activeQuestionRunStartedAt: 1_000,
+      activeQuestionRunRevision: 1,
       editSequence: 3,
       answer: { type: 'free-response', text: 'Revisited answer' },
     })
@@ -300,9 +294,8 @@ void test('QuestionView does not duplicate a manual submission when the question
       question,
       sessionId: 'session-1',
       studentId: 'student-1',
-      activeQuestionRunStartedAt: 1_000,
+      activeQuestionRunRevision: 1,
       disabled,
-      sendMessage: () => false,
       onSubmitted: (_questionId, answer) => submitted.push(answer),
     })
     const rendered = render(renderQuestion(false))
@@ -338,20 +331,19 @@ void test('QuestionView ignores a stale REST submission after a new run starts',
     })) as typeof fetch
 
     const question = { id: 'q1', type: 'free-response' as const, text: 'Explain.', order: 0 }
-    const renderQuestion = (activeQuestionRunStartedAt: number) => React.createElement(QuestionView, {
+    const renderQuestion = (activeQuestionRunRevision: number) => React.createElement(QuestionView, {
       question,
       sessionId: 'session-1',
       studentId: 'student-1',
-      activeQuestionRunStartedAt,
-      sendMessage: () => false,
+      activeQuestionRunRevision,
       onSubmitted: (_questionId, answer) => submitted.push(answer),
     })
-    const rendered = render(renderQuestion(1_000))
+    const rendered = render(renderQuestion(1))
     fireEvent.change(rendered.getByLabelText(/your answer/i), { target: { value: 'Earlier run answer' } })
     fireEvent.click(rendered.getByRole('button', { name: /submit answer/i }))
     await waitFor(() => assert.ok(deferredFetch.resolve))
 
-    rendered.rerender(renderQuestion(2_000))
+    rendered.rerender(renderQuestion(2))
     deferredFetch.resolve?.({ ok: true, json: async () => ({ ok: true }) } as Response)
     await waitFor(() => assert.deepEqual(submitted, []))
     rendered.unmount()
@@ -378,8 +370,7 @@ void test('QuestionView ignores a REST submission after its session identity cha
       question,
       sessionId,
       studentId,
-      activeQuestionRunStartedAt: null,
-      sendMessage: () => false,
+      activeQuestionRunRevision: null,
       onSubmitted: (_questionId, answer) => submitted.push(answer),
     })
     const rendered = render(renderQuestion('session-1', 'student-1'))
@@ -413,9 +404,8 @@ void test('QuestionView preserves a student draft when a same-run session update
         question,
         sessionId: 'session-1',
         studentId: 'student-1',
-        activeQuestionRunStartedAt: 2_000,
+        activeQuestionRunRevision: 2,
         initialAnswer: null,
-        sendMessage: () => true,
       }),
     )
 
@@ -427,9 +417,8 @@ void test('QuestionView preserves a student draft when a same-run session update
         question,
         sessionId: 'session-1',
         studentId: 'student-1',
-        activeQuestionRunStartedAt: 2_000,
+        activeQuestionRunRevision: 2,
         initialAnswer: { type: 'free-response', text: 'Earlier run answer' },
-        sendMessage: () => true,
       }),
     )
 
@@ -459,9 +448,8 @@ void test('QuestionView syncs a same-run session answer when the local draft is 
         question,
         sessionId: 'session-1',
         studentId: 'student-1',
-        activeQuestionRunStartedAt: 2_000,
+        activeQuestionRunRevision: 2,
         initialAnswer: null,
-        sendMessage: () => true,
       }),
     )
 
@@ -470,9 +458,8 @@ void test('QuestionView syncs a same-run session answer when the local draft is 
         question,
         sessionId: 'session-1',
         studentId: 'student-1',
-        activeQuestionRunStartedAt: 2_000,
+        activeQuestionRunRevision: 2,
         initialAnswer: { type: 'free-response', text: 'Submitted from another device' },
-        sendMessage: () => true,
       }),
     )
 
@@ -483,275 +470,6 @@ void test('QuestionView syncs a same-run session answer when the local draft is 
       )
     })
 
-    rendered.unmount()
-  } finally {
-    restoreDomEnvironment()
-  }
-})
-
-void test('QuestionView does not flush an unsent draft after the question run changes', async () => {
-  const restoreDomEnvironment = installDomEnvironment()
-  const { fireEvent, render, waitFor } = await import('@testing-library/react')
-
-  try {
-    const sentDrafts: unknown[] = []
-    const question = {
-      id: 'q1',
-      type: 'free-response' as const,
-      text: 'Explain your reasoning.',
-      order: 0,
-    }
-    const sendMessage = (type: string, payload: unknown) => {
-      if (type === 'resonance:update-draft') {
-        sentDrafts.push(payload)
-      }
-      return true
-    }
-    const rendered = render(
-      React.createElement(QuestionView, {
-        question,
-        sessionId: 'session-1',
-        studentId: 'student-1',
-        activeQuestionRunStartedAt: 1_000,
-        sendMessage,
-      }),
-    )
-
-    fireEvent.change(rendered.getByLabelText(/your answer/i), {
-      target: { value: 'Draft from the earlier run' },
-    })
-    rendered.rerender(
-      React.createElement(QuestionView, {
-        question,
-        sessionId: 'session-1',
-        studentId: 'student-1',
-        activeQuestionRunStartedAt: 2_000,
-        sendMessage,
-      }),
-    )
-
-    await waitFor(() => {
-      assert.deepEqual(sentDrafts, [])
-    })
-
-    rendered.unmount()
-  } finally {
-    restoreDomEnvironment()
-  }
-})
-
-void test('QuestionView keeps an unsent draft associated with its original question when switching questions', async () => {
-  const restoreDomEnvironment = installDomEnvironment()
-  const { fireEvent, render, waitFor } = await import('@testing-library/react')
-
-  try {
-    const sentDrafts: Array<{ questionId: string; answer: unknown }> = []
-    const firstQuestion = {
-      id: 'q1',
-      type: 'free-response' as const,
-      text: 'First question',
-      order: 0,
-    }
-    const secondQuestion = {
-      id: 'q2',
-      type: 'free-response' as const,
-      text: 'Second question',
-      order: 1,
-    }
-    const sendMessage = (type: string, payload: unknown) => {
-      if (type === 'resonance:update-draft') {
-        sentDrafts.push(payload as { questionId: string; answer: unknown })
-      }
-      return true
-    }
-    const renderQuestion = (question: typeof firstQuestion) => React.createElement(QuestionView, {
-      key: question.id,
-      question,
-      sessionId: 'session-1',
-      studentId: 'student-1',
-      activeQuestionRunStartedAt: 1_000,
-      sendMessage,
-    })
-    const rendered = render(renderQuestion(firstQuestion))
-
-    fireEvent.change(rendered.getByLabelText(/your answer/i), {
-      target: { value: 'Draft for the first question' },
-    })
-    rendered.rerender(renderQuestion(secondQuestion))
-
-    await waitFor(() => {
-      assert.deepEqual(sentDrafts, [{
-        studentId: 'student-1',
-        questionId: 'q1',
-        activeQuestionRunStartedAt: 1_000,
-        editSequence: 1,
-        answer: { type: 'free-response', text: 'Draft for the first question' },
-      }])
-    })
-
-    rendered.unmount()
-  } finally {
-    restoreDomEnvironment()
-  }
-})
-
-void test('QuestionView discards a pending draft instead of sending it under a new identity', async () => {
-  const restoreDomEnvironment = installDomEnvironment()
-  const { fireEvent, render } = await import('@testing-library/react')
-
-  try {
-    const sentDrafts: Array<{ studentId: string; answer: unknown }> = []
-    const question = { id: 'q1', type: 'free-response' as const, text: 'Explain your reasoning.', order: 0 }
-    const sendMessage = (type: string, payload: unknown) => {
-      if (type === 'resonance:update-draft') {
-        sentDrafts.push(payload as { studentId: string; answer: unknown })
-      }
-      return true
-    }
-    const renderQuestion = (sessionId: string, studentId: string) => React.createElement(QuestionView, {
-      question,
-      sessionId,
-      studentId,
-      activeQuestionRunStartedAt: 1_000,
-      sendMessage,
-    })
-    const rendered = render(renderQuestion('session-1', 'student-1'))
-
-    fireEvent.change(rendered.getByLabelText(/your answer/i), {
-      target: { value: 'Draft under the old identity' },
-    })
-
-    // The participant capability is lost and recovered with a new identity
-    // while this edit is still debouncing. QuestionView isn't remounted for
-    // an identity change (it's keyed only by question id), so the same
-    // instance must discard the pending draft rather than send it under the
-    // new identity.
-    console.info('[TEST] a draft pending when identity changes must not be sent under the new identity')
-    rendered.rerender(renderQuestion('session-2', 'student-2'))
-
-    // Wait comfortably past the debounce delay (1500ms) to give a
-    // wrongly-sent draft every chance to appear.
-    await new Promise((resolve) => setTimeout(resolve, 1_800))
-    assert.deepEqual(sentDrafts, [])
-
-    rendered.unmount()
-  } finally {
-    restoreDomEnvironment()
-  }
-})
-
-void test('QuestionView flushes an edit made inside the final debounce window before the deadline', async () => {
-  const restoreDomEnvironment = installDomEnvironment()
-  const { fireEvent, render, waitFor } = await import('@testing-library/react')
-
-  try {
-    const sentDrafts: unknown[] = []
-    const question = {
-      id: 'q1',
-      type: 'free-response' as const,
-      text: 'Explain your reasoning.',
-      order: 0,
-    }
-    const rendered = render(
-      React.createElement(QuestionView, {
-        question,
-        sessionId: 'session-1',
-        studentId: 'student-1',
-        activeQuestionRunStartedAt: 1_000,
-        activeQuestionDeadlineAt: Date.now() + 300,
-        sendMessage: (type: string, payload: unknown) => {
-          if (type === 'resonance:update-draft') sentDrafts.push(payload)
-          return true
-        },
-      }),
-    )
-
-    fireEvent.change(rendered.getByLabelText(/your answer/i), {
-      target: { value: 'Last-second revision' },
-    })
-
-    await waitFor(() => assert.equal(sentDrafts.length, 1), { timeout: 1_000 })
-    assert.deepEqual(sentDrafts[0], {
-      studentId: 'student-1',
-      questionId: 'q1',
-      activeQuestionRunStartedAt: 1_000,
-      editSequence: 1,
-      answer: { type: 'free-response', text: 'Last-second revision' },
-    })
-    rendered.unmount()
-  } finally {
-    restoreDomEnvironment()
-  }
-})
-
-void test('QuestionView debounces rapid draft edits without flushing each replaced value', async () => {
-  const restoreDomEnvironment = installDomEnvironment()
-  const { fireEvent, render, waitFor } = await import('@testing-library/react')
-
-  try {
-    const sentDrafts: Array<{ answer?: unknown }> = []
-    const rendered = render(
-      React.createElement(QuestionView, {
-        question: { id: 'q1', type: 'free-response', text: 'Explain your reasoning.', order: 0 },
-        sessionId: 'session-1',
-        studentId: 'student-1',
-        activeQuestionRunStartedAt: 1_000,
-        sendMessage: (type: string, payload: unknown) => {
-          if (type === 'resonance:update-draft') sentDrafts.push(payload as { answer?: unknown })
-          return true
-        },
-      }),
-    )
-    const textarea = rendered.getByLabelText(/your answer/i)
-    fireEvent.change(textarea, { target: { value: 'First' } })
-    fireEvent.change(textarea, { target: { value: 'Final' } })
-
-    await waitFor(() => assert.equal(sentDrafts.length, 1), { timeout: 2_500 })
-    assert.deepEqual(sentDrafts[0]?.answer, { type: 'free-response', text: 'Final' })
-    rendered.unmount()
-  } finally {
-    restoreDomEnvironment()
-  }
-})
-
-void test('QuestionView reconciles an unacknowledged draft when the question expires', async () => {
-  const restoreDomEnvironment = installDomEnvironment()
-  const { fireEvent, render, waitFor } = await import('@testing-library/react')
-
-  try {
-    const question = {
-      id: 'q1',
-      type: 'free-response' as const,
-      text: 'Explain your reasoning.',
-      order: 0,
-    }
-    let unconfirmedCount = 0
-    let saveCount = 0
-    console.info('[TEST] QuestionView reconciliation: saveDraft is expected to report a failed save below')
-    const props = {
-      question,
-      sessionId: 'session-1',
-      studentId: 'student-1',
-      activeQuestionRunStartedAt: 1_000,
-      activeQuestionDeadlineAt: Date.now() + 300,
-      saveDraft: async () => {
-        saveCount += 1
-        return false
-      },
-      onDraftUnconfirmed: () => {
-        unconfirmedCount += 1
-      },
-    }
-    const rendered = render(React.createElement(QuestionView, props))
-
-    fireEvent.change(rendered.getByLabelText(/your answer/i), {
-      target: { value: 'Unacknowledged revision' },
-    })
-    await waitFor(() => assert.equal(saveCount, 1), { timeout: 1_000 })
-    assert.equal(unconfirmedCount, 0)
-
-    rendered.rerender(React.createElement(QuestionView, { ...props, disabled: true }))
-    await waitFor(() => assert.equal(unconfirmedCount, 1))
     rendered.unmount()
   } finally {
     restoreDomEnvironment()
@@ -776,9 +494,6 @@ void test('QuestionView shows only the stem for staged MCQs before choices are r
         },
         sessionId: 'session-1',
         studentId: 'student-1',
-        sendMessage: () => {
-          throw new Error('stem-only staged questions should not send drafts or submissions')
-        },
       }),
     )
 

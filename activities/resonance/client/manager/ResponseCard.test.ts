@@ -21,6 +21,7 @@ void test('ResponseCard renders drag, star, flag, and emoji controls in the lead
         studentId: 'student-1',
         studentName: 'Taylor',
         submittedAt: Date.now(),
+        activeQuestionRunRevision: null,
         answer: { type: 'free-response', text: 'Because it fits the pattern.' },
       },
       annotation: { starred: true, flagged: false, emoji: '🔥' },
