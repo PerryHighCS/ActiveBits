@@ -8,7 +8,7 @@ import { useResonanceSession } from '../hooks/useResonanceSession.js'
 import NameEntryForm from './NameEntryForm.js'
 import QuestionView, { isSameAnswer } from './QuestionView.js'
 import SharedResponseFeed from './SharedResponseFeed.js'
-import type { AnswerPayload } from '../../shared/types.js'
+import type { AnswerPayload, StudentSessionSnapshot } from '../../shared/types.js'
 
 interface RegisterResponse {
   studentId?: string
@@ -339,6 +339,42 @@ export function isDraftStillCurrentForRevision(params: {
   currentRunRevision: number | null
 }): boolean {
   return params.dirtyRunRevision === params.currentRunRevision
+}
+
+/**
+ * Which still-unconfirmed questions a deadline-reconciliation refresh()
+ * actually shows as resolved by the server, as opposed to merely producing
+ * an *accepted* snapshot. refresh() succeeding only means the fetched
+ * snapshot wasn't rejected as stale (see selectStudentSessionSnapshot in
+ * useResonanceSession.ts) — it says nothing about whether the server's own
+ * clock has crossed this run's deadline yet. If the client's clock runs
+ * ahead of the server's, the local isPastDeadline check that triggers
+ * refresh() can fire while the server hasn't finalized anything: the
+ * refetch returns the exact same still-active run, with the draft never
+ * persisted. Treating that as reconciled would wipe the student's local
+ * answer and stop retrying it even though the server would still accept it.
+ *
+ * A question only counts as resolved when the refreshed snapshot shows
+ * either that the run/deadline it belonged to has actually ended (the
+ * server's own expiry ran — see expireActiveQuestionRunIfNeeded in
+ * routes.ts, which clears activeQuestionRunRevision/activeQuestionDeadlineAt
+ * for a non-staged run) or that the server now holds a confirmed answer for
+ * it (a staged run's finalization instead leaves the run/deadline
+ * unchanged and only finalizes the individual draft into a response).
+ */
+export function selectServerFinalizedQuestionIds(params: {
+  refreshedSnapshot: StudentSessionSnapshot
+  reconciliationKey: { revision: number | null; deadlineAt: number | null }
+  questionIds: readonly string[]
+}): string[] {
+  const runStillActiveAtReconciliationKey =
+    params.refreshedSnapshot.activeQuestionRunRevision === params.reconciliationKey.revision &&
+    params.refreshedSnapshot.activeQuestionDeadlineAt === params.reconciliationKey.deadlineAt
+
+  return params.questionIds.filter((questionId) => {
+    if (!runStillActiveAtReconciliationKey) return true
+    return questionId in params.refreshedSnapshot.submittedAnswers
+  })
 }
 
 function formatRemainingTime(deadlineAt: number | null, now: number): string | null {
@@ -940,27 +976,43 @@ export default function ResonanceStudent() {
             if (!matchesReconciliationKey(inFlightReconciliationRef.current)) return
             inFlightReconciliationRef.current = null
             if (!succeeded) return
-            // Only now — once refresh() has actually pulled whatever the
-            // server finalized — stop trusting our own optimistic local
-            // value for a draft that never got confirmed before the
-            // deadline (the snapshot-merge effect above only lets the
-            // server's value win when there's no local entry) and mark this
-            // run's deadline reconciled. A failed refresh() must not do
-            // either: it would strand the client trusting a stale local
-            // value with no further reconciliation attempt for this run,
-            // since reconciledExpiryRef would already claim it's handled.
-            reconciledExpiryRef.current = reconciliationKey
+            const refreshedSnapshot = snapshotRef.current
+            if (refreshedSnapshot === null) return
+            // refresh() succeeding only means the fetched snapshot was
+            // accepted, not stale-rejected — it does not by itself prove the
+            // server's own clock has crossed this deadline (a client clock
+            // running ahead of the server's can trigger this refresh while
+            // the server still has the exact same run active). Only treat a
+            // question as reconciled once the refreshed snapshot itself
+            // shows the server has moved past it. See
+            // selectServerFinalizedQuestionIds.
+            const resolvedIds = selectServerFinalizedQuestionIds({
+              refreshedSnapshot,
+              reconciliationKey,
+              questionIds: questionIdsStillUnconfirmed,
+            })
+            if (resolvedIds.length === 0) return
+            // Only mark this run's deadline fully reconciled once every
+            // question it covered has resolved — otherwise a future tick
+            // must refresh() again to keep checking the still-unresolved
+            // ones. A failed refresh() must not mark it reconciled either:
+            // it would strand the client trusting a stale local value with
+            // no further reconciliation attempt for this run, since
+            // reconciledExpiryRef would already claim it's handled.
+            if (resolvedIds.length === questionIdsStillUnconfirmed.length) {
+              reconciledExpiryRef.current = reconciliationKey
+            }
             clearDraftTracking({
               draftState: questionDraftStateRef.current,
-              questionIds: questionIdsStillUnconfirmed,
+              questionIds: resolvedIds,
             })
             setSubmittedAnswers((current) => resetAnswersForRestartedQuestions({
               submittedAnswers: current,
-              questionIdsToReset: questionIdsStillUnconfirmed,
+              questionIdsToReset: resolvedIds,
             }))
             setAnswerReconciliationGeneration((current) => {
               const next = { ...current }
-              for (const questionId of questionIdsStillUnconfirmed) {
+              for (const questionId of resolvedIds) {
                 next[questionId] = (next[questionId] ?? 0) + 1
               }
               return next

@@ -2790,3 +2790,131 @@ void test('a failed deadline reconciliation refresh does not strand the client, 
     restore()
   }
 })
+
+void test('a deadline-reconciliation refresh that succeeds without the server having finalized anything does not discard the local answer', async () => {
+  // Copilot review of PR #381: refresh() resolving true only means the
+  // fetched snapshot was accepted (not stale-rejected) — it does not prove
+  // the server's own clock has actually crossed this run's deadline. If the
+  // client's clock runs ahead of the server's, the local isPastDeadline
+  // check can trigger a refresh while the server still has the exact same
+  // run/deadline active and no persisted draft. The old code treated any
+  // *successful* refresh as proof of reconciliation and immediately cleared
+  // the student's unconfirmed local answer and stopped retrying it — even
+  // though the server would still have accepted it. A question should only
+  // be treated as reconciled once the refreshed snapshot itself shows the
+  // server moved past it (the run/deadline changed, or a confirmed answer
+  // now exists for it).
+  const restore = installResonanceStudentTestEnvironment()
+  const { persistSessionParticipantIdentity } = await import(
+    '@src/components/common/entryParticipantIdentityUtils'
+  )
+  const { MemoryRouter, Route, Routes } = await import('react-router')
+  const { default: ResonanceStudent, DRAFT_RETRY_INTERVAL_MS } = await import('./ResonanceStudent.js')
+  const { act, render, waitFor, fireEvent } = await import('@testing-library/react')
+
+  persistSessionParticipantIdentity(window.localStorage, 'session-1', 'Ada', 'student-1')
+
+  const snapshot = buildSnapshot({
+    activeQuestions: [
+      { id: 'q1', type: 'free-response', text: 'Question one', order: 0 },
+    ],
+    activeQuestionIds: ['q1'],
+    activeQuestionRunStartedAt: Date.now(),
+    activeQuestionRunRevision: 1,
+    // Passes almost immediately, well before the retry interval's first
+    // tick, so the very first tick already sees the deadline as past on the
+    // client's (simulated fast) clock.
+    activeQuestionDeadlineAt: Date.now() + 100,
+  })
+
+  let stateFetchCount = 0
+  ;(globalThis as { fetch?: typeof fetch }).fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input)
+    if (url.includes('/register-student')) {
+      return { ok: true, json: async () => ({ studentId: 'student-1', name: 'Ada' }) } as Response
+    }
+    if (url.includes('/state')) {
+      stateFetchCount += 1
+      // Call 1: the initial mount fetch — succeeds normally.
+      if (stateFetchCount === 1) {
+        return { ok: true, json: async () => snapshot } as Response
+      }
+      // Call 2: the first deadline-reconciliation attempt. The server's own
+      // clock has not actually reached the deadline yet, so it returns the
+      // exact same still-active run with no confirmed answer — a *successful*
+      // fetch that proves nothing was finalized.
+      if (stateFetchCount === 2) {
+        return { ok: true, json: async () => snapshot } as Response
+      }
+      // Call 3+: the server has now genuinely finalized the run.
+      return {
+        ok: true,
+        json: async () => ({
+          ...snapshot,
+          activeQuestionRunRevision: null,
+          activeQuestionDeadlineAt: null,
+          lastActiveQuestionRunRevision: 1,
+          submittedAnswers: { q1: { type: 'free-response', text: 'Server-finalized answer' } },
+        }),
+      } as Response
+    }
+    throw new Error(`Unexpected fetch: ${url}`)
+  }) as typeof fetch
+
+  let rendered!: ReturnType<typeof render>
+  try {
+    await act(async () => {
+      rendered = render(
+        React.createElement(
+          MemoryRouter,
+          { initialEntries: ['/session-1'] },
+          React.createElement(
+            Routes,
+            null,
+            React.createElement(Route, { path: '/:sessionId', element: React.createElement(ResonanceStudent) }),
+          ),
+        ),
+      )
+      await Promise.resolve()
+    })
+
+    await waitFor(() => assert.equal(FakeWebSocket.instances.length, 1))
+    const socket = FakeWebSocket.instances[0]!
+    // Never auto-ack — this draft stays unconfirmed past its (client-observed) deadline.
+    socket.send = (message: string) => { socket.sent.push(JSON.parse(message)) }
+
+    console.info('[TEST] typing an answer that never gets acknowledged before the client-observed deadline passes')
+    await act(async () => {
+      fireEvent.change(rendered.getByLabelText(/your answer/i), { target: { value: 'Locally typed answer' } })
+    })
+
+    console.info('[TEST] the first reconciliation refresh succeeds but the server has not actually finalized anything')
+    await new Promise((resolve) => setTimeout(resolve, DRAFT_RETRY_INTERVAL_MS + 300))
+    assert.ok(stateFetchCount >= 2, `expected a reconciliation refresh attempt, got ${stateFetchCount} /state calls`)
+    assert.equal(
+      (rendered.getByLabelText(/your answer/i) as HTMLTextAreaElement).value,
+      'Locally typed answer',
+      'a refresh that reports the same unfinalized run must not discard the local value',
+    )
+
+    console.info('[TEST] a further retry tick re-reconciles instead of giving up')
+    await new Promise((resolve) => setTimeout(resolve, DRAFT_RETRY_INTERVAL_MS + 300))
+    // Confirms reconciledExpiryRef was not (incorrectly) set to this run's
+    // key after the first refresh — otherwise this run's deadline would
+    // never be checked again and the assertion below would never see the
+    // server's later finalized answer.
+    assert.ok(stateFetchCount >= 3, `expected a retried reconciliation refresh, got ${stateFetchCount} /state calls`)
+
+    console.info('[TEST] the server has now genuinely finalized the run')
+    await waitFor(() => assert.equal(
+      (rendered.getByLabelText(/your answer/i) as HTMLTextAreaElement).value,
+      'Server-finalized answer',
+      'once the refreshed snapshot actually shows the server moved past the deadline, the local value must be replaced',
+    ))
+  } finally {
+    await act(async () => {
+      rendered.unmount()
+    })
+    restore()
+  }
+})
