@@ -15,6 +15,15 @@ Capture reusable test setup patterns, common failure modes, and reliability guid
 
 ## Entries
 
+- Date: 2026-09-24
+- Scope: e2e | cookie-gated WebSocket | WebKit
+- Pattern: When Playwright runs the production server on local HTTP, a response's `Secure` cookie may not be sent by WebKit on `ws://`. For a browser test that needs the issued token, assert the consume response succeeded, read its `Set-Cookie` pair in the test runner, and install that same token with `context.addCookies` as a local, httpOnly, non-Secure cookie. Do not fabricate a token or weaken production cookie options.
+- Why it helps: Chromium's local Secure-cookie behavior can mask a WebKit failure that looks like rejected student admission.
+- Example (file/path): `activities/syncdeck/playwright/student-return.spec.ts`
+- Failure signal: The WebSocket closes with `missing-accepted-entry` while the test expected a connected student.
+- Follow-up action: Use this fixture only for local HTTP tests; real HTTPS deployment should retain Secure cookies.
+- Owner: Codex
+
 - Date: 2026-08-20
 - Scope: CI | GitHub Actions matrix
 - Pattern: Put a fixed-name gate job after a dynamically generated matrix job. Run it with `if: ${{ always() }}`, depend on the matrix job with `needs`, and fail unless `needs.<matrix-job>.result` is `success`. Configure the fixed gate name—not individual generated matrix checks—as the required GitHub status check.

@@ -395,18 +395,21 @@ function resolveAcceptedSyncDeckStudent(
   return findSyncDeckStudentById(session.data.students, accepted?.participantId ?? null)
 }
 
+function resolveSocketAcceptedSyncDeckParticipantId(
+  session: SyncDeckSession,
+  socket: SyncDeckSocket,
+): string | null {
+  const cookieName = getSessionParticipantCookieName(session.id)
+  const cookieHeader = socket.upgradeHeaders?.cookie
+  const token = readCookieValue(Array.isArray(cookieHeader) ? cookieHeader[0] : cookieHeader, cookieName)
+  return resolveAcceptedEntryParticipantToken(session, token)?.participantId ?? null
+}
+
 function resolveSocketAcceptedSyncDeckStudent(
   session: SyncDeckSession,
   socket: SyncDeckSocket,
 ): SyncDeckStudent | null {
-  const cookieName = getSessionParticipantCookieName(session.id)
-  const cookieHeader = socket.upgradeHeaders?.cookie
-  return resolveAcceptedSyncDeckStudent(session, {
-    [cookieName]: readCookieValue(
-      Array.isArray(cookieHeader) ? cookieHeader[0] : cookieHeader,
-      cookieName,
-    ),
-  })
+  return findSyncDeckStudentById(session.data.students, resolveSocketAcceptedSyncDeckParticipantId(session, socket))
 }
 
 function normalizeStudents(value: unknown): SyncDeckStudent[] {
@@ -2016,8 +2019,8 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
     }
 
     const studentId = normalizeStudentId(readStringField(req.body, 'studentId'))
-    const student = findSyncDeckStudentById(session.data.students, studentId)
-    if (student) {
+    const student = resolveAcceptedSyncDeckStudent(session, req.cookies)
+    if (student && student.studentId === studentId) {
       const response = res as unknown as JsonResponse
       const payload: SyncDeckEmbeddedEntryContextResponse = {
         resolvedRole: 'student',
@@ -2596,8 +2599,8 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       return
     }
 
-    const student = findSyncDeckStudentById(session.data.students, studentId)
-    if (!student) {
+    const student = resolveAcceptedSyncDeckStudent(session, req.cookies)
+    if (!student || student.studentId !== studentId) {
       res.status(403).json({ error: 'forbidden' })
       return
     }
@@ -2697,7 +2700,8 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
     const client = socket as SyncDeckSocket
     client.sessionId = query.get('sessionId')
     client.isInstructor = false
-    client.studentId = normalizeStudentId(query.get('studentId'))
+    const requestedStudentId = normalizeStudentId(query.get('studentId'))
+    client.studentId = null
 
     const sessionId = client.sessionId
     if (!sessionId) {
@@ -2760,14 +2764,16 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
         return
       }
 
-      if (!client.studentId) {
-        socket.close(1008, 'missing studentId')
+      const acceptedStudentId = resolveSocketAcceptedSyncDeckParticipantId(session, client)
+      if (!acceptedStudentId || (requestedStudentId && requestedStudentId !== acceptedStudentId)) {
+        console.warn(JSON.stringify({ activity: 'syncdeck', event: 'student-websocket-rejected', sessionId: session.id, reason: acceptedStudentId ? 'student-id-mismatch' : 'missing-accepted-entry' }))
+        socket.close(1008, 'forbidden')
         return
       }
 
       const connectedStudent = connectSyncDeckStudent(
         session,
-        client.studentId,
+        acceptedStudentId,
       )
       if (!connectedStudent) {
         socket.close(1008, 'unregistered student')

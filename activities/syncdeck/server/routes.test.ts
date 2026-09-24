@@ -443,6 +443,18 @@ class MockSocket implements ActiveBitsWebSocket {
   }
 }
 
+function acceptedStudentCookies(session: SessionRecord, studentId: string, displayName = 'Ada Lovelace'): Record<string, string> {
+  acceptEntryParticipant(session, { participantId: studentId, displayName })
+  const token = issueAcceptedEntryParticipantToken(session, studentId)
+  assert.ok(token)
+  return { [getSessionParticipantCookieName(session.id)]: token }
+}
+
+function authorizeStudentSocket(session: SessionRecord, socket: MockSocket, studentId: string, displayName = 'Ada Lovelace'): void {
+  const cookies = acceptedStudentCookies(session, studentId, displayName)
+  socket.upgradeHeaders = { cookie: Object.entries(cookies).map(([name, value]) => `${name}=${value}`).join('; ') }
+}
+
 function emitInstructorAuth(socket: MockSocket, instructorPasscode: string): void {
   socket.emit(
     'message',
@@ -548,6 +560,7 @@ void test('syncdeck websocket sends latest state snapshot to student on connect'
   assert.equal(typeof handler, 'function')
 
   const studentSocket = new MockSocket()
+  authorizeStudentSocket(state.store.s1!, studentSocket, 'student-1', 'Ada Lovelace')
   ws.wss.clients.add(studentSocket)
 
   handler?.(
@@ -664,7 +677,8 @@ void test('syncdeck websocket replays existing embedded activity starts to stude
   const untrustedStart = untrustedSocket.sent
     .map((entry) => JSON.parse(entry) as { payload?: Record<string, unknown> })
     .find((entry) => entry.payload?.type === 'embedded-activity-start')
-  assert.equal(untrustedStart?.payload?.entryParticipantToken, null)
+  assert.equal(untrustedStart, undefined)
+  assert.deepEqual(untrustedSocket.closeCalls, [{ code: 1008, reason: 'forbidden' }])
 })
 
 void test('syncdeck websocket closes duplicate student sockets for the same session participant', async () => {
@@ -695,6 +709,7 @@ void test('syncdeck websocket closes duplicate student sockets for the same sess
   existingSocket.sessionId = 's1'
   existingSocket.studentId = 'student-1'
   const replacementSocket = new MockSocket()
+  authorizeStudentSocket(state.store.s1!, replacementSocket, 'student-1', 'Ada Lovelace')
   ws.wss.clients.add(existingSocket)
   ws.wss.clients.add(replacementSocket)
 
@@ -713,7 +728,8 @@ void test('syncdeck websocket closes duplicate student sockets for the same sess
   assert.deepEqual(existingSocket.closeCalls, [{ code: 4000, reason: 'Replaced by new connection' }])
 })
 
-void test('syncdeck websocket rejects student connect without a registered studentId', async () => {
+void test('syncdeck websocket rejects student connect without an accepted-entry cookie', async () => {
+  console.info('[TEST] Expected student WebSocket admission rejection without an accepted-entry cookie.')
   const app = createMockApp()
   const ws = createMockWs()
   const state = createSessionStore({
@@ -738,7 +754,50 @@ void test('syncdeck websocket rejects student connect without a registered stude
   )
   await new Promise((resolve) => setTimeout(resolve, 0))
 
-  assert.deepEqual(studentSocket.closeCalls, [{ code: 1008, reason: 'unregistered student' }])
+  assert.deepEqual(studentSocket.closeCalls, [{ code: 1008, reason: 'forbidden' }])
+})
+
+void test('syncdeck websocket rejects a claimed student ID that differs from the accepted cookie', async () => {
+  console.info('[TEST] Expected student WebSocket admission rejection for a mismatched identity.')
+  const app = createMockApp()
+  const ws = createMockWs()
+  const state = createSessionStore({ s1: createSyncDeckSession('s1', 'teacher-pass') })
+  setupSyncDeckRoutes(app, state.sessions, ws)
+  const socket = new MockSocket()
+  authorizeStudentSocket(state.store.s1!, socket, 'student-1')
+
+  ws.registered['/ws/syncdeck']?.(
+    socket,
+    new URLSearchParams({ sessionId: 's1', studentId: 'student-2' }),
+    ws.wss,
+  )
+  await new Promise((resolve) => setTimeout(resolve, 0))
+
+  assert.deepEqual(socket.closeCalls, [{ code: 1008, reason: 'forbidden' }])
+  assert.deepEqual((state.store.s1?.data as { students: unknown[] }).students, [])
+})
+
+void test('syncdeck websocket rejects an accepted cookie scoped to another session', async () => {
+  console.info('[TEST] Expected student WebSocket admission rejection for a wrong-session cookie.')
+  const app = createMockApp()
+  const ws = createMockWs()
+  const state = createSessionStore({
+    s1: createSyncDeckSession('s1', 'teacher-pass'),
+    s2: createSyncDeckSession('s2', 'teacher-pass'),
+  })
+  setupSyncDeckRoutes(app, state.sessions, ws)
+  const socket = new MockSocket()
+  authorizeStudentSocket(state.store.s2!, socket, 'student-1')
+
+  ws.registered['/ws/syncdeck']?.(
+    socket,
+    new URLSearchParams({ sessionId: 's1', studentId: 'student-1' }),
+    ws.wss,
+  )
+  await new Promise((resolve) => setTimeout(resolve, 0))
+
+  assert.deepEqual(socket.closeCalls, [{ code: 1008, reason: 'forbidden' }])
+  assert.deepEqual((state.store.s1?.data as { students: unknown[] }).students, [])
 })
 
 void test('syncdeck websocket updates an existing student record on reconnect', async () => {
@@ -806,6 +865,7 @@ void test('syncdeck websocket creates a student from accepted entry when no prio
   assert.equal(typeof handler, 'function')
 
   const studentSocket = new MockSocket()
+  authorizeStudentSocket(state.store.s1!, studentSocket, 'participant-1', 'Ada Lovelace')
   ws.wss.clients.add(studentSocket)
 
   handler?.(
@@ -1125,6 +1185,7 @@ void test('syncdeck websocket relays instructor updates to students in session',
 
   const instructorSocket = new MockSocket()
   const studentSocket = new MockSocket()
+  authorizeStudentSocket(state.store.s1!, studentSocket, 'student-1', 'Ada Lovelace')
   ws.wss.clients.add(instructorSocket)
   ws.wss.clients.add(studentSocket)
 
@@ -1268,6 +1329,7 @@ void test('syncdeck websocket replays buffered chalkboard snapshot and delta to 
   assert.equal(typeof handler, 'function')
 
   const studentSocket = new MockSocket()
+  authorizeStudentSocket(state.store.s1!, studentSocket, 'student-1', 'Ada Lovelace')
   ws.wss.clients.add(studentSocket)
 
   handler?.(
@@ -1419,6 +1481,7 @@ void test('syncdeck websocket caps replayed chalkboard delta from oversized pers
   assert.equal(typeof handler, 'function')
 
   const studentSocket = new MockSocket()
+  authorizeStudentSocket(state.store.s1!, studentSocket, 'student-2', 'Grace Hopper')
   ws.wss.clients.add(studentSocket)
 
   handler?.(
@@ -1645,6 +1708,7 @@ void test('syncdeck websocket broadcasts student presence count to instructor', 
 
   const instructorSocket = new MockSocket()
   const studentSocket = new MockSocket()
+  authorizeStudentSocket(state.store.s1!, studentSocket, 'student-1', 'Ada Lovelace')
   ws.wss.clients.add(instructorSocket)
   ws.wss.clients.add(studentSocket)
 
@@ -2431,6 +2495,7 @@ void test('embedded-context route resolves student role from registered student 
       },
     },
   })
+  const cookies = acceptedStudentCookies(storeState.store.s1!, 'student-1')
   setupSyncDeckRoutes(app, storeState.sessions, ws)
 
   const handler = app.handlers.post['/api/syncdeck/:sessionId/embedded-context']
@@ -2441,6 +2506,7 @@ void test('embedded-context route resolves student role from registered student 
     createRequest(
       { sessionId: 's1' },
       { studentId: 'student-1' },
+      cookies,
     ),
     res,
   )
@@ -2451,6 +2517,14 @@ void test('embedded-context route resolves student role from registered student 
     studentId: 'student-1',
     studentName: 'Ada Lovelace',
   })
+
+  const untrusted = createResponse()
+  await handler?.(createRequest({ sessionId: 's1' }, { studentId: 'student-1' }), untrusted)
+  assert.equal(untrusted.statusCode, 403)
+
+  const mismatched = createResponse()
+  await handler?.(createRequest({ sessionId: 's1' }, { studentId: 'student-2' }, cookies), mismatched)
+  assert.equal(mismatched.statusCode, 403)
 })
 
 void test('embedded-context route rejects unknown parent identity', async () => {
@@ -4312,6 +4386,7 @@ void test('embedded-activity auto-activate route marks released resonance childr
       },
     },
   })
+  const cookies = acceptedStudentCookies(storeState.store.s1!, 'student-1')
   setupSyncDeckRoutes(app, storeState.sessions, ws)
   const resonanceSocket = new MockSocket()
   resonanceSocket.sessionId = childSessionId
@@ -4319,6 +4394,18 @@ void test('embedded-activity auto-activate route marks released resonance childr
 
   const handler = app.handlers.post['/api/syncdeck/:sessionId/embedded-activity/auto-activate']
   assert.equal(typeof handler, 'function')
+
+  const untrusted = createResponse()
+  await handler?.(createRequest({ sessionId: 's1' }, {
+    instanceKey: 'resonance:3:1', childSessionId, studentId: 'student-1', autoActivateAllQuestions: true,
+  }), untrusted)
+  assert.equal(untrusted.statusCode, 403)
+
+  const mismatched = createResponse()
+  await handler?.(createRequest({ sessionId: 's1' }, {
+    instanceKey: 'resonance:3:1', childSessionId, studentId: 'student-2', autoActivateAllQuestions: true,
+  }, cookies), mismatched)
+  assert.equal(mismatched.statusCode, 403)
 
   const res = createResponse()
   await handler?.(
@@ -4330,6 +4417,7 @@ void test('embedded-activity auto-activate route marks released resonance childr
         studentId: 'student-1',
         autoActivateAllQuestions: true,
       },
+      cookies,
     ),
     res,
   )
@@ -4442,6 +4530,7 @@ void test('embedded-activity auto-activate route allows released horizontal reso
       },
     },
   })
+  const cookies = acceptedStudentCookies(storeState.store.s1!, 'student-1')
   setupSyncDeckRoutes(app, storeState.sessions, ws)
 
   const handler = app.handlers.post['/api/syncdeck/:sessionId/embedded-activity/auto-activate']
@@ -4457,6 +4546,7 @@ void test('embedded-activity auto-activate route allows released horizontal reso
         studentId: 'student-1',
         autoActivateAllQuestions: true,
       },
+      cookies,
     ),
     res,
   )
@@ -4522,6 +4612,7 @@ void test('embedded-activity auto-activate route supports variant-suffixed reson
       },
     },
   })
+  const cookies = acceptedStudentCookies(storeState.store.s1!, 'student-1')
   setupSyncDeckRoutes(app, storeState.sessions, ws)
 
   const handler = app.handlers.post['/api/syncdeck/:sessionId/embedded-activity/auto-activate']
@@ -4537,6 +4628,7 @@ void test('embedded-activity auto-activate route supports variant-suffixed reson
         studentId: 'student-1',
         autoActivateAllQuestions: true,
       },
+      cookies,
     ),
     res,
   )
@@ -4602,6 +4694,7 @@ void test('embedded-activity auto-activate route parses anchored indices before 
       },
     },
   })
+  const cookies = acceptedStudentCookies(storeState.store.s1!, 'student-1')
   setupSyncDeckRoutes(app, storeState.sessions, ws)
 
   const handler = app.handlers.post['/api/syncdeck/:sessionId/embedded-activity/auto-activate']
@@ -4617,6 +4710,7 @@ void test('embedded-activity auto-activate route parses anchored indices before 
         studentId: 'student-1',
         autoActivateAllQuestions: true,
       },
+      cookies,
     ),
     res,
   )
@@ -4692,6 +4786,7 @@ void test('embedded-activity auto-activate route is idempotent after resonance a
       },
     },
   })
+  const cookies = acceptedStudentCookies(storeState.store.s1!, 'student-1')
   setupSyncDeckRoutes(app, storeState.sessions, ws)
 
   const handler = app.handlers.post['/api/syncdeck/:sessionId/embedded-activity/auto-activate']
@@ -4707,6 +4802,7 @@ void test('embedded-activity auto-activate route is idempotent after resonance a
         studentId: 'student-1',
         autoActivateAllQuestions: true,
       },
+      cookies,
     ),
     firstResponse,
   )
@@ -4757,6 +4853,7 @@ void test('embedded-activity auto-activate route is idempotent after resonance a
         studentId: 'student-1',
         autoActivateAllQuestions: true,
       },
+      cookies,
     ),
     secondResponse,
   )
@@ -4825,6 +4922,7 @@ void test('embedded-activity auto-activate route is idempotent when resonance al
       },
     },
   })
+  const cookies = acceptedStudentCookies(storeState.store.s1!, 'student-1')
   setupSyncDeckRoutes(app, storeState.sessions, ws)
 
   const handler = app.handlers.post['/api/syncdeck/:sessionId/embedded-activity/auto-activate']
@@ -4841,6 +4939,7 @@ void test('embedded-activity auto-activate route is idempotent when resonance al
         studentId: 'student-1',
         autoActivateAllQuestions: true,
       },
+      cookies,
     ),
     res,
   )
@@ -4915,6 +5014,7 @@ void test('embedded-activity auto-activate route is idempotent after embedded re
       },
     },
   })
+  const cookies = acceptedStudentCookies(storeState.store.s1!, 'student-1')
   setupSyncDeckRoutes(app, storeState.sessions, ws)
 
   const handler = app.handlers.post['/api/syncdeck/:sessionId/embedded-activity/auto-activate']
@@ -4931,6 +5031,7 @@ void test('embedded-activity auto-activate route is idempotent after embedded re
         studentId: 'student-1',
         autoActivateAllQuestions: true,
       },
+      cookies,
     ),
     res,
   )
@@ -5002,6 +5103,7 @@ void test('embedded-activity auto-activate route rejects students who are not on
       },
     },
   })
+  const cookies = acceptedStudentCookies(storeState.store.s1!, 'student-1')
   setupSyncDeckRoutes(app, storeState.sessions, ws)
 
   const handler = app.handlers.post['/api/syncdeck/:sessionId/embedded-activity/auto-activate']
@@ -5017,6 +5119,7 @@ void test('embedded-activity auto-activate route rejects students who are not on
         studentId: 'student-1',
         autoActivateAllQuestions: true,
       },
+      cookies,
     ),
     res,
   )
@@ -5086,6 +5189,7 @@ void test('embedded-activity auto-activate route rejects future vertical resonan
       },
     },
   })
+  const cookies = acceptedStudentCookies(storeState.store.s1!, 'student-1')
   setupSyncDeckRoutes(app, storeState.sessions, ws)
 
   const handler = app.handlers.post['/api/syncdeck/:sessionId/embedded-activity/auto-activate']
@@ -5101,6 +5205,7 @@ void test('embedded-activity auto-activate route rejects future vertical resonan
         studentId: 'student-1',
         autoActivateAllQuestions: true,
       },
+      cookies,
     ),
     res,
   )

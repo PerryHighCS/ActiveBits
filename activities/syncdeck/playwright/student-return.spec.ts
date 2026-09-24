@@ -16,7 +16,22 @@ async function acceptStudent(page: Page, sessionId: string, displayName: string)
     values: { participantId: string }
   }
   expect(values.participantId).not.toBe('claimed-by-client')
-  await page.request.post(`/api/session/${sessionId}/entry-participant/consume`, { data: { token: entryParticipantToken } })
+  const consumed = await page.request.post(`/api/session/${sessionId}/entry-participant/consume`, { data: { token: entryParticipantToken } })
+  expect(consumed.ok()).toBeTruthy()
+  const cookiePair = consumed.headers()['set-cookie']?.split(';', 1)[0]
+  expect(cookiePair).toBeTruthy()
+  const separator = cookiePair!.indexOf('=')
+  expect(separator).toBeGreaterThan(0)
+  // The test server issues production Secure cookies on local HTTP. WebKit does
+  // not send those on ws://, so install the same issued token as a local cookie.
+  await page.context().addCookies([{
+    name: cookiePair!.slice(0, separator),
+    value: cookiePair!.slice(separator + 1),
+    url: new URL(consumed.url()).origin,
+    httpOnly: true,
+    sameSite: 'Lax',
+    secure: false,
+  }])
   return values.participantId
 }
 
@@ -45,7 +60,6 @@ test('SyncDeck manager boots a roster student through the rendered panel action'
   })
   expect(configured.ok()).toBeTruthy()
   const adaId = await acceptStudent(page, session.id, 'Ada')
-  const linId = await acceptStudent(page, session.id, 'Lin')
   await page.addInitScript(({ instructorPasscode }) => {
     window.history.replaceState(
       {
@@ -63,6 +77,7 @@ test('SyncDeck manager boots a roster student through the rendered panel action'
   await connectSyncDeckStudentSocket(page, session.id, adaId)
   await expect(page.getByRole('button', { name: 'Students: 1' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Return Ada to the waiting room' })).toBeVisible()
+  const linId = await acceptStudent(page, session.id, 'Lin')
   await connectSyncDeckStudentSocket(page, session.id, linId)
   await expect(page.getByRole('button', { name: 'Students: 2' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Return Lin to the waiting room' })).toBeVisible()

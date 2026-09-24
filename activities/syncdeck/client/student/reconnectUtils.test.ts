@@ -2,6 +2,12 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { resolveSyncDeckStudentCloseDecision } from './reconnectUtils.js'
 
+void test('forbidden student admission clears a stale cached identity', () => {
+  const decision = resolveSyncDeckStudentCloseDecision({ code: 1008, reason: 'forbidden' })
+  assert.equal(decision.clearCachedIdentity, true)
+  assert.match(decision.joinError ?? '', /re-enter your name/)
+})
+
 void test('resolveSyncDeckStudentCloseDecision requires rejoin for missing student identity', () => {
   const decision = resolveSyncDeckStudentCloseDecision({ code: 1008, reason: 'missing studentId' })
 

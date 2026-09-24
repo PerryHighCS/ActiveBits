@@ -16,6 +16,14 @@
 - Validation: `server/entryParticipants.test.ts`; `server/sessionEntryRoutes.test.ts`; `server/persistentSessionRoutes.test.ts`; `activities/syncdeck/server/routes.test.ts`; `activities/syncdeck/playwright/student-return.spec.ts`.
 - Follow-up: #313 must make the shared entry and child-token writes safe against concurrent whole-session writers.
 
+## SyncDeck student transport authority
+
+- Date: 2026-09-24
+- Area: SyncDeck student WebSocket | embedded-context | embedded auto-activation
+- Contract: The parent accepted-entry cookie resolves the student ID at WebSocket admission, including first roster registration. A client `studentId` may confirm that identity but cannot choose another roster student. Embedded-context and auto-activation require the same cookie plus a matching ID hint. Missing, wrong-session, or mismatched proof fails before student state is replayed or child state is mutated. WebSocket 1008 `forbidden` tells the student client to clear its cached ID and rejoin.
+- Validation: `activities/syncdeck/server/routes.test.ts`; `activities/syncdeck/client/student/reconnectUtils.test.ts`; `activities/syncdeck/playwright/student-return.spec.ts`.
+- Follow-up: #313 must make SyncDeck roster/session writes atomic alongside shared entry writes.
+
 ## MobCode live-session defaults
 
 - Date: 2026-08-19

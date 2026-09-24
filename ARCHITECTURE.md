@@ -93,6 +93,11 @@ routes always mint the participant ID, even when the request includes one.
 SyncDeck carries a parent student's ID into an embedded or standalone solo
 child only after validating the parent's accepted-entry cookie against its
 roster; the child receives a scoped, one-time handoff token.
+SyncDeck student WebSocket admission resolves that same cookie before joining
+or replaying state. Its embedded-context and auto-activation HTTP routes also
+require the cookie and reject a student ID that differs from its subject.
+An invalid or missing cookie closes the student socket with a rejoin-required
+policy error; the client clears its cached ID and returns to name entry.
 
 For live MobCode sessions, the instructor workspace remains `groups.default`. Newly initialized sessions broadcast instructor changes by default unless they begin with Try it enabled. When the instructor enables Try it, MobCode creates one private, server-backed workspace per accepted waiting-room participant from an explicit starter snapshot. The instructor controls whether their code is broadcast live or students keep the last published version. Student responses are participant-scoped and never include peer names or files; instructors may inspect named workspaces and publish one anonymous shared copy that they can edit and broadcast to the class in real time.
 
@@ -726,9 +731,8 @@ and `.agent/knowledge/activity-runtime-threat-model.md` for the full contract.
   server-issued **accepted-entry** token (`server/core/acceptedEntryParticipants.ts`),
   also hashed at rest, in `activebits_participant_<base64url(sessionId)>`.
   Participant identity is normally minted server-side by the waiting-room store.
-  (A request-supplied `participantId` is still honored there for SyncDeck's
-  embedded-activity handoff; hardening that into a trusted-only path is tracked
-  for the Slice C adapter work.)
+  SyncDeck's child handoff uses a separate trusted store path after verifying
+  the parent's accepted-entry cookie and roster.
 - **Activities own**: domain state, projections, and handlers, invoked only
   after the platform has resolved a principal.
 - **Java Format Practice** is the first migrated activity (Slice A): `POST
