@@ -101,17 +101,21 @@ test.describe('Resonance draft persistence in a real browser', () => {
     await expect.poll(() => droppedDrafts, { timeout: 10_000 }).toBeGreaterThan(0)
     expect(await readServerDraft(joined, 'q1')).toBeNull()
 
-    // Switching tabs remounts QuestionView, which used to lose the unconfirmed draft.
+    // Switching tabs unmounts Q1's QuestionView, which used to lose the unconfirmed draft.
     await page.getByRole('button', { name: 'Q2' }).click()
     await expect(page.getByText('Question 2 text')).toBeVisible()
-    await page.getByRole('button', { name: 'Q1' }).click()
-    await expect(page.getByLabel('Your answer')).toHaveValue('draft typed before switching tabs')
 
-    // Let the parent-owned retry loop finally get an acknowledgement.
+    // Release acknowledgements while Q2 is still showing: only the parent-owned
+    // retry loop can deliver Q1's draft now, since Q1's view is not mounted.
     dropDrafts = false
     console.log(`[TEST] Resuming draft delivery after dropping ${droppedDrafts} update(s).`)
     await expect.poll(() => readServerDraft(joined, 'q1'), { timeout: 20_000 })
       .toBe('draft typed before switching tabs')
+    await expect(page.getByText('Question 2 text')).toBeVisible()
+
+    // Coming back still shows the typed answer.
+    await page.getByRole('button', { name: 'Q1' }).click()
+    await expect(page.getByLabel('Your answer')).toHaveValue('draft typed before switching tabs')
 
     await context.close()
   })
