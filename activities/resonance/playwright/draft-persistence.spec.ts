@@ -76,11 +76,14 @@ test.describe('Resonance draft persistence in a real browser', () => {
   )
 
   test('an unacknowledged draft survives a stack-tab switch and is saved by the retry loop (#374)', async ({ browser }) => {
+    // Two sequential polls (10s + 20s) plus setup can exceed the 30s default on a slow run.
+    test.setTimeout(60_000)
     const joined = await startTwoQuestionSessionAndJoin(browser)
     const { page, context } = joined
 
     let dropDrafts = true
     let droppedDrafts = 0
+    console.log('[TEST] Dropping resonance:update-draft messages to simulate unacknowledged drafts; ack-timeout warnings are expected.')
     await page.routeWebSocket(/\/ws\/resonance/, (ws) => {
       const server = ws.connectToServer()
       ws.onMessage((message) => {
@@ -106,6 +109,7 @@ test.describe('Resonance draft persistence in a real browser', () => {
 
     // Let the parent-owned retry loop finally get an acknowledgement.
     dropDrafts = false
+    console.log(`[TEST] Resuming draft delivery after dropping ${droppedDrafts} update(s).`)
     await expect.poll(() => readServerDraft(joined, 'q1'), { timeout: 20_000 })
       .toBe('draft typed before switching tabs')
 
