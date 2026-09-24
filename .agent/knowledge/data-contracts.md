@@ -1050,3 +1050,10 @@ that document rather than creating activity-specific authentication payloads.
 - Separate lifecycle: `editSequenceByKeyRef` remains keyed by question and run and is reset only with session/student identity. The session's `responseDrafts` and `draftOrderingWatermarks` remain separate because a watermark must survive deletion of a cleared draft.
 - Known limitation and scope decision: This client-only consolidation does not make Resonance session writes atomic. Overlapping `sessions.set()` writers can still overwrite each other's whole-session changes, including drafts, even on one app instance. Converting only `resonance:update-draft` to `updateAtomic` would leave mixed writers and would not close that race. The required all-writer migration remains tracked in #313; this PR must not claim a full concurrent-write guarantee. Keep the documented single-instance deployment constraint until that migration is complete.
 - Evidence: `activities/resonance/client/student/ResonanceStudent.tsx`, its decision-table and mounted regression tests, `activities/resonance/server/routes.ts`, and `.agent/plans/resonance-client-draft-state-consolidation.md`.
+
+### Accepted clear with no stored draft
+
+- Owner: Resonance `resonance:update-draft` handler.
+- Invariant: An accepted `answer: null` write advances and persists `draftOrderingWatermarks[draftKey]` before acknowledging, whether or not `responseDrafts[draftKey]` currently exists. An older message handled afterward is rejected by that persisted floor. Instructor-state broadcast still requires an actual draft deletion.
+- Failure behavior: If the store write fails, the clear is not acknowledged; the client retains its unconfirmed state for retry. This closes sequential stale-message arrival after an absent-draft clear. It does not close two handlers that already hold stale whole-session clones, which requires the #313 all-writer atomic migration.
+- Evidence: `activities/resonance/server/routes.ts` and the absent-clear/older-write regression in `activities/resonance/server/routes.test.ts`.

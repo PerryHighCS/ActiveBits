@@ -3393,19 +3393,16 @@ export default function setupResonanceRoutes(
         }
 
         if (intendedAnswer === null) {
-          if (draftKey in session.data.responseDrafts) {
+          const removedDraft = draftKey in session.data.responseDrafts
+          if (removedDraft) {
             delete session.data.responseDrafts[draftKey]
-            await sessions.set(sessionId, session)
+          }
+          // An older send may still arrive after this clear, even when no
+          // draft was stored yet. Persist the ordering floor before acking.
+          await sessions.set(sessionId, session)
+          if (removedDraft) {
             broadcastToRole('resonance:instructor-state', buildInstructorSnapshot(session), sessionId, true)
           }
-          // When there was nothing to delete, the watermark bump above is
-          // never persisted (this function returns without calling
-          // `sessions.set`) — deliberately: the only case that needs a
-          // floor here is exactly the one above, where a draft this clear
-          // actually removed could otherwise be resurrected by a delayed
-          // older write. With nothing removed, there is nothing left for
-          // such a write to resurrect.
-          //
           // Ack even when the draft was already absent, so a retried clear is
           // idempotent instead of timing out and being reported as a failed save.
           if (draftId !== null) {

@@ -330,3 +330,11 @@ break. Instead, as an explicit closing step:
 
 Only after those three are done should individual review comments resume
 being handled one at a time, same as before.
+
+## Post-consolidation review: absent-draft clear watermark
+
+- [x] Check CodeRabbit's clear/write scenario against the existing ordering contract and the cloned session write limit.
+- [x] Persist the ordering watermark for an accepted clear even when no draft was stored, and test that an older message handled afterward cannot create a draft.
+- [x] Keep the separate #313 limit explicit: a handler that loaded a stale whole-session clone before the clear can still overwrite it, so this change must not claim full concurrency safety.
+
+Owner: Resonance `resonance:update-draft` handler. The invariant is that an acknowledged clear has a durable ordering floor even when it deleted no draft. If persistence fails, no acknowledgement is sent and the client's retry state remains active. The focused route test, activities typecheck, and full `npm test` gate passed, including the server health check.

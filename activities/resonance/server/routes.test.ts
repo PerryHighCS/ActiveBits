@@ -1865,13 +1865,35 @@ void test('clearing a draft over the websocket still acknowledges the write, pre
       questionId: 'q1',
       draftId: 'clear-already-absent',
       activeQuestionRunRevision: 1,
-      draftSendSequence: 1,
+      draftSendSequence: 3,
       answer: null,
     },
   }))
   await waitForCondition(() => sentMessages.some((message) =>
     message.type === 'resonance:draft-saved' && message.payload?.draftId === 'clear-already-absent'
   ))
+
+  console.info('[TEST] an older draft arriving after an absent-draft clear must not recreate the draft')
+  messageHandlers[0]?.(JSON.stringify({
+    type: 'resonance:update-draft',
+    payload: {
+      studentId: 'student1',
+      questionId: 'q1',
+      draftId: 'older-after-absent-clear',
+      activeQuestionRunRevision: 1,
+      draftSendSequence: 2,
+      answer: { type: 'free-response', text: 'Stale answer' },
+    },
+  }))
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  const afterOlderWrite = await sessions.get(session.id)
+  const afterOlderData = afterOlderWrite?.data as {
+    responseDrafts?: Record<string, unknown>
+    draftOrderingWatermarks?: Record<string, { draftSendSequence: number }>
+  } | undefined
+  assert.equal(afterOlderData?.draftOrderingWatermarks?.['q1:student1']?.draftSendSequence, 3)
+  assert.equal(afterOlderData?.responseDrafts?.['q1:student1'], undefined)
+  assert.ok(!sentMessages.some((message) => message.payload?.draftId === 'older-after-absent-clear'))
 
   await sessions.close()
 })
