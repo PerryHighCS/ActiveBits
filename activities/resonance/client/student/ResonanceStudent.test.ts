@@ -12,7 +12,7 @@ import { shouldRetryRegistrationWithoutStudentId } from './ResonanceStudent.js'
 import { advanceEditSequenceForRevisit, resolveCurrentEditSequence } from './ResonanceStudent.js'
 import { seedEditSequenceFromConfirmedResponse } from './ResonanceStudent.js'
 import { selectUnconfirmedDraftQuestionIds, resetAnswersForRestartedQuestions } from './ResonanceStudent.js'
-import { clearDraftTracking } from './ResonanceStudent.js'
+import { clearDraftTracking, isDraftStillCurrentForRevision } from './ResonanceStudent.js'
 import type { AnswerPayload, StudentSessionSnapshot } from '../../shared/types.js'
 
 ;(globalThis as { React?: typeof React }).React = React
@@ -381,64 +381,84 @@ void test('clearDraftTracking clears both unconfirmed and in-flight markers toge
     name: string
     unconfirmed: string[]
     inFlight: string[]
+    dirtyRevisions: string[]
     questionIds: string[]
     expectedUnconfirmed: string[]
     expectedInFlight: string[]
+    expectedDirtyRevisions: string[]
   }> = [
     {
-      name: 'in both sets and named: cleared from both',
+      name: 'in all three and named: cleared from all three',
       unconfirmed: ['q1'],
       inFlight: ['q1'],
+      dirtyRevisions: ['q1'],
       questionIds: ['q1'],
       expectedUnconfirmed: [],
       expectedInFlight: [],
+      expectedDirtyRevisions: [],
     },
     {
       name: 'unconfirmed only (no attempt ever started): still safe to clear',
       unconfirmed: ['q1'],
       inFlight: [],
+      dirtyRevisions: ['q1'],
       questionIds: ['q1'],
       expectedUnconfirmed: [],
       expectedInFlight: [],
+      expectedDirtyRevisions: [],
     },
     {
       name: 'in-flight only (already confirmed, still awaiting ack): still safe to clear',
       unconfirmed: [],
       inFlight: ['q1'],
+      dirtyRevisions: [],
       questionIds: ['q1'],
       expectedUnconfirmed: [],
       expectedInFlight: [],
+      expectedDirtyRevisions: [],
     },
     {
-      name: 'present in both but not named: left untouched',
+      name: 'present in all three but not named: left untouched',
       unconfirmed: ['q1', 'q2'],
       inFlight: ['q1', 'q2'],
+      dirtyRevisions: ['q1', 'q2'],
       questionIds: ['q2'],
       expectedUnconfirmed: ['q1'],
       expectedInFlight: ['q1'],
+      expectedDirtyRevisions: ['q1'],
     },
     {
-      name: 'named but absent from both sets: no-op, no error',
+      name: 'named but absent from all three: no-op, no error',
       unconfirmed: [],
       inFlight: [],
+      dirtyRevisions: [],
       questionIds: ['q1'],
       expectedUnconfirmed: [],
       expectedInFlight: [],
+      expectedDirtyRevisions: [],
     },
     {
-      name: 'empty questionIds: no-op even when both sets are populated',
+      name: 'empty questionIds: no-op even when all three are populated',
       unconfirmed: ['q1'],
       inFlight: ['q1'],
+      dirtyRevisions: ['q1'],
       questionIds: [],
       expectedUnconfirmed: ['q1'],
       expectedInFlight: ['q1'],
+      expectedDirtyRevisions: ['q1'],
     },
   ]
 
   for (const testCase of cases) {
     const unconfirmedQuestionIds = new Set(testCase.unconfirmed)
     const inFlightDraftQuestionIds = new Map(testCase.inFlight.map((questionId) => [questionId, 1]))
-    clearDraftTracking({ unconfirmedQuestionIds, inFlightDraftQuestionIds, questionIds: testCase.questionIds })
+    const unconfirmedQuestionRunRevisions = new Map(testCase.dirtyRevisions.map((questionId) => [questionId, 1]))
+    clearDraftTracking({
+      unconfirmedQuestionIds,
+      inFlightDraftQuestionIds,
+      unconfirmedQuestionRunRevisions,
+      questionIds: testCase.questionIds,
+    })
     assert.deepEqual(
       [...unconfirmedQuestionIds].sort(),
       [...testCase.expectedUnconfirmed].sort(),
@@ -448,6 +468,95 @@ void test('clearDraftTracking clears both unconfirmed and in-flight markers toge
       [...inFlightDraftQuestionIds.keys()].sort(),
       [...testCase.expectedInFlight].sort(),
       `${testCase.name}: in-flight`,
+    )
+    assert.deepEqual(
+      [...unconfirmedQuestionRunRevisions.keys()].sort(),
+      [...testCase.expectedDirtyRevisions].sort(),
+      `${testCase.name}: dirty revisions`,
+    )
+  }
+})
+
+void test('isDraftStillCurrentForRevision rejects a question whose dirty revision no longer matches the current one', () => {
+  // Copilot review of PR #381: a run transition's own cleanup runs in a
+  // passive effect, scheduled after the render that already updated the
+  // current snapshot — an already-due debounce/retry timer can fire in that
+  // window, before cleanup removes the question from unconfirmedQuestionIds.
+  // attemptDraftSend's existing set-membership guard can't see that window
+  // (the question is still nominally "unconfirmed" there); this check closes
+  // it by comparing against the revision the question actually became dirty
+  // under, independent of whether cleanup has run yet. Decision table:
+  // {tracked at all} x {matching current revision} x {revision is null vs a
+  // number}, since null (self-paced/idle) and a real number must not be
+  // treated as interchangeable.
+  const cases: Array<{
+    name: string
+    dirtyRevisions: Array<[string, number | null]>
+    questionId: string
+    currentRunRevision: number | null
+    expected: boolean
+  }> = [
+    {
+      name: 'dirtied under the revision that is still current: still safe to send',
+      dirtyRevisions: [['q1', 3]],
+      questionId: 'q1',
+      currentRunRevision: 3,
+      expected: true,
+    },
+    {
+      name: 'dirtied under a revision the run has since moved past: must not send',
+      dirtyRevisions: [['q1', 3]],
+      questionId: 'q1',
+      currentRunRevision: 4,
+      expected: false,
+    },
+    {
+      name: 'dirtied while live, run has since ended into self-paced/idle (null): must not send',
+      dirtyRevisions: [['q1', 3]],
+      questionId: 'q1',
+      currentRunRevision: null,
+      expected: false,
+    },
+    {
+      name: 'dirtied while self-paced/idle (null), a live run has since started: must not send',
+      dirtyRevisions: [['q1', null]],
+      questionId: 'q1',
+      currentRunRevision: 1,
+      expected: false,
+    },
+    {
+      name: 'dirtied and still self-paced/idle (null both times): still safe to send',
+      dirtyRevisions: [['q1', null]],
+      questionId: 'q1',
+      currentRunRevision: null,
+      expected: true,
+    },
+    {
+      name: 'never recorded as dirty at all: must not send (nothing to reconstruct the true context from)',
+      dirtyRevisions: [],
+      questionId: 'q1',
+      currentRunRevision: 1,
+      expected: false,
+    },
+    {
+      name: 'a different question’s dirty revision does not leak into this one’s check',
+      dirtyRevisions: [['q2', 1]],
+      questionId: 'q1',
+      currentRunRevision: 1,
+      expected: false,
+    },
+  ]
+
+  for (const testCase of cases) {
+    const unconfirmedQuestionRunRevisions = new Map(testCase.dirtyRevisions)
+    assert.equal(
+      isDraftStillCurrentForRevision({
+        unconfirmedQuestionRunRevisions,
+        questionId: testCase.questionId,
+        currentRunRevision: testCase.currentRunRevision,
+      }),
+      testCase.expected,
+      testCase.name,
     )
   }
 })
@@ -2296,6 +2405,24 @@ void test('a failed deadline reconciliation refresh does not strand the client, 
     console.info('[TEST] the next reconciliation attempt succeeds and recovers the server-finalized answer')
     await new Promise((resolve) => setTimeout(resolve, DRAFT_RETRY_INTERVAL_MS + 300))
     assert.ok(stateFetchCount >= 3, `expected a retried reconciliation refresh, got ${stateFetchCount} /state calls`)
+
+    // Copilot review of PR #381: resetting the parent's submittedAnswers
+    // cache alone isn't enough — QuestionView deliberately ignores a changed
+    // initialAnswer prop while its own local draftAnswer still differs from
+    // what it last synchronized (so an ordinary parent re-render never yanks
+    // away in-progress typing), and this same QuestionView instance stays
+    // mounted (just disabled) past the deadline, not remounted. Without an
+    // explicit reconciliation signal forcing a remount, the disabled input
+    // would keep showing the discarded "Locally typed answer" forever after
+    // a successful reconciliation, even though the server actually finalized
+    // something else. Folding a per-question reconciliation generation into
+    // QuestionView's key forces exactly that remount once reconciliation
+    // succeeds, so the fresh initialAnswer prop is adopted immediately.
+    await waitFor(() => assert.equal(
+      (rendered.getByLabelText(/your answer/i) as HTMLTextAreaElement).value,
+      'Server-finalized answer',
+      'a successful reconciliation must replace the discarded optimistic answer in the still-mounted, disabled input',
+    ))
 
     // Once reconciliation succeeds, q1 is no longer tracked as unconfirmed:
     // a further retry tick must neither resend the now-superseded local

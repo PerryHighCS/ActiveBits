@@ -279,12 +279,42 @@ export function selectUnconfirmedDraftQuestionIds(params: {
 export function clearDraftTracking(params: {
   unconfirmedQuestionIds: Set<string>
   inFlightDraftQuestionIds: Map<string, number>
+  unconfirmedQuestionRunRevisions: Map<string, number | null>
   questionIds: readonly string[]
 }): void {
   for (const questionId of params.questionIds) {
     params.unconfirmedQuestionIds.delete(questionId)
     params.inFlightDraftQuestionIds.delete(questionId)
+    params.unconfirmedQuestionRunRevisions.delete(questionId)
   }
+}
+
+/**
+ * Whether a question's unconfirmed local answer still belongs to the run
+ * revision currently in effect — the guard attemptDraftSend uses to decide
+ * whether it's actually safe to send.
+ *
+ * A run transition's own cleanup (clearDraftTracking, from the snapshot-merge
+ * effect) runs in a passive effect, which React schedules *after* the render
+ * that already updated the current snapshot — an already-due debounce/retry
+ * timer can fire in that window, before cleanup has removed the question from
+ * unconfirmedQuestionIds. Checking set-membership alone (as the other guard
+ * conditions in attemptDraftSend do) can't see that window: the question is
+ * still nominally "unconfirmed" even though the context it was dirtied under
+ * has already moved on. Comparing against the revision actually recorded at
+ * the moment the question became dirty (onDraftChanged) closes that window
+ * directly, independent of whether cleanup has run yet — a mismatch means the
+ * local answer belongs to a run/self-paced context that's already gone, and
+ * sending it now would stamp it with a revision it was never actually written
+ * under, letting a stale answer be silently accepted as legitimate content for
+ * a context it was never part of.
+ */
+export function isDraftStillCurrentForRevision(params: {
+  unconfirmedQuestionRunRevisions: ReadonlyMap<string, number | null>
+  questionId: string
+  currentRunRevision: number | null
+}): boolean {
+  return params.unconfirmedQuestionRunRevisions.get(params.questionId) === params.currentRunRevision
 }
 
 function formatRemainingTime(deadlineAt: number | null, now: number): string | null {
@@ -320,6 +350,20 @@ export default function ResonanceStudent() {
   const [selectedQuestionId, setSelectedQuestionId] = useState<string | null>(null)
   const [submittedQuestionIds, setSubmittedQuestionIds] = useState<Set<string>>(new Set())
   const [submittedAnswers, setSubmittedAnswers] = useState<Record<string, AnswerPayload | null>>({})
+  // Bumped per-question whenever the deadline-reconciliation branch below
+  // successfully replaces that question's optimistic local answer with the
+  // server-finalized one. QuestionView deliberately ignores a changed
+  // initialAnswer prop while its own local draftAnswer still differs from
+  // what it last synchronized (see isSameAnswer's usage in QuestionView.tsx)
+  // — by design, so an ordinary parent re-render never yanks away in-progress
+  // typing. That guard also means resetting submittedAnswers here alone is
+  // not enough once reconciliation actually succeeds: a staged/standard run
+  // stays mounted (just disabled) past its deadline, so the same QuestionView
+  // instance would otherwise keep showing the discarded optimistic answer
+  // instead of whatever the server actually finalized. Folding this into the
+  // QuestionView key forces a real remount at exactly that moment, resetting
+  // its internal state so the fresh initialAnswer prop is adopted immediately.
+  const [answerReconciliationGeneration, setAnswerReconciliationGeneration] = useState<Record<string, number>>({})
   const [submissionAnnouncement, setSubmissionAnnouncement] = useState<SubmissionAnnouncement | null>(null)
   const [countdownNow, setCountdownNow] = useState(() => Date.now())
 
@@ -337,6 +381,20 @@ export default function ResonanceStudent() {
   // remount-survival reason as editSequenceByKeyRef — see the draft-retry
   // effect below and issue #374.
   const unconfirmedQuestionIdsRef = useRef<Set<string>>(new Set())
+  // The run revision in effect at the moment each question in
+  // unconfirmedQuestionIdsRef became dirty (onDraftChanged). Run-transition
+  // cleanup (clearDraftTracking, called from the snapshot-merge effect and
+  // the deadline-reconciliation branch below) runs in a passive effect,
+  // which is scheduled *after* the render that already updated snapshotRef
+  // to the new revision — an already-due debounce/interval timer can fire
+  // in that window, before cleanup has removed the question from
+  // unconfirmedQuestionIdsRef. Without recording the revision a question
+  // was actually dirtied under, attemptDraftSend would stamp that stale
+  // send with whichever revision is current *now*, not the one the local
+  // answer actually belongs to — letting a stale answer be accepted as
+  // legitimate content for a new run/self-paced context it was never part
+  // of. See attemptDraftSend's own revision check below.
+  const unconfirmedQuestionRunRevisionsRef = useRef<Map<string, number | null>>(new Map())
   // Maps a question id to a token identifying whichever attemptDraftSend call
   // is currently outstanding for it. A plain presence flag isn't enough: if
   // attempt A is abandoned (clearDraftTracking) while still outstanding and a
@@ -478,12 +536,14 @@ export default function ResonanceStudent() {
     setSelectedQuestionId(null)
     setSubmittedQuestionIds(new Set())
     setSubmittedAnswers({})
+    setAnswerReconciliationGeneration({})
     setSubmissionAnnouncement(null)
     previousActiveQuestionIdsRef.current = []
     previousActiveQuestionRunRevisionRef.current = null
     hasObservedSnapshotRef.current = false
     editSequenceByKeyRef.current = {}
     unconfirmedQuestionIdsRef.current = new Set()
+    unconfirmedQuestionRunRevisionsRef.current = new Map()
     inFlightDraftQuestionIdsRef.current = new Map()
     for (const timeoutId of draftSendTimeoutsRef.current.values()) {
       window.clearTimeout(timeoutId)
@@ -563,6 +623,7 @@ export default function ResonanceStudent() {
       clearDraftTracking({
         unconfirmedQuestionIds: unconfirmedQuestionIdsRef.current,
         inFlightDraftQuestionIds: inFlightDraftQuestionIdsRef.current,
+        unconfirmedQuestionRunRevisions: unconfirmedQuestionRunRevisionsRef.current,
         questionIds: idsLeavingLiveContext,
       })
     }
@@ -683,6 +744,7 @@ export default function ResonanceStudent() {
       clearDraftTracking({
         unconfirmedQuestionIds: unconfirmedQuestionIdsRef.current,
         inFlightDraftQuestionIds: inFlightDraftQuestionIdsRef.current,
+        unconfirmedQuestionRunRevisions: unconfirmedQuestionRunRevisionsRef.current,
         questionIds: restartedIds,
       })
     }
@@ -717,7 +779,12 @@ export default function ResonanceStudent() {
       currentSnapshot === null ||
       inFlightDraftQuestionIdsRef.current.has(questionId) ||
       !unconfirmedQuestionIdsRef.current.has(questionId) ||
-      submittedQuestionIdsRef.current.has(questionId)
+      submittedQuestionIdsRef.current.has(questionId) ||
+      !isDraftStillCurrentForRevision({
+        unconfirmedQuestionRunRevisions: unconfirmedQuestionRunRevisionsRef.current,
+        questionId,
+        currentRunRevision: currentSnapshot.activeQuestionRunRevision,
+      })
     ) {
       return
     }
@@ -859,12 +926,20 @@ export default function ResonanceStudent() {
             clearDraftTracking({
               unconfirmedQuestionIds: unconfirmedQuestionIdsRef.current,
               inFlightDraftQuestionIds: inFlightDraftQuestionIdsRef.current,
+              unconfirmedQuestionRunRevisions: unconfirmedQuestionRunRevisionsRef.current,
               questionIds: questionIdsStillUnconfirmed,
             })
             setSubmittedAnswers((current) => resetAnswersForRestartedQuestions({
               submittedAnswers: current,
               questionIdsToReset: questionIdsStillUnconfirmed,
             }))
+            setAnswerReconciliationGeneration((current) => {
+              const next = { ...current }
+              for (const questionId of questionIdsStillUnconfirmed) {
+                next[questionId] = (next[questionId] ?? 0) + 1
+              }
+              return next
+            })
           })
         }
       }
@@ -1028,7 +1103,7 @@ export default function ResonanceStudent() {
             {/* Question card */}
             <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm px-6 py-6">
               <QuestionView
-                key={activeQuestion.id}
+                key={`${activeQuestion.id}:${answerReconciliationGeneration[activeQuestion.id] ?? 0}`}
                 question={activeQuestion}
                 sessionId={sessionId}
                 studentId={studentId}
@@ -1049,6 +1124,7 @@ export default function ResonanceStudent() {
                 announceSubmittedMessage={!snapshot.selfPacedMode}
                 onDraftChanged={(questionId, answer) => {
                   unconfirmedQuestionIdsRef.current.add(questionId)
+                  unconfirmedQuestionRunRevisionsRef.current.set(questionId, snapshot.activeQuestionRunRevision)
                   setSubmittedAnswers((current) => ({
                     ...current,
                     [questionId]: answer,
@@ -1064,6 +1140,7 @@ export default function ResonanceStudent() {
                   clearDraftTracking({
                     unconfirmedQuestionIds: unconfirmedQuestionIdsRef.current,
                     inFlightDraftQuestionIds: inFlightDraftQuestionIdsRef.current,
+                    unconfirmedQuestionRunRevisions: unconfirmedQuestionRunRevisionsRef.current,
                     questionIds: [questionId],
                   })
                   setSubmittedAnswers((current) => ({

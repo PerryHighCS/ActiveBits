@@ -901,7 +901,7 @@ void test('a self-paced draft that arrives after its submission is dropped, not 
       activeQuestionRunRevision: null,
       editSequence: 1,
       draftSendSequence: 1,
-      answer: { type: 'free-response', text: 'Stale pre-submission draft' },
+      answer: { type: 'free-response', text: 'Submitted answer' },
     },
   }))
   await waitForCondition(() => sentMessages.some((message) =>
@@ -974,9 +974,10 @@ void test('a draft that arrives after its submission is dropped instead of resur
   }, submitRes)
   assert.equal(submitRes.statusCode, 200)
 
-  // ...but a draft queued before the submission — same editSequence, since it
-  // was written during the same edit session — was still in flight over the
-  // WebSocket and only reaches the server afterward.
+  // ...but a draft queued before the submission — same editSequence and
+  // content, since it was written during the same edit session that then
+  // submitted this exact answer — was still in flight over the WebSocket and
+  // only reaches the server afterward.
   console.info('[TEST] a draft delivered after its own submission must not resurrect a stale answer')
   messageHandlers[0]?.(JSON.stringify({
     type: 'resonance:update-draft',
@@ -987,7 +988,7 @@ void test('a draft that arrives after its submission is dropped instead of resur
       activeQuestionRunRevision: 1,
       editSequence: 1,
       draftSendSequence: 1,
-      answer: { type: 'free-response', text: 'Stale pre-submission draft' },
+      answer: { type: 'free-response', text: 'Submitted answer' },
     },
   }))
   await waitForCondition(() => sentMessages.some((message) =>
@@ -1004,6 +1005,114 @@ void test('a draft that arrives after its submission is dropped instead of resur
     type: 'free-response',
     text: 'Submitted answer',
   })
+
+  await sessions.close()
+})
+
+void test('a stale pre-submission draft whose content differs from what was submitted is dropped without a false acknowledgement', async () => {
+  // Copilot review of PR #381: the confirmedResponseForRun staleness guard
+  // used to acknowledge every rejected write as "saved" purely because its
+  // editSequence didn't exceed the confirmed response's, regardless of
+  // content. That's safe when the draft's content is genuinely superseded by
+  // the submission (the sibling test above: a trailing same-mount draft
+  // attempt whose content matches what was submitted). It's not safe when
+  // the content differs, because the server cannot tell that case apart from
+  // a second concurrent tab's own still-current, independent edit that
+  // happens to share this low editSequence only because it hasn't yet
+  // processed the broadcast reflecting this response. Acking it either way
+  // would tell that sender its edit was persisted when it wasn't, and its
+  // own unconfirmed-draft tracking would stop retrying it.
+  //
+  // Since the server can't distinguish "genuinely superseded, single mount"
+  // from "independent edit from a second mount" once content differs, the
+  // safe default is to never ack a content-mismatched write here — the
+  // response itself is authoritative and untouched either way, so an
+  // omitted ack for a truly-superseded single-mount draft costs nothing
+  // (its sender's own onSubmitted already cleared its retry tracking once
+  // its own submission succeeded), while withholding it for a genuinely
+  // independent second-mount edit lets that sender's retry loop keep going
+  // until it naturally clears this branch (its local edit-sequence counter
+  // auto-seeds past this response's editSequence once it processes this
+  // same response's broadcast — see seedEditSequenceFromConfirmedResponse).
+  const app = createMockApp()
+  const sessions = createSessionStore(null)
+  const session = createMultiQuestionSession()
+  const runStartedAt = Date.now() - 1_000
+  session.data.activeQuestionId = 'q1'
+  session.data.activeQuestionIds = ['q1']
+  session.data.activeQuestionRunStartedAt = runStartedAt
+  session.data.activeQuestionRunRevision = 1
+  session.data.lastActiveQuestionRunRevision = 1
+  const studentCookies = issueStudentCookies(session, 'student1')
+  await sessions.set(session.id, session)
+  const captured = createCapturingMockWs()
+  setupResonanceRoutes(app, sessions, captured.ws)
+
+  const handler = captured.getHandler()
+  const messageHandlers: Array<(message: string) => void> = []
+  const sentMessages: Array<{ type?: string; payload?: { draftId?: string } }> = []
+  assert.ok(handler)
+  handler({
+    readyState: 1,
+    upgradeHeaders: {
+      cookie: Object.entries(studentCookies).map(([name, value]) => `${name}=${value}`).join('; '),
+    },
+    send(message: string) {
+      sentMessages.push(JSON.parse(message) as { type?: string; payload?: { draftId?: string } })
+    },
+    on(event: string, callback: (message: string) => void) {
+      if (event === 'message') messageHandlers.push(callback)
+    },
+    once() {},
+    close() {},
+    terminate() {},
+    ping() {},
+  }, new URLSearchParams({ sessionId: session.id, role: 'student', studentId: 'student1' }), captured.ws.wss)
+  await waitForCondition(() => messageHandlers.length === 1)
+
+  const submitRes = createResponse()
+  await app.handlers.post['/api/resonance/:sessionId/submit-answer']?.({
+    params: { sessionId: session.id },
+    cookies: studentCookies,
+    body: {
+      studentId: 'student1',
+      questionId: 'q1',
+      activeQuestionRunRevision: 1,
+      editSequence: 1,
+      answer: { type: 'free-response', text: 'Submitted from another tab' },
+    },
+  }, submitRes)
+  assert.equal(submitRes.statusCode, 200)
+
+  console.info('[TEST] a stale-editSequence write with different content arrives after an unrelated submission')
+  messageHandlers[0]?.(JSON.stringify({
+    type: 'resonance:update-draft',
+    payload: {
+      studentId: 'student1',
+      questionId: 'q1',
+      draftId: 'second-tab-draft',
+      activeQuestionRunRevision: 1,
+      editSequence: 1,
+      draftSendSequence: 1,
+      answer: { type: 'free-response', text: 'Still being typed in this tab' },
+    },
+  }))
+  await new Promise((resolve) => setTimeout(resolve, 0))
+
+  const stored = await sessions.get(session.id)
+  const storedData = stored?.data as {
+    responses?: Array<{ answer?: unknown }>
+    responseDrafts?: Record<string, unknown>
+  } | undefined
+  assert.equal(Object.keys(storedData?.responseDrafts ?? {}).length, 0, 'the differing draft must not have been written')
+  assert.deepEqual(storedData?.responses?.[0]?.answer, {
+    type: 'free-response',
+    text: 'Submitted from another tab',
+  }, 'the confirmed response must not have been touched')
+  assert.ok(
+    !sentMessages.some((message) => message.payload?.draftId === 'second-tab-draft'),
+    'a rejected write whose content differs from the confirmed response must not be acknowledged as saved',
+  )
 
   await sessions.close()
 })

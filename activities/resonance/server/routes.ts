@@ -3183,6 +3183,13 @@ export default function setupResonanceRoutes(
         ) return
         const draftSendSequence = rawDraftSendSequence
 
+        // Resolved this early so both staleness guards below (this one and
+        // isStaleDraftWrite's) can compare a rejected write's actual content
+        // against what's already persisted, not just its ordering. `null`
+        // here always means "clear the draft."
+        const intendedAnswer = payload.answer === null ? null : validateAnswerPayload(payload.answer, question)
+        if (payload.answer !== null && !intendedAnswer) return
+
         // A draft sent just before a submission can arrive here after the
         // submission already recorded a response and cleared the draft (the
         // two travel over different connections/transports, so delivery
@@ -3201,7 +3208,29 @@ export default function setupResonanceRoutes(
             response.activeQuestionRunRevision === session.data.activeQuestionRunRevision,
         )
         if (confirmedResponseForRun !== undefined && editSequence <= (confirmedResponseForRun.editSequence ?? 0)) {
-          if (draftId !== null) {
+          // A single mount's own pre-submission draft attempt, arriving late,
+          // is safe to ack unconditionally here: submitAnswer always sends
+          // whatever the student's local answer state was *at submit time*,
+          // which is never older than an earlier, still-in-flight autosave —
+          // so a trailing draft attempt from the *same* mount can only ever
+          // carry content the confirmed response already subsumes. That
+          // assumption breaks across two concurrent mounts for the same
+          // student (e.g. two browser tabs): a second tab's own genuine,
+          // still-unrevisited edit can share this same low editSequence
+          // purely because it hasn't yet processed the broadcast reflecting
+          // the *other* tab's submission — its content is not actually
+          // subsumed by that unrelated response. Acking it anyway would tell
+          // that tab its edit was persisted (it wasn't) and clear its own
+          // retry marker, silently losing it. Compare content instead of
+          // trusting editSequence ordering alone for that purpose; the
+          // sender's own retry loop keeps going otherwise, and naturally
+          // recovers once it processes this same response's broadcast (its
+          // local edit-sequence counter auto-seeds past this response's, see
+          // seedEditSequenceFromConfirmedResponse) and its next retry clears
+          // this branch entirely.
+          const alreadyMatchesConfirmed = intendedAnswer === null ||
+            isSameAnswer(confirmedResponseForRun.answer, intendedAnswer)
+          if (draftId !== null && alreadyMatchesConfirmed) {
             sendToSocket(socket, 'resonance:draft-saved', { draftId }, sessionId)
           }
           return
@@ -3255,12 +3284,6 @@ export default function setupResonanceRoutes(
             editSequence < existingDraftEditSequence ||
             (editSequence === existingDraftEditSequence && draftSendSequence < existingDraftSendSequence)
           )
-
-        // Resolved ahead of the staleness check below so a rejected write's
-        // content can be compared against what's actually stored, not just
-        // its ordering. `null` here always means "clear the draft."
-        const intendedAnswer = payload.answer === null ? null : validateAnswerPayload(payload.answer, question)
-        if (payload.answer !== null && !intendedAnswer) return
 
         if (isStaleDraftWrite) {
           // draftSendSequence only totally orders sends from a single
