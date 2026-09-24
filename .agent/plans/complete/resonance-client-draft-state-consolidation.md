@@ -8,6 +8,19 @@
 - [x] Full contract re-read, PR description update, and an explicit documented decision on the server's concurrent-write gap (#313) before resuming ad hoc review responses
 - [x] `ARCHITECTURE.md` / `.agent/knowledge/data-contracts.md` updated to describe the consolidated contract
 
+## Completion (2026-09-24)
+
+Status: **complete.** Merged with #381. The consolidated design is unchanged on `main`: one `QuestionDraftState` record per question (`unconfirmed`, `dirtyRunRevision`, `inFlightAttemptToken`, `pendingRetryAfterInFlight`) cleared together by `clearDraftTracking`, with `editSequenceByKeyRef` deliberately separate. The five targeted trackers are still two structures. A `dirtyEditSequence` field was tried during later review and reverted.
+
+The measurements in the implementation record below are a snapshot from the original implementation. `ResonanceStudent.tsx` is now 1282 lines, not 1245; the difference is deadline-reconciliation code added by later review rounds, not tracker code, so the plan's scoped claim (five trackers to two) still holds.
+
+Work after this plan, recorded in `.agent/knowledge/data-contracts.md` (not repeated here):
+
+- Deadline reconciliation: three successive client-side proxies for "the server finalized" were replaced, per AGENTS.md rule 16, by a server-stated `activeQuestionDeadlineExpired` snapshot field derived from the clock sample expiry finalization used.
+- Same student in two tabs: ordering stays client-assigned; a short deadline can outrun the retry ratchet. Accepted limitation with a rejected alternative recorded.
+- Whole-session `sessions.set()` races remain tracked in #313.
+- A reload plus waiting-room rejoin can yield a new studentId (#383); it is outside this plan.
+
 ## Implementation record
 
 - Step 1: Activities typecheck and the mounted `ResonanceStudent.test.ts` suite passed. The full `npm run test:codex` gate passed (156 activity test files); the initial `npm test` run reached its final server check but could not bind port 4010 (`EPERM`) in the default sandbox.
