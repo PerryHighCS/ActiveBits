@@ -13,7 +13,7 @@ import { advanceEditSequenceForRevisit, resolveCurrentEditSequence } from './Res
 import { seedEditSequenceFromConfirmedResponse } from './ResonanceStudent.js'
 import { selectUnconfirmedDraftQuestionIds, resetAnswersForRestartedQuestions } from './ResonanceStudent.js'
 import { clearDraftTracking, getOrCreateQuestionDraftState, isDraftStillCurrentForRevision } from './ResonanceStudent.js'
-import { selectServerFinalizedQuestionIds } from './ResonanceStudent.js'
+import { isServerPastReconciliationDeadline } from './ResonanceStudent.js'
 import type { QuestionDraftState } from './ResonanceStudent.js'
 import type { AnswerPayload, StudentSessionSnapshot } from '../../shared/types.js'
 
@@ -61,6 +61,7 @@ function buildSnapshot(overrides: Partial<StudentSessionSnapshot> = {}): Student
     lastActiveQuestionRunRevision: null,
     reveals: [],
     reviewedResponses: [],
+    activeQuestionDeadlineExpired: false,
     submittedAnswers: {},
     draftAnswers: {},
     draftSendSequences: {},
@@ -350,35 +351,26 @@ void test('hasActiveQuestionRunRestart detects a new revision', () => {
   )
 })
 
-void test('selectServerFinalizedQuestionIds only counts a confirmed response at or beyond the local edit sequence', () => {
-  // CodeRabbit review of PR #381: a revisit leaves the earlier confirmed
-  // response in submittedAnswers, so membership alone wrongly treated a newer
-  // unconfirmed revisit edit as finalized (submit -> revisit -> edit -> staged
-  // deadline refresh).
+void test('isServerPastReconciliationDeadline trusts only the server verdict or a replaced run, never a confirmed response', () => {
+  // Copilot/CodeRabbit reviews of PR #381: inferring finalization from a
+  // confirmed response is unsound. A revisit leaves an earlier response
+  // behind, and another tab can confirm the same edit sequence with different
+  // content, so neither proves this tab's draft was finalized.
   const key = { revision: 2, deadlineAt: 5000 }
   const answer = { type: 'free-response', text: 'x' } as AnswerPayload
-  const cases: Array<{
-    name: string
-    snapshot: Partial<StudentSessionSnapshot>
-    dirtySequence: number | undefined
-    expected: string[]
-  }> = [
-    { name: 'run identity changed: resolved regardless of responses', snapshot: { activeQuestionRunRevision: null, activeQuestionDeadlineAt: null }, dirtySequence: 3, expected: ['q1'] },
-    { name: 'same run, no confirmed response', snapshot: { activeQuestionRunRevision: 2, activeQuestionDeadlineAt: 5000 }, dirtySequence: 1, expected: [] },
-    { name: 'same run, confirmed sequence below the dirty sequence (revisit edit pending)', snapshot: { activeQuestionRunRevision: 2, activeQuestionDeadlineAt: 5000, submittedAnswers: { q1: answer }, submittedResponseEditSequences: { q1: 1 } }, dirtySequence: 2, expected: [] },
-    { name: 'same run, confirmed sequence equals the dirty sequence (finalized)', snapshot: { activeQuestionRunRevision: 2, activeQuestionDeadlineAt: 5000, submittedAnswers: { q1: answer }, submittedResponseEditSequences: { q1: 2 } }, dirtySequence: 2, expected: ['q1'] },
-    { name: 'same run, confirmed sequence above the dirty sequence', snapshot: { activeQuestionRunRevision: 2, activeQuestionDeadlineAt: 5000, submittedAnswers: { q1: answer }, submittedResponseEditSequences: { q1: 4 } }, dirtySequence: 2, expected: ['q1'] },
-    { name: 'same run, answer present but sequence missing', snapshot: { activeQuestionRunRevision: 2, activeQuestionDeadlineAt: 5000, submittedAnswers: { q1: answer } }, dirtySequence: 1, expected: [] },
+  const sameRun = { activeQuestionRunRevision: 2, activeQuestionDeadlineAt: 5000 }
+  const cases: Array<{ name: string; snapshot: Partial<StudentSessionSnapshot>; expected: boolean }> = [
+    { name: 'same run, server not expired', snapshot: sameRun, expected: false },
+    { name: 'same run, an earlier response present (revisit)', snapshot: { ...sameRun, submittedAnswers: { q1: answer }, submittedResponseEditSequences: { q1: 1 } }, expected: false },
+    { name: 'same run, another tab confirmed the same sequence', snapshot: { ...sameRun, submittedAnswers: { q1: answer }, submittedResponseEditSequences: { q1: 2 } }, expected: false },
+    { name: 'same run, server expired', snapshot: { ...sameRun, activeQuestionDeadlineExpired: true }, expected: true },
+    { name: 'run ended (revision cleared)', snapshot: { activeQuestionRunRevision: null, activeQuestionDeadlineAt: null }, expected: true },
+    { name: 'a newer run replaced it', snapshot: { activeQuestionRunRevision: 3, activeQuestionDeadlineAt: 9000 }, expected: true },
+    { name: 'same revision, deadline changed', snapshot: { activeQuestionRunRevision: 2, activeQuestionDeadlineAt: 7000 }, expected: true },
   ]
-  cases.push({ name: 'same run, no recorded dirty sequence', snapshot: { activeQuestionRunRevision: 2, activeQuestionDeadlineAt: 5000, submittedAnswers: { q1: answer }, submittedResponseEditSequences: { q1: 9 } }, dirtySequence: undefined, expected: [] })
   for (const testCase of cases) {
-    assert.deepEqual(
-      selectServerFinalizedQuestionIds({
-        refreshedSnapshot: buildSnapshot(testCase.snapshot),
-        reconciliationKey: key,
-        questionIds: ['q1'],
-        draftState: new Map([['q1', { ...getOrCreateQuestionDraftState(new Map(), 'q1'), dirtyEditSequence: testCase.dirtySequence }]]),
-      }),
+    assert.equal(
+      isServerPastReconciliationDeadline({ refreshedSnapshot: buildSnapshot(testCase.snapshot), reconciliationKey: key }),
       testCase.expected,
       testCase.name,
     )
@@ -2729,8 +2721,8 @@ void test('a failed deadline reconciliation refresh does not strand the client, 
         ok: true,
         json: async () => ({
           ...snapshot,
+          activeQuestionDeadlineExpired: true,
           submittedAnswers: { q1: { type: 'free-response', text: 'Server-finalized answer' } },
-          submittedResponseEditSequences: { q1: 1 },
         }),
       } as Response
     }
@@ -2883,14 +2875,13 @@ void test('a deadline-reconciliation refresh that succeeds without the server ha
       if (stateFetchCount === 2) {
         return { ok: true, json: async () => snapshot } as Response
       }
-      // Call 3+: the server has now genuinely finalized the run.
+      // Call 3+: the server's own clock has now passed the deadline (a staged
+      // run keeps its revision and deadline after expiry).
       return {
         ok: true,
         json: async () => ({
           ...snapshot,
-          activeQuestionRunRevision: null,
-          activeQuestionDeadlineAt: null,
-          lastActiveQuestionRunRevision: 1,
+          activeQuestionDeadlineExpired: true,
           submittedAnswers: { q1: { type: 'free-response', text: 'Server-finalized answer' } },
         }),
       } as Response

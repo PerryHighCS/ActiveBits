@@ -147,6 +147,15 @@ export interface StudentSessionSnapshot {
   activeQuestionRunRevision: number | null
   activeQuestionDeadlineAt: number | null
   /**
+   * Whether the server's own clock had reached `activeQuestionDeadlineAt` when
+   * this snapshot was built (always false with no deadline or in self-paced
+   * mode). Building a snapshot follows the server's expiry finalization, so
+   * `true` means this student's drafts for the run are already finalized.
+   * Clients must use this, not their own clock, to decide a deadline has
+   * really passed.
+   */
+  activeQuestionDeadlineExpired: boolean
+  /**
    * Highest live-run revision this session has ever assigned, independent of
    * `activeQuestionRunRevision` resetting to null on self-paced fallback. Lets
    * clients order a self-paced snapshot against a previously observed live

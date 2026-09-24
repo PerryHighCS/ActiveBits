@@ -395,6 +395,7 @@ export function normalizeStudentSessionSnapshot(
       typeof data.activeQuestionDeadlineAt === 'number' && Number.isFinite(data.activeQuestionDeadlineAt)
         ? data.activeQuestionDeadlineAt
         : null,
+    activeQuestionDeadlineExpired: data.activeQuestionDeadlineExpired === true,
     lastActiveQuestionRunRevision:
       typeof data.lastActiveQuestionRunRevision === 'number' && Number.isSafeInteger(data.lastActiveQuestionRunRevision)
         ? data.lastActiveQuestionRunRevision

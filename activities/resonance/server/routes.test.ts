@@ -2096,6 +2096,64 @@ void test('server deadline task segments delays above the Node timer maximum', a
   await sessions.close()
 })
 
+void test('student snapshots report the server-side deadline expiry, including for a staged run that keeps its revision', async () => {
+  // The client must not infer expiry from its own (possibly skewed) clock or
+  // from snapshot shape; the server states it in every student snapshot.
+  initializePersistentStorage(null)
+  const app = createMockApp()
+  const sessions = createSessionStore(null)
+  const session = createMultiQuestionSession()
+  let now = 1_000
+  session.data.presentationMode = 'staged'
+  session.data.stagedRun = {
+    questionIds: ['q1', 'q2'],
+    currentQuestionId: 'q1',
+    currentIndex: 0,
+    choicesRevealed: true,
+    completedQuestionIds: [],
+  }
+  session.data.activeQuestionId = 'q1'
+  session.data.activeQuestionIds = ['q1']
+  session.data.activeQuestionRunStartedAt = 800
+  session.data.activeQuestionRunRevision = 1
+  session.data.activeQuestionDeadlineAt = 1_100
+  await sessions.set(session.id, session)
+  setupResonanceRoutes(app, sessions, createMockWs(), {
+    now: () => now,
+    schedule(callback, delayMs) {
+      return { callback, delayMs, cancelled: false, unref() {} }
+    },
+    cancel() {},
+  })
+
+  const registerRes = createResponse()
+  await app.handlers.post['/api/resonance/:sessionId/register-student']?.(
+    { params: { sessionId: session.id }, body: { name: 'Ada' } },
+    registerRes,
+  )
+  const studentId = (registerRes.body as { studentId?: string }).studentId
+  const cookies = { [registerRes.cookies[0]!.name]: registerRes.cookies[0]!.value }
+  const readState = async () => {
+    const res = createResponse()
+    await app.handlers.get['/api/resonance/:sessionId/state']?.(
+      { params: { sessionId: session.id }, query: { studentId }, cookies },
+      res,
+    )
+    return res.body as { activeQuestionRunRevision: number | null; activeQuestionDeadlineExpired: boolean }
+  }
+
+  const before = await readState()
+  assert.equal(before.activeQuestionRunRevision, 1)
+  assert.equal(before.activeQuestionDeadlineExpired, false)
+
+  now = 1_100
+  const after = await readState()
+  assert.equal(after.activeQuestionRunRevision, 1, 'a staged run keeps its revision after expiry')
+  assert.equal(after.activeQuestionDeadlineExpired, true)
+
+  await sessions.close()
+})
+
 void test('server deadline task retries after a strict session read failure', async () => {
   const app = createMockApp()
   const sessions = createSessionStore(null)

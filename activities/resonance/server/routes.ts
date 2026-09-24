@@ -1340,6 +1340,7 @@ function buildStudentSnapshotWithMode(
   session: ResonanceSession,
   viewerStudentId: string | null,
   selfPacedMode: boolean,
+  now: number,
 ) {
   const { activeQuestionId, activeQuestionIds, activeQuestionRunStartedAt, activeQuestionRunRevision, activeQuestionDeadlineAt, questions, reveals } = session.data
   const effectiveSelfPacedMode = selfPacedMode && activeQuestionIds.length === 0
@@ -1468,6 +1469,12 @@ function buildStudentSnapshotWithMode(
     activeQuestionRunStartedAt: effectiveSelfPacedMode ? null : activeQuestionRunStartedAt,
     activeQuestionRunRevision: effectiveSelfPacedMode ? null : activeQuestionRunRevision,
     activeQuestionDeadlineAt: effectiveSelfPacedMode ? null : activeQuestionDeadlineAt,
+    // The server's own verdict on its own clock, so clients never have to infer
+    // expiry from their (possibly skewed) clock or from snapshot shape. Every
+    // caller builds this after loadResonanceSession has already finalized an
+    // expired run's drafts.
+    activeQuestionDeadlineExpired:
+      !effectiveSelfPacedMode && activeQuestionDeadlineAt !== null && now >= activeQuestionDeadlineAt,
     lastActiveQuestionRunRevision:
       session.data.lastActiveQuestionRunRevision > 0 ? session.data.lastActiveQuestionRunRevision : null,
     reveals: [
@@ -1899,7 +1906,7 @@ export default function setupResonanceRoutes(
           sendToSocket(
             socket,
             'resonance:session-state',
-            buildStudentSnapshotWithMode(session, socket.studentId ?? null, selfPacedMode),
+            buildStudentSnapshotWithMode(session, socket.studentId ?? null, selfPacedMode, deadlineTaskRunner.now()),
             sessionId,
           )
         }
@@ -2293,7 +2300,7 @@ export default function setupResonanceRoutes(
     }
     const selfPacedMode = await resolveSelfPacedMode(session, sessions)
     res.setHeader?.('Cache-Control', 'no-store')
-    res.json(buildStudentSnapshotWithMode(session, authenticatedStudentId, selfPacedMode))
+    res.json(buildStudentSnapshotWithMode(session, authenticatedStudentId, selfPacedMode, deadlineTaskRunner.now()))
   })
 
   // GET /api/resonance/:sessionId/responses
@@ -3613,7 +3620,7 @@ export default function setupResonanceRoutes(
         sendToSocket(
           client,
           'resonance:session-state',
-          buildStudentSnapshotWithMode(session, client.studentId ?? null, selfPacedMode),
+          buildStudentSnapshotWithMode(session, client.studentId ?? null, selfPacedMode, deadlineTaskRunner.now()),
           sessionId,
         )
       }
