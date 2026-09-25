@@ -2143,13 +2143,20 @@ const SyncDeckStudent: FC = () => {
     let isCancelled = false
 
     void (async () => {
-      const resolvedIdentity = await resolveInitialEntryParticipantIdentity({
-        activityName: 'syncdeck',
-        sessionId,
-        isSoloSession: false,
-        localStorage: window.localStorage,
-        sessionStorage: window.sessionStorage,
-      })
+      // Blocked storage (a throwing getter or getItem) must not skip the
+      // cookie lookup below; treat it as having nothing stored.
+      let resolvedIdentity: { studentName: string; studentId: string | null } = { studentName: '', studentId: null }
+      try {
+        resolvedIdentity = await resolveInitialEntryParticipantIdentity({
+          activityName: 'syncdeck',
+          sessionId,
+          isSoloSession: false,
+          localStorage: readWindowStorage('localStorage'),
+          sessionStorage: readWindowStorage('sessionStorage'),
+        })
+      } catch (error) {
+        console.warn('[SyncDeck][StudentIdentity] Failed to read stored identity:', error)
+      }
 
       if (isCancelled) {
         return
