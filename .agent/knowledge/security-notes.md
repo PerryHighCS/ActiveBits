@@ -36,7 +36,7 @@ Track security-relevant boundaries, risks, and mitigation decisions.
 - Date: 2026-09-24
 - Area: SyncDeck student WebSocket and student HTTP actions
 - Threat or risk: A caller with a known roster ID could join another student's SyncDeck socket or request embedded context and auto-activation without holding that student's accepted-entry cookie.
-- Control or mitigation: Student WebSocket admission derives identity from the parent accepted-entry cookie before roster join or state replay, and rejects a conflicting ID hint. Embedded-context and auto-activation require the same cookie and matching roster ID. A 1008 `forbidden` close clears the student's cached ID and requests reentry.
+- Control or mitigation: Student WebSocket admission derives identity from the parent accepted-entry cookie before roster join or state replay, and rejects a conflicting ID hint. Embedded-context and auto-activation require the same cookie and matching roster ID. A 1008 `forbidden` close clears the student's stored ID in both sessionStorage and localStorage and recovers the identity from the accepted-entry cookie (`GET /api/syncdeck/:sessionId/student-identity`), which returns only the cookie's own student and never accepts a client-supplied ID. Otherwise a reload that skips the waiting room would restore the rejected ID indefinitely.
 - Residual risk: Whole-session read-modify-write races remain tracked in #313.
 - Validation (test/review/path): `activities/syncdeck/server/routes.test.ts`; `activities/syncdeck/client/student/reconnectUtils.test.ts`; `activities/syncdeck/playwright/student-return.spec.ts`.
 - Follow-up action: Complete #313 atomic session-write migration.

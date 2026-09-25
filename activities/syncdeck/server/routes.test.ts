@@ -4380,6 +4380,40 @@ void test('solo activity entry rejects a student whose accepted entry was revoke
   assert.equal(state.store[child.id]!.data.entryParticipants, undefined)
 })
 
+void test('student identity returns only the accepted-entry cookie student, ignoring client hints', async () => {
+  const parent = createSyncDeckSession('s1')
+  acceptEntryParticipant(parent, { participantId: 'student-1', displayName: 'Ada' })
+  const token = issueAcceptedEntryParticipantToken(parent, 'student-1')
+  assert.ok(token)
+  acceptEntryParticipant(parent, { participantId: 'student-2', displayName: 'Grace' })
+  const revokedToken = issueAcceptedEntryParticipantToken(parent, 'student-2')
+  assert.ok(revokedToken)
+  assert.equal(revokeAcceptedEntryParticipant(parent, 'student-2'), true)
+  const state = createSessionStore({ s1: parent })
+  const app = createMockApp()
+  setupSyncDeckRoutes(app, state.sessions, createMockWs())
+  const handler = app.handlers.get['/api/syncdeck/:sessionId/student-identity']
+  assert.ok(handler)
+
+  // Decision table: no cookie, revoked cookie, missing session -> no identity.
+  console.info('[TEST] Expected student identity rejections without a valid accepted-entry cookie.')
+  const missingCookie = createResponse()
+  await handler(createRequest({ sessionId: 's1' }, undefined, {}), missingCookie)
+  assert.equal(missingCookie.statusCode, 403)
+  const revoked = createResponse()
+  await handler(createRequest({ sessionId: 's1' }, undefined, { [getSessionParticipantCookieName('s1')]: revokedToken }), revoked)
+  assert.equal(revoked.statusCode, 403)
+  const missingSession = createResponse()
+  await handler(createRequest({ sessionId: 'missing' }, undefined, { [getSessionParticipantCookieName('missing')]: token }), missingSession)
+  assert.equal(missingSession.statusCode, 404)
+
+  // A valid cookie resolves the student without a roster record.
+  const accepted = createResponse()
+  await handler(createRequest({ sessionId: 's1' }, { studentId: 'student-2' }, { [getSessionParticipantCookieName('s1')]: token }), accepted)
+  assert.equal(accepted.statusCode, 200)
+  assert.deepEqual(accepted.body, { studentId: 'student-1', displayName: 'Ada' })
+})
+
 void test('embedded-activity auto-activate route marks released resonance children to activate all questions', async () => {
   const app = createMockApp()
   const ws = createMockWs()

@@ -2551,6 +2551,38 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
 
   // A SyncDeck student can create a standalone solo child. Carry only the ID
   // proven by the parent session's accepted-entry cookie into that new session.
+  // Returns the student proven by the parent's accepted-entry cookie. The
+  // cookie, not browser storage, is authoritative: a client whose stored ID
+  // was rejected (or is missing after a reload that bypassed the waiting room)
+  // recovers its identity here instead of retrying the stale ID.
+  app.get('/api/syncdeck/:sessionId/student-identity', async (req, res) => {
+    res.setHeader?.('Cache-Control', 'no-store')
+    const sessionId = req.params.sessionId
+    if (!sessionId) {
+      res.status(400).json({ error: 'missing sessionId' })
+      return
+    }
+    try {
+      const session = asSyncDeckSession(await sessions.get(sessionId))
+      if (!session) {
+        res.status(404).json({ error: 'invalid session' })
+        return
+      }
+      const student = resolveAcceptedSyncDeckEntryIdentity(session, req.cookies)
+      if (!student) {
+        res.status(403).json({ error: 'forbidden' })
+        return
+      }
+      res.json({ studentId: student.studentId, displayName: student.name })
+    } catch (error) {
+      console.error(JSON.stringify({
+        activity: 'syncdeck', event: 'student-identity-failed', sessionId,
+        error: error instanceof Error ? error.message : String(error),
+      }))
+      res.status(500).json({ error: 'student identity unavailable' })
+    }
+  })
+
   app.post('/api/syncdeck/:sessionId/solo-activity/entry', async (req, res) => {
     res.setHeader?.('Cache-Control', 'no-store')
     const sessionId = req.params.sessionId

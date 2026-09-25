@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { handleReturnedToWaitingRoom } from './returnedToWaitingRoomUtils'
+import { clearSyncDeckStoredStudentIdentity, handleReturnedToWaitingRoom } from './returnedToWaitingRoomUtils'
 
 void test('handleReturnedToWaitingRoom clears identity and redirects only the targeted student', () => {
   const removed: string[] = []; const sessionRemoved: string[] = []; let destination = ''
@@ -12,4 +12,13 @@ void test('handleReturnedToWaitingRoom clears identity and redirects only the ta
   const before = [...removed, ...sessionRemoved]
   assert.equal(handleReturnedToWaitingRoom({ participantId: 'lin', registeredStudentId: 'ada', sessionId: 's1', storage, sessionStorage, redirect: () => {} }), false)
   assert.deepEqual([...removed, ...sessionRemoved], before)
+})
+
+void test('clearSyncDeckStoredStudentIdentity removes every stored identity key from both storages', () => {
+  const removed: string[] = []; const sessionRemoved: string[] = []
+  clearSyncDeckStoredStudentIdentity('s1', { removeItem(key: string) { removed.push(key) } }, { removeItem(key: string) { sessionRemoved.push(key) } })
+  assert.deepEqual(removed.sort(), [
+    'session-participant:s1', 'student-id-s1', 'student-name-s1', 'syncdeck_student_id_s1', 'syncdeck_student_name_s1',
+  ])
+  assert.deepEqual(sessionRemoved.sort(), ['session-participant:s1', 'syncdeck_student_id_s1', 'syncdeck_student_name_s1'])
 })
