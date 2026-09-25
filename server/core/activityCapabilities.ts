@@ -224,6 +224,30 @@ export function writeActivityCapabilityCookie(
   })
 }
 
+/**
+ * Revokes every capability of `principalKind` issued to `subjectId`, so an
+ * activity principal ends with the platform identity it was issued for (for
+ * example when a parent returns a student to the waiting room). Returns the
+ * number revoked.
+ */
+export function revokeActivityCapabilitiesForSubject(
+  session: ActivityCapabilitySessionLike,
+  principalKind: ActivityPrincipalKind,
+  subjectId: string,
+): number {
+  if (!isRecord(session.data)) return 0
+  const capabilities = (session.data as ActivityCapabilityContainer).activityCapabilities
+  if (!isRecord(capabilities)) return 0
+  let revoked = 0
+  for (const [id, value] of Object.entries(capabilities)) {
+    if (isRecord(value) && value.principalKind === principalKind && value.subjectId === subjectId) {
+      delete capabilities[id]
+      revoked += 1
+    }
+  }
+  return revoked
+}
+
 export function resolveActivityCapability(
   session: ActivityCapabilitySessionLike,
   sessionId: string,
