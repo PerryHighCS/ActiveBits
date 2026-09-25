@@ -488,3 +488,11 @@ Track security-relevant boundaries, risks, and mitigation decisions.
 - Date: 2026-09-24
 - The root `npm audit` uses the root dependency tree; it does not audit the separate `client/`, `server/`, and `activities/` lockfiles as independent projects. GitHub Dependabot tracks alerts per manifest, so the same advisory can produce multiple repository alerts.
 - Audit each nested lockfile from its directory with `npm audit --package-lock-only --workspaces=false`. In September 2026, this exposed `brace-expansion` 5.0.7 in the server and activities locks even though those findings were absent from GitHub's seven open alerts. Keep all four locks in scope when resolving dependency alerts.
+
+- Date: 2026-09-25
+- Area: session deletion vs. in-flight writers (SyncDeck solo/embedded children)
+- Threat or risk: `SessionStore.set()` is unconditional. A writer that reads a session, awaits, and writes it back (for example Resonance handlers, which take no lock) can recreate a session that was deleted in between. For SyncDeck this means a child deleted on return-to-waiting-room, eviction, or parent delete can come back unbound, and a student's child participant capability can keep working for that child until the session expires.
+- Control or mitigation: None yet beyond in-process ordering. Parent access is still revoked (no accepted entry, no binding), so the student can't re-enter through the parent. The risk is limited to a browser that already holds the child capability cookie and to the narrow window of an overlapping write. Deferred to #313: writers moving to `updateAtomic`, whose CAS is bound to the session incarnation, make a post-delete write fail instead of recreating the session.
+- Residual risk: Applies to every session type whose writers use plain get-then-set, including embedded children cascaded on parent delete on `main`.
+- Validation (test/review/path): Copilot review on PR #389 (discussion_r4109300345). `.agent/plans/shared-activity-runtime-authentication.md` Solo child binding, "Known residual".
+- Follow-up action: #313 Phase E checklist item "Make deletes authoritative".
