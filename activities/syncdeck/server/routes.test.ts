@@ -4306,6 +4306,7 @@ void test('solo activity entry carries only the parent-cookie student id into th
   const handler = app.handlers.post['/api/syncdeck/:sessionId/solo-activity/entry']
   assert.ok(handler)
 
+  console.info('[TEST] Expected solo activity entry rejection without a parent accepted-entry cookie.')
   const denied = createResponse()
   await handler(createRequest({ sessionId: 's1' }, { childSessionId: child.id, studentId: 'student-1' }), denied)
   assert.equal(denied.statusCode, 403)
@@ -4359,6 +4360,7 @@ void test('solo activity entry rejects a student whose accepted entry was revoke
   const token = issueAcceptedEntryParticipantToken(parent, 'student-1')
   assert.ok(token)
   assert.equal(revokeAcceptedEntryParticipant(parent, 'student-1'), true)
+  console.info('[TEST] Expected solo activity entry rejection for a revoked accepted entry.')
   const child: SessionRecord = { id: 'solo-child', type: 'resonance', created: 2, lastActivity: 2, data: {} }
   const state = createSessionStore({ s1: parent, [child.id]: child })
   const app = createMockApp()

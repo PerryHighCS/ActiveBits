@@ -483,4 +483,4 @@ For every migration:
 - [x] Complete Phase 1 as a read-only audit before implementing issue #344.
 - [x] Review the completed matrix and extract the versioned principal, capability, projection, and transport threat model before implementation begins.
 - [x] Open the first shared-primitives implementation PR and record its pilot results in the Phase 6 checklist above.
-- [ ] Fix and verify PR #387's two solo-entry review findings, then complete review and merge its Phase A issue fixes. Reconcile the remaining Phase A contract matrix before starting the #344/#353 manager and termination pilot on a fresh branch.
+- [ ] Complete review and merge PR #387's Phase A issue fixes. Merge requires the standalone roster finding to be fixed (done in #387); the solo child parent-binding gap is a known, accepted open issue at merge and is tracked in [#388](https://github.com/PerryHighCS/ActiveBits/issues/388). Reconcile the remaining Phase A contract matrix before starting the #344/#353 manager and termination pilot on a fresh branch.
