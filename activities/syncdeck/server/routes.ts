@@ -2613,6 +2613,38 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, rawSessions: 
     })
   })
 
+  // Returns the student proven by the parent's accepted-entry cookie. The
+  // cookie, not browser storage, is authoritative: a client whose stored ID
+  // was rejected (or is missing after a reload that bypassed the waiting room)
+  // recovers its identity here instead of retrying the stale ID.
+  app.get('/api/syncdeck/:sessionId/student-identity', async (req, res) => {
+    res.setHeader?.('Cache-Control', 'no-store')
+    const sessionId = req.params.sessionId
+    if (!sessionId) {
+      res.status(400).json({ error: 'missing sessionId' })
+      return
+    }
+    try {
+      const session = asSyncDeckSession(await sessions.get(sessionId))
+      if (!session) {
+        res.status(404).json({ error: 'invalid session' })
+        return
+      }
+      const student = resolveAcceptedSyncDeckEntryIdentity(session, req.cookies)
+      if (!student) {
+        res.status(403).json({ error: 'forbidden' })
+        return
+      }
+      res.json({ studentId: student.studentId, displayName: student.name })
+    } catch (error) {
+      console.error(JSON.stringify({
+        activity: 'syncdeck', event: 'student-identity-failed', sessionId,
+        error: error instanceof Error ? error.message : String(error),
+      }))
+      res.status(500).json({ error: 'student identity unavailable' })
+    }
+  })
+
   // A SyncDeck student starts a student-owned solo child. The server creates
   // (or reuses) the child and records its binding to the parent and student,
   // so a trusted entry token is only ever issued for a child this route made.

@@ -13,7 +13,8 @@ import {
   readStoredSessionParticipantIdentity,
   resolveInitialEntryParticipantIdentity,
 } from '@src/components/common/entryParticipantIdentityUtils'
-import { handleReturnedToWaitingRoom } from './returnedToWaitingRoomUtils.js'
+import { clearSyncDeckStoredStudentIdentity, handleReturnedToWaitingRoom } from './returnedToWaitingRoomUtils.js'
+import { fetchAcceptedSyncDeckStudentIdentity, resolveRecoveredSyncDeckStudentIdentity, type SyncDeckRecoveredStudentIdentity } from './studentIdentityRecovery.js'
 import {
   REVEAL_SYNC_PROTOCOL_VERSION,
   assessRevealSyncProtocolCompatibility,
@@ -1990,6 +1991,12 @@ const SyncDeckStudent: FC = () => {
   const [registeredStudentName, setRegisteredStudentName] = useState('')
   const [registeredStudentId, setRegisteredStudentId] = useState('')
   const [joinError, setJoinError] = useState<string | null>(null)
+  const registeredStudentIdRef = useRef('')
+  const currentSessionIdRef = useRef(sessionId)
+  useEffect(() => {
+    registeredStudentIdRef.current = registeredStudentId
+    currentSessionIdRef.current = sessionId
+  }, [registeredStudentId, sessionId])
   const iframeRef = useRef<HTMLIFrameElement | null>(null)
   const {
     overlayNavClickShieldRef,
@@ -2093,6 +2100,32 @@ const SyncDeckStudent: FC = () => {
     }))
   }, [])
 
+  const adoptRegisteredStudentIdentity = useCallback((targetSessionId: string, identity: SyncDeckRecoveredStudentIdentity) => {
+    persistSessionParticipantIdentity(window.localStorage, targetSessionId, identity.studentName, identity.studentId)
+    window.sessionStorage.setItem(`syncdeck_student_name_${targetSessionId}`, identity.studentName)
+    window.sessionStorage.setItem(`syncdeck_student_id_${targetSessionId}`, identity.studentId)
+    setRegisteredStudentName(identity.studentName)
+    setRegisteredStudentId(identity.studentId)
+    setJoinError(null)
+  }, [])
+
+  // After the socket rejects the stored identity, adopt the student proven by
+  // the accepted-entry cookie instead. The rejected ID is never re-adopted, so
+  // a cookie that still maps to it leaves the student at the rejoin prompt.
+  const recoverRejectedStudentIdentity = useCallback(async (targetSessionId: string, rejectedStudentId: string | null) => {
+    const identity = resolveRecoveredSyncDeckStudentIdentity(
+      await fetchAcceptedSyncDeckStudentIdentity(targetSessionId),
+      rejectedStudentId,
+    )
+    if (!identity || currentSessionIdRef.current !== targetSessionId || registeredStudentIdRef.current) {
+      if (isDevMode) {
+        console.info('[SyncDeck][StudentIdentityRecovery]', { recovered: identity != null })
+      }
+      return
+    }
+    adoptRegisteredStudentIdentity(targetSessionId, identity)
+  }, [adoptRegisteredStudentIdentity])
+
   useEffect(() => {
     if (!sessionId || typeof window === 'undefined') {
       return
@@ -2115,32 +2148,31 @@ const SyncDeckStudent: FC = () => {
 
       const resolvedStudentName = resolvedIdentity.studentName.trim()
       const resolvedStudentId = (resolvedIdentity.studentId ?? '').trim()
-
-      setRegisteredStudentName(resolvedStudentName)
-      setRegisteredStudentId(resolvedStudentId)
-      setJoinError(
-        resolvedStudentName.length === 0 || resolvedStudentId.length === 0
-          ? 'This presentation now requires entry through the waiting room.'
-          : null,
-      )
-
-      if (resolvedStudentName.length > 0 && resolvedStudentId.length > 0) {
-        persistSessionParticipantIdentity(
-          window.localStorage,
-          sessionId,
-          resolvedStudentName,
-          resolvedStudentId,
-        )
-
-        window.sessionStorage.setItem(`syncdeck_student_name_${sessionId}`, resolvedStudentName)
-        window.sessionStorage.setItem(`syncdeck_student_id_${sessionId}`, resolvedStudentId)
+      let identity: SyncDeckRecoveredStudentIdentity | null = resolvedStudentName.length > 0 && resolvedStudentId.length > 0
+        ? { studentName: resolvedStudentName, studentId: resolvedStudentId }
+        : null
+      if (!identity) {
+        // A reload with a valid accepted-entry cookie skips the waiting room;
+        // recover the student from the cookie when nothing usable is stored.
+        identity = resolveRecoveredSyncDeckStudentIdentity(await fetchAcceptedSyncDeckStudentIdentity(sessionId), null)
+        if (isCancelled) {
+          return
+        }
       }
+
+      if (identity) {
+        adoptRegisteredStudentIdentity(sessionId, identity)
+        return
+      }
+      setRegisteredStudentName('')
+      setRegisteredStudentId('')
+      setJoinError('This presentation now requires entry through the waiting room.')
     })()
 
     return () => {
       isCancelled = true
     }
-  }, [sessionId])
+  }, [adoptRegisteredStudentIdentity, sessionId])
 
   const presentationUrlError = useMemo(
     () => (presentationUrl
@@ -2778,15 +2810,20 @@ const SyncDeckStudent: FC = () => {
       onClose: (event) => {
         const closeDecision = resolveSyncDeckStudentCloseDecision(event)
         if (closeDecision.clearCachedIdentity) {
+          const rejectedStudentId = registeredStudentIdRef.current || null
           if (typeof window !== 'undefined' && sessionId) {
-            window.sessionStorage.removeItem(`syncdeck_student_name_${sessionId}`)
-            window.sessionStorage.removeItem(`syncdeck_student_id_${sessionId}`)
+            // Clear localStorage too: otherwise a reload restores the rejected ID.
+            clearSyncDeckStoredStudentIdentity(sessionId, window.localStorage, window.sessionStorage)
           }
+          registeredStudentIdRef.current = ''
           setRegisteredStudentName('')
           setRegisteredStudentId('')
           setJoinError(closeDecision.joinError)
           setConnectionState('disconnected')
           setStatusMessage(closeDecision.statusMessage)
+          if (typeof window !== 'undefined' && sessionId) {
+            void recoverRejectedStudentIdentity(sessionId, rejectedStudentId)
+          }
           return
         }
 
