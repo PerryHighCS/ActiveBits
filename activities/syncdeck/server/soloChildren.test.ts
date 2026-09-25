@@ -89,6 +89,33 @@ void test('recordSoloChild evicts the oldest records past the per-session cap', 
   assert.equal(soloChildren['child-0'], undefined)
 })
 
+void test('recordSoloChild never evicts the new binding, even when it is older than the stored records', () => {
+  // A clock step backward, or stored records with future timestamps.
+  const soloChildren: SyncDeckSoloChildrenMap = {}
+  for (let index = 0; index < MAX_SOLO_CHILDREN_PER_STUDENT; index += 1) {
+    soloChildren[`child-${index}`] = record({ instanceKey: `resonance:${index}:0`, createdAt: 1_000 + index })
+  }
+
+  const evicted = recordSoloChild(soloChildren, 'new-child', record({ createdAt: 1 }))
+
+  assert.deepEqual(evicted, ['child-0'])
+  assert.ok(soloChildren['new-child'])
+  assert.equal(Object.keys(soloChildren).length, MAX_SOLO_CHILDREN_PER_STUDENT)
+})
+
+void test('recordSoloChild never evicts the new binding under the per-session cap', () => {
+  const soloChildren: SyncDeckSoloChildrenMap = {}
+  for (let index = 0; index < MAX_SOLO_CHILDREN_PER_SESSION; index += 1) {
+    soloChildren[`child-${index}`] = record({ studentId: `student-${index}`, createdAt: 1_000 + index })
+  }
+
+  const evicted = recordSoloChild(soloChildren, 'new-child', record({ studentId: 'student-new', createdAt: 1 }))
+
+  assert.deepEqual(evicted, ['child-0'])
+  assert.ok(soloChildren['new-child'])
+  assert.equal(Object.keys(soloChildren).length, MAX_SOLO_CHILDREN_PER_SESSION)
+})
+
 void test('removeStudentSoloChildren deletes only that student and returns the affected child IDs', () => {
   const soloChildren: SyncDeckSoloChildrenMap = {
     a: record(),

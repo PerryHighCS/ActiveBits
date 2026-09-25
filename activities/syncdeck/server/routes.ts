@@ -2743,16 +2743,19 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, rawSessions: 
                   createdAt: Date.now(),
                 })
                 : []
-              // Delete evicted children before committing. A child whose delete
-              // fails keeps its binding, so it stays revocable and the next
-              // eviction or the parent-delete cascade retries it; this start
-              // still succeeds because its new child is validly bound.
+              // Delete evicted children before committing. If any delete fails,
+              // this start fails: the new binding is withdrawn and its child
+              // discarded, and each failed child keeps its binding so it stays
+              // revocable and is retried by a later eviction or the parent-delete
+              // cascade. The caps therefore always hold.
               const evictionResults = await Promise.allSettled(
                 evictedChildSessionIds.map((evictedChildSessionId) => sessions.delete(evictedChildSessionId)),
               )
-              evictionResults.forEach((evictionResult, index) => {
+              let evictionFailed = false
+              for (const [index, evictionResult] of evictionResults.entries()) {
                 const evictedChildSessionId = evictedChildSessionIds[index]!
                 if (evictionResult.status === 'rejected') {
+                  evictionFailed = true
                   freshParent.data.soloChildren[evictedChildSessionId] = bindingsBeforeEviction[evictedChildSessionId]!
                   console.error(JSON.stringify({
                     activity: 'syncdeck', event: 'solo-activity-evicted-child-delete-failed', sessionId,
@@ -2760,7 +2763,15 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, rawSessions: 
                     error: evictionResult.reason instanceof Error ? evictionResult.reason.message : String(evictionResult.reason),
                   }))
                 }
-              })
+              }
+              if (evictionFailed && createdChildSessionId) {
+                delete freshParent.data.soloChildren[createdChildSessionId]
+                // Persist the stale-binding removal and the evictions that did
+                // succeed, so bindings never point at deleted children.
+                await sessions.set(freshParent.id, freshParent)
+                await discardCreatedChild('eviction-failed')
+                return { statusCode: 503, body: { error: 'solo activity unavailable' } }
+              }
               await sessions.set(freshParent.id, freshParent)
             }
 

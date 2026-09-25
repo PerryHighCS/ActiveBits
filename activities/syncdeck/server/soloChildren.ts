@@ -84,10 +84,14 @@ export function findBoundSoloChild(
   return null
 }
 
-function evictOldest(soloChildren: SyncDeckSoloChildrenMap, childSessionIds: string[], keep: number): string[] {
-  if (childSessionIds.length <= keep) return []
-  const ordered = [...childSessionIds].sort((left, right) => soloChildren[left]!.createdAt - soloChildren[right]!.createdAt)
-  const evicted = ordered.slice(0, ordered.length - keep)
+// `protectedId` is never evicted, whatever its `createdAt`: a clock step
+// backward or a future-dated stored record must not evict the new binding.
+function evictOldest(soloChildren: SyncDeckSoloChildrenMap, childSessionIds: string[], keep: number, protectedId: string): string[] {
+  const candidates = childSessionIds.filter((id) => id !== protectedId)
+  const excess = childSessionIds.length - keep
+  if (excess <= 0) return []
+  const ordered = candidates.sort((left, right) => soloChildren[left]!.createdAt - soloChildren[right]!.createdAt)
+  const evicted = ordered.slice(0, excess)
   for (const childSessionId of evicted) {
     delete soloChildren[childSessionId]
   }
@@ -95,9 +99,10 @@ function evictOldest(soloChildren: SyncDeckSoloChildrenMap, childSessionIds: str
 }
 
 /**
- * Records a new binding, evicting the oldest records past the per-student and
- * per-session caps. Returns the evicted child session IDs; the caller must
- * delete those sessions, because an unbound child can no longer be revoked.
+ * Records a new binding, evicting the oldest other records past the per-student
+ * and per-session caps; the new binding itself is never evicted. Returns the
+ * evicted child session IDs; the caller must delete those sessions, because an
+ * unbound child can no longer be revoked.
  */
 export function recordSoloChild(
   soloChildren: SyncDeckSoloChildrenMap,
@@ -110,8 +115,9 @@ export function recordSoloChild(
       soloChildren,
       Object.keys(soloChildren).filter((id) => soloChildren[id]!.studentId === record.studentId),
       MAX_SOLO_CHILDREN_PER_STUDENT,
+      childSessionId,
     ),
-    ...evictOldest(soloChildren, Object.keys(soloChildren), MAX_SOLO_CHILDREN_PER_SESSION),
+    ...evictOldest(soloChildren, Object.keys(soloChildren), MAX_SOLO_CHILDREN_PER_SESSION, childSessionId),
   ]
 }
 

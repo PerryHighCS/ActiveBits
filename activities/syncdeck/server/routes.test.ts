@@ -4842,7 +4842,7 @@ void test('a failed solo start leaves no binding in a store that returns live re
   assert.deepEqual(childIds, [])
 })
 
-void test('a failed eviction delete keeps that binding while the new solo start still succeeds', async () => {
+void test('a failed eviction delete fails the solo start, keeps that binding, and discards the new child', async () => {
   const { parent, tokens } = createSoloParent()
   const initial: Record<string, SessionRecord> = { s1: parent }
   const soloChildren: Record<string, unknown> = {}
@@ -4864,11 +4864,12 @@ void test('a failed eviction delete keeps that binding while the new solo start 
   console.info('[TEST] Expected evicted solo child delete failure.')
   const res = await start({ activityId: 'resonance', location: { h: 0, v: 0 }, activityOptions: SOLO_RESONANCE_OPTIONS }, tokens['student-1'])
 
-  assert.equal(res.statusCode, 200)
+  assert.equal(res.statusCode, 503)
   const bound = (state.store.s1!.data as { soloChildren: Record<string, unknown> }).soloChildren
-  assert.notEqual(bound['CHILD:s1:old0:resonance'], undefined)
-  assert.notEqual(bound[(res.body as { childSessionId: string }).childSessionId], undefined)
-  assert.notEqual(state.store[(res.body as { childSessionId: string }).childSessionId], undefined)
+  // The cap holds: the failed child stays bound and revocable, and no new binding is added.
+  assert.deepEqual(Object.keys(bound).sort(), Object.keys(soloChildren).sort())
+  const liveChildIds = Object.keys(state.store).filter((id) => id.startsWith('CHILD:s1:'))
+  assert.deepEqual(liveChildIds.sort(), Object.keys(soloChildren).sort())
 })
 
 void test('a student WebSocket join replays state committed while it waited for the parent lock', async () => {
