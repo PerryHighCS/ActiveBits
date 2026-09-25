@@ -22,3 +22,13 @@ void test('clearSyncDeckStoredStudentIdentity removes every stored identity key 
   ])
   assert.deepEqual(sessionRemoved.sort(), ['session-participant:s1', 'syncdeck_student_id_s1', 'syncdeck_student_name_s1'])
 })
+
+void test('clearSyncDeckStoredStudentIdentity is best effort when storage is missing or a key fails', () => {
+  console.info('[TEST] Expected stored identity clear failures.')
+  const removed: string[] = []
+  const failing = { removeItem(key: string) { if (key === 'student-id-s1') throw new Error('[TEST] storage blocked'); removed.push(key) } }
+  assert.doesNotThrow(() => clearSyncDeckStoredStudentIdentity('s1', failing, null))
+  // Every other key is still removed after one fails.
+  assert.deepEqual(removed.sort(), ['session-participant:s1', 'student-name-s1', 'syncdeck_student_id_s1', 'syncdeck_student_name_s1'])
+  assert.doesNotThrow(() => clearSyncDeckStoredStudentIdentity('s1', null, null))
+})

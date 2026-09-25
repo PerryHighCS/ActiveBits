@@ -13,7 +13,7 @@ import {
   readStoredSessionParticipantIdentity,
   resolveInitialEntryParticipantIdentity,
 } from '@src/components/common/entryParticipantIdentityUtils'
-import { clearSyncDeckStoredStudentIdentity, handleReturnedToWaitingRoom } from './returnedToWaitingRoomUtils.js'
+import { clearSyncDeckStoredStudentIdentity, handleReturnedToWaitingRoom, readWindowStorage } from './returnedToWaitingRoomUtils.js'
 import { fetchAcceptedSyncDeckStudentIdentity, resolveRecoveredSyncDeckStudentIdentity, type SyncDeckRecoveredStudentIdentity } from './studentIdentityRecovery.js'
 import {
   REVEAL_SYNC_PROTOCOL_VERSION,
@@ -2100,9 +2100,19 @@ const SyncDeckStudent: FC = () => {
   }, [])
 
   const adoptRegisteredStudentIdentity = useCallback((targetSessionId: string, identity: SyncDeckRecoveredStudentIdentity) => {
-    persistSessionParticipantIdentity(window.localStorage, targetSessionId, identity.studentName, identity.studentId)
-    window.sessionStorage.setItem(`syncdeck_student_name_${targetSessionId}`, identity.studentName)
-    window.sessionStorage.setItem(`syncdeck_student_id_${targetSessionId}`, identity.studentId)
+    // Storage is a cache of the cookie-proven identity; a blocked or full
+    // storage must not stop the student from being registered.
+    const localStorage = readWindowStorage('localStorage')
+    if (localStorage) {
+      persistSessionParticipantIdentity(localStorage, targetSessionId, identity.studentName, identity.studentId)
+    }
+    try {
+      const sessionStorage = readWindowStorage('sessionStorage')
+      sessionStorage?.setItem(`syncdeck_student_name_${targetSessionId}`, identity.studentName)
+      sessionStorage?.setItem(`syncdeck_student_id_${targetSessionId}`, identity.studentId)
+    } catch (error) {
+      console.warn('[SyncDeck][StudentIdentity] Failed to persist session identity:', error)
+    }
     setRegisteredStudentName(identity.studentName)
     setRegisteredStudentId(identity.studentId)
     setJoinError(null)
@@ -2812,7 +2822,7 @@ const SyncDeckStudent: FC = () => {
           const rejectedStudentId = registeredStudentIdRef.current || null
           if (typeof window !== 'undefined' && sessionId) {
             // Clear localStorage too: otherwise a reload restores the rejected ID.
-            clearSyncDeckStoredStudentIdentity(sessionId, window.localStorage, window.sessionStorage)
+            clearSyncDeckStoredStudentIdentity(sessionId, readWindowStorage('localStorage'), readWindowStorage('sessionStorage'))
           }
           registeredStudentIdRef.current = ''
           setRegisteredStudentName('')
