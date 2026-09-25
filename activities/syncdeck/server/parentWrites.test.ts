@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import type { SessionRecord, SessionStore } from 'activebits-server/core/sessions.js'
+import { createSessionStore, type SessionRecord, type SessionStore } from 'activebits-server/core/sessions.js'
 import {
   createSyncDeckParentWriter,
   guardSyncDeckParentWrites,
@@ -120,9 +120,31 @@ void test('update re-reads the current parent, skips the write on false, and ign
     session.data.a = 99
     return false
   })
-  assert.equal(unchanged?.data.a, 99)
+  // A skipped write returns the stored record, not the abandoned copy.
+  assert.equal(unchanged?.data.a, 1)
   assert.equal(records.get('d1')?.data.a, 1)
 
   assert.equal(await writer.update('missing', () => undefined), null)
   assert.equal(await writer.update('CHILD:d1:a:resonance', () => undefined), null)
+})
+
+void test('update never exposes an abandoned or failed mutation through the store\'s live record', async () => {
+  // The real in-memory store returns its live record from get().
+  const store = createSessionStore(null)
+  await store.set('live-deck', deck('live-deck', { a: 1 }))
+  const writer = createSyncDeckParentWriter(store)
+
+  const skipped = await writer.update('live-deck', (session) => {
+    session.data.a = 99
+    return false
+  })
+  assert.equal(skipped?.data.a, 1)
+  assert.equal((await store.get('live-deck'))?.data.a, 1)
+
+  const failingWriter = createSyncDeckParentWriter({
+    get: (id) => store.get(id),
+    set: async () => { throw new Error('[TEST] parent write unavailable') },
+  })
+  await assert.rejects(failingWriter.update('live-deck', (session) => { session.data.a = 42 }), /parent write unavailable/)
+  assert.equal((await store.get('live-deck'))?.data.a, 1)
 })

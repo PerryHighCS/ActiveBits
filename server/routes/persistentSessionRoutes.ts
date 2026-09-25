@@ -947,8 +947,10 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
         if (capabilityOutcome.status === 'issued') {
           capabilityToken = capabilityOutcome.token
         } else if (capabilityOutcome.status === 'no-atomic-store') {
-          capabilityToken = issueActivityCapability(freshSession as { data: unknown }, 'manager').token
-          await setSession(sessionId, freshSession)
+          // Copy the store's live record so a failed write leaves it untouched.
+          const sessionToWrite = structuredClone(freshSession)
+          capabilityToken = issueActivityCapability(sessionToWrite as { data: unknown }, 'manager').token
+          await setSession(sessionId, sessionToWrite)
         } else {
           console.error(JSON.stringify({
             event: 'session-manager-capability-incarnation-mismatch',
@@ -1132,8 +1134,10 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
         if (capabilityOutcome.status === 'issued') {
           capabilityToken = capabilityOutcome.token
         } else if (capabilityOutcome.status === 'no-atomic-store') {
-          capabilityToken = issueActivityCapability(freshSession as { data: unknown }, 'manager').token
-          await setSession(sessionId, freshSession)
+          // Copy the store's live record so a failed write leaves it untouched.
+          const sessionToWrite = structuredClone(freshSession)
+          capabilityToken = issueActivityCapability(sessionToWrite as { data: unknown }, 'manager').token
+          await setSession(sessionId, sessionToWrite)
         } else {
           console.error(JSON.stringify({
             event: 'session-manager-capability-incarnation-mismatch',

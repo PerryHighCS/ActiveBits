@@ -29,8 +29,9 @@ export interface SyncDeckParentWriter {
   /** Runs `work` while holding the parent's write lock. Not reentrant for the same parent. */
   runExclusive<T>(sessionId: string, work: () => Promise<T>): Promise<T>
   /**
-   * Takes the lock, reads the current parent, applies `mutate`, and writes it
-   * unless `mutate` returns `false`. Returns the parent, or null if it is missing.
+   * Takes the lock, reads the current parent, applies `mutate` to a copy, and
+   * writes it unless `mutate` returns `false` (then the stored record is returned
+   * unchanged). Returns the parent, or null if it is missing.
    */
   update(sessionId: string, mutate: (session: SessionRecord) => boolean | void | Promise<boolean | void>): Promise<SessionRecord | null>
   /** Whether the current async context holds this parent's write lock. */
@@ -42,13 +43,17 @@ export function createSyncDeckParentWriter(sessions: Pick<SessionStore, 'get' | 
   const runExclusive = runSessionWriteExclusive
 
   const update: SyncDeckParentWriter['update'] = async (sessionId, mutate) => runExclusive(sessionId, async () => {
-    const session = await sessions.get(sessionId)
-    if (!session || session.type !== SYNCDECK_SESSION_TYPE) {
+    const current = await sessions.get(sessionId)
+    if (!current || current.type !== SYNCDECK_SESSION_TYPE) {
       return null
     }
-    if (await mutate(session) !== false) {
-      await sessions.set(sessionId, session)
+    // Stores return their live record (in-memory map or read cache). Mutate a
+    // copy so a skipped (`false`) or failed write leaves shared state untouched.
+    const session = structuredClone(current)
+    if (await mutate(session) === false) {
+      return current
     }
+    await sessions.set(sessionId, session)
     return session
   })
 

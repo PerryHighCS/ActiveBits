@@ -750,7 +750,9 @@ export function setupSessionRoutes(app: {
     // Read-modify-write under the shared per-session write lock so this
     // write cannot overwrite a concurrent activity-owned mutation.
     await runSessionWriteExclusive(sessionId, async () => {
-      const session = await sessions.get(sessionId)
+      // Copy the store's live record so a failed write leaves it untouched.
+      const storedSession = await sessions.get(sessionId)
+      const session = storedSession ? structuredClone(storedSession) : null
       if (!session) {
         res.status(404).json({ error: 'invalid session' })
         return
@@ -778,7 +780,9 @@ export function setupSessionRoutes(app: {
     // Read-modify-write under the shared per-session write lock so this
     // write cannot overwrite a concurrent activity-owned mutation.
     await runSessionWriteExclusive(sessionId, async () => {
-      const session = await sessions.get(sessionId)
+      // Copy the store's live record so a failed write leaves it untouched.
+      const storedSession = await sessions.get(sessionId)
+      const session = storedSession ? structuredClone(storedSession) : null
       if (!session) {
         res.status(404).json({ error: 'invalid session' })
         return

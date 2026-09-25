@@ -1,4 +1,4 @@
-import type { SessionRecord, SessionStore } from 'activebits-server/core/sessions.js'
+import { createSessionStore as createCoreSessionStore, type SessionRecord, type SessionStore } from 'activebits-server/core/sessions.js'
 import { consumeSessionDataToken } from 'activebits-server/core/sessionTokenUtils.js'
 import { acceptEntryParticipant, findAcceptedEntryParticipant, getSessionParticipantCookieName, issueAcceptedEntryParticipantToken, resolveAcceptedEntryParticipantToken, revokeAcceptedEntryParticipant } from 'activebits-server/core/acceptedEntryParticipants.js'
 import { consumeSessionEntryParticipant, storeTrustedSessionEntryParticipant } from 'activebits-server/core/sessionEntryParticipants.js'
@@ -4811,6 +4811,35 @@ void test('a failed return to the waiting room restores the deleted solo childre
   assert.notEqual(state.store[ada.childSessionId], undefined)
   assert.notEqual((state.store.s1!.data as { soloChildren: Record<string, unknown> }).soloChildren[ada.childSessionId], undefined)
   assert.notEqual(findAcceptedEntryParticipant(state.store.s1!, 'student-1'), null)
+})
+
+void test('a failed solo start leaves no binding in a store that returns live records', async () => {
+  const { parent, tokens } = createSoloParent()
+  await initializeActivityRegistry()
+  // The real in-memory store hands out its live record from get().
+  const store = createCoreSessionStore(null)
+  await store.set('s1', parent)
+  const originalSet = store.set.bind(store)
+  store.set = async (id: string, session: SessionRecord) => {
+    if (id === 's1') throw new Error('[TEST] parent write unavailable')
+    await originalSet(id, session)
+  }
+  const app = createMockApp()
+  setupSyncDeckRoutes(app, store, createMockWs())
+
+  console.info('[TEST] Expected solo activity start failure when the parent binding cannot be written.')
+  const res = createResponse()
+  await app.handlers.post['/api/syncdeck/:sessionId/solo-activity/start']!(createRequest(
+    { sessionId: 's1' },
+    { activityId: 'resonance', location: { h: 0, v: 0 }, activityOptions: SOLO_RESONANCE_OPTIONS },
+    { [getSessionParticipantCookieName('s1')]: tokens['student-1'] },
+  ), res)
+
+  assert.equal(res.statusCode, 500)
+  const stored = await store.get('s1')
+  assert.deepEqual(Object.keys((stored?.data as { soloChildren?: Record<string, unknown> }).soloChildren ?? {}), [])
+  const childIds = (await store.getAllIds()).filter((id) => id.startsWith('CHILD:s1:'))
+  assert.deepEqual(childIds, [])
 })
 
 void test('a failed eviction delete keeps that binding while the new solo start still succeeds', async () => {

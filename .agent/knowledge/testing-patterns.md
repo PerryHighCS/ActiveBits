@@ -471,3 +471,7 @@ Capture reusable test setup patterns, common failure modes, and reliability guid
 - Evidence: `activities/syncdeck/client/student/soloChildLaunch.ts` and its test ("calls fetch without binding it to the params object"); caught by `activities/syncdeck/playwright/solo-child.spec.ts`.
 - Pattern: To drive SyncDeck student behavior in Playwright without a real reveal.js deck, `page.route` the configured presentation URL to a stub HTML page that repeatedly posts `reveal-sync` `ready`/`state` (with `payload.indices`) and `activityRequest` messages to `window.parent`. The student listener checks only `event.source`, so the stub needs no origin setup.
 - Evidence: `activities/syncdeck/playwright/solo-child.spec.ts`.
+- Date: 2026-09-25
+- Scope: unit | session store semantics
+- Pattern: Production `SessionStore.get()` returns the store's live record (the in-memory map entry, or the Valkey read cache entry), not a copy. Code that mutates a fetched record and then fails or skips `set()` leaves the uncommitted change visible to other readers. Copy before mutating (`structuredClone`). Test mocks that clone on `get()` hide this bug, so cover abandon/failure paths against the real in-memory store (`createSessionStore(null)`).
+- Evidence: `activities/syncdeck/server/parentWrites.test.ts` ("update never exposes an abandoned or failed mutation..."); `activities/syncdeck/server/routes.test.ts` ("a failed solo start leaves no binding in a store that returns live records").

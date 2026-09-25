@@ -1594,6 +1594,10 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, rawSessions: 
   // store rejects any parent set/delete made outside it. See parentWrites.ts.
   const parentWriter = createSyncDeckParentWriter(rawSessions)
   const sessions = guardSyncDeckParentWrites(rawSessions, parentWriter)
+  // Stores return their live record (in-memory map or read cache). A record
+  // that will be mutated and written must be copied first, so a failed or
+  // abandoned write never leaves uncommitted state visible to other readers.
+  const cloneForWrite = <T extends SessionRecord | null>(session: T): T => (session ? structuredClone(session) : session)
   const embeddedActivityStartLocks = new Map<string, Promise<void>>()
 
   // Strict reads for the embedded-manager-capability redemption: a Valkey
@@ -2156,7 +2160,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, rawSessions: 
       async (): Promise<{ statusCode: number; body: { error: string } | EmbeddedActivityStartResponsePayload }> => parentWriter.runExclusive(
         sessionId,
         async (): Promise<{ statusCode: number; body: { error: string } | EmbeddedActivityStartResponsePayload }> => {
-          const lockedSession = asSyncDeckSession(await sessions.get(sessionId))
+          const lockedSession = asSyncDeckSession(cloneForWrite(await sessions.get(sessionId)))
           if (!lockedSession) {
             return { statusCode: 404, body: { error: 'invalid session' } }
           }
@@ -2174,7 +2178,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, rawSessions: 
               }
             }
 
-            const existingChildSession = await sessions.get(existing.childSessionId)
+            const existingChildSession = cloneForWrite(await sessions.get(existing.childSessionId))
             if (existingChildSession) {
               const managerBootstrap = buildEmbeddedManagerBootstrapPayload(existingChildSession)
               const existingEntryToken = readEmbeddedManagerEntryToken(existingChildSession)
@@ -2210,7 +2214,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, rawSessions: 
           await sessions.set(lockedSession.id, lockedSession)
           await broadcastEmbeddedActivityStart(lockedSession, instanceKey, activityId, childSession.id, location)
 
-          const normalizedChildSession = await sessions.get(childSession.id)
+          const normalizedChildSession = cloneForWrite(await sessions.get(childSession.id))
           const managerBootstrap = normalizedChildSession
             ? buildEmbeddedManagerBootstrapPayload(normalizedChildSession)
             : null
@@ -2415,7 +2419,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, rawSessions: 
     // Read and write the parent under its write lock so this whole-record
     // write cannot drop a solo binding or restore a revoked entry.
     await parentWriter.runExclusive(sessionId, async () => {
-      const session = await getSyncDeckSessionWithEmbeddedKeepalive(sessions, sessionId)
+      const session = cloneForWrite(await getSyncDeckSessionWithEmbeddedKeepalive(sessions, sessionId))
       if (!session) {
         res.status(404).json({ error: 'invalid session' })
         return
@@ -2676,7 +2680,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, rawSessions: 
             optionsKey,
           })
           if (boundChildSessionId) {
-            const boundChild = await sessions.get(boundChildSessionId)
+            const boundChild = cloneForWrite(await sessions.get(boundChildSessionId))
             if (boundChild && boundChild.type === activityId) {
               child = boundChild
             } else {
@@ -2712,7 +2716,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, rawSessions: 
                 'solo',
               )
               createdChildSessionId = created.id
-              child = await sessions.get(created.id)
+              child = cloneForWrite(await sessions.get(created.id))
               if (!child) {
                 await discardCreatedChild('child-unreadable')
                 return { statusCode: 500, body: { error: 'solo activity unavailable' } }
@@ -2721,7 +2725,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, rawSessions: 
             if (staleChildSessionId || createdChildSessionId) {
               // Apply only the binding change to a fresh read of the parent, so
               // this write never restores fields another writer has since changed.
-              const freshParent = asSyncDeckSession(await sessions.get(sessionId))
+              const freshParent = asSyncDeckSession(cloneForWrite(await sessions.get(sessionId)))
               if (!freshParent) {
                 await discardCreatedChild('parent-missing')
                 return { statusCode: 404, body: { error: 'invalid session' } }
