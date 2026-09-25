@@ -1119,6 +1119,17 @@ function buildEmbeddedActivityStartLockKey(sessionId: string, instanceKey: strin
   return `${sessionId}:${instanceKey}`
 }
 
+/**
+ * One in-process lock per SyncDeck parent for route writers that read the
+ * parent, await child-session work, then write the parent back: solo start,
+ * embedded-activity start, and return-to-waiting-room. It keeps concurrent
+ * students from dropping each other's solo bindings and keeps a start from
+ * restoring a student's revoked entry. Cross-instance writes remain #313's scope.
+ */
+function buildParentWriteLockKey(sessionId: string): string {
+  return `parent-write:${sessionId}`
+}
+
 function mergeReportStudents(sections: Array<{ students?: ActivityReportStudentRef[] }>): ActivityReportStudentRef[] {
   const byStudentId = new Map<string, ActivityReportStudentRef>()
   for (const section of sections) {
@@ -1958,83 +1969,87 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       return
     }
 
-    const session = await getSyncDeckSessionWithEmbeddedKeepalive(sessions, sessionId)
-    if (!session) {
-      res.status(404).json({ error: 'invalid session' })
-      return
-    }
-
-    const instructorPasscode = normalizeInstructorPasscode(readStringField(req.body, 'instructorPasscode'))
-    if (!instructorPasscode || !verifyInstructorPasscode(session.data.instructorPasscode, instructorPasscode)) {
-      res.status(403).json({ error: 'forbidden' })
-      return
-    }
-    const updatedSession = structuredClone(session)
-    if (!findSyncDeckStudentById(updatedSession.data.students, studentId) || !revokeAcceptedEntryParticipant(updatedSession, studentId)) {
-      res.status(404).json({ error: 'participant not found' })
-      return
-    }
-
-    const childSessionIds: string[] = []
-    const persistedChildSessions: SessionRecord[] = []
-    try {
-      revokeSessionEntryParticipants(updatedSession, studentId)
-      const affectedChildSessionIds = [
-        ...Object.values(updatedSession.data.embeddedActivities).map((embeddedActivity) => embeddedActivity.childSessionId),
-        ...removeStudentSoloChildren(updatedSession.data.soloChildren, studentId),
-      ]
-      for (const affectedChildSessionId of affectedChildSessionIds) {
-        const childSession = await sessions.get(affectedChildSessionId)
-        if (!childSession) continue
-        const originalChildSession = structuredClone(childSession)
-        const updatedChildSession = structuredClone(childSession)
-        revokeAcceptedEntryParticipant(updatedChildSession, studentId)
-        revokeSessionEntryParticipants(updatedChildSession, studentId)
-        await sessions.set(updatedChildSession.id, updatedChildSession)
-        persistedChildSessions.push(originalChildSession)
-        childSessionIds.push(updatedChildSession.id)
+    // Share the parent write lock so a concurrent solo or embedded start
+    // cannot write back this student's revoked entry or deleted bindings.
+    await withEmbeddedActivityStartLock(buildParentWriteLockKey(sessionId), async () => {
+      const session = await getSyncDeckSessionWithEmbeddedKeepalive(sessions, sessionId)
+      if (!session) {
+        res.status(404).json({ error: 'invalid session' })
+        return
       }
-      updatedSession.data.students = updatedSession.data.students.filter((student) => student.studentId !== studentId)
-      await sessions.set(updatedSession.id, updatedSession)
-    } catch (error) {
-      for (const childSession of persistedChildSessions.reverse()) {
-        try {
-          await sessions.set(childSession.id, childSession)
-        } catch (rollbackError) {
-          console.error(JSON.stringify({
-            activity: 'syncdeck',
-            event: 'participant-return-child-rollback-failed',
-            sessionId: childSession.id,
-            error: rollbackError instanceof Error ? rollbackError.message : String(rollbackError),
-          }))
+
+      const instructorPasscode = normalizeInstructorPasscode(readStringField(req.body, 'instructorPasscode'))
+      if (!instructorPasscode || !verifyInstructorPasscode(session.data.instructorPasscode, instructorPasscode)) {
+        res.status(403).json({ error: 'forbidden' })
+        return
+      }
+      const updatedSession = structuredClone(session)
+      if (!findSyncDeckStudentById(updatedSession.data.students, studentId) || !revokeAcceptedEntryParticipant(updatedSession, studentId)) {
+        res.status(404).json({ error: 'participant not found' })
+        return
+      }
+
+      const childSessionIds: string[] = []
+      const persistedChildSessions: SessionRecord[] = []
+      try {
+        revokeSessionEntryParticipants(updatedSession, studentId)
+        const affectedChildSessionIds = [
+          ...Object.values(updatedSession.data.embeddedActivities).map((embeddedActivity) => embeddedActivity.childSessionId),
+          ...removeStudentSoloChildren(updatedSession.data.soloChildren, studentId),
+        ]
+        for (const affectedChildSessionId of affectedChildSessionIds) {
+          const childSession = await sessions.get(affectedChildSessionId)
+          if (!childSession) continue
+          const originalChildSession = structuredClone(childSession)
+          const updatedChildSession = structuredClone(childSession)
+          revokeAcceptedEntryParticipant(updatedChildSession, studentId)
+          revokeSessionEntryParticipants(updatedChildSession, studentId)
+          await sessions.set(updatedChildSession.id, updatedChildSession)
+          persistedChildSessions.push(originalChildSession)
+          childSessionIds.push(updatedChildSession.id)
+        }
+        updatedSession.data.students = updatedSession.data.students.filter((student) => student.studentId !== studentId)
+        await sessions.set(updatedSession.id, updatedSession)
+      } catch (error) {
+        for (const childSession of persistedChildSessions.reverse()) {
+          try {
+            await sessions.set(childSession.id, childSession)
+          } catch (rollbackError) {
+            console.error(JSON.stringify({
+              activity: 'syncdeck',
+              event: 'participant-return-child-rollback-failed',
+              sessionId: childSession.id,
+              error: rollbackError instanceof Error ? rollbackError.message : String(rollbackError),
+            }))
+          }
+        }
+        console.error(JSON.stringify({ activity: 'syncdeck', event: 'participant-return-persist-failed', error: error instanceof Error ? error.message : String(error) }))
+        res.status(500).json({ error: 'Unable to return participant to waiting room' })
+        return
+      }
+
+      const lifecyclePayload = JSON.stringify({
+        type: 'participant-returned-to-waiting-room',
+        version: '1',
+        participantId: studentId,
+      })
+      for (const peer of ws.wss.clients as Set<SyncDeckSocket>) {
+        if (peer.readyState === WS_OPEN_READY_STATE && peer.sessionId === session.id && peer.studentId === studentId) {
+          try {
+            peer.send(lifecyclePayload)
+          } catch {
+            // The close below remains authoritative if the notification cannot be delivered.
+          }
         }
       }
-      console.error(JSON.stringify({ activity: 'syncdeck', event: 'participant-return-persist-failed', error: error instanceof Error ? error.message : String(error) }))
-      res.status(500).json({ error: 'Unable to return participant to waiting room' })
-      return
-    }
-
-    const lifecyclePayload = JSON.stringify({
-      type: 'participant-returned-to-waiting-room',
-      version: '1',
-      participantId: studentId,
+      closeParticipantSockets(ws.wss.clients as Set<SyncDeckSocket>, session.id, studentId)
+      for (const childSessionId of childSessionIds) {
+        closeParticipantSockets(ws.wss.clients as Set<SyncDeckSocket>, childSessionId, studentId)
+      }
+      await broadcastStudentsToInstructors(session.id)
+      console.info(JSON.stringify({ activity: 'syncdeck', event: 'participant-returned-to-waiting-room', sessionId: session.id }))
+      res.json({ participantId: studentId })
     })
-    for (const peer of ws.wss.clients as Set<SyncDeckSocket>) {
-      if (peer.readyState === WS_OPEN_READY_STATE && peer.sessionId === session.id && peer.studentId === studentId) {
-        try {
-          peer.send(lifecyclePayload)
-        } catch {
-          // The close below remains authoritative if the notification cannot be delivered.
-        }
-      }
-    }
-    closeParticipantSockets(ws.wss.clients as Set<SyncDeckSocket>, session.id, studentId)
-    for (const childSessionId of childSessionIds) {
-      closeParticipantSockets(ws.wss.clients as Set<SyncDeckSocket>, childSessionId, studentId)
-    }
-    await broadcastStudentsToInstructors(session.id)
-    console.info(JSON.stringify({ activity: 'syncdeck', event: 'participant-returned-to-waiting-room', sessionId: session.id }))
-    res.json({ participantId: studentId })
   })
 
   app.post('/api/syncdeck/:sessionId/embedded-context', async (req, res) => {
@@ -2126,85 +2141,88 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
 
     const responsePayload = await withEmbeddedActivityStartLock(
       buildEmbeddedActivityStartLockKey(sessionId, instanceKey),
-      async (): Promise<{ statusCode: number; body: { error: string } | EmbeddedActivityStartResponsePayload }> => {
-        const lockedSession = asSyncDeckSession(await sessions.get(sessionId))
-        if (!lockedSession) {
-          return { statusCode: 404, body: { error: 'invalid session' } }
-        }
-
-        if (!verifyInstructorPasscode(lockedSession.data.instructorPasscode, instructorPasscode)) {
-          return { statusCode: 403, body: { error: 'forbidden' } }
-        }
-
-        const existing = lockedSession.data.embeddedActivities[instanceKey]
-        if (existing) {
-          if (existing.activityId !== activityId) {
-            return {
-              statusCode: 409,
-              body: { error: 'embedded activity instance key already belongs to a different activity' },
-            }
+      async (): Promise<{ statusCode: number; body: { error: string } | EmbeddedActivityStartResponsePayload }> => withEmbeddedActivityStartLock(
+        buildParentWriteLockKey(sessionId),
+        async (): Promise<{ statusCode: number; body: { error: string } | EmbeddedActivityStartResponsePayload }> => {
+          const lockedSession = asSyncDeckSession(await sessions.get(sessionId))
+          if (!lockedSession) {
+            return { statusCode: 404, body: { error: 'invalid session' } }
           }
 
-          const existingChildSession = await sessions.get(existing.childSessionId)
-          if (existingChildSession) {
-            const managerBootstrap = buildEmbeddedManagerBootstrapPayload(existingChildSession)
-            const existingEntryToken = readEmbeddedManagerEntryToken(existingChildSession)
-            const managerEntryToken = managerBootstrap
-              ? existingEntryToken?.value ?? mintEmbeddedManagerEntryToken(existingChildSession)
-              : null
-            if (managerBootstrap && !existingEntryToken) {
-              await sessions.set(existingChildSession.id, existingChildSession)
-            }
-            return {
-              statusCode: 200,
-              body: {
-                childSessionId: existing.childSessionId,
-                instanceKey,
-                ...(existing.location ? { location: existing.location } : {}),
-                ...(managerBootstrap ? { managerBootstrap } : {}),
-                ...(managerEntryToken ? { managerEntryToken } : {}),
-              },
-            }
+          if (!verifyInstructorPasscode(lockedSession.data.instructorPasscode, instructorPasscode)) {
+            return { statusCode: 403, body: { error: 'forbidden' } }
           }
 
-          delete lockedSession.data.embeddedActivities[instanceKey]
-        }
+          const existing = lockedSession.data.embeddedActivities[instanceKey]
+          if (existing) {
+            if (existing.activityId !== activityId) {
+              return {
+                statusCode: 409,
+                body: { error: 'embedded activity instance key already belongs to a different activity' },
+              }
+            }
 
-        const childSession = await createEmbeddedChildSession(sessions, lockedSession.id, activityId, instanceKey, location, activityOptions)
-        lockedSession.data.embeddedActivities[instanceKey] = {
-          childSessionId: childSession.id,
-          activityId,
-          startedAt: Date.now(),
-          owner: SYNCDECK_EMBEDDED_OWNER,
-          ...(location ? { location } : {}),
-        }
-        await sessions.set(lockedSession.id, lockedSession)
-        await broadcastEmbeddedActivityStart(lockedSession, instanceKey, activityId, childSession.id, location)
+            const existingChildSession = await sessions.get(existing.childSessionId)
+            if (existingChildSession) {
+              const managerBootstrap = buildEmbeddedManagerBootstrapPayload(existingChildSession)
+              const existingEntryToken = readEmbeddedManagerEntryToken(existingChildSession)
+              const managerEntryToken = managerBootstrap
+                ? existingEntryToken?.value ?? mintEmbeddedManagerEntryToken(existingChildSession)
+                : null
+              if (managerBootstrap && !existingEntryToken) {
+                await sessions.set(existingChildSession.id, existingChildSession)
+              }
+              return {
+                statusCode: 200,
+                body: {
+                  childSessionId: existing.childSessionId,
+                  instanceKey,
+                  ...(existing.location ? { location: existing.location } : {}),
+                  ...(managerBootstrap ? { managerBootstrap } : {}),
+                  ...(managerEntryToken ? { managerEntryToken } : {}),
+                },
+              }
+            }
 
-        const normalizedChildSession = await sessions.get(childSession.id)
-        const managerBootstrap = normalizedChildSession
-          ? buildEmbeddedManagerBootstrapPayload(normalizedChildSession)
-          : null
-        const existingEntryToken = normalizedChildSession
-          ? readEmbeddedManagerEntryToken(normalizedChildSession)
-          : null
-        const managerEntryToken = normalizedChildSession && managerBootstrap
-          ? existingEntryToken?.value ?? mintEmbeddedManagerEntryToken(normalizedChildSession)
-          : null
-        if (normalizedChildSession && managerBootstrap && !existingEntryToken) {
-          await sessions.set(normalizedChildSession.id, normalizedChildSession)
-        }
-        return {
-          statusCode: 200,
-          body: {
+            delete lockedSession.data.embeddedActivities[instanceKey]
+          }
+
+          const childSession = await createEmbeddedChildSession(sessions, lockedSession.id, activityId, instanceKey, location, activityOptions)
+          lockedSession.data.embeddedActivities[instanceKey] = {
             childSessionId: childSession.id,
-            instanceKey,
+            activityId,
+            startedAt: Date.now(),
+            owner: SYNCDECK_EMBEDDED_OWNER,
             ...(location ? { location } : {}),
-            ...(managerBootstrap ? { managerBootstrap } : {}),
-            ...(managerEntryToken ? { managerEntryToken } : {}),
-          },
-        }
-      },
+          }
+          await sessions.set(lockedSession.id, lockedSession)
+          await broadcastEmbeddedActivityStart(lockedSession, instanceKey, activityId, childSession.id, location)
+
+          const normalizedChildSession = await sessions.get(childSession.id)
+          const managerBootstrap = normalizedChildSession
+            ? buildEmbeddedManagerBootstrapPayload(normalizedChildSession)
+            : null
+          const existingEntryToken = normalizedChildSession
+            ? readEmbeddedManagerEntryToken(normalizedChildSession)
+            : null
+          const managerEntryToken = normalizedChildSession && managerBootstrap
+            ? existingEntryToken?.value ?? mintEmbeddedManagerEntryToken(normalizedChildSession)
+            : null
+          if (normalizedChildSession && managerBootstrap && !existingEntryToken) {
+            await sessions.set(normalizedChildSession.id, normalizedChildSession)
+          }
+          return {
+            statusCode: 200,
+            body: {
+              childSessionId: childSession.id,
+              instanceKey,
+              ...(location ? { location } : {}),
+              ...(managerBootstrap ? { managerBootstrap } : {}),
+              ...(managerEntryToken ? { managerEntryToken } : {}),
+            },
+          }
+        },
+      ),
     )
 
     res.status(responsePayload.statusCode).json(responsePayload.body)
@@ -2487,8 +2505,11 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       return
     }
 
-    // Delete all embedded child sessions before removing the parent.
-    const childSessionIds = Object.values(session.data.embeddedActivities).map((record) => record.childSessionId)
+    // Delete all embedded and solo child sessions before removing the parent.
+    const childSessionIds = [
+      ...Object.values(session.data.embeddedActivities).map((record) => record.childSessionId),
+      ...Object.keys(session.data.soloChildren),
+    ]
     await Promise.all(childSessionIds.map((childSessionId) => sessions.delete(childSessionId)))
 
     // Notify connected clients that the parent session has ended.
@@ -2612,7 +2633,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       const optionsKey = buildSoloChildOptionsKey(selectedOptions)
 
       const result = await withEmbeddedActivityStartLock(
-        `solo:${sessionId}:${student.studentId}`,
+        buildParentWriteLockKey(sessionId),
         async (): Promise<{ statusCode: number; body: Record<string, unknown> }> => {
           const lockedParent = asSyncDeckSession(await sessions.get(sessionId))
           if (!lockedParent) {
@@ -2626,7 +2647,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
           }
 
           let child: SessionRecord | null = null
-          let parentChanged = false
+          let staleChildSessionId: string | null = null
           const boundChildSessionId = findBoundSoloChild(lockedParent.data.soloChildren, {
             studentId: lockedStudent.studentId,
             activityId,
@@ -2638,10 +2659,10 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
             if (boundChild && boundChild.type === activityId) {
               child = boundChild
             } else {
-              delete lockedParent.data.soloChildren[boundChildSessionId]
-              parentChanged = true
+              staleChildSessionId = boundChildSessionId
             }
           }
+          let createdChildSessionId: string | null = null
           if (!child) {
             const created = await createEmbeddedChildSession(
               sessions,
@@ -2652,21 +2673,34 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
               selectedOptions,
               'solo',
             )
-            recordSoloChild(lockedParent.data.soloChildren, created.id, {
-              studentId: lockedStudent.studentId,
-              activityId,
-              instanceKey,
-              optionsKey,
-              createdAt: Date.now(),
-            })
-            parentChanged = true
+            createdChildSessionId = created.id
             child = await sessions.get(created.id)
             if (!child) {
               return { statusCode: 500, body: { error: 'solo activity unavailable' } }
             }
           }
-          if (parentChanged) {
-            await sessions.set(lockedParent.id, lockedParent)
+          if (staleChildSessionId || createdChildSessionId) {
+            // Apply only the binding change to a fresh read of the parent, so
+            // this write never restores fields another writer has since changed.
+            const freshParent = asSyncDeckSession(await sessions.get(sessionId))
+            if (!freshParent) {
+              return { statusCode: 404, body: { error: 'invalid session' } }
+            }
+            if (staleChildSessionId) {
+              delete freshParent.data.soloChildren[staleChildSessionId]
+            }
+            const evictedChildSessionIds = createdChildSessionId
+              ? recordSoloChild(freshParent.data.soloChildren, createdChildSessionId, {
+                studentId: lockedStudent.studentId,
+                activityId,
+                instanceKey,
+                optionsKey,
+                createdAt: Date.now(),
+              })
+              : []
+            await sessions.set(freshParent.id, freshParent)
+            // An unbound child could no longer be revoked, so remove it.
+            await Promise.all(evictedChildSessionIds.map((evictedChildSessionId) => sessions.delete(evictedChildSessionId)))
           }
 
           const stored = storeTrustedSessionEntryParticipant(

@@ -62,9 +62,12 @@ void test('findBoundSoloChild matches only when student, activity, slide, and op
 
 void test('recordSoloChild evicts the oldest records past the per-student cap without touching other students', () => {
   const soloChildren: SyncDeckSoloChildrenMap = { 'other-student-child': record({ studentId: 'student-2', createdAt: 0 }) }
+  const evicted: string[] = []
   for (let index = 0; index <= MAX_SOLO_CHILDREN_PER_STUDENT; index += 1) {
-    recordSoloChild(soloChildren, `child-${index}`, record({ createdAt: index + 1 }))
+    evicted.push(...recordSoloChild(soloChildren, `child-${index}`, record({ createdAt: index + 1 })))
   }
+
+  assert.deepEqual(evicted, ['child-0'])
 
   const studentOneChildren = Object.keys(soloChildren).filter((id) => soloChildren[id]!.studentId === 'student-1')
   assert.equal(studentOneChildren.length, MAX_SOLO_CHILDREN_PER_STUDENT)
@@ -75,9 +78,12 @@ void test('recordSoloChild evicts the oldest records past the per-student cap wi
 
 void test('recordSoloChild evicts the oldest records past the per-session cap', () => {
   const soloChildren: SyncDeckSoloChildrenMap = {}
+  const evicted: string[] = []
   for (let index = 0; index <= MAX_SOLO_CHILDREN_PER_SESSION; index += 1) {
-    recordSoloChild(soloChildren, `child-${index}`, record({ studentId: `student-${index}`, createdAt: index }))
+    evicted.push(...recordSoloChild(soloChildren, `child-${index}`, record({ studentId: `student-${index}`, createdAt: index })))
   }
+
+  assert.deepEqual(evicted, ['child-0'])
 
   assert.equal(Object.keys(soloChildren).length, MAX_SOLO_CHILDREN_PER_SESSION)
   assert.equal(soloChildren['child-0'], undefined)

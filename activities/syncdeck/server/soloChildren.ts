@@ -84,27 +84,35 @@ export function findBoundSoloChild(
   return null
 }
 
-function evictOldest(soloChildren: SyncDeckSoloChildrenMap, childSessionIds: string[], keep: number): void {
-  if (childSessionIds.length <= keep) return
+function evictOldest(soloChildren: SyncDeckSoloChildrenMap, childSessionIds: string[], keep: number): string[] {
+  if (childSessionIds.length <= keep) return []
   const ordered = [...childSessionIds].sort((left, right) => soloChildren[left]!.createdAt - soloChildren[right]!.createdAt)
-  for (const childSessionId of ordered.slice(0, ordered.length - keep)) {
+  const evicted = ordered.slice(0, ordered.length - keep)
+  for (const childSessionId of evicted) {
     delete soloChildren[childSessionId]
   }
+  return evicted
 }
 
-/** Records a new binding, evicting the oldest records past the per-student and per-session caps. */
+/**
+ * Records a new binding, evicting the oldest records past the per-student and
+ * per-session caps. Returns the evicted child session IDs; the caller must
+ * delete those sessions, because an unbound child can no longer be revoked.
+ */
 export function recordSoloChild(
   soloChildren: SyncDeckSoloChildrenMap,
   childSessionId: string,
   record: SyncDeckSoloChildRecord,
-): void {
+): string[] {
   soloChildren[childSessionId] = record
-  evictOldest(
-    soloChildren,
-    Object.keys(soloChildren).filter((id) => soloChildren[id]!.studentId === record.studentId),
-    MAX_SOLO_CHILDREN_PER_STUDENT,
-  )
-  evictOldest(soloChildren, Object.keys(soloChildren), MAX_SOLO_CHILDREN_PER_SESSION)
+  return [
+    ...evictOldest(
+      soloChildren,
+      Object.keys(soloChildren).filter((id) => soloChildren[id]!.studentId === record.studentId),
+      MAX_SOLO_CHILDREN_PER_STUDENT,
+    ),
+    ...evictOldest(soloChildren, Object.keys(soloChildren), MAX_SOLO_CHILDREN_PER_SESSION),
+  ]
 }
 
 /** Deletes every binding owned by the student and returns the affected child session IDs. */
