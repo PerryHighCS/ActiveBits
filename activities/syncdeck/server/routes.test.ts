@@ -1,4 +1,5 @@
 import { createSessionStore as createCoreSessionStore, type SessionRecord, type SessionStore } from 'activebits-server/core/sessions.js'
+import { issueActivityCapability, resolveActivityCapability } from 'activebits-server/core/activityCapabilities.js'
 import { consumeSessionDataToken } from 'activebits-server/core/sessionTokenUtils.js'
 import { acceptEntryParticipant, findAcceptedEntryParticipant, getSessionParticipantCookieName, issueAcceptedEntryParticipantToken, resolveAcceptedEntryParticipantToken, revokeAcceptedEntryParticipant } from 'activebits-server/core/acceptedEntryParticipants.js'
 import { consumeSessionEntryParticipant, storeTrustedSessionEntryParticipant } from 'activebits-server/core/sessionEntryParticipants.js'
@@ -275,6 +276,9 @@ void test('SyncDeck instructor can return an accepted student to the waiting roo
   acceptEntryParticipant(child, { participantId: 'student-1', displayName: 'Ada' })
   const childToken = issueAcceptedEntryParticipantToken(child, 'student-1')
   const childEntryToken = storeTrustedSessionEntryParticipant(child, { displayName: 'Ada' }, 'student-1').token
+  // The child activity's own participant capabilities (as Resonance issues at registration).
+  const childCapability = issueActivityCapability(child, 'participant', 'student-1')
+  const otherChildCapability = issueActivityCapability(child, 'participant', 'student-2')
   ;(session.data as { embeddedActivities: Record<string, unknown> }).embeddedActivities['resonance:0:0'] = { childSessionId: child.id, activityId: 'resonance', startedAt: 1, owner: 'syncdeck-instructor' }
   const state = createSessionStore({ [session.id]: session, [child.id]: child })
   const app = createMockApp()
@@ -305,6 +309,8 @@ void test('SyncDeck instructor can return an accepted student to the waiting roo
   assert.equal(resolveAcceptedEntryParticipantToken(state.store[session.id]!, participantToken), null)
   assert.equal(resolveAcceptedEntryParticipantToken(state.store[child.id]!, childToken), null)
   assert.equal((state.store[child.id]?.data as { entryParticipants?: Record<string, unknown> }).entryParticipants?.[childEntryToken], undefined)
+  assert.equal(resolveActivityCapability(state.store[child.id]!, child.id, 'participant', childCapability.token), null)
+  assert.notEqual(resolveActivityCapability(state.store[child.id]!, child.id, 'participant', otherChildCapability.token), null)
   assert.match(sent[0] ?? '', /participant-returned-to-waiting-room/)
   assert.deepEqual(closeCalls, [{ code: 4001, reason: 'Returned to waiting room' }])
   assert.deepEqual(childCloseCalls, [{ code: 4001, reason: 'Returned to waiting room' }])

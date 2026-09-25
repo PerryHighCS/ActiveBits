@@ -31,7 +31,7 @@ import {
 } from 'activebits-server/core/sessions.js'
 import { storeTrustedSessionEntryParticipant } from 'activebits-server/core/sessionEntryParticipants.js'
 import { revokeSessionEntryParticipants } from 'activebits-server/core/sessionEntryParticipants.js'
-import { issueActivityCapability, issueManagerCapabilityAtomically, readCookieValue, writeActivityCapabilityCookie } from 'activebits-server/core/activityCapabilities.js'
+import { issueActivityCapability, issueManagerCapabilityAtomically, readCookieValue, revokeActivityCapabilitiesForSubject, writeActivityCapabilityCookie } from 'activebits-server/core/activityCapabilities.js'
 import { randomBytes, timingSafeEqual } from 'node:crypto'
 import type { ActiveBitsWebSocket, WsRouter } from '../../../types/websocket.js'
 import {
@@ -2004,6 +2004,10 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, rawSessions: 
           const updatedChildSession = structuredClone(childSession)
           revokeAcceptedEntryParticipant(updatedChildSession, studentId)
           revokeSessionEntryParticipants(updatedChildSession, studentId)
+          // The child activity's own participant principal (for example a
+          // Resonance registration capability) must end with the parent entry,
+          // or a reload of the child resumes the removed identity.
+          revokeActivityCapabilitiesForSubject(updatedChildSession, 'participant', studentId)
           await sessions.set(updatedChildSession.id, updatedChildSession)
           persistedChildSessions.push(originalChildSession)
           childSessionIds.push(updatedChildSession.id)

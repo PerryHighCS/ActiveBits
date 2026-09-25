@@ -7,6 +7,7 @@ import {
   readCookieValue,
   resolveActivityCapability,
   resolveActivityPrincipalFromCookies,
+  revokeActivityCapabilitiesForSubject,
   tryIssueActivityCapability,
 } from './activityCapabilities.js'
 
@@ -108,4 +109,25 @@ void test('non-evicting capability issuance removes invalid records before capac
   assert.ok(issued)
   const capabilities = session.data.activityCapabilities as Record<string, unknown>
   assert.deepEqual(Object.keys(capabilities), [issued.id])
+})
+
+void test('revokeActivityCapabilitiesForSubject revokes only that subject\'s capabilities of that kind', () => {
+  const session = { data: {} as Record<string, unknown> }
+  const ada = issueActivityCapability(session, 'participant', 'student-1')
+  const adaSecond = issueActivityCapability(session, 'participant', 'student-1')
+  const lin = issueActivityCapability(session, 'participant', 'student-2')
+  const adaManager = issueActivityCapability(session, 'manager', 'student-1')
+  const anonymousManager = issueActivityCapability(session, 'manager')
+
+  assert.equal(revokeActivityCapabilitiesForSubject(session, 'participant', 'student-1'), 2)
+  assert.equal(resolveActivityCapability(session, 's', 'participant', ada.token), null)
+  assert.equal(resolveActivityCapability(session, 's', 'participant', adaSecond.token), null)
+  assert.notEqual(resolveActivityCapability(session, 's', 'participant', lin.token), null)
+  assert.notEqual(resolveActivityCapability(session, 's', 'manager', adaManager.token), null)
+  assert.notEqual(resolveActivityCapability(session, 's', 'manager', anonymousManager.token), null)
+
+  // Unknown subjects and sessions without capabilities revoke nothing.
+  assert.equal(revokeActivityCapabilitiesForSubject(session, 'participant', 'missing'), 0)
+  assert.equal(revokeActivityCapabilitiesForSubject({ data: {} }, 'participant', 'student-1'), 0)
+  assert.equal(revokeActivityCapabilitiesForSubject({ data: null }, 'participant', 'student-1'), 0)
 })
