@@ -35,6 +35,11 @@ function getStoredString(storage: EntryParticipantStorageLike, key: string): str
   return trimmed.length > 0 ? trimmed : null
 }
 
+/**
+ * Caches the participant identity in browser storage. Best effort: every
+ * storage failure (including the context read-merge) is reported through
+ * `onWarn` and never thrown, because callers treat this as an optional cache.
+ */
 export function persistSessionParticipantIdentity(
   storage: EntryParticipantStorageLike,
   sessionId: string,
@@ -42,10 +47,14 @@ export function persistSessionParticipantIdentity(
   studentId: string | null,
   onWarn: StorageWarnHandler = console.warn,
 ): void {
-  persistSessionParticipantContext(storage, sessionId, {
-    studentName,
-    studentId,
-  }, onWarn)
+  try {
+    persistSessionParticipantContext(storage, sessionId, {
+      studentName,
+      studentId,
+    }, onWarn)
+  } catch (error) {
+    onWarn('[EntryParticipantIdentity] Failed to persist session participant context:', error)
+  }
 
   try {
     storage.setItem(`student-name-${sessionId}`, studentName)
