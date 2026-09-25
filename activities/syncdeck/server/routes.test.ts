@@ -269,7 +269,8 @@ void test('SyncDeck instructor can return an accepted student to the waiting roo
   }]
   acceptEntryParticipant(session, { participantId: 'student-1', displayName: 'Ada' })
   const participantToken = issueAcceptedEntryParticipantToken(session, 'student-1')
-  const child = createSyncDeckSession('CHILD:return-session:resonance')
+  // Embedded children are never SyncDeck sessions; use the child's real activity type.
+  const child: SessionRecord = { ...createSyncDeckSession('CHILD:return-session:resonance'), type: 'resonance' }
   acceptEntryParticipant(child, { participantId: 'student-1', displayName: 'Ada' })
   const childToken = issueAcceptedEntryParticipantToken(child, 'student-1')
   const childEntryToken = storeTrustedSessionEntryParticipant(child, { displayName: 'Ada' }, 'student-1').token
@@ -363,8 +364,9 @@ void test('SyncDeck return-to-waiting-room rolls back persisted child changes wh
     studentId: 'student-1', name: 'Ada', joinedAt: 1, lastSeenAt: 1, lastIndices: null, lastStudentStateAt: null,
   }]
   acceptEntryParticipant(session, { participantId: 'student-1', displayName: 'Ada' })
-  const firstChild = createSyncDeckSession('CHILD:return-child-persist-failure:first')
-  const failingChild = createSyncDeckSession('CHILD:return-child-persist-failure:failing')
+  // Embedded children are never SyncDeck sessions; use the child's real activity type.
+  const firstChild: SessionRecord = { ...createSyncDeckSession('CHILD:return-child-persist-failure:first'), type: 'resonance' }
+  const failingChild: SessionRecord = { ...createSyncDeckSession('CHILD:return-child-persist-failure:failing'), type: 'resonance' }
   acceptEntryParticipant(firstChild, { participantId: 'student-1', displayName: 'Ada' })
   acceptEntryParticipant(failingChild, { participantId: 'student-1', displayName: 'Ada' })
   ;(session.data as { embeddedActivities: Record<string, unknown> }).embeddedActivities = {
@@ -1737,7 +1739,8 @@ void test('syncdeck websocket broadcasts student presence count to instructor', 
   await new Promise((resolve) => setTimeout(resolve, 0))
 
   const delivered = instructorSocket.sent.map((entry) => JSON.parse(entry) as { type?: string; payload?: { connectedCount?: unknown } })
-  const studentsMessage = delivered.find((entry) => entry.type === 'syncdeck-students')
+  // The instructor's own auth also broadcasts presence; the latest one reflects the student.
+  const studentsMessage = delivered.filter((entry) => entry.type === 'syncdeck-students').at(-1)
   assert.ok(studentsMessage)
   assert.equal(studentsMessage?.payload?.connectedCount, 1)
 })
@@ -4319,7 +4322,8 @@ async function setupSoloStart(initial: Record<string, SessionRecord>) {
   await initializeActivityRegistry()
   const state = createSessionStore(initial)
   const app = createMockApp()
-  setupSyncDeckRoutes(app, state.sessions, createMockWs())
+  const ws = createMockWs()
+  setupSyncDeckRoutes(app, state.sessions, ws)
   const handler = app.handlers.post['/api/syncdeck/:sessionId/solo-activity/start']
   assert.ok(handler)
   const start = async (body: unknown, token?: string) => {
@@ -4331,7 +4335,7 @@ async function setupSoloStart(initial: Record<string, SessionRecord>) {
     ), res)
     return res
   }
-  return { state, app, start }
+  return { state, app, ws, start }
 }
 
 function soloChildIds(store: Record<string, SessionRecord>): string[] {
@@ -4641,6 +4645,78 @@ void test('an instructor embedded end racing a solo start keeps the solo binding
   const parentData = state.store.s1!.data as { soloChildren: Record<string, unknown>; embeddedActivities: Record<string, unknown> }
   assert.notEqual(parentData.soloChildren[(soloResponse.body as { childSessionId: string }).childSessionId], undefined)
   assert.equal(parentData.embeddedActivities['resonance:4:0'], undefined)
+})
+
+void test('an instructor WebSocket state update racing a solo start keeps the solo binding', async () => {
+  const { parent, tokens } = createSoloParent()
+  parent.data.instructorPasscode = 'teacher-passcode'
+  const { state, ws, start } = await setupSoloStart({ s1: parent })
+  const instructorSocket = new MockSocket()
+  ws.wss.clients.add(instructorSocket)
+  ws.registered['/ws/syncdeck']!(instructorSocket, new URLSearchParams({ sessionId: 's1', role: 'instructor' }), ws.wss)
+  emitInstructorAuth(instructorSocket, 'teacher-passcode')
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  // Delay the instructor's parent write so a solo start would commit inside
+  // its read-to-write window without the parent write lock.
+  const originalSet = state.sessions.set.bind(state.sessions)
+  let delayed = false
+  state.sessions.set = async (id: string, session: SessionRecord) => {
+    if (id === 's1' && !delayed && (session.data as { lastInstructorPayload?: unknown }).lastInstructorPayload != null) {
+      delayed = true
+      await new Promise((resolve) => setTimeout(resolve, 25))
+    }
+    await originalSet(id, session)
+  }
+
+  instructorSocket.emit('message', JSON.stringify({
+    type: 'syncdeck-state-update',
+    payload: { type: 'slidechanged', payload: { h: 2, v: 0, f: 0 } },
+  }))
+  await new Promise((resolve) => setImmediate(resolve))
+  const soloResponse = await start({ activityId: 'resonance', location: { h: 0, v: 0 }, activityOptions: SOLO_RESONANCE_OPTIONS }, tokens['student-1'])
+  await new Promise((resolve) => setTimeout(resolve, 40))
+
+  assert.equal(delayed, true)
+  assert.equal(soloResponse.statusCode, 200)
+  const parentData = state.store.s1!.data as { soloChildren: Record<string, unknown>; lastInstructorPayload?: unknown }
+  assert.notEqual(parentData.soloChildren[(soloResponse.body as { childSessionId: string }).childSessionId], undefined)
+  assert.deepEqual(parentData.lastInstructorPayload, { type: 'slidechanged', payload: { h: 2, v: 0, f: 0 } })
+})
+
+void test('a student WebSocket join racing a return to the waiting room cannot restore the revoked entry', async () => {
+  const { parent } = createSoloParent({ roster: false })
+  parent.data.instructorPasscode = 'teacher-passcode'
+  const { state, app, ws } = await setupSoloStart({ s1: parent })
+  const studentSocket = new MockSocket()
+  authorizeStudentSocket(state.store.s1!, studentSocket, 'student-1', 'Ada')
+  // The student must already be on the roster for the instructor to return them.
+  ;(state.store.s1!.data as { students: unknown[] }).students = [{
+    studentId: 'student-1', name: 'Ada', joinedAt: 1, lastSeenAt: 1, lastIndices: null, lastStudentStateAt: null,
+  }]
+  ws.wss.clients.add(studentSocket)
+  const originalSet = state.sessions.set.bind(state.sessions)
+  let delayed = false
+  state.sessions.set = async (id: string, session: SessionRecord) => {
+    if (id === 's1' && !delayed) {
+      delayed = true
+      await new Promise((resolve) => setTimeout(resolve, 25))
+    }
+    await originalSet(id, session)
+  }
+
+  ws.registered['/ws/syncdeck']!(studentSocket, new URLSearchParams({ sessionId: 's1', studentId: 'student-1' }), ws.wss)
+  await new Promise((resolve) => setImmediate(resolve))
+  const returnResponse = createResponse()
+  await app.handlers.post['/api/syncdeck/:sessionId/students/:studentId/return-to-waiting-room']!(
+    createRequest({ sessionId: 's1', studentId: 'student-1' }, { instructorPasscode: 'teacher-passcode' }),
+    returnResponse,
+  )
+  await new Promise((resolve) => setTimeout(resolve, 40))
+
+  assert.equal(delayed, true)
+  assert.equal(returnResponse.statusCode, 200)
+  assert.equal(findAcceptedEntryParticipant(state.store.s1!, 'student-1'), null)
+  assert.equal((state.store.s1!.data as { students: unknown[] }).students.length, 0)
 })
 
 void test('solo start deletes a child session evicted past the per-student cap', async () => {

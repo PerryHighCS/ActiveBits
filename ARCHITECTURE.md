@@ -150,15 +150,16 @@ behind a newer commit, a stalled read of an incarnation that was since recreated
 or a strict read that completes after a `delete` therefore cannot roll `get()`
 back - or resurrect a deleted session - for the cache TTL.
 
-SyncDeck has not migrated to this primitive. Its parent-session routes that read
-the parent, await child-session work, and write the parent back (solo start,
-embedded-activity start and end, return-to-waiting-room, and parent deletion) share one
-in-process lock per parent (`buildParentWriteLockKey`), and solo start commits
-only its `soloChildren` change onto a fresh read. That lock is a single-process
-guarantee: other instances neither see it nor bypass their 30-second read cache,
-and other SyncDeck parent writers still use plain `set()`. Multi-instance safety
-for SyncDeck depends on migrating its complete writer set to `updateAtomic`
-(#313).
+SyncDeck has not migrated to this primitive. Instead, every write or delete of a
+SyncDeck parent session record goes through one owned path,
+`activities/syncdeck/server/parentWrites.ts`: writers hold a per-parent
+in-process lock and read the parent inside it (`update` applies a change to a
+fresh read). SyncDeck's routes and Learn integration receive a guarded store
+that rejects any `syncdeck` set/delete outside that parent's lock, tracked per
+async context. That lock is a single-process guarantee: other instances neither
+see it nor bypass their 30-second read cache. Multi-instance safety for SyncDeck
+depends on moving `parentWrites.ts` (and SyncDeck's child writers) onto
+`updateAtomic` (#313).
 
 Video Sync additionally carries a monotonic `playbackRevision` in its public
 playback state. Clients order state frames by that revision before considering

@@ -47,6 +47,7 @@ import {
 import { getActivityReportBuilder } from '../../../server/activities/activityReportRegistry.js'
 import { getActivityConfig, initializeActivityRegistry } from '../../../server/activities/activityRegistry.js'
 import { connectSyncDeckStudent } from './studentParticipants.js'
+import { createSyncDeckParentWriter, guardSyncDeckParentWrites, type SyncDeckParentWriter } from './parentWrites.js'
 import {
   buildSoloChildOptionsKey,
   findBoundSoloChild,
@@ -1119,16 +1120,6 @@ function buildEmbeddedActivityStartLockKey(sessionId: string, instanceKey: strin
   return `${sessionId}:${instanceKey}`
 }
 
-/**
- * One in-process lock per SyncDeck parent for route writers that read the
- * parent, await child-session work, then write the parent back: solo start,
- * embedded-activity start and end, return-to-waiting-room, and parent deletion. It keeps concurrent
- * students from dropping each other's solo bindings and keeps a start from
- * restoring a student's revoked entry. Cross-instance writes remain #313's scope.
- */
-function buildParentWriteLockKey(sessionId: string): string {
-  return `parent-write:${sessionId}`
-}
 
 function mergeReportStudents(sections: Array<{ students?: ActivityReportStudentRef[] }>): ActivityReportStudentRef[] {
   const byStudentId = new Map<string, ActivityReportStudentRef>()
@@ -1580,6 +1571,7 @@ registerSessionNormalizer('syncdeck', (session) => {
 
 async function createSyncDeckInstructorSession(
   sessions: SessionStore,
+  parentWriter: SyncDeckParentWriter,
   presentationUrl?: string,
 ): Promise<{ sessionId: string; instructorRecoveryToken: string; instructorPasscode: string }> {
   const session = await createSession(sessions, { data: {} })
@@ -1590,12 +1582,18 @@ async function createSyncDeckInstructorSession(
   })
   const instructorRecoveryToken = randomBytes(32).toString('hex')
   session.data.instructorRecoveryToken = instructorRecoveryToken
-  await sessions.set(session.id, session)
+  await parentWriter.runExclusive(session.id, async () => {
+    await sessions.set(session.id, session)
+  })
   const instructorPasscode = typeof session.data.instructorPasscode === 'string' ? session.data.instructorPasscode : ''
   return { sessionId: session.id, instructorRecoveryToken, instructorPasscode }
 }
 
-export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: SessionStore, ws: WsRouter): void {
+export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, rawSessions: SessionStore, ws: WsRouter): void {
+  // Every SyncDeck parent write goes through this writer's lock; the guarded
+  // store rejects any parent set/delete made outside it. See parentWrites.ts.
+  const parentWriter = createSyncDeckParentWriter(rawSessions)
+  const sessions = guardSyncDeckParentWrites(rawSessions, parentWriter)
   const embeddedActivityStartLocks = new Map<string, Promise<void>>()
 
   // Strict reads for the embedded-manager-capability redemption: a Valkey
@@ -1619,9 +1617,10 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
   registerLearnSyncDeckRoutes({
     app,
     sessions,
+    parentWriter,
     ws,
     async createInstructorSession(presentationUrl) {
-      return createSyncDeckInstructorSession(sessions, presentationUrl)
+      return createSyncDeckInstructorSession(sessions, parentWriter, presentationUrl)
     },
     writeInstructorRecoveryCookie(req, res, sessionId, token) {
       writeSyncDeckInstructorRecoveryCookie(req, res, sessionId, token)
@@ -1952,7 +1951,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
   app.post('/api/syncdeck/create', async (req, res) => {
     const response = res as unknown as JsonResponse
     try {
-      const session = await createSyncDeckInstructorSession(sessions)
+      const session = await createSyncDeckInstructorSession(sessions, parentWriter)
       writeSyncDeckInstructorRecoveryCookie(req, res, session.sessionId, session.instructorRecoveryToken)
       response.json({ id: session.sessionId, instructorPasscode: session.instructorPasscode })
     } catch (error) {
@@ -1971,7 +1970,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
 
     // Share the parent write lock so a concurrent solo or embedded start
     // cannot write back this student's revoked entry or deleted bindings.
-    await withEmbeddedActivityStartLock(buildParentWriteLockKey(sessionId), async () => {
+    await parentWriter.runExclusive(sessionId, async () => {
       const session = await getSyncDeckSessionWithEmbeddedKeepalive(sessions, sessionId)
       if (!session) {
         res.status(404).json({ error: 'invalid session' })
@@ -2141,8 +2140,8 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
 
     const responsePayload = await withEmbeddedActivityStartLock(
       buildEmbeddedActivityStartLockKey(sessionId, instanceKey),
-      async (): Promise<{ statusCode: number; body: { error: string } | EmbeddedActivityStartResponsePayload }> => withEmbeddedActivityStartLock(
-        buildParentWriteLockKey(sessionId),
+      async (): Promise<{ statusCode: number; body: { error: string } | EmbeddedActivityStartResponsePayload }> => parentWriter.runExclusive(
+        sessionId,
         async (): Promise<{ statusCode: number; body: { error: string } | EmbeddedActivityStartResponsePayload }> => {
           const lockedSession = asSyncDeckSession(await sessions.get(sessionId))
           if (!lockedSession) {
@@ -2402,7 +2401,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
 
     // Read and write the parent under its write lock so this whole-record
     // write cannot drop a solo binding or restore a revoked entry.
-    await withEmbeddedActivityStartLock(buildParentWriteLockKey(sessionId), async () => {
+    await parentWriter.runExclusive(sessionId, async () => {
       const session = await getSyncDeckSessionWithEmbeddedKeepalive(sessions, sessionId)
       if (!session) {
         res.status(404).json({ error: 'invalid session' })
@@ -2500,7 +2499,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
     // Hold the parent write lock and read the parent under it, so a
     // concurrent solo or embedded start either finishes first (and its
     // child is in the cascade below) or sees the parent already gone.
-    await withEmbeddedActivityStartLock(buildParentWriteLockKey(sessionId), async () => {
+    await parentWriter.runExclusive(sessionId, async () => {
       const session = await getSyncDeckSessionWithEmbeddedKeepalive(sessions, sessionId)
       if (!session) {
         res.status(404).json({ error: 'invalid session' })
@@ -2641,8 +2640,8 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       const instanceKey = buildGeneratedEmbeddedActivityInstanceKey(activityId, location)
       const optionsKey = buildSoloChildOptionsKey(selectedOptions)
 
-      const result = await withEmbeddedActivityStartLock(
-        buildParentWriteLockKey(sessionId),
+      const result = await parentWriter.runExclusive(
+        sessionId,
         async (): Promise<{ statusCode: number; body: Record<string, unknown> }> => {
           const lockedParent = asSyncDeckSession(await sessions.get(sessionId))
           if (!lockedParent) {
@@ -2727,8 +2726,21 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
                 })
                 : []
               await sessions.set(freshParent.id, freshParent)
-              // An unbound child could no longer be revoked, so remove it.
-              await Promise.all(evictedChildSessionIds.map((evictedChildSessionId) => sessions.delete(evictedChildSessionId)))
+              // An unbound child could no longer be revoked, so remove it. Each
+              // delete stands alone: a failure is logged and does not fail this
+              // start, whose new child is already validly bound.
+              const evictionResults = await Promise.allSettled(
+                evictedChildSessionIds.map((evictedChildSessionId) => sessions.delete(evictedChildSessionId)),
+              )
+              evictionResults.forEach((evictionResult, index) => {
+                if (evictionResult.status === 'rejected') {
+                  console.error(JSON.stringify({
+                    activity: 'syncdeck', event: 'solo-activity-evicted-child-delete-failed', sessionId,
+                    childSessionId: evictedChildSessionIds[index],
+                    error: evictionResult.reason instanceof Error ? evictionResult.reason.message : String(evictionResult.reason),
+                  }))
+                }
+              })
             }
 
             const stored = storeTrustedSessionEntryParticipant(
@@ -2878,11 +2890,18 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       }
     }
 
-    session.data.presentationUrl = presentationUrl
-    session.data.standaloneMode = standaloneMode
-    await sessions.set(session.id, session)
-
+    const configured = await parentWriter.update(sessionId, (fresh) => {
+      const freshSession = asSyncDeckSession(fresh)
+      if (!freshSession) return false
+      freshSession.data.presentationUrl = presentationUrl
+      freshSession.data.standaloneMode = standaloneMode
+      return true
+    })
     const response = res as unknown as JsonResponse
+    if (!configured) {
+      response.status(404).json({ error: 'invalid session' })
+      return
+    }
     response.json({ ok: true })
   })
 
@@ -2961,20 +2980,27 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
         return
       }
 
-      const connectedStudent = connectSyncDeckStudent(
-        session,
-        acceptedStudentId,
-      )
-      if (!connectedStudent) {
+      // Join against the current parent under its write lock, re-checking the
+      // accepted entry so a concurrent return-to-waiting-room cannot be undone.
+      const join: { student: ReturnType<typeof connectSyncDeckStudent> } = { student: null }
+      const joinedSession = asSyncDeckSession(await parentWriter.update(session.id, (fresh) => {
+        const freshSession = asSyncDeckSession(fresh)
+        if (!freshSession || resolveSocketAcceptedSyncDeckParticipantId(freshSession, client) !== acceptedStudentId) {
+          return false
+        }
+        join.student = connectSyncDeckStudent(freshSession, acceptedStudentId)
+        return join.student != null
+      }))
+      const joinedStudent = join.student
+      if (!joinedSession || !joinedStudent) {
         socket.close(1008, 'unregistered student')
         return
       }
 
-      client.studentId = connectedStudent.participantId
-      await sessions.set(session.id, session)
+      client.studentId = joinedStudent.participantId
       closeDuplicateParticipantSockets(ws.wss.clients as Set<SyncDeckSocket>, client)
 
-      await replayEmbeddedActivityStartsToSocket(client, session, connectedStudent.student)
+      await replayEmbeddedActivityStartsToSocket(client, joinedSession, joinedStudent.student)
 
       if (session.data.lastInstructorPayload != null) {
         if (session.data.lastInstructorStatePayload != null && !parseChalkboardCommand(session.data.lastInstructorStatePayload)) {
@@ -3034,16 +3060,28 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
           return
         }
 
-        session.data.lastInstructorPayload = message.payload ?? null
-        if (extractIndicesFromInstructorPayload(message.payload) != null) {
-          session.data.lastInstructorStatePayload = message.payload
+        // Apply the instructor update to the current parent under its write
+        // lock, so it cannot write back a stale roster, binding, or entry map.
+        const updatedSession = await parentWriter.update(session.id, (fresh) => {
+          const freshSession = asSyncDeckSession(fresh)
+          if (!freshSession) return false
+          freshSession.data.lastInstructorPayload = message.payload ?? null
+          if (extractIndicesFromInstructorPayload(message.payload) != null) {
+            freshSession.data.lastInstructorStatePayload = message.payload
+          }
+          applyChalkboardBufferUpdate(freshSession.data, message.payload)
+          const drawingToolModeUpdate = parseDrawingToolModeUpdate(message.payload)
+          if (drawingToolModeUpdate) {
+            freshSession.data.drawingToolMode = drawingToolModeUpdate
+          }
+          return true
+        })
+        if (!updatedSession) {
+          logSyncDeckProtocolEvent('info', 'ignore_instructor_ws_message_missing_session', {
+            sessionId: session.id,
+          })
+          return
         }
-        applyChalkboardBufferUpdate(session.data, message.payload)
-        const drawingToolModeUpdate = parseDrawingToolModeUpdate(message.payload)
-        if (drawingToolModeUpdate) {
-          session.data.drawingToolMode = drawingToolModeUpdate
-        }
-        await sessions.set(session.id, session)
         logSyncDeckProtocolEvent('info', 'apply_instructor_ws_payload', {
           sessionId: session.id,
           payloadType: isPlainObject(message.payload) ? (message.payload.type ?? null) : null,
