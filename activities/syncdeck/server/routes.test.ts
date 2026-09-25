@@ -19,6 +19,7 @@ import { initializeActivityRegistry } from '../../../server/activities/activityR
 import { registerActivityReportBuilder } from '../../../server/activities/activityReportRegistry.js'
 import setupSyncDeckRoutes, { waitForInstructorAuthMessage } from './routes.js'
 import { MAX_SOLO_CHILDREN_PER_STUDENT } from './soloChildren.js'
+import { runSessionWriteExclusive } from 'activebits-server/core/sessionWriteLock.js'
 import '../../gallery-walk/server/routes.js'
 import '../../postboard/server/routes.js'
 import '../../resonance/server/routes.js'
@@ -4763,7 +4764,7 @@ void test('solo activity entry route is no longer registered', async () => {
   assert.equal(app.handlers.post['/api/syncdeck/:sessionId/solo-activity/entry'], undefined)
 })
 
-void test('returning a student to the waiting room deletes their solo bindings and revokes their solo child entries', async () => {
+void test('returning a student to the waiting room deletes their solo children and bindings', async () => {
   const { parent, tokens } = createSoloParent({ students: [{ id: 'student-1', name: 'Ada' }, { id: 'student-2', name: 'Grace' }] })
   parent.data.instructorPasscode = 'teacher-passcode'
   const { state, app, start } = await setupSoloStart({ s1: parent })
@@ -4782,8 +4783,97 @@ void test('returning a student to the waiting room deletes their solo bindings a
     Object.keys((state.store.s1!.data as { soloChildren: Record<string, unknown> }).soloChildren),
     [grace.childSessionId],
   )
-  const adaChildData = state.store[ada.childSessionId]!.data as { entryParticipants?: Record<string, unknown> }
-  assert.equal(adaChildData.entryParticipants?.[ada.entryParticipantToken], undefined)
+  // Deleted, not just revoked: an unbound child could be re-entered through its
+  // own waiting room and would never be cleaned up.
+  assert.equal(state.store[ada.childSessionId], undefined)
+  assert.notEqual(state.store[grace.childSessionId], undefined)
+})
+
+void test('a failed return to the waiting room restores the deleted solo children and keeps their bindings', async () => {
+  const { parent, tokens } = createSoloParent()
+  parent.data.instructorPasscode = 'teacher-passcode'
+  const { state, app, start } = await setupSoloStart({ s1: parent })
+  const ada = (await start({ activityId: 'resonance', location: { h: 0, v: 0 }, activityOptions: SOLO_RESONANCE_OPTIONS }, tokens['student-1'])).body as { childSessionId: string }
+  const originalSet = state.sessions.set.bind(state.sessions)
+  state.sessions.set = async (id: string, session: SessionRecord) => {
+    if (id === 's1') throw new Error('[TEST] parent write unavailable')
+    await originalSet(id, session)
+  }
+
+  console.info('[TEST] Expected return-to-waiting-room failure when the parent write fails.')
+  const response = createResponse()
+  await app.handlers.post['/api/syncdeck/:sessionId/students/:studentId/return-to-waiting-room']!(
+    createRequest({ sessionId: 's1', studentId: 'student-1' }, { instructorPasscode: 'teacher-passcode' }),
+    response,
+  )
+
+  assert.equal(response.statusCode, 500)
+  assert.notEqual(state.store[ada.childSessionId], undefined)
+  assert.notEqual((state.store.s1!.data as { soloChildren: Record<string, unknown> }).soloChildren[ada.childSessionId], undefined)
+  assert.notEqual(findAcceptedEntryParticipant(state.store.s1!, 'student-1'), null)
+})
+
+void test('a failed eviction delete keeps that binding while the new solo start still succeeds', async () => {
+  const { parent, tokens } = createSoloParent()
+  const initial: Record<string, SessionRecord> = { s1: parent }
+  const soloChildren: Record<string, unknown> = {}
+  for (let index = 0; index < MAX_SOLO_CHILDREN_PER_STUDENT; index += 1) {
+    const childId = `CHILD:s1:old${index}:resonance`
+    soloChildren[childId] = {
+      studentId: 'student-1', activityId: 'resonance', instanceKey: `resonance:${index + 10}:0`, optionsKey: 'old', createdAt: index + 1,
+    }
+    initial[childId] = { id: childId, type: 'resonance', created: 1, lastActivity: 1, data: {} }
+  }
+  ;(parent.data as { soloChildren: Record<string, unknown> }).soloChildren = soloChildren
+  const { state, start } = await setupSoloStart(initial)
+  const originalDelete = state.sessions.delete.bind(state.sessions)
+  state.sessions.delete = async (id: string) => {
+    if (id === 'CHILD:s1:old0:resonance') throw new Error('[TEST] child delete unavailable')
+    return originalDelete(id)
+  }
+
+  console.info('[TEST] Expected evicted solo child delete failure.')
+  const res = await start({ activityId: 'resonance', location: { h: 0, v: 0 }, activityOptions: SOLO_RESONANCE_OPTIONS }, tokens['student-1'])
+
+  assert.equal(res.statusCode, 200)
+  const bound = (state.store.s1!.data as { soloChildren: Record<string, unknown> }).soloChildren
+  assert.notEqual(bound['CHILD:s1:old0:resonance'], undefined)
+  assert.notEqual(bound[(res.body as { childSessionId: string }).childSessionId], undefined)
+  assert.notEqual(state.store[(res.body as { childSessionId: string }).childSessionId], undefined)
+})
+
+void test('a student WebSocket join replays state committed while it waited for the parent lock', async () => {
+  const { parent } = createSoloParent({ roster: false })
+  parent.data.lastInstructorPayload = { type: 'slidechanged', payload: { h: 1, v: 0, f: 0 } }
+  parent.data.lastInstructorStatePayload = parent.data.lastInstructorPayload
+  const { state, ws } = await setupSoloStart({ s1: parent })
+  const studentSocket = new MockSocket()
+  authorizeStudentSocket(state.store.s1!, studentSocket, 'student-1', 'Ada')
+  ws.wss.clients.add(studentSocket)
+
+  let releaseLock!: () => void
+  const lockReleased = new Promise<void>((resolve) => { releaseLock = resolve })
+  let lockHeld!: () => void
+  const heldSignal = new Promise<void>((resolve) => { lockHeld = resolve })
+  const holder = runSessionWriteExclusive('s1', async () => {
+    lockHeld()
+    await lockReleased
+  })
+  await heldSignal
+  ws.registered['/ws/syncdeck']!(studentSocket, new URLSearchParams({ sessionId: 's1', studentId: 'student-1' }), ws.wss)
+  await new Promise((resolve) => setImmediate(resolve))
+  // An instructor update lands after the join's first read but before its locked join.
+  const newer = { type: 'slidechanged', payload: { h: 5, v: 0, f: 0 } }
+  ;(state.store.s1!.data as Record<string, unknown>).lastInstructorPayload = newer
+  ;(state.store.s1!.data as Record<string, unknown>).lastInstructorStatePayload = newer
+  releaseLock()
+  await holder
+  await new Promise((resolve) => setTimeout(resolve, 10))
+
+  const replayed = studentSocket.sent.map((entry) => (JSON.parse(entry) as { type?: string; payload?: unknown }))
+    .filter((entry) => entry.type === 'syncdeck-state')
+    .map((entry) => entry.payload)
+  assert.deepEqual(replayed[0], newer)
 })
 
 void test('embedded-activity auto-activate route marks released resonance children to activate all questions', async () => {

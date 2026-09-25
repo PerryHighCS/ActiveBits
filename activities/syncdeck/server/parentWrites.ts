@@ -1,5 +1,5 @@
-import { AsyncLocalStorage } from 'node:async_hooks'
 import type { SessionRecord, SessionStore } from 'activebits-server/core/sessions.js'
+import { holdsSessionWriteLock, runSessionWriteExclusive } from 'activebits-server/core/sessionWriteLock.js'
 
 /**
  * The single owned mutation path for SyncDeck parent session records.
@@ -10,8 +10,10 @@ import type { SessionRecord, SessionStore } from 'activebits-server/core/session
  * child binding or restoring a revoked accepted entry). `guardSyncDeckParentWrites`
  * enforces this: a set/delete of a `syncdeck` record outside the lock throws.
  *
- * The lock is in-process only. Cross-instance safety needs the whole writer set
- * moved to `updateAtomic` (#313); this module is where that swap belongs.
+ * The lock is the shared per-session write lock (`server/core/sessionWriteLock.ts`),
+ * so shared platform writers of the same record (entry-participant, consume,
+ * persistent capability issuance) serialize with SyncDeck's. It is in-process
+ * only; cross-instance safety needs the writer set moved to `updateAtomic` (#313).
  * See "Solo child binding" in `.agent/plans/shared-activity-runtime-authentication.md`.
  */
 export const SYNCDECK_SESSION_TYPE = 'syncdeck'
@@ -36,35 +38,8 @@ export interface SyncDeckParentWriter {
 }
 
 export function createSyncDeckParentWriter(sessions: Pick<SessionStore, 'get' | 'set'>): SyncDeckParentWriter {
-  const tails = new Map<string, Promise<void>>()
-  const heldLocks = new AsyncLocalStorage<ReadonlySet<string>>()
-
-  const holds = (sessionId: string): boolean => heldLocks.getStore()?.has(sessionId) === true
-
-  const runExclusive = async <T>(sessionId: string, work: () => Promise<T>): Promise<T> => {
-    if (holds(sessionId)) {
-      throw new Error(`SyncDeck parent write lock for ${sessionId} is not reentrant`)
-    }
-    const previous = tails.get(sessionId) ?? Promise.resolve()
-    let release!: () => void
-    const current = new Promise<void>((resolve) => {
-      release = resolve
-    })
-    const queued = previous.then(() => current, () => current)
-    tails.set(sessionId, queued)
-
-    await previous
-    try {
-      const held = new Set(heldLocks.getStore() ?? [])
-      held.add(sessionId)
-      return await heldLocks.run(held, work)
-    } finally {
-      release()
-      if (tails.get(sessionId) === queued) {
-        tails.delete(sessionId)
-      }
-    }
-  }
+  const holds = holdsSessionWriteLock
+  const runExclusive = runSessionWriteExclusive
 
   const update: SyncDeckParentWriter['update'] = async (sessionId, mutate) => runExclusive(sessionId, async () => {
     const session = await sessions.get(sessionId)

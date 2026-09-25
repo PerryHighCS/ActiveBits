@@ -47,6 +47,7 @@ import {
   writeActivityCapabilityCookie,
 } from '../core/activityCapabilities.js'
 import { getSessionCreatedIdentity } from '../core/sessions.js'
+import { runSessionWriteExclusive } from '../core/sessionWriteLock.js'
 
 const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000
 const MAX_TEACHER_CODE_LENGTH = 100
@@ -921,40 +922,47 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
       // The teacher code was verified while `activeSession` was live; bind the
       // capability to that same incarnation so a delete+recreate of this id
       // (even as the same activity) in the awaits above cannot inherit it.
-      const expectedCreated = readSessionCreated(activeSession)
-      const freshSession = await getSessionStrict(sessionId)
-      if (!matchesSessionIncarnation(freshSession, activityName, expectedCreated)) {
-        console.error(JSON.stringify({
-          event: 'session-manager-capability-incarnation-mismatch',
-          route: 'teacher-authenticate',
-          stage: 'pre-mutation-strict-read',
+      // Read, issue, and write under the shared per-session write lock so an
+      // activity-owned writer cannot overwrite the capability (or vice versa).
+      const setSession = sessions.set.bind(sessions)
+      const issued = await runSessionWriteExclusive(sessionId, async (): Promise<boolean> => {
+        const expectedCreated = readSessionCreated(activeSession)
+        const freshSession = await getSessionStrict(sessionId)
+        if (!matchesSessionIncarnation(freshSession, activityName, expectedCreated)) {
+          console.error(JSON.stringify({
+            event: 'session-manager-capability-incarnation-mismatch',
+            route: 'teacher-authenticate',
+            stage: 'pre-mutation-strict-read',
+            sessionId,
+          }))
+          res.status(404).json({ error: 'Teacher join is unavailable for this session' })
+          return false
+        }
+        let capabilityToken: string
+        const capabilityOutcome = await issueManagerCapabilityAtomically(
+          sessions as unknown as AtomicManagerCapabilityStore,
           sessionId,
-        }))
-        res.status(404).json({ error: 'Teacher join is unavailable for this session' })
-        return
-      }
-      let capabilityToken: string
-      const capabilityOutcome = await issueManagerCapabilityAtomically(
-        sessions as unknown as AtomicManagerCapabilityStore,
-        sessionId,
-        { expectedType: activityName, expectedCreated },
-      )
-      if (capabilityOutcome.status === 'issued') {
-        capabilityToken = capabilityOutcome.token
-      } else if (capabilityOutcome.status === 'no-atomic-store') {
-        capabilityToken = issueActivityCapability(freshSession as { data: unknown }, 'manager').token
-        await sessions.set(sessionId, freshSession)
-      } else {
-        console.error(JSON.stringify({
-          event: 'session-manager-capability-incarnation-mismatch',
-          route: 'teacher-authenticate',
-          stage: capabilityOutcome.status,
-          sessionId,
-        }))
-        res.status(404).json({ error: 'Teacher join is unavailable for this session' })
-        return
-      }
-      writeActivityCapabilityCookie(res, sessionId, 'manager', capabilityToken)
+          { expectedType: activityName, expectedCreated },
+        )
+        if (capabilityOutcome.status === 'issued') {
+          capabilityToken = capabilityOutcome.token
+        } else if (capabilityOutcome.status === 'no-atomic-store') {
+          capabilityToken = issueActivityCapability(freshSession as { data: unknown }, 'manager').token
+          await setSession(sessionId, freshSession)
+        } else {
+          console.error(JSON.stringify({
+            event: 'session-manager-capability-incarnation-mismatch',
+            route: 'teacher-authenticate',
+            stage: capabilityOutcome.status,
+            sessionId,
+          }))
+          res.status(404).json({ error: 'Teacher join is unavailable for this session' })
+          return false
+        }
+        writeActivityCapabilityCookie(res, sessionId, 'manager', capabilityToken)
+        return true
+      })
+      if (!issued) return
     } catch (error) {
       console.error(JSON.stringify({
         event: 'persistent-manager-capability-persistence-failed',
@@ -1093,7 +1101,8 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
       // cookie-validation awaits above. Issue the capability onto the latest
       // record so a concurrent activity update in that window is not lost when
       // the whole-session snapshot is written back.
-      const freshSession = await getSessionStrict(sessionId)
+      // Read, issue, and write under the shared per-session write lock so an
+      // activity-owned writer cannot overwrite the capability (or vice versa).
       // The persistent authorization was established against this `activeSession`
       // incarnation. If the session ended and its id was reused during the
       // awaits above - for a different activity, or even the same activity - do
@@ -1101,39 +1110,43 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
       // authorized `type` and its `created` timestamp.
       const expectedType = activeSession.type
       const expectedCreated = readSessionCreated(activeSession)
-      if (!matchesSessionIncarnation(freshSession, expectedType, expectedCreated)) {
-        console.error(JSON.stringify({
-          event: 'session-manager-capability-incarnation-mismatch',
-          route: 'persistent-manager-capability',
-          stage: 'pre-mutation-strict-read',
+      const setSession = sessions.set.bind(sessions)
+      await runSessionWriteExclusive(sessionId, async () => {
+        const freshSession = await getSessionStrict(sessionId)
+        if (!matchesSessionIncarnation(freshSession, expectedType, expectedCreated)) {
+          console.error(JSON.stringify({
+            event: 'session-manager-capability-incarnation-mismatch',
+            route: 'persistent-manager-capability',
+            stage: 'pre-mutation-strict-read',
+            sessionId,
+          }))
+          res.status(404).json({ error: 'Active session not found' })
+          return
+        }
+        let capabilityToken: string
+        const capabilityOutcome = await issueManagerCapabilityAtomically(
+          sessions as unknown as AtomicManagerCapabilityStore,
           sessionId,
-        }))
-        res.status(404).json({ error: 'Active session not found' })
-        return
-      }
-      let capabilityToken: string
-      const capabilityOutcome = await issueManagerCapabilityAtomically(
-        sessions as unknown as AtomicManagerCapabilityStore,
-        sessionId,
-        { expectedType, expectedCreated },
-      )
-      if (capabilityOutcome.status === 'issued') {
-        capabilityToken = capabilityOutcome.token
-      } else if (capabilityOutcome.status === 'no-atomic-store') {
-        capabilityToken = issueActivityCapability(freshSession as { data: unknown }, 'manager').token
-        await sessions.set(sessionId, freshSession)
-      } else {
-        console.error(JSON.stringify({
-          event: 'session-manager-capability-incarnation-mismatch',
-          route: 'persistent-manager-capability',
-          stage: capabilityOutcome.status,
-          sessionId,
-        }))
-        res.status(404).json({ error: 'Active session not found' })
-        return
-      }
-      writeActivityCapabilityCookie(res, sessionId, 'manager', capabilityToken)
-      res.json({ success: true, persistentRecoveryAvailable: true })
+          { expectedType, expectedCreated },
+        )
+        if (capabilityOutcome.status === 'issued') {
+          capabilityToken = capabilityOutcome.token
+        } else if (capabilityOutcome.status === 'no-atomic-store') {
+          capabilityToken = issueActivityCapability(freshSession as { data: unknown }, 'manager').token
+          await setSession(sessionId, freshSession)
+        } else {
+          console.error(JSON.stringify({
+            event: 'session-manager-capability-incarnation-mismatch',
+            route: 'persistent-manager-capability',
+            stage: capabilityOutcome.status,
+            sessionId,
+          }))
+          res.status(404).json({ error: 'Active session not found' })
+          return
+        }
+        writeActivityCapabilityCookie(res, sessionId, 'manager', capabilityToken)
+        res.json({ success: true, persistentRecoveryAvailable: true })
+      })
     } catch (error) {
       console.error(JSON.stringify({
         event: 'persistent-manager-capability-failed',

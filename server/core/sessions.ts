@@ -25,6 +25,7 @@ import {
 } from './acceptedEntryParticipants.js'
 import { resolveActivityPrincipalFromCookies } from './activityCapabilities.js'
 import { consumeSessionDataToken } from './sessionTokenUtils.js'
+import { runSessionWriteExclusive } from './sessionWriteLock.js'
 
 export interface SessionRecord extends SharedSession<Record<string, unknown>> {
   [key: string]: unknown
@@ -746,63 +747,71 @@ export function setupSessionRoutes(app: {
   app.post('/api/session/:sessionId/entry-participant', async (req, res) => {
     setNoStore(res)
     const { sessionId } = req.params
-    const session = await sessions.get(sessionId)
-    if (!session) {
-      res.status(404).json({ error: 'invalid session' })
-      return
-    }
-
-    try {
-      const body = req.body != null && typeof req.body === 'object' ? (req.body as Record<string, unknown>) : {}
-      const { token, values } = storeSessionEntryParticipant(session, body.values)
-      await sessions.set(sessionId, session)
-      res.json({ entryParticipantToken: token, values })
-    } catch (error) {
-      if (error instanceof SessionEntryParticipantStoreError) {
-        res.status(error.statusCode).json({ error: error.message })
+    // Read-modify-write under the shared per-session write lock so this
+    // write cannot overwrite a concurrent activity-owned mutation.
+    await runSessionWriteExclusive(sessionId, async () => {
+      const session = await sessions.get(sessionId)
+      if (!session) {
+        res.status(404).json({ error: 'invalid session' })
         return
       }
-      console.error('Error storing session entry participant:', { sessionId, error })
-      res.status(500).json({ error: 'internal server error' })
-    }
+
+      try {
+        const body = req.body != null && typeof req.body === 'object' ? (req.body as Record<string, unknown>) : {}
+        const { token, values } = storeSessionEntryParticipant(session, body.values)
+        await sessions.set(sessionId, session)
+        res.json({ entryParticipantToken: token, values })
+      } catch (error) {
+        if (error instanceof SessionEntryParticipantStoreError) {
+          res.status(error.statusCode).json({ error: error.message })
+          return
+        }
+        console.error('Error storing session entry participant:', { sessionId, error })
+        res.status(500).json({ error: 'internal server error' })
+      }
+    })
   })
 
   app.post('/api/session/:sessionId/entry-participant/consume', async (req, res) => {
     setNoStore(res)
     const { sessionId } = req.params as { sessionId: string }
-    const session = await sessions.get(sessionId)
-    if (!session) {
-      res.status(404).json({ error: 'invalid session' })
-      return
-    }
-
-    try {
-      const body = req.body != null && typeof req.body === 'object' ? (req.body as Record<string, unknown>) : {}
-      const token = typeof body.token === 'string' ? body.token : ''
-      const values = consumeSessionEntryParticipant(session, token)
-      if (!values) {
-        res.status(404).json({ error: 'entry participant not found' })
+    // Read-modify-write under the shared per-session write lock so this
+    // write cannot overwrite a concurrent activity-owned mutation.
+    await runSessionWriteExclusive(sessionId, async () => {
+      const session = await sessions.get(sessionId)
+      if (!session) {
+        res.status(404).json({ error: 'invalid session' })
         return
       }
 
-      const acceptedParticipant = acceptEntryParticipant(session, values)
-      const participantToken = acceptedParticipant
-        ? issueAcceptedEntryParticipantToken(session, acceptedParticipant.participantId)
-        : null
-      await sessions.set(sessionId, session)
-      if (participantToken) {
-        res.cookie?.(getSessionParticipantCookieName(sessionId), participantToken, {
-          httpOnly: true,
-          sameSite: 'lax',
-          secure: process.env.NODE_ENV === 'production',
-          path: '/',
-        })
+      try {
+        const body = req.body != null && typeof req.body === 'object' ? (req.body as Record<string, unknown>) : {}
+        const token = typeof body.token === 'string' ? body.token : ''
+        const values = consumeSessionEntryParticipant(session, token)
+        if (!values) {
+          res.status(404).json({ error: 'entry participant not found' })
+          return
+        }
+
+        const acceptedParticipant = acceptEntryParticipant(session, values)
+        const participantToken = acceptedParticipant
+          ? issueAcceptedEntryParticipantToken(session, acceptedParticipant.participantId)
+          : null
+        await sessions.set(sessionId, session)
+        if (participantToken) {
+          res.cookie?.(getSessionParticipantCookieName(sessionId), participantToken, {
+            httpOnly: true,
+            sameSite: 'lax',
+            secure: process.env.NODE_ENV === 'production',
+            path: '/',
+          })
+        }
+        res.json({ values })
+      } catch (error) {
+        console.error('Error consuming session entry participant:', { sessionId, error })
+        res.status(500).json({ error: 'internal server error' })
       }
-      res.json({ values })
-    } catch (error) {
-      console.error('Error consuming session entry participant:', { sessionId, error })
-      res.status(500).json({ error: 'internal server error' })
-    }
+    })
   })
 
   app.delete('/api/session/:sessionId', async (req, res) => {

@@ -150,15 +150,21 @@ behind a newer commit, a stalled read of an incarnation that was since recreated
 or a strict read that completes after a `delete` therefore cannot roll `get()`
 back - or resurrect a deleted session - for the cache TTL.
 
-SyncDeck has not migrated to this primitive. Instead, every write or delete of a
-SyncDeck parent session record goes through one owned path,
-`activities/syncdeck/server/parentWrites.ts`: writers hold a per-parent
-in-process lock and read the parent inside it (`update` applies a change to a
+Within one process, `server/core/sessionWriteLock.ts` provides an
+activity-agnostic per-session write lock (`runSessionWriteExclusive`), with
+ownership tracked per async context. Writers that read a session, may await other
+work, and write it back take it: the shared `entry-participant` and `consume`
+routes, persistent manager-capability issuance, and SyncDeck's parent writer.
+It does not coordinate across instances.
+
+SyncDeck has not migrated to `updateAtomic`. Instead, every write or delete of a
+SyncDeck parent session record inside SyncDeck goes through one owned path,
+`activities/syncdeck/server/parentWrites.ts`, built on that shared lock:
+writers hold it and read the parent inside it (`update` applies a change to a
 fresh read). SyncDeck's routes and Learn integration receive a guarded store
-that rejects any `syncdeck` set/delete outside that parent's lock, tracked per
-async context. That lock is a single-process guarantee: other instances neither
-see it nor bypass their 30-second read cache. Multi-instance safety for SyncDeck
-depends on moving `parentWrites.ts` (and SyncDeck's child writers) onto
+that rejects any `syncdeck` set/delete outside that parent's lock. Other
+instances neither see the lock nor bypass their 30-second read cache, so
+multi-instance safety for SyncDeck depends on moving these writers onto
 `updateAtomic` (#313).
 
 Video Sync additionally carries a monotonic `playbackRevision` in its public

@@ -1992,12 +1992,9 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, rawSessions: 
       const persistedChildSessions: SessionRecord[] = []
       try {
         revokeSessionEntryParticipants(updatedSession, studentId)
-        const affectedChildSessionIds = [
-          ...Object.values(updatedSession.data.embeddedActivities).map((embeddedActivity) => embeddedActivity.childSessionId),
-          ...removeStudentSoloChildren(updatedSession.data.soloChildren, studentId),
-        ]
-        for (const affectedChildSessionId of affectedChildSessionIds) {
-          const childSession = await sessions.get(affectedChildSessionId)
+        // Shared class activities stay; the returned student's entries are revoked.
+        for (const embeddedActivity of Object.values(updatedSession.data.embeddedActivities)) {
+          const childSession = await sessions.get(embeddedActivity.childSessionId)
           if (!childSession) continue
           const originalChildSession = structuredClone(childSession)
           const updatedChildSession = structuredClone(childSession)
@@ -2007,6 +2004,22 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, rawSessions: 
           persistedChildSessions.push(originalChildSession)
           childSessionIds.push(updatedChildSession.id)
         }
+        // The student's own solo children are deleted: once unbound they could
+        // be re-entered through their waiting room and could never be cleaned
+        // up. A later failure restores them (rollback below) with the stored
+        // parent still binding them, so the return can be retried.
+        const soloChildSessionIds = Object.entries(updatedSession.data.soloChildren)
+          .filter(([, record]) => record.studentId === studentId)
+          .map(([childSessionId]) => childSessionId)
+        for (const soloChildSessionId of soloChildSessionIds) {
+          const childSession = await sessions.get(soloChildSessionId)
+          if (childSession) {
+            persistedChildSessions.push(structuredClone(childSession))
+            await sessions.delete(soloChildSessionId)
+            childSessionIds.push(soloChildSessionId)
+          }
+        }
+        removeStudentSoloChildren(updatedSession.data.soloChildren, studentId)
         updatedSession.data.students = updatedSession.data.students.filter((student) => student.studentId !== studentId)
         await sessions.set(updatedSession.id, updatedSession)
       } catch (error) {
@@ -2716,6 +2729,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, rawSessions: 
               if (staleChildSessionId) {
                 delete freshParent.data.soloChildren[staleChildSessionId]
               }
+              const bindingsBeforeEviction = { ...freshParent.data.soloChildren }
               const evictedChildSessionIds = createdChildSessionId
                 ? recordSoloChild(freshParent.data.soloChildren, createdChildSessionId, {
                   studentId: lockedStudent.studentId,
@@ -2725,22 +2739,25 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, rawSessions: 
                   createdAt: Date.now(),
                 })
                 : []
-              await sessions.set(freshParent.id, freshParent)
-              // An unbound child could no longer be revoked, so remove it. Each
-              // delete stands alone: a failure is logged and does not fail this
-              // start, whose new child is already validly bound.
+              // Delete evicted children before committing. A child whose delete
+              // fails keeps its binding, so it stays revocable and the next
+              // eviction or the parent-delete cascade retries it; this start
+              // still succeeds because its new child is validly bound.
               const evictionResults = await Promise.allSettled(
                 evictedChildSessionIds.map((evictedChildSessionId) => sessions.delete(evictedChildSessionId)),
               )
               evictionResults.forEach((evictionResult, index) => {
+                const evictedChildSessionId = evictedChildSessionIds[index]!
                 if (evictionResult.status === 'rejected') {
+                  freshParent.data.soloChildren[evictedChildSessionId] = bindingsBeforeEviction[evictedChildSessionId]!
                   console.error(JSON.stringify({
                     activity: 'syncdeck', event: 'solo-activity-evicted-child-delete-failed', sessionId,
-                    childSessionId: evictedChildSessionIds[index],
+                    childSessionId: evictedChildSessionId,
                     error: evictionResult.reason instanceof Error ? evictionResult.reason.message : String(evictionResult.reason),
                   }))
                 }
               })
+              await sessions.set(freshParent.id, freshParent)
             }
 
             const stored = storeTrustedSessionEntryParticipant(
@@ -3002,20 +3019,22 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, rawSessions: 
 
       await replayEmbeddedActivityStartsToSocket(client, joinedSession, joinedStudent.student)
 
-      if (session.data.lastInstructorPayload != null) {
-        if (session.data.lastInstructorStatePayload != null && !parseChalkboardCommand(session.data.lastInstructorStatePayload)) {
-          sendSyncDeckState(socket, session.data.lastInstructorStatePayload)
+      // Replay from the parent read under the lock, not the pre-lock snapshot.
+      const joinedData = joinedSession.data
+      if (joinedData.lastInstructorPayload != null) {
+        if (joinedData.lastInstructorStatePayload != null && !parseChalkboardCommand(joinedData.lastInstructorStatePayload)) {
+          sendSyncDeckState(socket, joinedData.lastInstructorStatePayload)
         }
         if (
-          session.data.lastInstructorPayload !== session.data.lastInstructorStatePayload &&
-          !parseChalkboardCommand(session.data.lastInstructorPayload)
+          joinedData.lastInstructorPayload !== joinedData.lastInstructorStatePayload &&
+          !parseChalkboardCommand(joinedData.lastInstructorPayload)
         ) {
-          sendSyncDeckState(socket, session.data.lastInstructorPayload)
+          sendSyncDeckState(socket, joinedData.lastInstructorPayload)
         }
       }
 
-      sendSyncDeckState(socket, buildDrawingToolModePayload(session.data.drawingToolMode))
-      sendBufferedChalkboardState(socket, session.data.chalkboard)
+      sendSyncDeckState(socket, buildDrawingToolModePayload(joinedData.drawingToolMode))
+      sendBufferedChalkboardState(socket, joinedData.chalkboard)
 
       await broadcastStudentsToInstructors(session.id)
     })().catch(() => {
