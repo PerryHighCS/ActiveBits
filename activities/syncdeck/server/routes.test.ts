@@ -4557,6 +4557,62 @@ void test('an instructor embedded start racing a solo start keeps both the solo 
   assert.notEqual(parentData.embeddedActivities['resonance:4:0'], undefined)
 })
 
+void test('deleting the parent while a solo start is finishing leaves no solo child behind', async () => {
+  const { parent, tokens } = createSoloParent()
+  parent.data.instructorPasscode = 'teacher-passcode'
+  const { state, app, start } = await setupSoloStart({ s1: parent })
+  // Delay the start's final child write (the handoff), after its binding is
+  // committed; an unlocked delete would remove the child and then see it rewritten.
+  const originalSet = state.sessions.set.bind(state.sessions)
+  const childWrites = new Map<string, number>()
+  let startedDelete: (() => void) | null = null
+  const deleteMayRun = new Promise<void>((resolve) => { startedDelete = resolve })
+  state.sessions.set = async (id: string, session: SessionRecord) => {
+    if (id.startsWith('CHILD:s1:')) {
+      const writes = (childWrites.get(id) ?? 0) + 1
+      childWrites.set(id, writes)
+      if (writes === 2) {
+        startedDelete?.()
+        await new Promise((resolve) => setTimeout(resolve, 25))
+      }
+    }
+    await originalSet(id, session)
+  }
+
+  const startPromise = start({ activityId: 'resonance', location: { h: 0, v: 0 }, activityOptions: SOLO_RESONANCE_OPTIONS }, tokens['student-1'])
+  await deleteMayRun
+  const deleteResponse = createResponse()
+  await app.handlers.delete['/api/syncdeck/:sessionId']!(createRequest({ sessionId: 's1' }, { instructorPasscode: 'teacher-passcode' }), deleteResponse)
+  await startPromise
+
+  assert.equal(deleteResponse.statusCode, 200)
+  assert.equal(state.store.s1, undefined)
+  assert.deepEqual(soloChildIds(state.store), [])
+})
+
+void test('solo start deletes the child it created when a later step fails', async () => {
+  const { parent, tokens } = createSoloParent()
+  const { state, start } = await setupSoloStart({ s1: parent })
+  const originalSet = state.sessions.set.bind(state.sessions)
+  const launch = { activityId: 'resonance', location: { h: 0, v: 0 }, activityOptions: SOLO_RESONANCE_OPTIONS }
+
+  state.sessions.set = async (id: string, session: SessionRecord) => {
+    if (id === 's1') throw new Error('[TEST] parent write unavailable')
+    await originalSet(id, session)
+  }
+  console.info('[TEST] Expected solo activity start failure when the parent binding cannot be written.')
+  assert.equal((await start(launch, tokens['student-1'])).statusCode, 500)
+  assert.deepEqual(soloChildIds(state.store), [])
+
+  state.sessions.set = async (id: string, session: SessionRecord) => {
+    await originalSet(id, session)
+    if (id.startsWith('CHILD:s1:')) delete state.store.s1
+  }
+  console.info('[TEST] Expected solo activity start failure when the parent disappears after child creation.')
+  assert.equal((await start(launch, tokens['student-1'])).statusCode, 404)
+  assert.deepEqual(soloChildIds(state.store), [])
+})
+
 void test('solo start deletes a child session evicted past the per-student cap', async () => {
   const { parent, tokens } = createSoloParent()
   const initial: Record<string, SessionRecord> = { s1: parent }

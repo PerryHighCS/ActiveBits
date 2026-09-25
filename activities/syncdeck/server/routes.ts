@@ -1122,7 +1122,7 @@ function buildEmbeddedActivityStartLockKey(sessionId: string, instanceKey: strin
 /**
  * One in-process lock per SyncDeck parent for route writers that read the
  * parent, await child-session work, then write the parent back: solo start,
- * embedded-activity start, and return-to-waiting-room. It keeps concurrent
+ * embedded-activity start, return-to-waiting-room, and parent deletion. It keeps concurrent
  * students from dropping each other's solo bindings and keeps a start from
  * restoring a student's revoked entry. Cross-instance writes remain #313's scope.
  */
@@ -2493,42 +2493,47 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       return
     }
 
-    const session = await getSyncDeckSessionWithEmbeddedKeepalive(sessions, sessionId)
-    if (!session) {
-      res.status(404).json({ error: 'invalid session' })
-      return
-    }
+    // Hold the parent write lock and read the parent under it, so a
+    // concurrent solo or embedded start either finishes first (and its
+    // child is in the cascade below) or sees the parent already gone.
+    await withEmbeddedActivityStartLock(buildParentWriteLockKey(sessionId), async () => {
+      const session = await getSyncDeckSessionWithEmbeddedKeepalive(sessions, sessionId)
+      if (!session) {
+        res.status(404).json({ error: 'invalid session' })
+        return
+      }
 
-    const instructorPasscode = normalizeInstructorPasscode(readStringField(req.body, 'instructorPasscode'))
-    if (!instructorPasscode || !verifyInstructorPasscode(session.data.instructorPasscode, instructorPasscode)) {
-      res.status(403).json({ error: 'forbidden' })
-      return
-    }
+      const instructorPasscode = normalizeInstructorPasscode(readStringField(req.body, 'instructorPasscode'))
+      if (!instructorPasscode || !verifyInstructorPasscode(session.data.instructorPasscode, instructorPasscode)) {
+        res.status(403).json({ error: 'forbidden' })
+        return
+      }
 
-    // Delete all embedded and solo child sessions before removing the parent.
-    const childSessionIds = [
-      ...Object.values(session.data.embeddedActivities).map((record) => record.childSessionId),
-      ...Object.keys(session.data.soloChildren),
-    ]
-    await Promise.all(childSessionIds.map((childSessionId) => sessions.delete(childSessionId)))
+      // Delete all embedded and solo child sessions before removing the parent.
+      const childSessionIds = [
+        ...Object.values(session.data.embeddedActivities).map((record) => record.childSessionId),
+        ...Object.keys(session.data.soloChildren),
+      ]
+      await Promise.all(childSessionIds.map((childSessionId) => sessions.delete(childSessionId)))
 
-    // Notify connected clients that the parent session has ended.
-    if (sessions.publishBroadcast) {
-      await sessions.publishBroadcast('session-ended', { sessionId })
-    } else {
-      for (const peer of ws.wss.clients as Set<SyncDeckSocket>) {
-        if (peer.readyState === WS_OPEN_READY_STATE && peer.sessionId === sessionId) {
-          try {
-            peer.send(JSON.stringify({ type: 'session-ended' }))
-          } catch {
-            // Socket may have closed concurrently; swallow send failures.
+      // Notify connected clients that the parent session has ended.
+      if (sessions.publishBroadcast) {
+        await sessions.publishBroadcast('session-ended', { sessionId })
+      } else {
+        for (const peer of ws.wss.clients as Set<SyncDeckSocket>) {
+          if (peer.readyState === WS_OPEN_READY_STATE && peer.sessionId === sessionId) {
+            try {
+              peer.send(JSON.stringify({ type: 'session-ended' }))
+            } catch {
+              // Socket may have closed concurrently; swallow send failures.
+            }
           }
         }
       }
-    }
 
-    await sessions.delete(sessionId)
-    res.json({ success: true, deleted: sessionId })
+      await sessions.delete(sessionId)
+      res.json({ success: true, deleted: sessionId })
+    })
   })
 
   app.post('/api/syncdeck/:sessionId/embedded-activity/entry', async (req, res) => {
@@ -2663,55 +2668,78 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
             }
           }
           let createdChildSessionId: string | null = null
-          if (!child) {
-            const created = await createEmbeddedChildSession(
-              sessions,
-              lockedParent.id,
-              activityId,
-              instanceKey,
-              location,
-              selectedOptions,
-              'solo',
-            )
-            createdChildSessionId = created.id
-            child = await sessions.get(created.id)
-            if (!child) {
-              return { statusCode: 500, body: { error: 'solo activity unavailable' } }
+          // A child created here but not handed off must not outlive the
+          // failure: generic child deletion is forbidden, and an unbound
+          // child can never be revoked. A binding committed before the
+          // failure is dropped on the next start, when its child is missing.
+          const discardCreatedChild = async (reason: string): Promise<void> => {
+            if (!createdChildSessionId) return
+            try {
+              await sessions.delete(createdChildSessionId)
+            } catch (cleanupError) {
+              console.error(JSON.stringify({
+                activity: 'syncdeck', event: 'solo-activity-child-cleanup-failed', sessionId,
+                childSessionId: createdChildSessionId, reason,
+                error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
+              }))
             }
           }
-          if (staleChildSessionId || createdChildSessionId) {
-            // Apply only the binding change to a fresh read of the parent, so
-            // this write never restores fields another writer has since changed.
-            const freshParent = asSyncDeckSession(await sessions.get(sessionId))
-            if (!freshParent) {
-              return { statusCode: 404, body: { error: 'invalid session' } }
-            }
-            if (staleChildSessionId) {
-              delete freshParent.data.soloChildren[staleChildSessionId]
-            }
-            const evictedChildSessionIds = createdChildSessionId
-              ? recordSoloChild(freshParent.data.soloChildren, createdChildSessionId, {
-                studentId: lockedStudent.studentId,
+          try {
+            if (!child) {
+              const created = await createEmbeddedChildSession(
+                sessions,
+                lockedParent.id,
                 activityId,
                 instanceKey,
-                optionsKey,
-                createdAt: Date.now(),
-              })
-              : []
-            await sessions.set(freshParent.id, freshParent)
-            // An unbound child could no longer be revoked, so remove it.
-            await Promise.all(evictedChildSessionIds.map((evictedChildSessionId) => sessions.delete(evictedChildSessionId)))
-          }
+                location,
+                selectedOptions,
+                'solo',
+              )
+              createdChildSessionId = created.id
+              child = await sessions.get(created.id)
+              if (!child) {
+                await discardCreatedChild('child-unreadable')
+                return { statusCode: 500, body: { error: 'solo activity unavailable' } }
+              }
+            }
+            if (staleChildSessionId || createdChildSessionId) {
+              // Apply only the binding change to a fresh read of the parent, so
+              // this write never restores fields another writer has since changed.
+              const freshParent = asSyncDeckSession(await sessions.get(sessionId))
+              if (!freshParent) {
+                await discardCreatedChild('parent-missing')
+                return { statusCode: 404, body: { error: 'invalid session' } }
+              }
+              if (staleChildSessionId) {
+                delete freshParent.data.soloChildren[staleChildSessionId]
+              }
+              const evictedChildSessionIds = createdChildSessionId
+                ? recordSoloChild(freshParent.data.soloChildren, createdChildSessionId, {
+                  studentId: lockedStudent.studentId,
+                  activityId,
+                  instanceKey,
+                  optionsKey,
+                  createdAt: Date.now(),
+                })
+                : []
+              await sessions.set(freshParent.id, freshParent)
+              // An unbound child could no longer be revoked, so remove it.
+              await Promise.all(evictedChildSessionIds.map((evictedChildSessionId) => sessions.delete(evictedChildSessionId)))
+            }
 
-          const stored = storeTrustedSessionEntryParticipant(
-            child,
-            lockedStudent.name ? { displayName: lockedStudent.name } : {},
-            lockedStudent.studentId,
-          )
-          await sessions.set(child.id, child)
-          return {
-            statusCode: 200,
-            body: { childSessionId: child.id, entryParticipantToken: stored.token, values: stored.values },
+            const stored = storeTrustedSessionEntryParticipant(
+              child,
+              lockedStudent.name ? { displayName: lockedStudent.name } : {},
+              lockedStudent.studentId,
+            )
+            await sessions.set(child.id, child)
+            return {
+              statusCode: 200,
+              body: { childSessionId: child.id, entryParticipantToken: stored.token, values: stored.values },
+            }
+          } catch (error) {
+            await discardCreatedChild('start-failed')
+            throw error
           }
         },
       )
