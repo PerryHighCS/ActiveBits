@@ -54,6 +54,14 @@ test('persistent SyncDeck solo entry establishes the accepted-entry cookie for t
     sameSite: 'Lax',
     secure: false,
   }])
+  // With the cookie, a reload bypasses the waiting room and resumes the student
+  // instead of prompting for reentry. (A standalone session opens no instructor
+  // socket, so there is no connection status to assert.)
+  await page.reload()
+  await expect(page.getByText('SyncDeck')).not.toHaveCount(0)
+  await expect(page.getByRole('heading', { name: 'Return to Waiting Room' })).toHaveCount(0)
+  await expect(page.locator('#waiting-room-field-displayName')).toHaveCount(0)
+
   // The session recognizes the student from the accepted-entry cookie alone.
   await expect.poll(async () => {
     const response = await page.request.get(`/api/syncdeck/${encodeURIComponent(sessionId)}/student-identity`)
