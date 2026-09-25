@@ -1133,6 +1133,47 @@ function scheduleUnsyncedStudentsPrune(
   unsyncedStudentPruneTimersBySession.set(scope, timer)
 }
 
+/**
+ * A SyncDeck solo child has no manager to configure it, so it takes its video
+ * from `embeddedLaunch.selectedOptions.sourceUrl` and always runs standalone.
+ * Applies only while no video is configured; returns whether it changed data.
+ */
+export function applyVideoSyncSoloLaunch(data: Record<string, unknown> & { standaloneMode: boolean; state: VideoSyncState }, now: number): boolean {
+  const embeddedLaunch = isPlainObject(data.embeddedLaunch) ? data.embeddedLaunch : null
+  if (embeddedLaunch?.mode !== 'solo') {
+    return false
+  }
+  let changed = false
+  if (!data.standaloneMode) {
+    data.standaloneMode = true
+    changed = true
+  }
+  if (data.state.videoId.length > 0) {
+    return changed
+  }
+  const selectedOptions = isPlainObject(embeddedLaunch.selectedOptions) ? embeddedLaunch.selectedOptions : {}
+  const sourceUrl = typeof selectedOptions.sourceUrl === 'string' ? selectedOptions.sourceUrl.trim() : ''
+  const parsedSource = sourceUrl.length > 0 ? parseYouTubeSource(sourceUrl, null) : null
+  if (!parsedSource?.ok) {
+    return changed
+  }
+  data.state = {
+    ...data.state,
+    provider,
+    playerHost: parsedSource.source.playerHost,
+    videoId: parsedSource.source.videoId,
+    startSec: parsedSource.source.startSec,
+    stopSec: parsedSource.source.stopSec,
+    positionSec: parsedSource.source.startSec,
+    isPlaying: false,
+    playbackRate: 1,
+    updatedBy: 'system',
+    playbackRevision: data.state.playbackRevision + 1,
+    serverTimestampMs: now,
+  }
+  return true
+}
+
 function normalizeVideoSyncSessionData(session: SessionRecord): {
   data: VideoSyncSessionData
   changed: boolean
@@ -1154,6 +1195,8 @@ function normalizeVideoSyncSessionData(session: SessionRecord): {
         .slice(-MAX_PROCESSED_COMMAND_IDS)
       : [],
   }
+
+  applyVideoSyncSoloLaunch(normalized, Date.now())
 
   const changed = !isPlainObject(previousData) || !isDeepStrictEqual(previousData, normalized)
   session.data = normalized

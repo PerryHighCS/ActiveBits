@@ -47,6 +47,14 @@ import {
 import { getActivityReportBuilder } from '../../../server/activities/activityReportRegistry.js'
 import { getActivityConfig, initializeActivityRegistry } from '../../../server/activities/activityRegistry.js'
 import { connectSyncDeckStudent } from './studentParticipants.js'
+import {
+  buildSoloChildOptionsKey,
+  findBoundSoloChild,
+  normalizeSoloChildren,
+  recordSoloChild,
+  removeStudentSoloChildren,
+  type SyncDeckSoloChildrenMap,
+} from './soloChildren.js'
 import type {
   ActivityReportScope,
   ActivityReportStudentRef,
@@ -135,6 +143,8 @@ interface SyncDeckEmbeddedLaunchPayload {
   instanceKey: string
   location?: SyncDeckEmbeddedActivityLocation
   selectedOptions: Record<string, unknown>
+  /** `'solo'` marks a student-owned solo child; absent for instructor-started embedded activities. */
+  mode?: 'solo'
 }
 
 interface SyncDeckEmbeddedManagerBootstrapPayload {
@@ -178,6 +188,7 @@ interface SyncDeckSessionData extends Record<string, unknown> {
   drawingToolMode: SyncDeckDrawingToolMode
   students: SyncDeckStudent[]
   embeddedActivities: SyncDeckEmbeddedActivitiesMap
+  soloChildren: SyncDeckSoloChildrenMap
 }
 
 interface SyncDeckSession extends SessionRecord {
@@ -678,6 +689,7 @@ export function normalizeSyncDeckSessionData(data: unknown): SyncDeckSessionData
     drawingToolMode: normalizeDrawingToolMode(source.drawingToolMode),
     students: normalizeStudents(source.students),
     embeddedActivities: normalizeEmbeddedActivities(source.embeddedActivities),
+    soloChildren: normalizeSoloChildren(source.soloChildren),
   }
 }
 
@@ -1363,6 +1375,7 @@ async function createEmbeddedChildSession(
   instanceKey: string,
   location: SyncDeckEmbeddedActivityLocation | null,
   selectedOptions: Record<string, unknown>,
+  mode?: 'solo',
 ): Promise<SessionRecord> {
   const childId = await generateHexId(sessions)
   const sessionId = `${EMBEDDED_CHILD_SESSION_PREFIX}${parentSessionId}:${childId}:${activityId}`
@@ -1381,6 +1394,7 @@ async function createEmbeddedChildSession(
         instanceKey,
         ...(location ? { location } : {}),
         selectedOptions,
+        ...(mode ? { mode } : {}),
       } satisfies SyncDeckEmbeddedLaunchPayload,
     },
   }
@@ -1965,8 +1979,12 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
     const persistedChildSessions: SessionRecord[] = []
     try {
       revokeSessionEntryParticipants(updatedSession, studentId)
-      for (const embeddedActivity of Object.values(updatedSession.data.embeddedActivities)) {
-        const childSession = await sessions.get(embeddedActivity.childSessionId)
+      const affectedChildSessionIds = [
+        ...Object.values(updatedSession.data.embeddedActivities).map((embeddedActivity) => embeddedActivity.childSessionId),
+        ...removeStudentSoloChildren(updatedSession.data.soloChildren, studentId),
+      ]
+      for (const affectedChildSessionId of affectedChildSessionIds) {
+        const childSession = await sessions.get(affectedChildSessionId)
         if (!childSession) continue
         const originalChildSession = structuredClone(childSession)
         const updatedChildSession = structuredClone(childSession)
@@ -2549,9 +2567,11 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
     })
   })
 
-  // A SyncDeck student can create a standalone solo child. Carry only the ID
-  // proven by the parent session's accepted-entry cookie into that new session.
-  app.post('/api/syncdeck/:sessionId/solo-activity/entry', async (req, res) => {
+  // A SyncDeck student starts a student-owned solo child. The server creates
+  // (or reuses) the child and records its binding to the parent and student,
+  // so a trusted entry token is only ever issued for a child this route made.
+  // See "Solo child binding" in .agent/plans/shared-activity-runtime-authentication.md.
+  app.post('/api/syncdeck/:sessionId/solo-activity/start', async (req, res) => {
     res.setHeader?.('Cache-Control', 'no-store')
     const sessionId = req.params.sessionId
     if (!sessionId) {
@@ -2569,29 +2589,105 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
         res.status(403).json({ error: 'forbidden' })
         return
       }
-      const childSessionId = readStringField(req.body, 'childSessionId')
-      if (!childSessionId || childSessionId === sessionId || childSessionId.startsWith(EMBEDDED_CHILD_SESSION_PREFIX)) {
-        res.status(400).json({ error: 'invalid child session' })
+
+      const activityId = normalizeActivityId(readStringField(req.body, 'activityId'))
+      const location = normalizeEmbeddedActivityLocation(readObjectField(req.body, 'location'))
+      if (!activityId || !location) {
+        res.status(400).json({ error: 'invalid payload' })
         return
       }
-      const child = await sessions.get(childSessionId)
-      if (!child) {
-        res.status(404).json({ error: 'invalid child session' })
+      let activityConfig = getActivityConfig(activityId)
+      if (!activityConfig) {
+        await initializeActivityRegistry()
+        activityConfig = getActivityConfig(activityId)
+      }
+      const embeddedRuntime = isPlainObject(activityConfig?.embeddedRuntime) ? activityConfig.embeddedRuntime : null
+      if (!activityConfig || embeddedRuntime?.supportsSoloChild !== true) {
+        res.status(404).json({ error: 'invalid solo activity' })
         return
       }
-      const stored = storeTrustedSessionEntryParticipant(
-        child,
-        student.name ? { displayName: student.name } : {},
-        student.studentId,
+
+      const selectedOptions = sanitizeEmbeddedLaunchSelectedOptions(readObjectField(req.body, 'activityOptions'))
+      const instanceKey = buildGeneratedEmbeddedActivityInstanceKey(activityId, location)
+      const optionsKey = buildSoloChildOptionsKey(selectedOptions)
+
+      const result = await withEmbeddedActivityStartLock(
+        `solo:${sessionId}:${student.studentId}`,
+        async (): Promise<{ statusCode: number; body: Record<string, unknown> }> => {
+          const lockedParent = asSyncDeckSession(await sessions.get(sessionId))
+          if (!lockedParent) {
+            return { statusCode: 404, body: { error: 'invalid session' } }
+          }
+          // Re-check under the lock: a concurrent return-to-waiting-room may
+          // have revoked this student's accepted entry.
+          const lockedStudent = resolveAcceptedSyncDeckEntryIdentity(lockedParent, req.cookies)
+          if (!lockedStudent || lockedStudent.studentId !== student.studentId) {
+            return { statusCode: 403, body: { error: 'forbidden' } }
+          }
+
+          let child: SessionRecord | null = null
+          let parentChanged = false
+          const boundChildSessionId = findBoundSoloChild(lockedParent.data.soloChildren, {
+            studentId: lockedStudent.studentId,
+            activityId,
+            instanceKey,
+            optionsKey,
+          })
+          if (boundChildSessionId) {
+            const boundChild = await sessions.get(boundChildSessionId)
+            if (boundChild && boundChild.type === activityId) {
+              child = boundChild
+            } else {
+              delete lockedParent.data.soloChildren[boundChildSessionId]
+              parentChanged = true
+            }
+          }
+          if (!child) {
+            const created = await createEmbeddedChildSession(
+              sessions,
+              lockedParent.id,
+              activityId,
+              instanceKey,
+              location,
+              selectedOptions,
+              'solo',
+            )
+            recordSoloChild(lockedParent.data.soloChildren, created.id, {
+              studentId: lockedStudent.studentId,
+              activityId,
+              instanceKey,
+              optionsKey,
+              createdAt: Date.now(),
+            })
+            parentChanged = true
+            child = await sessions.get(created.id)
+            if (!child) {
+              return { statusCode: 500, body: { error: 'solo activity unavailable' } }
+            }
+          }
+          if (parentChanged) {
+            await sessions.set(lockedParent.id, lockedParent)
+          }
+
+          const stored = storeTrustedSessionEntryParticipant(
+            child,
+            lockedStudent.name ? { displayName: lockedStudent.name } : {},
+            lockedStudent.studentId,
+          )
+          await sessions.set(child.id, child)
+          return {
+            statusCode: 200,
+            body: { childSessionId: child.id, entryParticipantToken: stored.token, values: stored.values },
+          }
+        },
       )
-      await sessions.set(childSessionId, child)
-      res.json({ entryParticipantToken: stored.token, values: stored.values })
+      res.status(result.statusCode).json(result.body)
     } catch (error) {
       console.error(JSON.stringify({
-        activity: 'syncdeck', event: 'solo-activity-entry-failed', sessionId,
+        activity: 'syncdeck', event: 'solo-activity-start-failed', sessionId,
         error: error instanceof Error ? error.message : String(error),
       }))
-      res.status(500).json({ error: 'solo activity entry unavailable' })
+      res.status(500).json({ error: 'solo activity unavailable' })
     }
   })
 

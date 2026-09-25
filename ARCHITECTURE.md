@@ -96,8 +96,12 @@ scoped, one-time handoff token. Embedded children also require the student in
 the parent's roster. Solo children do not, because standalone students never
 open the SyncDeck WebSocket and so have no roster record; the ID and fallback
 name come from the accepted-entry record (`resolveAcceptedSyncDeckEntryIdentity`).
-The solo route does not yet verify that the child belongs to the parent
-([#388](https://github.com/PerryHighCS/ActiveBits/issues/388)).
+SyncDeck creates solo children itself (`POST /api/syncdeck/:sessionId/solo-activity/start`)
+for activities that declare `embeddedRuntime.supportsSoloChild`, records each one
+in the parent's `soloChildren` binding, and issues a handoff only for a child
+bound to the requesting student; no route accepts a client-supplied child ID
+as proof of ownership. Other activities keep their own solo launcher and entry
+flow without a SyncDeck handoff.
 SyncDeck student WebSocket admission resolves that same cookie before joining
 or replaying state. Its embedded-context and auto-activation HTTP routes also
 require the cookie and reject a student ID that differs from its subject.
