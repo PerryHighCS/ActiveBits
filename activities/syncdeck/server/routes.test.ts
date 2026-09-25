@@ -4613,6 +4613,36 @@ void test('solo start deletes the child it created when a later step fails', asy
   assert.deepEqual(soloChildIds(state.store), [])
 })
 
+void test('an instructor embedded end racing a solo start keeps the solo binding', async () => {
+  const { parent, tokens } = createSoloParent()
+  parent.data.instructorPasscode = 'teacher-passcode'
+  const embeddedChild: SessionRecord = { id: 'CHILD:s1:emb:resonance', type: 'resonance', created: 1, lastActivity: 1, data: {} }
+  ;(parent.data as { embeddedActivities: Record<string, unknown> }).embeddedActivities['resonance:4:0'] = {
+    childSessionId: embeddedChild.id, activityId: 'resonance', startedAt: 1, owner: 'syncdeck-instructor',
+  }
+  const { state, app, start } = await setupSoloStart({ s1: parent, [embeddedChild.id]: embeddedChild })
+  // Hold the end route's read-to-write window open on its child keepalive touch.
+  const originalTouch = state.sessions.touch.bind(state.sessions)
+  state.sessions.touch = async (id: string) => {
+    if (id === embeddedChild.id) await new Promise((resolve) => setTimeout(resolve, 25))
+    return originalTouch(id)
+  }
+  const endResponse = createResponse()
+
+  const endPromise = app.handlers.post['/api/syncdeck/:sessionId/embedded-activity/end']!(
+    createRequest({ sessionId: 's1' }, { instructorPasscode: 'teacher-passcode', instanceKey: 'resonance:4:0' }),
+    endResponse,
+  )
+  const soloResponse = await start({ activityId: 'resonance', location: { h: 0, v: 0 }, activityOptions: SOLO_RESONANCE_OPTIONS }, tokens['student-1'])
+  await endPromise
+
+  assert.equal(endResponse.statusCode, 200)
+  assert.equal(soloResponse.statusCode, 200)
+  const parentData = state.store.s1!.data as { soloChildren: Record<string, unknown>; embeddedActivities: Record<string, unknown> }
+  assert.notEqual(parentData.soloChildren[(soloResponse.body as { childSessionId: string }).childSessionId], undefined)
+  assert.equal(parentData.embeddedActivities['resonance:4:0'], undefined)
+})
+
 void test('solo start deletes a child session evicted past the per-student cap', async () => {
   const { parent, tokens } = createSoloParent()
   const initial: Record<string, SessionRecord> = { s1: parent }

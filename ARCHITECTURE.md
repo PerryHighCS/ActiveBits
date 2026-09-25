@@ -152,7 +152,7 @@ back - or resurrect a deleted session - for the cache TTL.
 
 SyncDeck has not migrated to this primitive. Its parent-session routes that read
 the parent, await child-session work, and write the parent back (solo start,
-embedded-activity start, return-to-waiting-room, and parent deletion) share one
+embedded-activity start and end, return-to-waiting-room, and parent deletion) share one
 in-process lock per parent (`buildParentWriteLockKey`), and solo start commits
 only its `soloChildren` change onto a fresh read. That lock is a single-process
 guarantee: other instances neither see it nor bypass their 30-second read cache,

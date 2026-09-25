@@ -1122,7 +1122,7 @@ function buildEmbeddedActivityStartLockKey(sessionId: string, instanceKey: strin
 /**
  * One in-process lock per SyncDeck parent for route writers that read the
  * parent, await child-session work, then write the parent back: solo start,
- * embedded-activity start, return-to-waiting-room, and parent deletion. It keeps concurrent
+ * embedded-activity start and end, return-to-waiting-room, and parent deletion. It keeps concurrent
  * students from dropping each other's solo bindings and keeps a start from
  * restoring a student's revoked entry. Cross-instance writes remain #313's scope.
  */
@@ -2400,35 +2400,39 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       return
     }
 
-    const session = await getSyncDeckSessionWithEmbeddedKeepalive(sessions, sessionId)
-    if (!session) {
-      res.status(404).json({ error: 'invalid session' })
-      return
-    }
+    // Read and write the parent under its write lock so this whole-record
+    // write cannot drop a solo binding or restore a revoked entry.
+    await withEmbeddedActivityStartLock(buildParentWriteLockKey(sessionId), async () => {
+      const session = await getSyncDeckSessionWithEmbeddedKeepalive(sessions, sessionId)
+      if (!session) {
+        res.status(404).json({ error: 'invalid session' })
+        return
+      }
 
-    const instructorPasscode = normalizeInstructorPasscode(readStringField(req.body, 'instructorPasscode'))
-    const instanceKey = normalizeInstanceKey(readStringField(req.body, 'instanceKey'))
-    if (!instructorPasscode || !verifyInstructorPasscode(session.data.instructorPasscode, instructorPasscode)) {
-      res.status(403).json({ error: 'forbidden' })
-      return
-    }
-    if (!instanceKey) {
-      res.status(400).json({ error: 'invalid payload' })
-      return
-    }
+      const instructorPasscode = normalizeInstructorPasscode(readStringField(req.body, 'instructorPasscode'))
+      const instanceKey = normalizeInstanceKey(readStringField(req.body, 'instanceKey'))
+      if (!instructorPasscode || !verifyInstructorPasscode(session.data.instructorPasscode, instructorPasscode)) {
+        res.status(403).json({ error: 'forbidden' })
+        return
+      }
+      if (!instanceKey) {
+        res.status(400).json({ error: 'invalid payload' })
+        return
+      }
 
-    const existing = session.data.embeddedActivities[instanceKey]
-    if (!existing) {
-      res.status(404).json({ error: 'embedded activity not found' })
-      return
-    }
+      const existing = session.data.embeddedActivities[instanceKey]
+      if (!existing) {
+        res.status(404).json({ error: 'embedded activity not found' })
+        return
+      }
 
-    delete session.data.embeddedActivities[instanceKey]
-    await sessions.set(session.id, session)
-    await sessions.delete(existing.childSessionId)
-    broadcastEmbeddedActivityEnd(session, instanceKey, existing.childSessionId)
+      delete session.data.embeddedActivities[instanceKey]
+      await sessions.set(session.id, session)
+      await sessions.delete(existing.childSessionId)
+      broadcastEmbeddedActivityEnd(session, instanceKey, existing.childSessionId)
 
-    res.json({ ok: true, instanceKey, childSessionId: existing.childSessionId })
+      res.json({ ok: true, instanceKey, childSessionId: existing.childSessionId })
+    })
   })
 
   app.get('/api/syncdeck/:sessionId/report-manifest', async (req, res) => {
