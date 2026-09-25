@@ -90,9 +90,14 @@ registered capability then carries the same student's authority across a page
 reload. Local browser storage is only an identity hint for the activity client,
 not proof of student authority. Public live and persistent waiting-room store
 routes always mint the participant ID, even when the request includes one.
-SyncDeck carries a parent student's ID into an embedded or standalone solo
-child only after validating the parent's accepted-entry cookie against its
-roster; the child receives a scoped, one-time handoff token.
+SyncDeck carries a parent student's ID into an embedded or solo child only
+after validating the parent's accepted-entry cookie; the child receives a
+scoped, one-time handoff token. Embedded children also require the student in
+the parent's roster. Solo children do not, because standalone students never
+open the SyncDeck WebSocket and so have no roster record; the ID and fallback
+name come from the accepted-entry record (`resolveAcceptedSyncDeckEntryIdentity`).
+The solo route does not yet verify that the child belongs to the parent
+([#388](https://github.com/PerryHighCS/ActiveBits/issues/388)).
 SyncDeck student WebSocket admission resolves that same cookie before joining
 or replaying state. Its embedded-context and auto-activation HTTP routes also
 require the cookie and reject a student ID that differs from its subject.
@@ -732,7 +737,7 @@ and `.agent/knowledge/activity-runtime-threat-model.md` for the full contract.
   also hashed at rest, in `activebits_participant_<base64url(sessionId)>`.
   Participant identity is normally minted server-side by the waiting-room store.
   SyncDeck's child handoff uses a separate trusted store path after verifying
-  the parent's accepted-entry cookie and roster.
+  the parent's accepted-entry cookie (plus the roster for embedded children).
 - **Activities own**: domain state, projections, and handlers, invoked only
   after the platform has resolved a principal.
 - **Java Format Practice** is the first migrated activity (Slice A): `POST
