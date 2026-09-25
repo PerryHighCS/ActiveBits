@@ -11,6 +11,7 @@ import {
 } from './core/acceptedEntryParticipants.js'
 import { getActivityCapabilityCookieName, issueActivityCapability } from './core/activityCapabilities.js'
 import { runSessionWriteExclusive } from './core/sessionWriteLock.js'
+import { initializePersistentStorage } from './core/persistentSessions.js'
 
 interface MockResponse {
   statusCode: number
@@ -664,4 +665,53 @@ void test('shared entry-participant and consume writes wait for the session writ
   assert.equal(consumeRes.statusCode, 200)
   assert.equal(records.get('locked-session')?.data.concurrentChange, true)
   assert.equal(records.get('locked-session')?.data.secondConcurrentChange, true)
+})
+
+void test('generic session delete waits for the session write lock so a writer cannot recreate the session', async () => {
+  await initializeActivityRegistry()
+  // The delete route resets any persistent link for the session.
+  initializePersistentStorage(null)
+  const records = new Map<string, SessionRecord>([['delete-locked', createSessionRecord('delete-locked', 'syncdeck')]])
+  const sessions = {
+    get: async (id: string) => {
+      const record = records.get(id)
+      return record ? structuredClone(record) : null
+    },
+    set: async (id: string, session: SessionRecord) => {
+      records.set(id, structuredClone(session))
+    },
+    delete: async (id: string) => records.delete(id),
+    touch: async () => true,
+    getAll: async () => [],
+    getAllIds: async () => [],
+    cleanup: () => {},
+    close: async () => {},
+  }
+  const app = createMockApp()
+  setupSessionRoutes(app as unknown as Parameters<typeof setupSessionRoutes>[0], sessions)
+
+  // A writer (for example a SyncDeck solo start) read the session and will
+  // write it back after other awaited work.
+  let release!: () => void
+  const released = new Promise<void>((resolve) => { release = resolve })
+  let signalHeld!: () => void
+  const held = new Promise<void>((resolve) => { signalHeld = resolve })
+  const writer = runSessionWriteExclusive('delete-locked', async () => {
+    const current = await sessions.get('delete-locked')
+    signalHeld()
+    await released
+    await sessions.set('delete-locked', { ...current!, data: { ...current!.data, writerChange: true } })
+  })
+  await held
+
+  const res = createMockResponse()
+  const deleting = getRoute(app, 'delete', '/api/session/:sessionId')({ params: { sessionId: 'delete-locked' } }, res)
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.equal(res.jsonBody, null)
+  release()
+  await writer
+  await deleting
+
+  assert.deepEqual(res.jsonBody, { success: true, deleted: 'delete-locked' })
+  assert.equal(records.has('delete-locked'), false)
 })

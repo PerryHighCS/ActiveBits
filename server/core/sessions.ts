@@ -820,34 +820,38 @@ export function setupSessionRoutes(app: {
 
   app.delete('/api/session/:sessionId', async (req, res) => {
     const { sessionId } = req.params
-    const session = await sessions.get(sessionId)
-    if (!session) {
-      res.status(404).json({ error: 'invalid session' })
-      return
-    }
+    // Read and delete under the shared per-session write lock, so a writer
+    // that read the session earlier cannot recreate it after this delete.
+    await runSessionWriteExclusive(sessionId, async () => {
+      const session = await sessions.get(sessionId)
+      if (!session) {
+        res.status(404).json({ error: 'invalid session' })
+        return
+      }
 
-    if (sessionId.startsWith(EMBEDDED_CHILD_SESSION_PREFIX)) {
-      res.status(403).json({ error: 'embedded child sessions must be ended by the parent session' })
-      return
-    }
+      if (sessionId.startsWith(EMBEDDED_CHILD_SESSION_PREFIX)) {
+        res.status(403).json({ error: 'embedded child sessions must be ended by the parent session' })
+        return
+      }
 
-    if (sessions.publishBroadcast) {
-      await sessions.publishBroadcast('session-ended', { sessionId })
-    } else if (wss) {
-      for (const client of wss.clients) {
-        if (typeof client.sessionId !== 'undefined' && client.sessionId === sessionId && client.readyState === 1) {
-          client.send(JSON.stringify({ type: 'session-ended' }))
+      if (sessions.publishBroadcast) {
+        await sessions.publishBroadcast('session-ended', { sessionId })
+      } else if (wss) {
+        for (const client of wss.clients) {
+          if (typeof client.sessionId !== 'undefined' && client.sessionId === sessionId && client.readyState === 1) {
+            client.send(JSON.stringify({ type: 'session-ended' }))
+          }
         }
       }
-    }
 
-    const hash = await findHashBySessionId(sessionId)
-    if (hash) {
-      await resetPersistentSession(hash)
-    }
+      const hash = await findHashBySessionId(sessionId)
+      if (hash) {
+        await resetPersistentSession(hash)
+      }
 
-    await sessions.delete(sessionId)
-    res.json({ success: true, deleted: sessionId })
+      await sessions.delete(sessionId)
+      res.json({ success: true, deleted: sessionId })
+    })
   })
 }
 

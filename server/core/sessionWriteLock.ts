@@ -15,7 +15,11 @@ import { AsyncLocalStorage } from 'node:async_hooks'
  * `SessionStore.updateAtomic` (#313). The lock is not reentrant for one session.
  */
 const tails = new Map<string, Promise<void>>()
-const heldLocks = new AsyncLocalStorage<ReadonlySet<string>>()
+// Each `runSessionWriteExclusive` call owns one Set holding its session id. The
+// async context carries the chain of those Sets from every enclosing call, so
+// clearing a call's Set on release is seen by all async work it started,
+// including unawaited continuations and nested locks.
+const heldLocks = new AsyncLocalStorage<ReadonlyArray<Set<string>>>()
 
 export class SessionWriteLockReentryError extends Error {
   constructor(sessionId: string) {
@@ -26,7 +30,7 @@ export class SessionWriteLockReentryError extends Error {
 
 /** Whether the current async context holds the write lock for `sessionId`. */
 export function holdsSessionWriteLock(sessionId: string): boolean {
-  return heldLocks.getStore()?.has(sessionId) === true
+  return heldLocks.getStore()?.some((held) => held.has(sessionId)) === true
 }
 
 /** Runs `work` while holding `sessionId`'s write lock; writers for that session run one at a time. */
@@ -43,11 +47,13 @@ export async function runSessionWriteExclusive<T>(sessionId: string, work: () =>
   tails.set(sessionId, queued)
 
   await previous
+  // Async work that `work` starts but does not await keeps this chain, so the
+  // id is removed on release; otherwise it would still appear to hold the lock.
+  const held = new Set([sessionId])
   try {
-    const held = new Set(heldLocks.getStore() ?? [])
-    held.add(sessionId)
-    return await heldLocks.run(held, work)
+    return await heldLocks.run([...(heldLocks.getStore() ?? []), held], work)
   } finally {
+    held.delete(sessionId)
     release()
     if (tails.get(sessionId) === queued) {
       tails.delete(sessionId)

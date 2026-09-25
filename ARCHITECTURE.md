@@ -154,7 +154,9 @@ Within one process, `server/core/sessionWriteLock.ts` provides an
 activity-agnostic per-session write lock (`runSessionWriteExclusive`), with
 ownership tracked per async context. Writers that read a session, may await other
 work, and write it back take it: the shared `entry-participant` and `consume`
-routes, persistent manager-capability issuance, and SyncDeck's parent writer.
+routes, the generic `DELETE /api/session/:id`, persistent manager-capability
+issuance, and SyncDeck's parent writer. Ownership is cleared when the lock is
+released, including for async work the holder started but did not await.
 It does not coordinate across instances.
 
 SyncDeck has not migrated to `updateAtomic`. Instead, every write or delete of a

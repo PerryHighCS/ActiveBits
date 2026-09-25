@@ -47,3 +47,30 @@ void test('session write lock rejects reentry and is released after a failure', 
   await assert.rejects(runSessionWriteExclusive('lock-reentry', async () => { throw new Error('[TEST] expected failure') }))
   assert.equal(await runSessionWriteExclusive('lock-reentry', async () => 'next'), 'next')
 })
+
+void test('async work left running after release no longer holds the lock', async () => {
+  let leftover!: Promise<{ holdsOuter: boolean; holdsInner: boolean; retook: string }>
+  let nestedLeftover!: Promise<boolean>
+  await runSessionWriteExclusive('lock-leftover', async () => {
+    // Not awaited: runs after this lock (and the nested one) are released.
+    leftover = new Promise((resolve) => {
+      setTimeout(() => {
+        void runSessionWriteExclusive('lock-leftover', async () => 'retaken').then((retook) => resolve({
+          holdsOuter: holdsSessionWriteLock('lock-leftover'),
+          holdsInner: holdsSessionWriteLock('lock-leftover-inner'),
+          retook,
+        }))
+      }, 5)
+    })
+    await runSessionWriteExclusive('lock-leftover-inner', async () => {
+      nestedLeftover = new Promise((resolve) => {
+        setTimeout(() => resolve(holdsSessionWriteLock('lock-leftover')), 5)
+      })
+    })
+  })
+
+  // A leftover continuation can take the lock again instead of failing as reentry.
+  assert.deepEqual(await leftover, { holdsOuter: false, holdsInner: false, retook: 'retaken' })
+  // A continuation started inside a nested lock loses the outer lock too.
+  assert.equal(await nestedLeftover, false)
+})
