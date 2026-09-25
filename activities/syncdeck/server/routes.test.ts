@@ -825,6 +825,7 @@ void test('syncdeck websocket updates an existing student record on reconnect', 
   assert.equal(typeof handler, 'function')
 
   const studentSocket = new MockSocket()
+  authorizeStudentSocket(state.store.s1!, studentSocket, 'student-1')
   ws.wss.clients.add(studentSocket)
 
   handler?.(
@@ -838,6 +839,7 @@ void test('syncdeck websocket updates an existing student record on reconnect', 
   )
   await new Promise((resolve) => setTimeout(resolve, 0))
 
+  assert.deepEqual(studentSocket.closeCalls, [])
   const students = (state.store.s1?.data as {
     students?: Array<{ studentId: string; name: string; joinedAt: number; lastSeenAt: number }>
   }).students ?? []
@@ -845,7 +847,7 @@ void test('syncdeck websocket updates an existing student record on reconnect', 
   assert.equal(students[0]?.studentId, 'student-1')
   assert.equal(students[0]?.name, 'Old Name')
   assert.equal(students[0]?.joinedAt, 100)
-  assert.ok((students[0]?.lastSeenAt ?? 0) >= 110)
+  assert.ok((students[0]?.lastSeenAt ?? 0) > 110)
 })
 
 void test('syncdeck websocket creates a student from accepted entry when no prior registration exists', async () => {
