@@ -32,3 +32,9 @@ void test('clearSyncDeckStoredStudentIdentity is best effort when storage is mis
   assert.deepEqual(removed.sort(), ['session-participant:s1', 'student-name-s1', 'syncdeck_student_id_s1', 'syncdeck_student_name_s1'])
   assert.doesNotThrow(() => clearSyncDeckStoredStudentIdentity('s1', null, null))
 })
+
+void test('handleReturnedToWaitingRoom still redirects when browser storage is unavailable', () => {
+  let destination = ''
+  assert.equal(handleReturnedToWaitingRoom({ participantId: 'ada', registeredStudentId: 'ada', sessionId: 's1', storage: null, sessionStorage: null, redirect: (url) => { destination = url } }), true)
+  assert.equal(destination, '/s1')
+})

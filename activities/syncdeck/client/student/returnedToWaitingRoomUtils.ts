@@ -39,7 +39,7 @@ export function clearSyncDeckStoredStudentIdentity(sessionId: string, storage: R
   remove(storage, buildSessionParticipantContextStorageKey(sessionId))
 }
 
-export function handleReturnedToWaitingRoom(params: { participantId: unknown; registeredStudentId: string; sessionId: string; storage: Storage; sessionStorage: Storage; redirect: (url: string) => void }): boolean {
+export function handleReturnedToWaitingRoom(params: { participantId: unknown; registeredStudentId: string; sessionId: string; storage: RemovableStorage | null; sessionStorage: RemovableStorage | null; redirect: (url: string) => void }): boolean {
   if (params.participantId !== params.registeredStudentId) return false
   const { sessionId } = params
   clearSyncDeckStoredStudentIdentity(sessionId, params.storage, params.sessionStorage)

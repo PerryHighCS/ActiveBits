@@ -2412,7 +2412,7 @@ const SyncDeckStudent: FC = () => {
           && parsed.participantId === registeredStudentId
           && sessionId
         ) {
-          if (typeof window !== 'undefined') handleReturnedToWaitingRoom({ participantId: parsed.participantId, registeredStudentId, sessionId, storage: window.localStorage, sessionStorage: window.sessionStorage, redirect: window.location.assign.bind(window.location) })
+          if (typeof window !== 'undefined') handleReturnedToWaitingRoom({ participantId: parsed.participantId, registeredStudentId, sessionId, storage: readWindowStorage('localStorage'), sessionStorage: readWindowStorage('sessionStorage'), redirect: window.location.assign.bind(window.location) })
           return
         }
         if (parsed.type !== 'syncdeck-state') {
@@ -2421,15 +2421,15 @@ const SyncDeckStudent: FC = () => {
 
         const embeddedLifecyclePayload = parseEmbeddedLifecyclePayload(parsed.payload)
         if (embeddedLifecyclePayload) {
+          const embeddedHandoffStorage = readWindowStorage('sessionStorage')
           if (
             embeddedLifecyclePayload.type === 'embedded-activity-start' &&
             embeddedLifecyclePayload.activityId &&
             embeddedLifecyclePayload.entryParticipantToken &&
-            typeof window !== 'undefined' &&
-            window.sessionStorage != null
+            embeddedHandoffStorage != null
           ) {
             persistEntryParticipantToken(
-              window.sessionStorage,
+              embeddedHandoffStorage,
               buildEntryParticipantStorageKey(
                 embeddedLifecyclePayload.activityId,
                 'session',
@@ -3218,8 +3218,8 @@ const SyncDeckStudent: FC = () => {
       childSessionId: activeEmbeddedChildSessionId,
       studentId: registeredStudentId,
       activityId: activeEmbeddedActivityId,
-      sessionStorage: window.sessionStorage,
-      localStorage: window.localStorage,
+      sessionStorage: readWindowStorage('sessionStorage'),
+      localStorage: readWindowStorage('localStorage'),
     })
     if (!shouldRecover) {
       return
@@ -3404,16 +3404,23 @@ const SyncDeckStudent: FC = () => {
             })
             if (isCancelled) return
             const storageKey = buildSessionEntryParticipantStorageKey(overlay.activityId, started.childSessionId)
-            persistEntryParticipantToken(window.sessionStorage, storageKey, started.entryParticipantToken)
-            if (!hasValidEntryParticipantHandoffStorageValue(window.sessionStorage, storageKey)) {
+            // The child needs the entry token; the identity cache is optional.
+            const handoffStorage = readWindowStorage('sessionStorage')
+            if (handoffStorage) {
+              persistEntryParticipantToken(handoffStorage, storageKey, started.entryParticipantToken)
+            }
+            if (!handoffStorage || !hasValidEntryParticipantHandoffStorageValue(handoffStorage, storageKey)) {
               throw new Error('Solo activity entry could not be saved')
             }
-            persistSessionParticipantIdentity(
-              window.localStorage,
-              started.childSessionId,
-              registeredStudentName,
-              registeredStudentId,
-            )
+            const identityCache = readWindowStorage('localStorage')
+            if (identityCache) {
+              persistSessionParticipantIdentity(
+                identityCache,
+                started.childSessionId,
+                registeredStudentName,
+                registeredStudentId,
+              )
+            }
             nextSrc = `/${encodeURIComponent(started.childSessionId)}`
           } else {
             // Other activities keep their own launcher and entry flow; SyncDeck
