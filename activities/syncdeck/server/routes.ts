@@ -2549,8 +2549,6 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
     })
   })
 
-  // A SyncDeck student can create a standalone solo child. Carry only the ID
-  // proven by the parent session's accepted-entry cookie into that new session.
   // Returns the student proven by the parent's accepted-entry cookie. The
   // cookie, not browser storage, is authoritative: a client whose stored ID
   // was rejected (or is missing after a reload that bypassed the waiting room)
@@ -2583,6 +2581,8 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
     }
   })
 
+  // A SyncDeck student can create a standalone solo child. Carry only the ID
+  // proven by the parent session's accepted-entry cookie into that new session.
   app.post('/api/syncdeck/:sessionId/solo-activity/entry', async (req, res) => {
     res.setHeader?.('Cache-Control', 'no-store')
     const sessionId = req.params.sessionId
