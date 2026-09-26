@@ -11,7 +11,7 @@ import { computePersistentLinkUrlHash } from 'activebits-server/core/persistentL
 import { getActivityCapabilityCookieName, issueActivityCapability } from 'activebits-server/core/activityCapabilities.js'
 import type { SessionRecord } from 'activebits-server/core/sessions.js'
 import type { WsRouter } from '../../../types/websocket.js'
-import setupVideoSyncRoutes, { applyVideoSyncSoloLaunch, persistentCookieEntryHasTeacherCodeCandidate } from './routes.js'
+import setupVideoSyncRoutes, { applyVideoSyncSoloLaunch, persistentCookieEntryHasTeacherCodeCandidate, validateVideoSyncSoloLaunchOptions } from './routes.js'
 
 const defaultManagerCookiesBySessionId = new Map<string, Record<string, string>>()
 
@@ -5175,4 +5175,14 @@ void test('applyVideoSyncSoloLaunch leaves non-solo, configured, and invalid-sou
   const missing = createSoloVideoSyncData({ mode: 'solo', sourceUrl: 42 })
   applyVideoSyncSoloLaunch(missing, 1)
   assert.equal(missing.state.videoId, '')
+})
+
+void test('validateVideoSyncSoloLaunchOptions requires a playable source', () => {
+  assert.deepEqual(validateVideoSyncSoloLaunchOptions({ sourceUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ' }), { ok: true })
+  assert.deepEqual(validateVideoSyncSoloLaunchOptions({ sourceUrl: ' https://youtu.be/dQw4w9WgXcQ?t=5 ' }), { ok: true })
+  assert.equal(validateVideoSyncSoloLaunchOptions({}).ok, false)
+  assert.equal(validateVideoSyncSoloLaunchOptions({ sourceUrl: '   ' }).ok, false)
+  assert.equal(validateVideoSyncSoloLaunchOptions({ sourceUrl: 42 }).ok, false)
+  assert.equal(validateVideoSyncSoloLaunchOptions({ sourceUrl: 'https://example.com/not-a-video' }).ok, false)
+  assert.equal(validateVideoSyncSoloLaunchOptions({ sourceUrl: 'not a url' }).ok, false)
 })

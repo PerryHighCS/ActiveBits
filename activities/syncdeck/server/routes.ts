@@ -30,6 +30,7 @@ import {
   type SessionStore,
 } from 'activebits-server/core/sessions.js'
 import { storeTrustedSessionEntryParticipant } from 'activebits-server/core/sessionEntryParticipants.js'
+import { validateSoloLaunchOptions } from 'activebits-server/core/soloLaunchValidation.js'
 import { revokeSessionEntryParticipants } from 'activebits-server/core/sessionEntryParticipants.js'
 import { issueActivityCapability, issueManagerCapabilityAtomically, readCookieValue, revokeActivityCapabilitiesForSubject, writeActivityCapabilityCookie } from 'activebits-server/core/activityCapabilities.js'
 import { randomBytes, timingSafeEqual } from 'node:crypto'
@@ -2690,6 +2691,16 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, rawSessions: 
       }
 
       const selectedOptions = sanitizeEmbeddedLaunchSelectedOptions(readObjectField(req.body, 'activityOptions'))
+      // A student-owned child has no manager to fix bad options later, so the
+      // activity rejects them before any child is created.
+      const optionsValidation = validateSoloLaunchOptions(activityId, selectedOptions)
+      if (!optionsValidation.ok) {
+        console.warn(JSON.stringify({
+          activity: 'syncdeck', event: 'solo-activity-options-rejected', sessionId, activityId, reason: optionsValidation.error,
+        }))
+        res.status(400).json({ error: 'invalid solo activity options', detail: optionsValidation.error })
+        return
+      }
       const instanceKey = buildGeneratedEmbeddedActivityInstanceKey(activityId, location)
       const optionsKey = buildSoloChildOptionsKey(selectedOptions)
 

@@ -28,7 +28,7 @@ Both endpoints consume the entry token atomically (one redemption only), so the 
 
 When a student reaches a slide's `activityRequest` without an instructor position to follow (a standalone deck, or before the instructor's first slide update), SyncDeck shows a solo overlay. The deck payload is the same `data-activity-options` used for embedded launches; only the host path differs.
 
-- **Server-created solo child** — for activities whose config declares `embeddedRuntime.supportsSoloChild: true` (currently **Resonance** and **Video Sync**), the student client calls `POST /api/syncdeck/:sessionId/solo-activity/start` with `{ activityId, location: { h, v }, activityOptions }`. The server authorizes the student from the parent's accepted-entry cookie, creates (or reuses) a `CHILD:<parent>:<id>:<activity>` session, and returns `{ childSessionId, entryParticipantToken, values }`. The child's `embeddedLaunch` has the usual `parentSessionId`, `instanceKey` (`<activityId>:<h>:<v>`), `location`, and `selectedOptions`, plus `mode: "solo"`. Solo children are never added to the parent's `embeddedActivities`, never broadcast, and get no manager entry token.
+- **Server-created solo child** — for activities whose config declares `embeddedRuntime.supportsSoloChild: true` (currently **Resonance** and **Video Sync**), the student client calls `POST /api/syncdeck/:sessionId/solo-activity/start` with `{ activityId, location: { h, v }, activityOptions }`. The server authorizes the student from the parent's accepted-entry cookie, creates (or reuses) a `CHILD:<parent>:<id>:<activity>` session, and returns `{ childSessionId, entryParticipantToken, values }`. The child's `embeddedLaunch` has the usual `parentSessionId`, `instanceKey` (`<activityId>:<h>:<v>`), `location`, and `selectedOptions`, plus `mode: "solo"`. Solo children are never added to the parent's `embeddedActivities`, never broadcast, and get no manager entry token. Because nobody can configure a solo child after it is created, an activity may reject its launch options up front: the route then returns `400 { error: 'invalid solo activity options' }` and creates no child.
 - **Reuse** — a repeat launch by the same student on the same slide with the same options returns the same child with a fresh handoff token, so reloading keeps the student's work. Different options on that slide create a new child.
 - **Other activities** (MobCode, nested SyncDeck) keep their activity-owned client launcher and do not receive a SyncDeck identity handoff; their own entry flow applies.
 
@@ -192,7 +192,7 @@ Field guidance:
 
 Video Sync reads `selectedOptions.sourceUrl` from embedded launch state. Keep that field present and canonical.
 
-For a solo child (`embeddedLaunch.mode: "solo"`), there is no manager to configure the video, so the Video Sync session normalizer applies `sourceUrl` itself while no video is configured, and forces `standaloneMode: true`. An invalid `sourceUrl` leaves the child unconfigured.
+For a solo child (`embeddedLaunch.mode: "solo"`), there is no manager to configure the video, so the Video Sync session normalizer applies `sourceUrl` itself while no video is configured, and forces `standaloneMode: true`. A solo start with a missing or unsupported `sourceUrl` is rejected with 400 before any child is created.
 
 ### Embedded manager authentication
 

@@ -7,6 +7,7 @@ import {
   writeActivityCapabilityCookie,
 } from 'activebits-server/core/activityCapabilities.js'
 import { registerSessionNormalizer } from 'activebits-server/core/sessionNormalization.js'
+import { registerSoloLaunchOptionsValidator } from 'activebits-server/core/soloLaunchValidation.js'
 import { createBroadcastSubscriptionHelper } from 'activebits-server/core/broadcastUtils.js'
 import {
   findIndexedHashBySessionId,
@@ -1217,6 +1218,21 @@ function toPublicSessionData(data: VideoSyncSessionData): PublicVideoSyncSession
     telemetry: data.telemetry,
   }
 }
+
+/**
+ * A solo Video Sync child is student-owned and has no manager to configure it,
+ * so a launch without a playable source is rejected before the child exists.
+ */
+export function validateVideoSyncSoloLaunchOptions(selectedOptions: Record<string, unknown>): { ok: true } | { ok: false; error: string } {
+  const sourceUrl = typeof selectedOptions.sourceUrl === 'string' ? selectedOptions.sourceUrl.trim() : ''
+  if (sourceUrl.length === 0) {
+    return { ok: false, error: 'sourceUrl is required' }
+  }
+  const parsedSource = parseYouTubeSource(sourceUrl, null)
+  return parsedSource.ok ? { ok: true } : { ok: false, error: 'sourceUrl is not a supported video source' }
+}
+
+registerSoloLaunchOptionsValidator('video-sync', validateVideoSyncSoloLaunchOptions)
 
 registerSessionNormalizer('video-sync', (session) => {
   ensureVideoSyncSessionData(session as SessionRecord)

@@ -4489,6 +4489,20 @@ void test('solo activity start configures a Video Sync solo child from its launc
   assert.equal(childData.state.startSec, 5)
 })
 
+void test('solo activity start rejects a Video Sync launch without a playable source and creates no child', async () => {
+  const { parent, tokens } = createSoloParent()
+  const { state, start } = await setupSoloStart({ s1: parent })
+
+  console.info('[TEST] Expected Video Sync solo launch option rejections.')
+  // Decision table: missing, blank, and unsupported sources are rejected.
+  for (const activityOptions of [{}, { sourceUrl: '   ' }, { sourceUrl: 'https://example.com/not-a-video' }]) {
+    const res = await start({ activityId: 'video-sync', location: { h: 3, v: 1 }, activityOptions }, tokens['student-1'])
+    assert.equal(res.statusCode, 400, JSON.stringify(activityOptions))
+  }
+  assert.deepEqual(soloChildIds(state.store), [])
+  assert.deepEqual((state.store.s1!.data as { soloChildren?: Record<string, unknown> }).soloChildren ?? {}, {})
+})
+
 void test('concurrent solo starts by different students keep every binding', async () => {
   const students = Array.from({ length: 6 }, (_, index) => ({ id: `student-${index}`, name: `Student ${index}` }))
   const { parent, tokens } = createSoloParent({ roster: false, students })
