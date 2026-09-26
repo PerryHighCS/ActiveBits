@@ -24,6 +24,16 @@ SyncDeck starts embedded instructor iframes only after `POST /api/syncdeck/:sess
 
 Both endpoints consume the entry token atomically (one redemption only), so the one-time token cannot be resurrected. They differ after the consume: the legacy passcode exchange returns the passcode it captured *before* the atomic consume and does not re-read or re-persist the child; the capability exchange re-reads the child session after consumption and issues the capability onto that fresh record before writing the cookie. A credentialless child still receives an empty `managerBootstrap` object alongside the token so the parent can reuse the same mount/retry lifecycle; once activities have migrated off the passcode exchange it simply redeems the token at the capability endpoint. This is host-managed runtime state, not deck-authored `data-activity-options`; do not add credentials or bootstrap tokens to deck payloads.
 
+## Student Solo Child Launch
+
+When a student reaches a slide's `activityRequest` without an instructor position to follow (a standalone deck, or before the instructor's first slide update), SyncDeck shows a solo overlay. The deck payload is the same `data-activity-options` used for embedded launches; only the host path differs.
+
+- **Server-created solo child** — for activities whose config declares `embeddedRuntime.supportsSoloChild: true` (currently **Resonance** and **Video Sync**), the student client calls `POST /api/syncdeck/:sessionId/solo-activity/start` with `{ activityId, location: { h, v }, activityOptions }`. The server authorizes the student from the parent's accepted-entry cookie, creates (or reuses) a `CHILD:<parent>:<id>:<activity>` session, and returns `{ childSessionId, entryParticipantToken, values }`. The child's `embeddedLaunch` has the usual `parentSessionId`, `instanceKey` (`<activityId>:<h>:<v>`), `location`, and `selectedOptions`, plus `mode: "solo"`. Solo children are never added to the parent's `embeddedActivities`, never broadcast, and get no manager entry token.
+- **Reuse** — a repeat launch by the same student on the same slide with the same options returns the same child with a fresh handoff token, so reloading keeps the student's work. Different options on that slide create a new child.
+- **Other activities** (MobCode, nested SyncDeck) keep their activity-owned client launcher and do not receive a SyncDeck identity handoff; their own entry flow applies.
+
+`mode` is host-managed runtime state, not deck-authored; do not put it in `data-activity-options`.
+
 ## Resonance
 
 ### Deck launch payload
@@ -155,6 +165,8 @@ Resonance persistent and embedded recovery paths may store encrypted question ma
 
 That storage shape is a host/runtime detail. Deck authors should usually provide plain `questions` in the launch payload and let the host normalize as needed.
 
+A solo child (`embeddedLaunch.mode: "solo"`, see [Student Solo Child Launch](#student-solo-child-launch)) always runs self-paced, because no instructor will activate questions for it.
+
 ## Video Sync
 
 ### Deck launch payload
@@ -179,6 +191,8 @@ Field guidance:
 ### Child embedded launch state
 
 Video Sync reads `selectedOptions.sourceUrl` from embedded launch state. Keep that field present and canonical.
+
+For a solo child (`embeddedLaunch.mode: "solo"`), there is no manager to configure the video, so the Video Sync session normalizer applies `sourceUrl` itself while no video is configured, and forces `standaloneMode: true`. An invalid `sourceUrl` leaves the child unconfigured.
 
 ### Embedded manager authentication
 

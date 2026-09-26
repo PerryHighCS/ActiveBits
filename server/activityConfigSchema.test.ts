@@ -93,6 +93,7 @@ void test('parseActivityConfig accepts valid shared contracts', () => {
       },
       embeddedRuntime: {
         instructorGated: 'runtime',
+        supportsSoloChild: true,
       },
       reportEndpoint: '/api/syncdeck/s1/report',
       utilMode: true,
@@ -140,6 +141,7 @@ void test('parseActivityConfig accepts valid shared contracts', () => {
   assert.equal(parsed.manageDashboard?.customPersistentLinkBuilder, true)
   assert.equal(parsed.studentLayout?.expandShell, true)
   assert.equal(parsed.embeddedRuntime?.instructorGated, 'runtime')
+  assert.equal(parsed.embeddedRuntime?.supportsSoloChild, true)
   assert.equal(parsed.reportEndpoint, '/api/syncdeck/s1/report')
   assert.deepEqual(parsed.utilities, [
     {
@@ -433,6 +435,22 @@ void test('parseActivityConfig rejects invalid shared contract enums and shapes'
         'bad-config-7',
       ),
     /embeddedRuntime.*instructorGated.*runtime.*waiting-room/,
+  )
+
+  assert.throws(
+    () =>
+      parseActivityConfig(
+        {
+          id: 'bad-solo-child',
+          name: 'Bad Solo Child',
+          description: 'desc',
+          color: 'navy',
+          standaloneEntry: { enabled: true },
+          embeddedRuntime: { supportsSoloChild: 'yes' },
+        },
+        'bad-config-solo-child',
+      ),
+    /embeddedRuntime.*supportsSoloChild.*boolean/,
   )
 
   assert.throws(

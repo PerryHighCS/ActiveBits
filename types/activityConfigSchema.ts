@@ -383,8 +383,10 @@ function parseEmbeddedRuntime(raw: unknown, context: string): ActivityConfig['em
     instructorGatedRaw === 'runtime' || instructorGatedRaw === 'waiting-room'
       ? instructorGatedRaw
       : undefined
+  const supportsSoloChild = readOptionalBoolean(raw, 'supportsSoloChild', `${context}.embeddedRuntime`)
   return {
     ...(instructorGated !== undefined ? { instructorGated } : {}),
+    ...(supportsSoloChild !== undefined ? { supportsSoloChild } : {}),
   }
 }
 

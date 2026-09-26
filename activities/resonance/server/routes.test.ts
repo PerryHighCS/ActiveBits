@@ -6027,3 +6027,33 @@ void test('student state reports a cleared draft\'s retained ordering watermark,
 
   await sessions.close()
 })
+
+void test('Resonance runs a SyncDeck solo child self-paced even when the parent is instructor-led', async () => {
+  const { normalizeSessionData: normalizeRegisteredSessionData } = await import('activebits-server/core/sessionNormalization.js')
+  const soloQuestions = [{ id: 'q1', type: 'free-response', text: 'Explain why.', order: 0 }]
+  const solo = normalizeRegisteredSessionData({
+    id: 'CHILD:s1:abc:resonance',
+    type: 'resonance',
+    created: 1,
+    lastActivity: 1,
+    data: {
+      embeddedParentSessionId: 's1',
+      embeddedLaunch: { parentSessionId: 's1', instanceKey: 'resonance:1:0', mode: 'solo', selectedOptions: { questions: soloQuestions } },
+    },
+  } as SessionRecord)
+  const soloData = solo.data as { selfPacedMode?: boolean; questions: unknown[] }
+  assert.equal(soloData.selfPacedMode, true)
+  assert.equal(soloData.questions.length, 1)
+
+  const embedded = normalizeRegisteredSessionData({
+    id: 'CHILD:s1:def:resonance',
+    type: 'resonance',
+    created: 1,
+    lastActivity: 1,
+    data: {
+      embeddedParentSessionId: 's1',
+      embeddedLaunch: { parentSessionId: 's1', instanceKey: 'resonance:1:0', selectedOptions: { questions: soloQuestions } },
+    },
+  } as SessionRecord)
+  assert.equal((embedded.data as { selfPacedMode?: boolean }).selfPacedMode, undefined)
+})

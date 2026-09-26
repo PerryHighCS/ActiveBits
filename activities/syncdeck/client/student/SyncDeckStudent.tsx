@@ -28,6 +28,7 @@ import {
   resolveGroupedPreloadRequestBatchInputs,
 } from '../shared/groupedActivityRequests.js'
 import { resolveSyncDeckStudentCloseDecision } from './reconnectUtils.js'
+import { parseSyncDeckSoloSlideLocation, startSyncDeckSoloChild } from './soloChildLaunch.js'
 import ConnectionStatusDot from '../components/ConnectionStatusDot.js'
 import { getStudentPresentationCompatibilityError } from '../shared/presentationUrlCompatibility.js'
 import { isSyncDeckDebugEnabled } from '../shared/syncDebug.js'
@@ -3372,7 +3373,7 @@ const SyncDeckStudent: FC = () => {
     let isCancelled = false
 
     void (async () => {
-      const { launchActivityPersistentSoloEntry } = await import('@src/activities')
+      const { getActivity, launchActivityPersistentSoloEntry } = await import('@src/activities')
 
       for (const [slideKey, overlay] of launchableEntries) {
         if (isCancelled) {
@@ -3385,74 +3386,28 @@ const SyncDeckStudent: FC = () => {
         }
 
         try {
-          const launchResult = await launchActivityPersistentSoloEntry(overlay.activityId, {
-            hash: '',
-            search: '',
-            selectedOptions,
-          })
-
-          if (isCancelled) {
-            return
-          }
-
-          if (!launchResult) {
-            setSoloOverlays((current) => {
-              const existing = current[slideKey]
-              if (
-                !existing
-                || existing.activityId !== overlay.activityId
-                || getSoloOverlaySelectedOptionsComparisonKey(existing) !== getSelectedOptionsComparisonKey(overlay.selectedOptions)
-              ) {
-                return current
-              }
-
-              return {
-                ...current,
-                [slideKey]: {
-                  activityId: overlay.activityId,
-                  notice: 'Unable to launch this solo activity.',
-                },
-              }
-            })
-            continue
-          }
-
-          const nextSrc = typeof launchResult.navigateTo === 'string' && launchResult.navigateTo.length > 0
-            ? launchResult.navigateTo
-            : typeof launchResult.sessionId === 'string' && launchResult.sessionId.length > 0
-              ? `/${encodeURIComponent(launchResult.sessionId)}`
-              : null
-
-          if (
-            typeof window !== 'undefined'
-            && typeof launchResult.sessionId === 'string'
-            && launchResult.sessionId.length > 0
-            && registeredStudentName.trim().length > 0
-            && registeredStudentId.trim().length > 0
-          ) {
-            if (!sessionId) throw new Error('Parent session is unavailable')
-            const launchedSessionId = launchResult.sessionId
-            const entryResponse = await fetch(`/api/syncdeck/${encodeURIComponent(sessionId)}/solo-activity/entry`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              credentials: 'include',
-              body: JSON.stringify({ childSessionId: launchedSessionId }),
-            })
-            if (!entryResponse.ok) throw new Error('Solo activity entry was denied')
-            const entry = await entryResponse.json() as {
-              entryParticipantToken?: unknown
-              values?: { participantId?: unknown }
+          let nextSrc: string | null
+          if (getActivity(overlay.activityId)?.embeddedRuntime?.supportsSoloChild === true) {
+            // Server-owned solo child: SyncDeck creates (or reuses) the child
+            // bound to this student and returns its one-time entry handoff.
+            const location = parseSyncDeckSoloSlideLocation(slideKey)
+            if (!sessionId || !location || registeredStudentId.trim().length === 0 || typeof window === 'undefined') {
+              throw new Error('Solo activity start is unavailable')
             }
+            const started = await startSyncDeckSoloChild({
+              fetchImpl: fetch,
+              sessionId,
+              activityId: overlay.activityId,
+              location,
+              selectedOptions,
+              expectedStudentId: registeredStudentId,
+            })
             if (isCancelled) return
-            if (
-              typeof entry.entryParticipantToken !== 'string'
-              || entry.values?.participantId !== registeredStudentId
-            ) throw new Error('Solo activity entry was invalid')
-            const storageKey = buildSessionEntryParticipantStorageKey(overlay.activityId, launchedSessionId)
+            const storageKey = buildSessionEntryParticipantStorageKey(overlay.activityId, started.childSessionId)
             // The child needs the entry token; the identity cache is optional.
             const handoffStorage = readWindowStorage('sessionStorage')
             if (handoffStorage) {
-              persistEntryParticipantToken(handoffStorage, storageKey, entry.entryParticipantToken)
+              persistEntryParticipantToken(handoffStorage, storageKey, started.entryParticipantToken)
             }
             if (!handoffStorage || !hasValidEntryParticipantHandoffStorageValue(handoffStorage, storageKey)) {
               throw new Error('Solo activity entry could not be saved')
@@ -3461,11 +3416,52 @@ const SyncDeckStudent: FC = () => {
             if (identityCache) {
               persistSessionParticipantIdentity(
                 identityCache,
-                launchedSessionId,
+                started.childSessionId,
                 registeredStudentName,
                 registeredStudentId,
               )
             }
+            nextSrc = `/${encodeURIComponent(started.childSessionId)}`
+          } else {
+            // Other activities keep their own launcher and entry flow; SyncDeck
+            // issues no trusted handoff for a child it did not create.
+            const launchResult = await launchActivityPersistentSoloEntry(overlay.activityId, {
+              hash: '',
+              search: '',
+              selectedOptions,
+            })
+
+            if (isCancelled) {
+              return
+            }
+
+            if (!launchResult) {
+              setSoloOverlays((current) => {
+                const existing = current[slideKey]
+                if (
+                  !existing
+                  || existing.activityId !== overlay.activityId
+                  || getSoloOverlaySelectedOptionsComparisonKey(existing) !== getSelectedOptionsComparisonKey(overlay.selectedOptions)
+                ) {
+                  return current
+                }
+
+                return {
+                  ...current,
+                  [slideKey]: {
+                    activityId: overlay.activityId,
+                    notice: 'Unable to launch this solo activity.',
+                  },
+                }
+              })
+              continue
+            }
+
+            nextSrc = typeof launchResult.navigateTo === 'string' && launchResult.navigateTo.length > 0
+              ? launchResult.navigateTo
+              : typeof launchResult.sessionId === 'string' && launchResult.sessionId.length > 0
+                ? `/${encodeURIComponent(launchResult.sessionId)}`
+                : null
           }
 
           setSoloOverlays((current) => {
@@ -3497,11 +3493,16 @@ const SyncDeckStudent: FC = () => {
               },
             }
           })
-        } catch {
+        } catch (error) {
           if (isCancelled) {
             return
           }
 
+          console.warn('[SyncDeck][SoloLaunchFailed]', {
+            activityId: overlay.activityId,
+            slideKey,
+            error: error instanceof Error ? error.message : String(error),
+          })
           setSoloOverlays((current) => {
             const existing = current[slideKey]
             if (

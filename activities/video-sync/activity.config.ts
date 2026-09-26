@@ -11,6 +11,10 @@ const videoSyncConfig: ActivityConfig = {
     supportsPermalink: true,
     showOnHome: false,
   },
+  embeddedRuntime: {
+    // SyncDeck solo overlays create this activity as a student-owned child.
+    supportsSoloChild: true,
+  },
   waitingRoom: {
     fields: [
       {

@@ -102,6 +102,13 @@ export interface ActivityStandaloneEntryConfig {
 
 export interface ActivityEmbeddedRuntimeConfig {
   instructorGated?: 'runtime' | 'waiting-room'
+  /**
+   * The activity can run as a student-owned SyncDeck solo child: a server-created
+   * embedded child whose `embeddedLaunch.mode` is `'solo'`. The activity must
+   * bootstrap its standalone behavior from `embeddedLaunch.selectedOptions`
+   * because no instructor or manager will configure the child.
+   */
+  supportsSoloChild?: boolean
 }
 
 export type ActivityReportScope = 'activity-session' | 'student-cross-activity' | 'session-summary'

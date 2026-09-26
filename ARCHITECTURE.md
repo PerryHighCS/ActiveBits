@@ -96,8 +96,12 @@ scoped, one-time handoff token. Embedded children also require the student in
 the parent's roster. Solo children do not, because standalone students never
 open the SyncDeck WebSocket and so have no roster record; the ID and fallback
 name come from the accepted-entry record (`resolveAcceptedSyncDeckEntryIdentity`).
-The solo route does not yet verify that the child belongs to the parent
-([#388](https://github.com/PerryHighCS/ActiveBits/issues/388)).
+SyncDeck creates solo children itself (`POST /api/syncdeck/:sessionId/solo-activity/start`)
+for activities that declare `embeddedRuntime.supportsSoloChild`, records each one
+in the parent's `soloChildren` binding, and issues a handoff only for a child
+bound to the requesting student; no route accepts a client-supplied child ID
+as proof of ownership. Other activities keep their own solo launcher and entry
+flow without a SyncDeck handoff.
 SyncDeck student WebSocket admission resolves that same cookie before joining
 or replaying state. Its embedded-context and auto-activation HTTP routes also
 require the cookie and reject a student ID that differs from its subject.
@@ -145,6 +149,25 @@ current counter, always ahead of any captured token. A result that raced
 behind a newer commit, a stalled read of an incarnation that was since recreated,
 or a strict read that completes after a `delete` therefore cannot roll `get()`
 back - or resurrect a deleted session - for the cache TTL.
+
+Within one process, `server/core/sessionWriteLock.ts` provides an
+activity-agnostic per-session write lock (`runSessionWriteExclusive`), with
+ownership tracked per async context. Writers that read a session, may await other
+work, and write it back take it: the shared `entry-participant` and `consume`
+routes, the generic `DELETE /api/session/:id`, persistent manager-capability
+issuance, and SyncDeck's parent writer. Ownership is cleared when the lock is
+released, including for async work the holder started but did not await.
+It does not coordinate across instances.
+
+SyncDeck has not migrated to `updateAtomic`. Instead, every write or delete of a
+SyncDeck parent session record inside SyncDeck goes through one owned path,
+`activities/syncdeck/server/parentWrites.ts`, built on that shared lock:
+writers hold it and read the parent inside it (`update` applies a change to a
+fresh read). SyncDeck's routes and Learn integration receive a guarded store
+that rejects any `syncdeck` set/delete outside that parent's lock. Other
+instances neither see the lock nor bypass their 30-second read cache, so
+multi-instance safety for SyncDeck depends on moving these writers onto
+`updateAtomic` (#313).
 
 Video Sync additionally carries a monotonic `playbackRevision` in its public
 playback state. Clients order state frames by that revision before considering
