@@ -1575,7 +1575,10 @@ async function createSyncDeckInstructorSession(
   parentWriter: SyncDeckParentWriter,
   presentationUrl?: string,
 ): Promise<{ sessionId: string; instructorRecoveryToken: string; instructorPasscode: string }> {
-  const session = await createSession(sessions, { data: {} })
+  // createSession has already stored this record, and stores keep that same
+  // object. Build the SyncDeck record on a copy so only the locked set below
+  // publishes it; a failed set leaves nothing half-configured in the cache.
+  const session = structuredClone(await createSession(sessions, { data: {} }))
   session.type = 'syncdeck'
   session.data = normalizeSyncDeckSessionData({
     ...session.data,

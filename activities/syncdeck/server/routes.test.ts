@@ -6362,6 +6362,29 @@ void test('create route keeps temporary instructor recovery tokens in one bounde
   assert.ok(entries.every((entry) => typeof entry.token === 'string' && /^[a-f0-9]{64}$/.test(entry.token)))
 })
 
+void test('a failed SyncDeck create leaves no half-configured parent visible in the store', async () => {
+  // The real in-memory store returns its live record, so pre-lock mutations would leak.
+  const store = createCoreSessionStore(null)
+  const originalSet = store.set.bind(store)
+  store.set = async (id: string, session: SessionRecord, ...rest: unknown[]) => {
+    if (session.type === 'syncdeck') throw new Error('[TEST] parent write unavailable')
+    return (originalSet as (...args: unknown[]) => Promise<void>)(id, session, ...rest)
+  }
+  const app = createMockApp()
+  setupSyncDeckRoutes(app, store, createMockWs())
+
+  console.info('[TEST] Expected SyncDeck create failure.')
+  const res = createResponse()
+  await app.handlers.post['/api/syncdeck/create']!(createRequest({}, {}), res)
+
+  assert.equal(res.statusCode, 500)
+  for (const id of await store.getAllIds()) {
+    const stored = await store.get(id)
+    assert.notEqual(stored?.type, 'syncdeck', id)
+    assert.equal((stored?.data as Record<string, unknown> | undefined)?.instructorRecoveryToken, undefined, id)
+  }
+})
+
 void test('configure route sets presentation url for valid passcode', async () => {
   const app = createMockApp()
   const ws = createMockWs()

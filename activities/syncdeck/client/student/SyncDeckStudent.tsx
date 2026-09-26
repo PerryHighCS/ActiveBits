@@ -3394,8 +3394,14 @@ const SyncDeckStudent: FC = () => {
           if (getActivity(overlay.activityId)?.embeddedRuntime?.supportsSoloChild === true) {
             // Server-owned solo child: SyncDeck creates (or reuses) the child
             // bound to this student and returns its one-time entry handoff.
+            if (registeredStudentId.trim().length === 0) {
+              // Identity is still being resolved (for example from the entry
+              // cookie). Leave the overlay launchable; this effect re-runs when
+              // the identity arrives. A repeat start reuses the bound child.
+              continue
+            }
             const location = parseSyncDeckSoloSlideLocation(slideKey)
-            if (!sessionId || !location || registeredStudentId.trim().length === 0 || typeof window === 'undefined') {
+            if (!sessionId || !location || typeof window === 'undefined') {
               throw new Error('Solo activity start is unavailable')
             }
             const started = await startSyncDeckSoloChild({
@@ -3532,7 +3538,7 @@ const SyncDeckStudent: FC = () => {
     return () => {
       isCancelled = true
     }
-  }, [soloOverlays, syncState])
+  }, [registeredStudentId, registeredStudentName, sessionId, soloOverlays, syncState])
 
   useEffect(() => {
     sendSyncContextToEmbeddedIframe()
