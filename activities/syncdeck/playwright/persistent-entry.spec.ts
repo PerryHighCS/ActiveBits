@@ -54,10 +54,24 @@ test('persistent SyncDeck solo entry establishes the accepted-entry cookie for t
     sameSite: 'Lax',
     secure: false,
   }])
+  const identityResponse = await page.request.get(`/api/syncdeck/${encodeURIComponent(sessionId)}/student-identity`)
+  expect(identityResponse.ok()).toBeTruthy()
+  const { studentId: acceptedStudentId } = await identityResponse.json() as { studentId: string }
+
+  // A stale stored ID must not survive a reload: a standalone presentation
+  // opens no student socket that could reject it, so the load reconciles the
+  // stored identity with the cookie's student.
+  await page.evaluate((id) => {
+    window.localStorage.setItem(`session-participant:${id}`, JSON.stringify({ studentName: 'Ada', studentId: 'stale-student' }))
+    window.localStorage.setItem(`student-id-${id}`, 'stale-student')
+    window.sessionStorage.setItem(`syncdeck_student_id_${id}`, 'stale-student')
+  }, sessionId)
+
   // With the cookie, a reload bypasses the waiting room and resumes the student
   // instead of prompting for reentry. (A standalone session opens no instructor
   // socket, so there is no connection status to assert.)
   await page.reload()
+  await expect.poll(() => page.evaluate((id) => window.localStorage.getItem(`student-id-${id}`), sessionId)).toBe(acceptedStudentId)
   await expect(page.getByText('SyncDeck')).not.toHaveCount(0)
   await expect(page.getByRole('heading', { name: 'Return to Waiting Room' })).toHaveCount(0)
   await expect(page.locator('#waiting-room-field-displayName')).toHaveCount(0)

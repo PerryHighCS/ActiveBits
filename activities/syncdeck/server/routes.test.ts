@@ -4764,6 +4764,35 @@ void test('solo start deletes a child session evicted past the per-student cap',
   assert.ok(bound.includes((res.body as { childSessionId: string }).childSessionId))
 })
 
+void test('a failed parent commit restores evicted children and discards the new child', async () => {
+  const { parent, tokens } = createSoloParent()
+  const initial: Record<string, SessionRecord> = { s1: parent }
+  const soloChildren: Record<string, unknown> = {}
+  for (let index = 0; index < MAX_SOLO_CHILDREN_PER_STUDENT; index += 1) {
+    const childId = `CHILD:s1:old${index}:resonance`
+    soloChildren[childId] = {
+      studentId: 'student-1', activityId: 'resonance', instanceKey: `resonance:${index + 10}:0`, optionsKey: 'old', createdAt: index + 1,
+    }
+    initial[childId] = { id: childId, type: 'resonance', created: 1, lastActivity: 1, data: { work: `draft-${index}` } }
+  }
+  ;(parent.data as { soloChildren: Record<string, unknown> }).soloChildren = soloChildren
+  const { state, start } = await setupSoloStart(initial)
+  const originalSet = state.sessions.set.bind(state.sessions)
+  state.sessions.set = async (id: string, session: SessionRecord, ...rest: unknown[]) => {
+    if (id === 's1') throw new Error('[TEST] parent write unavailable')
+    return (originalSet as (...args: unknown[]) => Promise<void>)(id, session, ...rest)
+  }
+
+  console.info('[TEST] Expected solo start parent commit failure.')
+  const res = await start({ activityId: 'resonance', location: { h: 0, v: 0 }, activityOptions: SOLO_RESONANCE_OPTIONS }, tokens['student-1'])
+
+  assert.equal(res.statusCode, 500)
+  // The evicted child is back with its work, still bound by the unchanged parent.
+  assert.deepEqual(state.store['CHILD:s1:old0:resonance']?.data, { work: 'draft-0' })
+  assert.deepEqual(Object.keys((state.store.s1!.data as { soloChildren: Record<string, unknown> }).soloChildren).sort(), Object.keys(soloChildren).sort())
+  assert.deepEqual(soloChildIds(state.store).sort(), Object.keys(soloChildren).sort())
+})
+
 void test('deleting the parent session also deletes its solo children', async () => {
   const { parent, tokens } = createSoloParent()
   parent.data.instructorPasscode = 'teacher-passcode'
@@ -6358,6 +6387,50 @@ void test('configure route sets presentation url for valid passcode', async () =
   const updated = storeState.store.s1?.data as Record<string, unknown>
   assert.equal(updated.presentationUrl, 'https://example.com/deck')
   assert.equal(updated.standaloneMode, false)
+})
+
+void test('configure route re-authorizes inside the parent lock against the same session incarnation', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const storeState = createSessionStore({ s1: createSyncDeckSession('s1', 'teacher-pass') })
+  setupSyncDeckRoutes(app, storeState.sessions, ws)
+  const handler = app.handlers.post['/api/syncdeck/:sessionId/configure']!
+
+  const configureWith = async (instructorPasscode: string) => {
+    let releaseLock!: () => void
+    const lockReleased = new Promise<void>((resolve) => { releaseLock = resolve })
+    let lockHeld!: () => void
+    const heldSignal = new Promise<void>((resolve) => { lockHeld = resolve })
+    const holder = runSessionWriteExclusive('s1', async () => {
+      lockHeld()
+      await lockReleased
+    })
+    await heldSignal
+    const res = createResponse()
+    const pending = handler(createRequest({ sessionId: 's1' }, { presentationUrl: 'https://example.com/deck', instructorPasscode }), res)
+    await new Promise((resolve) => setImmediate(resolve))
+    return { res, pending, holder, releaseLock }
+  }
+
+  console.info('[TEST] Expected configure re-authorization failures after the session changed.')
+  // Decision table: while configure waits for the lock, the session is
+  // (a) replaced by a new incarnation with the same passcode, or
+  // (b) kept but its passcode rotated. Both must be refused without a write.
+  const replaced = await configureWith('teacher-pass')
+  storeState.store.s1 = { ...createSyncDeckSession('s1', 'teacher-pass'), created: (storeState.store.s1!.created ?? 0) + 1 }
+  replaced.releaseLock()
+  await replaced.holder
+  await replaced.pending
+  assert.equal(replaced.res.statusCode, 404)
+  assert.equal((storeState.store.s1.data as Record<string, unknown>).presentationUrl, null)
+
+  const rotated = await configureWith('teacher-pass')
+  ;(storeState.store.s1.data as Record<string, unknown>).instructorPasscode = 'rotated-pass'
+  rotated.releaseLock()
+  await rotated.holder
+  await rotated.pending
+  assert.equal(rotated.res.statusCode, 404)
+  assert.equal((storeState.store.s1.data as Record<string, unknown>).presentationUrl, null)
 })
 
 void test('configure route can enable standalone mode for solo-launched sessions', async () => {

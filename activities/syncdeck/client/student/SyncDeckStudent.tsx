@@ -14,7 +14,7 @@ import {
   resolveInitialEntryParticipantIdentity,
 } from '@src/components/common/entryParticipantIdentityUtils'
 import { clearSyncDeckStoredStudentIdentity, handleReturnedToWaitingRoom, readWindowStorage } from './returnedToWaitingRoomUtils.js'
-import { fetchAcceptedSyncDeckStudentIdentity, resolveRecoveredSyncDeckStudentIdentity, type SyncDeckRecoveredStudentIdentity } from './studentIdentityRecovery.js'
+import { fetchAcceptedSyncDeckStudentIdentity, lookupAcceptedSyncDeckStudentIdentity, reconcileStoredSyncDeckStudentIdentity, resolveRecoveredSyncDeckStudentIdentity, type SyncDeckRecoveredStudentIdentity } from './studentIdentityRecovery.js'
 import {
   REVEAL_SYNC_PROTOCOL_VERSION,
   assessRevealSyncProtocolCompatibility,
@@ -2165,22 +2165,26 @@ const SyncDeckStudent: FC = () => {
 
       const resolvedStudentName = resolvedIdentity.studentName.trim()
       const resolvedStudentId = (resolvedIdentity.studentId ?? '').trim()
-      let identity: SyncDeckRecoveredStudentIdentity | null = resolvedStudentName.length > 0 && resolvedStudentId.length > 0
+      const storedIdentity: SyncDeckRecoveredStudentIdentity | null = resolvedStudentName.length > 0 && resolvedStudentId.length > 0
         ? { studentName: resolvedStudentName, studentId: resolvedStudentId }
         : null
-      if (!identity) {
-        // A reload with a valid accepted-entry cookie skips the waiting room;
-        // recover the student from the cookie when nothing usable is stored.
-        identity = resolveRecoveredSyncDeckStudentIdentity(await fetchAcceptedSyncDeckStudentIdentity(sessionId), null)
-        if (isCancelled) {
-          return
-        }
-      }
-
-      if (identity) {
-        adoptRegisteredStudentIdentity(sessionId, identity)
+      // The accepted-entry cookie is authoritative and stored identity is only
+      // a cache. Reconcile on every load: a reload with a valid cookie skips
+      // the waiting room, and a standalone presentation opens no student
+      // socket that could reject a stale stored ID.
+      const reconciled = reconcileStoredSyncDeckStudentIdentity(
+        storedIdentity,
+        await lookupAcceptedSyncDeckStudentIdentity(sessionId),
+      )
+      if (isCancelled) {
         return
       }
+
+      if (reconciled.action === 'adopt' || (reconciled.action === 'keep' && storedIdentity)) {
+        adoptRegisteredStudentIdentity(sessionId, reconciled.action === 'adopt' ? reconciled.identity : storedIdentity!)
+        return
+      }
+      clearSyncDeckStoredStudentIdentity(sessionId, readWindowStorage('localStorage'), readWindowStorage('sessionStorage'))
       setRegisteredStudentName('')
       setRegisteredStudentId('')
       setJoinError('This presentation now requires entry through the waiting room.')

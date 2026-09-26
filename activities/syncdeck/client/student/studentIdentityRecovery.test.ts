@@ -3,11 +3,13 @@ import test from 'node:test'
 import {
   buildSyncDeckStudentIdentityApiUrl,
   fetchAcceptedSyncDeckStudentIdentity,
+  lookupAcceptedSyncDeckStudentIdentity,
+  reconcileStoredSyncDeckStudentIdentity,
   resolveRecoveredSyncDeckStudentIdentity,
 } from './studentIdentityRecovery'
 
-function jsonResponse(ok: boolean, body: unknown) {
-  return { ok, json: async () => body }
+function jsonResponse(ok: boolean, body: unknown, status = ok ? 200 : 500) {
+  return { ok, status, json: async () => body }
 }
 
 void test('fetchAcceptedSyncDeckStudentIdentity reads the cookie-proven student with credentials and no caching', async () => {
@@ -51,4 +53,33 @@ void test('resolveRecoveredSyncDeckStudentIdentity adopts only a complete identi
   assert.equal(resolveRecoveredSyncDeckStudentIdentity({ studentId: 'student-1', studentName: '' }, null), null)
   assert.equal(resolveRecoveredSyncDeckStudentIdentity(null, null), null)
   assert.equal(resolveRecoveredSyncDeckStudentIdentity(null, 'stale-id'), null)
+})
+
+void test('lookupAcceptedSyncDeckStudentIdentity distinguishes a denied cookie from an unknown answer', async () => {
+  console.info('[TEST] Expected student identity lookup denials and failures.')
+  assert.deepEqual(
+    await lookupAcceptedSyncDeckStudentIdentity('s1', async () => jsonResponse(true, { studentId: 'student-1', displayName: 'Ada' })),
+    { status: 'ok', identity: { studentId: 'student-1', studentName: 'Ada' } },
+  )
+  assert.deepEqual(await lookupAcceptedSyncDeckStudentIdentity('s1', async () => jsonResponse(false, { error: 'forbidden' }, 403)), { status: 'denied' })
+  assert.deepEqual(await lookupAcceptedSyncDeckStudentIdentity('s1', async () => jsonResponse(false, { error: 'invalid session' }, 404)), { status: 'unavailable' })
+  assert.deepEqual(await lookupAcceptedSyncDeckStudentIdentity('s1', async () => jsonResponse(false, {}, 500)), { status: 'unavailable' })
+  assert.deepEqual(await lookupAcceptedSyncDeckStudentIdentity('s1', async () => { throw new Error('[TEST] network down') }), { status: 'unavailable' })
+  assert.deepEqual(await lookupAcceptedSyncDeckStudentIdentity('s1', null), { status: 'unavailable' })
+})
+
+void test('reconcileStoredSyncDeckStudentIdentity lets the cookie win and clears a denied cache', () => {
+  const stored = { studentId: 'stale-student', studentName: 'Ada' }
+  const cookie = { studentId: 'student-1', studentName: 'Ada L.' }
+  // Decision table: stored identity (present/absent) x lookup result.
+  assert.deepEqual(reconcileStoredSyncDeckStudentIdentity(stored, { status: 'ok', identity: cookie }), { action: 'adopt', identity: cookie })
+  assert.deepEqual(reconcileStoredSyncDeckStudentIdentity(null, { status: 'ok', identity: cookie }), { action: 'adopt', identity: cookie })
+  assert.deepEqual(reconcileStoredSyncDeckStudentIdentity(stored, { status: 'denied' }), { action: 'clear' })
+  assert.deepEqual(reconcileStoredSyncDeckStudentIdentity(null, { status: 'denied' }), { action: 'clear' })
+  assert.deepEqual(reconcileStoredSyncDeckStudentIdentity(stored, { status: 'unavailable' }), { action: 'keep' })
+  assert.deepEqual(reconcileStoredSyncDeckStudentIdentity(null, { status: 'unavailable' }), { action: 'clear' })
+  // A cookie identity without a display name keeps only a matching stored identity.
+  const nameless = { status: 'ok' as const, identity: { studentId: 'student-1', studentName: '' } }
+  assert.deepEqual(reconcileStoredSyncDeckStudentIdentity({ studentId: 'student-1', studentName: 'Ada' }, nameless), { action: 'keep' })
+  assert.deepEqual(reconcileStoredSyncDeckStudentIdentity(stored, nameless), { action: 'clear' })
 })

@@ -2769,6 +2769,16 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, rawSessions: 
                 return { statusCode: 500, body: { error: 'solo activity unavailable' } }
               }
             }
+            // Write the child's handoff before any eviction, so the parent
+            // commit below is the last step and a failure before it has not
+            // deleted any earlier solo work.
+            const stored = storeTrustedSessionEntryParticipant(
+              child,
+              lockedStudent.name ? { displayName: lockedStudent.name } : {},
+              lockedStudent.studentId,
+            )
+            await sessions.set(child.id, child)
+
             if (staleChildSessionId || createdChildSessionId) {
               // Apply only the binding change to a fresh read of the parent, so
               // this write never restores fields another writer has since changed.
@@ -2795,9 +2805,38 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, rawSessions: 
               // discarded, and each failed child keeps its binding so it stays
               // revocable and is retried by a later eviction or the parent-delete
               // cascade. The caps therefore always hold.
+              const evictedSnapshots = new Map<string, SessionRecord>()
+              for (const evictedChildSessionId of evictedChildSessionIds) {
+                const evictedRecord = cloneForWrite(await sessions.get(evictedChildSessionId))
+                if (evictedRecord) evictedSnapshots.set(evictedChildSessionId, evictedRecord)
+              }
               const evictionResults = await Promise.allSettled(
                 evictedChildSessionIds.map((evictedChildSessionId) => sessions.delete(evictedChildSessionId)),
               )
+              // The stored parent still binds every evicted child until this
+              // commit lands. If it fails, put back the children already
+              // deleted so a failed launch never destroys earlier solo work.
+              const commitParentOrRestoreEvicted = async (): Promise<void> => {
+                try {
+                  await sessions.set(freshParent.id, freshParent)
+                } catch (commitError) {
+                  for (const [index, evictionResult] of evictionResults.entries()) {
+                    const evictedChildSessionId = evictedChildSessionIds[index]!
+                    const snapshot = evictedSnapshots.get(evictedChildSessionId)
+                    if (evictionResult.status !== 'fulfilled' || !snapshot) continue
+                    try {
+                      await sessions.set(evictedChildSessionId, snapshot)
+                    } catch (restoreError) {
+                      console.error(JSON.stringify({
+                        activity: 'syncdeck', event: 'solo-activity-evicted-child-restore-failed', sessionId,
+                        childSessionId: evictedChildSessionId,
+                        error: restoreError instanceof Error ? restoreError.message : String(restoreError),
+                      }))
+                    }
+                  }
+                  throw commitError
+                }
+              }
               let evictionFailed = false
               for (const [index, evictionResult] of evictionResults.entries()) {
                 const evictedChildSessionId = evictedChildSessionIds[index]!
@@ -2815,19 +2854,13 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, rawSessions: 
                 delete freshParent.data.soloChildren[createdChildSessionId]
                 // Persist the stale-binding removal and the evictions that did
                 // succeed, so bindings never point at deleted children.
-                await sessions.set(freshParent.id, freshParent)
+                await commitParentOrRestoreEvicted()
                 await discardCreatedChild('eviction-failed')
                 return { statusCode: 503, body: { error: 'solo activity unavailable' } }
               }
-              await sessions.set(freshParent.id, freshParent)
+              await commitParentOrRestoreEvicted()
             }
 
-            const stored = storeTrustedSessionEntryParticipant(
-              child,
-              lockedStudent.name ? { displayName: lockedStudent.name } : {},
-              lockedStudent.studentId,
-            )
-            await sessions.set(child.id, child)
             return {
               statusCode: 200,
               body: { childSessionId: child.id, entryParticipantToken: stored.token, values: stored.values },
@@ -2969,15 +3002,28 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, rawSessions: 
       }
     }
 
-    const configured = await parentWriter.update(sessionId, (fresh) => {
+    // The checks above ran on a pre-lock read, and the persistent-link lookup
+    // awaited. Re-authorize inside the lock against the same incarnation, so a
+    // session deleted and recreated under this ID is never configured with the
+    // old one's passcode or link verification.
+    let authorized = false
+    await parentWriter.update(sessionId, (fresh) => {
       const freshSession = asSyncDeckSession(fresh)
-      if (!freshSession) return false
+      if (
+        !freshSession
+        || freshSession.created !== session.created
+        || !verifyInstructorPasscode(freshSession.data.instructorPasscode, instructorPasscode)
+      ) {
+        return false
+      }
+      authorized = true
       freshSession.data.presentationUrl = presentationUrl
       freshSession.data.standaloneMode = standaloneMode
       return true
     })
     const response = res as unknown as JsonResponse
-    if (!configured) {
+    if (!authorized) {
+      console.warn(JSON.stringify({ activity: 'syncdeck', event: 'configure-reauthorization-failed', sessionId }))
       response.status(404).json({ error: 'invalid session' })
       return
     }
