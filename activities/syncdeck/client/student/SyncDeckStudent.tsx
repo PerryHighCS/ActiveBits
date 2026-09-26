@@ -13,11 +13,8 @@ import {
   readStoredSessionParticipantIdentity,
   resolveInitialEntryParticipantIdentity,
 } from '@src/components/common/entryParticipantIdentityUtils'
-import {
-  buildSessionEntryParticipantSubmitApiUrl,
-} from '@src/components/common/entryParticipantStorage'
-import { persistWaitingRoomServerBackedHandoff } from '@src/components/common/waitingRoomHandoffUtils'
-import { handleReturnedToWaitingRoom } from './returnedToWaitingRoomUtils.js'
+import { clearSyncDeckStoredStudentIdentity, handleReturnedToWaitingRoom, readWindowStorage } from './returnedToWaitingRoomUtils.js'
+import { fetchAcceptedSyncDeckStudentIdentity, lookupAcceptedSyncDeckStudentIdentity, reconcileStoredSyncDeckStudentIdentity, resolveRecoveredSyncDeckStudentIdentity, type SyncDeckRecoveredStudentIdentity } from './studentIdentityRecovery.js'
 import {
   REVEAL_SYNC_PROTOCOL_VERSION,
   assessRevealSyncProtocolCompatibility,
@@ -31,6 +28,7 @@ import {
   resolveGroupedPreloadRequestBatchInputs,
 } from '../shared/groupedActivityRequests.js'
 import { resolveSyncDeckStudentCloseDecision } from './reconnectUtils.js'
+import { parseSyncDeckSoloSlideLocation, startSyncDeckSoloChild } from './soloChildLaunch.js'
 import ConnectionStatusDot from '../components/ConnectionStatusDot.js'
 import { getStudentPresentationCompatibilityError } from '../shared/presentationUrlCompatibility.js'
 import { isSyncDeckDebugEnabled } from '../shared/syncDebug.js'
@@ -1993,6 +1991,12 @@ const SyncDeckStudent: FC = () => {
   const [registeredStudentName, setRegisteredStudentName] = useState('')
   const [registeredStudentId, setRegisteredStudentId] = useState('')
   const [joinError, setJoinError] = useState<string | null>(null)
+  const registeredStudentIdRef = useRef('')
+  const currentSessionIdRef = useRef(sessionId)
+  useEffect(() => {
+    registeredStudentIdRef.current = registeredStudentId
+    currentSessionIdRef.current = sessionId
+  }, [registeredStudentId, sessionId])
   const iframeRef = useRef<HTMLIFrameElement | null>(null)
   const {
     overlayNavClickShieldRef,
@@ -2096,6 +2100,42 @@ const SyncDeckStudent: FC = () => {
     }))
   }, [])
 
+  const adoptRegisteredStudentIdentity = useCallback((targetSessionId: string, identity: SyncDeckRecoveredStudentIdentity) => {
+    // Storage is a cache of the cookie-proven identity; a blocked or full
+    // storage must not stop the student from being registered.
+    const localStorage = readWindowStorage('localStorage')
+    if (localStorage) {
+      persistSessionParticipantIdentity(localStorage, targetSessionId, identity.studentName, identity.studentId)
+    }
+    try {
+      const sessionStorage = readWindowStorage('sessionStorage')
+      sessionStorage?.setItem(`syncdeck_student_name_${targetSessionId}`, identity.studentName)
+      sessionStorage?.setItem(`syncdeck_student_id_${targetSessionId}`, identity.studentId)
+    } catch (error) {
+      console.warn('[SyncDeck][StudentIdentity] Failed to persist session identity:', error)
+    }
+    setRegisteredStudentName(identity.studentName)
+    setRegisteredStudentId(identity.studentId)
+    setJoinError(null)
+  }, [])
+
+  // After the socket rejects the stored identity, adopt the student proven by
+  // the accepted-entry cookie instead. The rejected ID is never re-adopted, so
+  // a cookie that still maps to it leaves the student at the rejoin prompt.
+  const recoverRejectedStudentIdentity = useCallback(async (targetSessionId: string, rejectedStudentId: string | null) => {
+    const identity = resolveRecoveredSyncDeckStudentIdentity(
+      await fetchAcceptedSyncDeckStudentIdentity(targetSessionId),
+      rejectedStudentId,
+    )
+    if (!identity || currentSessionIdRef.current !== targetSessionId || registeredStudentIdRef.current) {
+      if (isDevMode) {
+        console.info('[SyncDeck][StudentIdentityRecovery]', { recovered: identity != null })
+      }
+      return
+    }
+    adoptRegisteredStudentIdentity(targetSessionId, identity)
+  }, [adoptRegisteredStudentIdentity])
+
   useEffect(() => {
     if (!sessionId || typeof window === 'undefined') {
       return
@@ -2104,13 +2144,20 @@ const SyncDeckStudent: FC = () => {
     let isCancelled = false
 
     void (async () => {
-      const resolvedIdentity = await resolveInitialEntryParticipantIdentity({
-        activityName: 'syncdeck',
-        sessionId,
-        isSoloSession: false,
-        localStorage: window.localStorage,
-        sessionStorage: window.sessionStorage,
-      })
+      // Blocked storage (a throwing getter or getItem) must not skip the
+      // cookie lookup below; treat it as having nothing stored.
+      let resolvedIdentity: { studentName: string; studentId: string | null } = { studentName: '', studentId: null }
+      try {
+        resolvedIdentity = await resolveInitialEntryParticipantIdentity({
+          activityName: 'syncdeck',
+          sessionId,
+          isSoloSession: false,
+          localStorage: readWindowStorage('localStorage'),
+          sessionStorage: readWindowStorage('sessionStorage'),
+        })
+      } catch (error) {
+        console.warn('[SyncDeck][StudentIdentity] Failed to read stored identity:', error)
+      }
 
       if (isCancelled) {
         return
@@ -2118,32 +2165,35 @@ const SyncDeckStudent: FC = () => {
 
       const resolvedStudentName = resolvedIdentity.studentName.trim()
       const resolvedStudentId = (resolvedIdentity.studentId ?? '').trim()
-
-      setRegisteredStudentName(resolvedStudentName)
-      setRegisteredStudentId(resolvedStudentId)
-      setJoinError(
-        resolvedStudentName.length === 0 || resolvedStudentId.length === 0
-          ? 'This presentation now requires entry through the waiting room.'
-          : null,
+      const storedIdentity: SyncDeckRecoveredStudentIdentity | null = resolvedStudentName.length > 0 && resolvedStudentId.length > 0
+        ? { studentName: resolvedStudentName, studentId: resolvedStudentId }
+        : null
+      // The accepted-entry cookie is authoritative and stored identity is only
+      // a cache. Reconcile on every load: a reload with a valid cookie skips
+      // the waiting room, and a standalone presentation opens no student
+      // socket that could reject a stale stored ID.
+      const reconciled = reconcileStoredSyncDeckStudentIdentity(
+        storedIdentity,
+        await lookupAcceptedSyncDeckStudentIdentity(sessionId),
       )
-
-      if (resolvedStudentName.length > 0 && resolvedStudentId.length > 0) {
-        persistSessionParticipantIdentity(
-          window.localStorage,
-          sessionId,
-          resolvedStudentName,
-          resolvedStudentId,
-        )
-
-        window.sessionStorage.setItem(`syncdeck_student_name_${sessionId}`, resolvedStudentName)
-        window.sessionStorage.setItem(`syncdeck_student_id_${sessionId}`, resolvedStudentId)
+      if (isCancelled) {
+        return
       }
+
+      if (reconciled.action === 'adopt' || (reconciled.action === 'keep' && storedIdentity)) {
+        adoptRegisteredStudentIdentity(sessionId, reconciled.action === 'adopt' ? reconciled.identity : storedIdentity!)
+        return
+      }
+      clearSyncDeckStoredStudentIdentity(sessionId, readWindowStorage('localStorage'), readWindowStorage('sessionStorage'))
+      setRegisteredStudentName('')
+      setRegisteredStudentId('')
+      setJoinError('This presentation now requires entry through the waiting room.')
     })()
 
     return () => {
       isCancelled = true
     }
-  }, [sessionId])
+  }, [adoptRegisteredStudentIdentity, sessionId])
 
   const presentationUrlError = useMemo(
     () => (presentationUrl
@@ -2366,7 +2416,7 @@ const SyncDeckStudent: FC = () => {
           && parsed.participantId === registeredStudentId
           && sessionId
         ) {
-          if (typeof window !== 'undefined') handleReturnedToWaitingRoom({ participantId: parsed.participantId, registeredStudentId, sessionId, storage: window.localStorage, sessionStorage: window.sessionStorage, redirect: window.location.assign.bind(window.location) })
+          if (typeof window !== 'undefined') handleReturnedToWaitingRoom({ participantId: parsed.participantId, registeredStudentId, sessionId, storage: readWindowStorage('localStorage'), sessionStorage: readWindowStorage('sessionStorage'), redirect: window.location.assign.bind(window.location) })
           return
         }
         if (parsed.type !== 'syncdeck-state') {
@@ -2375,15 +2425,15 @@ const SyncDeckStudent: FC = () => {
 
         const embeddedLifecyclePayload = parseEmbeddedLifecyclePayload(parsed.payload)
         if (embeddedLifecyclePayload) {
+          const embeddedHandoffStorage = readWindowStorage('sessionStorage')
           if (
             embeddedLifecyclePayload.type === 'embedded-activity-start' &&
             embeddedLifecyclePayload.activityId &&
             embeddedLifecyclePayload.entryParticipantToken &&
-            typeof window !== 'undefined' &&
-            window.sessionStorage != null
+            embeddedHandoffStorage != null
           ) {
             persistEntryParticipantToken(
-              window.sessionStorage,
+              embeddedHandoffStorage,
               buildEntryParticipantStorageKey(
                 embeddedLifecyclePayload.activityId,
                 'session',
@@ -2781,15 +2831,20 @@ const SyncDeckStudent: FC = () => {
       onClose: (event) => {
         const closeDecision = resolveSyncDeckStudentCloseDecision(event)
         if (closeDecision.clearCachedIdentity) {
+          const rejectedStudentId = registeredStudentIdRef.current || null
           if (typeof window !== 'undefined' && sessionId) {
-            window.sessionStorage.removeItem(`syncdeck_student_name_${sessionId}`)
-            window.sessionStorage.removeItem(`syncdeck_student_id_${sessionId}`)
+            // Clear localStorage too: otherwise a reload restores the rejected ID.
+            clearSyncDeckStoredStudentIdentity(sessionId, readWindowStorage('localStorage'), readWindowStorage('sessionStorage'))
           }
+          registeredStudentIdRef.current = ''
           setRegisteredStudentName('')
           setRegisteredStudentId('')
           setJoinError(closeDecision.joinError)
           setConnectionState('disconnected')
           setStatusMessage(closeDecision.statusMessage)
+          if (typeof window !== 'undefined' && sessionId) {
+            void recoverRejectedStudentIdentity(sessionId, rejectedStudentId)
+          }
           return
         }
 
@@ -3167,8 +3222,8 @@ const SyncDeckStudent: FC = () => {
       childSessionId: activeEmbeddedChildSessionId,
       studentId: registeredStudentId,
       activityId: activeEmbeddedActivityId,
-      sessionStorage: window.sessionStorage,
-      localStorage: window.localStorage,
+      sessionStorage: readWindowStorage('sessionStorage'),
+      localStorage: readWindowStorage('localStorage'),
     })
     if (!shouldRecover) {
       return
@@ -3322,7 +3377,7 @@ const SyncDeckStudent: FC = () => {
     let isCancelled = false
 
     void (async () => {
-      const { launchActivityPersistentSoloEntry } = await import('@src/activities')
+      const { getActivity, launchActivityPersistentSoloEntry } = await import('@src/activities')
 
       for (const [slideKey, overlay] of launchableEntries) {
         if (isCancelled) {
@@ -3335,69 +3390,88 @@ const SyncDeckStudent: FC = () => {
         }
 
         try {
-          const launchResult = await launchActivityPersistentSoloEntry(overlay.activityId, {
-            hash: '',
-            search: '',
-            selectedOptions,
-          })
-
-          if (isCancelled) {
-            return
-          }
-
-          if (!launchResult) {
-            setSoloOverlays((current) => {
-              const existing = current[slideKey]
-              if (
-                !existing
-                || existing.activityId !== overlay.activityId
-                || getSoloOverlaySelectedOptionsComparisonKey(existing) !== getSelectedOptionsComparisonKey(overlay.selectedOptions)
-              ) {
-                return current
-              }
-
-              return {
-                ...current,
-                [slideKey]: {
-                  activityId: overlay.activityId,
-                  notice: 'Unable to launch this solo activity.',
-                },
-              }
+          let nextSrc: string | null
+          if (getActivity(overlay.activityId)?.embeddedRuntime?.supportsSoloChild === true) {
+            // Server-owned solo child: SyncDeck creates (or reuses) the child
+            // bound to this student and returns its one-time entry handoff.
+            if (registeredStudentId.trim().length === 0) {
+              // Identity is still being resolved (for example from the entry
+              // cookie). Leave the overlay launchable; this effect re-runs when
+              // the identity arrives. A repeat start reuses the bound child.
+              continue
+            }
+            const location = parseSyncDeckSoloSlideLocation(slideKey)
+            if (!sessionId || !location || typeof window === 'undefined') {
+              throw new Error('Solo activity start is unavailable')
+            }
+            const started = await startSyncDeckSoloChild({
+              fetchImpl: fetch,
+              sessionId,
+              activityId: overlay.activityId,
+              location,
+              selectedOptions,
+              expectedStudentId: registeredStudentId,
             })
-            continue
-          }
-
-          const nextSrc = typeof launchResult.navigateTo === 'string' && launchResult.navigateTo.length > 0
-            ? launchResult.navigateTo
-            : typeof launchResult.sessionId === 'string' && launchResult.sessionId.length > 0
-              ? `/${encodeURIComponent(launchResult.sessionId)}`
-              : null
-
-          if (
-            typeof window !== 'undefined'
-            && typeof launchResult.sessionId === 'string'
-            && launchResult.sessionId.length > 0
-            && registeredStudentName.trim().length > 0
-            && registeredStudentId.trim().length > 0
-          ) {
-            const launchedSessionId = launchResult.sessionId
-            persistSessionParticipantIdentity(
-              window.localStorage,
-              launchedSessionId,
-              registeredStudentName,
-              registeredStudentId,
-            )
-            void persistWaitingRoomServerBackedHandoff({
-              storage: window.sessionStorage,
-              storageKey: buildSessionEntryParticipantStorageKey(overlay.activityId, launchedSessionId),
-              values: {
-                displayName: registeredStudentName,
-                participantId: registeredStudentId,
-              },
-              submitApiUrl: buildSessionEntryParticipantSubmitApiUrl(launchedSessionId),
-              participantContextStorage: window.localStorage,
-              sessionParticipantContextSessionId: launchedSessionId,
+            if (isCancelled) return
+            const storageKey = buildSessionEntryParticipantStorageKey(overlay.activityId, started.childSessionId)
+            // The child needs the entry token; the identity cache is optional.
+            const handoffStorage = readWindowStorage('sessionStorage')
+            if (handoffStorage) {
+              persistEntryParticipantToken(handoffStorage, storageKey, started.entryParticipantToken)
+            }
+            if (!handoffStorage || !hasValidEntryParticipantHandoffStorageValue(handoffStorage, storageKey)) {
+              throw new Error('Solo activity entry could not be saved')
+            }
+            const identityCache = readWindowStorage('localStorage')
+            if (identityCache) {
+              persistSessionParticipantIdentity(
+                identityCache,
+                started.childSessionId,
+                registeredStudentName,
+                registeredStudentId,
+              )
+            }
+            nextSrc = `/${encodeURIComponent(started.childSessionId)}`
+          } else {
+            // Other activities keep their own launcher and entry flow; SyncDeck
+            // issues no trusted handoff for a child it did not create.
+            const launchResult = await launchActivityPersistentSoloEntry(overlay.activityId, {
+              hash: '',
+              search: '',
+              selectedOptions,
             })
+
+            if (isCancelled) {
+              return
+            }
+
+            if (!launchResult) {
+              setSoloOverlays((current) => {
+                const existing = current[slideKey]
+                if (
+                  !existing
+                  || existing.activityId !== overlay.activityId
+                  || getSoloOverlaySelectedOptionsComparisonKey(existing) !== getSelectedOptionsComparisonKey(overlay.selectedOptions)
+                ) {
+                  return current
+                }
+
+                return {
+                  ...current,
+                  [slideKey]: {
+                    activityId: overlay.activityId,
+                    notice: 'Unable to launch this solo activity.',
+                  },
+                }
+              })
+              continue
+            }
+
+            nextSrc = typeof launchResult.navigateTo === 'string' && launchResult.navigateTo.length > 0
+              ? launchResult.navigateTo
+              : typeof launchResult.sessionId === 'string' && launchResult.sessionId.length > 0
+                ? `/${encodeURIComponent(launchResult.sessionId)}`
+                : null
           }
 
           setSoloOverlays((current) => {
@@ -3429,11 +3503,16 @@ const SyncDeckStudent: FC = () => {
               },
             }
           })
-        } catch {
+        } catch (error) {
           if (isCancelled) {
             return
           }
 
+          console.warn('[SyncDeck][SoloLaunchFailed]', {
+            activityId: overlay.activityId,
+            slideKey,
+            error: error instanceof Error ? error.message : String(error),
+          })
           setSoloOverlays((current) => {
             const existing = current[slideKey]
             if (
@@ -3459,7 +3538,7 @@ const SyncDeckStudent: FC = () => {
     return () => {
       isCancelled = true
     }
-  }, [soloOverlays, syncState])
+  }, [registeredStudentId, registeredStudentName, sessionId, soloOverlays, syncState])
 
   useEffect(() => {
     sendSyncContextToEmbeddedIframe()

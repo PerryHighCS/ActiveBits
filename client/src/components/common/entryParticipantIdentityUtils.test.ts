@@ -229,3 +229,26 @@ void test('resolveInitialEntryParticipantIdentity returns unsubmited live identi
     nameSubmitted: false,
   })
 })
+
+void test('persistSessionParticipantIdentity never throws when storage methods fail', () => {
+  console.info('[TEST] Expected participant identity storage failures.')
+  const warnings: string[] = []
+  const written: string[] = []
+  const throwingRead = {
+    getItem() { throw new Error('[TEST] getItem blocked') },
+    setItem(key: string) { written.push(key) },
+    removeItem() { throw new Error('[TEST] removeItem blocked') },
+  }
+  assert.doesNotThrow(() => persistSessionParticipantIdentity(throwingRead, 'session-1', 'Ada', 'participant-1', (message) => { warnings.push(message) }))
+  // The legacy name/id keys are still written after the context merge fails.
+  assert.deepEqual(written, ['student-name-session-1', 'student-id-session-1'])
+  assert.equal(warnings.length, 1)
+
+  // A malformed stored context makes the error path call removeItem, which also throws.
+  const malformed = {
+    getItem() { return '{not json' },
+    setItem() { throw new Error('[TEST] setItem blocked') },
+    removeItem() { throw new Error('[TEST] removeItem blocked') },
+  }
+  assert.doesNotThrow(() => persistSessionParticipantIdentity(malformed, 'session-1', 'Ada', 'participant-1', () => {}))
+})

@@ -2,6 +2,7 @@ import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypt
 import { isValidHttpUrl } from 'activebits-server/core/httpUrlUtils.js'
 import { createSession, type SessionRecord, type SessionStore } from 'activebits-server/core/sessions.js'
 import type { ActiveBitsWebSocket, WsRouter } from '../../../types/websocket.js'
+import type { SyncDeckParentWriter } from './parentWrites.js'
 
 const INTEGRATION_PREFIX = '/api/integrations/learn/v1'
 const BROWSER_PREFIX = '/integrations/learn'
@@ -81,6 +82,8 @@ interface SubstituteInstructorLinkPayload {
 export interface LearnSyncDeckRouteOptions {
   app: RouteApp
   sessions: SessionStore
+  /** Owns every SyncDeck parent write; see parentWrites.ts. */
+  parentWriter: SyncDeckParentWriter
   ws: WsRouter
   createInstructorSession(presentationUrl: string): Promise<{ sessionId: string; instructorRecoveryToken: string }>
   writeInstructorRecoveryCookie(req: RouteRequest, res: RouteResponse, sessionId: string, token: string): void
@@ -383,22 +386,22 @@ function resolveActiveEntryTtlMs(sessions: SessionStore): number {
 // ordinary websocket keepalive activity on the session (see `linkedSessionId` handling in
 // server/core/sessions.ts) also refreshes the entry, instead of the entry's lifetime depending
 // solely on Learn re-polling `status`/`start` while the class may already be underway.
-async function linkLiveSessionToEntry(sessions: SessionStore, sessionId: string, entryMappingId: string): Promise<void> {
-  const liveSession = await sessions.get(sessionId)
-  if (!liveSession) return
-  liveSession.data = { ...liveSession.data, linkedSessionId: entryMappingId }
-  await sessions.set(sessionId, liveSession)
+async function linkLiveSessionToEntry(parentWriter: SyncDeckParentWriter, sessionId: string, entryMappingId: string): Promise<void> {
+  await parentWriter.update(sessionId, (liveSession) => {
+    liveSession.data = { ...liveSession.data, linkedSessionId: entryMappingId }
+  })
 }
 
 // Clear the link only when it still belongs to this entry. A stopped or rolled-back
 // session can retain open sockets, so it must not refresh a later mapping with the same id.
-async function unlinkLiveSessionFromEntry(sessions: SessionStore, sessionId: string, entryMappingId: string): Promise<void> {
-  const liveSession = await sessions.get(sessionId)
-  if (!liveSession || liveSession.data.linkedSessionId !== entryMappingId) return
-  const { linkedSessionId: _linkedSessionId, ...data } = liveSession.data
-  void _linkedSessionId
-  liveSession.data = data
-  await sessions.set(sessionId, liveSession)
+async function unlinkLiveSessionFromEntry(parentWriter: SyncDeckParentWriter, sessionId: string, entryMappingId: string): Promise<void> {
+  await parentWriter.update(sessionId, (liveSession) => {
+    if (liveSession.data.linkedSessionId !== entryMappingId) return false
+    const { linkedSessionId: _linkedSessionId, ...data } = liveSession.data
+    void _linkedSessionId
+    liveSession.data = data
+    return true
+  })
 }
 
 function cookieValue(secret: string, mapping: string): string {
@@ -531,7 +534,7 @@ function requireSyncDeckActivity(activityId: string | undefined, res: RouteRespo
 }
 
 export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions): void {
-  const { sessions, ws } = options
+  const { sessions, parentWriter, ws } = options
   const withCoordinationErrorHandling = (
     route: string,
     handler: (req: RouteRequest, res: RouteResponse) => void | Promise<void>,
@@ -750,7 +753,7 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
           }
           const created = await options.createInstructorSession(presentationUrl)
           sessionId = created.sessionId
-          await linkLiveSessionToEntry(sessions, sessionId, id)
+          await linkLiveSessionToEntry(parentWriter, sessionId, id)
           const nextData: LearnEntryData = {
             learnIntegrationKind: 'entry',
             activityId: ACTIVITY_ID,
@@ -767,7 +770,7 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
           logLearnLifecycle(auth.key.secret, 'learn-instructor-session-started', provider, resourceLinkId, id, sessionId, { requestId, reused: false })
         } catch {
           try {
-            if (sessionId) await unlinkLiveSessionFromEntry(sessions, sessionId, id)
+            if (sessionId) await unlinkLiveSessionFromEntry(parentWriter, sessionId, id)
           } catch {
             logLearnLifecycleError(auth.key.secret, 'learn-instructor-session-unlink-failed', provider, resourceLinkId, id, sessionId, requestId, 'unlink-failed')
           }
@@ -829,11 +832,11 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
       return void res.json({ state: 'inactive', alreadyInactive: true })
     }
     const sessionId = entry.data.activeSessionId
-    await unlinkLiveSessionFromEntry(sessions, sessionId, id)
-    const activeSession = await sessions.get(sessionId)
-    if (activeSession) {
+    await unlinkLiveSessionFromEntry(parentWriter, sessionId, id)
+    const stoppedSession = await parentWriter.update(sessionId, (activeSession) => {
       activeSession.data.learnIntegrationStoppedAt = Date.now()
-      await sessions.set(sessionId, activeSession)
+    })
+    if (stoppedSession) {
       await sessions.publishBroadcast?.('session-ended', { sessionId })
     }
     await sessions.delete(id)
@@ -912,12 +915,12 @@ export function registerLearnSyncDeckRoutes(options: LearnSyncDeckRouteOptions):
           const created = await options.createInstructorSession(link.presentationUrl)
           sessionId = created.sessionId
           recoveryToken = created.instructorRecoveryToken
-          await linkLiveSessionToEntry(sessions, sessionId, id)
+          await linkLiveSessionToEntry(parentWriter, sessionId, id)
           entry.session.data = { learnIntegrationKind: 'entry', activityId: ACTIVITY_ID, provider: link.provider, resourceLinkId: link.resourceLinkId, state: 'active', startRequestId: `substitute:${link.jti}`, activeSessionId: sessionId, presentationUrl: link.presentationUrl, expiresAt: Date.now() + resolveActiveEntryTtlMs(sessions) }
           await sessions.set(id, entry.session)
         } catch {
           try {
-            if (sessionId) await unlinkLiveSessionFromEntry(sessions, sessionId, id)
+            if (sessionId) await unlinkLiveSessionFromEntry(parentWriter, sessionId, id)
           } catch {
             logLearnSubstituteLifecycleError(key.secret, 'learn-substitute-link-unlink-failed', link.provider, link.resourceLinkId, id, sessionId, 'unlink-failed')
           }

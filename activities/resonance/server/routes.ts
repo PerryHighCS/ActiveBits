@@ -1177,7 +1177,8 @@ function normalizeSessionData(data: unknown): ResonanceSessionData {
     // without going through /create, so ensure a stable instructor passcode exists
     // before the child manager bootstrap is generated.
     instructorPasscode: normalizeInstructorPasscode(source.instructorPasscode) ?? generatePasscode(),
-    ...(source.selfPacedMode === true ? { selfPacedMode: true } : {}),
+    // A SyncDeck solo child has no instructor, so it always runs self-paced.
+    ...(source.selfPacedMode === true || normalizedEmbeddedLaunch?.mode === 'solo' ? { selfPacedMode: true } : {}),
     ...(normalizedEmbeddedLaunch ? { embeddedLaunch: normalizedEmbeddedLaunch } : {}),
     presentationMode,
     stagedRun,

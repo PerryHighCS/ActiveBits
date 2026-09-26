@@ -1,5 +1,96 @@
 # Shared Activity Runtime and Authentication Plan
 
+## Near-term delivery sequence (2026-09-24)
+
+This sequence coordinates [#352](https://github.com/PerryHighCS/ActiveBits/issues/352), [#383](https://github.com/PerryHighCS/ActiveBits/issues/383), [#344](https://github.com/PerryHighCS/ActiveBits/issues/344), and [#353](https://github.com/PerryHighCS/ActiveBits/issues/353). Keep each phase independently reviewable. [#313](https://github.com/PerryHighCS/ActiveBits/issues/313) owns the broader atomic session-write migration and follows as a separate workstream; shared entry and lifecycle writes touched here must still use its safe mutation contract.
+
+**Current delivery state:** [PR #387](https://github.com/PerryHighCS/ActiveBits/pull/387) contains the three implemented Phase A slices. It passed CI and was marked ready for review on 2026-09-24; it has not merged. CodeRabbit's first review identified two solo-entry gaps: the standalone roster gap is fixed in #387, and parent binding for solo children ([#388](https://github.com/PerryHighCS/ActiveBits/issues/388)) is fixed by #389, merged into #387's branch on 2026-09-26. The only related residual deferred is the delete-vs-in-flight-write race, tracked in #313. Phase A is still under review. The original Phases 0–8 farther down are the long-range design/audit checklist; this near-term sequence is the current delivery tracker.
+
+### Contract and observed failure
+
+**Owner:** The shared entry and principal layer decides whether a session-scoped student may enter an activity; the activity owns its student record and private state. **Invariant:** A public waiting-room request cannot claim an arbitrary participant ID. An accepted, registered student with a valid server-issued principal can reload into the same student ID. An explicit fresh join in a shared browser can create a different student. A consumed one-time handoff cannot issue a second capability. **Failure behavior:** Missing, expired, wrong-session, or revoked authority returns to normal waiting-room acceptance or a controlled authorization error; it never silently adopts a local-storage ID or an old browser user's capability.
+
+The #383 browser report had a deterministic path: Resonance registration revokes `acceptedEntryParticipants[studentId]` after issuing an activity participant capability. Previously, `GET /api/session/:id/entry` checked only the revoked accepted-entry token, so it omitted `participantAuthenticated` and the router showed the waiting room. The subsequent join minted a new ID. PR #387 recognizes a valid registered capability at `/entry`, covers the saved-draft reload in Chromium, removes #352's public supplied-ID trust, and requires parent-cookie proof for SyncDeck child tokens and student transport. #313 races remain possible.
+
+### Phase A: Secure student entry and restore reload identity (#352, #383)
+
+- [x] Restore `/entry` recognition of a valid registered participant capability and prove Resonance's saved-draft reload retains its student ID (#383 first slice).
+- [x] Make public live/persistent stores mint IDs, and use parent-cookie-authorized SyncDeck embedded and solo child handoffs for identity continuity (#352 slice).
+- [x] Move SyncDeck's remaining student WebSocket admission and student-ID HTTP routes to the accepted-entry principal contract; WebSocket join, embedded context, and auto-activation now require cookie authority and reject mismatched ID hints.
+- [x] Update `ARCHITECTURE.md`, `.agent/knowledge/data-contracts.md`, and `.agent/knowledge/security-notes.md` for the delivered student-entry behavior.
+- [x] Restore solo child handoff for an accepted standalone SyncDeck student who has no WebSocket roster record; derive the ID from the accepted-entry token and test that path. `solo-activity/start` (which replaced `solo-activity/entry` in #389) uses `resolveAcceptedSyncDeckEntryIdentity`, which takes the ID and fallback name from the accepted-entry record and uses the roster only for the display name. It re-checks that identity under the parent lock. Removal revokes the parent accepted entry, so a removed student is still denied.
+- [x] Require proof that a solo child belongs to the requesting SyncDeck parent before issuing its trusted entry token; reject an unrelated existing session ID. Design below; implemented in PR #389 for [#388](https://github.com/PerryHighCS/ActiveBits/issues/388), merged into #387's branch 2026-09-26 (a86c788c); #388 closed.
+  - [x] Add `embeddedRuntime.supportsSoloChild` to the activity config contract; set it for Resonance and Video Sync.
+  - [x] Extend the embedded launch payload with `mode: 'solo'`; update `skills/syncdeck/references/ACTIVITY_PAYLOADS.md`.
+  - [x] Resonance: treat a solo launch as `selfPacedMode`.
+  - [x] Video Sync: apply `sourceUrl` and `standaloneMode` from a solo launch's selected options when the child has no video yet.
+  - [x] Add `POST /api/syncdeck/:sessionId/solo-activity/start` (creates or reuses the bound child and returns the handoff); remove `solo-activity/entry`.
+  - [x] Delete a student's bindings, and revoke their solo-child entries, when the instructor returns them to the waiting room.
+  - [x] Switch `SyncDeckStudent` to the start route for activities that declare `supportsSoloChild`; other activities keep their client launcher with no trusted handoff.
+  - [x] Route and normalizer tests (see invariant), plus a browser smoke test for a standalone solo launch and reload (`activities/syncdeck/playwright/solo-child.spec.ts`). The browser test caught a native-`fetch` receiver bug the unit fakes missed.
+  - [ ] After PR #387 merges and PR #389 (which carries the `skills/syncdeck/references/ACTIVITY_PAYLOADS.md` solo-launch update) lands on `main`, publish the skill change upstream per AGENTS.md rules 13–14 and `skills/README.md`. From an up-to-date `main`, create a sync branch, then run `git subtree push --prefix=skills/syncdeck syncdeck-agent-skills main`. Confirm the upstream `references/ACTIVITY_PAYLOADS.md` shows the "Student Solo Child Launch" section.
+- [ ] Resolve CodeRabbit's first review (roster finding fixed in #387; parent-binding finding fixed by #389, merged into #387), complete review, and merge PR #387; close #352 and #383 only after the merged behavior is verified.
+- [ ] Record the proof accepted by standalone, persistent, and SyncDeck embedded entry, including the parent-roster and session-incarnation checks for child handoffs. Keep the rule in the shared principal layer.
+- [ ] Complete the accepted-entry-to-registered transition matrix: explicit new entry in a shared browser must supersede stale authority without replaying a consumed handoff; cookie loss, expiry, and wrong-session proof must reach a controlled entry path.
+- [ ] Reconcile route and browser coverage against that matrix, including the existing Resonance draft/reload test and an additional activity's reload path. Put any demonstrated gap in a focused follow-up rather than widening PR #387 during review.
+
+**Exit gate:** A valid registered student reloads under the same server-authorized ID; a new or unauthorized visitor cannot claim that ID; SyncDeck embedded identity continuity still works.
+
+#### Solo child binding (#388)
+
+**Approach:** SyncDeck's server creates the solo child by reusing `createEmbeddedChildSession`. The child is a `CHILD:<parent>:<id>:<activity>` session whose `embeddedLaunch` carries `mode: 'solo'`. That gives parent keepalive, protection from direct `DELETE`, and the `/embedded-launch` bootstrap for free. Solo children never enter the class-wide `embeddedActivities` map, are never broadcast, and never get an embedded manager entry token, so no one gets manager authority over them through SyncDeck.
+
+**Owner:** SyncDeck's server routes own the binding. The parent session record holds `soloChildren[childSessionId] = { studentId, activityId, instanceKey, optionsKey, createdAt }`, written only by `solo-activity/start` in the same locked operation that creates the child. Each activity owns how it interprets `mode: 'solo'`; the shared layer owns only the `embeddedRuntime.supportsSoloChild` declaration.
+
+**Invariant:**
+- A trusted solo-child entry token is issued only by `solo-activity/start`, only to the student S resolved from the parent's accepted-entry cookie, and only for a child that the same call created or found bound to S. No route accepts a client-supplied child ID as proof of ownership.
+- A binding is reused when S, the generated `instanceKey` (activity and slide), and `optionsKey` (hash of the sanitized selected options) all match and the child still exists; otherwise a new child and binding are created. Relaunching the same slide therefore keeps the student's work.
+- Bindings are capped per student and per session (oldest other binding evicted; the new binding is never evicted, regardless of `createdAt`, so clock skew cannot evict the child being returned); a binding whose child is missing is removed when found. An evicted child session is deleted, because once unbound it can no longer be revoked; deleting the parent also deletes its solo children.
+- Parent writes: every write or delete of a `syncdeck` session record goes through `activities/syncdeck/server/parentWrites.ts`. Writers either call `parentWriter.update(id, mutate)` (lock, fresh read, apply, write) or do their child-session work inside `parentWriter.runExclusive(id, ...)` and read the parent there. This covers creation, solo and embedded start/end, return-to-waiting-room, deletion, configure, the student WebSocket join (which re-checks the accepted entry under the lock), instructor WebSocket state updates, and Learn link/unlink/stop. SyncDeck's routes receive a guarded store that throws `SyncDeckParentWriteOutsideLockError` for any `syncdeck` set/delete outside that parent's lock (tracked per async context), so a new unlocked writer fails its tests instead of racing. The lock itself is the shared `server/core/sessionWriteLock.ts`, which the shared `entry-participant`/`consume` routes, the generic `DELETE /api/session/:id`, and persistent manager-capability issuance also take, so platform writers of the parent serialize with SyncDeck's. The lock is in-process; cross-instance safety is #313's, by moving these writers onto `updateAtomic`.
+- Return-to-waiting-room deletes the student's solo children (not just revokes them), recording originals for rollback so a failed return restores them with their bindings. Eviction deletes evicted children before committing. If any eviction delete fails, the start fails with 503: the new binding is withdrawn and its child deleted, each failed child keeps its binding (revocable, retried by a later eviction or the parent-delete cascade), and the successful evictions are committed. The caps are therefore hard limits.
+- Only activities that declare `supportsSoloChild` can be started this way. Nested SyncDeck and MobCode keep their client launchers and receive no trusted handoff; their own entry flow applies.
+
+**Root-cause note (PR #389, rule 16):** Three review rounds each found another SyncDeck parent writer that read the parent, awaited other work, and wrote the whole record back, dropping solo bindings or restoring revoked entries. The cause was structural: about ten writers across `routes.ts` and `learnIntegration.ts` wrote the parent directly, with no single owner, so each fix covered one writer at a time. The fix moved every parent write behind one owned path with a runtime guard (above), and replaced ordering-dependent test fixtures that used `syncdeck`-typed embedded children. A fourth round found shared platform routes (entry-participant, consume, persistent capability issuance) writing the same record outside that path, so the lock moved to `server/core/sessionWriteLock.ts` and those routes take it too.
+
+**Failure behavior:** If any step after `solo-activity/start` creates a child fails (child unreadable, parent gone, or a write throws), the route deletes that child before responding; a binding committed before the failure is dropped on the next start when its child is missing. No accepted-entry cookie, or one that has been revoked, returns 403 with no write to parent or child. An unsupported or unknown activity, or missing location, returns 400/404 with no child created. The client shows the existing "Unable to launch this solo activity" notice and never falls back to an unauthenticated handoff. When the instructor returns a student to the waiting room, their bindings are deleted and their entries in bound children are revoked alongside the parent revocation.
+
+**Known residual, deferred to #313 (decided 2026-09-25):** A child delete (return-to-waiting-room, eviction, parent-delete cascade, or a failed-start cleanup) is not authoritative against an in-flight write to that child. Child activity writers such as Resonance's handlers read a detached snapshot, await, then call a plain `sessions.set()`, and they don't take SyncDeck's lock. A write that read before the delete can recreate the child after its binding and parent entry are gone, keeping the student's child participant capability. The recreated child is outside the parent's cascade, and the student can't re-enter it through the parent (no accepted entry, no binding). However, a valid child capability cookie still authenticates to the child until that session expires. Root cause: `SessionStore.set()` is unconditional, so any stale-snapshot write can undo any delete. This applies to every session type, not just solo children. The fix belongs to #313: once a type's writers move to `updateAtomic` (CAS bound to the session incarnation), a write whose record was deleted fails instead of recreating it. An interim option considered and deferred: a store-level delete marker that refuses a `set()` for a deleted `(id, created)` incarnation.
+
+**Why not the Phase B creator capability:** It would prove who created a session, but solo children would still be created by per-activity client launchers with no parent context. Reusing the embedded creator gives SyncDeck a server-owned creation path now. Reconsider if Phase B's capability ends up covering child sessions.
+
+### Phase B: Establish the temporary manager contract (#344)
+
+- [ ] Reconcile #344's old stacked-on-#342 delivery note with the current branch/PR state; implement this as a focused successor rather than depending on the unmerged audit branch.
+- [ ] Define and apply a generic temporary-session creator capability at creation, verified for manager REST and WebSocket access. Preserve zero-prompt instructor startup, cookie-backed reload, and the existing verified persistent and embedded manager adapters. Never place instructor passcodes or manager credentials in browser storage.
+- [ ] Prove the contract on one representative activity, using Java Format's existing capability work where appropriate. Pair its manager-route migration with Phase C before treating the activity as fully protected.
+- [ ] Test forged `role=manager`, absent/expired/wrong-session cookie, shared-browser student/manager tabs, persistent and embedded recovery, and browser reload for the pilot.
+
+**Exit gate:** The shared contract and one pilot derive manager REST and WebSocket authority from the same server-verifiable principal. Its shared End Session path remains an explicit Phase C gate.
+
+### Phase C: Protect shared session termination (#353)
+
+- [ ] Extend the shared HTTP principal contract to `DELETE /api/session/:sessionId` and any equivalent end-session path, with an activity-agnostic policy declaration. Gate each migrated activity's End Session with the same manager principal as its other manager routes. Avoid a one-off Java Format branch or a blanket change that breaks unmigrated activities.
+- [ ] Check the session type and incarnation inside the authorized termination boundary, and ensure denial has no delete or broadcast side effect.
+- [ ] Add route and browser tests for authorized end, known-ID unauthenticated delete, student cookie, wrong-session manager cookie, expired manager cookie, and embedded parent-controlled end. Document the lifecycle authorization rule.
+
+**Exit gate:** A known session ID alone cannot end the pilot activity; the legitimate manager and parent-owned embedded lifecycle still work. Apply this gate with each subsequent manager migration.
+
+### Phase D: Roll out manager protection in reviewable slices (#344, #353)
+
+- [ ] Complete or verify Python List, Binary Breach, Java String, Java Format, and Traveling Salesman against the Phase B manager contract; keep activity-specific domain commands inside each activity.
+- [ ] For each activity, protect manager REST, manager WebSocket, and shared End Session in the same slice. Include temporary, persistent, embedded, and reload paths that activity supports.
+- [ ] Add the Phase B/C authorization matrix and browser smoke coverage for each slice before marking that activity complete.
+
+**Exit gate:** Every activity named in #344 has consistent manager authority across its control surfaces, including session termination.
+
+### Phase E: Complete atomic session-write migration (#313)
+
+- [ ] Use #313's writer inventory to migrate complete session-type writer sets, including the shared entry/consume and lifecycle routes changed above. Do not mix plain `set()` and atomic writers for one session type.
+- [ ] Verify overlapping entry, registration, manager, and end-session operations against the chosen in-memory and Valkey stores. Preserve session-incarnation, TTL, and cache behavior.
+- [ ] Make deletes authoritative: a writer whose snapshot predates a delete must not recreate the session. This covers SyncDeck child deletes (solo children, embedded cascade) against Resonance and other child writers; see "Known residual" under Solo child binding.
+
+**Exit gate:** The identity and authorization guarantees from Phases A–D survive concurrent writers and scale-out; #313 retains the detailed project-wide checklist.
+
 ## Status
 
 - [x] Recognize the repository-wide architecture problem exposed by issue #341 and PR #342.
@@ -267,7 +358,7 @@ Do not begin with all activities at once.
 
 - [ ] Use Video Sync or MobCode to prove persistent/embedded adapters without replacing their domain protocols prematurely.
 
-#### Current Slice C branch: `feat/persistent-manager-capability-adapter` (Video Sync)
+#### Historical Slice C branch: `feat/persistent-manager-capability-adapter` (Video Sync)
 
 - [x] Select Video Sync because its persistent-teacher and SyncDeck-parent recovery paths are already server-verified and its manager surface is narrower than MobCode's private-workspace model.
 - [x] Audit the existing adapter: verified persistent/parent authority currently reaches the manager by returning `instructorPasscode` from `GET /api/video-sync/:sessionId/instructor-passcode`.
@@ -409,4 +500,5 @@ For every migration:
 
 - [x] Complete Phase 1 as a read-only audit before implementing issue #344.
 - [x] Review the completed matrix and extract the versioned principal, capability, projection, and transport threat model before implementation begins.
-- [ ] Review the contract for cookie-record layout and temporary-manager browser-restart behavior, then open the first shared-primitives implementation PR.
+- [x] Open the first shared-primitives implementation PR and record its pilot results in the Phase 6 checklist above.
+- [ ] Complete review and merge PR #387's Phase A issue fixes. Merge requires the standalone roster finding to be fixed (done in #387). The solo child parent-binding gap ([#388](https://github.com/PerryHighCS/ActiveBits/issues/388)) is fixed by #389, merged into #387's branch; the delete-vs-in-flight-write residual is tracked in #313. Reconcile the remaining Phase A contract matrix before starting the #344/#353 manager and termination pilot on a fresh branch.

@@ -1,0 +1,94 @@
+import type { SessionRecord, SessionStore } from 'activebits-server/core/sessions.js'
+import { holdsSessionWriteLock, runSessionWriteExclusive } from 'activebits-server/core/sessionWriteLock.js'
+
+/**
+ * The single owned mutation path for SyncDeck parent session records.
+ *
+ * Every writer of a `syncdeck` session record must hold that parent's write
+ * lock and read the record inside it, so one writer can never write back a
+ * snapshot that another writer has since changed (for example dropping a solo
+ * child binding or restoring a revoked accepted entry). `guardSyncDeckParentWrites`
+ * enforces this: a set/delete of a `syncdeck` record outside the lock throws.
+ *
+ * The lock is the shared per-session write lock (`server/core/sessionWriteLock.ts`),
+ * so shared platform writers of the same record (entry-participant, consume,
+ * persistent capability issuance) serialize with SyncDeck's. It is in-process
+ * only; cross-instance safety needs the writer set moved to `updateAtomic` (#313).
+ * See "Solo child binding" in `.agent/plans/shared-activity-runtime-authentication.md`.
+ */
+export const SYNCDECK_SESSION_TYPE = 'syncdeck'
+
+export class SyncDeckParentWriteOutsideLockError extends Error {
+  constructor(operation: 'set' | 'delete', sessionId: string) {
+    super(`SyncDeck parent ${operation} for ${sessionId} must run inside its parent write lock`)
+    this.name = 'SyncDeckParentWriteOutsideLockError'
+  }
+}
+
+export interface SyncDeckParentWriter {
+  /** Runs `work` while holding the parent's write lock. Not reentrant for the same parent. */
+  runExclusive<T>(sessionId: string, work: () => Promise<T>): Promise<T>
+  /**
+   * Takes the lock, reads the current parent, applies `mutate` to a copy, and
+   * writes it unless `mutate` returns `false` (then the stored record is returned
+   * unchanged). Returns the parent, or null if it is missing.
+   */
+  update(sessionId: string, mutate: (session: SessionRecord) => boolean | void | Promise<boolean | void>): Promise<SessionRecord | null>
+  /** Whether the current async context holds this parent's write lock. */
+  holds(sessionId: string): boolean
+}
+
+export function createSyncDeckParentWriter(sessions: Pick<SessionStore, 'get' | 'set'>): SyncDeckParentWriter {
+  const holds = holdsSessionWriteLock
+  const runExclusive = runSessionWriteExclusive
+
+  const update: SyncDeckParentWriter['update'] = async (sessionId, mutate) => runExclusive(sessionId, async () => {
+    const current = await sessions.get(sessionId)
+    if (!current || current.type !== SYNCDECK_SESSION_TYPE) {
+      return null
+    }
+    // Stores return their live record (in-memory map or read cache). Mutate a
+    // copy so a skipped (`false`) or failed write leaves shared state untouched.
+    const session = structuredClone(current)
+    if (await mutate(session) === false) {
+      return current
+    }
+    await sessions.set(sessionId, session)
+    return session
+  })
+
+  return { runExclusive, update, holds }
+}
+
+/**
+ * Wraps the session store handed to SyncDeck's routes so any write or delete
+ * of a `syncdeck` record outside its parent write lock fails loudly instead of
+ * racing. Child sessions and Learn entry records are unaffected.
+ */
+export function guardSyncDeckParentWrites<TStore extends SessionStore>(sessions: TStore, writer: SyncDeckParentWriter): TStore {
+  return new Proxy(sessions, {
+    get(target, property, receiver) {
+      if (property === 'set') {
+        return async (id: string, session: SessionRecord, ...rest: unknown[]) => {
+          if (session?.type === SYNCDECK_SESSION_TYPE && !writer.holds(id)) {
+            throw new SyncDeckParentWriteOutsideLockError('set', id)
+          }
+          return (target.set as (...args: unknown[]) => Promise<void>).call(target, id, session, ...rest)
+        }
+      }
+      if (property === 'delete') {
+        return async (id: string) => {
+          if (!writer.holds(id)) {
+            const existing = await target.get(id)
+            if (existing?.type === SYNCDECK_SESSION_TYPE) {
+              throw new SyncDeckParentWriteOutsideLockError('delete', id)
+            }
+          }
+          return target.delete(id)
+        }
+      }
+      const value = Reflect.get(target, property, receiver) as unknown
+      return typeof value === 'function' ? (value as (...args: unknown[]) => unknown).bind(target) : value
+    },
+  })
+}

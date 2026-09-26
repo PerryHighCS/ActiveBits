@@ -2,7 +2,16 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { initializeActivityRegistry } from './activities/activityRegistry.js'
 import { EMBEDDED_CHILD_SESSION_PREFIX, setupSessionRoutes, type SessionRecord } from './core/sessions.js'
-import { resolveAcceptedEntryParticipantToken } from './core/acceptedEntryParticipants.js'
+import {
+  acceptEntryParticipant,
+  getSessionParticipantCookieName,
+  issueAcceptedEntryParticipantToken,
+  revokeAcceptedEntryParticipant,
+  resolveAcceptedEntryParticipantToken,
+} from './core/acceptedEntryParticipants.js'
+import { getActivityCapabilityCookieName, issueActivityCapability } from './core/activityCapabilities.js'
+import { runSessionWriteExclusive } from './core/sessionWriteLock.js'
+import { initializePersistentStorage } from './core/persistentSessions.js'
 
 interface MockResponse {
   statusCode: number
@@ -141,6 +150,58 @@ void test('session entry route returns render-ui for activities with waiting-roo
     entryOutcome: 'join-live',
     presentationMode: 'render-ui',
   })
+})
+
+void test('session entry recognizes a registered participant after its one-time handoff is revoked', async () => {
+  await initializeActivityRegistry()
+  const session = createSessionRecord('resonance-reload', 'resonance')
+  acceptEntryParticipant(session, { participantId: 'student-1', displayName: 'Ada' })
+  const acceptedToken = issueAcceptedEntryParticipantToken(session, 'student-1')
+  const capability = issueActivityCapability(session, 'participant', 'student-1')
+  assert.ok(acceptedToken)
+  const acceptedCookieName = getSessionParticipantCookieName(session.id)
+  const capabilityCookieName = getActivityCapabilityCookieName('participant', session.id)
+  const otherSession = createSessionRecord('different-session', 'resonance')
+  const sessions = {
+    get: async (id: string) => id === session.id ? session : id === otherSession.id ? otherSession : null,
+    set: async () => {},
+    delete: async () => true,
+    touch: async () => true,
+    getAll: async () => [],
+    getAllIds: async () => [],
+    cleanup: () => {},
+    close: async () => {},
+  }
+  const app = createMockApp()
+  setupSessionRoutes(app as unknown as Parameters<typeof setupSessionRoutes>[0], sessions)
+  const entry = getRoute(app, 'get', '/api/session/:sessionId/entry')
+
+  const cases = [
+    { label: 'accepted handoff', cookies: { [acceptedCookieName]: acceptedToken }, authenticated: true },
+    { label: 'registered capability', cookies: { [capabilityCookieName]: capability.token }, authenticated: true },
+    { label: 'forged capability', cookies: { [capabilityCookieName]: 'forged' }, authenticated: false },
+    { label: 'no cookie', cookies: {}, authenticated: false },
+  ]
+  for (const candidate of cases) {
+    const response = createMockResponse()
+    await entry({ params: { sessionId: session.id }, cookies: candidate.cookies }, response)
+    assert.equal(response.jsonBody?.participantAuthenticated === true, candidate.authenticated, candidate.label)
+  }
+
+  revokeAcceptedEntryParticipant(session, 'student-1')
+  const revokedResponse = createMockResponse()
+  await entry({
+    params: { sessionId: session.id },
+    cookies: { [acceptedCookieName]: acceptedToken, [capabilityCookieName]: capability.token },
+  }, revokedResponse)
+  assert.equal(revokedResponse.jsonBody?.participantAuthenticated, true)
+
+  const wrongSessionResponse = createMockResponse()
+  await entry({
+    params: { sessionId: otherSession.id },
+    cookies: { [capabilityCookieName]: capability.token },
+  }, wrongSessionResponse)
+  assert.equal(wrongSessionResponse.jsonBody?.participantAuthenticated, undefined)
 })
 
 void test('session entry route returns pass-through for activities without waiting-room fields', async () => {
@@ -345,6 +406,7 @@ void test('session entry participant routes store and consume waiting-room value
     body: {
       values: {
         displayName: 'Ada',
+        participantId: 'victim-id',
         ignored: () => 'x',
       },
     },
@@ -358,6 +420,7 @@ void test('session entry participant routes store and consume waiting-room value
     ? (storeRes.jsonBody?.values as Record<string, unknown>).participantId as string
     : null
   assert.equal(typeof participantId, 'string')
+  assert.notEqual(participantId, 'victim-id')
   assert.deepEqual(
     storeRes.jsonBody?.values,
     {
@@ -528,4 +591,127 @@ void test('session entry participant consume route returns 404 for missing sessi
 
   assert.equal(res.statusCode, 404)
   assert.deepEqual(res.jsonBody, { error: 'invalid session' })
+})
+
+void test('shared entry-participant and consume writes wait for the session write lock and keep concurrent changes', async () => {
+  await initializeActivityRegistry()
+  const records = new Map<string, SessionRecord>([['locked-session', createSessionRecord('locked-session', 'syncdeck')]])
+  const sessions = {
+    get: async (id: string) => {
+      const record = records.get(id)
+      return record ? structuredClone(record) : null
+    },
+    set: async (id: string, session: SessionRecord) => {
+      records.set(id, structuredClone(session))
+    },
+    delete: async () => true,
+    touch: async () => true,
+    getAll: async () => [],
+    getAllIds: async () => [],
+    cleanup: () => {},
+    close: async () => {},
+  }
+  const app = createMockApp()
+  setupSessionRoutes(app as unknown as Parameters<typeof setupSessionRoutes>[0], sessions)
+
+  // Another writer (for example SyncDeck's parent writer) holds the lock and
+  // commits a change; the shared routes must read after it, not before.
+  let release!: () => void
+  const released = new Promise<void>((resolve) => { release = resolve })
+  let signalHeld!: () => void
+  const held = new Promise<void>((resolve) => { signalHeld = resolve })
+  const holder = runSessionWriteExclusive('locked-session', async () => {
+    signalHeld()
+    await released
+    const current = records.get('locked-session')!
+    records.set('locked-session', { ...current, data: { ...current.data, concurrentChange: true } })
+  })
+  await held
+
+  const storeRes = createMockResponse()
+  const storing = getRoute(app, 'post', '/api/session/:sessionId/entry-participant')({
+    params: { sessionId: 'locked-session' },
+    body: { values: { displayName: 'Ada' } },
+  }, storeRes)
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.equal(storeRes.jsonBody, null)
+  release()
+  await holder
+  await storing
+  assert.equal(storeRes.statusCode, 200)
+  assert.equal(records.get('locked-session')?.data.concurrentChange, true)
+
+  let releaseAgain!: () => void
+  const releasedAgain = new Promise<void>((resolve) => { releaseAgain = resolve })
+  let signalHeldAgain!: () => void
+  const heldAgain = new Promise<void>((resolve) => { signalHeldAgain = resolve })
+  const holderAgain = runSessionWriteExclusive('locked-session', async () => {
+    signalHeldAgain()
+    await releasedAgain
+    const current = records.get('locked-session')!
+    records.set('locked-session', { ...current, data: { ...current.data, secondConcurrentChange: true } })
+  })
+  await heldAgain
+  const consumeRes = createMockResponse()
+  const consuming = getRoute(app, 'post', '/api/session/:sessionId/entry-participant/consume')({
+    params: { sessionId: 'locked-session' },
+    body: { token: (storeRes.jsonBody as unknown as { entryParticipantToken: string }).entryParticipantToken },
+  }, consumeRes)
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.equal(consumeRes.jsonBody, null)
+  releaseAgain()
+  await holderAgain
+  await consuming
+  assert.equal(consumeRes.statusCode, 200)
+  assert.equal(records.get('locked-session')?.data.concurrentChange, true)
+  assert.equal(records.get('locked-session')?.data.secondConcurrentChange, true)
+})
+
+void test('generic session delete waits for the session write lock so a writer cannot recreate the session', async () => {
+  await initializeActivityRegistry()
+  // The delete route resets any persistent link for the session.
+  initializePersistentStorage(null)
+  const records = new Map<string, SessionRecord>([['delete-locked', createSessionRecord('delete-locked', 'syncdeck')]])
+  const sessions = {
+    get: async (id: string) => {
+      const record = records.get(id)
+      return record ? structuredClone(record) : null
+    },
+    set: async (id: string, session: SessionRecord) => {
+      records.set(id, structuredClone(session))
+    },
+    delete: async (id: string) => records.delete(id),
+    touch: async () => true,
+    getAll: async () => [],
+    getAllIds: async () => [],
+    cleanup: () => {},
+    close: async () => {},
+  }
+  const app = createMockApp()
+  setupSessionRoutes(app as unknown as Parameters<typeof setupSessionRoutes>[0], sessions)
+
+  // A writer (for example a SyncDeck solo start) read the session and will
+  // write it back after other awaited work.
+  let release!: () => void
+  const released = new Promise<void>((resolve) => { release = resolve })
+  let signalHeld!: () => void
+  const held = new Promise<void>((resolve) => { signalHeld = resolve })
+  const writer = runSessionWriteExclusive('delete-locked', async () => {
+    const current = await sessions.get('delete-locked')
+    signalHeld()
+    await released
+    await sessions.set('delete-locked', { ...current!, data: { ...current!.data, writerChange: true } })
+  })
+  await held
+
+  const res = createMockResponse()
+  const deleting = getRoute(app, 'delete', '/api/session/:sessionId')({ params: { sessionId: 'delete-locked' } }, res)
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.equal(res.jsonBody, null)
+  release()
+  await writer
+  await deleting
+
+  assert.deepEqual(res.jsonBody, { success: true, deleted: 'delete-locked' })
+  assert.equal(records.has('delete-locked'), false)
 })

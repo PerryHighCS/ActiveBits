@@ -50,10 +50,26 @@ export function storeEntryParticipant(
   container: EntryParticipantContainer,
   values: unknown,
 ): { token: string; values: EntryParticipantValues } {
+  return storeEntryParticipantWithId(container, values, generateParticipantId())
+}
+
+/** For server-authorized parent-to-child handoffs. Public callers must use storeEntryParticipant. */
+export function storeTrustedEntryParticipant(
+  container: EntryParticipantContainer,
+  values: unknown,
+  participantId: string,
+): { token: string; values: EntryParticipantValues } {
+  const normalizedId = participantId.trim()
+  if (!normalizedId) throw new Error('trusted participant id is required')
+  return storeEntryParticipantWithId(container, values, normalizedId)
+}
+
+function storeEntryParticipantWithId(
+  container: EntryParticipantContainer,
+  values: unknown,
+  participantId: string,
+): { token: string; values: EntryParticipantValues } {
   const normalizedValues = normalizeEntryParticipantValues(values)
-  const participantId = typeof normalizedValues.participantId === 'string' && normalizedValues.participantId.trim().length > 0
-    ? normalizedValues.participantId.trim()
-    : generateParticipantId()
   const token = generateEntryParticipantToken()
 
   container.entryParticipants ??= {}

@@ -4,6 +4,7 @@ import test from 'node:test'
 import type { SessionRecord, SessionStore } from 'activebits-server/core/sessions.js'
 import type { ActiveBitsWebSocket, WsRouter } from '../../../types/websocket.js'
 import { buildLearnHmacCanonicalRequest, identityFingerprint, identityFingerprints, mappingId, registerLearnSyncDeckRoutes } from './learnIntegration.js'
+import { createSyncDeckParentWriter } from './parentWrites.js'
 
 interface MockResponse {
   statusCode: number
@@ -121,12 +122,14 @@ void test('Learn waiting-room handoff retains local cookie attributes outside pr
   try {
     const getHandlers = new Map<string, RouteHandler>()
     const postHandlers = new Map<string, RouteHandler>()
+    const learnStore = store([])
     registerLearnSyncDeckRoutes({
       app: {
         get(path, handler) { getHandlers.set(path, handler) },
         post(path, handler) { postHandlers.set(path, handler) },
       },
-      sessions: store([]),
+      sessions: learnStore,
+      parentWriter: createSyncDeckParentWriter(learnStore),
       ws: { wss: { clients: new Set<ActiveBitsWebSocket>(), close() {} }, register() {} },
       async createInstructorSession() { throw new Error('not used by the waiting-room handoff test') },
       writeInstructorRecoveryCookie() {},
@@ -209,6 +212,7 @@ void test('Learn routes transition a one-time waiting-room entry into an active 
         post(path, handler) { postHandlers.set(path, handler) },
       },
       sessions,
+      parentWriter: createSyncDeckParentWriter(sessions),
       ws,
       async createInstructorSession() {
         instructorSessionCreateCount += 1

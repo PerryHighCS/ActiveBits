@@ -99,9 +99,13 @@ Before increasing the instance count:
 3. Ensure every instance uses the same `PERSISTENT_SESSION_SECRET` and relevant
    Learn integration secrets.
 4. Monitor Key Value connection use and memory as instances are added.
-5. Resonance does not currently have a safe concurrent-writer deployment. Do not
-   scale it beyond one app instance; one instance only bounds cross-instance races.
-   Its session writes must support safe concurrent operation before scale-out.
+5. Resonance and SyncDeck do not currently have a safe concurrent-writer
+   deployment. Do not scale beyond one app instance while either activity is in
+   use; one instance only bounds cross-instance races. SyncDeck's parent-session
+   writers are serialized by an in-process lock that does not coordinate across
+   instances. Both activities' session writes must support safe concurrent
+   operation ([#313](https://github.com/PerryHighCS/ActiveBits/issues/313)) before
+   scale-out.
 
 See [Atomic Session Mutation](ARCHITECTURE.md#atomic-session-mutation) for the
 session coordination model and compatibility requirements.

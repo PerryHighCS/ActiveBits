@@ -11,6 +11,10 @@ const resonanceConfig: ActivityConfig = {
     supportsPermalink: true,
     showOnHome: false,
   },
+  embeddedRuntime: {
+    // SyncDeck solo overlays create this activity as a student-owned child.
+    supportsSoloChild: true,
+  },
   deepLinkOptions: {
     // q: encrypted question set; h: activity-specific decryption/AAD hash
     // Both are internal and managed by the custom link builder — not shown in generic UI.

@@ -13,7 +13,7 @@ function createSession(): SessionRecord {
   }
 }
 
-void test('storeSessionEntryParticipant filters unsupported values and normalizes participantId', () => {
+void test('storeSessionEntryParticipant filters unsupported values and replaces a supplied participantId', () => {
   const session = createSession()
 
   const { token, values } = storeSessionEntryParticipant(session, {
@@ -24,9 +24,11 @@ void test('storeSessionEntryParticipant filters unsupported values and normalize
   })
 
   assert.match(token, /^[a-f0-9]{16}$/)
+  assert.match(String(values.participantId), /^[a-f0-9]{16}$/)
+  assert.notEqual(values.participantId, 'participant-1')
   assert.deepEqual(values, {
     displayName: 'Ada',
-    participantId: 'participant-1',
+    participantId: values.participantId,
     nested: { team: 'red' },
   })
 })

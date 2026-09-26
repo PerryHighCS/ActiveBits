@@ -23,7 +23,9 @@ import {
   issueAcceptedEntryParticipantToken,
   resolveAcceptedEntryParticipantToken,
 } from './acceptedEntryParticipants.js'
+import { resolveActivityPrincipalFromCookies } from './activityCapabilities.js'
 import { consumeSessionDataToken } from './sessionTokenUtils.js'
+import { runSessionWriteExclusive } from './sessionWriteLock.js'
 
 export interface SessionRecord extends SharedSession<Record<string, unknown>> {
   [key: string]: unknown
@@ -679,10 +681,15 @@ export function setupSessionRoutes(app: {
 
     const activityName = typeof session.type === 'string' ? session.type : ''
     const waitingRoomFieldCount = activityName ? getActivityWaitingRoomFieldCount(activityName) : 0
-    const participantAuthenticated = Boolean(resolveAcceptedEntryParticipantToken(
-      session,
-      req.cookies?.[getSessionParticipantCookieName(sessionId)],
-    ))
+    // The accepted-entry cookie is a one-time registration handoff. Activities
+    // that issue a participant capability may revoke it after registration;
+    // that registered principal must still be able to reload the live session.
+    const participantAuthenticated = Boolean(
+      resolveAcceptedEntryParticipantToken(
+        session,
+        req.cookies?.[getSessionParticipantCookieName(sessionId)],
+      ) || resolveActivityPrincipalFromCookies(session, sessionId, 'participant', req.cookies),
+    )
     const payload = {
       ...buildSessionEntryStatus({
         sessionId,
@@ -740,95 +747,111 @@ export function setupSessionRoutes(app: {
   app.post('/api/session/:sessionId/entry-participant', async (req, res) => {
     setNoStore(res)
     const { sessionId } = req.params
-    const session = await sessions.get(sessionId)
-    if (!session) {
-      res.status(404).json({ error: 'invalid session' })
-      return
-    }
-
-    try {
-      const body = req.body != null && typeof req.body === 'object' ? (req.body as Record<string, unknown>) : {}
-      const { token, values } = storeSessionEntryParticipant(session, body.values)
-      await sessions.set(sessionId, session)
-      res.json({ entryParticipantToken: token, values })
-    } catch (error) {
-      if (error instanceof SessionEntryParticipantStoreError) {
-        res.status(error.statusCode).json({ error: error.message })
+    // Read-modify-write under the shared per-session write lock so this
+    // write cannot overwrite a concurrent activity-owned mutation.
+    await runSessionWriteExclusive(sessionId, async () => {
+      // Copy the store's live record so a failed write leaves it untouched.
+      const storedSession = await sessions.get(sessionId)
+      const session = storedSession ? structuredClone(storedSession) : null
+      if (!session) {
+        res.status(404).json({ error: 'invalid session' })
         return
       }
-      console.error('Error storing session entry participant:', { sessionId, error })
-      res.status(500).json({ error: 'internal server error' })
-    }
+
+      try {
+        const body = req.body != null && typeof req.body === 'object' ? (req.body as Record<string, unknown>) : {}
+        const { token, values } = storeSessionEntryParticipant(session, body.values)
+        await sessions.set(sessionId, session)
+        res.json({ entryParticipantToken: token, values })
+      } catch (error) {
+        if (error instanceof SessionEntryParticipantStoreError) {
+          res.status(error.statusCode).json({ error: error.message })
+          return
+        }
+        console.error('Error storing session entry participant:', { sessionId, error })
+        res.status(500).json({ error: 'internal server error' })
+      }
+    })
   })
 
   app.post('/api/session/:sessionId/entry-participant/consume', async (req, res) => {
     setNoStore(res)
     const { sessionId } = req.params as { sessionId: string }
-    const session = await sessions.get(sessionId)
-    if (!session) {
-      res.status(404).json({ error: 'invalid session' })
-      return
-    }
-
-    try {
-      const body = req.body != null && typeof req.body === 'object' ? (req.body as Record<string, unknown>) : {}
-      const token = typeof body.token === 'string' ? body.token : ''
-      const values = consumeSessionEntryParticipant(session, token)
-      if (!values) {
-        res.status(404).json({ error: 'entry participant not found' })
+    // Read-modify-write under the shared per-session write lock so this
+    // write cannot overwrite a concurrent activity-owned mutation.
+    await runSessionWriteExclusive(sessionId, async () => {
+      // Copy the store's live record so a failed write leaves it untouched.
+      const storedSession = await sessions.get(sessionId)
+      const session = storedSession ? structuredClone(storedSession) : null
+      if (!session) {
+        res.status(404).json({ error: 'invalid session' })
         return
       }
 
-      const acceptedParticipant = acceptEntryParticipant(session, values)
-      const participantToken = acceptedParticipant
-        ? issueAcceptedEntryParticipantToken(session, acceptedParticipant.participantId)
-        : null
-      await sessions.set(sessionId, session)
-      if (participantToken) {
-        res.cookie?.(getSessionParticipantCookieName(sessionId), participantToken, {
-          httpOnly: true,
-          sameSite: 'lax',
-          secure: process.env.NODE_ENV === 'production',
-          path: '/',
-        })
+      try {
+        const body = req.body != null && typeof req.body === 'object' ? (req.body as Record<string, unknown>) : {}
+        const token = typeof body.token === 'string' ? body.token : ''
+        const values = consumeSessionEntryParticipant(session, token)
+        if (!values) {
+          res.status(404).json({ error: 'entry participant not found' })
+          return
+        }
+
+        const acceptedParticipant = acceptEntryParticipant(session, values)
+        const participantToken = acceptedParticipant
+          ? issueAcceptedEntryParticipantToken(session, acceptedParticipant.participantId)
+          : null
+        await sessions.set(sessionId, session)
+        if (participantToken) {
+          res.cookie?.(getSessionParticipantCookieName(sessionId), participantToken, {
+            httpOnly: true,
+            sameSite: 'lax',
+            secure: process.env.NODE_ENV === 'production',
+            path: '/',
+          })
+        }
+        res.json({ values })
+      } catch (error) {
+        console.error('Error consuming session entry participant:', { sessionId, error })
+        res.status(500).json({ error: 'internal server error' })
       }
-      res.json({ values })
-    } catch (error) {
-      console.error('Error consuming session entry participant:', { sessionId, error })
-      res.status(500).json({ error: 'internal server error' })
-    }
+    })
   })
 
   app.delete('/api/session/:sessionId', async (req, res) => {
     const { sessionId } = req.params
-    const session = await sessions.get(sessionId)
-    if (!session) {
-      res.status(404).json({ error: 'invalid session' })
-      return
-    }
+    // Read and delete under the shared per-session write lock, so a writer
+    // that read the session earlier cannot recreate it after this delete.
+    await runSessionWriteExclusive(sessionId, async () => {
+      const session = await sessions.get(sessionId)
+      if (!session) {
+        res.status(404).json({ error: 'invalid session' })
+        return
+      }
 
-    if (sessionId.startsWith(EMBEDDED_CHILD_SESSION_PREFIX)) {
-      res.status(403).json({ error: 'embedded child sessions must be ended by the parent session' })
-      return
-    }
+      if (sessionId.startsWith(EMBEDDED_CHILD_SESSION_PREFIX)) {
+        res.status(403).json({ error: 'embedded child sessions must be ended by the parent session' })
+        return
+      }
 
-    if (sessions.publishBroadcast) {
-      await sessions.publishBroadcast('session-ended', { sessionId })
-    } else if (wss) {
-      for (const client of wss.clients) {
-        if (typeof client.sessionId !== 'undefined' && client.sessionId === sessionId && client.readyState === 1) {
-          client.send(JSON.stringify({ type: 'session-ended' }))
+      if (sessions.publishBroadcast) {
+        await sessions.publishBroadcast('session-ended', { sessionId })
+      } else if (wss) {
+        for (const client of wss.clients) {
+          if (typeof client.sessionId !== 'undefined' && client.sessionId === sessionId && client.readyState === 1) {
+            client.send(JSON.stringify({ type: 'session-ended' }))
+          }
         }
       }
-    }
 
-    const hash = await findHashBySessionId(sessionId)
-    if (hash) {
-      await resetPersistentSession(hash)
-    }
+      const hash = await findHashBySessionId(sessionId)
+      if (hash) {
+        await resetPersistentSession(hash)
+      }
 
-    await sessions.delete(sessionId)
-    res.json({ success: true, deleted: sessionId })
+      await sessions.delete(sessionId)
+      res.json({ success: true, deleted: sessionId })
+    })
   })
 }
 

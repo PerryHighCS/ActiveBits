@@ -1,5 +1,29 @@
 # Data Contracts
 
+## Registered participant reload at shared entry
+
+- Date: 2026-09-24
+- Area: shared live-session entry | Resonance student recovery
+- Contract: `GET /api/session/:id/entry` reports `participantAuthenticated: true` for either a valid accepted-entry cookie or a valid session-scoped registered participant capability. Resonance consumes and revokes its accepted-entry record during registration; the registered capability remains the server authority for reloading the same student ID. Browser-stored student IDs are hints and cannot grant activity access.
+- Validation: `server/sessionEntryRoutes.test.ts`; `activities/resonance/playwright/auth.spec.ts` (saved draft survives a real-browser reload).
+- Follow-up: #313 must protect concurrent whole-session writers.
+
+## Public and SyncDeck child participant IDs
+
+- Date: 2026-09-24
+- Area: waiting-room entry | SyncDeck embedded and solo child sessions
+- Contract: Public live and persistent entry stores always mint an ID; request `participantId` is ignored. The separate trusted store function accepts an explicit ID only after the SyncDeck parent session's accepted-entry cookie resolves to an accepted student (embedded routes also require a current roster record). Embedded WS delivery and recovery HTTP routes require this parent proof before issuing a child-scoped token. `POST /api/syncdeck/:sessionId/solo-activity/start` (`{ activityId, location: { h, v }, activityOptions }` → `{ childSessionId, entryParticipantToken, values }`) replaces the former `solo-activity/entry` route. It derives the student ID (and fallback display name) from the parent's accepted-entry record, not the request body, without requiring a roster record; accepts only activities whose config sets `embeddedRuntime.supportsSoloChild`; rejects launch options that the activity's registered solo validator refuses (`registerSoloLaunchOptionsValidator` in `server/core/soloLaunchValidation.ts`; Video Sync requires a playable `sourceUrl`) with `400 { error: 'invalid solo activity options' }` before creating anything; creates the child through `createEmbeddedChildSession` with `embeddedLaunch.mode: 'solo'`; and records `soloChildren[childSessionId] = { studentId, activityId, instanceKey, optionsKey, createdAt }` on the parent (capped per student and per session). A repeat launch with the same student, slide, and options reuses the child. Resonance maps `mode: 'solo'` to `selfPacedMode`; Video Sync applies `selectedOptions.sourceUrl` and `standaloneMode`. Returning a student to the waiting room deletes their solo children and bindings (restored on a failed return). Evicted children and, on parent delete, all solo children are deleted; the new binding is never the one evicted, and if an eviction delete fails the start returns 503 and discards its new child so the caps always hold. All SyncDeck parent writes (HTTP routes, both WebSocket paths, Learn) go through `parentWrites.ts`, which guards against unlocked `syncdeck` writes and uses the shared per-session lock (`server/core/sessionWriteLock.ts`) that shared entry-participant/consume, the generic session delete, and persistent capability issuance also take; solo start commits only its binding change onto a fresh parent read. A solo start that fails after creating its child deletes that child. Owner/invariant: "Solo child binding" in `.agent/plans/shared-activity-runtime-authentication.md`.
+- Validation: `server/entryParticipants.test.ts`; `server/sessionEntryRoutes.test.ts`; `server/persistentSessionRoutes.test.ts`; `server/sessionWriteLock.test.ts`; `activities/syncdeck/server/routes.test.ts`; `activities/syncdeck/server/soloChildren.test.ts`; `activities/syncdeck/server/parentWrites.test.ts`; `activities/syncdeck/client/student/soloChildLaunch.test.ts`; `activities/syncdeck/playwright/solo-child.spec.ts`; `activities/syncdeck/playwright/student-return.spec.ts`.
+- Follow-up: #313 must make the shared entry and child-token writes safe against concurrent whole-session writers.
+
+## SyncDeck student transport authority
+
+- Date: 2026-09-24
+- Area: SyncDeck student WebSocket | embedded-context | embedded auto-activation
+- Contract: The parent accepted-entry cookie resolves the student ID at WebSocket admission, including first roster registration. A client `studentId` may confirm that identity but cannot choose another roster student. Embedded-context and auto-activation require the same cookie plus a matching ID hint. Missing, wrong-session, or mismatched proof fails before student state is replayed or child state is mutated. WebSocket 1008 `forbidden` (and `missing studentId` / `unregistered student`) tells the student client to clear every stored identity for the session (sessionStorage and localStorage, via `clearSyncDeckStoredStudentIdentity`) and recover from `GET /api/syncdeck/:sessionId/student-identity` → `{ studentId, displayName }` (403 without a valid accepted-entry cookie, `no-store`). The client adopts that identity unless it equals the ID just rejected (`resolveRecoveredSyncDeckStudentIdentity`), so recovery cannot loop; on every load the client also reconciles any stored identity with the same lookup (`reconcileStoredSyncDeckStudentIdentity`): the cookie's student is adopted, a 403 clears the stored identity, and an unknown answer (network/server error) keeps it. This matters because a reload with a valid cookie skips the waiting room, and a standalone presentation opens no student socket that could reject a stale stored ID. Browser storage is only a cache; the cookie is authoritative.
+- Validation: `activities/syncdeck/server/routes.test.ts`; `activities/syncdeck/client/student/reconnectUtils.test.ts`; `activities/syncdeck/playwright/student-return.spec.ts`.
+- Follow-up: #313 must make SyncDeck roster/session writes atomic alongside shared entry writes.
+
 ## MobCode live-session defaults
 
 - Date: 2026-08-19

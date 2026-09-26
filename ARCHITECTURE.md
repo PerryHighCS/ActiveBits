@@ -83,6 +83,31 @@ session.
 5. Student is shown the appropriate activity component
 6. Student interacts with the activity
 
+The live-session `/entry` response recognizes either a valid accepted-entry
+cookie or a session-scoped registered participant capability. An activity may
+consume and revoke the accepted-entry token when it registers the student; its
+registered capability then carries the same student's authority across a page
+reload. Local browser storage is only an identity hint for the activity client,
+not proof of student authority. Public live and persistent waiting-room store
+routes always mint the participant ID, even when the request includes one.
+SyncDeck carries a parent student's ID into an embedded or solo child only
+after validating the parent's accepted-entry cookie; the child receives a
+scoped, one-time handoff token. Embedded children also require the student in
+the parent's roster. Solo children do not, because standalone students never
+open the SyncDeck WebSocket and so have no roster record; the ID and fallback
+name come from the accepted-entry record (`resolveAcceptedSyncDeckEntryIdentity`).
+SyncDeck creates solo children itself (`POST /api/syncdeck/:sessionId/solo-activity/start`)
+for activities that declare `embeddedRuntime.supportsSoloChild`, records each one
+in the parent's `soloChildren` binding, and issues a handoff only for a child
+bound to the requesting student; no route accepts a client-supplied child ID
+as proof of ownership. Other activities keep their own solo launcher and entry
+flow without a SyncDeck handoff.
+SyncDeck student WebSocket admission resolves that same cookie before joining
+or replaying state. Its embedded-context and auto-activation HTTP routes also
+require the cookie and reject a student ID that differs from its subject.
+An invalid or missing cookie closes the student socket with a rejoin-required
+policy error; the client clears its cached ID and returns to name entry.
+
 For live MobCode sessions, the instructor workspace remains `groups.default`. Newly initialized sessions broadcast instructor changes by default unless they begin with Try it enabled. When the instructor enables Try it, MobCode creates one private, server-backed workspace per accepted waiting-room participant from an explicit starter snapshot. The instructor controls whether their code is broadcast live or students keep the last published version. Student responses are participant-scoped and never include peer names or files; instructors may inspect named workspaces and publish one anonymous shared copy that they can edit and broadcast to the class in real time.
 
 ### Session Lifecycle
@@ -124,6 +149,25 @@ current counter, always ahead of any captured token. A result that raced
 behind a newer commit, a stalled read of an incarnation that was since recreated,
 or a strict read that completes after a `delete` therefore cannot roll `get()`
 back - or resurrect a deleted session - for the cache TTL.
+
+Within one process, `server/core/sessionWriteLock.ts` provides an
+activity-agnostic per-session write lock (`runSessionWriteExclusive`), with
+ownership tracked per async context. Writers that read a session, may await other
+work, and write it back take it: the shared `entry-participant` and `consume`
+routes, the generic `DELETE /api/session/:id`, persistent manager-capability
+issuance, and SyncDeck's parent writer. Ownership is cleared when the lock is
+released, including for async work the holder started but did not await.
+It does not coordinate across instances.
+
+SyncDeck has not migrated to `updateAtomic`. Instead, every write or delete of a
+SyncDeck parent session record inside SyncDeck goes through one owned path,
+`activities/syncdeck/server/parentWrites.ts`, built on that shared lock:
+writers hold it and read the parent inside it (`update` applies a change to a
+fresh read). SyncDeck's routes and Learn integration receive a guarded store
+that rejects any `syncdeck` set/delete outside that parent's lock. Other
+instances neither see the lock nor bypass their 30-second read cache, so
+multi-instance safety for SyncDeck depends on moving these writers onto
+`updateAtomic` (#313).
 
 Video Sync additionally carries a monotonic `playbackRevision` in its public
 playback state. Clients order state frames by that revision before considering
@@ -715,9 +759,8 @@ and `.agent/knowledge/activity-runtime-threat-model.md` for the full contract.
   server-issued **accepted-entry** token (`server/core/acceptedEntryParticipants.ts`),
   also hashed at rest, in `activebits_participant_<base64url(sessionId)>`.
   Participant identity is normally minted server-side by the waiting-room store.
-  (A request-supplied `participantId` is still honored there for SyncDeck's
-  embedded-activity handoff; hardening that into a trusted-only path is tracked
-  for the Slice C adapter work.)
+  SyncDeck's child handoff uses a separate trusted store path after verifying
+  the parent's accepted-entry cookie (plus the roster for embedded children).
 - **Activities own**: domain state, projections, and handlers, invoked only
   after the platform has resolved a principal.
 - **Java Format Practice** is the first migrated activity (Slice A): `POST

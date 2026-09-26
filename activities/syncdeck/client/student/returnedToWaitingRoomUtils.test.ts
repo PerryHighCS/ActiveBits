@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { handleReturnedToWaitingRoom } from './returnedToWaitingRoomUtils'
+import { clearSyncDeckStoredStudentIdentity, handleReturnedToWaitingRoom } from './returnedToWaitingRoomUtils'
 
 void test('handleReturnedToWaitingRoom clears identity and redirects only the targeted student', () => {
   const removed: string[] = []; const sessionRemoved: string[] = []; let destination = ''
@@ -12,4 +12,29 @@ void test('handleReturnedToWaitingRoom clears identity and redirects only the ta
   const before = [...removed, ...sessionRemoved]
   assert.equal(handleReturnedToWaitingRoom({ participantId: 'lin', registeredStudentId: 'ada', sessionId: 's1', storage, sessionStorage, redirect: () => {} }), false)
   assert.deepEqual([...removed, ...sessionRemoved], before)
+})
+
+void test('clearSyncDeckStoredStudentIdentity removes every stored identity key from both storages', () => {
+  const removed: string[] = []; const sessionRemoved: string[] = []
+  clearSyncDeckStoredStudentIdentity('s1', { removeItem(key: string) { removed.push(key) } }, { removeItem(key: string) { sessionRemoved.push(key) } })
+  assert.deepEqual(removed.sort(), [
+    'session-participant:s1', 'student-id-s1', 'student-name-s1', 'syncdeck_student_id_s1', 'syncdeck_student_name_s1',
+  ])
+  assert.deepEqual(sessionRemoved.sort(), ['session-participant:s1', 'syncdeck_student_id_s1', 'syncdeck_student_name_s1'])
+})
+
+void test('clearSyncDeckStoredStudentIdentity is best effort when storage is missing or a key fails', () => {
+  console.info('[TEST] Expected stored identity clear failures.')
+  const removed: string[] = []
+  const failing = { removeItem(key: string) { if (key === 'student-id-s1') throw new Error('[TEST] storage blocked'); removed.push(key) } }
+  assert.doesNotThrow(() => clearSyncDeckStoredStudentIdentity('s1', failing, null))
+  // Every other key is still removed after one fails.
+  assert.deepEqual(removed.sort(), ['session-participant:s1', 'student-name-s1', 'syncdeck_student_id_s1', 'syncdeck_student_name_s1'])
+  assert.doesNotThrow(() => clearSyncDeckStoredStudentIdentity('s1', null, null))
+})
+
+void test('handleReturnedToWaitingRoom still redirects when browser storage is unavailable', () => {
+  let destination = ''
+  assert.equal(handleReturnedToWaitingRoom({ participantId: 'ada', registeredStudentId: 'ada', sessionId: 's1', storage: null, sessionStorage: null, redirect: (url) => { destination = url } }), true)
+  assert.equal(destination, '/s1')
 })

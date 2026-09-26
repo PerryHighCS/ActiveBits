@@ -11,7 +11,7 @@ import { computePersistentLinkUrlHash } from 'activebits-server/core/persistentL
 import { getActivityCapabilityCookieName, issueActivityCapability } from 'activebits-server/core/activityCapabilities.js'
 import type { SessionRecord } from 'activebits-server/core/sessions.js'
 import type { WsRouter } from '../../../types/websocket.js'
-import setupVideoSyncRoutes, { persistentCookieEntryHasTeacherCodeCandidate } from './routes.js'
+import setupVideoSyncRoutes, { applyVideoSyncSoloLaunch, persistentCookieEntryHasTeacherCodeCandidate, validateVideoSyncSoloLaunchOptions } from './routes.js'
 
 const defaultManagerCookiesBySessionId = new Map<string, Record<string, string>>()
 
@@ -5117,4 +5117,72 @@ void test('event route clamps load-failure telemetry.error fields before persist
   assert.equal(telemetry.error.code, 'C'.repeat(64))
   assert.equal(telemetry.error.message, 'M'.repeat(256))
   assert.equal(telemetry.sync.lastCorrectionResult, 'failed')
+})
+
+function createSoloVideoSyncData(overrides: { mode?: string; sourceUrl?: unknown; videoId?: string; standaloneMode?: boolean } = {}) {
+  return {
+    standaloneMode: overrides.standaloneMode ?? false,
+    state: {
+      provider: 'youtube' as const,
+      playerHost: 'www.youtube.com' as never,
+      videoId: overrides.videoId ?? '',
+      startSec: 0,
+      stopSec: null,
+      positionSec: 0,
+      isPlaying: false,
+      playbackRate: 1 as const,
+      updatedBy: 'system' as const,
+      controllerId: null,
+      playbackRevision: 0,
+      serverTimestampMs: 0,
+    },
+    embeddedLaunch: {
+      parentSessionId: 's1',
+      instanceKey: 'video-sync:1:0',
+      ...(overrides.mode ? { mode: overrides.mode } : {}),
+      selectedOptions: { sourceUrl: overrides.sourceUrl ?? 'https://youtu.be/dQw4w9WgXcQ?t=7' },
+    },
+  }
+}
+
+void test('applyVideoSyncSoloLaunch configures an unconfigured solo child and forces standalone mode', () => {
+  const data = createSoloVideoSyncData({ mode: 'solo' })
+  assert.equal(applyVideoSyncSoloLaunch(data, 1234), true)
+  assert.equal(data.standaloneMode, true)
+  assert.equal(data.state.videoId, 'dQw4w9WgXcQ')
+  assert.equal(data.state.startSec, 7)
+  assert.equal(data.state.positionSec, 7)
+  assert.equal(data.state.playbackRevision, 1)
+  assert.equal(data.state.serverTimestampMs, 1234)
+  assert.equal(applyVideoSyncSoloLaunch(data, 5678), false)
+})
+
+void test('applyVideoSyncSoloLaunch leaves non-solo, configured, and invalid-source children unconfigured', () => {
+  const embedded = createSoloVideoSyncData()
+  assert.equal(applyVideoSyncSoloLaunch(embedded, 1), false)
+  assert.equal(embedded.standaloneMode, false)
+  assert.equal(embedded.state.videoId, '')
+
+  const configured = createSoloVideoSyncData({ mode: 'solo', videoId: 'existingVid1', standaloneMode: true })
+  assert.equal(applyVideoSyncSoloLaunch(configured, 1), false)
+  assert.equal(configured.state.videoId, 'existingVid1')
+
+  const invalid = createSoloVideoSyncData({ mode: 'solo', sourceUrl: 'https://example.com/not-youtube' })
+  assert.equal(applyVideoSyncSoloLaunch(invalid, 1), true)
+  assert.equal(invalid.standaloneMode, true)
+  assert.equal(invalid.state.videoId, '')
+
+  const missing = createSoloVideoSyncData({ mode: 'solo', sourceUrl: 42 })
+  applyVideoSyncSoloLaunch(missing, 1)
+  assert.equal(missing.state.videoId, '')
+})
+
+void test('validateVideoSyncSoloLaunchOptions requires a playable source', () => {
+  assert.deepEqual(validateVideoSyncSoloLaunchOptions({ sourceUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ' }), { ok: true })
+  assert.deepEqual(validateVideoSyncSoloLaunchOptions({ sourceUrl: ' https://youtu.be/dQw4w9WgXcQ?t=5 ' }), { ok: true })
+  assert.equal(validateVideoSyncSoloLaunchOptions({}).ok, false)
+  assert.equal(validateVideoSyncSoloLaunchOptions({ sourceUrl: '   ' }).ok, false)
+  assert.equal(validateVideoSyncSoloLaunchOptions({ sourceUrl: 42 }).ok, false)
+  assert.equal(validateVideoSyncSoloLaunchOptions({ sourceUrl: 'https://example.com/not-a-video' }).ok, false)
+  assert.equal(validateVideoSyncSoloLaunchOptions({ sourceUrl: 'not a url' }).ok, false)
 })

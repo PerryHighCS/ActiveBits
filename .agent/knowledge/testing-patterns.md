@@ -15,6 +15,15 @@ Capture reusable test setup patterns, common failure modes, and reliability guid
 
 ## Entries
 
+- Date: 2026-09-24
+- Scope: e2e | cookie-gated WebSocket | WebKit
+- Pattern: When Playwright runs the production server on local HTTP, a response's `Secure` cookie may not be sent by WebKit on `ws://`. For a browser test that needs the issued token, assert the consume response succeeded, read its `Set-Cookie` pair in the test runner, and install that same token with `context.addCookies` as a local, httpOnly, non-Secure cookie. Do not fabricate a token or weaken production cookie options.
+- Why it helps: Chromium's local Secure-cookie behavior can mask a WebKit failure that looks like rejected student admission.
+- Example (file/path): `activities/syncdeck/playwright/student-return.spec.ts`
+- Failure signal: The WebSocket closes with `missing-accepted-entry` while the test expected a connected student.
+- Follow-up action: Use this fixture only for local HTTP tests; real HTTPS deployment should retain Secure cookies.
+- Owner: Codex
+
 - Date: 2026-08-20
 - Scope: CI | GitHub Actions matrix
 - Pattern: Put a fixed-name gate job after a dynamically generated matrix job. Run it with `if: ${{ always() }}`, depend on the matrix job with `needs`, and fail unless `needs.<matrix-job>.result` is `success`. Configure the fixed gate name—not individual generated matrix checks—as the required GitHub status check.
@@ -456,3 +465,13 @@ Capture reusable test setup patterns, common failure modes, and reliability guid
 - Pattern: `activities/video-sync/server/routes.ts` keeps process-level maps/sets keyed by session id (`subscribersBySession`, `heartbeatTimers`, and now `migratedLegacyUnsyncedScopes`). A route test that shares a session id such as `s1` with earlier tests can observe state one of those tests left behind - e.g. a "once per process" guard that another test already tripped. When a new test depends on a *first-time* transition for an id, give it a dedicated id (`legacy-unsync-scope-move`) rather than `s1`.
 - Pattern: `createMockVideoSyncValkeyStore().client.eval` dispatches on `script.includes('video-sync-unsynced-<op>')` and asserts `numKeys`. A new multi-key Lua (the `video-sync-unsynced-merge` scope fold takes 2 keys) needs its own branch handled *before* the shared `assert.equal(numKeys, 1)`.
 - Evidence: `activities/video-sync/server/routes.test.ts` ("legacy session unsynced markers survive the scope move once created is persisted", "websocket initial snapshot failure unsubscribes the socket instead of leaving it in the broadcast set").
+- Date: 2026-09-25
+- Scope: unit | e2e | injected fetch
+- Pattern: When a helper takes an injected `fetchImpl`, call it without a receiver (`const fetchImpl = params.fetchImpl; await fetchImpl(...)`). Calling `params.fetchImpl(...)` binds `this` to the params object, and the browser's native `fetch` throws `TypeError: Illegal invocation`. Plain async-function fakes never notice. Add a unit test whose fake records `this`, and keep a browser test on the real path.
+- Evidence: `activities/syncdeck/client/student/soloChildLaunch.ts` and its test ("calls fetch without binding it to the params object"); caught by `activities/syncdeck/playwright/solo-child.spec.ts`.
+- Pattern: To drive SyncDeck student behavior in Playwright without a real reveal.js deck, `page.route` the configured presentation URL to a stub HTML page that repeatedly posts `reveal-sync` `ready`/`state` (with `payload.indices`) and `activityRequest` messages to `window.parent`. The student listener checks only `event.source`, so the stub needs no origin setup.
+- Evidence: `activities/syncdeck/playwright/solo-child.spec.ts`.
+- Date: 2026-09-25
+- Scope: unit | session store semantics
+- Pattern: Production `SessionStore.get()` returns the store's live record (the in-memory map entry, or the Valkey read cache entry), not a copy. Code that mutates a fetched record and then fails or skips `set()` leaves the uncommitted change visible to other readers. Copy before mutating (`structuredClone`). Test mocks that clone on `get()` hide this bug, so cover abandon/failure paths against the real in-memory store (`createSessionStore(null)`).
+- Evidence: `activities/syncdeck/server/parentWrites.test.ts` ("update never exposes an abandoned or failed mutation..."); `activities/syncdeck/server/routes.test.ts` ("a failed solo start leaves no binding in a store that returns live records").

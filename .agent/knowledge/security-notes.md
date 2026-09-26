@@ -15,6 +15,34 @@ Track security-relevant boundaries, risks, and mitigation decisions.
 
 ## Notes
 
+- Date: 2026-09-24
+- Area: shared live-session entry after activity registration
+- Threat or risk: Resonance revoked its one-time accepted-entry token after issuing a participant capability, but shared `/entry` checked only the revoked token. Reloading therefore returned a valid student to the waiting room and a new join orphaned work under a new ID.
+- Control or mitigation: Shared `/entry` also recognizes a valid session-scoped participant capability. The browser's stored student ID remains a hint; the capability is verified against the session record before bypassing the waiting room.
+- Revocation: Because that capability now authenticates `/entry`, it must end with the platform identity it was issued for. When SyncDeck returns a student to the waiting room, it revokes the student's accepted entry and pending handoffs in each embedded child and also calls `revokeActivityCapabilitiesForSubject(child, 'participant', studentId)` (`server/core/activityCapabilities.ts`). Otherwise a removed student could reload the child and resume the old identity. Any parent flow that removes a participant must revoke the child activity's principals for that subject in the same way.
+- Residual risk: The public supplied-ID path was closed in the subsequent #352 slice. Shared session-write races remain tracked in #313.
+- Validation (test/review/path): `server/sessionEntryRoutes.test.ts`; `activities/resonance/playwright/auth.spec.ts`.
+- Follow-up action: Complete #352 and the rest of Phase A in `.agent/plans/shared-activity-runtime-authentication.md`.
+- Owner: Codex
+
+- Date: 2026-09-24
+- Area: public waiting-room entry and SyncDeck child handoff
+- Threat or risk: Public entry stores previously accepted `participantId` from the request, allowing a caller to claim and rotate another student's accepted-entry identity. SyncDeck needed parent-to-child continuity, including standalone solo overlays, so simply minting every ID would break that flow.
+- Control or mitigation: Public stores now always mint IDs. A separate trusted store preserves an ID only for a SyncDeck child handoff authorized by the parent accepted-entry cookie; embedded handoffs also require the current roster, while solo handoffs do not because standalone students have no roster record. Solo handoffs are issued only by `solo-activity/start`, which creates the child server-side and binds it to the parent and student (#388); no route accepts a client-supplied child ID, so a known session ID no longer grants trusted entry. Activities without `supportsSoloChild` get no SyncDeck handoff. SyncDeck normalizes and retains the token map used to verify that cookie. Its embedded WS and HTTP token paths do not issue child tokens to unverified student IDs; the solo overlay uses a parent-cookie-authorized endpoint.
+- Residual risk: SyncDeck's student WebSocket and related HTTP routes were gated in the next slice. Concurrent session writes remain tracked in #313.
+- Validation (test/review/path): `server/entryParticipants.test.ts`; `server/sessionEntryRoutes.test.ts`; `server/persistentSessionRoutes.test.ts`; `activities/syncdeck/server/routes.test.ts`; `activities/syncdeck/playwright/student-return.spec.ts`.
+- Follow-up action: Complete the shared student-principal and atomic-write migrations before treating all SyncDeck student state as protected.
+- Owner: Codex
+
+- Date: 2026-09-24
+- Area: SyncDeck student WebSocket and student HTTP actions
+- Threat or risk: A caller with a known roster ID could join another student's SyncDeck socket or request embedded context and auto-activation without holding that student's accepted-entry cookie.
+- Control or mitigation: Student WebSocket admission derives identity from the parent accepted-entry cookie before roster join or state replay, and rejects a conflicting ID hint. Embedded-context and auto-activation require the same cookie and matching roster ID. A 1008 `forbidden` close clears the student's stored ID in both sessionStorage and localStorage and recovers the identity from the accepted-entry cookie (`GET /api/syncdeck/:sessionId/student-identity`), which returns only the cookie's own student and never accepts a client-supplied ID. Otherwise a reload that skips the waiting room would restore the rejected ID indefinitely.
+- Residual risk: Whole-session read-modify-write races remain tracked in #313.
+- Validation (test/review/path): `activities/syncdeck/server/routes.test.ts`; `activities/syncdeck/client/student/reconnectUtils.test.ts`; `activities/syncdeck/playwright/student-return.spec.ts`.
+- Follow-up action: Complete #313 atomic session-write migration.
+- Owner: Codex
+
 - Date: 2026-09-13
 - Area: Resonance student WebSocket lifecycle (`activities/resonance/client/hooks/useResonanceSession.ts`)
 - Threat or risk: The WS effect guarded every socket handler with a shared `mountedRef` that the *next* effect run resets to `true` at the top of its own body. When the session/student identity changed (e.g. a new student registering in the same tab, or a SyncDeck embedded re-launch), a message already in flight on the *old* socket could be dispatched after the new effect had already reset `mountedRef` and pointed `wsRef.current` at the new socket. The stale handler's `!mountedRef.current` check no longer blocked it, so the old identity's queued `resonance:session-state` payload (another participant's retained answers/state) could be applied under the new identity — CWE-200 exposure of sensitive information to an unauthorized actor, found by CodeRabbit's security scan on PR #372.
@@ -460,3 +488,11 @@ Track security-relevant boundaries, risks, and mitigation decisions.
 - Date: 2026-09-24
 - The root `npm audit` uses the root dependency tree; it does not audit the separate `client/`, `server/`, and `activities/` lockfiles as independent projects. GitHub Dependabot tracks alerts per manifest, so the same advisory can produce multiple repository alerts.
 - Audit each nested lockfile from its directory with `npm audit --package-lock-only --workspaces=false`. In September 2026, this exposed `brace-expansion` 5.0.7 in the server and activities locks even though those findings were absent from GitHub's seven open alerts. Keep all four locks in scope when resolving dependency alerts.
+
+- Date: 2026-09-25
+- Area: session deletion vs. in-flight writers (SyncDeck solo/embedded children)
+- Threat or risk: `SessionStore.set()` is unconditional. A writer that reads a session, awaits, and writes it back (for example Resonance handlers, which take no lock) can recreate a session that was deleted in between. For SyncDeck this means a child deleted on return-to-waiting-room, eviction, or parent delete can come back unbound, and a student's child participant capability can keep working for that child until the session expires.
+- Control or mitigation: None yet beyond in-process ordering. Parent access is still revoked (no accepted entry, no binding), so the student can't re-enter through the parent. The risk is limited to a browser that already holds the child capability cookie and to the narrow window of an overlapping write. Deferred to #313: writers moving to `updateAtomic`, whose CAS is bound to the session incarnation, make a post-delete write fail instead of recreating the session.
+- Residual risk: Applies to every session type whose writers use plain get-then-set, including embedded children cascaded on parent delete on `main`.
+- Validation (test/review/path): Copilot review on PR #389 (discussion_r4109300345). `.agent/plans/shared-activity-runtime-authentication.md` Solo child binding, "Known residual".
+- Follow-up action: #313 Phase E checklist item "Make deletes authoritative".
