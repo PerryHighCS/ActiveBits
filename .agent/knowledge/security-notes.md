@@ -460,3 +460,14 @@ Track security-relevant boundaries, risks, and mitigation decisions.
 - Date: 2026-09-24
 - The root `npm audit` uses the root dependency tree; it does not audit the separate `client/`, `server/`, and `activities/` lockfiles as independent projects. GitHub Dependabot tracks alerts per manifest, so the same advisory can produce multiple repository alerts.
 - Audit each nested lockfile from its directory with `npm audit --package-lock-only --workspaces=false`. In September 2026, this exposed `brace-expansion` 5.0.7 in the server and activities locks even though those findings were absent from GitHub's seven open alerts. Keep all four locks in scope when resolving dependency alerts.
+
+# October 2026 runtime and dependency refresh
+
+- Date: 2026-10-26
+- Area: Node runtime and npm dependency security refresh
+- Threat or risk: The previous Node 24 floor allowed releases before the October 2026 security fixes, including the Brotli decoder memory corruption issue. The npm audit found 10 vulnerable package entries, including three critical entries in the root dependency tree.
+- Control or mitigation: Require Node 24.22.1 or newer on the 24.x line in `.nvmrc` and all workspace engines. Refresh compatible direct dependency ranges and the root plus standalone workspace lockfiles. The refreshed tree includes patched `body-parser`, `proxy-addr`, `shell-quote`, `undici`, and Vite versions. Hold Brython at `~3.14.3`: 3.15.0 caused the MobCode Python runner to fail with `JavascriptError: name.startsWith is not a function` in the browser test; restoring 3.14.3 made the focused test pass.
+- Residual risk: Deployments must actually select the updated Node runtime; changing manifests alone does not replace an already-running process. The Node 26 line and dependency major upgrades remain separate compatibility work. Revisit Brython 3.15 only with a compatible runner implementation and browser coverage.
+- Validation (test/review/path): `npm audit` on the refreshed root tree; `npm test` and workspace audits; `DEPLOYMENT.md`; `.nvmrc`; all four manifests and lockfiles.
+- Follow-up action: Verify the Render runtime version and redeploy, then confirm `/health-check` and a live session flow.
+- Owner: Codex

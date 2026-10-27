@@ -6,7 +6,9 @@ For system design and runtime behavior, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Deployment requirements
 
-- A Render web service running Node.js 24.x.
+- A Render web service running Node.js 24.22.1 or newer on the 24.x line.
+  Keep the Render runtime aligned with `.nvmrc` before deploying; earlier 24.x
+  releases lack the October 2026 security fixes.
 - A Render Key Value instance in the same region as the web service. New instances
   run Valkey and are Redis-compatible.
 - A strong, stable `PERSISTENT_SESSION_SECRET` stored as a Render secret.
