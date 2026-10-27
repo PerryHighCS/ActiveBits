@@ -5,7 +5,7 @@ import process from 'node:process'
 import { fileURLToPath } from 'node:url'
 import path, { dirname } from 'node:path'
 import { readFileSync } from 'node:fs'
-import { getDevPresentationAsset } from './src/devPresentationAssets'
+import { getDevPresentationAsset } from './src/devPresentationAssets.ts'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)

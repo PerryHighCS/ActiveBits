@@ -1887,3 +1887,10 @@ Use this log for durable findings that future contributors and agents should reu
 - Why it matters: Distinguishes "verified-safe, hardened for the future" from "was an active bug" - useful context if this code changes again and the guard looks redundant.
 - Evidence: `activities/video-sync/client/manager/VideoSyncManager.tsx` (`emitNaturalEndPause`); PR #365 review thread.
 - Owner: Claude
+
+- Date: 2026-10-26
+- Area: client Vite config loading
+- Discovery: Vite 8's native config loader requires an explicit `.ts` extension for the local `devPresentationAssets` import in `client/vite.config.ts`. Because that file is included in the client's no-emit TypeScript check, `client/tsconfig.json` also needs `allowImportingTsExtensions: true`.
+- Why it matters: The extensionless import produced a Vite warning that native config loading would not support it. The explicit extension lets `vite build --configLoader native` load the config successfully.
+- Evidence: `client/vite.config.ts`; `client/tsconfig.json`; client typecheck, lint, tests, and native-config build.
+- Owner: Codex
