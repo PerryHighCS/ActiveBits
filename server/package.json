@@ -15,33 +15,33 @@
     "monitor:valkey": "node --import tsx monitor-valkey.ts"
   },
   "engines": {
-    "node": ">=24 <25"
+    "node": ">=24.22.1 <25"
   },
   "keywords": [],
   "author": "",
   "license": "MIT",
   "description": "",
   "dependencies": {
-    "brython": "^3.14.3",
+    "brython": "~3.14.3",
     "cookie-parser": "^1.4.7",
-    "express": "^5.2.1",
-    "express-rate-limit": "^8.5.2",
-    "http-proxy-middleware": "^4.1.1",
+    "express": "^5.3.0",
+    "express-rate-limit": "^8.7.1",
+    "http-proxy-middleware": "^4.2.1",
     "ioredis": "^5.11.1",
-    "ws": "^8.21.0"
+    "ws": "^8.22.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/cookie-parser": "^1.4.10",
     "@types/express": "^5.0.6",
-    "@types/node": "^24.13.2",
-    "@types/ws": "^8.18.1",
-    "@typescript-eslint/eslint-plugin": "^8.62.0",
-    "@typescript-eslint/parser": "^8.62.0",
-    "eslint": "^10.5.0",
-    "eslint-plugin-jsdoc": "^63.0.7",
-    "globals": "^17.7.0",
-    "tsx": "^4.22.4",
+    "@types/node": "^24.19.2",
+    "@types/ws": "^8.18.2",
+    "@typescript-eslint/eslint-plugin": "^8.72.1",
+    "@typescript-eslint/parser": "^8.72.1",
+    "eslint": "^10.13.0",
+    "eslint-plugin-jsdoc": "^63.3.3",
+    "globals": "^17.13.0",
+    "tsx": "^4.23.15",
     "typescript": "^6.0.3"
   }
 }

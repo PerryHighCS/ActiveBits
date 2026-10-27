@@ -29,7 +29,7 @@ test.describe('SyncDeck report preview overlay', () => {
     await expect(joinCode).toBeVisible()
     const joinCodeHandle = await joinCode.elementHandle()
     expect(joinCodeHandle).not.toBeNull()
-    if (!joinCodeHandle) {
+    if (joinCodeHandle === null) {
       throw new Error('Expected the visible Join Code control to have a DOM element.')
     }
     const reportPrecedesJoinCode = await previewButton.evaluate(
