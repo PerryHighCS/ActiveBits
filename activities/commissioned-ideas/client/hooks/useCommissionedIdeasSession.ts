@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from 'react'
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
 import type {
+  CommissionedIdeasBallot,
   CommissionedIdeasPhase,
   CommissionedIdeasTeam,
   PresentationHistoryEntry,
@@ -27,7 +28,7 @@ export interface StudentSnapshot {
   participantRoster: Record<string, StudentSafeParticipant>
   teams: Record<string, StudentSafeTeam>
   ballotSubmitted: boolean
-  myBallot: unknown | null
+  myBallot: CommissionedIdeasBallot | null
   ballotsReceived: number
   currentPresentationTeamId: string | null
   podiumRevealStep: string
@@ -53,6 +54,8 @@ export interface ManagerSnapshot {
   participantRoster: Record<string, ManagerParticipant>
   teams: Record<string, ManagerTeam>
   ballotsReceived: number
+  /** Who has voted — ids only, never ballot contents. */
+  ballotSubmitterIds: string[]
   currentPresentationTeamId: string | null
   podiumRevealStep: string
 }

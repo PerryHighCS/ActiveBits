@@ -17,7 +17,7 @@ import type {
   StudentSafeProposal,
   StudentSafeTeam,
 } from '../shared/types.js'
-import { sanitizeDisplayName } from '../shared/validation.js'
+import { coerceAllocations, sanitizeDisplayName, validateBallot } from '../shared/validation.js'
 import {
   MAX_PROPOSAL_LENGTH,
   MAX_PROPOSALS_PER_KIND,
@@ -447,6 +447,7 @@ function buildManagerSnapshot(data: CommissionedIdeasSessionData) {
   return {
     ...rest,
     ballotsReceived: Object.keys(_ballots).length,
+    ballotSubmitterIds: Object.keys(_ballots),
   }
 }
 
@@ -787,6 +788,10 @@ export default function setupCommissionedIdeasRoutes(
     // Membership contract: rejected participants are never team members.
     if (participant.rejectedByInstructor && participant.teamId) {
       removeParticipantFromTeam(session.data, participant)
+    }
+    // Ballot contract: a rejected participant's ballot does not count.
+    if (participant.rejectedByInstructor) {
+      delete session.data.ballots[participant.id]
     }
 
     await sessions.set(sessionId, session)
@@ -1161,6 +1166,46 @@ export default function setupCommissionedIdeasRoutes(
       rejected: body.rejected,
     })
     res.json({ ok: true })
+  })
+
+  // ── Student: submit or replace a ballot ─────────────────────────────────────
+  // Body: { participantId, allocations: [{ teamId, amount }] }
+  // Ballot size and amounts follow shared/validation.ts (reduced for small classes).
+  app.post('/api/commissioned-ideas/:sessionId/ballot', async (req, res) => {
+    const ctx = await loadParticipantSession(req, res)
+    if (!ctx) return
+    const { session, participant } = ctx
+
+    if (session.data.phase !== 'voting') {
+      res.status(409).json({ error: 'Voting is not open' })
+      return
+    }
+
+    const body = ensurePlainObject(req.body)
+    const result = validateBallot(body.allocations, participant.id, session.data)
+    const allocations = result.valid ? coerceAllocations(body.allocations) : null
+    if (!result.valid || !allocations) {
+      console.warn('[commissioned-ideas] Invalid ballot rejected', {
+        sessionId: session.id,
+        participantId: participant.id,
+        error: result.error ?? 'Malformed allocations',
+      })
+      res.status(400).json({ error: result.error ?? 'Malformed allocations' })
+      return
+    }
+
+    const replaced = participant.id in session.data.ballots
+    session.data.ballots[participant.id] = {
+      voterId: participant.id,
+      voterName: participant.name,
+      voterTeamId: participant.teamId,
+      allocations,
+      submittedAt: Date.now(),
+    }
+
+    await saveAndBroadcast(session)
+    console.info('[commissioned-ideas] Ballot submitted', { sessionId: session.id, participantId: participant.id, replaced })
+    res.json({ ok: true, replaced })
   })
 
   // ── Instructor: change phase ────────────────────────────────────────────────

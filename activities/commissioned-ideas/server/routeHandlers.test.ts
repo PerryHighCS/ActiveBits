@@ -1828,3 +1828,110 @@ void test('team changes are refused once presentations start', async () => {
   console.log('[TEST] expecting 409 team change during presentations')
   assert.equal((await s.asStudent('leave-team', s.members[0]!)).statusCode, 409)
 })
+
+// ── Phase 6: ballots ─────────────────────────────────────────────────────────
+
+async function setupVotingSession(teamCount = 4) {
+  const names = ['Alice', 'Bob', 'Carol', 'Dan', 'Eve'].slice(0, teamCount)
+  const s = await setupPresentationSession(names)
+  const loner = await s.register('Loner')
+  await s.asInstructor('phase', { phase: 'presentation' })
+  await s.asInstructor('phase', { phase: 'voting' })
+  return { ...s, loner }
+}
+
+void test('ballot route stores a valid ballot and reports it to the manager by id only', async () => {
+  const s = await setupVotingSession()
+  const [own, a, b, c] = s.teamIds as [string, string, string, string]
+  const alice = s.members[0]!
+  assert.equal(s.data().participantRoster[alice.participantId]?.teamId, own)
+
+  const res = await s.asStudent('ballot', alice, {
+    allocations: [{ teamId: a, amount: 500 }, { teamId: b, amount: 300 }, { teamId: c, amount: 100 }],
+  })
+
+  assert.equal(res.statusCode, 200)
+  assert.equal((res.body as { replaced: boolean }).replaced, false)
+  const ballot = s.data().ballots[alice.participantId]
+  assert.equal(ballot?.voterTeamId, own)
+  assert.equal(ballot?.allocations.length, 3)
+})
+
+void test('ballot route replaces an existing ballot', async () => {
+  const s = await setupVotingSession()
+  const [, a, b, c] = s.teamIds as [string, string, string, string]
+  const alice = s.members[0]!
+  await s.asStudent('ballot', alice, { allocations: [{ teamId: a, amount: 500 }, { teamId: b, amount: 300 }, { teamId: c, amount: 100 }] })
+
+  const res = await s.asStudent('ballot', alice, { allocations: [{ teamId: c, amount: 500 }, { teamId: b, amount: 300 }, { teamId: a, amount: 100 }] })
+
+  assert.equal((res.body as { replaced: boolean }).replaced, true)
+  assert.equal(Object.keys(s.data().ballots).length, 1)
+  assert.equal(s.data().ballots[alice.participantId]?.allocations.find((x) => x.amount === 500)?.teamId, c)
+})
+
+void test('ballot route accepts a reduced two-award ballot when only two other teams exist', async () => {
+  const s = await setupVotingSession(3)
+  const [, a, b] = s.teamIds as [string, string, string]
+  const res = await s.asStudent('ballot', s.members[0]!, { allocations: [{ teamId: a, amount: 500 }, { teamId: b, amount: 300 }] })
+  assert.equal(res.statusCode, 200)
+})
+
+void test('ballot route lets an ungrouped student vote for every team', async () => {
+  const s = await setupVotingSession(3)
+  const [a, b, c] = s.teamIds as [string, string, string]
+  const res = await s.asStudent('ballot', s.loner, {
+    allocations: [{ teamId: a, amount: 500 }, { teamId: b, amount: 300 }, { teamId: c, amount: 100 }],
+  })
+  assert.equal(res.statusCode, 200)
+})
+
+void test('ballot route rejects invalid ballots without storing them', async () => {
+  const s = await setupVotingSession()
+  const [own, a, b] = s.teamIds as [string, string, string]
+  console.log('[TEST] expecting 400 invalid ballots')
+  const selfVote = await s.asStudent('ballot', s.members[0]!, {
+    allocations: [{ teamId: own, amount: 500 }, { teamId: a, amount: 300 }, { teamId: b, amount: 100 }],
+  })
+  assert.equal(selfVote.statusCode, 400)
+  const short = await s.asStudent('ballot', s.members[0]!, { allocations: [{ teamId: a, amount: 500 }] })
+  assert.equal(short.statusCode, 400)
+  assert.equal(Object.keys(s.data().ballots).length, 0)
+})
+
+void test('ballot route requires participant auth and the voting phase', async () => {
+  const s = await setupPresentationSession(['Alice', 'Bob'])
+  const [, b] = s.teamIds as [string, string]
+  console.log('[TEST] expecting ballot auth/phase failures')
+  const early = await s.asStudent('ballot', s.members[0]!, { allocations: [{ teamId: b, amount: 500 }] })
+  assert.equal(early.statusCode, 409)
+  const noAuth = await s.post('ballot', createRequest({ sessionId: s.sessionId }, {
+    participantId: s.members[0]!.participantId, allocations: [{ teamId: b, amount: 500 }],
+  }))
+  assert.equal(noAuth.statusCode, 403)
+})
+
+void test('rejecting a voter deletes their ballot', async () => {
+  const s = await setupVotingSession(2)
+  const [, b] = s.teamIds as [string, string]
+  const alice = s.members[0]!
+  await s.asStudent('ballot', alice, { allocations: [{ teamId: b, amount: 500 }] })
+  assert.ok(s.data().ballots[alice.participantId])
+
+  await s.asInstructor('participant-name', { participantId: alice.participantId, rejected: true })
+
+  assert.equal(alice.participantId in s.data().ballots, false)
+})
+
+void test('ballots survive results → voting and can be edited again', async () => {
+  const s = await setupVotingSession(2)
+  const [, b] = s.teamIds as [string, string]
+  const alice = s.members[0]!
+  await s.asStudent('ballot', alice, { allocations: [{ teamId: b, amount: 500 }] })
+  await s.asInstructor('phase', { phase: 'results' })
+  console.log('[TEST] expecting 409 ballot during results')
+  assert.equal((await s.asStudent('ballot', alice, { allocations: [{ teamId: b, amount: 500 }] })).statusCode, 409)
+  await s.asInstructor('phase', { phase: 'voting' })
+  assert.ok(s.data().ballots[alice.participantId])
+  assert.equal((await s.asStudent('ballot', alice, { allocations: [{ teamId: b, amount: 500 }] })).statusCode, 200)
+})

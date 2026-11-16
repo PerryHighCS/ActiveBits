@@ -1,8 +1,8 @@
-import { useState } from 'react'
 import type { ProposalKind } from '../../shared/naming.js'
 import type { StudentSafeParticipant, StudentSafeTeam } from '../../shared/types.js'
 import { sortTeams, teamLabel } from '../teamLabels.js'
 import TeamNamingPanel from './TeamNamingPanel.js'
+import { useParticipantApi } from './useParticipantApi.js'
 
 interface StudentRosterProps {
   participants: Record<string, StudentSafeParticipant>
@@ -27,8 +27,7 @@ export default function StudentRoster({
   groupingMode,
   maxTeamSize,
 }: StudentRosterProps) {
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const { post, busy, error, clearError } = useParticipantApi(sessionId, myParticipantId, participantToken)
 
   const me = participants[myParticipantId]
   const myTeamId = me?.teamId ?? null
@@ -38,34 +37,6 @@ export default function StudentRoster({
   const ungrouped = Object.values(participants)
     .filter((p) => p.teamId === null)
     .sort((a, b) => a.name.localeCompare(b.name))
-
-  // ── API helpers ─────────────────────────────────────────────────────────────
-
-  const post = async (path: string, body: Record<string, unknown>): Promise<boolean> => {
-    setBusy(true)
-    setError(null)
-    try {
-      const res = await fetch(`/api/commissioned-ideas/${sessionId}/${path}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Commissioned-Ideas-Participant-Token': participantToken,
-        },
-        body: JSON.stringify({ ...body, participantId: myParticipantId }),
-      })
-      const data = (await res.json()) as { error?: string }
-      if (!res.ok) {
-        setError(data.error ?? 'Something went wrong. Please try again.')
-        return false
-      }
-      return true
-    } catch {
-      setError('Network error — please try again.')
-      return false
-    } finally {
-      setBusy(false)
-    }
-  }
 
   const handleCreateTeam = () => { void post('create-team', {}) }
   const handleJoinTeam = (teamId: string) => { void post('join-team', { teamId }) }
@@ -80,7 +51,7 @@ export default function StudentRoster({
       {error && (
         <div role="alert" className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700 flex items-center justify-between gap-2">
           <span>{error}</span>
-          <button type="button" onClick={() => setError(null)} aria-label="Dismiss error" className="text-red-400 hover:text-red-600">×</button>
+          <button type="button" onClick={clearError} aria-label="Dismiss error" className="text-red-400 hover:text-red-600">×</button>
         </div>
       )}
 
