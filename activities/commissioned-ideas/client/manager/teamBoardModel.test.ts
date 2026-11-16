@@ -1,0 +1,77 @@
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import type { ManagerParticipant, ManagerTeam } from '../hooks/useCommissionedIdeasSession.js'
+import { buildAssignBody, canMoveTo, listMoveOptions, type MoveDestination } from './teamBoardModel.js'
+
+function participant(id: string, teamId: string | null, rejected = false): ManagerParticipant {
+  return { id, name: id, teamId, connected: true, lastSeen: 0, rejectedByInstructor: rejected }
+}
+
+function team(id: string, memberIds: string[], registeredAt = 0, groupName: string | null = null): ManagerTeam {
+  return {
+    id,
+    groupName,
+    projectName: null,
+    registeredAt,
+    presenterOrder: null,
+    locked: false,
+    memberIds,
+    proposedGroupNames: [],
+    proposedProjectNames: [],
+    groupNameVotes: {},
+    projectNameVotes: {},
+  }
+}
+
+const roster: Record<string, ManagerParticipant> = {
+  a1: participant('a1', 'A'),
+  a2: participant('a2', 'A'),
+  b1: participant('b1', 'B'),
+  loose: participant('loose', null),
+  banned: participant('banned', null, true),
+  ghostMember: participant('ghostMember', 'B', true),
+}
+const teams: Record<string, ManagerTeam> = {
+  A: team('A', ['a1', 'a2'], 1, 'Owls'),
+  B: team('B', ['b1', 'ghostMember'], 2),
+}
+const MAX = 2
+
+const cases: { name: string; who: string; to: MoveDestination; expected: boolean }[] = [
+  { name: 'ungrouped → team with space', who: 'loose', to: 'team:B', expected: true },
+  { name: 'ungrouped → full team', who: 'loose', to: 'team:A', expected: false },
+  { name: 'team → other team with space', who: 'a1', to: 'team:B', expected: true },
+  { name: 'team → same team is a no-op', who: 'a1', to: 'team:A', expected: false },
+  { name: 'team → ungrouped', who: 'a1', to: 'ungrouped', expected: true },
+  { name: 'ungrouped → ungrouped is a no-op', who: 'loose', to: 'ungrouped', expected: false },
+  { name: 'anyone → new team', who: 'b1', to: 'new', expected: true },
+  { name: 'rejected → team refused', who: 'banned', to: 'team:B', expected: false },
+  { name: 'rejected → new team refused', who: 'banned', to: 'new', expected: false },
+  { name: 'unknown team refused', who: 'loose', to: 'team:missing', expected: false },
+  { name: 'rejected members do not count toward capacity', who: 'a1', to: 'team:B', expected: true },
+]
+
+for (const row of cases) {
+  void test(`canMoveTo: ${row.name}`, () => {
+    assert.equal(canMoveTo(roster[row.who]!, row.to, teams, roster, MAX), row.expected)
+  })
+}
+
+void test('listMoveOptions orders teams by registration, labels full teams, keeps current selectable', () => {
+  const options = listMoveOptions(roster['b1']!, teams, roster, MAX)
+  assert.deepEqual(
+    options.map((o) => [o.value, o.label, o.disabled]),
+    [
+      ['team:A', 'Owls (full)', true],
+      ['team:B', 'Team 2', false],
+      ['new', 'New team', false],
+      ['ungrouped', 'Ungrouped', false],
+    ],
+  )
+})
+
+void test('buildAssignBody encodes each destination for the assign-participant route', () => {
+  assert.deepEqual(buildAssignBody('p', 'team:X'), { participantId: 'p', teamId: 'X' })
+  assert.deepEqual(buildAssignBody('p', 'new'), { participantId: 'p', newTeam: true })
+  assert.deepEqual(buildAssignBody('p', 'ungrouped'), { participantId: 'p', teamId: null })
+})

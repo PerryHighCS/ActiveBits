@@ -3,6 +3,8 @@ import { useLocation, useParams, useNavigate } from 'react-router'
 import SessionHeader from '@src/components/common/SessionHeader'
 import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler'
 import { useManagerSession } from '../hooks/useCommissionedIdeasSession.js'
+import PhaseControls from './PhaseControls.js'
+import PresentationDashboard from './PresentationDashboard.js'
 import RegistrationDashboard from './RegistrationDashboard.js'
 import { resolveCommissionedIdeasInstructorPasscode } from './passcode.js'
 
@@ -60,6 +62,12 @@ export default function CommissionedIdeasManager() {
       <div className="max-w-3xl mx-auto px-4 py-6">
         {!snapshot && <p className="text-gray-400">Connecting…</p>}
 
+        {snapshot && (
+          <div className="mb-6">
+            <PhaseControls sessionId={sessionId} instructorPasscode={instructorPasscode} snapshot={snapshot} />
+          </div>
+        )}
+
         {snapshot && phase === 'registration' && (
           <RegistrationDashboard
             sessionId={sessionId}
@@ -69,20 +77,22 @@ export default function CommissionedIdeasManager() {
         )}
 
         {snapshot && phase === 'presentation' && (
-          <div className="bg-white rounded-xl border border-gray-200 p-6 text-gray-600">
-            <p className="font-medium">Presentation phase — controls coming in Phase 4.</p>
-          </div>
+          <PresentationDashboard
+            sessionId={sessionId}
+            instructorPasscode={instructorPasscode}
+            snapshot={snapshot}
+          />
         )}
 
         {snapshot && phase === 'voting' && (
           <div className="bg-white rounded-xl border border-gray-200 p-6 text-gray-600">
-            <p className="font-medium">Voting phase — ballot controls coming in Phase 5.</p>
+            <p className="font-medium">Voting phase — ballot controls coming in Phase 6.</p>
           </div>
         )}
 
         {snapshot && phase === 'results' && (
           <div className="bg-white rounded-xl border border-gray-200 p-6 text-gray-600">
-            <p className="font-medium">Results phase — podium reveal coming in Phase 6.</p>
+            <p className="font-medium">Results phase — podium reveal coming in Phase 7.</p>
           </div>
         )}
       </div>

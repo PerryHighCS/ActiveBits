@@ -14,9 +14,28 @@ import type {
   PresentationHistoryEntry,
   NameProposal,
   StudentSafeParticipant,
+  StudentSafeProposal,
+  StudentSafeTeam,
 } from '../shared/types.js'
 import { sanitizeDisplayName } from '../shared/validation.js'
-import { resolveLeadingProposal } from '../shared/scoring.js'
+import {
+  MAX_PROPOSAL_LENGTH,
+  MAX_PROPOSALS_PER_KIND,
+  countVotes,
+  normalizeProposalKind,
+  proposalMatchKey,
+  proposalsForKind,
+  resolveTeamNames,
+  votesForKind,
+} from '../shared/naming.js'
+import {
+  checkPhaseTransition,
+  isTeamPermutation,
+  normalizePhaseValue,
+  normalizePresenterOrder,
+  presentedTeamIds,
+  unpresentedTeamIds,
+} from '../shared/presentation.js'
 import { generateShortId } from '../shared/id.js'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -108,17 +127,24 @@ function normalizeTeam(raw: unknown, id: string): CommissionedIdeasTeam {
   const groupNameVotes = normalizeVotesRecord(item.groupNameVotes)
   const projectNameVotes = normalizeVotesRecord(item.projectNameVotes)
 
-  // Resolve name from proposals when they exist; otherwise preserve the
+  const memberIds = Array.isArray(item.memberIds)
+    ? item.memberIds.filter((m): m is string => typeof m === 'string')
+    : []
+
+  // Resolve names from proposals when they exist; otherwise preserve the
   // persisted value so records with names-but-no-proposals (e.g. instructor
   // overrides, manual seeds) survive normalization unchanged.
+  const resolved = resolveTeamNames({
+    memberIds,
+    proposedGroupNames,
+    proposedProjectNames,
+    groupNameVotes,
+    projectNameVotes,
+  })
   const groupName =
-    proposedGroupNames.length > 0
-      ? resolveLeadingProposal(proposedGroupNames, groupNameVotes)
-      : (sanitizeDisplayName(item.groupName) ?? null)
+    proposedGroupNames.length > 0 ? resolved.groupName : (sanitizeDisplayName(item.groupName) ?? null)
   const projectName =
-    proposedProjectNames.length > 0
-      ? resolveLeadingProposal(proposedProjectNames, projectNameVotes)
-      : (sanitizeDisplayName(item.projectName) ?? null)
+    proposedProjectNames.length > 0 ? resolved.projectName : (sanitizeDisplayName(item.projectName) ?? null)
 
   return {
     id,
@@ -127,9 +153,7 @@ function normalizeTeam(raw: unknown, id: string): CommissionedIdeasTeam {
     registeredAt: typeof item.registeredAt === 'number' ? item.registeredAt : Date.now(),
     presenterOrder: typeof item.presenterOrder === 'number' ? item.presenterOrder : null,
     locked: Boolean(item.locked),
-    memberIds: Array.isArray(item.memberIds)
-      ? item.memberIds.filter((m): m is string => typeof m === 'string')
-      : [],
+    memberIds,
     proposedGroupNames,
     proposedProjectNames,
     groupNameVotes,
@@ -335,14 +359,61 @@ function buildDefaultSessionData(): CommissionedIdeasSessionData {
 
 // ── Snapshot builders ─────────────────────────────────────────────────────────
 
+function toStudentProposals(
+  team: CommissionedIdeasTeam,
+  proposals: NameProposal[],
+  votes: Record<string, string>,
+  viewerParticipantId: string,
+): StudentSafeProposal[] {
+  const tally = countVotes(proposals, votes, new Set(team.memberIds))
+  return proposals
+    .filter((p) => !p.rejectedByInstructor)
+    .map((p) => ({
+      id: p.id,
+      value: p.value,
+      voteCount: tally.get(p.id) ?? 0,
+      proposedByMe: p.proposedByParticipantId === viewerParticipantId,
+    }))
+}
+
+function eligibleVote(proposals: NameProposal[], proposalId: string | undefined): string | null {
+  if (!proposalId) return null
+  return proposals.some((p) => p.id === proposalId && !p.rejectedByInstructor) ? proposalId : null
+}
+
+/**
+ * Student-visible team. Raw vote maps and instructor-rejected proposals never
+ * leave the server; naming details are attached only for the viewer's own team.
+ */
+function buildStudentTeam(team: CommissionedIdeasTeam, viewerParticipantId: string | null): StudentSafeTeam {
+  const safe: StudentSafeTeam = {
+    id: team.id,
+    groupName: team.groupName,
+    projectName: team.projectName,
+    registeredAt: team.registeredAt,
+    presenterOrder: team.presenterOrder,
+    memberIds: [...team.memberIds],
+  }
+  if (viewerParticipantId && team.memberIds.includes(viewerParticipantId)) {
+    safe.naming = {
+      groupProposals: toStudentProposals(team, team.proposedGroupNames, team.groupNameVotes, viewerParticipantId),
+      projectProposals: toStudentProposals(team, team.proposedProjectNames, team.projectNameVotes, viewerParticipantId),
+      myGroupVote: eligibleVote(team.proposedGroupNames, team.groupNameVotes[viewerParticipantId]),
+      myProjectVote: eligibleVote(team.proposedProjectNames, team.projectNameVotes[viewerParticipantId]),
+    }
+  }
+  return safe
+}
+
 /**
  * Student-safe snapshot. Strips:
  * - All ballot contents (replaced by submission count + own-ballot summary)
  * - Instructor-only participant fields: connected, lastSeen, rejectedByInstructor
  * - Rejected participants (hidden from peers until instructor approves/edits name)
+ * - Raw name votes and every team's proposals except the viewer's own (non-rejected only)
  */
 function buildStudentSnapshot(data: CommissionedIdeasSessionData, viewerParticipantId: string | null) {
-  const { ballots: _ballots, participantRoster, instructorPasscode: _passcode, ...rest } = data
+  const { ballots: _ballots, participantRoster, instructorPasscode: _passcode, teams, ...rest } = data
 
   const myBallot = viewerParticipantId ? (_ballots[viewerParticipantId] ?? null) : null
 
@@ -352,8 +423,14 @@ function buildStudentSnapshot(data: CommissionedIdeasSessionData, viewerParticip
     safeRoster[id] = { id: p.id, name: p.name, teamId: p.teamId }
   }
 
+  const safeTeams: Record<string, StudentSafeTeam> = {}
+  for (const [id, team] of Object.entries(teams)) {
+    safeTeams[id] = buildStudentTeam(team, viewerParticipantId)
+  }
+
   return {
     ...rest,
+    teams: safeTeams,
     participantRoster: safeRoster,
     ballotSubmitted: Boolean(myBallot),
     myBallot,
@@ -435,10 +512,42 @@ function broadcastToAll(
 }
 
 // ── Team formation helpers ────────────────────────────────────────────────────
+//
+// Membership contract (see .agent/plans/commissioned-ideas-activity-plan.md):
+// participant.teamId === team.id  ⇔  participant.id ∈ team.memberIds.
+// Empty teams are deleted; leaving a team drops that member's name votes.
+
+export type RandomAssignmentScope = 'ungrouped' | 'all'
+
+function createTeamRecord(data: CommissionedIdeasSessionData): CommissionedIdeasTeam {
+  const teamId = generateShortId()
+  const team: CommissionedIdeasTeam = {
+    id: teamId,
+    groupName: null,
+    projectName: null,
+    registeredAt: Date.now(),
+    presenterOrder: null,
+    locked: false,
+    memberIds: [],
+    proposedGroupNames: [],
+    proposedProjectNames: [],
+    groupNameVotes: {},
+    projectNameVotes: {},
+  }
+  data.teams[teamId] = team
+  return team
+}
+
+/** Recomputes a team's displayed names from its proposals and current members' votes. */
+function refreshTeamNames(team: CommissionedIdeasTeam): void {
+  const resolved = resolveTeamNames(team)
+  if (team.proposedGroupNames.length > 0) team.groupName = resolved.groupName
+  if (team.proposedProjectNames.length > 0) team.projectName = resolved.projectName
+}
 
 /**
- * Removes `participant` from their current team's memberIds and clears teamId.
- * Deletes the team record if it becomes empty.
+ * Removes `participant` from their current team's memberIds, drops their name
+ * votes, and clears teamId. Deletes the team record if it becomes empty.
  */
 function removeParticipantFromTeam(
   data: CommissionedIdeasSessionData,
@@ -447,63 +556,82 @@ function removeParticipantFromTeam(
   const team = participant.teamId ? data.teams[participant.teamId] : null
   if (team) {
     team.memberIds = team.memberIds.filter((id) => id !== participant.id)
+    delete team.groupNameVotes[participant.id]
+    delete team.projectNameVotes[participant.id]
     if (team.memberIds.length === 0) {
       delete data.teams[team.id]
+    } else {
+      refreshTeamNames(team)
     }
   }
   participant.teamId = null
 }
 
-/**
- * Randomly assigns ungrouped (and non-rejected) participants to teams,
- * filling existing teams with space before creating new ones.
- *
- * @param reshuffleOnly When true only ungrouped participants are placed;
- *                      when false the same logic applies (both modes act on
- *                      ungrouped participants only — grouped ones are never
- *                      disturbed).
- */
-function assignRandom(data: CommissionedIdeasSessionData, _reshuffleOnly: boolean): void {
-  const ungrouped = Object.values(data.participantRoster).filter(
-    (p) => !p.rejectedByInstructor && p.teamId === null,
-  )
-  if (ungrouped.length === 0) return
+/** Moves `participant` into `team`, leaving any previous team first. Caller checks capacity. */
+function addParticipantToTeam(
+  data: CommissionedIdeasSessionData,
+  participant: CommissionedIdeasParticipant,
+  team: CommissionedIdeasTeam,
+): void {
+  if (participant.teamId === team.id) return
+  if (participant.teamId) removeParticipantFromTeam(data, participant)
+  team.memberIds.push(participant.id)
+  participant.teamId = team.id
+  refreshTeamNames(team)
+}
 
-  // Fisher-Yates shuffle using randomInt for uniform distribution
-  for (let i = ungrouped.length - 1; i > 0; i--) {
+function countActiveMembers(data: CommissionedIdeasSessionData, team: CommissionedIdeasTeam): number {
+  return team.memberIds.filter((id) => {
+    const p = data.participantRoster[id]
+    return p !== undefined && !p.rejectedByInstructor
+  }).length
+}
+
+function shuffleInPlace<T>(items: T[]): void {
+  for (let i = items.length - 1; i > 0; i--) {
     const j = randomInt(0, i + 1)
-    const tmp = ungrouped[i]!
-    ungrouped[i] = ungrouped[j]!
-    ungrouped[j] = tmp
+    const tmp = items[i]!
+    items[i] = items[j]!
+    items[j] = tmp
+  }
+}
+
+/**
+ * Randomly places non-rejected participants into teams, keeping team sizes
+ * balanced and never exceeding `maxTeamSize`.
+ *
+ * - `ungrouped`: only participants without a team are placed. Each goes to the
+ *   open team with the fewest members (earliest registered on ties); a new team
+ *   is created only when every existing team is full.
+ * - `all`: every team is dissolved and all non-rejected participants are
+ *   redistributed across `ceil(n / maxTeamSize)` new teams.
+ */
+function assignRandom(data: CommissionedIdeasSessionData, scope: RandomAssignmentScope): void {
+  if (scope === 'all') {
+    for (const participant of Object.values(data.participantRoster)) {
+      participant.teamId = null
+    }
+    data.teams = {}
   }
 
+  const toPlace = Object.values(data.participantRoster).filter(
+    (p) => !p.rejectedByInstructor && p.teamId === null,
+  )
+  if (toPlace.length === 0) return
+  shuffleInPlace(toPlace)
+
   const maxSize = data.maxTeamSize
+  if (scope === 'all') {
+    const teamCount = Math.ceil(toPlace.length / maxSize)
+    for (let i = 0; i < teamCount; i++) createTeamRecord(data)
+  }
 
-  // Fill existing teams with available space first, then create new ones.
-  const openTeams = Object.values(data.teams).filter((t) => t.memberIds.length < maxSize)
-
-  for (const participant of ungrouped) {
-    let target = openTeams.find((t) => t.memberIds.length < maxSize)
-    if (!target) {
-      const teamId = generateShortId()
-      target = {
-        id: teamId,
-        groupName: null,
-        projectName: null,
-        registeredAt: Date.now(),
-        presenterOrder: null,
-        locked: false,
-        memberIds: [],
-        proposedGroupNames: [],
-        proposedProjectNames: [],
-        groupNameVotes: {},
-        projectNameVotes: {},
-      }
-      data.teams[teamId] = target
-      openTeams.push(target)
-    }
-    target.memberIds.push(participant.id)
-    participant.teamId = target.id
+  for (const participant of toPlace) {
+    const open = Object.values(data.teams)
+      .filter((t) => countActiveMembers(data, t) < maxSize)
+      .sort((a, b) => countActiveMembers(data, a) - countActiveMembers(data, b) || a.registeredAt - b.registeredAt)
+    const target = open[0] ?? createTeamRecord(data)
+    addParticipantToTeam(data, participant, target)
   }
 }
 
@@ -656,6 +784,11 @@ export default function setupCommissionedIdeasRoutes(
       participant.rejectedByInstructor = Boolean(body.rejected)
     }
 
+    // Membership contract: rejected participants are never team members.
+    if (participant.rejectedByInstructor && participant.teamId) {
+      removeParticipantFromTeam(session.data, participant)
+    }
+
     await sessions.set(sessionId, session)
     console.info(`[commissioned-ideas] Participant name moderated`, { sessionId, participantId })
 
@@ -704,163 +837,134 @@ export default function setupCommissionedIdeasRoutes(
     res.json({ ok: true })
   })
 
-  // ── Student: create a new team and join it ──────────────────────────────────
-  app.post('/api/commissioned-ideas/:sessionId/create-team', async (req, res) => {
+  // ── Shared route guards ─────────────────────────────────────────────────────
+
+  async function loadSession(req: RouteRequest, res: JsonResponse): Promise<CommissionedIdeasSession | null> {
     const { sessionId } = req.params
-    if (!sessionId) { res.status(400).json({ error: 'Missing sessionId' }); return }
-
+    if (!sessionId) { res.status(400).json({ error: 'Missing sessionId' }); return null }
     const session = await getSession(sessions, sessionId)
-    if (!session) { res.status(404).json({ error: 'Session not found' }); return }
+    if (!session) { res.status(404).json({ error: 'Session not found' }); return null }
+    return session
+  }
 
+  async function loadInstructorSession(req: RouteRequest, res: JsonResponse): Promise<CommissionedIdeasSession | null> {
+    const session = await loadSession(req, res)
+    if (!session) return null
+    if (!checkInstructorAuth(req, session)) {
+      res.status(403).json({ error: 'Instructor authentication required' })
+      return null
+    }
+    return session
+  }
+
+  async function loadParticipantSession(
+    req: RouteRequest,
+    res: JsonResponse,
+  ): Promise<{ session: CommissionedIdeasSession; participant: CommissionedIdeasParticipant } | null> {
+    const session = await loadSession(req, res)
+    if (!session) return null
     const participant = checkParticipantAuth(req, session)
     if (!participant) {
       res.status(403).json({ error: 'Participant authentication required' })
-      return
+      return null
     }
+    return { session, participant }
+  }
 
+  function requireRegistrationPhase(session: CommissionedIdeasSession, res: JsonResponse): boolean {
+    if (session.data.phase !== 'registration') {
+      res.status(409).json({ error: 'Team changes are only allowed during registration' })
+      return false
+    }
+    return true
+  }
+
+  /** Student self-grouping guard: registration phase, manual mode, grouping unlocked. */
+  function requireStudentGrouping(session: CommissionedIdeasSession, res: JsonResponse): boolean {
+    if (!requireRegistrationPhase(session, res)) return false
     if (session.data.studentGroupingLocked) {
       res.status(403).json({ error: 'Grouping is locked' })
-      return
+      return false
     }
-
     if (session.data.groupingMode !== 'manual') {
       res.status(403).json({ error: 'Self-grouping is not allowed in random mode' })
-      return
+      return false
     }
+    return true
+  }
 
-    const participantId = participant.id
+  async function saveAndBroadcast(session: CommissionedIdeasSession): Promise<void> {
+    await sessions.set(session.id, session)
+    broadcastRegistrationUpdate(ws, session.id, session.data)
+  }
 
-    // Leave current team if already in one
-    if (participant.teamId) {
-      removeParticipantFromTeam(session.data, participant)
-    }
+  // ── Student: create a new team and join it ──────────────────────────────────
+  app.post('/api/commissioned-ideas/:sessionId/create-team', async (req, res) => {
+    const ctx = await loadParticipantSession(req, res)
+    if (!ctx) return
+    const { session, participant } = ctx
+    if (!requireStudentGrouping(session, res)) return
 
-    const teamId = generateShortId()
-    session.data.teams[teamId] = {
-      id: teamId,
-      groupName: null,
-      projectName: null,
-      registeredAt: Date.now(),
-      presenterOrder: null,
-      locked: false,
-      memberIds: [participantId],
-      proposedGroupNames: [],
-      proposedProjectNames: [],
-      groupNameVotes: {},
-      projectNameVotes: {},
-    }
-    participant.teamId = teamId
+    const team = createTeamRecord(session.data)
+    addParticipantToTeam(session.data, participant, team)
 
-    await sessions.set(sessionId, session)
-    console.info('[commissioned-ideas] Team created', { sessionId, teamId, participantId })
-    broadcastRegistrationUpdate(ws, sessionId, session.data)
-    res.json({ teamId })
+    await saveAndBroadcast(session)
+    console.info('[commissioned-ideas] Team created', { sessionId: session.id, teamId: team.id, participantId: participant.id })
+    res.json({ teamId: team.id })
   })
 
-  // ── Student: join an existing team ──────────────────────────────────────────
+  // ── Student: join (or switch to) an existing team ───────────────────────────
   app.post('/api/commissioned-ideas/:sessionId/join-team', async (req, res) => {
-    const { sessionId } = req.params
-    if (!sessionId) { res.status(400).json({ error: 'Missing sessionId' }); return }
-
-    const session = await getSession(sessions, sessionId)
-    if (!session) { res.status(404).json({ error: 'Session not found' }); return }
-
-    const participant = checkParticipantAuth(req, session)
-    if (!participant) {
-      res.status(403).json({ error: 'Participant authentication required' })
-      return
-    }
+    const ctx = await loadParticipantSession(req, res)
+    if (!ctx) return
+    const { session, participant } = ctx
 
     const body = ensurePlainObject(req.body)
     const teamId = typeof body.teamId === 'string' ? body.teamId : null
     if (!teamId) { res.status(400).json({ error: 'teamId is required' }); return }
 
-    if (session.data.studentGroupingLocked) {
-      res.status(403).json({ error: 'Grouping is locked' })
-      return
-    }
-
-    if (session.data.groupingMode !== 'manual') {
-      res.status(403).json({ error: 'Self-grouping is not allowed in random mode' })
-      return
-    }
-
-    const participantId = participant.id
+    if (!requireStudentGrouping(session, res)) return
 
     const team = session.data.teams[teamId]
     if (!team) { res.status(404).json({ error: 'Team not found' }); return }
 
-    const memberCount = team.memberIds.filter((id) => id in session.data.participantRoster).length
-    if (memberCount >= session.data.maxTeamSize) {
+    if (participant.teamId !== teamId && countActiveMembers(session.data, team) >= session.data.maxTeamSize) {
       res.status(409).json({ error: 'Team is full' })
       return
     }
 
-    // Leave current team first
-    if (participant.teamId) {
-      removeParticipantFromTeam(session.data, participant)
-    }
+    addParticipantToTeam(session.data, participant, team)
 
-    team.memberIds.push(participantId)
-    participant.teamId = teamId
-
-    await sessions.set(sessionId, session)
-    console.info('[commissioned-ideas] Participant joined team', { sessionId, teamId, participantId })
-    broadcastRegistrationUpdate(ws, sessionId, session.data)
+    await saveAndBroadcast(session)
+    console.info('[commissioned-ideas] Participant joined team', { sessionId: session.id, teamId, participantId: participant.id })
     res.json({ ok: true })
   })
 
   // ── Student: leave current team ─────────────────────────────────────────────
   app.post('/api/commissioned-ideas/:sessionId/leave-team', async (req, res) => {
-    const { sessionId } = req.params
-    if (!sessionId) { res.status(400).json({ error: 'Missing sessionId' }); return }
-
-    const session = await getSession(sessions, sessionId)
-    if (!session) { res.status(404).json({ error: 'Session not found' }); return }
-
-    const participant = checkParticipantAuth(req, session)
-    if (!participant) {
-      res.status(403).json({ error: 'Participant authentication required' })
-      return
-    }
-
-    if (session.data.studentGroupingLocked) {
-      res.status(403).json({ error: 'Grouping is locked' })
-      return
-    }
-
-    if (session.data.groupingMode !== 'manual') {
-      res.status(403).json({ error: 'Self-grouping is not allowed in random mode' })
-      return
-    }
+    const ctx = await loadParticipantSession(req, res)
+    if (!ctx) return
+    const { session, participant } = ctx
+    if (!requireStudentGrouping(session, res)) return
 
     if (!participant.teamId) {
       res.status(409).json({ error: 'Participant is not in a team' })
       return
     }
 
-    const participantId = participant.id
-
     removeParticipantFromTeam(session.data, participant)
 
-    await sessions.set(sessionId, session)
-    console.info('[commissioned-ideas] Participant left team', { sessionId, participantId })
-    broadcastRegistrationUpdate(ws, sessionId, session.data)
+    await saveAndBroadcast(session)
+    console.info('[commissioned-ideas] Participant left team', { sessionId: session.id, participantId: participant.id })
     res.json({ ok: true })
   })
 
-  // ── Instructor: assign participant to a team (or remove with teamId=null) ───
+  // ── Instructor: move a participant to a team, a new team, or ungrouped ─────
+  // Body: { participantId, teamId: string | null } or { participantId, newTeam: true }
   app.post('/api/commissioned-ideas/:sessionId/assign-participant', async (req, res) => {
-    const { sessionId } = req.params
-    if (!sessionId) { res.status(400).json({ error: 'Missing sessionId' }); return }
-
-    const session = await getSession(sessions, sessionId)
-    if (!session) { res.status(404).json({ error: 'Session not found' }); return }
-
-    if (!checkInstructorAuth(req, session)) {
-      res.status(403).json({ error: 'Instructor authentication required' })
-      return
-    }
+    const session = await loadInstructorSession(req, res)
+    if (!session) return
+    if (!requireRegistrationPhase(session, res)) return
 
     const body = ensurePlainObject(req.body)
     const participantId = typeof body.participantId === 'string' ? body.participantId : null
@@ -869,61 +973,334 @@ export default function setupCommissionedIdeasRoutes(
     const participant = session.data.participantRoster[participantId]
     if (!participant) { res.status(404).json({ error: 'Participant not found' }); return }
 
+    const newTeam = body.newTeam === true
     const targetTeamId = typeof body.teamId === 'string' ? body.teamId : null
 
-    if (targetTeamId !== null) {
+    if ((newTeam || targetTeamId !== null) && participant.rejectedByInstructor) {
+      res.status(409).json({ error: 'Rejected participants cannot be placed on a team' })
+      return
+    }
+
+    let resultTeamId: string | null = null
+    if (newTeam) {
+      const team = createTeamRecord(session.data)
+      addParticipantToTeam(session.data, participant, team)
+      resultTeamId = team.id
+    } else if (targetTeamId !== null) {
       const team = session.data.teams[targetTeamId]
       if (!team) { res.status(404).json({ error: 'Team not found' }); return }
-
-      const memberCount = team.memberIds.filter((id) => id in session.data.participantRoster).length
-      if (memberCount >= session.data.maxTeamSize && participant.teamId !== targetTeamId) {
+      if (participant.teamId !== targetTeamId && countActiveMembers(session.data, team) >= session.data.maxTeamSize) {
         res.status(409).json({ error: 'Team is full' })
         return
       }
-    }
-
-    if (participant.teamId) {
+      addParticipantToTeam(session.data, participant, team)
+      resultTeamId = team.id
+    } else if (participant.teamId) {
       removeParticipantFromTeam(session.data, participant)
     }
 
-    if (targetTeamId !== null) {
-      const team = session.data.teams[targetTeamId]
-      if (team) {
-        team.memberIds.push(participantId)
-        participant.teamId = targetTeamId
-      }
+    await saveAndBroadcast(session)
+    console.info('[commissioned-ideas] Instructor assigned participant', {
+      sessionId: session.id,
+      participantId,
+      teamId: resultTeamId,
+      newTeam,
+    })
+    res.json({ ok: true, teamId: resultTeamId })
+  })
+
+  // ── Instructor: random assignment ───────────────────────────────────────────
+  // scope 'ungrouped' (default) places only students without a team.
+  // scope 'all' dissolves every team and redistributes; refused once grouping is locked.
+  app.post('/api/commissioned-ideas/:sessionId/assign-random', async (req, res) => {
+    const session = await loadInstructorSession(req, res)
+    if (!session) return
+    if (!requireRegistrationPhase(session, res)) return
+
+    const body = ensurePlainObject(req.body)
+    const scope: RandomAssignmentScope = body.scope === 'all' ? 'all' : 'ungrouped'
+
+    if (scope === 'all' && session.data.studentGroupingLocked) {
+      console.warn('[commissioned-ideas] Full reshuffle refused while grouping locked', { sessionId: session.id })
+      res.status(409).json({ error: 'Unlock grouping before reshuffling every team' })
+      return
     }
 
-    await sessions.set(sessionId, session)
-    console.info('[commissioned-ideas] Instructor assigned participant', { sessionId, participantId, targetTeamId })
-    broadcastRegistrationUpdate(ws, sessionId, session.data)
+    assignRandom(session.data, scope)
+
+    await saveAndBroadcast(session)
+    console.info('[commissioned-ideas] Random assignment complete', { sessionId: session.id, scope })
     res.json({ ok: true })
   })
 
-  // ── Instructor: randomly assign ungrouped participants ──────────────────────
-  // When reshuffleOnly=false (default), assigns all ungrouped participants.
-  // When reshuffleOnly=true, only places ungrouped participants (post-lock mode).
-  app.post('/api/commissioned-ideas/:sessionId/assign-random', async (req, res) => {
-    const { sessionId } = req.params
-    if (!sessionId) { res.status(400).json({ error: 'Missing sessionId' }); return }
+  // ── Student: propose a team or project name ─────────────────────────────────
+  // Body: { participantId, kind: 'group' | 'project', value }
+  app.post('/api/commissioned-ideas/:sessionId/team/proposal', async (req, res) => {
+    const ctx = await loadParticipantSession(req, res)
+    if (!ctx) return
+    const { session, participant } = ctx
 
-    const session = await getSession(sessions, sessionId)
-    if (!session) { res.status(404).json({ error: 'Session not found' }); return }
+    const body = ensurePlainObject(req.body)
+    const kind = normalizeProposalKind(body.kind)
+    if (!kind) { res.status(400).json({ error: "kind must be 'group' or 'project'" }); return }
+    const value = sanitizeDisplayName(body.value, MAX_PROPOSAL_LENGTH)
+    if (!value) { res.status(400).json({ error: 'value is required' }); return }
 
-    if (!checkInstructorAuth(req, session)) {
-      res.status(403).json({ error: 'Instructor authentication required' })
+    if (!requireRegistrationPhase(session, res)) return
+    if (session.data.namingLocked) { res.status(403).json({ error: 'Naming is locked' }); return }
+
+    const team = participant.teamId ? session.data.teams[participant.teamId] : null
+    if (!team) { res.status(409).json({ error: 'Join a team before proposing names' }); return }
+
+    const proposals = proposalsForKind(team, kind)
+    const votes = votesForKind(team, kind)
+    const key = proposalMatchKey(value)
+    const duplicate = proposals.find((p) => proposalMatchKey(p.value) === key)
+
+    let proposalId: string
+    if (duplicate) {
+      if (duplicate.rejectedByInstructor) {
+        res.status(409).json({ error: 'That name is not available' })
+        return
+      }
+      proposalId = duplicate.id
+    } else {
+      if (proposals.length >= MAX_PROPOSALS_PER_KIND) {
+        res.status(409).json({ error: 'This team has reached the proposal limit' })
+        return
+      }
+      proposalId = generateShortId()
+      proposals.push({
+        id: proposalId,
+        value,
+        proposedByParticipantId: participant.id,
+        createdAt: Date.now(),
+        rejectedByInstructor: false,
+      })
+    }
+    votes[participant.id] = proposalId
+    refreshTeamNames(team)
+
+    await saveAndBroadcast(session)
+    console.info('[commissioned-ideas] Name proposed', {
+      sessionId: session.id,
+      teamId: team.id,
+      participantId: participant.id,
+      kind,
+      proposalId,
+      duplicate: Boolean(duplicate),
+    })
+    res.json({ ok: true, proposalId })
+  })
+
+  // ── Student: vote for a proposal within their own team ──────────────────────
+  // Body: { participantId, kind, proposalId }
+  app.post('/api/commissioned-ideas/:sessionId/team/proposal-vote', async (req, res) => {
+    const ctx = await loadParticipantSession(req, res)
+    if (!ctx) return
+    const { session, participant } = ctx
+
+    const body = ensurePlainObject(req.body)
+    const kind = normalizeProposalKind(body.kind)
+    if (!kind) { res.status(400).json({ error: "kind must be 'group' or 'project'" }); return }
+    const proposalId = typeof body.proposalId === 'string' ? body.proposalId : null
+    if (!proposalId) { res.status(400).json({ error: 'proposalId is required' }); return }
+
+    if (!requireRegistrationPhase(session, res)) return
+    if (session.data.namingLocked) { res.status(403).json({ error: 'Naming is locked' }); return }
+
+    const team = participant.teamId ? session.data.teams[participant.teamId] : null
+    if (!team) { res.status(409).json({ error: 'Join a team before voting on names' }); return }
+
+    const proposal = proposalsForKind(team, kind).find((p) => p.id === proposalId)
+    if (!proposal) { res.status(404).json({ error: 'Proposal not found on your team' }); return }
+    if (proposal.rejectedByInstructor) { res.status(409).json({ error: 'That proposal was removed' }); return }
+
+    votesForKind(team, kind)[participant.id] = proposalId
+    refreshTeamNames(team)
+
+    await saveAndBroadcast(session)
+    console.info('[commissioned-ideas] Name vote cast', {
+      sessionId: session.id,
+      teamId: team.id,
+      participantId: participant.id,
+      kind,
+      proposalId,
+    })
+    res.json({ ok: true })
+  })
+
+  // ── Instructor: reject or restore a proposal ────────────────────────────────
+  // Body: { teamId, kind, proposalId, rejected: boolean }
+  app.post('/api/commissioned-ideas/:sessionId/team/proposal-moderation', async (req, res) => {
+    const session = await loadInstructorSession(req, res)
+    if (!session) return
+
+    const body = ensurePlainObject(req.body)
+    const kind = normalizeProposalKind(body.kind)
+    if (!kind) { res.status(400).json({ error: "kind must be 'group' or 'project'" }); return }
+    const teamId = typeof body.teamId === 'string' ? body.teamId : null
+    const proposalId = typeof body.proposalId === 'string' ? body.proposalId : null
+    if (!teamId || !proposalId) { res.status(400).json({ error: 'teamId and proposalId are required' }); return }
+    if (typeof body.rejected !== 'boolean') { res.status(400).json({ error: 'rejected must be a boolean' }); return }
+
+    const team = session.data.teams[teamId]
+    if (!team) { res.status(404).json({ error: 'Team not found' }); return }
+    const proposal = proposalsForKind(team, kind).find((p) => p.id === proposalId)
+    if (!proposal) { res.status(404).json({ error: 'Proposal not found' }); return }
+
+    proposal.rejectedByInstructor = body.rejected
+    refreshTeamNames(team)
+
+    await saveAndBroadcast(session)
+    console.info('[commissioned-ideas] Proposal moderated', {
+      sessionId: session.id,
+      teamId,
+      kind,
+      proposalId,
+      rejected: body.rejected,
+    })
+    res.json({ ok: true })
+  })
+
+  // ── Instructor: change phase ────────────────────────────────────────────────
+  // Body: { phase }. Allowed transitions live in shared/presentation.ts.
+  app.post('/api/commissioned-ideas/:sessionId/phase', async (req, res) => {
+    const session = await loadInstructorSession(req, res)
+    if (!session) return
+
+    const body = ensurePlainObject(req.body)
+    const to = normalizePhaseValue(body.phase)
+    if (!to) { res.status(400).json({ error: 'phase must be registration, presentation, voting, or results' }); return }
+
+    const from = session.data.phase
+    const check = checkPhaseTransition(from, to, {
+      teamCount: Object.keys(session.data.teams).length,
+      ballotCount: Object.keys(session.data.ballots).length,
+    })
+    if (!check.ok) {
+      console.warn('[commissioned-ideas] Phase transition refused', { sessionId: session.id, from, to, reason: check.reason })
+      res.status(409).json({ error: check.reason })
+      return
+    }
+
+    session.data.phase = to
+    session.data.podiumRevealStep = 'hidden'
+    if (to === 'presentation') {
+      normalizePresenterOrder(session.data.teams)
+      const current = session.data.currentPresentationTeamId
+      if (current && !session.data.teams[current]) session.data.currentPresentationTeamId = null
+    }
+
+    await sessions.set(session.id, session)
+    broadcastToAll(ws, session.id, 'commissioned-ideas:phase-changed', session.data)
+    console.info('[commissioned-ideas] Phase changed', { sessionId: session.id, from, to })
+    res.json({ ok: true, phase: to })
+  })
+
+  function requirePresentationPhase(session: CommissionedIdeasSession, res: JsonResponse): boolean {
+    if (session.data.phase !== 'presentation') {
+      res.status(409).json({ error: 'Only available during presentations' })
+      return false
+    }
+    return true
+  }
+
+  /** Spotlights a team and records it as presented in the current round (once per round). */
+  function spotlightTeam(data: CommissionedIdeasSessionData, teamId: string | null): void {
+    data.currentPresentationTeamId = teamId
+    if (teamId && !presentedTeamIds(data.presentationHistory, data.presentationRound).has(teamId)) {
+      data.presentationHistory.push({ round: data.presentationRound, teamId, presentedAt: Date.now() })
+    }
+  }
+
+  // ── Instructor: set presentation order ──────────────────────────────────────
+  // Body: { teamIds: string[] } — the full permutation of current team ids.
+  app.post('/api/commissioned-ideas/:sessionId/presentation-order', async (req, res) => {
+    const session = await loadInstructorSession(req, res)
+    if (!session) return
+    if (session.data.phase !== 'registration' && session.data.phase !== 'presentation') {
+      res.status(409).json({ error: 'Presentation order is locked after presentations end' })
       return
     }
 
     const body = ensurePlainObject(req.body)
-    const reshuffleOnly = Boolean(body.reshuffleOnly)
+    if (!isTeamPermutation(body.teamIds, session.data.teams)) {
+      res.status(400).json({ error: 'teamIds must list every current team exactly once' })
+      return
+    }
+    body.teamIds.forEach((teamId, index) => {
+      session.data.teams[teamId]!.presenterOrder = index
+    })
 
-    assignRandom(session.data, reshuffleOnly)
-
-    await sessions.set(sessionId, session)
-    console.info('[commissioned-ideas] Random assignment complete', { sessionId, reshuffleOnly })
-    broadcastRegistrationUpdate(ws, sessionId, session.data)
+    await saveAndBroadcast(session)
+    console.info('[commissioned-ideas] Presentation order updated', { sessionId: session.id })
     res.json({ ok: true })
+  })
+
+  // ── Instructor: spotlight a team (or clear with teamId: null) ───────────────
+  app.post('/api/commissioned-ideas/:sessionId/presentation-active', async (req, res) => {
+    const session = await loadInstructorSession(req, res)
+    if (!session) return
+    if (!requirePresentationPhase(session, res)) return
+
+    const body = ensurePlainObject(req.body)
+    if (!('teamId' in body)) { res.status(400).json({ error: 'teamId is required (string or null)' }); return }
+    const teamId = typeof body.teamId === 'string' ? body.teamId : null
+    if (body.teamId !== null && teamId === null) { res.status(400).json({ error: 'teamId must be a string or null' }); return }
+    if (teamId && !session.data.teams[teamId]) { res.status(404).json({ error: 'Team not found' }); return }
+
+    spotlightTeam(session.data, teamId)
+
+    await saveAndBroadcast(session)
+    console.info('[commissioned-ideas] Presenting team set', { sessionId: session.id, teamId, round: session.data.presentationRound })
+    res.json({ ok: true })
+  })
+
+  // ── Instructor: spotlight a random team that has not presented this round ───
+  app.post('/api/commissioned-ideas/:sessionId/presentation-randomize', async (req, res) => {
+    const session = await loadInstructorSession(req, res)
+    if (!session) return
+    if (!requirePresentationPhase(session, res)) return
+
+    const eligible = unpresentedTeamIds(session.data.teams, session.data.presentationHistory, session.data.presentationRound)
+    if (eligible.length === 0) {
+      res.status(409).json({ error: 'Every team has presented this round' })
+      return
+    }
+    const teamId = eligible[randomInt(0, eligible.length)]!
+    spotlightTeam(session.data, teamId)
+
+    await saveAndBroadcast(session)
+    console.info('[commissioned-ideas] Random presenting team', { sessionId: session.id, teamId, round: session.data.presentationRound })
+    res.json({ ok: true, teamId })
+  })
+
+  // ── Instructor: next round or reset the current round ───────────────────────
+  // Body: { action: 'next' | 'reset' }
+  app.post('/api/commissioned-ideas/:sessionId/presentation-round', async (req, res) => {
+    const session = await loadInstructorSession(req, res)
+    if (!session) return
+    if (!requirePresentationPhase(session, res)) return
+
+    const body = ensurePlainObject(req.body)
+    const action = body.action
+    if (action !== 'next' && action !== 'reset') {
+      res.status(400).json({ error: "action must be 'next' or 'reset'" })
+      return
+    }
+
+    const round = session.data.presentationRound
+    if (action === 'next') {
+      session.data.presentationRound = round + 1
+    } else {
+      session.data.presentationHistory = session.data.presentationHistory.filter((entry) => entry.round !== round)
+    }
+    session.data.currentPresentationTeamId = null
+
+    await saveAndBroadcast(session)
+    console.info('[commissioned-ideas] Presentation round updated', { sessionId: session.id, action, round: session.data.presentationRound })
+    res.json({ ok: true, round: session.data.presentationRound })
   })
 
   // ── WebSocket ───────────────────────────────────────────────────────────────
@@ -1035,5 +1412,7 @@ export {
   broadcastRegistrationUpdate,
   broadcastToAll,
   removeParticipantFromTeam,
+  addParticipantToTeam,
   assignRandom,
+  buildStudentTeam,
 }

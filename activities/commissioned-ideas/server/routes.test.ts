@@ -1,8 +1,9 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { computeTeamScores, resolveLeadingProposal } from '../shared/scoring.js'
+import { computeTeamScores } from '../shared/scoring.js'
+import { resolveLeadingProposal } from '../shared/naming.js'
 import { validateBallot, sanitizeDisplayName, coerceAllocations } from '../shared/validation.js'
-import { normalizeTeam, buildStudentSnapshot, removeParticipantFromTeam, assignRandom } from './routes.js'
+import { normalizeTeam, buildStudentSnapshot, buildStudentTeam, removeParticipantFromTeam, assignRandom } from './routes.js'
 import type { CommissionedIdeasSessionData, CommissionedIdeasTeam } from '../shared/types.js'
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -508,7 +509,7 @@ void test('assignRandom places all ungrouped participants into teams', () => {
     },
   })
 
-  assignRandom(data, false)
+  assignRandom(data, 'ungrouped')
 
   for (const p of Object.values(data.participantRoster)) {
     assert.ok(p.teamId !== null, `${p.name} must be in a team`)
@@ -527,7 +528,7 @@ void test('assignRandom skips rejected participants', () => {
     },
   })
 
-  assignRandom(data, false)
+  assignRandom(data, 'ungrouped')
 
   assert.ok(data.participantRoster['p1']?.teamId !== null)
   assert.equal(data.participantRoster['rejected']?.teamId, null, 'rejected participant must not be assigned')
@@ -545,7 +546,7 @@ void test('assignRandom does not disturb already-grouped participants', () => {
     },
   })
 
-  assignRandom(data, false)
+  assignRandom(data, 'ungrouped')
 
   assert.equal(data.participantRoster['grouped']?.teamId, 'existing', 'grouped participant must stay put')
   assert.ok(data.participantRoster['ungrouped']?.teamId !== null, 'ungrouped participant must be placed')
@@ -563,7 +564,7 @@ void test('assignRandom fills existing teams before creating new ones', () => {
     },
   })
 
-  assignRandom(data, false)
+  assignRandom(data, 'ungrouped')
 
   // 'partial' had 1 member with capacity 3 — new1 should land in it
   assert.equal(data.participantRoster['new1']?.teamId, 'partial')
@@ -581,8 +582,141 @@ void test('assignRandom is a no-op when all participants are already grouped', (
     },
   })
 
-  assignRandom(data, false)
+  assignRandom(data, 'ungrouped')
 
   assert.equal(data.participantRoster['p1']?.teamId, 't1')
   assert.equal(Object.keys(data.teams).length, 1)
+})
+
+// ── Phase 3b: balanced random placement ──────────────────────────────────────
+
+function rosterOf(ids: string[], teamId: string | null = null) {
+  return Object.fromEntries(
+    ids.map((id) => [id, { id, name: id, teamId, connected: true, lastSeen: 0, rejectedByInstructor: false, token: 'T' }]),
+  )
+}
+
+void test("assignRandom 'all' dissolves existing teams and balances sizes", () => {
+  const ids = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i']
+  const data = makeRegistrationSession({
+    maxTeamSize: 4,
+    teams: { old: { ...makeTeam('old'), memberIds: ['a', 'b'] } },
+    participantRoster: {
+      ...rosterOf(ids),
+      a: { ...rosterOf(['a'])['a']!, teamId: 'old' },
+      b: { ...rosterOf(['b'])['b']!, teamId: 'old' },
+    },
+  })
+
+  assignRandom(data, 'all')
+
+  assert.equal('old' in data.teams, false, 'previous teams must be dissolved')
+  const sizes = Object.values(data.teams).map((t) => t.memberIds.length).sort()
+  assert.deepEqual(sizes, [3, 3, 3], '9 students with max 4 should split 3/3/3, not 4/4/1')
+  for (const p of Object.values(data.participantRoster)) {
+    assert.ok(p.teamId && data.teams[p.teamId]?.memberIds.includes(p.id), `${p.id} membership must be consistent`)
+  }
+})
+
+void test("assignRandom 'ungrouped' places into the smallest open team first", () => {
+  const data = makeRegistrationSession({
+    maxTeamSize: 4,
+    teams: {
+      big: { ...makeTeam('big', 1), memberIds: ['b1', 'b2', 'b3'] },
+      small: { ...makeTeam('small', 2), memberIds: ['s1'] },
+    },
+    participantRoster: {
+      ...rosterOf(['b1', 'b2', 'b3'], 'big'),
+      ...rosterOf(['s1'], 'small'),
+      ...rosterOf(['n1']),
+    },
+  })
+
+  assignRandom(data, 'ungrouped')
+
+  assert.equal(data.participantRoster['n1']?.teamId, 'small')
+})
+
+void test("assignRandom 'all' never places rejected participants", () => {
+  const data = makeRegistrationSession({
+    maxTeamSize: 2,
+    participantRoster: {
+      ...rosterOf(['a', 'b']),
+      r: { ...rosterOf(['r'])['r']!, rejectedByInstructor: true },
+    },
+  })
+  assignRandom(data, 'all')
+  assert.equal(data.participantRoster['r']?.teamId, null)
+  assert.equal(Object.keys(data.teams).length, 1)
+})
+
+// ── Membership contract: leaving drops votes and re-resolves names ───────────
+
+void test('removeParticipantFromTeam drops the leaver votes and re-resolves names', () => {
+  const team: CommissionedIdeasTeam = {
+    ...makeTeam('t1'),
+    groupName: 'Hawks',
+    memberIds: ['alice', 'bob', 'carol'],
+    proposedGroupNames: [
+      { id: 'g1', value: 'Owls', proposedByParticipantId: 'alice', createdAt: 1, rejectedByInstructor: false },
+      { id: 'g2', value: 'Hawks', proposedByParticipantId: 'bob', createdAt: 2, rejectedByInstructor: false },
+    ],
+    groupNameVotes: { alice: 'g1', bob: 'g2', carol: 'g2' },
+  }
+  const data = makeRegistrationSession({
+    teams: { t1: team },
+    participantRoster: rosterOf(['alice', 'bob', 'carol'], 't1'),
+  })
+
+  removeParticipantFromTeam(data, data.participantRoster['carol']!)
+
+  assert.equal('carol' in team.groupNameVotes, false)
+  // 1–1 tie now; Owls was proposed first.
+  assert.equal(team.groupName, 'Owls')
+})
+
+// ── Student-safe team shape ──────────────────────────────────────────────────
+
+void test('buildStudentTeam attaches naming only for the viewer team and hides rejected proposals and raw votes', () => {
+  const team: CommissionedIdeasTeam = {
+    ...makeTeam('t1'),
+    memberIds: ['alice', 'bob'],
+    proposedGroupNames: [
+      { id: 'g1', value: 'Owls', proposedByParticipantId: 'alice', createdAt: 1, rejectedByInstructor: false },
+      { id: 'g2', value: 'Rude', proposedByParticipantId: 'bob', createdAt: 2, rejectedByInstructor: true },
+    ],
+    groupNameVotes: { alice: 'g1', bob: 'g2' },
+  }
+
+  const outsider = buildStudentTeam(team, 'zed')
+  assert.equal(outsider.naming, undefined)
+  assert.equal('groupNameVotes' in outsider, false)
+  assert.equal('proposedGroupNames' in outsider, false)
+
+  const aliceView = buildStudentTeam(team, 'alice')
+  assert.deepEqual(aliceView.naming?.groupProposals, [
+    { id: 'g1', value: 'Owls', voteCount: 1, proposedByMe: true },
+  ])
+  assert.equal(aliceView.naming?.myGroupVote, 'g1')
+
+  const bobView = buildStudentTeam(team, 'bob')
+  assert.equal(bobView.naming?.myGroupVote, null, 'a vote for a rejected proposal is reported as no vote')
+  assert.equal(JSON.stringify(bobView).includes('Rude'), false)
+})
+
+void test('buildStudentSnapshot teams never include raw proposal or vote fields', () => {
+  const data = makeRegistrationSession({
+    teams: {
+      t1: {
+        ...makeTeam('t1'),
+        memberIds: ['alice'],
+        proposedGroupNames: [{ id: 'g1', value: 'Secret', proposedByParticipantId: 'alice', createdAt: 1, rejectedByInstructor: true }],
+        groupNameVotes: { alice: 'g1' },
+      },
+    },
+    participantRoster: rosterOf(['alice'], 't1'),
+  })
+  const snapshot = buildStudentSnapshot(data, null)
+  assert.equal(JSON.stringify(snapshot.teams).includes('Secret'), false)
+  assert.equal(JSON.stringify(snapshot.teams).includes('groupNameVotes'), false)
 })

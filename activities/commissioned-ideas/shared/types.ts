@@ -46,6 +46,34 @@ export interface StudentSafeParticipant {
   teamId: string | null
 }
 
+/** A naming proposal as seen by a member of the proposing team. */
+export interface StudentSafeProposal {
+  id: string
+  value: string
+  voteCount: number
+  proposedByMe: boolean
+}
+
+/** Naming details sent only to members of the team. Rejected proposals are omitted. */
+export interface StudentTeamNaming {
+  groupProposals: StudentSafeProposal[]
+  projectProposals: StudentSafeProposal[]
+  myGroupVote: string | null
+  myProjectVote: string | null
+}
+
+/** Student-visible team shape — no raw votes, no other teams' proposals. */
+export interface StudentSafeTeam {
+  id: string
+  groupName: string | null
+  projectName: string | null
+  registeredAt: number
+  presenterOrder: number | null
+  memberIds: string[]
+  /** Present only on the viewer's own team. */
+  naming?: StudentTeamNaming
+}
+
 export interface BallotAllocation {
   teamId: string
   amount: 100 | 300 | 500

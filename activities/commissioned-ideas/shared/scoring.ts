@@ -44,35 +44,3 @@ export function computeTeamScores(
 
   return scores
 }
-
-export function resolveLeadingProposal(
-  proposals: { id: string; value: string; rejectedByInstructor: boolean }[],
-  votes: Record<string, string>,
-): string | null {
-  const eligible = proposals.filter((p) => !p.rejectedByInstructor)
-  if (eligible.length === 0) return null
-
-  const tally = new Map<string, number>()
-  for (const proposal of eligible) {
-    tally.set(proposal.id, 0)
-  }
-
-  for (const proposalId of Object.values(votes)) {
-    if (tally.has(proposalId)) {
-      tally.set(proposalId, (tally.get(proposalId) ?? 0) + 1)
-    }
-  }
-
-  let leader: { id: string; value: string } | null = null
-  let leaderVotes = -1
-
-  for (const proposal of eligible) {
-    const count = tally.get(proposal.id) ?? 0
-    if (count > leaderVotes || (count === leaderVotes && leader && proposal.id < leader.id)) {
-      leader = proposal
-      leaderVotes = count
-    }
-  }
-
-  return leader?.value ?? null
-}
