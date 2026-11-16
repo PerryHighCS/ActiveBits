@@ -7,6 +7,8 @@ import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler'
 import { useStudentSession } from '../hooks/useCommissionedIdeasSession'
 import RegistrationForm from './RegistrationForm'
 import PresentationView from './PresentationView'
+import { useParticipantApi } from './useParticipantApi'
+import VotingBallot from './VotingBallot'
 import StudentRoster from './StudentRoster'
 
 interface SessionData {
@@ -87,6 +89,8 @@ export default function CommissionedIdeasStudent({ sessionData }: { sessionData:
     return () => disconnect()
   }, [registered, sessionId, connect, disconnect])
 
+  const ballotApi = useParticipantApi(sessionId ?? '', studentId ?? '', participantToken ?? '')
+
   // ── Handlers ────────────────────────────────────────────────────────────────
   const handleRegistered = (participantId: string, name: string, token: string) => {
     setStudentId(participantId)
@@ -162,9 +166,21 @@ export default function CommissionedIdeasStudent({ sessionData }: { sessionData:
         )}
 
         {phase === 'voting' && (
-          <div className="p-6 text-gray-600">
-            <p className="font-medium">Voting is open — ballot coming in Phase 6.</p>
-          </div>
+          <>
+            {ballotApi.error && (
+              <div role="alert" className="mx-4 mt-4 rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700 flex items-center justify-between gap-2">
+                <span>{ballotApi.error}</span>
+                <button type="button" onClick={ballotApi.clearError} aria-label="Dismiss error" className="text-red-400 hover:text-red-600">×</button>
+              </div>
+            )}
+            <VotingBallot
+              teams={teams}
+              myTeamId={studentId ? (participants[studentId]?.teamId ?? null) : null}
+              myBallot={snapshot?.myBallot ?? null}
+              busy={ballotApi.busy}
+              onSubmit={(allocations) => ballotApi.post('ballot', { allocations })}
+            />
+          </>
         )}
 
         {phase === 'results' && (

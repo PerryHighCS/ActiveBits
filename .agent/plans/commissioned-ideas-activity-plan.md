@@ -541,12 +541,26 @@ Goal:
 - Collect valid weighted ballots tied to participant identity and team membership.
 
 Implementation:
-- [ ] Implement voting ballot UI with accessibility semantics
-- [ ] Enforce `$100/$300/$500` distinct-team validation on client and server
-- [ ] Enforce self-vote blocking from `participant.teamId`
-- [ ] Implement ballot create/replace persistence
-- [ ] Implement manager voting-progress dashboard
-- [ ] Add tests for ballot validation, self-vote blocking, replace behavior, and progress reporting
+- [x] Implement voting ballot UI with accessibility semantics
+- [x] Enforce `$100/$300/$500` distinct-team validation on client and server
+- [x] Enforce self-vote blocking from `participant.teamId`
+- [x] Implement ballot create/replace persistence
+- [x] Implement manager voting-progress dashboard
+- [x] Add tests for ballot validation, self-vote blocking, replace behavior, and progress reporting
+
+- [x] Implement reduced ballots for voters with fewer than three eligible teams (top amounts)
+- [x] Playwright spec: student submits and changes a ballot; manager progress updates live
+
+#### Ballot contract
+
+Owner: `activities/commissioned-ideas/shared/validation.ts` (`ballotEligibleTeamIds`, `requiredBallotAmounts`, `validateBallot`). The server route and the student ballot UI both use these.
+
+- Eligible teams for a voter: every existing team except the voter's own (`participant.teamId`). Ungrouped voters can vote for every team.
+- Ballot size: `min(3, eligibleTeamCount)`. The ballot keeps the top amounts in order: 1 team → `$500`; 2 teams → `$500, $300`; 3 or more → `$500, $300, $100` (decision 2026-11-16). A voter with zero eligible teams cannot vote.
+- A valid ballot uses each required amount exactly once, on distinct eligible teams. Anything else returns `400` with a reason and a structured `warn` log; state is unchanged.
+- Ballots are accepted only in `voting` (`409` otherwise), from authenticated, non-rejected participants. Submitting again replaces the voter's ballot. Going results → voting reopens editing; existing ballots are kept.
+- Rejecting a participant deletes their ballot.
+- Privacy: students receive only their own ballot plus a count. The manager receives submitter IDs (`ballotSubmitterIds`) and a count, never ballot contents, until the results phase (Phase 7).
 
 Exit criteria:
 - Valid ballots can be submitted and tracked live, and invalid/self-voting ballots are rejected deterministically.

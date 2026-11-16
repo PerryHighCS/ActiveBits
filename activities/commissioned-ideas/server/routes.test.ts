@@ -240,11 +240,11 @@ void test('validateBallot blocks self-vote when voter belongs to a team', () => 
       voter1: { id: 'voter1', name: 'Alice', teamId: 't1', connected: true, lastSeen: 0, rejectedByInstructor: false, token: 'TESTTOKEN' },
     },
   })
+  // Voter is on t1, so only t2 and t3 are eligible → a two-award ballot.
   const result = validateBallot(
     [
       { teamId: 't1', amount: 500 },
       { teamId: 't2', amount: 300 },
-      { teamId: 't3', amount: 100 },
     ],
     'voter1',
     session,

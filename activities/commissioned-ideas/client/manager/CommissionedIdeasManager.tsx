@@ -6,6 +6,7 @@ import { useManagerSession } from '../hooks/useCommissionedIdeasSession.js'
 import PhaseControls from './PhaseControls.js'
 import PresentationDashboard from './PresentationDashboard.js'
 import RegistrationDashboard from './RegistrationDashboard.js'
+import VotingDashboard from './VotingDashboard.js'
 import { resolveCommissionedIdeasInstructorPasscode } from './passcode.js'
 
 export default function CommissionedIdeasManager() {
@@ -85,9 +86,7 @@ export default function CommissionedIdeasManager() {
         )}
 
         {snapshot && phase === 'voting' && (
-          <div className="bg-white rounded-xl border border-gray-200 p-6 text-gray-600">
-            <p className="font-medium">Voting phase — ballot controls coming in Phase 6.</p>
-          </div>
+          <VotingDashboard snapshot={snapshot} />
         )}
 
         {snapshot && phase === 'results' && (
