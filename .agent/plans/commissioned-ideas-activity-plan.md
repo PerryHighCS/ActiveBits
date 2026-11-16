@@ -2,6 +2,15 @@
 
 This plan outlines a new multi-phase ActiveBits activity for classroom presentations. `Commissioned Ideas` should stay self-contained under `activities/commissioned-ideas/`, and the product description can continue to frame it as Shark Tank-inspired while the activity itself keeps a broader classroom-friendly name.
 
+## Active bootstrap fix (2026-11-16)
+
+Owner: `activities/commissioned-ideas/client/manager/`. The manager must resolve its instructor passcode from the same-tab navigation payload or the activity's in-memory create-session handoff without writing it to browser storage. Repeated React effect setup for the same session must return the same passcode; if neither source has a valid passcode, manager controls stay unavailable and the UI shows a recovery message.
+
+- [x] Cover dashboard creation and manager entry in a browser test.
+- [x] Centralize and test passcode resolution for ordinary, repeated, missing, and malformed handoffs.
+- [x] Verify creation and teacher join flows with `npm test` and root `npm run test:e2e`.
+- [x] Document the final credential handoff contract.
+
 ## Goal
 
 Create a live classroom activity where:

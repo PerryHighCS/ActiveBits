@@ -486,8 +486,16 @@ Track security-relevant boundaries, risks, and mitigation decisions.
 - Date: 2026-04-23
 - Area: commissioned-ideas instructor bootstrap + manager websocket auth
 - Threat or risk: Storing `instructorPasscode` in browser `sessionStorage` and placing it in the websocket URL query string exposes the credential to client-side storage inspection, browser/network tooling, and URL-based logging surfaces. Those patterns are especially likely to trip CodeQL and create avoidable secret-handling risk.
-- Control or mitigation: `commissioned-ideas` now carries the passcode only in the one-time create-session bootstrap history payload, opts out of the generic same-tab `sessionStorage` fallback (`allowSessionStorageFallback: false`), and authenticates manager websocket connections with a post-connect `commissioned-ideas:manager-auth` message instead of a query parameter.
+- Control or mitigation: `commissioned-ideas` carries the passcode in same-tab create-session router state or an in-memory bootstrap payload, opts out of the generic same-tab `sessionStorage` fallback (`allowSessionStorageFallback: false`), and authenticates manager websocket connections with a post-connect `commissioned-ideas:manager-auth` message instead of a query parameter.
 - Residual risk: Reloading the manager page after the initial handoff drops the in-memory bootstrap payload, so the instructor must reopen from the create-session navigation flow. The create route still intentionally returns the passcode, so downstream consumers must avoid logging that response body.
 - Validation (test/review/path): `activities/commissioned-ideas/activity.config.ts`; `activities/commissioned-ideas/client/manager/CommissionedIdeasManager.tsx`; `activities/commissioned-ideas/client/hooks/useCommissionedIdeasSession.ts`; `activities/commissioned-ideas/server/routes.ts`; `client/src/components/common/manageDashboardUtils.ts`; `client/src/components/common/manageDashboardUtils.test.ts`; `activities/commissioned-ideas/server/routeHandlers.test.ts`; `npm test` (blocked only by unrelated existing server failures in `galleryWalkRoutes.test.ts`, `sessionStore.test.ts`, and `statusRoute.test.ts`).
 - Follow-up action: Reuse the same opt-out + post-connect auth pattern for any future activity that needs to hand an instructor secret from create-session into a websocket-managed screen.
+- Owner: Codex
+
+- Date: 2026-11-16
+- Area: commissioned-ideas manager credential handoff
+- Observation: The manager previously consumed the in-memory bootstrap during effect setup. React Strict Mode replay consumed it a second time and replaced the valid passcode with `null`; persistent-link waiting-room entry also navigated without passing its server-issued credential to the manager.
+- Control or mitigation: Resolve the passcode without consuming same-tab router state or in-memory bootstrap. The waiting room saves the server-issued payload in memory before navigating. Neither flow writes the Commissioned Ideas passcode to browser storage.
+- Residual risk: A full reload still loses the same-tab handoff; the instructor must re-enter through a creation or authenticated join flow.
+- Validation (test/review/path): `activities/commissioned-ideas/client/manager/passcode.test.ts`; `activities/commissioned-ideas/playwright/manager-entry.spec.ts`; root `npm test` and `npm run test:e2e`.
 - Owner: Codex

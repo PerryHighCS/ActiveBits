@@ -1,34 +1,20 @@
-import { useEffect, useState } from 'react'
-import { useParams, useNavigate } from 'react-router'
+import { useEffect, useMemo } from 'react'
+import { useLocation, useParams, useNavigate } from 'react-router'
 import SessionHeader from '@src/components/common/SessionHeader'
 import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler'
-import { consumeCreateSessionBootstrapPayload } from '@src/components/common/manageDashboardUtils'
 import { useManagerSession } from '../hooks/useCommissionedIdeasSession.js'
 import RegistrationDashboard from './RegistrationDashboard.js'
-
-function resolvePasscode(sessionId: string): string | null {
-  const bootstrap = consumeCreateSessionBootstrapPayload('commissioned-ideas', sessionId)
-  if (bootstrap !== null && typeof bootstrap.instructorPasscode === 'string' && bootstrap.instructorPasscode.length > 0) {
-    return bootstrap.instructorPasscode
-  }
-
-  return null
-}
+import { resolveCommissionedIdeasInstructorPasscode } from './passcode.js'
 
 export default function CommissionedIdeasManager() {
   const { sessionId } = useParams<{ sessionId?: string }>()
+  const location = useLocation()
   const navigate = useNavigate()
   const attachSessionEndedHandler = useSessionEndedHandler()
-
-  const [instructorPasscode, setInstructorPasscode] = useState<string | null>(null)
-  const [passcodeResolved, setPasscodeResolved] = useState(false)
-
-  useEffect(() => {
-    if (!sessionId) return
-    const passcode = resolvePasscode(sessionId)
-    setInstructorPasscode(passcode)
-    setPasscodeResolved(true)
-  }, [sessionId])
+  const instructorPasscode = useMemo(
+    () => resolveCommissionedIdeasInstructorPasscode({ sessionId, locationState: location.state }),
+    [sessionId, location.state],
+  )
 
   const { snapshot, connect, disconnect } = useManagerSession({
     sessionId: sessionId ?? null,
@@ -53,10 +39,6 @@ export default function CommissionedIdeasManager() {
 
   if (!sessionId) {
     return <div className="p-6 text-gray-500">No active session.</div>
-  }
-
-  if (!passcodeResolved) {
-    return <div className="p-6 text-gray-400">Loading…</div>
   }
 
   if (!instructorPasscode) {
