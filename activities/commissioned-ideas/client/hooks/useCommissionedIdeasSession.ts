@@ -4,10 +4,13 @@ import type {
   CommissionedIdeasBallot,
   CommissionedIdeasPhase,
   CommissionedIdeasTeam,
+  PodiumRevealStep,
   PresentationHistoryEntry,
   StudentSafeParticipant,
   StudentSafeTeam,
+  TeamScore,
 } from '../../shared/types.js'
+import type { PodiumEntry } from '../../shared/podium.js'
 
 // ── Client-side snapshot types ────────────────────────────────────────────────
 
@@ -31,7 +34,11 @@ export interface StudentSnapshot {
   myBallot: CommissionedIdeasBallot | null
   ballotsReceived: number
   currentPresentationTeamId: string | null
-  podiumRevealStep: string
+  podiumRevealStep: PodiumRevealStep
+  /** Revealed podium places only; empty outside results. */
+  podium: PodiumEntry[]
+  /** Number of podium steps (distinct funded totals, max 3); 0 outside results. */
+  podiumPlaceCount: number
 }
 
 export interface ManagerParticipant {
@@ -57,7 +64,9 @@ export interface ManagerSnapshot {
   /** Who has voted — ids only, never ballot contents. */
   ballotSubmitterIds: string[]
   currentPresentationTeamId: string | null
-  podiumRevealStep: string
+  podiumRevealStep: PodiumRevealStep
+  /** Full ranking, best first; present only in the results phase. */
+  results: TeamScore[] | null
 }
 
 interface WsMessage {
@@ -65,6 +74,18 @@ interface WsMessage {
   sessionId?: string
   data?: unknown
   error?: string
+}
+
+/** Every server broadcast that carries a full snapshot in `data`. */
+const SNAPSHOT_MESSAGE_TYPES = new Set([
+  'commissioned-ideas:session-state',
+  'commissioned-ideas:registration-updated',
+  'commissioned-ideas:phase-changed',
+  'commissioned-ideas:podium-step',
+])
+
+export function isSnapshotMessage(type: string): boolean {
+  return SNAPSHOT_MESSAGE_TYPES.has(type)
 }
 
 // ── Student hook ──────────────────────────────────────────────────────────────
@@ -99,11 +120,7 @@ export function useStudentSession({
   const handleMessage = useCallback((event: MessageEvent) => {
     try {
       const msg = JSON.parse(event.data as string) as WsMessage
-      if (
-        msg.type === 'commissioned-ideas:session-state' ||
-        msg.type === 'commissioned-ideas:registration-updated' ||
-        msg.type === 'commissioned-ideas:phase-changed'
-      ) {
+      if (isSnapshotMessage(msg.type)) {
         setSnapshot(msg.data as StudentSnapshot)
       }
     } catch {
@@ -161,11 +178,7 @@ export function useManagerSession({
   const handleMessage = useCallback((event: MessageEvent) => {
     try {
       const msg = JSON.parse(event.data as string) as WsMessage
-      if (
-        msg.type === 'commissioned-ideas:session-state' ||
-        msg.type === 'commissioned-ideas:registration-updated' ||
-        msg.type === 'commissioned-ideas:phase-changed'
-      ) {
+      if (isSnapshotMessage(msg.type)) {
         if (mountedRef.current) {
           setSnapshot(msg.data as ManagerSnapshot)
         }

@@ -1909,3 +1909,10 @@ Use this log for durable findings that future contributors and agents should reu
 - Why it matters: New or rebased activities can compile only when their direct runtime imports match the current workspace dependencies.
 - Evidence: `activities/commissioned-ideas/client/manager/CommissionedIdeasManager.tsx`; `client/package.json`; `npm test`.
 - Owner: Codex
+
+- Date: 2026-11-16
+- Area: local development server
+- Discovery: `npm run dev` runs the server with `node --import tsx server.ts` and no file watching, so newly added activity routes do not exist until the dev server is restarted. Unknown API paths fall through to the SPA and return `index.html` with status 200, so client `res.json()` fails with "Unexpected token '<'" rather than a 404. Vite keeps hot-reloading the client, so the UI can look current while calling routes the running server lacks.
+- Why it matters: After adding server routes, restart `npm run dev` before manual testing; an HTML-instead-of-JSON error usually means a stale server, not a routing bug.
+- Evidence: Commissioned Ideas Phase 7 podium check against a dev server started before the `podium-step` route existed.
+- Owner: Claude

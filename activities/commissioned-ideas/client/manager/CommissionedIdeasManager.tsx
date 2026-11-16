@@ -6,6 +6,7 @@ import { useManagerSession } from '../hooks/useCommissionedIdeasSession.js'
 import PhaseControls from './PhaseControls.js'
 import PresentationDashboard from './PresentationDashboard.js'
 import RegistrationDashboard from './RegistrationDashboard.js'
+import ResultsDashboard from './ResultsDashboard.js'
 import VotingDashboard from './VotingDashboard.js'
 import { resolveCommissionedIdeasInstructorPasscode } from './passcode.js'
 
@@ -90,9 +91,7 @@ export default function CommissionedIdeasManager() {
         )}
 
         {snapshot && phase === 'results' && (
-          <div className="bg-white rounded-xl border border-gray-200 p-6 text-gray-600">
-            <p className="font-medium">Results phase — podium reveal coming in Phase 7.</p>
-          </div>
+          <ResultsDashboard sessionId={sessionId} instructorPasscode={instructorPasscode} snapshot={snapshot} />
         )}
       </div>
     </div>
