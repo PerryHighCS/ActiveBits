@@ -1902,3 +1902,10 @@ Use this log for durable findings that future contributors and agents should reu
 - Why it matters: The extensionless import produced a Vite warning that native config loading would not support it. The explicit extension lets `vite build --configLoader native` load the config successfully.
 - Evidence: `client/vite.config.ts`; `client/tsconfig.json`; client typecheck, lint, tests, and native-config build.
 - Owner: Codex
+
+- Date: 2026-11-16
+- Area: commissioned-ideas rebase onto Node 26 / React Router 8 main
+- Discovery: Activity client code should import router hooks from `react-router`; the current client workspace no longer installs `react-router-dom`. Rebasing the commissioned-ideas manager exposed its older `react-router-dom` import during activity typechecking.
+- Why it matters: New or rebased activities can compile only when their direct runtime imports match the current workspace dependencies.
+- Evidence: `activities/commissioned-ideas/client/manager/CommissionedIdeasManager.tsx`; `client/package.json`; `npm test`.
+- Owner: Codex
