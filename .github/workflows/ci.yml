@@ -23,6 +23,9 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
 
+      - name: Use repository npm version
+        run: npm install --global "$(node -p "require('./package.json').packageManager")"
+
       - name: Verify Node version sync
         run: npm run verify:node-version-sync
 

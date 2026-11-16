@@ -42,6 +42,7 @@ Track security-relevant boundaries, risks, and mitigation decisions.
 - Follow-up action: Close #341 when PR #372 merges.
 - Owner: Codex
 
+
 - Date: 2026-08-29
 - Area: shared activity runtime authority boundary
 - Threat or risk: Activities independently treated session IDs, request participant IDs,
@@ -470,4 +471,14 @@ Track security-relevant boundaries, risks, and mitigation decisions.
 - Residual risk: Deployments must actually select the updated Node runtime; changing manifests alone does not replace an already-running process. The Node 26 line and dependency major upgrades remain separate compatibility work. Revisit Brython 3.15 only with a compatible runner implementation and browser coverage.
 - Validation (test/review/path): `npm audit` on the refreshed root tree; `npm test` and workspace audits; `DEPLOYMENT.md`; `.nvmrc`; all four manifests and lockfiles.
 - Follow-up action: Verify the Render runtime version and redeploy, then confirm `/health-check` and a live session flow.
+- Owner: Codex
+
+# November 2026 dependency refresh
+
+- Date: 2026-11-16
+- Area: npm dependencies across the root, client, server, and activities workspaces
+- Control or mitigation: Updated compatible direct dependency ranges and regenerated all four lockfiles. The standalone workspace audits initially reported eight moderate findings each in the ESLint dependency chain; the refreshed root and standalone locks each report zero vulnerabilities.
+- Toolchain: Moved the repository floor to Node 26.13.1 and npm 12.2.2, updated Node types to 26.x, and pinned the Node devcontainer feature to the same release. Node 26.13.1 contains the November 2026 security release.
+- Compatibility boundary: Kept Brython on the tested 3.14 line and deferred major upgrades to `@types/jsdom`, `eslint-plugin-jsdoc`, `ioredis`, `jsdom`, and TypeScript pending focused compatibility work.
+- Validation (test/review/path): `npm outdated --workspaces --include-workspace-root`; `npm audit --package-lock-only --workspaces=false` from each package root; `npm test` under Node 26.13.1/npm 12.2.2; root `npm run test:e2e` (76 passed, 12 existing browser skips); all four manifests and lockfiles. Updating Node types exposed a TypeScript inference error in an existing algorithm-demo registry test; an explicit indexed-step type restores strict typechecking without changing test behavior.
 - Owner: Codex

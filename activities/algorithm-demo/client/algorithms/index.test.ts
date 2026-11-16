@@ -44,7 +44,7 @@ void test('algorithm registry - pseudocode line references are valid', async (t)
       const validLineIds = new Set(pseudocode.map((_, i) => `line-${i}`))
 
       for (let stepIdx = 0; stepIdx < algo.steps.length; stepIdx++) {
-        const step = algo.steps[stepIdx]
+        const step: (typeof algo.steps)[number] | undefined = algo.steps[stepIdx]
         if (!step) continue
         if (Array.isArray(step.highlight)) {
           for (const lineId of step.highlight) {

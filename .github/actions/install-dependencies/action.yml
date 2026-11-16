@@ -4,6 +4,10 @@ description: Retry npm workspace dependency installation for CI jobs.
 runs:
   using: composite
   steps:
+    - name: Use repository npm version
+      shell: bash
+      run: npm install --global "$(node -p "require('./package.json').packageManager")"
+
     - name: Install dependencies
       shell: bash
       run: |

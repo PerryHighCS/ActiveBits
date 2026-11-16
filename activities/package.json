@@ -13,7 +13,7 @@
     "typecheck": "node ../scripts/typecheck-activities.mjs"
   },
   "engines": {
-    "node": ">=24.22.1 <25"
+    "node": ">=26.13.1 <27"
   },
   "dependencies": {
     "@codemirror/lang-cpp": "^6.0.3",
@@ -40,14 +40,14 @@
     "@eslint/js": "^10.0.1",
     "@testing-library/react": "^16.3.3",
     "@types/jsdom": "^28.0.3",
-    "@types/node": "^24.19.2",
+    "@types/node": "^26.6.6",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
-    "@typescript-eslint/eslint-plugin": "^8.72.1",
-    "@typescript-eslint/parser": "^8.72.1",
-    "eslint": "^10.13.0",
+    "@typescript-eslint/eslint-plugin": "^8.73.0",
+    "@typescript-eslint/parser": "^8.73.0",
+    "eslint": "^10.15.0",
     "eslint-plugin-jsdoc": "^63.3.3",
-    "globals": "^17.13.0",
+    "globals": "^17.14.0",
     "jsdom": "^29.1.1",
     "typescript": "^6.0.3"
   }
