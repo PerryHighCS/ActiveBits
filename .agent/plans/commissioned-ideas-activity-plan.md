@@ -34,7 +34,7 @@ Create a live classroom activity where:
 - Team names and project names are proposed by team members and voted on by that team's members
 - Voting rule: each voter must assign `$100`, `$300`, and `$500` to three distinct teams
 - Result ranking: total awarded dollars, descending
-- Tiebreakers:
+- Podium: teams with equal total funding share a podium step (decision 2026-11-16). The tiebreakers below only order the instructor's full rankings table:
   1. more `$500` awards
   2. more `$300` awards
   3. earlier registration time
@@ -266,7 +266,7 @@ Ranking sort order:
 3. `threeHundredCount` descending
 4. `registeredAt` ascending
 
-This gives deterministic ordering without adding a shared tie-break abstraction.
+This gives a deterministic order for the full rankings table. Podium steps ignore the tiebreakers: equal totals share a step (see the results and podium contract).
 
 ## Proposed REST / WS Contract
 
@@ -293,7 +293,6 @@ This gives deterministic ordering without adding a shared tie-break abstraction.
 | `POST` | `/api/commissioned-ideas/:sessionId/presentation-randomize` | Select a random not-yet-presented team for the round |
 | `POST` | `/api/commissioned-ideas/:sessionId/presentation-round` | Start the next presentation round or reset round tracking |
 | `POST` | `/api/commissioned-ideas/:sessionId/ballot` | Submit or replace a participant ballot |
-| `GET` | `/api/commissioned-ideas/:sessionId/results` | Instructor-visible scored results |
 | `POST` | `/api/commissioned-ideas/:sessionId/podium-step` | Instructor advances/reset reveal step |
 
 ### WebSocket Messages
@@ -571,13 +570,27 @@ Goal:
 - Reveal the winning teams in a clean, dramatic final phase.
 
 Implementation:
-- [ ] Implement ranking calculation and deterministic tie-breakers
-- [ ] Implement results route / results state derivation
-- [ ] Implement podium reveal sequencing
-- [ ] Implement manager podium controls
-- [ ] Implement student reveal screen updates
-- [ ] Verify top-three rendering, reveal resets, and return-to-presentation behavior
-- [ ] Add tests for scoring, tie-breakers, reveal-step transitions, and top-three rendering
+- [x] Implement ranking calculation and deterministic tie-breakers
+- [x] Implement results route / results state derivation
+- [x] Implement podium reveal sequencing
+- [x] Implement manager podium controls
+- [x] Implement student reveal screen updates
+- [x] Verify top-three rendering, reveal resets, and return-to-presentation behavior
+- [x] Add tests for scoring, tie-breakers, reveal-step transitions, and top-three rendering
+
+- [x] Handle classes with fewer than three teams (skip podium places that do not exist)
+- [x] Playwright spec: instructor reveals 3rd → 2nd → winner; student view follows; reset works
+- [x] Teams with equal funding share a podium step; `$0` teams never get a step
+
+#### Results and podium contract
+
+Owner: `activities/commissioned-ideas/shared/podium.ts` (`podiumSequence`, `nextPodiumStep`, `revealedPlaces`) plus `shared/scoring.ts` (`computeTeamScores`, the ranking and tie-breakers). The server, manager UI, and student UI use these.
+
+- Ranking table order: total dollars, then more `$500` awards, then more `$300` awards, then earlier team registration.
+- Podium steps (decision 2026-11-16): each step is one funding amount. Step 1 holds every team with the highest total, step 2 every team with the next distinct total, step 3 the third (dense ranking: `$500, $500, $300, $100` → two winners, then 2nd and 3rd). Teams with `$0` never get a step. Tiebreakers do not separate podium steps. `fundingRanks` in `shared/podium.ts` is the single owner of this rule, and the rankings table shows the same rank numbers.
+- Podium place count: the number of distinct funded totals, capped at 3. The reveal sequence skips places that do not exist: 3 places `hidden → third → second → winner → complete`; 2 places `hidden → second → winner → complete`; 1 place `hidden → winner → complete`; 0 places (no funding at all) stays `hidden`. Students receive the place count so their view can draw the right number of steps. `complete` shows the final podium together.
+- `podium-step` takes `{ action: 'next' | 'reset' }`, only in `results` (`409` otherwise). `next` past `complete` returns `409`. Every phase transition resets the step to `hidden` (Phase 5 contract).
+- Privacy: no separate results route. In `results` the manager snapshot carries the full `results` ranking (shown behind a spoiler toggle so a projected screen does not leak it). Students receive only `podium` entries for places already revealed; nothing else about scores.
 
 Exit criteria:
 - The instructor can reveal 3rd, 2nd, and winner cleanly, and rankings stay stable across reloads.

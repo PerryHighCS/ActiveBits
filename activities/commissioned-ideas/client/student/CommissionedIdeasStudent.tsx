@@ -7,6 +7,7 @@ import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler'
 import { useStudentSession } from '../hooks/useCommissionedIdeasSession'
 import RegistrationForm from './RegistrationForm'
 import PresentationView from './PresentationView'
+import ResultsView from './ResultsView'
 import { useParticipantApi } from './useParticipantApi'
 import VotingBallot from './VotingBallot'
 import StudentRoster from './StudentRoster'
@@ -184,9 +185,13 @@ export default function CommissionedIdeasStudent({ sessionData }: { sessionData:
         )}
 
         {phase === 'results' && (
-          <div className="p-6 text-gray-600">
-            <p className="font-medium">Results are being revealed — podium coming in Phase 7.</p>
-          </div>
+          <ResultsView
+            teams={teams}
+            podium={snapshot?.podium ?? []}
+            placeCount={snapshot?.podiumPlaceCount ?? 0}
+            step={snapshot?.podiumRevealStep ?? 'hidden'}
+            myTeamId={studentId ? (participants[studentId]?.teamId ?? null) : null}
+          />
         )}
       </div>
     </div>

@@ -8,7 +8,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import type { SessionRecord } from 'activebits-server/core/sessions.js'
 import type { WsRouter } from '../../../types/websocket.js'
-import setupCommissionedIdeasRoutes from './routes.js'
+import setupCommissionedIdeasRoutes, { buildManagerSnapshot, buildStudentSnapshot } from './routes.js'
 import type { CommissionedIdeasSessionData } from '../shared/types.js'
 
 // ── Mock infrastructure ───────────────────────────────────────────────────────
@@ -1934,4 +1934,122 @@ void test('ballots survive results → voting and can be edited again', async ()
   await s.asInstructor('phase', { phase: 'voting' })
   assert.ok(s.data().ballots[alice.participantId])
   assert.equal((await s.asStudent('ballot', alice, { allocations: [{ teamId: b, amount: 500 }] })).statusCode, 200)
+})
+
+// ── Phase 7: results and podium ──────────────────────────────────────────────
+
+/** 4 teams; Loner (ungrouped) funds Team 4 > Team 3 > Team 2, so Team 1 is last. */
+async function setupResultsSession() {
+  const s = await setupVotingSession(4)
+  const [t1, t2, t3, t4] = s.teamIds as [string, string, string, string]
+  await s.asStudent('ballot', s.loner, {
+    allocations: [{ teamId: t4, amount: 500 }, { teamId: t3, amount: 300 }, { teamId: t2, amount: 100 }],
+  })
+  await s.asInstructor('phase', { phase: 'results' })
+  return { ...s, t1, t2, t3, t4 }
+}
+
+void test('podium-step reveals 3rd, 2nd, winner, then complete and refuses further steps', async () => {
+  const s = await setupResultsSession()
+  const steps: string[] = []
+  for (let i = 0; i < 4; i++) {
+    const res = await s.asInstructor('podium-step', { action: 'next' })
+    assert.equal(res.statusCode, 200)
+    steps.push((res.body as { step: string }).step)
+  }
+  assert.deepEqual(steps, ['third', 'second', 'winner', 'complete'])
+  console.log('[TEST] expecting 409 podium already revealed')
+  assert.equal((await s.asInstructor('podium-step', { action: 'next' })).statusCode, 409)
+
+  assert.equal((await s.asInstructor('podium-step', { action: 'reset' })).statusCode, 200)
+  assert.equal(s.data().podiumRevealStep, 'hidden')
+})
+
+void test('student snapshot reveals only podium places already shown', async () => {
+  const s = await setupResultsSession()
+  const view = () => buildStudentSnapshot(s.data(), s.loner.participantId).podium.map((e) => [e.place, e.teams.map((t) => t.teamId).join()])
+
+  assert.deepEqual(view(), [])
+  await s.asInstructor('podium-step', { action: 'next' })
+  assert.deepEqual(view(), [[3, s.t2]])
+  await s.asInstructor('podium-step', { action: 'next' })
+  assert.deepEqual(view(), [[3, s.t2], [2, s.t3]])
+  await s.asInstructor('podium-step', { action: 'next' })
+  assert.deepEqual(view(), [[3, s.t2], [2, s.t3], [1, s.t4]])
+
+  const snapshot = buildStudentSnapshot(s.data(), s.loner.participantId)
+  assert.equal('results' in snapshot, false, 'students never receive the full ranking')
+})
+
+void test('manager snapshot carries the full ranking only in results', async () => {
+  const s = await setupResultsSession()
+  const ranking = buildManagerSnapshot(s.data()).results
+  assert.deepEqual(ranking?.map((r) => r.teamId), [s.t4, s.t3, s.t2, s.t1])
+  assert.deepEqual(ranking?.map((r) => r.totalDollars), [500, 300, 100, 0])
+
+  await s.asInstructor('phase', { phase: 'presentation' })
+  assert.equal(buildManagerSnapshot(s.data()).results, null)
+  assert.deepEqual(buildStudentSnapshot(s.data(), null).podium, [])
+})
+
+void test('leaving and re-entering results restarts the reveal', async () => {
+  const s = await setupResultsSession()
+  await s.asInstructor('podium-step', { action: 'next' })
+  await s.asInstructor('phase', { phase: 'presentation' })
+  await s.asInstructor('phase', { phase: 'voting' })
+  await s.asInstructor('phase', { phase: 'results' })
+  assert.equal(s.data().podiumRevealStep, 'hidden')
+})
+
+void test('no funding at all means nothing to reveal', async () => {
+  const s = await setupVotingSession(2)
+  await s.asInstructor('phase', { phase: 'results' })
+  console.log('[TEST] expecting 409 podium with no funding')
+  assert.equal((await s.asInstructor('podium-step', { action: 'next' })).statusCode, 409)
+  assert.equal(buildStudentSnapshot(s.data(), null).podiumPlaceCount, 0)
+})
+
+void test('two funded teams reveal 2nd then winner', async () => {
+  const s = await setupVotingSession(2)
+  const [a, b] = s.teamIds as [string, string]
+  await s.asStudent('ballot', s.loner, { allocations: [{ teamId: a, amount: 500 }, { teamId: b, amount: 300 }] })
+  await s.asInstructor('phase', { phase: 'results' })
+  const first = await s.asInstructor('podium-step', { action: 'next' })
+  assert.equal((first.body as { step: string }).step, 'second')
+  const second = await s.asInstructor('podium-step', { action: 'next' })
+  assert.equal((second.body as { step: string }).step, 'winner')
+})
+
+void test('podium-step requires instructor auth, results phase, and a valid action', async () => {
+  const s = await setupVotingSession(2)
+  console.log('[TEST] expecting podium-step failures')
+  assert.equal((await s.asInstructor('podium-step', { action: 'next' })).statusCode, 409, 'not in results yet')
+  await s.asInstructor('phase', { phase: 'results' })
+  assert.equal((await s.asInstructor('podium-step', { action: 'skip' })).statusCode, 400)
+  const noAuth = await s.post('podium-step', createRequest({ sessionId: s.sessionId }, { action: 'next' }))
+  assert.equal(noAuth.statusCode, 403)
+})
+
+void test('teams with equal funding share a podium step', async () => {
+  const s = await setupVotingSession(4)
+  const [t1, t2, t3, t4] = s.teamIds as [string, string, string, string]
+  // Two ungrouped voters: t3 and t4 both end on $800; t2 gets $400; t1 $0.
+  const v2 = await s.register('Voter Two')
+  await s.asStudent('ballot', s.loner, {
+    allocations: [{ teamId: t4, amount: 500 }, { teamId: t3, amount: 300 }, { teamId: t2, amount: 100 }],
+  })
+  await s.asStudent('ballot', v2, {
+    allocations: [{ teamId: t3, amount: 500 }, { teamId: t4, amount: 300 }, { teamId: t2, amount: 100 }],
+  })
+  await s.asInstructor('phase', { phase: 'results' })
+  for (let i = 0; i < 3; i++) await s.asInstructor('podium-step', { action: 'next' })
+
+  const snapshot = buildStudentSnapshot(s.data(), s.loner.participantId)
+  assert.equal(snapshot.podiumPlaceCount, 2, 'two funded totals → two steps; $0 team gets none')
+  const winners = snapshot.podium.find((e) => e.place === 1)
+  assert.deepEqual(winners?.teams.map((t) => t.teamId).sort(), [t3, t4].sort())
+  assert.equal(winners?.totalDollars, 800)
+  assert.deepEqual(snapshot.podium.find((e) => e.place === 2)?.teams.map((t) => t.teamId), [t2])
+  assert.equal(JSON.stringify(snapshot.podium).includes(t1), false)
+  assert.equal(s.data().podiumRevealStep, 'complete', '2 places: second → winner → complete')
 })

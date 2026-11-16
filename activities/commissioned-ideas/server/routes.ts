@@ -18,6 +18,8 @@ import type {
   StudentSafeTeam,
 } from '../shared/types.js'
 import { coerceAllocations, sanitizeDisplayName, validateBallot } from '../shared/validation.js'
+import { computeTeamScores } from '../shared/scoring.js'
+import { nextPodiumStep, podiumPlaceCount, revealedPodium } from '../shared/podium.js'
 import {
   MAX_PROPOSAL_LENGTH,
   MAX_PROPOSALS_PER_KIND,
@@ -435,12 +437,27 @@ function buildStudentSnapshot(data: CommissionedIdeasSessionData, viewerParticip
     ballotSubmitted: Boolean(myBallot),
     myBallot,
     ballotsReceived: Object.keys(_ballots).length,
+    ...buildStudentPodium(data),
+  }
+}
+
+/**
+ * Results contract: students only ever see podium steps already revealed, plus
+ * how many steps exist (so the stage can draw placeholders). Empty outside results.
+ */
+function buildStudentPodium(data: CommissionedIdeasSessionData) {
+  if (data.phase !== 'results') return { podium: [], podiumPlaceCount: 0 }
+  const ranking = computeTeamScores(data.teams, data.ballots)
+  return {
+    podium: revealedPodium(ranking, data.podiumRevealStep),
+    podiumPlaceCount: podiumPlaceCount(ranking),
   }
 }
 
 /**
  * Manager snapshot. Keeps the full participant roster (including connection state
- * and moderation fields) but still omits raw ballot contents.
+ * and moderation fields) but still omits raw ballot contents. The full ranking is
+ * included only in the results phase.
  */
 function buildManagerSnapshot(data: CommissionedIdeasSessionData) {
   const { ballots: _ballots, ...rest } = data
@@ -448,6 +465,7 @@ function buildManagerSnapshot(data: CommissionedIdeasSessionData) {
     ...rest,
     ballotsReceived: Object.keys(_ballots).length,
     ballotSubmitterIds: Object.keys(_ballots),
+    results: data.phase === 'results' ? computeTeamScores(data.teams, _ballots) : null,
   }
 }
 
@@ -1206,6 +1224,41 @@ export default function setupCommissionedIdeasRoutes(
     await saveAndBroadcast(session)
     console.info('[commissioned-ideas] Ballot submitted', { sessionId: session.id, participantId: participant.id, replaced })
     res.json({ ok: true, replaced })
+  })
+
+  // ── Instructor: advance or reset the podium reveal ──────────────────────────
+  // Body: { action: 'next' | 'reset' }. Sequence lives in shared/podium.ts.
+  app.post('/api/commissioned-ideas/:sessionId/podium-step', async (req, res) => {
+    const session = await loadInstructorSession(req, res)
+    if (!session) return
+    if (session.data.phase !== 'results') {
+      res.status(409).json({ error: 'The podium is only available in Results' })
+      return
+    }
+
+    const body = ensurePlainObject(req.body)
+    if (body.action !== 'next' && body.action !== 'reset') {
+      res.status(400).json({ error: "action must be 'next' or 'reset'" })
+      return
+    }
+
+    const from = session.data.podiumRevealStep
+    if (body.action === 'reset') {
+      session.data.podiumRevealStep = 'hidden'
+    } else {
+      const placeCount = podiumPlaceCount(computeTeamScores(session.data.teams, session.data.ballots))
+      const next = nextPodiumStep(from, placeCount)
+      if (!next) {
+        res.status(409).json({ error: 'The podium is already fully revealed' })
+        return
+      }
+      session.data.podiumRevealStep = next
+    }
+
+    await sessions.set(session.id, session)
+    broadcastToAll(ws, session.id, 'commissioned-ideas:podium-step', session.data)
+    console.info('[commissioned-ideas] Podium step', { sessionId: session.id, from, to: session.data.podiumRevealStep })
+    res.json({ ok: true, step: session.data.podiumRevealStep })
   })
 
   // ── Instructor: change phase ────────────────────────────────────────────────
