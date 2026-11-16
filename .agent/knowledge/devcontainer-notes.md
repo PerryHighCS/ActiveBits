@@ -54,3 +54,9 @@ Track durable local-development and devcontainer behavior that future contributo
 - Evidence: `.devcontainer/devcontainer.json`; `.devcontainer/privileged/devcontainer.json`; `.devcontainer/post-create.sh`; `.devcontainer/setup-dev.sh`
 - Follow-up action: Keep future privileged, service-readiness, or host-sensitive bootstrap logic out of `postCreateCommand` unless it is strictly required before first attach.
 - Owner: Codex
+
+- Date: 2026-11-16
+- Change: Both devcontainer profiles now pin the Node feature to `26.13.1`, matching `.nvmrc`, instead of requesting the whole Node major. `setup-dev.sh` continues to read the npm pin from `packageManager` and uses `12.2.2` only as its fallback.
+- Why it matters: A container built with an older Node patch can remain below the repository's engine floor until rebuilt. The feature pin makes newly built containers deterministic; an existing container still needs a rebuild to receive the new runtime.
+- Evidence: `.devcontainer/devcontainer.json`; `.devcontainer/privileged/devcontainer.json`; `.devcontainer/setup-dev.sh`; `.nvmrc`; `package.json`.
+- Owner: Codex

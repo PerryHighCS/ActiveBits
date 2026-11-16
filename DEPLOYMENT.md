@@ -6,9 +6,9 @@ For system design and runtime behavior, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Deployment requirements
 
-- A Render web service running Node.js 24.22.1 or newer on the 24.x line.
-  Keep the Render runtime aligned with `.nvmrc` before deploying; earlier 24.x
-  releases lack the October 2026 security fixes.
+- A Render web service running Node.js 26.13.1 or newer on the 26.x line.
+  Keep the Render runtime aligned with `.nvmrc` before deploying; earlier 26.x
+  releases lack the November 2026 security fixes. Use npm 12.2.2 for installs.
 - A Render Key Value instance in the same region as the web service. New instances
   run Valkey and are Redis-compatible.
 - A strong, stable `PERSISTENT_SESSION_SECRET` stored as a Render secret.
@@ -34,7 +34,7 @@ Create a Node web service from the deployment branch with these commands:
 
 | Setting | Value |
 | --- | --- |
-| Build command | `npm install --include=dev --workspaces --include-workspace-root && npm run build --workspace client && npm run build --workspace server` |
+| Build command | `npm install --global npm@12.2.2 && npm install --include=dev --workspaces --include-workspace-root && npm run build --workspace client && npm run build --workspace server` |
 | Start command | `npm start --prefix server` |
 | Health check path | `/health-check` |
 

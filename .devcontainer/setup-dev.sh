@@ -12,7 +12,7 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$script_dir/.." && pwd)"
 package_json_path="$repo_root/package.json"
 
-default_npm_version="11.11.1"
+default_npm_version="12.2.2"
 desired_npm_version="$default_npm_version"
 
 # Keep npm pinning in one place by reading packageManager from root package.json.
