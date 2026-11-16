@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate } from 'react-router'
 import SessionHeader from '@src/components/common/SessionHeader'
 import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler'
 import { consumeCreateSessionBootstrapPayload } from '@src/components/common/manageDashboardUtils'
