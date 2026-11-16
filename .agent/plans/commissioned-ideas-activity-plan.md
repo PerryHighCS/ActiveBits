@@ -278,19 +278,15 @@ This gives deterministic ordering without adding a shared tie-break abstraction.
 | `GET` | `/api/commissioned-ideas/:sessionId/state` | Return current student-safe snapshot |
 | `POST` | `/api/commissioned-ideas/:sessionId/register-participant` | Register/reconnect a participant |
 | `POST` | `/api/commissioned-ideas/:sessionId/participant-name` | Instructor edits or rejects a participant name |
-| `POST` | `/api/commissioned-ideas/:sessionId/max-team-size` | Instructor sets max team size |
-| `POST` | `/api/commissioned-ideas/:sessionId/grouping-mode` | Instructor chooses manual or random grouping |
-| `POST` | `/api/commissioned-ideas/:sessionId/team/create` | Create a new team shell |
-| `POST` | `/api/commissioned-ideas/:sessionId/team/membership` | Join or leave a team |
-| `POST` | `/api/commissioned-ideas/:sessionId/team/remove-member` | Instructor removes a student from a team |
-| `POST` | `/api/commissioned-ideas/:sessionId/random-groups` | Instructor assigns or reshuffles random groups |
-| `POST` | `/api/commissioned-ideas/:sessionId/random-groups-ungrouped` | Instructor places only ungrouped students into teams/new groups |
-| `POST` | `/api/commissioned-ideas/:sessionId/manual-assignment` | Instructor manually assigns an ungrouped or late student to a team |
+| `POST` | `/api/commissioned-ideas/:sessionId/settings` | Instructor sets `maxTeamSize`, `groupingMode`, `studentGroupingLocked`, `namingLocked`, `allowLateRegistration` |
+| `POST` | `/api/commissioned-ideas/:sessionId/create-team` | Student creates a team and joins it (manual mode, unlocked) |
+| `POST` | `/api/commissioned-ideas/:sessionId/join-team` | Student joins or switches to a team (manual mode, unlocked) |
+| `POST` | `/api/commissioned-ideas/:sessionId/leave-team` | Student leaves their team (manual mode, unlocked) |
+| `POST` | `/api/commissioned-ideas/:sessionId/assign-participant` | Instructor moves a student to `teamId`, a `newTeam`, or ungrouped (`teamId: null`) |
+| `POST` | `/api/commissioned-ideas/:sessionId/assign-random` | Instructor random placement: `scope: 'ungrouped'` (default) or `'all'` (unlocked only) |
 | `POST` | `/api/commissioned-ideas/:sessionId/team/proposal` | Propose a team name or project name |
 | `POST` | `/api/commissioned-ideas/:sessionId/team/proposal-vote` | Vote on a name proposal |
 | `POST` | `/api/commissioned-ideas/:sessionId/team/proposal-moderation` | Instructor rejects or restores a proposal |
-| `POST` | `/api/commissioned-ideas/:sessionId/grouping-lock` | Instructor locks or unlocks student grouping |
-| `POST` | `/api/commissioned-ideas/:sessionId/naming-lock` | Instructor locks or unlocks team/project naming |
 | `POST` | `/api/commissioned-ideas/:sessionId/phase` | Instructor changes phase |
 | `POST` | `/api/commissioned-ideas/:sessionId/presentation-order` | Instructor reorders teams |
 | `POST` | `/api/commissioned-ideas/:sessionId/presentation-active` | Instructor sets the current presenting team |
@@ -434,20 +430,66 @@ Implementation:
 Exit criteria:
 - The teacher can get every student into a valid team structure without reopening full free-form grouping.
 
+### Phase 3b: Phase 3 Audit Fixes And Instructor Team Arrangement (2026-11-16)
+
+Goal:
+- Close gaps found while verifying Phase 3 and give the instructor direct drag/drop control over team membership.
+
+Audit findings (verified against code on 2026-11-16):
+- Rejecting a participant left them in `team.memberIds`, so they still counted toward capacity and leaked into team member lists.
+- Student snapshots spread the full team record, so every student would receive every team's proposals (including instructor-rejected ones) and raw vote maps once naming ships.
+- Random mode could only place ungrouped students; there was no full reshuffle before the grouping lock, and placement packed teams (`4/4/1`) instead of balancing them.
+- The instructor could not create a team or move a student directly from one team to another.
+- Ungrouped students in random mode saw no "wait for assignment" message until grouping was locked.
+- Found during browser verification: a student who registered through the activity's own Join form (no name pre-captured by the shared entry flow) stayed on the form forever because `nameSubmitted` was never set after a successful registration.
+- Team mutations were accepted in any phase; they are now limited to `registration` (`409` otherwise) so ballots and presentations never see a moving roster.
+
+Implementation:
+- [x] Remove a participant from their team when the instructor rejects them; refuse instructor assignment of rejected participants
+- [x] Build an explicit student-safe team shape (no proposals/votes for other teams, no rejected proposals)
+- [x] Add instructor `newTeam` assignment (move a student into a brand-new team)
+- [x] Add full random reshuffle (`scope: 'all'`, only while grouping is unlocked) and balance random placement (smallest open team first; full reshuffle pre-sizes `ceil(n / maxTeamSize)` teams)
+- [x] Manager team board with native HTML5 drag/drop between teams, Ungrouped, and a "New team" drop zone
+- [x] Keyboard/screen-reader alternative: per-student `Move … to` select with the same destinations
+- [x] Student random-mode waiting message whenever ungrouped
+- [x] Route-handler tests for reject-removes-membership, rejected-assignment refusal, newTeam, full reshuffle, and lock refusal
+- [x] Playwright spec: instructor drags a student between teams and to a new team
+- [x] Students can switch directly between teams in manual mode (server already allowed it; UI now offers `Switch`)
+- [x] Fix student stuck on Join form after successful registration
+
+Exit criteria:
+- The instructor can rearrange any student at any time during registration with drag/drop or keyboard, and student views never receive moderation-only data.
+
+#### Team membership contract
+
+Owner: `activities/commissioned-ideas/server/routes.ts` (`removeParticipantFromTeam`, `addParticipantToTeam`, `assignRandom`).
+
+Invariant: `participant.teamId === team.id` if and only if `participant.id ∈ team.memberIds`. A team with zero members is deleted. Rejected participants are never members of a team. When a participant leaves a team (any path: student leave/switch, instructor move/remove, rejection, reshuffle), their votes in that team's `groupNameVotes`/`projectNameVotes` are deleted and the team's displayed names are re-resolved.
+
+Failure behavior: membership mutations that would exceed `maxTeamSize` return `409` without mutating state. Student-initiated membership changes after `studentGroupingLocked` return `403`; instructor moves are always allowed during registration. Any team mutation outside the `registration` phase returns `409`. Full reshuffle while grouping is locked returns `409`.
+
 ### Phase 4: Team Naming And Proposal Voting
 
 Goal:
 - Let teams collaboratively settle on a team name and project name after grouping is mostly stable.
 
 Implementation:
-- [ ] Implement team-name proposal creation
-- [ ] Implement project-name proposal creation
-- [ ] Implement team-member voting and vote changes for both proposal types
-- [ ] Implement instructor proposal rejection/restoration
-- [ ] Implement deterministic current-name resolution from non-rejected proposals
-- [ ] Implement `namingLocked` behavior separately from student grouping lock
-- [ ] Add manager and student proposal/voting UI
-- [ ] Add tests for proposal tallying, vote changes, moderation, and naming lock enforcement
+- [x] Implement team-name proposal creation
+- [x] Implement project-name proposal creation
+- [x] Implement team-member voting and vote changes for both proposal types
+- [x] Implement instructor proposal rejection/restoration
+- [x] Implement deterministic current-name resolution from non-rejected proposals
+- [x] Implement `namingLocked` behavior separately from student grouping lock
+- [x] Add manager and student proposal/voting UI
+- [x] Add tests for proposal tallying, vote changes, moderation, and naming lock enforcement
+
+#### Team naming contract
+
+Owner: `activities/commissioned-ideas/shared/naming.ts` (`resolveTeamNames`, `resolveLeadingProposal`). Every server path that mutates proposals, votes, or membership calls `resolveTeamNames` and writes the result to `team.groupName`/`team.projectName`; normalization uses the same function.
+
+Invariant: a team's displayed name for each kind is the non-rejected proposal with the most votes, counting only votes cast by current team members for non-rejected proposals of that team. Ties break by earlier `createdAt`, then earlier position in the append-only proposal list (IDs are random and never used for ordering). No eligible proposal → `null`. Proposing a value auto-casts the proposer's vote for it; proposing a value that case-insensitively matches an existing non-rejected proposal of the same kind casts a vote for the existing proposal instead of creating a duplicate. Each team holds at most 20 proposals per kind.
+
+Failure behavior: proposals/votes after `namingLocked` return `403`; voting for a proposal in another team, an unknown proposal, or a rejected proposal returns `404`/`409` without mutating state. Rejecting a proposal keeps its votes on record but they stop counting; restoring it makes them count again.
 
 Exit criteria:
 - Teams have stable displayed names and project titles that survive reloads and moderation.
@@ -458,14 +500,37 @@ Goal:
 - Support live presentation facilitation across one or more rounds.
 
 Implementation:
-- [ ] Implement presentation order management
-- [ ] Implement direct presenting-team selection
-- [ ] Implement randomizer for teams not yet presented in the current round
-- [ ] Implement `presentationRound` tracking and `presentationHistory`
-- [ ] Implement start-next-round/reset-round controls
-- [ ] Implement return-from-results to presentation
-- [ ] Add manager presentation queue UI and student active-presenter view
-- [ ] Add tests for round tracking, randomizer eligibility, and multi-round behavior
+- [x] Implement presentation order management
+- [x] Implement direct presenting-team selection
+- [x] Implement randomizer for teams not yet presented in the current round
+- [x] Implement `presentationRound` tracking and `presentationHistory`
+- [x] Implement start-next-round/reset-round controls
+- [x] Implement return-from-results to presentation
+- [x] Add manager presentation queue UI and student active-presenter view
+- [x] Add tests for round tracking, randomizer eligibility, and multi-round behavior
+- [x] Add the instructor `/phase` route and manager phase controls (no phase route existed before Phase 5)
+- [x] Playwright spec: instructor starts presentations, spotlights/randomizes a team, student view follows live
+
+Decision (recorded 2026-11-16, Phase 0 left it unrecorded): presentation order is editable during `registration` and `presentation`, including after a round has started. Reordering never changes `presentationHistory`.
+
+#### Phase and presentation contract
+
+Owner: `activities/commissioned-ideas/shared/presentation.ts` (`checkPhaseTransition`, `orderedPresentationTeams`, `normalizePresenterOrder`, `unpresentedTeamIds`, `adjacentTeamId`). Server routes call these; the manager UI uses the same functions to enable/disable controls.
+
+Phase transitions (anything else → `409`, unchanged state):
+
+| From \ To | registration | presentation | voting | results |
+| --- | --- | --- | --- | --- |
+| registration | – | needs ≥1 team | no | no |
+| presentation | only with 0 ballots | – | needs ≥1 team | no |
+| voting | no | yes | – | yes |
+| results | no | yes | yes | – |
+
+Every successful transition resets `podiumRevealStep` to `hidden`. Entering `presentation` normalizes presenter order and clears `currentPresentationTeamId` if that team no longer exists. Voting stays open with as few as one team. Product decision (2026-11-16): when a voter has fewer than three eligible teams (teams other than their own), they still vote but get fewer awards: the ballot size is `min(3, eligibleTeamCount)`, and a voter with zero eligible teams cannot vote. Phase 6 must centralize this ballot-size rule in shared code and decide which amounts the smaller ballot keeps.
+
+Presenter order invariant: in `presentation`, `presenterOrder` values for the existing teams are exactly `0..n-1`. Teams with no order sort after ordered ones by `registeredAt`, then `id`. `presentation-order` takes the full permutation of current team IDs; anything else returns `400`.
+
+Rounds: a team counts as "presented" in round `r` when `presentationHistory` has an entry `{round: r, teamId}`. Spotlighting a team (`presentation-active`) records at most one entry per team per round. The randomizer picks uniformly among existing teams with no entry for the current round; when none remain it returns `409`. `presentation-round` `next` increments the round and clears the spotlight; `reset` drops the current round's history entries and clears the spotlight. Spotlight, randomize, and round actions are only accepted in `presentation` (`409` otherwise).
 
 Exit criteria:
 - The instructor can reliably run manual or randomized presentation rounds without losing team state.

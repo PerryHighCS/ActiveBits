@@ -1,15 +1,19 @@
 import { useState } from 'react'
-import type { ClientTeam } from '../hooks/useCommissionedIdeasSession.js'
-import type { StudentSafeParticipant } from '../../shared/types.js'
+import type { ProposalKind } from '../../shared/naming.js'
+import type { StudentSafeParticipant, StudentSafeTeam } from '../../shared/types.js'
+import { sortTeams, teamLabel } from '../teamLabels.js'
+import TeamNamingPanel from './TeamNamingPanel.js'
 
 interface StudentRosterProps {
   participants: Record<string, StudentSafeParticipant>
-  teams: Record<string, ClientTeam>
+  teams: Record<string, StudentSafeTeam>
   myParticipantId: string
   participantToken: string
   sessionId: string
   studentGroupingLocked: boolean
+  namingLocked: boolean
   groupingMode: string
+  maxTeamSize: number
 }
 
 export default function StudentRoster({
@@ -19,7 +23,9 @@ export default function StudentRoster({
   participantToken,
   sessionId,
   studentGroupingLocked,
+  namingLocked,
   groupingMode,
+  maxTeamSize,
 }: StudentRosterProps) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -27,14 +33,15 @@ export default function StudentRoster({
   const me = participants[myParticipantId]
   const myTeamId = me?.teamId ?? null
 
-  const teamList = Object.values(teams).sort((a, b) => a.registeredAt - b.registeredAt)
+  const teamList = sortTeams(teams)
+  const myTeam = myTeamId ? teams[myTeamId] : undefined
   const ungrouped = Object.values(participants)
     .filter((p) => p.teamId === null)
     .sort((a, b) => a.name.localeCompare(b.name))
 
   // ── API helpers ─────────────────────────────────────────────────────────────
 
-  const post = async (path: string, body: Record<string, unknown>) => {
+  const post = async (path: string, body: Record<string, unknown>): Promise<boolean> => {
     setBusy(true)
     setError(null)
     try {
@@ -49,9 +56,12 @@ export default function StudentRoster({
       const data = (await res.json()) as { error?: string }
       if (!res.ok) {
         setError(data.error ?? 'Something went wrong. Please try again.')
+        return false
       }
+      return true
     } catch {
       setError('Network error — please try again.')
+      return false
     } finally {
       setBusy(false)
     }
@@ -60,6 +70,8 @@ export default function StudentRoster({
   const handleCreateTeam = () => { void post('create-team', {}) }
   const handleJoinTeam = (teamId: string) => { void post('join-team', { teamId }) }
   const handleLeaveTeam = () => { void post('leave-team', {}) }
+  const handlePropose = (kind: ProposalKind, value: string) => post('team/proposal', { kind, value })
+  const handleVote = (kind: ProposalKind, proposalId: string) => post('team/proposal-vote', { kind, proposalId })
 
   const isManual = groupingMode === 'manual'
 
@@ -74,17 +86,29 @@ export default function StudentRoster({
 
       {/* My status */}
       <MyTeamStatus
-        myTeamId={myTeamId}
-        teams={teams}
+        myTeam={myTeam}
+        label={myTeam ? teamLabel(myTeam, teamList.indexOf(myTeam)) : ''}
         participants={participants}
-        studentGroupingLocked={studentGroupingLocked}
+        canLeave={isManual && !studentGroupingLocked}
         busy={busy}
         onLeave={handleLeaveTeam}
       />
 
-      {/* Random mode waiting message */}
-      {!isManual && myTeamId === null && studentGroupingLocked && (
-        <p className="text-sm text-gray-500 italic">
+      {myTeam?.naming && (
+        <TeamNamingPanel
+          naming={myTeam.naming}
+          groupName={myTeam.groupName}
+          projectName={myTeam.projectName}
+          namingLocked={namingLocked}
+          busy={busy}
+          onPropose={handlePropose}
+          onVote={handleVote}
+        />
+      )}
+
+      {/* Waiting for instructor placement */}
+      {myTeamId === null && (!isManual || studentGroupingLocked) && (
+        <p className="text-sm text-gray-500 italic" role="status">
           Your instructor will assign you to a team.
         </p>
       )}
@@ -103,7 +127,9 @@ export default function StudentRoster({
                 .sort((a, b) => a.name.localeCompare(b.name))
               const isMine = team.id === myTeamId
               const memberCount = members.length
-              const canJoin = isManual && !isMine && myTeamId === null && !studentGroupingLocked
+              const isFull = memberCount >= maxTeamSize
+              const canJoin = isManual && !isMine && !studentGroupingLocked && !isFull
+              const label = teamLabel(team, idx)
 
               return (
                 <div
@@ -112,19 +138,22 @@ export default function StudentRoster({
                 >
                   <div className="flex items-center justify-between gap-2 mb-1">
                     <p className="text-xs font-semibold text-gray-600">
-                      Team {idx + 1}
-                      {team.groupName ? ` — ${team.groupName}` : ''}
-                      <span className="ml-1 font-normal text-gray-400">({memberCount})</span>
+                      {label}
+                      <span className="ml-1 font-normal text-gray-400">({memberCount}/{maxTeamSize})</span>
                     </p>
                     {canJoin && (
                       <button
                         type="button"
                         disabled={busy}
                         onClick={() => handleJoinTeam(team.id)}
+                        aria-label={`${myTeamId ? 'Switch to' : 'Join'} ${label}`}
                         className="rounded-full border border-amber-400 bg-amber-50 px-2.5 py-0.5 text-xs font-medium text-amber-700 hover:bg-amber-100 disabled:opacity-50"
                       >
-                        Join
+                        {myTeamId ? 'Switch' : 'Join'}
                       </button>
+                    )}
+                    {!isMine && isFull && (
+                      <span className="text-xs text-gray-400">Full</span>
                     )}
                     {isMine && (
                       <span className="text-xs font-medium text-amber-600">Your team</span>
@@ -203,41 +232,31 @@ export default function StudentRoster({
 // ── My team status strip ──────────────────────────────────────────────────────
 
 interface MyTeamStatusProps {
-  myTeamId: string | null
-  teams: Record<string, ClientTeam>
+  myTeam: StudentSafeTeam | undefined
+  label: string
   participants: Record<string, StudentSafeParticipant>
-  studentGroupingLocked: boolean
+  canLeave: boolean
   busy: boolean
   onLeave: () => void
 }
 
-function MyTeamStatus({
-  myTeamId,
-  teams,
-  participants,
-  studentGroupingLocked,
-  busy,
-  onLeave,
-}: MyTeamStatusProps) {
-  if (myTeamId === null) return null
+function MyTeamStatus({ myTeam, label, participants, canLeave, busy, onLeave }: MyTeamStatusProps) {
+  if (!myTeam) return null
 
-  const team = teams[myTeamId]
-  if (!team) return null
-
-  const members = team.memberIds
+  const names = myTeam.memberIds
     .map((id) => participants[id])
     .filter((p): p is StudentSafeParticipant => p !== undefined)
-  const names = members.map((p) => p.name).join(', ')
+    .map((p) => p.name)
+    .join(', ')
 
   return (
     <div className="rounded-lg bg-amber-50 border border-amber-200 px-4 py-3 flex items-center justify-between gap-3">
       <div>
-        <p className="text-sm font-semibold text-amber-800">
-          {team.groupName ?? 'Your team'}
-        </p>
+        <p className="text-sm font-semibold text-amber-800">Your team: {label}</p>
+        {myTeam.projectName && <p className="text-xs text-amber-700 italic">Project: {myTeam.projectName}</p>}
         <p className="text-xs text-amber-700 mt-0.5">{names}</p>
       </div>
-      {!studentGroupingLocked && (
+      {canLeave && (
         <button
           type="button"
           disabled={busy}

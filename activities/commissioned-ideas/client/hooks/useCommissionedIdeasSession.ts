@@ -1,25 +1,31 @@
 import { useCallback, useRef, useState } from 'react'
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
-import type { StudentSafeParticipant } from '../../shared/types.js'
+import type {
+  CommissionedIdeasPhase,
+  CommissionedIdeasTeam,
+  PresentationHistoryEntry,
+  StudentSafeParticipant,
+  StudentSafeTeam,
+} from '../../shared/types.js'
 
 // ── Client-side snapshot types ────────────────────────────────────────────────
 
-export interface ClientTeam {
-  id: string
-  groupName: string | null
-  projectName: string | null
-  registeredAt: number
-  memberIds: string[]
-}
+/** Fields every client view of a team has. */
+export type ClientTeam = Pick<StudentSafeTeam, 'id' | 'groupName' | 'projectName' | 'registeredAt' | 'memberIds'>
+
+/** Manager snapshots carry the full team record, including proposals and votes. */
+export type ManagerTeam = CommissionedIdeasTeam
 
 export interface StudentSnapshot {
-  phase: string
+  phase: CommissionedIdeasPhase
+  presentationRound: number
+  presentationHistory: PresentationHistoryEntry[]
   studentGroupingLocked: boolean
   namingLocked: boolean
   maxTeamSize: number
   groupingMode: string
   participantRoster: Record<string, StudentSafeParticipant>
-  teams: Record<string, ClientTeam>
+  teams: Record<string, StudentSafeTeam>
   ballotSubmitted: boolean
   myBallot: unknown | null
   ballotsReceived: number
@@ -37,13 +43,15 @@ export interface ManagerParticipant {
 }
 
 export interface ManagerSnapshot {
-  phase: string
+  phase: CommissionedIdeasPhase
+  presentationRound: number
+  presentationHistory: PresentationHistoryEntry[]
   studentGroupingLocked: boolean
   namingLocked: boolean
   maxTeamSize: number
   groupingMode: string
   participantRoster: Record<string, ManagerParticipant>
-  teams: Record<string, ClientTeam>
+  teams: Record<string, ManagerTeam>
   ballotsReceived: number
   currentPresentationTeamId: string | null
   podiumRevealStep: string

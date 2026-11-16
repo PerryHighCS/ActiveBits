@@ -6,6 +6,7 @@ import {
 import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler'
 import { useStudentSession } from '../hooks/useCommissionedIdeasSession'
 import RegistrationForm from './RegistrationForm'
+import PresentationView from './PresentationView'
 import StudentRoster from './StudentRoster'
 
 interface SessionData {
@@ -91,6 +92,7 @@ export default function CommissionedIdeasStudent({ sessionData }: { sessionData:
     setStudentId(participantId)
     setStudentName(name)
     setParticipantToken(token)
+    setNameSubmitted(true)
     setRegistered(true)
     if (sessionId) {
       persistSessionParticipantIdentity(window.localStorage, sessionId, name, participantId)
@@ -142,15 +144,21 @@ export default function CommissionedIdeasStudent({ sessionData }: { sessionData:
             participantToken={participantToken ?? ''}
             sessionId={sessionId}
             studentGroupingLocked={studentGroupingLocked}
+            namingLocked={snapshot?.namingLocked ?? false}
             groupingMode={groupingMode}
+            maxTeamSize={snapshot?.maxTeamSize ?? 4}
           />
         )}
 
         {phase === 'presentation' && (
-          <div className="p-6 text-gray-600">
-            <p className="font-medium">Presentations are underway.</p>
-            <p className="text-sm mt-1 text-gray-400">Your instructor will open voting when ready.</p>
-          </div>
+          <PresentationView
+            teams={teams}
+            participants={participants}
+            currentTeamId={snapshot?.currentPresentationTeamId ?? null}
+            round={snapshot?.presentationRound ?? 1}
+            history={snapshot?.presentationHistory ?? []}
+            myTeamId={studentId ? (participants[studentId]?.teamId ?? null) : null}
+          />
         )}
 
         {phase === 'voting' && (

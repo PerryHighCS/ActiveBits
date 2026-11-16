@@ -1355,3 +1355,476 @@ void test('assign-random returns 403 without instructor auth', async () => {
   )
   assert.equal(res.statusCode, 403)
 })
+
+// ── Phase 3b + Phase 4 helpers ───────────────────────────────────────────────
+
+const ROUTE = (name: string) => `/api/commissioned-ideas/:sessionId/${name}`
+
+async function setupSession() {
+  const app = createMockApp()
+  const { store, sessions } = createMockSessions()
+  setupCommissionedIdeasRoutes(app, sessions, createMockWs())
+  const { id: sessionId, instructorPasscode } = await createSession(app)
+  const post = async (name: string, req: MockRequest) => {
+    const res = createResponse()
+    await app.handlers.post[ROUTE(name)]!(req, res)
+    return res
+  }
+  const asInstructor = (name: string, body: unknown) => post(name, withPasscode({ sessionId }, body, instructorPasscode))
+  const asStudent = (name: string, who: { participantId: string; token: string }, body: Record<string, unknown> = {}) =>
+    post(name, withParticipantToken({ sessionId }, { ...body, participantId: who.participantId }, who.token))
+  const data = () => sessionData(store, sessionId)
+  const register = (name: string) => registerParticipant(app, sessionId, name)
+  return { sessionId, instructorPasscode, post, asInstructor, asStudent, data, register }
+}
+
+function assertMembershipConsistent(data: CommissionedIdeasSessionData) {
+  for (const p of Object.values(data.participantRoster)) {
+    if (p.teamId) {
+      assert.ok(data.teams[p.teamId]?.memberIds.includes(p.id), `${p.name} teamId must point at a team listing them`)
+    }
+  }
+  for (const team of Object.values(data.teams)) {
+    assert.ok(team.memberIds.length > 0, 'empty teams must be deleted')
+    for (const id of team.memberIds) {
+      assert.equal(data.participantRoster[id]?.teamId, team.id, `member ${id} must point back at team ${team.id}`)
+    }
+  }
+}
+
+// ── Phase 3b: instructor arrangement ─────────────────────────────────────────
+
+void test('assign-participant moves a student directly between two teams', async () => {
+  const s = await setupSession()
+  const alice = await s.register('Alice')
+  const bob = await s.register('Bob')
+  const carol = await s.register('Carol')
+  const teamA = (await s.asStudent('create-team', alice)).body as { teamId: string }
+  await s.asStudent('join-team', bob, { teamId: teamA.teamId })
+  const teamC = (await s.asStudent('create-team', carol)).body as { teamId: string }
+
+  const res = await s.asInstructor('assign-participant', { participantId: bob.participantId, teamId: teamC.teamId })
+
+  assert.equal(res.statusCode, 200)
+  assert.deepEqual(s.data().teams[teamA.teamId]?.memberIds, [alice.participantId])
+  assert.deepEqual(s.data().teams[teamC.teamId]?.memberIds, [carol.participantId, bob.participantId])
+  assertMembershipConsistent(s.data())
+})
+
+void test('assign-participant with newTeam creates a team for the student', async () => {
+  const s = await setupSession()
+  const alice = await s.register('Alice')
+  const bob = await s.register('Bob')
+  const team = (await s.asStudent('create-team', alice)).body as { teamId: string }
+  await s.asStudent('join-team', bob, { teamId: team.teamId })
+
+  const res = await s.asInstructor('assign-participant', { participantId: bob.participantId, newTeam: true })
+
+  assert.equal(res.statusCode, 200)
+  const { teamId } = res.body as { teamId: string }
+  assert.notEqual(teamId, team.teamId)
+  assert.deepEqual(s.data().teams[teamId]?.memberIds, [bob.participantId])
+  assertMembershipConsistent(s.data())
+})
+
+void test('assign-participant still works after grouping is locked', async () => {
+  const s = await setupSession()
+  const alice = await s.register('Alice')
+  const bob = await s.register('Bob')
+  const team = (await s.asStudent('create-team', alice)).body as { teamId: string }
+  await s.asInstructor('settings', { studentGroupingLocked: true })
+
+  const res = await s.asInstructor('assign-participant', { participantId: bob.participantId, teamId: team.teamId })
+  assert.equal(res.statusCode, 200)
+  assert.equal(s.data().participantRoster[bob.participantId]?.teamId, team.teamId)
+})
+
+void test('assign-participant refuses a full team without mutating state', async () => {
+  const s = await setupSession()
+  await s.asInstructor('settings', { maxTeamSize: 1 })
+  const alice = await s.register('Alice')
+  const bob = await s.register('Bob')
+  const team = (await s.asStudent('create-team', alice)).body as { teamId: string }
+
+  console.log('[TEST] expecting 409 Team is full')
+  const res = await s.asInstructor('assign-participant', { participantId: bob.participantId, teamId: team.teamId })
+  assert.equal(res.statusCode, 409)
+  assert.equal(s.data().participantRoster[bob.participantId]?.teamId, null)
+})
+
+void test('assign-participant refuses to place a rejected participant', async () => {
+  const s = await setupSession()
+  const alice = await s.register('Alice')
+  const bob = await s.register('Bob')
+  const team = (await s.asStudent('create-team', alice)).body as { teamId: string }
+  await s.asInstructor('participant-name', { participantId: bob.participantId, rejected: true })
+
+  console.log('[TEST] expecting 409 rejected participant placement')
+  const res = await s.asInstructor('assign-participant', { participantId: bob.participantId, teamId: team.teamId })
+  assert.equal(res.statusCode, 409)
+  const newTeamRes = await s.asInstructor('assign-participant', { participantId: bob.participantId, newTeam: true })
+  assert.equal(newTeamRes.statusCode, 409)
+})
+
+void test('assign-participant is refused outside the registration phase', async () => {
+  const s = await setupSession()
+  const alice = await s.register('Alice')
+  const session = s.data()
+  session.phase = 'presentation'
+
+  console.log('[TEST] expecting 409 outside registration')
+  const res = await s.asInstructor('assign-participant', { participantId: alice.participantId, newTeam: true })
+  assert.equal(res.statusCode, 409)
+})
+
+void test('rejecting a participant removes them from their team', async () => {
+  const s = await setupSession()
+  const alice = await s.register('Alice')
+  const bob = await s.register('Bob')
+  const team = (await s.asStudent('create-team', alice)).body as { teamId: string }
+  await s.asStudent('join-team', bob, { teamId: team.teamId })
+
+  await s.asInstructor('participant-name', { participantId: bob.participantId, rejected: true })
+
+  assert.equal(s.data().participantRoster[bob.participantId]?.teamId, null)
+  assert.deepEqual(s.data().teams[team.teamId]?.memberIds, [alice.participantId])
+  assertMembershipConsistent(s.data())
+})
+
+void test("assign-random scope 'all' reshuffles every student while unlocked", async () => {
+  const s = await setupSession()
+  await s.asInstructor('settings', { groupingMode: 'random', maxTeamSize: 2 })
+  for (const name of ['A', 'B', 'C', 'D', 'E']) await s.register(name)
+  await s.asInstructor('assign-random', {})
+  const before = Object.keys(s.data().teams).sort()
+
+  const res = await s.asInstructor('assign-random', { scope: 'all' })
+
+  assert.equal(res.statusCode, 200)
+  const after = Object.keys(s.data().teams).sort()
+  assert.equal(after.length, 3)
+  assert.equal(after.some((id) => before.includes(id)), false, 'full reshuffle builds fresh teams')
+  assertMembershipConsistent(s.data())
+})
+
+void test("assign-random scope 'all' is refused while grouping is locked", async () => {
+  const s = await setupSession()
+  await s.register('A')
+  await s.asInstructor('settings', { studentGroupingLocked: true })
+
+  console.log('[TEST] expecting 409 full reshuffle while locked')
+  const res = await s.asInstructor('assign-random', { scope: 'all' })
+  assert.equal(res.statusCode, 409)
+})
+
+void test('join-team lets a student switch directly from one team to another', async () => {
+  const s = await setupSession()
+  const alice = await s.register('Alice')
+  const bob = await s.register('Bob')
+  const carol = await s.register('Carol')
+  const teamA = (await s.asStudent('create-team', alice)).body as { teamId: string }
+  await s.asStudent('join-team', bob, { teamId: teamA.teamId })
+  const teamC = (await s.asStudent('create-team', carol)).body as { teamId: string }
+
+  const res = await s.asStudent('join-team', bob, { teamId: teamC.teamId })
+  assert.equal(res.statusCode, 200)
+  assertMembershipConsistent(s.data())
+  assert.equal(s.data().participantRoster[bob.participantId]?.teamId, teamC.teamId)
+})
+
+// ── Phase 4: naming proposals and votes ──────────────────────────────────────
+
+async function setupTeamOfTwo() {
+  const s = await setupSession()
+  const alice = await s.register('Alice')
+  const bob = await s.register('Bob')
+  const { teamId } = (await s.asStudent('create-team', alice)).body as { teamId: string }
+  await s.asStudent('join-team', bob, { teamId })
+  return { ...s, alice, bob, teamId }
+}
+
+void test('team/proposal creates a proposal, auto-votes, and sets the displayed name', async () => {
+  const s = await setupTeamOfTwo()
+
+  const res = await s.asStudent('team/proposal', s.alice, { kind: 'group', value: '  Night Owls  ' })
+
+  assert.equal(res.statusCode, 200)
+  const team = s.data().teams[s.teamId]!
+  assert.equal(team.proposedGroupNames.length, 1)
+  assert.equal(team.proposedGroupNames[0]?.value, 'Night Owls')
+  assert.equal(team.groupNameVotes[s.alice.participantId], team.proposedGroupNames[0]?.id)
+  assert.equal(team.groupName, 'Night Owls')
+  assert.equal(team.projectName, null, 'project name is independent of group name')
+})
+
+void test('team/proposal with a duplicate value votes for the existing proposal', async () => {
+  const s = await setupTeamOfTwo()
+  const first = (await s.asStudent('team/proposal', s.alice, { kind: 'project', value: 'Solar Oven' })).body as { proposalId: string }
+
+  const res = await s.asStudent('team/proposal', s.bob, { kind: 'project', value: 'solar   oven' })
+
+  assert.equal((res.body as { proposalId: string }).proposalId, first.proposalId)
+  const team = s.data().teams[s.teamId]!
+  assert.equal(team.proposedProjectNames.length, 1)
+  assert.equal(team.projectNameVotes[s.bob.participantId], first.proposalId)
+})
+
+void test('team/proposal-vote changes a vote and re-resolves the name', async () => {
+  const s = await setupTeamOfTwo()
+  const owls = (await s.asStudent('team/proposal', s.alice, { kind: 'group', value: 'Owls' })).body as { proposalId: string }
+  const hawks = (await s.asStudent('team/proposal', s.bob, { kind: 'group', value: 'Hawks' })).body as { proposalId: string }
+  assert.equal(s.data().teams[s.teamId]?.groupName, 'Owls', '1–1 tie goes to earlier proposal')
+
+  const res = await s.asStudent('team/proposal-vote', s.alice, { kind: 'group', proposalId: hawks.proposalId })
+
+  assert.equal(res.statusCode, 200)
+  assert.equal(s.data().teams[s.teamId]?.groupName, 'Hawks')
+  assert.notEqual(s.data().teams[s.teamId]?.groupNameVotes[s.alice.participantId], owls.proposalId)
+})
+
+void test('team/proposal-vote rejects a proposal from another team', async () => {
+  const s = await setupTeamOfTwo()
+  const carol = await s.register('Carol')
+  await s.asStudent('create-team', carol)
+  const other = (await s.asStudent('team/proposal', carol, { kind: 'group', value: 'Foxes' })).body as { proposalId: string }
+
+  console.log('[TEST] expecting 404 cross-team vote')
+  const res = await s.asStudent('team/proposal-vote', s.alice, { kind: 'group', proposalId: other.proposalId })
+  assert.equal(res.statusCode, 404)
+})
+
+void test('naming routes require team membership, valid kind, and participant auth', async () => {
+  const s = await setupSession()
+  const loner = await s.register('Loner')
+
+  console.log('[TEST] expecting naming validation failures')
+  assert.equal((await s.asStudent('team/proposal', loner, { kind: 'group', value: 'Solo' })).statusCode, 409)
+  assert.equal((await s.asStudent('team/proposal', loner, { kind: 'mascot', value: 'Solo' })).statusCode, 400)
+  assert.equal((await s.asStudent('team/proposal', loner, { kind: 'group', value: '   ' })).statusCode, 400)
+  const noAuth = await s.post('team/proposal', createRequest({ sessionId: s.sessionId }, { participantId: loner.participantId, kind: 'group', value: 'X' }))
+  assert.equal(noAuth.statusCode, 403)
+})
+
+void test('naming lock blocks proposals and votes but not grouping', async () => {
+  const s = await setupTeamOfTwo()
+  const owls = (await s.asStudent('team/proposal', s.alice, { kind: 'group', value: 'Owls' })).body as { proposalId: string }
+  await s.asInstructor('settings', { namingLocked: true })
+
+  console.log('[TEST] expecting 403 naming locked')
+  assert.equal((await s.asStudent('team/proposal', s.bob, { kind: 'group', value: 'Hawks' })).statusCode, 403)
+  assert.equal((await s.asStudent('team/proposal-vote', s.bob, { kind: 'group', proposalId: owls.proposalId })).statusCode, 403)
+  assert.equal((await s.asStudent('leave-team', s.bob)).statusCode, 200, 'grouping lock is independent of naming lock')
+})
+
+void test('grouping lock does not block naming', async () => {
+  const s = await setupTeamOfTwo()
+  await s.asInstructor('settings', { studentGroupingLocked: true })
+  const res = await s.asStudent('team/proposal', s.alice, { kind: 'project', value: 'Rain Catcher' })
+  assert.equal(res.statusCode, 200)
+})
+
+void test('team/proposal-moderation rejects and restores, recomputing the displayed name', async () => {
+  const s = await setupTeamOfTwo()
+  const rude = (await s.asStudent('team/proposal', s.alice, { kind: 'group', value: 'Rude Name' })).body as { proposalId: string }
+  await s.asStudent('team/proposal-vote', s.bob, { kind: 'group', proposalId: rude.proposalId })
+  await s.asStudent('team/proposal', s.bob, { kind: 'group', value: 'Owls' })
+  // Bob moved his vote to Owls by proposing it; Alice still on Rude Name → 1–1, Rude Name is older.
+  assert.equal(s.data().teams[s.teamId]?.groupName, 'Rude Name')
+
+  const rejectRes = await s.asInstructor('team/proposal-moderation', {
+    teamId: s.teamId, kind: 'group', proposalId: rude.proposalId, rejected: true,
+  })
+  assert.equal(rejectRes.statusCode, 200)
+  assert.equal(s.data().teams[s.teamId]?.groupName, 'Owls')
+
+  console.log('[TEST] expecting 409 for re-proposing / voting a rejected name')
+  assert.equal((await s.asStudent('team/proposal', s.bob, { kind: 'group', value: 'rude name' })).statusCode, 409)
+  assert.equal((await s.asStudent('team/proposal-vote', s.bob, { kind: 'group', proposalId: rude.proposalId })).statusCode, 409)
+
+  await s.asInstructor('team/proposal-moderation', {
+    teamId: s.teamId, kind: 'group', proposalId: rude.proposalId, rejected: false,
+  })
+  assert.equal(s.data().teams[s.teamId]?.groupName, 'Rude Name', 'restored proposal votes count again')
+})
+
+void test('team/proposal-moderation requires instructor auth and a boolean rejected flag', async () => {
+  const s = await setupTeamOfTwo()
+  const p = (await s.asStudent('team/proposal', s.alice, { kind: 'group', value: 'Owls' })).body as { proposalId: string }
+
+  console.log('[TEST] expecting moderation auth/validation failures')
+  const noAuth = await s.post('team/proposal-moderation', createRequest({ sessionId: s.sessionId }, {
+    teamId: s.teamId, kind: 'group', proposalId: p.proposalId, rejected: true,
+  }))
+  assert.equal(noAuth.statusCode, 403)
+  const bad = await s.asInstructor('team/proposal-moderation', { teamId: s.teamId, kind: 'group', proposalId: p.proposalId, rejected: 'yes' })
+  assert.equal(bad.statusCode, 400)
+})
+
+void test('leaving a team removes the leaver vote from the displayed-name tally', async () => {
+  const s = await setupTeamOfTwo()
+  const carol = await s.register('Carol')
+  await s.asStudent('join-team', carol, { teamId: s.teamId })
+  await s.asStudent('team/proposal', s.alice, { kind: 'group', value: 'Owls' })
+  const hawks = (await s.asStudent('team/proposal', s.bob, { kind: 'group', value: 'Hawks' })).body as { proposalId: string }
+  await s.asStudent('team/proposal-vote', carol, { kind: 'group', proposalId: hawks.proposalId })
+  assert.equal(s.data().teams[s.teamId]?.groupName, 'Hawks')
+
+  await s.asStudent('leave-team', carol)
+
+  assert.equal(s.data().teams[s.teamId]?.groupName, 'Owls')
+  assert.equal(carol.participantId in (s.data().teams[s.teamId]?.groupNameVotes ?? {}), false)
+})
+
+void test('proposal count per kind is capped', async () => {
+  const s = await setupTeamOfTwo()
+  for (let i = 0; i < 20; i++) {
+    const r = await s.asStudent('team/proposal', s.alice, { kind: 'group', value: `Name ${i}` })
+    assert.equal(r.statusCode, 200)
+  }
+  console.log('[TEST] expecting 409 proposal limit')
+  assert.equal((await s.asStudent('team/proposal', s.alice, { kind: 'group', value: 'One too many' })).statusCode, 409)
+})
+
+// ── Phase 5: phases, order, spotlight, rounds ────────────────────────────────
+
+async function setupPresentationSession(teamNames = ['Alice', 'Bob', 'Carol']) {
+  const s = await setupSession()
+  const members: { participantId: string; token: string }[] = []
+  const teamIds: string[] = []
+  for (const name of teamNames) {
+    const who = await s.register(name)
+    members.push(who)
+    teamIds.push(((await s.asStudent('create-team', who)).body as { teamId: string }).teamId)
+  }
+  return { ...s, members, teamIds }
+}
+
+void test('phase route requires instructor auth and a known phase', async () => {
+  const s = await setupPresentationSession()
+  console.log('[TEST] expecting phase auth/validation failures')
+  const noAuth = await s.post('phase', createRequest({ sessionId: s.sessionId }, { phase: 'presentation' }))
+  assert.equal(noAuth.statusCode, 403)
+  assert.equal((await s.asInstructor('phase', { phase: 'lobby' })).statusCode, 400)
+})
+
+void test('phase route refuses disallowed transitions without changing state', async () => {
+  const s = await setupSession()
+  console.log('[TEST] expecting 409 phase transitions')
+  assert.equal((await s.asInstructor('phase', { phase: 'presentation' })).statusCode, 409, 'no teams yet')
+  assert.equal((await s.asInstructor('phase', { phase: 'results' })).statusCode, 409)
+  assert.equal(s.data().phase, 'registration')
+})
+
+void test('entering presentation normalizes presenter order and resets the podium', async () => {
+  const s = await setupPresentationSession()
+  s.data().podiumRevealStep = 'winner'
+
+  const res = await s.asInstructor('phase', { phase: 'presentation' })
+
+  assert.equal(res.statusCode, 200)
+  const data = s.data()
+  assert.equal(data.phase, 'presentation')
+  assert.equal(data.podiumRevealStep, 'hidden')
+  const orders = Object.values(data.teams).map((team) => team.presenterOrder).sort()
+  assert.deepEqual(orders, [0, 1, 2])
+})
+
+void test('reopening registration from presentation is refused once a ballot exists', async () => {
+  const s = await setupPresentationSession()
+  await s.asInstructor('phase', { phase: 'presentation' })
+  s.data().ballots['someone'] = { voterId: 'someone', voterName: 'X', voterTeamId: null, allocations: [], submittedAt: 1 }
+
+  console.log('[TEST] expecting 409 reopen registration with ballots')
+  assert.equal((await s.asInstructor('phase', { phase: 'registration' })).statusCode, 409)
+})
+
+void test('full phase cycle including results back to presentation', async () => {
+  const s = await setupPresentationSession()
+  for (const phase of ['presentation', 'voting', 'results', 'presentation']) {
+    const res = await s.asInstructor('phase', { phase })
+    assert.equal(res.statusCode, 200, `→ ${phase}`)
+  }
+  assert.equal(s.data().phase, 'presentation')
+})
+
+void test('presentation-order accepts a full permutation and rejects partial lists', async () => {
+  const s = await setupPresentationSession()
+  await s.asInstructor('phase', { phase: 'presentation' })
+  const reversed = [...s.teamIds].reverse()
+
+  assert.equal((await s.asInstructor('presentation-order', { teamIds: reversed })).statusCode, 200)
+  reversed.forEach((id, index) => assert.equal(s.data().teams[id]?.presenterOrder, index))
+
+  console.log('[TEST] expecting 400 partial presentation order')
+  assert.equal((await s.asInstructor('presentation-order', { teamIds: reversed.slice(1) })).statusCode, 400)
+})
+
+void test('presentation-active records a team once per round and can clear the spotlight', async () => {
+  const s = await setupPresentationSession()
+  await s.asInstructor('phase', { phase: 'presentation' })
+  const [a, b] = s.teamIds as [string, string]
+
+  await s.asInstructor('presentation-active', { teamId: a })
+  await s.asInstructor('presentation-active', { teamId: b })
+  await s.asInstructor('presentation-active', { teamId: a })
+  assert.equal(s.data().currentPresentationTeamId, a)
+  assert.deepEqual(s.data().presentationHistory.map((e) => [e.round, e.teamId]), [[1, a], [1, b]])
+
+  await s.asInstructor('presentation-active', { teamId: null })
+  assert.equal(s.data().currentPresentationTeamId, null)
+
+  console.log('[TEST] expecting presentation-active validation failures')
+  assert.equal((await s.asInstructor('presentation-active', { teamId: 'nope' })).statusCode, 404)
+  assert.equal((await s.asInstructor('presentation-active', {})).statusCode, 400)
+})
+
+void test('presentation-randomize only picks unpresented teams and refuses when exhausted', async () => {
+  const s = await setupPresentationSession()
+  await s.asInstructor('phase', { phase: 'presentation' })
+  await s.asInstructor('presentation-active', { teamId: s.teamIds[0] })
+
+  const picked = new Set<string>()
+  for (let i = 0; i < 2; i++) {
+    const res = await s.asInstructor('presentation-randomize', {})
+    assert.equal(res.statusCode, 200)
+    picked.add((res.body as { teamId: string }).teamId)
+  }
+  assert.deepEqual([...picked].sort(), [s.teamIds[1], s.teamIds[2]].sort())
+
+  console.log('[TEST] expecting 409 everyone presented')
+  assert.equal((await s.asInstructor('presentation-randomize', {})).statusCode, 409)
+})
+
+void test('presentation-round next starts a fresh round; reset clears only the current round', async () => {
+  const s = await setupPresentationSession()
+  await s.asInstructor('phase', { phase: 'presentation' })
+  await s.asInstructor('presentation-active', { teamId: s.teamIds[0] })
+
+  const next = await s.asInstructor('presentation-round', { action: 'next' })
+  assert.equal((next.body as { round: number }).round, 2)
+  assert.equal(s.data().currentPresentationTeamId, null)
+
+  await s.asInstructor('presentation-active', { teamId: s.teamIds[1] })
+  await s.asInstructor('presentation-round', { action: 'reset' })
+  assert.deepEqual(s.data().presentationHistory.map((e) => [e.round, e.teamId]), [[1, s.teamIds[0]]])
+  assert.equal(s.data().presentationRound, 2)
+
+  console.log('[TEST] expecting 400 bad round action')
+  assert.equal((await s.asInstructor('presentation-round', { action: 'skip' })).statusCode, 400)
+})
+
+void test('presentation controls are refused outside the presentation phase', async () => {
+  const s = await setupPresentationSession()
+  console.log('[TEST] expecting 409 presentation controls during registration')
+  assert.equal((await s.asInstructor('presentation-active', { teamId: s.teamIds[0] })).statusCode, 409)
+  assert.equal((await s.asInstructor('presentation-randomize', {})).statusCode, 409)
+  assert.equal((await s.asInstructor('presentation-round', { action: 'next' })).statusCode, 409)
+  assert.equal((await s.asInstructor('presentation-order', { teamIds: s.teamIds })).statusCode, 200, 'order is editable in registration')
+})
+
+void test('team changes are refused once presentations start', async () => {
+  const s = await setupPresentationSession()
+  await s.asInstructor('phase', { phase: 'presentation' })
+  console.log('[TEST] expecting 409 team change during presentations')
+  assert.equal((await s.asStudent('leave-team', s.members[0]!)).statusCode, 409)
+})
