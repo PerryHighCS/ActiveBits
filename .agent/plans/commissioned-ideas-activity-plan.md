@@ -15,6 +15,41 @@ Owner: `activities/commissioned-ideas/client/manager/`. The manager must resolve
 - [x] Verify creation and teacher join flows with `npm test` and root `npm run test:e2e`.
 - [x] Document the final credential handoff contract.
 
+## Manager reload recovery (2026-11-18)
+
+Owner: `activities/commissioned-ideas/client/manager/passcode.ts` (client resolution and recovery) and the `create` / `instructor-passcode` routes in `server/routes.ts`.
+
+Problem: the manager only had the instructor passcode from router state or the in-memory handoff. Router state was never cleared, so the passcode stayed in `window.history.state`, and a reload depended on that leftover state.
+
+Contract:
+- `POST /create` issues a core manager capability (`issueActivityCapability`, only a SHA-256 digest is stored on the session) and sets it as the httpOnly `activebits_cap_manager_<scope>` cookie (SameSite=Lax, Secure in production, 7-day expiry). Persistent-link Teacher Join already issues the same capability through core.
+- `GET /:sessionId/instructor-passcode` returns the passcode only when the caller's manager capability cookie resolves for that session; otherwise `403`. Responses are `no-store` and logged.
+- The manager uses router state or the in-memory handoff when present, then clears router state (`replace`, `state: null`) so the passcode does not persist in browser history. Without a handoff (a reload), it calls the exchange endpoint. On `403` it calls core `POST /api/session/:id/persistent-manager-capability` once (which reissues the cookie from the persistent teacher cookie) and retries the exchange once. Anything else leaves manager controls unavailable with the recovery message.
+- Snapshots sent to clients list their fields explicitly. Session-only data (`instructorPasscode`, `activityCapabilities`, participant tokens, anything core adds) never reaches students, and the manager snapshot also omits the passcode and capability records.
+- The WebSocket still authenticates with the passcode message after connect; no passcode in URLs or browser storage.
+
+Failure behavior: an expired or missing capability with no persistent teacher cookie yields the existing "Instructor passcode not found" recovery message. A rate-limited (`429`) persistent recovery is treated as a failure for that load.
+
+- [x] Server: issue the manager capability cookie on create; add the exchange route
+- [x] Server: explicit field lists for student and manager snapshots
+- [x] Client: clear router state after reading the handoff; exchange on reload with one persistent fallback
+- [x] Tests: route tests (cookie issued, exchange accepts/rejects, snapshots exclude secrets), client recovery decision table, Playwright real reload for dashboard, Teacher Join, and persistent-link entries
+- [x] Docs: data contract, security notes
+- [ ] PR description (after the change is pushed)
+
+## CodeRabbit July review follow-up (2026-11-18)
+
+Triage of the 25 unresolved CodeRabbit threads from 2026-07-30 on PR #243, verified against current code.
+
+- [x] Already fixed earlier: Strict Mode bootstrap consumption, missing student-flow tests, passcode in manager frames, full reshuffle, `allowLateRegistration`
+- [x] Critical: participant impersonation via reconnect; WebSocket identity from URL (see "Commissioned Ideas participant identity" in `.agent/knowledge/data-contracts.md`)
+- [x] Normalization fails closed instead of minting secrets on read; no display names in logs; socket `error` listener; manager stops reconnecting on auth refusal
+- [x] Shared `allowSessionStorageFallback: false` survives an otherwise-empty bootstrap config
+- [x] Smaller items: shared WS URL helper, no-op unmount guard removed, max-team-size revert on failure, focus restored after name edit, loading states announced, `GroupingMode` typing, shared ballot-amount check, plan names/tree updated
+- [x] Declined with reason: runtime validation of same-origin snapshot payloads
+- [ ] Open, needs product/engineering decision: participant token in `localStorage` (move to a core httpOnly participant capability); per-session atomic updates (`updateAtomic` for every writer)
+- [ ] Post replies and resolve threads after the fixes are pushed
+
 ## Goal
 
 Create a live classroom activity where:
@@ -74,100 +109,39 @@ Out of scope for v1:
 
 The new activity should borrow those ideas without adding Commissioned Ideas-specific conditionals to shared code.
 
-## Proposed Activity Shape
+## Activity Shape (as built)
+
+The original proposal used `SharkTank*` placeholder names; Phase 0 switched everything to `CommissionedIdeas*`. Tests sit beside the code they cover (`*.test.ts`), and browser specs are under `playwright/`.
 
 ```text
 activities/commissioned-ideas/
 ├── activity.config.ts
-├── shared/
-│   ├── types.ts
-│   ├── scoring.ts
-│   └── validation.ts
+├── shared/                      # rules shared by client and server, each with a decision-table test
+│   ├── types.ts                 # session model (authoritative)
+│   ├── naming.ts                # team/project name resolution
+│   ├── membership.ts            # which instructor team moves are allowed when
+│   ├── presentation.ts          # phase transitions, presentation order, rounds
+│   ├── validation.ts            # who can vote, ballot size and validity
+│   ├── podium.ts                # funding ranks, ties, reveal sequence
+│   ├── scoring.ts               # team totals and rankings-table order
+│   └── id.ts
 ├── client/
 │   ├── index.ts
-│   ├── manager/
-│   │   ├── SharkTankManager.tsx
-│   │   ├── PodiumReveal.tsx
-│   │   └── PresentationQueue.tsx
-│   └── student/
-│       ├── SharkTankStudent.tsx
-│       ├── TeamRegistrationForm.tsx
-│       └── VotingBallot.tsx
-└── server/
-    ├── routes.ts
-    └── routes.test.ts
+│   ├── PodiumStage.tsx/.css     # podium shared by manager and student
+│   ├── teamLabels.ts
+│   ├── hooks/useCommissionedIdeasSession.ts
+│   ├── manager/                 # CommissionedIdeasManager, PhaseControls, RegistrationDashboard,
+│   │                            # TeamBoard, PresentationDashboard, VotingDashboard, ResultsDashboard,
+│   │                            # LateArrivalsPanel, passcode recovery, API hooks
+│   └── student/                 # CommissionedIdeasStudent, RegistrationForm, StudentRoster,
+│                                # TeamNamingPanel, PresentationView, VotingBallot, ResultsView
+├── server/routes.ts
+└── playwright/                  # manager-entry, teams, presentation, voting, results, late-arrival
 ```
 
 ## Session Model
 
-```ts
-type SharkTankPhase = 'registration' | 'presentation' | 'voting' | 'results'
-
-type PodiumRevealStep = 'hidden' | 'third' | 'second' | 'winner' | 'complete'
-
-interface SharkTankTeam {
-  id: string
-  groupName: string | null
-  projectName: string | null
-  registeredAt: number
-  presenterOrder: number | null
-  locked: boolean
-  memberIds: string[]
-  proposedGroupNames: {
-    id: string
-    value: string
-    proposedByParticipantId: string
-    createdAt: number
-    rejectedByInstructor: boolean
-  }[]
-  proposedProjectNames: {
-    id: string
-    value: string
-    proposedByParticipantId: string
-    createdAt: number
-    rejectedByInstructor: boolean
-  }[]
-  groupNameVotes: Record<string, string>
-  projectNameVotes: Record<string, string>
-}
-
-interface SharkTankBallot {
-  voterId: string
-  voterName: string
-  voterTeamId: string | null
-  allocations: {
-    teamId: string
-    amount: 100 | 300 | 500
-  }[]
-  submittedAt: number
-}
-
-interface SharkTankSessionData {
-  phase: SharkTankPhase
-  studentGroupingLocked: boolean
-  namingLocked: boolean
-  maxTeamSize: number
-  groupingMode: 'manual' | 'random'
-  presentationRound: number
-  teams: Record<string, SharkTankTeam>
-  participantRoster: Record<string, {
-    id: string
-    name: string
-    teamId: string | null
-    connected: boolean
-    lastSeen: number
-    rejectedByInstructor: boolean
-  }>
-  ballots: Record<string, SharkTankBallot>
-  presentationHistory: {
-    round: number
-    teamId: string
-    presentedAt: number
-  }[]
-  currentPresentationTeamId: string | null
-  podiumRevealStep: PodiumRevealStep
-}
-```
+The authoritative model is `CommissionedIdeasSessionData` in `shared/types.ts` (teams with naming proposals and votes, the participant roster, ballots, presentation round and history, podium step, and settings). Client snapshot shapes are `StudentSafeTeam` / `StudentSafeParticipant` and the manager snapshot built in `server/routes.ts`; both use explicit field lists (see "Manager reload recovery").
 
 ## Phase Behavior
 

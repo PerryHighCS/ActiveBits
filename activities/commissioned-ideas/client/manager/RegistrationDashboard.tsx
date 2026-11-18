@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { QRCodeSVG } from 'qrcode.react'
 import type { ProposalKind } from '../../shared/naming.js'
 import type { ManagerParticipant, ManagerSnapshot } from '../hooks/useCommissionedIdeasSession.js'
@@ -38,9 +38,9 @@ export default function RegistrationDashboard({
     await call('settings', { [field]: !snapshot[field] })
   }
 
-  const handleMaxTeamSize = async (value: number) => {
-    if (!Number.isInteger(value) || value < 2) return
-    await call('settings', { maxTeamSize: value })
+  const handleMaxTeamSize = async (value: number): Promise<boolean> => {
+    if (!Number.isInteger(value) || value < 2) return false
+    return call('settings', { maxTeamSize: value })
   }
 
   const handleGroupingMode = async (mode: 'manual' | 'random') => {
@@ -159,7 +159,8 @@ interface SettingsPanelProps {
   snapshot: ManagerSnapshot
   busy: boolean
   onToggleLock: (field: 'studentGroupingLocked' | 'namingLocked') => void
-  onMaxTeamSize: (value: number) => void
+  /** Resolves false when the server refused the change. */
+  onMaxTeamSize: (value: number) => Promise<boolean>
   onGroupingMode: (mode: 'manual' | 'random') => void
   onAssignRandom: (scope: 'ungrouped' | 'all') => void
 }
@@ -182,10 +183,17 @@ function SettingsPanel({
     setMaxInput(String(serverMax))
   }, [serverMax])
 
+  // Show the requested size immediately, and fall back to the server's value if
+  // the request fails (serverMax does not change then, so the effect won't fire).
+  const requestMaxTeamSize = async (value: number) => {
+    setMaxInput(String(value))
+    if (!(await onMaxTeamSize(value))) setMaxInput(String(serverMax))
+  }
+
   const handleMaxBlur = () => {
     const v = parseInt(maxInput, 10)
     if (!Number.isNaN(v) && v >= 2) {
-      onMaxTeamSize(v)
+      void requestMaxTeamSize(v)
     } else {
       setMaxInput(String(serverMax))
     }
@@ -206,7 +214,7 @@ function SettingsPanel({
               type="button"
               aria-label="Decrease max team size"
               disabled={busy || serverMax <= 2}
-              onClick={() => { setMaxInput(String(serverMax - 1)); onMaxTeamSize(serverMax - 1) }}
+              onClick={() => { void requestMaxTeamSize(serverMax - 1) }}
               className="rounded-md border border-gray-300 px-2.5 py-1 text-sm font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
             >
               −
@@ -225,7 +233,7 @@ function SettingsPanel({
               type="button"
               aria-label="Increase max team size"
               disabled={busy}
-              onClick={() => { setMaxInput(String(serverMax + 1)); onMaxTeamSize(serverMax + 1) }}
+              onClick={() => { void requestMaxTeamSize(serverMax + 1) }}
               className="rounded-md border border-gray-300 px-2.5 py-1 text-sm font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
             >
               +
@@ -425,6 +433,14 @@ function ParticipantRow({
   const { id, name, connected, rejectedByInstructor } = participant
   const isEditing = editState !== null
 
+  // Return keyboard focus to the Edit button when leaving edit mode (save or cancel).
+  const editButtonRef = useRef<HTMLButtonElement>(null)
+  const wasEditingRef = useRef(isEditing)
+  useEffect(() => {
+    if (wasEditingRef.current && !isEditing) editButtonRef.current?.focus()
+    wasEditingRef.current = isEditing
+  }, [isEditing])
+
   return (
     <div className={`px-4 py-3 flex items-center gap-3 ${rejectedByInstructor ? 'bg-red-50' : ''}`}>
       <span
@@ -482,6 +498,7 @@ function ParticipantRow({
         ) : (
           <>
             <button
+              ref={editButtonRef}
               type="button"
               onClick={onStartEdit}
               aria-label={`Edit name for ${name}`}

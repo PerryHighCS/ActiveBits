@@ -1,5 +1,5 @@
 import type { ProposalKind } from '../../shared/naming.js'
-import type { StudentSafeParticipant, StudentSafeTeam } from '../../shared/types.js'
+import type { GroupingMode, StudentSafeParticipant, StudentSafeTeam } from '../../shared/types.js'
 import { sortTeams, teamLabel } from '../teamLabels.js'
 import TeamNamingPanel from './TeamNamingPanel.js'
 import { useParticipantApi } from './useParticipantApi.js'
@@ -12,7 +12,7 @@ interface StudentRosterProps {
   sessionId: string
   studentGroupingLocked: boolean
   namingLocked: boolean
-  groupingMode: string
+  groupingMode: GroupingMode
   maxTeamSize: number
 }
 

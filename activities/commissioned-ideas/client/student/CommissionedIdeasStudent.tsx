@@ -81,6 +81,7 @@ export default function CommissionedIdeasStudent({ sessionData }: { sessionData:
   const { snapshot, connect, disconnect } = useStudentSession({
     sessionId: registered ? sessionId : null,
     participantId: studentId,
+    participantToken,
     attachSessionEndedHandler,
   })
 
@@ -107,11 +108,11 @@ export default function CommissionedIdeasStudent({ sessionData }: { sessionData:
 
   // ── Render ──────────────────────────────────────────────────────────────────
   if (!sessionId) {
-    return <div className="p-6 text-gray-500">Loading session…</div>
+    return <div className="p-6 text-gray-500" role="status">Loading session…</div>
   }
 
   if (!identityResolved) {
-    return <div className="p-6 text-gray-500">Loading…</div>
+    return <div className="p-6 text-gray-500" role="status">Loading…</div>
   }
 
   if (!nameSubmitted || !registered) {
@@ -120,6 +121,7 @@ export default function CommissionedIdeasStudent({ sessionData }: { sessionData:
         sessionId={sessionId}
         initialName={studentName}
         initialParticipantId={studentId}
+        initialToken={participantToken}
         onRegistered={handleRegistered}
       />
     )

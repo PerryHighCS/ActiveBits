@@ -598,7 +598,7 @@ void test('register-participant stores participant in session roster', async () 
   assert.equal(participant.connected, true)
 })
 
-void test('register-participant reconnects an existing participant by id', async () => {
+void test('register-participant reconnects an existing participant with id and token', async () => {
   const app = createMockApp()
   const ws = createMockWs()
   const { store, sessions } = createMockSessions()
@@ -613,18 +613,19 @@ void test('register-participant reconnects an existing participant by id', async
   // First registration
   const firstRes = createResponse()
   await handler(createRequest({ sessionId }, { name: 'Carol' }), firstRes)
-  const firstId = (firstRes.body as { participantId: string }).participantId
+  const { participantId: firstId, token: firstToken } = firstRes.body as { participantId: string; token: string }
 
-  // Reconnect with same id
+  // Reconnect with same id, proving ownership with the token
   const reconnectRes = createResponse()
   await handler(
-    createRequest({ sessionId }, { name: 'Carol Updated', participantId: firstId }),
+    withParticipantToken({ sessionId }, { name: 'Carol Updated', participantId: firstId }, firstToken),
     reconnectRes,
   )
 
   assert.equal(reconnectRes.statusCode, 200)
-  const reconnectBody = reconnectRes.body as { participantId: string; name: string }
+  const reconnectBody = reconnectRes.body as { participantId: string; token: string }
   assert.equal(reconnectBody.participantId, firstId, 'same id returned on reconnect')
+  assert.equal(reconnectBody.token, firstToken, 'same token returned on reconnect')
 
   // Only one participant in roster
   const data = sessionData(store, sessionId)
@@ -648,13 +649,15 @@ void test('register-participant reconnect does not overwrite instructor-moderate
   // Student registers with a typo
   const regRes = createResponse()
   await regHandler(createRequest({ sessionId }, { name: 'bbo' }), regRes)
-  const participantId = (regRes.body as { participantId: string }).participantId
+  const { participantId, token } = regRes.body as { participantId: string; token: string }
 
   // Instructor corrects the name
   await moderateHandler(withPasscode({ sessionId }, { participantId, name: 'Bob' }, passcode), createResponse())
 
-  // Student reconnects with stale local storage name
-  await regHandler(createRequest({ sessionId }, { name: 'bbo', participantId }), createResponse())
+  // Student reconnects (with their token) using a stale local storage name
+  const reconnectRes = createResponse()
+  await regHandler(withParticipantToken({ sessionId }, { name: 'bbo', participantId }, token), reconnectRes)
+  assert.equal((reconnectRes.body as { participantId: string }).participantId, participantId, 'must be a reconnect')
 
   const data = sessionData(store, sessionId)
   assert.equal(
@@ -2078,4 +2081,248 @@ void test('teams with equal funding share a podium step', async () => {
   assert.equal(JSON.stringify(snapshot.podium).includes(t1), false)
   assert.equal(JSON.stringify(snapshot.podium).includes(t5), false)
   assert.equal(s.data().podiumRevealStep, 'complete', '2 places: second → winner → complete')
+})
+
+// ── Manager reload recovery and snapshot privacy ─────────────────────────────
+
+function createCookieResponse() {
+  const res = createResponse() as MockResponse & {
+    cookies: Record<string, { value: string; options: Record<string, unknown> }>
+    headers: Record<string, string>
+    cookie(name: string, value: string, options: Record<string, unknown>): void
+    setHeader(name: string, value: string): void
+  }
+  res.cookies = {}
+  res.headers = {}
+  res.cookie = (name, value, options) => { res.cookies[name] = { value, options } }
+  res.setHeader = (name, value) => { res.headers[name] = value }
+  return res
+}
+
+async function createSessionWithCookie() {
+  const app = createMockApp()
+  const { store, sessions } = createMockSessions()
+  setupCommissionedIdeasRoutes(app, sessions, createMockWs())
+  const res = createCookieResponse()
+  await app.handlers.post['/api/commissioned-ideas/create']!(createRequest(), res)
+  const { id: sessionId, instructorPasscode } = res.body as { id: string; instructorPasscode: string }
+  const [cookieName, cookie] = Object.entries(res.cookies)[0] ?? []
+  const exchange = async (cookies: Record<string, unknown> | undefined, id = sessionId) => {
+    const out = createCookieResponse()
+    await app.handlers.get['/api/commissioned-ideas/:sessionId/instructor-passcode']!(
+      { params: { sessionId: id }, cookies } as MockRequest,
+      out,
+    )
+    return out
+  }
+  return { app, store, sessionId, instructorPasscode, res, cookieName: cookieName!, cookie: cookie!, exchange }
+}
+
+void test('create issues an httpOnly manager capability cookie and stores only its digest', async () => {
+  const s = await createSessionWithCookie()
+  assert.match(s.cookieName, /^activebits_cap_manager_/)
+  assert.equal(s.cookie.options.httpOnly, true)
+  assert.equal(s.cookie.options.sameSite, 'lax')
+  assert.equal(s.res.headers['Cache-Control'], 'no-store')
+  const stored = JSON.stringify(sessionData(s.store, s.sessionId))
+  assert.equal(stored.includes(s.cookie.value), false, 'raw capability token must not be stored')
+})
+
+void test('instructor-passcode returns the passcode only for a valid manager capability cookie', async () => {
+  const s = await createSessionWithCookie()
+
+  const ok = await s.exchange({ [s.cookieName]: s.cookie.value })
+  assert.equal(ok.statusCode, 200)
+  assert.equal((ok.body as { instructorPasscode: string }).instructorPasscode, s.instructorPasscode)
+  assert.equal(ok.headers['Cache-Control'], 'no-store')
+
+  console.log('[TEST] expecting 403 passcode recovery refusals')
+  assert.equal((await s.exchange(undefined)).statusCode, 403, 'no cookie')
+  assert.equal((await s.exchange({ [s.cookieName]: 'not-the-token' })).statusCode, 403, 'wrong token')
+  assert.equal((await s.exchange({ instructorPasscode: s.instructorPasscode })).statusCode, 403, 'the passcode itself is not proof')
+})
+
+void test('a manager capability for one session does not unlock another', async () => {
+  const first = await createSessionWithCookie()
+  const res = createCookieResponse()
+  await first.app.handlers.post['/api/commissioned-ideas/create']!(createRequest(), res)
+  const otherId = (res.body as { id: string }).id
+
+  console.log('[TEST] expecting 403 cross-session recovery')
+  // Same token presented under the other session's cookie name.
+  const otherCookieName = Object.keys(res.cookies)[0]!
+  assert.equal((await first.exchange({ [otherCookieName]: first.cookie.value }, otherId)).statusCode, 403)
+  assert.equal((await first.exchange({ [first.cookieName]: first.cookie.value }, otherId)).statusCode, 403)
+})
+
+void test('snapshots never include passcodes, participant tokens, capability records, or unknown session fields', async () => {
+  const s = await setupTeamOfTwo()
+  const data = s.data()
+  data.activityCapabilities = { cap1: { id: 'cap1', tokenHash: 'HASH-SECRET', principalKind: 'manager', issuedAt: 0, expiresAt: Number.MAX_SAFE_INTEGER } }
+  data.someFieldCoreAddsLater = 'CORE-SECRET'
+  const aliceToken = data.participantRoster[s.alice.participantId]!.token
+
+  for (const [label, snapshot] of [
+    ['manager', buildManagerSnapshot(data)],
+    ['student', buildStudentSnapshot(data, s.alice.participantId)],
+    ['anonymous', buildStudentSnapshot(data, null)],
+  ] as const) {
+    const json = JSON.stringify(snapshot)
+    assert.equal(json.includes(data.instructorPasscode), false, `${label}: passcode`)
+    assert.equal(json.includes(aliceToken), false, `${label}: participant token`)
+    assert.equal(json.includes('HASH-SECRET'), false, `${label}: capability records`)
+    assert.equal(json.includes('CORE-SECRET'), false, `${label}: unknown session fields`)
+  }
+  assert.equal(buildManagerSnapshot(data).participantRoster[s.alice.participantId]?.name, 'Alice')
+})
+
+// ── Participant identity must be proven (CodeRabbit: impersonation) ──────────
+
+void test('register-participant with someone else\'s id but no valid token creates a new participant', async () => {
+  const s = await setupSession()
+  const victim = await s.register('Victim')
+  const handler = (body: unknown, token?: string) => s.post('register-participant', token
+    ? withParticipantToken({ sessionId: s.sessionId }, body, token)
+    : createRequest({ sessionId: s.sessionId }, body))
+
+  for (const [label, res] of [
+    ['no token', await handler({ name: 'Attacker', participantId: victim.participantId })],
+    ['wrong token', await handler({ name: 'Attacker', participantId: victim.participantId }, 'WRONGTOKEN')],
+  ] as const) {
+    const body = res.body as { participantId: string; token: string }
+    assert.equal(res.statusCode, 200, label)
+    assert.notEqual(body.participantId, victim.participantId, `${label}: must not take over the victim id`)
+    assert.notEqual(body.token, victim.token, `${label}: must never receive the victim token`)
+  }
+  assert.equal(s.data().participantRoster[victim.participantId]?.name, 'Victim')
+})
+
+void test('a rejected student reconnecting with their token stays themselves (and rejected)', async () => {
+  const s = await setupSession()
+  const student = await s.register('Rude Name')
+  await s.asInstructor('participant-name', { participantId: student.participantId, rejected: true })
+
+  const res = await s.post('register-participant', withParticipantToken({ sessionId: s.sessionId }, { name: 'Rude Name', participantId: student.participantId }, student.token))
+  assert.equal((res.body as { participantId: string }).participantId, student.participantId)
+  assert.equal(Object.keys(s.data().participantRoster).length, 1, 'no new identity to slip past the rejection')
+  assert.equal(s.data().participantRoster[student.participantId]?.rejectedByInstructor, true)
+})
+
+// ── WebSocket auth: failure paths and identity binding ───────────────────────
+
+interface WsTestSocket {
+  sessionId?: string
+  participantId?: string | null
+  isManager?: boolean
+  wantsManager?: boolean
+  readyState: number
+  send(message: string): void
+  close(code?: number, reason?: string): void
+  on(event: string, handler: (raw?: unknown) => void): void
+}
+
+async function setupWsHarness() {
+  const app = createMockApp()
+  const { store, sessions } = createMockSessions()
+  const clients = new Set<WsTestSocket>()
+  let wsHandler: ((socket: WsTestSocket, query: URLSearchParams) => void) | null = null
+  const wsRouter = {
+    wss: { clients, close() {} },
+    register(path: string, handler: unknown) {
+      if (path === '/ws/commissioned-ideas') wsHandler = handler as typeof wsHandler
+    },
+  } as unknown as WsRouter
+  setupCommissionedIdeasRoutes(app, sessions, wsRouter)
+  const { id: sessionId, instructorPasscode } = await createSession(app)
+  const tick = () => new Promise((resolve) => setTimeout(resolve, 0))
+
+  const connect = async (query: Record<string, string>) => {
+    const sent: Record<string, unknown>[] = []
+    const handlers: Record<string, (raw?: unknown) => void> = {}
+    let closed: { code?: number; reason?: string } | null = null
+    const socket: WsTestSocket = {
+      readyState: 1,
+      send(message) { sent.push(JSON.parse(message) as Record<string, unknown>) },
+      close(code, reason) { closed = { code, reason } },
+      on(event, handler) { handlers[event] = handler },
+    }
+    clients.add(socket)
+    wsHandler!(socket, new URLSearchParams({ sessionId, ...query }))
+    await tick()
+    return {
+      socket,
+      sent,
+      closed: () => closed,
+      say: async (payload: unknown) => {
+        handlers.message?.(typeof payload === 'string' ? payload : JSON.stringify(payload))
+        await tick()
+        await tick()
+      },
+      lastSnapshot: () => [...sent].reverse().find((m) => m.type !== 'commissioned-ideas:error')?.data as Record<string, unknown> | undefined,
+    }
+  }
+  const register = (name: string) => registerParticipant(app, sessionId, name)
+  const createTeam = async (who: { participantId: string; token: string }) => {
+    const res = createResponse()
+    await app.handlers.post['/api/commissioned-ideas/:sessionId/create-team']!(
+      withParticipantToken({ sessionId }, { participantId: who.participantId }, who.token), res,
+    )
+    return (res.body as { teamId: string }).teamId
+  }
+  return { store, sessionId, instructorPasscode, connect, register, createTeam }
+}
+
+void test('manager websocket with a wrong passcode gets an error, a 1008 close, and no snapshot', async () => {
+  const h = await setupWsHarness()
+  const conn = await h.connect({ role: 'manager' })
+  console.log('[TEST] expecting manager auth failure over websocket')
+  await conn.say({ type: 'commissioned-ideas:manager-auth', instructorPasscode: 'WRONGPASS' })
+  assert.equal(conn.sent.some((m) => m.type === 'commissioned-ideas:session-state'), false)
+  assert.ok(conn.sent.some((m) => m.type === 'commissioned-ideas:error'))
+  assert.equal(conn.closed()?.code, 1008)
+  assert.notEqual(conn.socket.isManager, true)
+})
+
+void test('manager websocket ignores malformed and passcode-less auth messages', async () => {
+  const h = await setupWsHarness()
+  const conn = await h.connect({ role: 'manager' })
+  console.log('[TEST] expecting malformed websocket messages to be refused')
+  await conn.say('not json {')
+  await conn.say({ type: 'commissioned-ideas:manager-auth' })
+  await conn.say({ type: 'commissioned-ideas:manager-auth', instructorPasscode: 42 })
+  assert.equal(conn.sent.some((m) => m.type === 'commissioned-ideas:session-state'), false)
+  assert.notEqual(conn.socket.isManager, true)
+})
+
+void test('a participantId in the websocket URL grants nothing', async () => {
+  const h = await setupWsHarness()
+  const victim = await h.register('Victim')
+  const teamId = await h.createTeam(victim)
+
+  const attacker = await h.connect({ participantId: victim.participantId })
+  assert.equal(attacker.socket.participantId, null, 'identity must not bind from the URL')
+  assert.equal(attacker.sent.some((m) => m.type === 'commissioned-ideas:session-state'), false, 'no snapshot before auth')
+
+  console.log('[TEST] expecting participant websocket auth failure without a token')
+  await attacker.say({ type: 'commissioned-ideas:participant-auth', participantId: victim.participantId })
+  const teams = attacker.lastSnapshot()?.teams as Record<string, { naming?: unknown }>
+  assert.equal(teams[teamId]?.naming, undefined, 'victim team naming details must not be sent')
+})
+
+void test('participant websocket auth binds identity only with a valid token', async () => {
+  const h = await setupWsHarness()
+  const student = await h.register('Student')
+  const teamId = await h.createTeam(student)
+
+  const conn = await h.connect({})
+  console.log('[TEST] expecting participant websocket auth failure with wrong token')
+  await conn.say({ type: 'commissioned-ideas:participant-auth', participantId: student.participantId, token: 'WRONGTOKEN' })
+  assert.equal(conn.socket.participantId, null)
+  assert.ok(conn.sent.some((m) => m.type === 'commissioned-ideas:error'))
+
+  await conn.say({ type: 'commissioned-ideas:participant-auth', participantId: student.participantId, token: student.token })
+  assert.equal(conn.socket.participantId, student.participantId)
+  const teams = conn.lastSnapshot()?.teams as Record<string, { naming?: unknown }>
+  assert.notEqual(teams[teamId]?.naming, undefined, 'own team naming details arrive after auth')
+  assert.equal(sessionData(h.store, h.sessionId).participantRoster[student.participantId]?.connected, true)
 })

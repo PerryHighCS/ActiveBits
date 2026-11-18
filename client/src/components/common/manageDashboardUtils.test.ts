@@ -426,6 +426,20 @@ void test('parseCreateSessionBootstrap validates sessionStorage bootstrap metada
   )
 })
 
+void test('an explicit sessionStorage opt-out survives a config with no other bootstrap fields', () => {
+  const optOutOnly = { sessionStorage: [], historyState: [], allowSessionStorageFallback: false }
+  assert.deepEqual(parseCreateSessionBootstrap(optOutOnly), {
+    sessionStorage: [],
+    allowSessionStorageFallback: false,
+  })
+  assert.equal(shouldPersistCreateSessionBootstrapPayloadToSessionStorage(optOutOnly), false)
+  assert.equal(shouldPersistCreateSessionBootstrapPayloadToSessionStorage({ allowSessionStorageFallback: false }), false)
+
+  // Without the opt-out, an empty config still means "no bootstrap config".
+  assert.equal(parseCreateSessionBootstrap({ sessionStorage: [], historyState: [] }), null)
+  assert.equal(shouldPersistCreateSessionBootstrapPayloadToSessionStorage({ sessionStorage: [], historyState: [] }), true)
+})
+
 void test('shouldPersistCreateSessionBootstrapPayloadToSessionStorage respects explicit opt-out', () => {
   assert.equal(
     shouldPersistCreateSessionBootstrapPayloadToSessionStorage({
