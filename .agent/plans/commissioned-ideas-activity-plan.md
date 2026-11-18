@@ -35,7 +35,7 @@ Failure behavior: an expired or missing capability with no persistent teacher co
 - [x] Client: clear router state after reading the handoff; exchange on reload with one persistent fallback
 - [x] Tests: route tests (cookie issued, exchange accepts/rejects, snapshots exclude secrets), client recovery decision table, Playwright real reload for dashboard, Teacher Join, and persistent-link entries
 - [x] Docs: data contract, security notes
-- [ ] PR description (after the change is pushed)
+- [x] PR description (after the change is pushed)
 
 ## CodeRabbit July review follow-up (2026-11-18)
 
@@ -48,7 +48,7 @@ Triage of the 25 unresolved CodeRabbit threads from 2026-07-30 on PR #243, verif
 - [x] Smaller items: shared WS URL helper, no-op unmount guard removed, max-team-size revert on failure, focus restored after name edit, loading states announced, `GroupingMode` typing, shared ballot-amount check, plan names/tree updated
 - [x] Declined with reason: runtime validation of same-origin snapshot payloads
 - [ ] Open, needs product/engineering decision: participant token in `localStorage` (move to a core httpOnly participant capability); per-session atomic updates (`updateAtomic` for every writer)
-- [ ] Post replies and resolve threads after the fixes are pushed
+- [x] Post replies and resolve threads after the fixes are pushed (0690ab1a: 23 resolved; the two follow-up threads replied to and left open)
 
 ## Goal
 
