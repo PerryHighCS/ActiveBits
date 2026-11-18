@@ -1,5 +1,5 @@
-import { useEffect, useMemo } from 'react'
-import { useLocation, useParams, useNavigate } from 'react-router'
+import { useEffect } from 'react'
+import { useParams, useNavigate } from 'react-router'
 import SessionHeader from '@src/components/common/SessionHeader'
 import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler'
 import { useManagerSession } from '../hooks/useCommissionedIdeasSession.js'
@@ -9,19 +9,16 @@ import PresentationDashboard from './PresentationDashboard.js'
 import RegistrationDashboard from './RegistrationDashboard.js'
 import ResultsDashboard from './ResultsDashboard.js'
 import VotingDashboard from './VotingDashboard.js'
-import { resolveCommissionedIdeasInstructorPasscode } from './passcode.js'
+import { useCommissionedIdeasInstructorPasscode } from './useInstructorPasscode.js'
 
 export default function CommissionedIdeasManager() {
   const { sessionId } = useParams<{ sessionId?: string }>()
-  const location = useLocation()
   const navigate = useNavigate()
   const attachSessionEndedHandler = useSessionEndedHandler()
-  const instructorPasscode = useMemo(
-    () => resolveCommissionedIdeasInstructorPasscode({ sessionId, locationState: location.state }),
-    [sessionId, location.state],
-  )
+  const passcodeState = useCommissionedIdeasInstructorPasscode(sessionId)
+  const instructorPasscode = passcodeState.passcode
 
-  const { snapshot, connect, disconnect } = useManagerSession({
+  const { snapshot, authError, connect, disconnect } = useManagerSession({
     sessionId: sessionId ?? null,
     instructorPasscode,
     attachSessionEndedHandler,
@@ -46,6 +43,10 @@ export default function CommissionedIdeasManager() {
     return <div className="p-6 text-gray-500">No active session.</div>
   }
 
+  if (passcodeState.status === 'loading') {
+    return <div className="p-6 text-gray-400" role="status">Checking instructor access…</div>
+  }
+
   if (!instructorPasscode) {
     return (
       <div className="p-6 text-gray-500">
@@ -63,7 +64,12 @@ export default function CommissionedIdeasManager() {
       />
 
       <div className="max-w-3xl mx-auto px-4 py-6">
-        {!snapshot && <p className="text-gray-400">Connecting…</p>}
+        {!snapshot && authError && (
+          <p role="alert" className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
+            {authError}. Re-open this session from the dashboard or with Teacher Join.
+          </p>
+        )}
+        {!snapshot && !authError && <p className="text-gray-400" role="status">Connecting…</p>}
 
         {snapshot && (
           <div className="mb-6">

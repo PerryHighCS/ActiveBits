@@ -5,6 +5,8 @@ interface RegistrationFormProps {
   sessionId: string
   initialName?: string
   initialParticipantId?: string | null
+  /** Stored participant token; proves ownership of `initialParticipantId` on reconnect. */
+  initialToken?: string | null
   onRegistered: (participantId: string, name: string, token: string) => void
 }
 
@@ -12,6 +14,7 @@ export default function RegistrationForm({
   sessionId,
   initialName = '',
   initialParticipantId,
+  initialToken,
   onRegistered,
 }: RegistrationFormProps) {
   const [name, setName] = useState(initialName)
@@ -29,7 +32,12 @@ export default function RegistrationForm({
     try {
       const res = await fetch(`/api/commissioned-ideas/${sessionId}/register-participant`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        // Without a valid token the server registers a new participant rather
+        // than handing out the existing one's credentials.
+        headers: {
+          'Content-Type': 'application/json',
+          ...(initialParticipantId && initialToken ? { 'X-Commissioned-Ideas-Participant-Token': initialToken } : {}),
+        },
         body: JSON.stringify({ name: trimmed, participantId: initialParticipantId }),
       })
       const data = (await res.json()) as { participantId?: string; name?: string; token?: string; error?: string }

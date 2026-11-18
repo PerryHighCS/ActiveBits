@@ -2,6 +2,11 @@ import { randomInt, timingSafeEqual } from 'crypto'
 import { createSession, type SessionRecord, type SessionStore } from 'activebits-server/core/sessions.js'
 import { registerSessionNormalizer } from 'activebits-server/core/sessionNormalization.js'
 import { createBroadcastSubscriptionHelper } from 'activebits-server/core/broadcastUtils.js'
+import {
+  issueActivityCapability,
+  resolveActivityPrincipalFromCookies,
+  writeActivityCapabilityCookie,
+} from 'activebits-server/core/activityCapabilities.js'
 import type { ActiveBitsWebSocket, WsRouter } from '../../../types/websocket.js'
 import type {
   CommissionedIdeasSessionData,
@@ -17,7 +22,7 @@ import type {
   StudentSafeProposal,
   StudentSafeTeam,
 } from '../shared/types.js'
-import { coerceAllocations, sanitizeDisplayName, validateBallot, voterBallotStatus } from '../shared/validation.js'
+import { coerceAllocations, isValidBallotAmount, sanitizeDisplayName, validateBallot, voterBallotStatus } from '../shared/validation.js'
 import { computeTeamScores } from '../shared/scoring.js'
 import { nextPodiumStep, podiumPlaceCount, revealedPodium } from '../shared/podium.js'
 import { checkInstructorMove } from '../shared/membership.js'
@@ -53,11 +58,26 @@ interface CommissionedIdeasSocket extends ActiveBitsWebSocket {
   participantId?: string | null
   isManager?: boolean
   wantsManager?: boolean
+  /**
+   * Student sockets receive nothing while `pending` (waiting for the
+   * participant-auth message), so a client never renders an anonymous view
+   * first and then its own. `anonymous` follows a failed auth.
+   */
+  studentAuth?: 'pending' | 'authenticated' | 'anonymous'
+}
+
+/** Which snapshot (if any) a socket should receive for a broadcast. */
+function snapshotAudience(client: CommissionedIdeasSocket): 'manager' | 'student' | null {
+  if (client.isManager) return 'manager'
+  if (client.wantsManager) return null // manager socket still authenticating
+  return client.studentAuth === 'pending' ? null : 'student'
 }
 
 interface JsonResponse {
   status(code: number): JsonResponse
   json(payload: unknown): JsonResponse | void
+  setHeader?(name: string, value: string): void
+  cookie?(name: string, value: string, options: Record<string, unknown>): void
 }
 
 interface RouteRequest {
@@ -65,6 +85,7 @@ interface RouteRequest {
   query?: Record<string, string | undefined>
   body?: unknown
   headers?: Record<string, string | string[] | undefined>
+  cookies?: Record<string, unknown>
 }
 
 interface CommissionedIdeasRouteApp {
@@ -182,7 +203,8 @@ function normalizeParticipant(raw: unknown, id: string): CommissionedIdeasPartic
     connected: Boolean(item.connected),
     lastSeen: typeof item.lastSeen === 'number' ? item.lastSeen : 0,
     rejectedByInstructor: Boolean(item.rejectedByInstructor),
-    token: typeof item.token === 'string' && item.token.length > 0 ? item.token : generatePasscode(),
+    // Fail closed: an empty token never verifies. Tokens are issued only at registration.
+    token: typeof item.token === 'string' && item.token.length > 0 ? item.token : '',
   }
 }
 
@@ -208,8 +230,7 @@ function normalizeBallots(value: unknown): Record<string, CommissionedIdeasBallo
       voterTeamId: typeof raw.voterTeamId === 'string' ? raw.voterTeamId : null,
       allocations: raw.allocations
         .filter(isPlainObject)
-        .filter((a) => typeof a.teamId === 'string' && (a.amount === 100 || a.amount === 300 || a.amount === 500))
-        .map((a) => ({ teamId: a.teamId as string, amount: a.amount as 100 | 300 | 500 })),
+        .flatMap((a) => (typeof a.teamId === 'string' && isValidBallotAmount(a.amount) ? [{ teamId: a.teamId, amount: a.amount }] : [])),
       submittedAt: typeof raw.submittedAt === 'number' ? raw.submittedAt : 0,
     }
   }
@@ -228,11 +249,25 @@ function normalizePresentationHistory(value: unknown): PresentationHistoryEntry[
     }))
 }
 
+/**
+ * True for a record core has just created (persistent-link start) that has none
+ * of this activity's fields yet. Core normalizes on write, so a passcode
+ * generated for such a record is persisted with it.
+ */
+function isUninitializedSessionData(source: Record<string, unknown>): boolean {
+  return !('instructorPasscode' in source) && !('participantRoster' in source) && !('teams' in source)
+}
+
 function normalizeSessionData(data: unknown): CommissionedIdeasSessionData {
   const source = ensurePlainObject(data)
   return {
     ...source,
-    instructorPasscode: normalizeInstructorPasscode(source.instructorPasscode) ?? generatePasscode(),
+    // Generate only while initializing. An initialized record that has lost its
+    // passcode normalizes to '' and fails closed instead of minting an unknown
+    // secret on every read.
+    instructorPasscode:
+      normalizeInstructorPasscode(source.instructorPasscode)
+      ?? (isUninitializedSessionData(source) ? generatePasscode() : ''),
     phase: normalizePhase(source.phase),
     studentGroupingLocked: Boolean(source.studentGroupingLocked),
     namingLocked: Boolean(source.namingLocked),
@@ -286,22 +321,38 @@ function checkInstructorAuth(req: RouteRequest, session: CommissionedIdeasSessio
  * comparison against the stored token.  Returns the verified participant or
  * null on any failure (missing token, bad token, unknown id, rejected).
  */
+function readParticipantToken(req: RouteRequest): string | null {
+  const raw = req.headers?.['x-commissioned-ideas-participant-token']
+  const header = Array.isArray(raw) ? raw[0] : raw
+  return typeof header === 'string' && header.length > 0 ? header : null
+}
+
+/**
+ * Single owner of participant credential checks (HTTP actions, reconnect, and
+ * WebSocket binding). Constant-time token comparison; an empty stored token
+ * never verifies. Rejected participants are refused unless `allowRejected`
+ * (reconnect keeps a rejected student as themselves, still rejected).
+ */
+function verifyParticipantCredential(
+  data: CommissionedIdeasSessionData,
+  participantId: unknown,
+  token: unknown,
+  { allowRejected = false }: { allowRejected?: boolean } = {},
+): CommissionedIdeasParticipant | null {
+  if (typeof participantId !== 'string' || typeof token !== 'string' || token.length === 0) return null
+  const participant = data.participantRoster[participantId]
+  if (!participant) return null
+  if (participant.rejectedByInstructor && !allowRejected) return null
+  return verifyPasscode(participant.token, token.toUpperCase()) ? participant : null
+}
+
+/** Authenticates a participant action: `participantId` in the body plus the token header. */
 function checkParticipantAuth(
   req: RouteRequest,
   session: CommissionedIdeasSession,
 ): CommissionedIdeasParticipant | null {
   const body = ensurePlainObject(req.body)
-  const participantId = typeof body.participantId === 'string' ? body.participantId : null
-  if (!participantId) return null
-
-  const raw = req.headers?.['x-commissioned-ideas-participant-token']
-  const tokenHeader = Array.isArray(raw) ? raw[0] : raw
-  if (typeof tokenHeader !== 'string' || tokenHeader.length === 0) return null
-
-  const participant = session.data.participantRoster[participantId]
-  if (!participant || participant.rejectedByInstructor) return null
-
-  return verifyPasscode(participant.token, tokenHeader.toUpperCase()) ? participant : null
+  return verifyParticipantCredential(session.data, body.participantId, readParticipantToken(req))
 }
 
 function parseSocketMessage(raw: unknown): Record<string, unknown> | null {
@@ -413,8 +464,28 @@ function buildStudentTeam(team: CommissionedIdeasTeam, viewerParticipantId: stri
  * - Rejected participants (hidden from peers until instructor approves/edits name)
  * - Raw name votes and every team's proposals except the viewer's own (non-rejected only)
  */
+/**
+ * Session settings and progress that every client may see. Snapshots are built
+ * from this explicit list — never by spreading session data — so server-only
+ * fields (instructorPasscode, activityCapabilities, participant tokens, anything
+ * core adds later) cannot leak to a browser.
+ */
+function sharedSessionFields(data: CommissionedIdeasSessionData) {
+  return {
+    phase: data.phase,
+    studentGroupingLocked: data.studentGroupingLocked,
+    namingLocked: data.namingLocked,
+    maxTeamSize: data.maxTeamSize,
+    groupingMode: data.groupingMode,
+    presentationRound: data.presentationRound,
+    presentationHistory: data.presentationHistory,
+    currentPresentationTeamId: data.currentPresentationTeamId,
+    podiumRevealStep: data.podiumRevealStep,
+  }
+}
+
 function buildStudentSnapshot(data: CommissionedIdeasSessionData, viewerParticipantId: string | null) {
-  const { ballots: _ballots, participantRoster, instructorPasscode: _passcode, teams, ...rest } = data
+  const { ballots: _ballots, participantRoster, teams } = data
 
   const myBallot = viewerParticipantId ? (_ballots[viewerParticipantId] ?? null) : null
 
@@ -430,7 +501,7 @@ function buildStudentSnapshot(data: CommissionedIdeasSessionData, viewerParticip
   }
 
   return {
-    ...rest,
+    ...sharedSessionFields(data),
     teams: safeTeams,
     participantRoster: safeRoster,
     ballotSubmitted: Boolean(myBallot),
@@ -454,19 +525,34 @@ function buildStudentPodium(data: CommissionedIdeasSessionData) {
 }
 
 /**
- * Manager snapshot. Keeps the full participant roster (including connection state
- * and moderation fields) but still omits raw ballot contents. The full ranking is
- * included only in the results phase.
+ * Manager snapshot. Includes moderation fields (connection state, rejection),
+ * full team records, and ballot progress — but never participant tokens, the
+ * instructor passcode, capability records, or raw ballot contents. The full
+ * ranking is included only in the results phase.
  */
 function buildManagerSnapshot(data: CommissionedIdeasSessionData) {
-  const { ballots: _ballots, ...rest } = data
+  const roster: Record<string, ManagerParticipantView> = {}
+  for (const [id, p] of Object.entries(data.participantRoster)) {
+    roster[id] = {
+      id: p.id,
+      name: p.name,
+      teamId: p.teamId,
+      connected: p.connected,
+      lastSeen: p.lastSeen,
+      rejectedByInstructor: p.rejectedByInstructor,
+    }
+  }
   return {
-    ...rest,
-    ballotsReceived: Object.keys(_ballots).length,
-    ballotSubmitterIds: Object.keys(_ballots),
-    results: data.phase === 'results' ? computeTeamScores(data.teams, _ballots) : null,
+    ...sharedSessionFields(data),
+    participantRoster: roster,
+    teams: data.teams,
+    ballotsReceived: Object.keys(data.ballots).length,
+    ballotSubmitterIds: Object.keys(data.ballots),
+    results: data.phase === 'results' ? computeTeamScores(data.teams, data.ballots) : null,
   }
 }
+
+type ManagerParticipantView = Omit<CommissionedIdeasParticipant, 'token'>
 
 // ── Broadcast helpers ─────────────────────────────────────────────────────────
 
@@ -488,8 +574,10 @@ function broadcastRegistrationUpdate(
 
   for (const client of ws.wss.clients as Set<CommissionedIdeasSocket>) {
     if (client.readyState !== 1 || client.sessionId !== sessionId) continue
+    const audience = snapshotAudience(client)
+    if (audience === null) continue
     try {
-      if (client.isManager) {
+      if (audience === 'manager') {
         client.send(managerPayload)
       } else {
         const snapshot = buildStudentSnapshot(data, client.participantId ?? null)
@@ -516,8 +604,10 @@ function broadcastToAll(
 
   for (const client of ws.wss.clients as Set<CommissionedIdeasSocket>) {
     if (client.readyState !== 1 || client.sessionId !== sessionId) continue
+    const audience = snapshotAudience(client)
+    if (audience === null) continue
     try {
-      if (client.isManager) {
+      if (audience === 'manager') {
         client.send(managerPayload)
       } else {
         const snapshot = buildStudentSnapshot(data, client.participantId ?? null)
@@ -667,9 +757,44 @@ export default function setupCommissionedIdeasRoutes(
     const session = await createSession(sessions, { data: {} })
     session.type = 'commissioned-ideas'
     session.data = buildDefaultSessionData()
+    // Reload recovery: an httpOnly manager capability (only its digest is stored)
+    // lets this browser exchange for the passcode later via /instructor-passcode.
+    const managerCapability = issueActivityCapability(session, 'manager')
     await sessions.set(session.id, session)
-    console.log(`[commissioned-ideas] Session created: ${session.id}`)
+    res.setHeader?.('Cache-Control', 'no-store')
+    if (res.cookie) {
+      writeActivityCapabilityCookie({ cookie: res.cookie.bind(res) }, session.id, 'manager', managerCapability.token)
+    }
+    console.info('[commissioned-ideas] Session created', { sessionId: session.id })
     res.json({ id: session.id, instructorPasscode: session.data.instructorPasscode })
+  })
+
+  // ── Instructor: recover the passcode after a reload ─────────────────────────
+  // Requires the httpOnly manager capability cookie issued by /create or by core
+  // persistent-link Teacher Join. Never accepts the passcode itself as proof.
+  app.get('/api/commissioned-ideas/:sessionId/instructor-passcode', async (req, res) => {
+    res.setHeader?.('Cache-Control', 'no-store')
+    const session = await loadSession(req, res)
+    if (!session) return
+
+    const principal = resolveActivityPrincipalFromCookies(session, session.id, 'manager', req.cookies)
+    if (!principal) {
+      console.warn('[commissioned-ideas] Instructor passcode recovery refused', { sessionId: session.id })
+      res.status(403).json({ error: 'Instructor authentication required' })
+      return
+    }
+
+    if (!session.data.instructorPasscode) {
+      console.error('[commissioned-ideas] Session has no instructor passcode', { sessionId: session.id })
+      res.status(409).json({ error: 'This session can no longer be managed' })
+      return
+    }
+
+    console.info('[commissioned-ideas] Instructor passcode recovered', {
+      sessionId: session.id,
+      capabilityId: principal.capabilityId,
+    })
+    res.json({ instructorPasscode: session.data.instructorPasscode })
   })
 
   // ── Student-safe state snapshot ─────────────────────────────────────────────
@@ -720,21 +845,34 @@ export default function setupCommissionedIdeasRoutes(
       typeof body.participantId === 'string' && /^[A-Z0-9]{6,12}$/i.test(body.participantId)
         ? body.participantId
         : null
-    const existing = requestedId ? session.data.participantRoster[requestedId] : null
+    const requested = requestedId ? session.data.participantRoster[requestedId] : null
+    // Reconnect only with proof of ownership: participant ids are visible to every
+    // student, so an id alone must never return that participant's token.
+    const existing = requested
+      ? verifyParticipantCredential(session.data, requestedId, readParticipantToken(req), { allowRejected: true })
+      : null
+    if (requested && !existing) {
+      console.warn('[commissioned-ideas] Reconnect without a valid participant token; registering as new', {
+        sessionId,
+        requestedId,
+      })
+    }
 
     let participantId: string
     let participantToken: string
+    let reconnected = false
     if (existing) {
       // Reconnect: mark connected only. The server-side name is authoritative —
       // overwriting it here would silently undo instructor moderation applied
       // between the student's last visit and this reconnect.
+      reconnected = true
       participantId = existing.id
       participantToken = existing.token
       existing.connected = true
       existing.lastSeen = Date.now()
     } else {
-      // New registration
-      participantId = requestedId ?? generateShortId()
+      // New registration. Never reuse a requested id that already belongs to someone.
+      participantId = requestedId && !requested ? requestedId : generateShortId()
       participantToken = generatePasscode()
       const participant: CommissionedIdeasParticipant = {
         id: participantId,
@@ -749,7 +887,7 @@ export default function setupCommissionedIdeasRoutes(
     }
 
     await sessions.set(sessionId, session)
-    console.info(`[commissioned-ideas] Participant registered`, { sessionId, participantId, name })
+    console.info('[commissioned-ideas] Participant registered', { sessionId, participantId, reconnected })
 
     broadcastRegistrationUpdate(ws, sessionId, session.data)
     res.json({ participantId, name, token: participantToken })
@@ -1431,8 +1569,18 @@ export default function setupCommissionedIdeasRoutes(
 
     const typedSocket = socket as CommissionedIdeasSocket
     typedSocket.sessionId = sessionId
-    typedSocket.participantId = query.get('participantId') ?? null
+    // Identity is bound only after a verified auth message (participant token or
+    // instructor passcode) — never from the URL.
+    typedSocket.participantId = null
     typedSocket.wantsManager = query.get('role') === 'manager'
+    typedSocket.studentAuth = typedSocket.wantsManager ? undefined : 'pending'
+
+    socket.on('error', (err: unknown) => {
+      console.warn('[commissioned-ideas] WS transport error', {
+        sessionId,
+        error: err instanceof Error ? err.message : String(err),
+      })
+    })
 
     ensureBroadcastSubscription(sessionId)
 
@@ -1444,22 +1592,8 @@ export default function setupCommissionedIdeasRoutes(
         return
       }
 
-      const participantId = typedSocket.participantId
-      if (participantId && session.data.participantRoster[participantId]) {
-        const p = session.data.participantRoster[participantId]
-        p.connected = true
-        p.lastSeen = Date.now()
-        await sessions.set(sessionId, session)
-        broadcastRegistrationUpdate(ws, sessionId, session.data)
-      }
-
-      if (!typedSocket.wantsManager) {
-        socket.send(JSON.stringify({
-          type: 'commissioned-ideas:session-state',
-          sessionId,
-          data: buildStudentSnapshot(session.data, participantId ?? null),
-        }))
-      }
+      // Students get their first snapshot after participant-auth (personalized)
+      // or after a failed auth (anonymous) — never an anonymous view first.
     })().catch((err: unknown) => {
       console.error('[commissioned-ideas] WS init error', err)
       socket.send(JSON.stringify({ type: 'commissioned-ideas:error', error: 'Failed to load session' }))
@@ -1467,11 +1601,42 @@ export default function setupCommissionedIdeasRoutes(
 
     socket.on('message', (raw: unknown) => {
       void (async () => {
+        const message = parseSocketMessage(raw)
+
+        // Accepted until it succeeds once (a failed attempt may be retried on the same socket).
+        if (message?.type === 'commissioned-ideas:participant-auth' && (typedSocket.studentAuth === 'pending' || typedSocket.studentAuth === 'anonymous')) {
+          const session = await getSession(sessions, sessionId)
+          if (!session) {
+            socket.send(JSON.stringify({ type: 'commissioned-ideas:error', error: 'Session not found' }))
+            socket.close(1008, 'Session not found')
+            return
+          }
+          const participant = verifyParticipantCredential(session.data, message.participantId, message.token, { allowRejected: true })
+          if (!participant) {
+            console.warn('[commissioned-ideas] WS participant auth refused', { sessionId })
+            typedSocket.studentAuth = 'anonymous'
+            socket.send(JSON.stringify({ type: 'commissioned-ideas:error', error: 'Invalid participant credentials' }))
+            socket.send(JSON.stringify({
+              type: 'commissioned-ideas:session-state',
+              sessionId,
+              data: buildStudentSnapshot(session.data, null),
+            }))
+            return
+          }
+          typedSocket.studentAuth = 'authenticated'
+          typedSocket.participantId = participant.id
+          participant.connected = true
+          participant.lastSeen = Date.now()
+          await sessions.set(sessionId, session)
+          // The broadcast includes this socket's personalized snapshot.
+          broadcastRegistrationUpdate(ws, sessionId, session.data)
+          return
+        }
+
         if (typedSocket.isManager || !typedSocket.wantsManager) {
           return
         }
 
-        const message = parseSocketMessage(raw)
         if (message?.type !== 'commissioned-ideas:manager-auth') {
           return
         }
@@ -1497,8 +1662,8 @@ export default function setupCommissionedIdeasRoutes(
           data: buildManagerSnapshot(session.data),
         }))
       })().catch((err: unknown) => {
-        console.error('[commissioned-ideas] WS manager auth error', err)
-        socket.send(JSON.stringify({ type: 'commissioned-ideas:error', error: 'Failed to authenticate manager' }))
+        console.error('[commissioned-ideas] WS auth error', err)
+        socket.send(JSON.stringify({ type: 'commissioned-ideas:error', error: 'Failed to authenticate' }))
       })
     })
 

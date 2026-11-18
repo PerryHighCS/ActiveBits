@@ -468,7 +468,9 @@ export function parseCreateSessionBootstrap(rawCreateSessionBootstrap: unknown):
 
   const allowSessionStorageFallback = rawCreateSessionBootstrap.allowSessionStorageFallback !== false
 
-  if (sessionStorage.length === 0 && historyState.length === 0) {
+  // An explicit opt-out must survive even with no other bootstrap fields;
+  // returning null would read as "fallback allowed".
+  if (sessionStorage.length === 0 && historyState.length === 0 && allowSessionStorageFallback) {
     return null
   }
 

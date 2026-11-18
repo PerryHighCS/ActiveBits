@@ -1,8 +1,9 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useState } from 'react'
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
 import type {
   CommissionedIdeasBallot,
   CommissionedIdeasPhase,
+  GroupingMode,
   CommissionedIdeasTeam,
   PodiumRevealStep,
   PresentationHistoryEntry,
@@ -27,7 +28,7 @@ export interface StudentSnapshot {
   studentGroupingLocked: boolean
   namingLocked: boolean
   maxTeamSize: number
-  groupingMode: string
+  groupingMode: GroupingMode
   participantRoster: Record<string, StudentSafeParticipant>
   teams: Record<string, StudentSafeTeam>
   ballotSubmitted: boolean
@@ -57,7 +58,7 @@ export interface ManagerSnapshot {
   studentGroupingLocked: boolean
   namingLocked: boolean
   maxTeamSize: number
-  groupingMode: string
+  groupingMode: GroupingMode
   participantRoster: Record<string, ManagerParticipant>
   teams: Record<string, ManagerTeam>
   ballotsReceived: number
@@ -88,11 +89,27 @@ export function isSnapshotMessage(type: string): boolean {
   return SNAPSHOT_MESSAGE_TYPES.has(type)
 }
 
+/** WebSocket URL for this activity. Identity is never put in the URL; sockets authenticate by message. */
+export function buildCommissionedIdeasWsUrl(
+  sessionId: string,
+  role: 'student' | 'manager',
+  location: Pick<Location, 'protocol' | 'host'> = window.location,
+): string {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
+  const params = new URLSearchParams({ sessionId })
+  if (role === 'manager') params.set('role', 'manager')
+  return `${proto}//${location.host}/ws/commissioned-ideas?${params.toString()}`
+}
+
+/** Close code the server uses for auth failures; reconnecting cannot fix these. */
+const POLICY_VIOLATION_CLOSE_CODE = 1008
+
 // ── Student hook ──────────────────────────────────────────────────────────────
 
 interface UseStudentSessionOptions {
   sessionId: string | null | undefined
   participantId: string | null
+  participantToken: string | null
   attachSessionEndedHandler?: (ws: WebSocket) => void
 }
 
@@ -105,17 +122,21 @@ interface UseStudentSessionResult {
 export function useStudentSession({
   sessionId,
   participantId,
+  participantToken,
   attachSessionEndedHandler,
 }: UseStudentSessionOptions): UseStudentSessionResult {
   const [snapshot, setSnapshot] = useState<StudentSnapshot | null>(null)
 
-  const buildWsUrl = useCallback(() => {
-    if (!sessionId) return null
-    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const params = new URLSearchParams({ sessionId })
-    if (participantId) params.set('participantId', participantId)
-    return `${proto}//${window.location.host}/ws/commissioned-ideas?${params.toString()}`
-  }, [sessionId, participantId])
+  const buildWsUrl = useCallback(
+    () => (sessionId ? buildCommissionedIdeasWsUrl(sessionId, 'student') : null),
+    [sessionId],
+  )
+
+  // Bind identity after connect by proving the participant token (never via the URL).
+  const handleOpen = useCallback((_event: Event, ws: WebSocket) => {
+    if (!participantId || !participantToken) return
+    ws.send(JSON.stringify({ type: 'commissioned-ideas:participant-auth', participantId, token: participantToken }))
+  }, [participantId, participantToken])
 
   const handleMessage = useCallback((event: MessageEvent) => {
     try {
@@ -131,6 +152,7 @@ export function useStudentSession({
   const { connect, disconnect } = useResilientWebSocket({
     buildUrl: buildWsUrl,
     shouldReconnect: Boolean(sessionId),
+    onOpen: handleOpen,
     onMessage: handleMessage,
     attachSessionEndedHandler,
   })
@@ -148,6 +170,8 @@ interface UseManagerSessionOptions {
 
 interface UseManagerSessionResult {
   snapshot: ManagerSnapshot | null
+  /** Set when the server refuses manager auth; reconnecting stops. */
+  authError: string | null
   connect: () => WebSocket | null
   disconnect: () => void
   socketRef: ReturnType<typeof useResilientWebSocket>['socketRef']
@@ -159,14 +183,12 @@ export function useManagerSession({
   attachSessionEndedHandler,
 }: UseManagerSessionOptions): UseManagerSessionResult {
   const [snapshot, setSnapshot] = useState<ManagerSnapshot | null>(null)
-  const mountedRef = useRef(true)
+  const [authError, setAuthError] = useState<string | null>(null)
 
-  const buildWsUrl = useCallback(() => {
-    if (!sessionId || !instructorPasscode) return null
-    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const params = new URLSearchParams({ sessionId, role: 'manager' })
-    return `${proto}//${window.location.host}/ws/commissioned-ideas?${params.toString()}`
-  }, [sessionId, instructorPasscode])
+  const buildWsUrl = useCallback(
+    () => (sessionId && instructorPasscode ? buildCommissionedIdeasWsUrl(sessionId, 'manager') : null),
+    [sessionId, instructorPasscode],
+  )
 
   const handleOpen = useCallback((_event: Event, ws: WebSocket) => {
     ws.send(JSON.stringify({
@@ -179,9 +201,10 @@ export function useManagerSession({
     try {
       const msg = JSON.parse(event.data as string) as WsMessage
       if (isSnapshotMessage(msg.type)) {
-        if (mountedRef.current) {
-          setSnapshot(msg.data as ManagerSnapshot)
-        }
+        setAuthError(null)
+        setSnapshot(msg.data as ManagerSnapshot)
+      } else if (msg.type === 'commissioned-ideas:error') {
+        setAuthError(typeof msg.error === 'string' ? msg.error : 'Connection refused')
       }
     } catch {
       // malformed WS frame — ignored
@@ -191,10 +214,12 @@ export function useManagerSession({
   const { connect, disconnect, socketRef } = useResilientWebSocket({
     buildUrl: buildWsUrl,
     shouldReconnect: Boolean(sessionId) && Boolean(instructorPasscode),
+    // An auth refusal (1008) will not succeed on retry; stop instead of looping.
+    isTerminalClose: (event) => event.code === POLICY_VIOLATION_CLOSE_CODE,
     onOpen: handleOpen,
     onMessage: handleMessage,
     attachSessionEndedHandler,
   })
 
-  return { snapshot, connect, disconnect, socketRef }
+  return { snapshot, authError, connect, disconnect, socketRef }
 }
