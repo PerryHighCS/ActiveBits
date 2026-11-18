@@ -1142,3 +1142,13 @@ Owner: `verifyParticipantCredential` in `activities/commissioned-ideas/server/ro
 - Lookups by client-supplied team or participant ID use `ownEntry` (`shared/records.ts`), so inherited names such as `__proto__` are unknown IDs (`404`).
 - `assign-participant` needs an explicit target: `teamId: '<id>'`, `teamId: null` (ungrouped), or `newTeam: true` (`parseAssignTarget`). Anything else is `400`. `settings` is accepted only in `registration` (`409` otherwise). A verified reconnect returns the server-side (possibly moderated) name.
 - Normalization generates the instructor passcode only for an uninitialized record (core's persistent-link creation, which persists it on write). An initialized record with a missing passcode or participant token normalizes to `''` and fails closed.
+
+## Commissioned Ideas atomic session writes (2026-11-18)
+
+Owner: `atomicUpdate` / `mutateSession` in `activities/commissioned-ideas/server/routes.ts`.
+
+- Every write to a Commissioned Ideas session goes through the store's `updateAtomic`: create, every route, socket auth, and presence. Nothing calls `sessions.set` after core's `createSession`. This is required because core already writes these sessions atomically (`issueManagerCapabilityAtomically`). A plain `set()` landing between that read and its compare-and-set would be silently overwritten, and the reverse would also lose writes.
+- Mutation callbacks run on a fresh normalized copy and may re-run on a revision conflict. They must not have external side effects; responses, broadcasts, and success logs happen after commit, using the committed data. All checks (auth, phase, capacity, existence) run inside the callback, so they hold for the state actually written. For example, two concurrent joins cannot both pass the capacity check.
+- A check that fails throws `Refusal(status, error)`. This aborts the compare-and-set with no write and no revision bump, and the route responds with that status. A missing session or a record of another type is `404`. A store error or exhausted retries is `500`, with a structured error log.
+- Cross-field invariants that any write can affect run inside every update (currently `reconcilePodiumReveal`).
+- Any new writer for this session type must use `atomicUpdate` (or `mutateSession` for routes). The route test double enforces this: `routes never write with a plain set after create`.

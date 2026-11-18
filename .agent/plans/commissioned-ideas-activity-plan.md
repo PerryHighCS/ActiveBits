@@ -50,6 +50,32 @@ Triage of the 25 unresolved CodeRabbit threads from 2026-07-30 on PR #243, verif
 - [ ] Open, needs product/engineering decision: participant token in `localStorage` (move to a core httpOnly participant capability); per-session atomic updates (`updateAtomic` for every writer)
 - [x] Post replies and resolve threads after the fixes are pushed (0690ab1a: 23 resolved; the two follow-up threads replied to and left open)
 
+## Deferred follow-ups (2026-11-18)
+
+### A. Atomic session writes
+
+Owner: `mutateSession` in `activities/commissioned-ideas/server/routes.ts`.
+
+Problem: routes did `get → mutate → set`. Two concurrent requests could both pass a check (for example, team capacity) and one write could silently drop the other. Core's manager-capability reissue (`issueManagerCapabilityAtomically`) already writes these sessions with `updateAtomic`. Per `server/core/sessions.ts`, once any writer for a session type uses `updateAtomic`, every writer must, or a plain `set()` that lands between the read and the compare-and-set is silently overwritten.
+
+Invariant: every write to a Commissioned Ideas session, including create, presence updates, and socket auth, goes through `updateAtomic` (via `mutateSession`, or `atomicUpdate` for non-route callers). Nothing calls `sessions.set` directly.
+
+Contract:
+- The mutation callback works on a fresh normalized copy and may run more than once on a revision conflict. It has no external side effects (no responses, no broadcasts, no success logs). Generated IDs and timestamps are fine, because only the committed run's values are used.
+- Every check (auth, phase, capacity, existence) runs inside the callback against the copy being committed, so a check cannot pass on stale state.
+- A refusal throws `Refusal(status, error)` from inside the callback. That aborts the compare-and-set with no write and no revision bump. The route then sends that status.
+- After commit, the route broadcasts the committed data, logs, and responds. Cross-field invariants (`reconcilePodiumReveal`) run inside the callback.
+- Failure behavior: a missing session, or a record of another type, is `404`. Exhausted CAS retries or a store error is `500`, with a structured error log. A store without `updateAtomic` (minimal test doubles only) falls back to read-modify-write.
+
+- [x] Plan the contract (this section)
+- [x] `atomicUpdate`, `mutateSession`, and `Refusal`; convert every route, create, socket auth, and presence
+- [x] Test double with revision-checked `updateAtomic`; tests for refusals not writing, a conflicting writer between read and commit, concurrent joins at capacity, and 500 on store failure
+- [x] Promote to data-contracts.md
+
+### B. Participant credential in an httpOnly cookie
+
+To be planned after A lands.
+
 ## CodeRabbit review round 3 (2026-11-18)
 
 35 new threads. This is the third review round on this PR, so per AGENTS.md rule 16 the fixes are grouped by the contract each cluster broke rather than patched one by one.
@@ -68,7 +94,8 @@ Root causes and contracts (owners in parentheses):
 - [x] Student UI: session-keyed identity, credential-refusal recovery, storage warning, first-snapshot gate, results-phase notice, naming panel keyed by team, focus kept after Join/Switch/Leave
 - [x] Tests: route tests for each server change, websocket interleavings (concurrent auth, close during read, second tab, store failure), Playwright for refusal recovery, roster keyboard focus, passcode values in storage, and real manager-cookie reissue
 - [x] Docs: transition table, reduced-ballot wording, socket auth, test matrix, data contracts
-- [ ] Still open by decision: participant token in `localStorage`; per-session atomic updates
+- [x] Per-session atomic updates: done (see "Deferred follow-ups → A")
+- [ ] Participant token in `localStorage`: in progress (see "Deferred follow-ups → B")
 
 ## Goal
 

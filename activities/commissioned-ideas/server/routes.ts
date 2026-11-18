@@ -434,16 +434,72 @@ async function getSession(
 }
 
 /**
- * Every write of an existing session goes through this. Enforces cross-field invariants that any
- * mutation can affect, so individual routes cannot forget them:
+ * A request refused by a check inside a session mutation. Throwing it aborts the
+ * compare-and-set (nothing is written, no revision bump); the route sends `status`.
+ */
+class Refusal extends Error {
+  constructor(
+    readonly status: number,
+    readonly error: string,
+    readonly log?: { message: string; fields: Record<string, unknown> },
+  ) {
+    super(error)
+    this.name = 'Refusal'
+  }
+}
+
+function refuse(status: number, error: string, log?: Refusal['log']): never {
+  throw new Refusal(status, error, log)
+}
+
+/** Thrown inside a mutation when the stored record is not a Commissioned Ideas session. */
+class NotCommissionedIdeasSession extends Error {}
+
+/**
+ * Atomic-write contract (see "Deferred follow-ups → A" in the activity plan): every
+ * write to a Commissioned Ideas session goes through here, on top of the store's
+ * `updateAtomic`. `mutate` receives a fresh normalized copy and may run more than once
+ * on a revision conflict, so it must not have external side effects. Cross-field
+ * invariants run here on every write:
  * - podium reveal: a revealed podium always matches the ranking it was revealed for
  *   (`reconcilePodiumReveal`); moderation that changes the podium resets the reveal.
+ *
+ * Returns the committed session, or null when there is no such session. A `Refusal`
+ * (or any other error) thrown by `mutate` propagates without writing.
  */
-async function persistSession(sessions: SessionStore, sessionId: string, session: CommissionedIdeasSession): Promise<void> {
-  if (reconcilePodiumReveal(session.data, computeTeamScores(session.data.teams, session.data.ballots))) {
-    console.info('[commissioned-ideas] Podium reveal reset after the ranking changed', { sessionId })
+async function atomicUpdate(
+  sessions: SessionStore,
+  sessionId: string,
+  mutate: (session: CommissionedIdeasSession) => void,
+): Promise<CommissionedIdeasSession | null> {
+  let podiumReset = false
+  const apply = (draft: SessionRecord): SessionRecord => {
+    if (draft.type !== 'commissioned-ideas') throw new NotCommissionedIdeasSession()
+    const session = draft as CommissionedIdeasSession
+    session.data = normalizeSessionData(session.data)
+    mutate(session)
+    podiumReset = reconcilePodiumReveal(session.data, computeTeamScores(session.data.teams, session.data.ballots))
+    return session
   }
-  await sessions.set(sessionId, session)
+
+  let committed: SessionRecord | null
+  try {
+    if (typeof sessions.updateAtomic === 'function') {
+      committed = await sessions.updateAtomic(sessionId, apply)
+    } else {
+      // Only minimal test doubles lack updateAtomic; both production stores have it.
+      const current = await sessions.get(sessionId)
+      committed = current ? apply(current) : null
+      if (committed) await sessions.set(sessionId, committed)
+    }
+  } catch (err) {
+    if (err instanceof NotCommissionedIdeasSession) return null
+    throw err
+  }
+  if (!committed || committed.type !== 'commissioned-ideas') return null
+  if (podiumReset) console.info('[commissioned-ideas] Podium reveal reset after the ranking changed', { sessionId })
+  committed.data = normalizeSessionData(committed.data)
+  return committed as CommissionedIdeasSession
 }
 
 function buildDefaultSessionData(): CommissionedIdeasSessionData {
@@ -822,21 +878,98 @@ export default function setupCommissionedIdeasRoutes(
 ): void {
   const ensureBroadcastSubscription = createBroadcastSubscriptionHelper(sessions, ws)
 
+  // ── Mutation plumbing (atomic-write contract) ──────────────────────────────
+
+  /**
+   * Runs `run` as one atomic session update for a route. All checks belong inside
+   * `run` (they then see the state being committed) and refuse by throwing
+   * `Refusal`. Responds with 400/404/refusal/500 itself and returns null; on
+   * commit, returns the committed session and `run`'s value for the route to
+   * broadcast, log, and respond with.
+   */
+  async function mutateSession<T>(
+    req: RouteRequest,
+    res: JsonResponse,
+    run: (session: CommissionedIdeasSession) => T,
+  ): Promise<{ session: CommissionedIdeasSession; value: T } | null> {
+    const { sessionId } = req.params
+    if (!sessionId) { res.status(400).json({ error: 'Missing sessionId' }); return null }
+    try {
+      let value: T | undefined
+      const session = await atomicUpdate(sessions, sessionId, (draft) => { value = run(draft) })
+      if (!session) { res.status(404).json({ error: 'Session not found' }); return null }
+      return { session, value: value as T }
+    } catch (err) {
+      if (err instanceof Refusal) {
+        if (err.log) console.warn(err.log.message, err.log.fields)
+        res.status(err.status).json({ error: err.error })
+        return null
+      }
+      console.error('[commissioned-ideas] Session update failed', { sessionId, err })
+      res.status(500).json({ error: 'Could not save the change. Please try again.' })
+      return null
+    }
+  }
+
+  function requireInstructor(req: RouteRequest, session: CommissionedIdeasSession): void {
+    if (!checkInstructorAuth(req, session)) refuse(403, 'Instructor authentication required')
+  }
+
+  function requireParticipant(req: RouteRequest, session: CommissionedIdeasSession): CommissionedIdeasParticipant {
+    return checkParticipantAuth(req, session) ?? refuse(403, 'Participant authentication required')
+  }
+
+  function requireRegistrationPhase(session: CommissionedIdeasSession): void {
+    if (session.data.phase !== 'registration') refuse(409, 'Team changes are only allowed during registration')
+  }
+
+  /** Student self-grouping guard: registration phase, manual mode, grouping unlocked. */
+  function requireStudentGrouping(session: CommissionedIdeasSession): void {
+    requireRegistrationPhase(session)
+    if (session.data.studentGroupingLocked) refuse(403, 'Grouping is locked')
+    if (session.data.groupingMode !== 'manual') refuse(403, 'Self-grouping is not allowed in random mode')
+  }
+
+  function requirePresentationPhase(session: CommissionedIdeasSession): void {
+    if (session.data.phase !== 'presentation') refuse(409, 'Only available during presentations')
+  }
+
+  async function loadSession(req: RouteRequest, res: JsonResponse): Promise<CommissionedIdeasSession | null> {
+    const { sessionId } = req.params
+    if (!sessionId) { res.status(400).json({ error: 'Missing sessionId' }); return null }
+    const session = await getSession(sessions, sessionId)
+    if (!session) { res.status(404).json({ error: 'Session not found' }); return null }
+    return session
+  }
+
   // ── Create session ──────────────────────────────────────────────────────────
   app.post('/api/commissioned-ideas/create', async (_req, res) => {
-    const session = await createSession(sessions, { data: {} })
-    session.type = 'commissioned-ideas'
-    session.data = buildDefaultSessionData()
-    // Reload recovery: an httpOnly manager capability (only its digest is stored)
-    // lets this browser exchange for the passcode later via /instructor-passcode.
-    const managerCapability = issueActivityCapability(session, 'manager')
-    await sessions.set(session.id, session)
-    res.setHeader?.('Cache-Control', 'no-store')
-    if (res.cookie) {
-      writeActivityCapabilityCookie({ cookie: res.cookie.bind(res) }, session.id, 'manager', managerCapability.token)
+    try {
+      const created = await createSession(sessions, { data: {} })
+      // Reload recovery: an httpOnly manager capability (only its digest is stored)
+      // lets this browser exchange for the passcode later via /instructor-passcode.
+      let managerToken = ''
+      const update = (draft: SessionRecord): SessionRecord => {
+        draft.type = 'commissioned-ideas'
+        draft.data = buildDefaultSessionData()
+        managerToken = issueActivityCapability(draft, 'manager').token
+        return draft
+      }
+      const session = typeof sessions.updateAtomic === 'function'
+        ? await sessions.updateAtomic(created.id, update)
+        : await (async () => { const s = update(created); await sessions.set(created.id, s); return s })()
+      if (!session) throw new Error('Created session disappeared before initialization')
+      const data = normalizeSessionData(session.data)
+      res.setHeader?.('Cache-Control', 'no-store')
+      if (res.cookie) {
+        writeActivityCapabilityCookie({ cookie: res.cookie.bind(res) }, session.id, 'manager', managerToken)
+      }
+      console.info('[commissioned-ideas] Session created', { sessionId: session.id })
+      res.json({ id: session.id, instructorPasscode: data.instructorPasscode })
+    } catch (err) {
+      console.error('[commissioned-ideas] Session creation failed', { err })
+      res.status(500).json({ error: 'Could not create the session. Please try again.' })
     }
-    console.info('[commissioned-ideas] Session created', { sessionId: session.id })
-    res.json({ id: session.id, instructorPasscode: session.data.instructorPasscode })
   })
 
   // ── Instructor: recover the passcode after a reload ─────────────────────────
@@ -868,560 +1001,378 @@ export default function setupCommissionedIdeasRoutes(
   })
 
   // ── Student-safe state snapshot ─────────────────────────────────────────────
-  // `participantId` query param gives the viewer their own ballot summary.
   app.get('/api/commissioned-ideas/:sessionId/state', async (req, res) => {
-    const { sessionId } = req.params
-    if (!sessionId) {
-      res.status(400).json({ error: 'Missing sessionId' })
-      return
-    }
-
-    const session = await getSession(sessions, sessionId)
-    if (!session) {
-      res.status(404).json({ error: 'Session not found' })
-      return
-    }
-
+    const session = await loadSession(req, res)
+    if (!session) return
     // Always pass null: ballot context belongs to the WS channel, where the
-    // server binds participantId at socket-open time. Accepting an arbitrary
+    // server binds the participant only after verified auth. Accepting an arbitrary
     // query param here would let any student read another participant's ballot.
-    const snapshot = buildStudentSnapshot(session.data, null)
-    res.json({ sessionId, data: snapshot })
+    res.json({ sessionId: session.id, data: buildStudentSnapshot(session.data, null) })
   })
 
   // ── Register / reconnect participant ────────────────────────────────────────
   app.post('/api/commissioned-ideas/:sessionId/register-participant', async (req, res) => {
-    const { sessionId } = req.params
-    if (!sessionId) {
-      res.status(400).json({ error: 'Missing sessionId' })
-      return
-    }
+    const result = await mutateSession(req, res, (session) => {
+      const body = ensurePlainObject(req.body)
+      const name = sanitizeDisplayName(body.name, 100)
+      if (!name) refuse(400, 'name is required')
 
-    const session = await getSession(sessions, sessionId)
-    if (!session) {
-      res.status(404).json({ error: 'Session not found' })
-      return
-    }
-
-    const body = ensurePlainObject(req.body)
-    const name = sanitizeDisplayName(body.name, 100)
-    if (!name) {
-      res.status(400).json({ error: 'name is required' })
-      return
-    }
-
-    // Accept a client-provided id for reconnect; generate one for new registrations.
-    const requestedId =
-      typeof body.participantId === 'string' && /^[A-Z0-9]{6,12}$/i.test(body.participantId)
-        ? body.participantId
+      // Accept a client-provided id for reconnect; generate one for new registrations.
+      const requestedId =
+        typeof body.participantId === 'string' && /^[A-Z0-9]{6,12}$/i.test(body.participantId)
+          ? body.participantId
+          : null
+      const requested = ownEntry(session.data.participantRoster, requestedId)
+      // Reconnect only with proof of ownership: participant ids are visible to every
+      // student, so an id alone must never return that participant's token.
+      const existing = requested
+        ? verifyParticipantCredential(session.data, requestedId, readParticipantToken(req), { allowRejected: true })
         : null
-    const requested = ownEntry(session.data.participantRoster, requestedId)
-    // Reconnect only with proof of ownership: participant ids are visible to every
-    // student, so an id alone must never return that participant's token.
-    const existing = requested
-      ? verifyParticipantCredential(session.data, requestedId, readParticipantToken(req), { allowRejected: true })
-      : null
-    if (requested && !existing) {
-      console.warn('[commissioned-ideas] Reconnect without a valid participant token; registering as new', {
-        sessionId,
-        requestedId,
-      })
-    }
 
-    let participantId: string
-    let participantToken: string
-    let participantName: string
-    let reconnected = false
-    if (existing) {
-      // Reconnect: mark connected only. The server-side name is authoritative —
-      // overwriting it here would silently undo instructor moderation applied
-      // between the student's last visit and this reconnect.
-      reconnected = true
-      participantId = existing.id
-      participantToken = existing.token
-      participantName = existing.name
-      existing.connected = true
-      existing.lastSeen = Date.now()
-    } else {
+      if (existing) {
+        // Reconnect: mark connected only. The server-side name is authoritative —
+        // overwriting it here would silently undo instructor moderation applied
+        // between the student's last visit and this reconnect.
+        existing.connected = true
+        existing.lastSeen = Date.now()
+        return { participantId: existing.id, name: existing.name, token: existing.token, reconnected: true, refusedId: null }
+      }
+
       // New registration. Never reuse a requested id that already belongs to someone.
-      participantId = requestedId && !requested ? requestedId : generateShortId()
-      participantToken = generatePasscode()
-      participantName = name
-      const participant: CommissionedIdeasParticipant = {
+      const participantId = requestedId && !requested ? requestedId : generateShortId()
+      const token = generatePasscode()
+      session.data.participantRoster[participantId] = {
         id: participantId,
         name,
         teamId: null,
         connected: true,
         lastSeen: Date.now(),
         rejectedByInstructor: false,
-        token: participantToken,
+        token,
       }
-      session.data.participantRoster[participantId] = participant
+      return { participantId, name, token, reconnected: false, refusedId: requested ? requestedId : null }
+    })
+    if (!result) return
+    const { session, value } = result
+
+    if (value.refusedId) {
+      console.warn('[commissioned-ideas] Reconnect without a valid participant token; registered as new', {
+        sessionId: session.id,
+        requestedId: value.refusedId,
+      })
     }
-
-    await persistSession(sessions, sessionId, session)
-    console.info('[commissioned-ideas] Participant registered', { sessionId, participantId, reconnected })
-
-    broadcastRegistrationUpdate(ws, sessionId, session.data)
-    res.json({ participantId, name: participantName, token: participantToken })
+    console.info('[commissioned-ideas] Participant registered', {
+      sessionId: session.id,
+      participantId: value.participantId,
+      reconnected: value.reconnected,
+    })
+    broadcastRegistrationUpdate(ws, session.id, session.data)
+    res.json({ participantId: value.participantId, name: value.name, token: value.token })
   })
 
   // ── Instructor: edit or reject a participant name ───────────────────────────
   app.post('/api/commissioned-ideas/:sessionId/participant-name', async (req, res) => {
-    const { sessionId } = req.params
-    if (!sessionId) {
-      res.status(400).json({ error: 'Missing sessionId' })
-      return
-    }
+    const result = await mutateSession(req, res, (session) => {
+      requireInstructor(req, session)
+      const body = ensurePlainObject(req.body)
+      const participantId = typeof body.participantId === 'string' ? body.participantId : null
+      if (!participantId) refuse(400, 'participantId is required')
 
-    const session = await getSession(sessions, sessionId)
-    if (!session) {
-      res.status(404).json({ error: 'Session not found' })
-      return
-    }
+      const participant = ownEntry(session.data.participantRoster, participantId) ?? refuse(404, 'Participant not found')
 
-    if (!checkInstructorAuth(req, session)) {
-      res.status(403).json({ error: 'Instructor authentication required' })
-      return
-    }
-
-    const body = ensurePlainObject(req.body)
-    const participantId = typeof body.participantId === 'string' ? body.participantId : null
-    if (!participantId) {
-      res.status(400).json({ error: 'participantId is required' })
-      return
-    }
-
-    const participant = ownEntry(session.data.participantRoster, participantId)
-    if (!participant) {
-      res.status(404).json({ error: 'Participant not found' })
-      return
-    }
-
-    if ('name' in body) {
-      const newName = sanitizeDisplayName(body.name, 100)
-      if (!newName) {
-        res.status(400).json({ error: 'name must be a non-empty string' })
-        return
+      if ('name' in body) {
+        const newName = sanitizeDisplayName(body.name, 100) ?? refuse(400, 'name must be a non-empty string')
+        participant.name = newName
+        // Editing the name clears a prior rejection so the student is visible again.
+        participant.rejectedByInstructor = false
       }
-      participant.name = newName
-      // Editing the name clears a prior rejection so the student is visible again.
-      participant.rejectedByInstructor = false
-    }
+      if ('rejected' in body) {
+        participant.rejectedByInstructor = Boolean(body.rejected)
+      }
 
-    if ('rejected' in body) {
-      participant.rejectedByInstructor = Boolean(body.rejected)
-    }
+      // Membership contract: rejected participants are never team members.
+      if (participant.rejectedByInstructor && participant.teamId) {
+        removeParticipantFromTeam(session.data, participant)
+      }
+      // Ballot contract: a rejected participant's ballot does not count.
+      if (participant.rejectedByInstructor) {
+        delete session.data.ballots[participant.id]
+      }
+      return participantId
+    })
+    if (!result) return
 
-    // Membership contract: rejected participants are never team members.
-    if (participant.rejectedByInstructor && participant.teamId) {
-      removeParticipantFromTeam(session.data, participant)
-    }
-    // Ballot contract: a rejected participant's ballot does not count.
-    if (participant.rejectedByInstructor) {
-      delete session.data.ballots[participant.id]
-    }
-
-    await persistSession(sessions, sessionId, session)
-    console.info(`[commissioned-ideas] Participant name moderated`, { sessionId, participantId })
-
-    broadcastRegistrationUpdate(ws, sessionId, session.data)
+    console.info('[commissioned-ideas] Participant name moderated', { sessionId: result.session.id, participantId: result.value })
+    broadcastRegistrationUpdate(ws, result.session.id, result.session.data)
     res.json({ ok: true })
   })
 
   // ── Instructor: update session settings ────────────────────────────────────
   app.post('/api/commissioned-ideas/:sessionId/settings', async (req, res) => {
-    const { sessionId } = req.params
-    if (!sessionId) { res.status(400).json({ error: 'Missing sessionId' }); return }
-
-    const session = await getSession(sessions, sessionId)
-    if (!session) { res.status(404).json({ error: 'Session not found' }); return }
-
-    if (!checkInstructorAuth(req, session)) {
-      res.status(403).json({ error: 'Instructor authentication required' })
-      return
-    }
-
-    // Team-formation settings only mean something while teams are forming. After
-    // registration the size limit is fixed (late placement may exceed it).
-    if (session.data.phase !== 'registration') {
-      console.warn('[commissioned-ideas] Settings change refused outside registration', { sessionId, phase: session.data.phase })
-      res.status(409).json({ error: 'Session settings can only be changed during registration' })
-      return
-    }
-
-    const body = ensurePlainObject(req.body)
-    if ('maxTeamSize' in body) {
-      const v = body.maxTeamSize
-      if (typeof v !== 'number' || !Number.isInteger(v) || v < 1) {
-        res.status(400).json({ error: 'maxTeamSize must be a positive integer' })
-        return
+    const result = await mutateSession(req, res, (session) => {
+      requireInstructor(req, session)
+      // Team-formation settings only mean something while teams are forming. After
+      // registration the size limit is fixed (late placement may exceed it).
+      if (session.data.phase !== 'registration') {
+        refuse(409, 'Session settings can only be changed during registration', {
+          message: '[commissioned-ideas] Settings change refused outside registration',
+          fields: { sessionId: session.id, phase: session.data.phase },
+        })
       }
-      session.data.maxTeamSize = v
-    }
-    if ('groupingMode' in body) {
-      session.data.groupingMode = normalizeGroupingMode(body.groupingMode)
-    }
-    if ('studentGroupingLocked' in body) {
-      session.data.studentGroupingLocked = Boolean(body.studentGroupingLocked)
-    }
-    if ('namingLocked' in body) {
-      session.data.namingLocked = Boolean(body.namingLocked)
-    }
 
-    await persistSession(sessions, sessionId, session)
-    console.info('[commissioned-ideas] Settings updated', { sessionId })
-    broadcastToAll(ws, sessionId, 'commissioned-ideas:registration-updated', session.data)
+      const body = ensurePlainObject(req.body)
+      if ('maxTeamSize' in body) {
+        const v = body.maxTeamSize
+        if (typeof v !== 'number' || !Number.isInteger(v) || v < 1) refuse(400, 'maxTeamSize must be a positive integer')
+        session.data.maxTeamSize = v
+      }
+      if ('groupingMode' in body) session.data.groupingMode = normalizeGroupingMode(body.groupingMode)
+      if ('studentGroupingLocked' in body) session.data.studentGroupingLocked = Boolean(body.studentGroupingLocked)
+      if ('namingLocked' in body) session.data.namingLocked = Boolean(body.namingLocked)
+    })
+    if (!result) return
+
+    console.info('[commissioned-ideas] Settings updated', { sessionId: result.session.id })
+    broadcastToAll(ws, result.session.id, 'commissioned-ideas:registration-updated', result.session.data)
     res.json({ ok: true })
   })
 
-  // ── Shared route guards ─────────────────────────────────────────────────────
-
-  async function loadSession(req: RouteRequest, res: JsonResponse): Promise<CommissionedIdeasSession | null> {
-    const { sessionId } = req.params
-    if (!sessionId) { res.status(400).json({ error: 'Missing sessionId' }); return null }
-    const session = await getSession(sessions, sessionId)
-    if (!session) { res.status(404).json({ error: 'Session not found' }); return null }
-    return session
-  }
-
-  async function loadInstructorSession(req: RouteRequest, res: JsonResponse): Promise<CommissionedIdeasSession | null> {
-    const session = await loadSession(req, res)
-    if (!session) return null
-    if (!checkInstructorAuth(req, session)) {
-      res.status(403).json({ error: 'Instructor authentication required' })
-      return null
-    }
-    return session
-  }
-
-  async function loadParticipantSession(
-    req: RouteRequest,
-    res: JsonResponse,
-  ): Promise<{ session: CommissionedIdeasSession; participant: CommissionedIdeasParticipant } | null> {
-    const session = await loadSession(req, res)
-    if (!session) return null
-    const participant = checkParticipantAuth(req, session)
-    if (!participant) {
-      res.status(403).json({ error: 'Participant authentication required' })
-      return null
-    }
-    return { session, participant }
-  }
-
-  function requireRegistrationPhase(session: CommissionedIdeasSession, res: JsonResponse): boolean {
-    if (session.data.phase !== 'registration') {
-      res.status(409).json({ error: 'Team changes are only allowed during registration' })
-      return false
-    }
-    return true
-  }
-
-  /** Student self-grouping guard: registration phase, manual mode, grouping unlocked. */
-  function requireStudentGrouping(session: CommissionedIdeasSession, res: JsonResponse): boolean {
-    if (!requireRegistrationPhase(session, res)) return false
-    if (session.data.studentGroupingLocked) {
-      res.status(403).json({ error: 'Grouping is locked' })
-      return false
-    }
-    if (session.data.groupingMode !== 'manual') {
-      res.status(403).json({ error: 'Self-grouping is not allowed in random mode' })
-      return false
-    }
-    return true
-  }
-
-  async function saveAndBroadcast(session: CommissionedIdeasSession): Promise<void> {
-    await persistSession(sessions, session.id, session)
-    broadcastRegistrationUpdate(ws, session.id, session.data)
-  }
-
   // ── Student: create a new team and join it ──────────────────────────────────
   app.post('/api/commissioned-ideas/:sessionId/create-team', async (req, res) => {
-    const ctx = await loadParticipantSession(req, res)
-    if (!ctx) return
-    const { session, participant } = ctx
-    if (!requireStudentGrouping(session, res)) return
+    const result = await mutateSession(req, res, (session) => {
+      const participant = requireParticipant(req, session)
+      requireStudentGrouping(session)
+      const team = createTeamRecord(session.data)
+      addParticipantToTeam(session.data, participant, team)
+      return { teamId: team.id, participantId: participant.id }
+    })
+    if (!result) return
 
-    const team = createTeamRecord(session.data)
-    addParticipantToTeam(session.data, participant, team)
-
-    await saveAndBroadcast(session)
-    console.info('[commissioned-ideas] Team created', { sessionId: session.id, teamId: team.id, participantId: participant.id })
-    res.json({ teamId: team.id })
+    broadcastRegistrationUpdate(ws, result.session.id, result.session.data)
+    console.info('[commissioned-ideas] Team created', { sessionId: result.session.id, ...result.value })
+    res.json({ teamId: result.value.teamId })
   })
 
   // ── Student: join (or switch to) an existing team ───────────────────────────
   app.post('/api/commissioned-ideas/:sessionId/join-team', async (req, res) => {
-    const ctx = await loadParticipantSession(req, res)
-    if (!ctx) return
-    const { session, participant } = ctx
+    const result = await mutateSession(req, res, (session) => {
+      const participant = requireParticipant(req, session)
+      const body = ensurePlainObject(req.body)
+      const teamId = typeof body.teamId === 'string' ? body.teamId : null
+      if (!teamId) refuse(400, 'teamId is required')
+      requireStudentGrouping(session)
 
-    const body = ensurePlainObject(req.body)
-    const teamId = typeof body.teamId === 'string' ? body.teamId : null
-    if (!teamId) { res.status(400).json({ error: 'teamId is required' }); return }
+      const team = ownEntry(session.data.teams, teamId) ?? refuse(404, 'Team not found')
+      // Checked against the state being committed, so two concurrent joins cannot both pass.
+      if (participant.teamId !== teamId && countActiveMembers(session.data, team) >= session.data.maxTeamSize) {
+        refuse(409, 'Team is full')
+      }
+      addParticipantToTeam(session.data, participant, team)
+      return { teamId, participantId: participant.id }
+    })
+    if (!result) return
 
-    if (!requireStudentGrouping(session, res)) return
-
-    const team = ownEntry(session.data.teams, teamId)
-    if (!team) { res.status(404).json({ error: 'Team not found' }); return }
-
-    if (participant.teamId !== teamId && countActiveMembers(session.data, team) >= session.data.maxTeamSize) {
-      res.status(409).json({ error: 'Team is full' })
-      return
-    }
-
-    addParticipantToTeam(session.data, participant, team)
-
-    await saveAndBroadcast(session)
-    console.info('[commissioned-ideas] Participant joined team', { sessionId: session.id, teamId, participantId: participant.id })
+    broadcastRegistrationUpdate(ws, result.session.id, result.session.data)
+    console.info('[commissioned-ideas] Participant joined team', { sessionId: result.session.id, ...result.value })
     res.json({ ok: true })
   })
 
   // ── Student: leave current team ─────────────────────────────────────────────
   app.post('/api/commissioned-ideas/:sessionId/leave-team', async (req, res) => {
-    const ctx = await loadParticipantSession(req, res)
-    if (!ctx) return
-    const { session, participant } = ctx
-    if (!requireStudentGrouping(session, res)) return
+    const result = await mutateSession(req, res, (session) => {
+      const participant = requireParticipant(req, session)
+      requireStudentGrouping(session)
+      if (!participant.teamId) refuse(409, 'Participant is not in a team')
+      removeParticipantFromTeam(session.data, participant)
+      return participant.id
+    })
+    if (!result) return
 
-    if (!participant.teamId) {
-      res.status(409).json({ error: 'Participant is not in a team' })
-      return
-    }
-
-    removeParticipantFromTeam(session.data, participant)
-
-    await saveAndBroadcast(session)
-    console.info('[commissioned-ideas] Participant left team', { sessionId: session.id, participantId: participant.id })
+    broadcastRegistrationUpdate(ws, result.session.id, result.session.data)
+    console.info('[commissioned-ideas] Participant left team', { sessionId: result.session.id, participantId: result.value })
     res.json({ ok: true })
   })
 
   // ── Instructor: move a participant to a team, a new team, or ungrouped ─────
   // Body: { participantId, teamId: string | null } or { participantId, newTeam: true }
   app.post('/api/commissioned-ideas/:sessionId/assign-participant', async (req, res) => {
-    const session = await loadInstructorSession(req, res)
-    if (!session) return
+    const result = await mutateSession(req, res, (session) => {
+      requireInstructor(req, session)
+      const body = ensurePlainObject(req.body)
+      const participantId = typeof body.participantId === 'string' ? body.participantId : null
+      if (!participantId) refuse(400, 'participantId is required')
+      const participant = ownEntry(session.data.participantRoster, participantId) ?? refuse(404, 'Participant not found')
 
-    const body = ensurePlainObject(req.body)
-    const participantId = typeof body.participantId === 'string' ? body.participantId : null
-    if (!participantId) { res.status(400).json({ error: 'participantId is required' }); return }
-
-    const participant = ownEntry(session.data.participantRoster, participantId)
-    if (!participant) { res.status(404).json({ error: 'Participant not found' }); return }
-
-    const parsed = parseAssignTarget(body)
-    if (!parsed.ok) {
-      console.warn('[commissioned-ideas] Instructor move refused: invalid target', { sessionId: session.id, participantId, error: parsed.error })
-      res.status(400).json({ error: parsed.error })
-      return
-    }
-    const { target } = parsed
-    const newTeam = target.kind === 'new-team'
-    const targetTeamId = target.kind === 'team' ? target.teamId : null
-
-    // Membership contract: which moves are allowed in which phase lives in shared/membership.ts.
-    const decision = checkInstructorMove({
-      phase: session.data.phase,
-      participantTeamId: participant.teamId,
-      rejected: participant.rejectedByInstructor,
-      target,
-    })
-    if (!decision.ok) {
-      console.warn('[commissioned-ideas] Instructor move refused', {
-        sessionId: session.id,
-        participantId,
-        phase: session.data.phase,
-        error: decision.error,
-      })
-      res.status(decision.status).json({ error: decision.error })
-      return
-    }
-
-    let resultTeamId: string | null = null
-    if (newTeam) {
-      const team = createTeamRecord(session.data)
-      addParticipantToTeam(session.data, participant, team)
-      resultTeamId = team.id
-    } else if (targetTeamId !== null) {
-      const team = ownEntry(session.data.teams, targetTeamId)
-      if (!team) { res.status(404).json({ error: 'Team not found' }); return }
-      if (
-        decision.enforceCapacity &&
-        participant.teamId !== targetTeamId &&
-        countActiveMembers(session.data, team) >= session.data.maxTeamSize
-      ) {
-        res.status(409).json({ error: 'Team is full' })
-        return
+      const parsed = parseAssignTarget(body)
+      if (!parsed.ok) {
+        refuse(400, parsed.error, {
+          message: '[commissioned-ideas] Instructor move refused: invalid target',
+          fields: { sessionId: session.id, participantId, error: parsed.error },
+        })
       }
-      addParticipantToTeam(session.data, participant, team)
-      resultTeamId = team.id
-    } else if (participant.teamId) {
-      removeParticipantFromTeam(session.data, participant)
-    }
+      const { target } = parsed
 
-    await saveAndBroadcast(session)
-    console.info('[commissioned-ideas] Instructor assigned participant', {
-      sessionId: session.id,
-      participantId,
-      teamId: resultTeamId,
-      newTeam,
-      latePlacement: decision.latePlacement,
+      // Membership contract: which moves are allowed in which phase lives in shared/membership.ts.
+      const decision = checkInstructorMove({
+        phase: session.data.phase,
+        participantTeamId: participant.teamId,
+        rejected: participant.rejectedByInstructor,
+        target,
+      })
+      if (!decision.ok) {
+        refuse(decision.status, decision.error, {
+          message: '[commissioned-ideas] Instructor move refused',
+          fields: { sessionId: session.id, participantId, phase: session.data.phase, error: decision.error },
+        })
+      }
+
+      let teamId: string | null = null
+      if (target.kind === 'new-team') {
+        const team = createTeamRecord(session.data)
+        addParticipantToTeam(session.data, participant, team)
+        teamId = team.id
+      } else if (target.kind === 'team') {
+        const team = ownEntry(session.data.teams, target.teamId) ?? refuse(404, 'Team not found')
+        if (
+          decision.enforceCapacity &&
+          participant.teamId !== target.teamId &&
+          countActiveMembers(session.data, team) >= session.data.maxTeamSize
+        ) {
+          refuse(409, 'Team is full')
+        }
+        addParticipantToTeam(session.data, participant, team)
+        teamId = team.id
+      } else if (participant.teamId) {
+        removeParticipantFromTeam(session.data, participant)
+      }
+      return { participantId, teamId, newTeam: target.kind === 'new-team', latePlacement: decision.latePlacement }
     })
-    res.json({ ok: true, teamId: resultTeamId })
+    if (!result) return
+
+    broadcastRegistrationUpdate(ws, result.session.id, result.session.data)
+    console.info('[commissioned-ideas] Instructor assigned participant', { sessionId: result.session.id, ...result.value })
+    res.json({ ok: true, teamId: result.value.teamId })
   })
 
   // ── Instructor: random assignment ───────────────────────────────────────────
   // scope 'ungrouped' (default) places only students without a team.
   // scope 'all' dissolves every team and redistributes; refused once grouping is locked.
   app.post('/api/commissioned-ideas/:sessionId/assign-random', async (req, res) => {
-    const session = await loadInstructorSession(req, res)
-    if (!session) return
-    if (!requireRegistrationPhase(session, res)) return
+    const result = await mutateSession(req, res, (session) => {
+      requireInstructor(req, session)
+      requireRegistrationPhase(session)
+      const body = ensurePlainObject(req.body)
+      const scope: RandomAssignmentScope = body.scope === 'all' ? 'all' : 'ungrouped'
+      if (scope === 'all' && session.data.studentGroupingLocked) {
+        refuse(409, 'Unlock grouping before reshuffling every team', {
+          message: '[commissioned-ideas] Full reshuffle refused while grouping locked',
+          fields: { sessionId: session.id },
+        })
+      }
+      assignRandom(session.data, scope)
+      return scope
+    })
+    if (!result) return
 
-    const body = ensurePlainObject(req.body)
-    const scope: RandomAssignmentScope = body.scope === 'all' ? 'all' : 'ungrouped'
-
-    if (scope === 'all' && session.data.studentGroupingLocked) {
-      console.warn('[commissioned-ideas] Full reshuffle refused while grouping locked', { sessionId: session.id })
-      res.status(409).json({ error: 'Unlock grouping before reshuffling every team' })
-      return
-    }
-
-    assignRandom(session.data, scope)
-
-    await saveAndBroadcast(session)
-    console.info('[commissioned-ideas] Random assignment complete', { sessionId: session.id, scope })
+    broadcastRegistrationUpdate(ws, result.session.id, result.session.data)
+    console.info('[commissioned-ideas] Random assignment complete', { sessionId: result.session.id, scope: result.value })
     res.json({ ok: true })
   })
 
   // ── Student: propose a team or project name ─────────────────────────────────
   // Body: { participantId, kind: 'group' | 'project', value }
   app.post('/api/commissioned-ideas/:sessionId/team/proposal', async (req, res) => {
-    const ctx = await loadParticipantSession(req, res)
-    if (!ctx) return
-    const { session, participant } = ctx
+    const result = await mutateSession(req, res, (session) => {
+      const participant = requireParticipant(req, session)
+      const body = ensurePlainObject(req.body)
+      const kind = normalizeProposalKind(body.kind) ?? refuse(400, "kind must be 'group' or 'project'")
+      const value = sanitizeDisplayName(body.value, MAX_PROPOSAL_LENGTH) ?? refuse(400, 'value is required')
 
-    const body = ensurePlainObject(req.body)
-    const kind = normalizeProposalKind(body.kind)
-    if (!kind) { res.status(400).json({ error: "kind must be 'group' or 'project'" }); return }
-    const value = sanitizeDisplayName(body.value, MAX_PROPOSAL_LENGTH)
-    if (!value) { res.status(400).json({ error: 'value is required' }); return }
+      requireRegistrationPhase(session)
+      if (session.data.namingLocked) refuse(403, 'Naming is locked')
+      const team = ownEntry(session.data.teams, participant.teamId) ?? refuse(409, 'Join a team before proposing names')
 
-    if (!requireRegistrationPhase(session, res)) return
-    if (session.data.namingLocked) { res.status(403).json({ error: 'Naming is locked' }); return }
+      const proposals = proposalsForKind(team, kind)
+      const key = proposalMatchKey(value)
+      const duplicate = proposals.find((p) => proposalMatchKey(p.value) === key)
 
-    const team = ownEntry(session.data.teams, participant.teamId)
-    if (!team) { res.status(409).json({ error: 'Join a team before proposing names' }); return }
-
-    const proposals = proposalsForKind(team, kind)
-    const votes = votesForKind(team, kind)
-    const key = proposalMatchKey(value)
-    const duplicate = proposals.find((p) => proposalMatchKey(p.value) === key)
-
-    let proposalId: string
-    if (duplicate) {
-      if (duplicate.rejectedByInstructor) {
-        res.status(409).json({ error: 'That name is not available' })
-        return
+      let proposalId: string
+      if (duplicate) {
+        if (duplicate.rejectedByInstructor) refuse(409, 'That name is not available')
+        proposalId = duplicate.id
+      } else {
+        if (proposals.length >= MAX_PROPOSALS_PER_KIND) refuse(409, 'This team has reached the proposal limit')
+        proposalId = generateShortId()
+        proposals.push({
+          id: proposalId,
+          value,
+          proposedByParticipantId: participant.id,
+          createdAt: Date.now(),
+          rejectedByInstructor: false,
+        })
       }
-      proposalId = duplicate.id
-    } else {
-      if (proposals.length >= MAX_PROPOSALS_PER_KIND) {
-        res.status(409).json({ error: 'This team has reached the proposal limit' })
-        return
-      }
-      proposalId = generateShortId()
-      proposals.push({
-        id: proposalId,
-        value,
-        proposedByParticipantId: participant.id,
-        createdAt: Date.now(),
-        rejectedByInstructor: false,
-      })
-    }
-    votes[participant.id] = proposalId
-    refreshTeamNames(team)
-
-    await saveAndBroadcast(session)
-    console.info('[commissioned-ideas] Name proposed', {
-      sessionId: session.id,
-      teamId: team.id,
-      participantId: participant.id,
-      kind,
-      proposalId,
-      duplicate: Boolean(duplicate),
+      votesForKind(team, kind)[participant.id] = proposalId
+      refreshTeamNames(team)
+      return { teamId: team.id, participantId: participant.id, kind, proposalId, duplicate: Boolean(duplicate) }
     })
-    res.json({ ok: true, proposalId })
+    if (!result) return
+
+    broadcastRegistrationUpdate(ws, result.session.id, result.session.data)
+    console.info('[commissioned-ideas] Name proposed', { sessionId: result.session.id, ...result.value })
+    res.json({ ok: true, proposalId: result.value.proposalId })
   })
 
   // ── Student: vote for a proposal within their own team ──────────────────────
   // Body: { participantId, kind, proposalId }
   app.post('/api/commissioned-ideas/:sessionId/team/proposal-vote', async (req, res) => {
-    const ctx = await loadParticipantSession(req, res)
-    if (!ctx) return
-    const { session, participant } = ctx
+    const result = await mutateSession(req, res, (session) => {
+      const participant = requireParticipant(req, session)
+      const body = ensurePlainObject(req.body)
+      const kind = normalizeProposalKind(body.kind) ?? refuse(400, "kind must be 'group' or 'project'")
+      const proposalId = typeof body.proposalId === 'string' ? body.proposalId : null
+      if (!proposalId) refuse(400, 'proposalId is required')
 
-    const body = ensurePlainObject(req.body)
-    const kind = normalizeProposalKind(body.kind)
-    if (!kind) { res.status(400).json({ error: "kind must be 'group' or 'project'" }); return }
-    const proposalId = typeof body.proposalId === 'string' ? body.proposalId : null
-    if (!proposalId) { res.status(400).json({ error: 'proposalId is required' }); return }
+      requireRegistrationPhase(session)
+      if (session.data.namingLocked) refuse(403, 'Naming is locked')
+      const team = ownEntry(session.data.teams, participant.teamId) ?? refuse(409, 'Join a team before voting on names')
 
-    if (!requireRegistrationPhase(session, res)) return
-    if (session.data.namingLocked) { res.status(403).json({ error: 'Naming is locked' }); return }
+      const proposal = proposalsForKind(team, kind).find((p) => p.id === proposalId) ?? refuse(404, 'Proposal not found on your team')
+      if (proposal.rejectedByInstructor) refuse(409, 'That proposal was removed')
 
-    const team = ownEntry(session.data.teams, participant.teamId)
-    if (!team) { res.status(409).json({ error: 'Join a team before voting on names' }); return }
-
-    const proposal = proposalsForKind(team, kind).find((p) => p.id === proposalId)
-    if (!proposal) { res.status(404).json({ error: 'Proposal not found on your team' }); return }
-    if (proposal.rejectedByInstructor) { res.status(409).json({ error: 'That proposal was removed' }); return }
-
-    votesForKind(team, kind)[participant.id] = proposalId
-    refreshTeamNames(team)
-
-    await saveAndBroadcast(session)
-    console.info('[commissioned-ideas] Name vote cast', {
-      sessionId: session.id,
-      teamId: team.id,
-      participantId: participant.id,
-      kind,
-      proposalId,
+      votesForKind(team, kind)[participant.id] = proposalId
+      refreshTeamNames(team)
+      return { teamId: team.id, participantId: participant.id, kind, proposalId }
     })
+    if (!result) return
+
+    broadcastRegistrationUpdate(ws, result.session.id, result.session.data)
+    console.info('[commissioned-ideas] Name vote cast', { sessionId: result.session.id, ...result.value })
     res.json({ ok: true })
   })
 
   // ── Instructor: reject or restore a proposal ────────────────────────────────
   // Body: { teamId, kind, proposalId, rejected: boolean }
   app.post('/api/commissioned-ideas/:sessionId/team/proposal-moderation', async (req, res) => {
-    const session = await loadInstructorSession(req, res)
-    if (!session) return
+    const result = await mutateSession(req, res, (session) => {
+      requireInstructor(req, session)
+      const body = ensurePlainObject(req.body)
+      const kind = normalizeProposalKind(body.kind) ?? refuse(400, "kind must be 'group' or 'project'")
+      const teamId = typeof body.teamId === 'string' ? body.teamId : null
+      const proposalId = typeof body.proposalId === 'string' ? body.proposalId : null
+      if (!teamId || !proposalId) refuse(400, 'teamId and proposalId are required')
+      const rejected = body.rejected
+      if (typeof rejected !== 'boolean') refuse(400, 'rejected must be a boolean')
 
-    const body = ensurePlainObject(req.body)
-    const kind = normalizeProposalKind(body.kind)
-    if (!kind) { res.status(400).json({ error: "kind must be 'group' or 'project'" }); return }
-    const teamId = typeof body.teamId === 'string' ? body.teamId : null
-    const proposalId = typeof body.proposalId === 'string' ? body.proposalId : null
-    if (!teamId || !proposalId) { res.status(400).json({ error: 'teamId and proposalId are required' }); return }
-    if (typeof body.rejected !== 'boolean') { res.status(400).json({ error: 'rejected must be a boolean' }); return }
-
-    const team = ownEntry(session.data.teams, teamId)
-    if (!team) { res.status(404).json({ error: 'Team not found' }); return }
-    const proposal = proposalsForKind(team, kind).find((p) => p.id === proposalId)
-    if (!proposal) { res.status(404).json({ error: 'Proposal not found' }); return }
-
-    proposal.rejectedByInstructor = body.rejected
-    refreshTeamNames(team)
-
-    await saveAndBroadcast(session)
-    console.info('[commissioned-ideas] Proposal moderated', {
-      sessionId: session.id,
-      teamId,
-      kind,
-      proposalId,
-      rejected: body.rejected,
+      const team = ownEntry(session.data.teams, teamId) ?? refuse(404, 'Team not found')
+      const proposal = proposalsForKind(team, kind).find((p) => p.id === proposalId) ?? refuse(404, 'Proposal not found')
+      proposal.rejectedByInstructor = rejected
+      refreshTeamNames(team)
+      return { teamId, kind, proposalId, rejected }
     })
+    if (!result) return
+
+    broadcastRegistrationUpdate(ws, result.session.id, result.session.data)
+    console.info('[commissioned-ideas] Proposal moderated', { sessionId: result.session.id, ...result.value })
     res.json({ ok: true })
   })
 
@@ -1429,130 +1380,107 @@ export default function setupCommissionedIdeasRoutes(
   // Body: { participantId, allocations: [{ teamId, amount }] }
   // Ballot size and amounts follow shared/validation.ts (reduced for small classes).
   app.post('/api/commissioned-ideas/:sessionId/ballot', async (req, res) => {
-    const ctx = await loadParticipantSession(req, res)
-    if (!ctx) return
-    const { session, participant } = ctx
+    const result = await mutateSession(req, res, (session) => {
+      const participant = requireParticipant(req, session)
+      if (session.data.phase !== 'voting') refuse(409, 'Voting is not open')
 
-    if (session.data.phase !== 'voting') {
-      res.status(409).json({ error: 'Voting is not open' })
-      return
-    }
+      // Ballot contract: late arrivals and other ungrouped students wait for placement.
+      const status = voterBallotStatus(participant.teamId, session.data.teams)
+      if (!status.canVote) refuse(409, status.message)
 
-    // Ballot contract: late arrivals and other ungrouped students wait for placement.
-    const status = voterBallotStatus(participant.teamId, session.data.teams)
-    if (!status.canVote) {
-      res.status(409).json({ error: status.message })
-      return
-    }
+      const body = ensurePlainObject(req.body)
+      const validation = validateBallot(body.allocations, participant.id, session.data)
+      const allocations = validation.valid ? coerceAllocations(body.allocations) : null
+      if (!validation.valid || !allocations) {
+        const error = validation.error ?? 'Malformed allocations'
+        refuse(400, error, {
+          message: '[commissioned-ideas] Invalid ballot rejected',
+          fields: { sessionId: session.id, participantId: participant.id, error },
+        })
+      }
 
-    const body = ensurePlainObject(req.body)
-    const result = validateBallot(body.allocations, participant.id, session.data)
-    const allocations = result.valid ? coerceAllocations(body.allocations) : null
-    if (!result.valid || !allocations) {
-      console.warn('[commissioned-ideas] Invalid ballot rejected', {
-        sessionId: session.id,
-        participantId: participant.id,
-        error: result.error ?? 'Malformed allocations',
-      })
-      res.status(400).json({ error: result.error ?? 'Malformed allocations' })
-      return
-    }
+      const replaced = Object.hasOwn(session.data.ballots, participant.id)
+      session.data.ballots[participant.id] = {
+        voterId: participant.id,
+        voterName: participant.name,
+        voterTeamId: participant.teamId,
+        allocations,
+        submittedAt: Date.now(),
+      }
+      return { participantId: participant.id, replaced }
+    })
+    if (!result) return
 
-    const replaced = participant.id in session.data.ballots
-    session.data.ballots[participant.id] = {
-      voterId: participant.id,
-      voterName: participant.name,
-      voterTeamId: participant.teamId,
-      allocations,
-      submittedAt: Date.now(),
-    }
-
-    await saveAndBroadcast(session)
-    console.info('[commissioned-ideas] Ballot submitted', { sessionId: session.id, participantId: participant.id, replaced })
-    res.json({ ok: true, replaced })
+    broadcastRegistrationUpdate(ws, result.session.id, result.session.data)
+    console.info('[commissioned-ideas] Ballot submitted', { sessionId: result.session.id, ...result.value })
+    res.json({ ok: true, replaced: result.value.replaced })
   })
 
   // ── Instructor: advance or reset the podium reveal ──────────────────────────
   // Body: { action: 'next' | 'reset' }. Sequence lives in shared/podium.ts.
   app.post('/api/commissioned-ideas/:sessionId/podium-step', async (req, res) => {
-    const session = await loadInstructorSession(req, res)
-    if (!session) return
-    if (session.data.phase !== 'results') {
-      res.status(409).json({ error: 'The podium is only available in Results' })
-      return
-    }
+    const result = await mutateSession(req, res, (session) => {
+      requireInstructor(req, session)
+      if (session.data.phase !== 'results') refuse(409, 'The podium is only available in Results')
+      const body = ensurePlainObject(req.body)
+      if (body.action !== 'next' && body.action !== 'reset') refuse(400, "action must be 'next' or 'reset'")
 
-    const body = ensurePlainObject(req.body)
-    if (body.action !== 'next' && body.action !== 'reset') {
-      res.status(400).json({ error: "action must be 'next' or 'reset'" })
-      return
-    }
-
-    const from = session.data.podiumRevealStep
-    if (body.action === 'reset') {
-      session.data.podiumRevealStep = 'hidden'
-      session.data.podiumRevealKey = null
-    } else {
-      const ranking = computeTeamScores(session.data.teams, session.data.ballots)
-      const next = nextPodiumStep(from, podiumPlaceCount(ranking))
-      if (!next) {
-        res.status(409).json({ error: 'The podium is already fully revealed' })
-        return
+      const from = session.data.podiumRevealStep
+      if (body.action === 'reset') {
+        session.data.podiumRevealStep = 'hidden'
+        session.data.podiumRevealKey = null
+      } else {
+        const ranking = computeTeamScores(session.data.teams, session.data.ballots)
+        const next = nextPodiumStep(from, podiumPlaceCount(ranking)) ?? refuse(409, 'The podium is already fully revealed')
+        session.data.podiumRevealStep = next
+        // The reveal is pinned to this podium; see reconcilePodiumReveal.
+        if (from === 'hidden') session.data.podiumRevealKey = podiumRevealKey(ranking)
       }
-      session.data.podiumRevealStep = next
-      // The reveal is pinned to this podium; see reconcilePodiumReveal.
-      if (from === 'hidden') session.data.podiumRevealKey = podiumRevealKey(ranking)
-    }
+      return { from, to: session.data.podiumRevealStep }
+    })
+    if (!result) return
 
-    await persistSession(sessions, session.id, session)
-    broadcastToAll(ws, session.id, 'commissioned-ideas:podium-step', session.data)
-    console.info('[commissioned-ideas] Podium step', { sessionId: session.id, from, to: session.data.podiumRevealStep })
-    res.json({ ok: true, step: session.data.podiumRevealStep })
+    broadcastToAll(ws, result.session.id, 'commissioned-ideas:podium-step', result.session.data)
+    console.info('[commissioned-ideas] Podium step', { sessionId: result.session.id, ...result.value })
+    res.json({ ok: true, step: result.session.data.podiumRevealStep })
   })
 
   // ── Instructor: change phase ────────────────────────────────────────────────
   // Body: { phase }. Allowed transitions live in shared/presentation.ts.
   app.post('/api/commissioned-ideas/:sessionId/phase', async (req, res) => {
-    const session = await loadInstructorSession(req, res)
-    if (!session) return
+    const result = await mutateSession(req, res, (session) => {
+      requireInstructor(req, session)
+      const body = ensurePlainObject(req.body)
+      const to = normalizePhaseValue(body.phase) ?? refuse(400, 'phase must be registration, presentation, voting, or results')
 
-    const body = ensurePlainObject(req.body)
-    const to = normalizePhaseValue(body.phase)
-    if (!to) { res.status(400).json({ error: 'phase must be registration, presentation, voting, or results' }); return }
+      const from = session.data.phase
+      const check = checkPhaseTransition(from, to, {
+        teamCount: Object.keys(session.data.teams).length,
+        ballotCount: Object.keys(session.data.ballots).length,
+      })
+      if (!check.ok) {
+        refuse(409, check.reason, {
+          message: '[commissioned-ideas] Phase transition refused',
+          fields: { sessionId: session.id, from, to, reason: check.reason },
+        })
+      }
 
-    const from = session.data.phase
-    const check = checkPhaseTransition(from, to, {
-      teamCount: Object.keys(session.data.teams).length,
-      ballotCount: Object.keys(session.data.ballots).length,
+      session.data.phase = to
+      session.data.podiumRevealStep = 'hidden'
+      session.data.podiumRevealKey = null
+      if (to === 'presentation') {
+        normalizePresenterOrder(session.data.teams)
+        const current = session.data.currentPresentationTeamId
+        if (current && !ownEntry(session.data.teams, current)) session.data.currentPresentationTeamId = null
+      }
+      return { from, to }
     })
-    if (!check.ok) {
-      console.warn('[commissioned-ideas] Phase transition refused', { sessionId: session.id, from, to, reason: check.reason })
-      res.status(409).json({ error: check.reason })
-      return
-    }
+    if (!result) return
 
-    session.data.phase = to
-    session.data.podiumRevealStep = 'hidden'
-    session.data.podiumRevealKey = null
-    if (to === 'presentation') {
-      normalizePresenterOrder(session.data.teams)
-      const current = session.data.currentPresentationTeamId
-      if (current && !ownEntry(session.data.teams, current)) session.data.currentPresentationTeamId = null
-    }
-
-    await persistSession(sessions, session.id, session)
-    broadcastToAll(ws, session.id, 'commissioned-ideas:phase-changed', session.data)
-    console.info('[commissioned-ideas] Phase changed', { sessionId: session.id, from, to })
-    res.json({ ok: true, phase: to })
+    broadcastToAll(ws, result.session.id, 'commissioned-ideas:phase-changed', result.session.data)
+    console.info('[commissioned-ideas] Phase changed', { sessionId: result.session.id, ...result.value })
+    res.json({ ok: true, phase: result.value.to })
   })
-
-  function requirePresentationPhase(session: CommissionedIdeasSession, res: JsonResponse): boolean {
-    if (session.data.phase !== 'presentation') {
-      res.status(409).json({ error: 'Only available during presentations' })
-      return false
-    }
-    return true
-  }
 
   /** Spotlights a team and records it as presented in the current round (once per round). */
   function spotlightTeam(data: CommissionedIdeasSessionData, teamId: string | null): void {
@@ -1565,106 +1493,106 @@ export default function setupCommissionedIdeasRoutes(
   // ── Instructor: set presentation order ──────────────────────────────────────
   // Body: { teamIds: string[] } — the full permutation of current team ids.
   app.post('/api/commissioned-ideas/:sessionId/presentation-order', async (req, res) => {
-    const session = await loadInstructorSession(req, res)
-    if (!session) return
-    if (session.data.phase !== 'registration' && session.data.phase !== 'presentation') {
-      res.status(409).json({ error: 'Presentation order is locked after presentations end' })
-      return
-    }
-
-    const body = ensurePlainObject(req.body)
-    if (!isTeamPermutation(body.teamIds, session.data.teams)) {
-      res.status(400).json({ error: 'teamIds must list every current team exactly once' })
-      return
-    }
-    body.teamIds.forEach((teamId, index) => {
-      session.data.teams[teamId]!.presenterOrder = index
+    const result = await mutateSession(req, res, (session) => {
+      requireInstructor(req, session)
+      if (session.data.phase !== 'registration' && session.data.phase !== 'presentation') {
+        refuse(409, 'Presentation order is locked after presentations end')
+      }
+      const body = ensurePlainObject(req.body)
+      const teamIds = body.teamIds
+      if (!isTeamPermutation(teamIds, session.data.teams)) refuse(400, 'teamIds must list every current team exactly once')
+      teamIds.forEach((teamId, index) => {
+        session.data.teams[teamId]!.presenterOrder = index
+      })
     })
+    if (!result) return
 
-    await saveAndBroadcast(session)
-    console.info('[commissioned-ideas] Presentation order updated', { sessionId: session.id })
+    broadcastRegistrationUpdate(ws, result.session.id, result.session.data)
+    console.info('[commissioned-ideas] Presentation order updated', { sessionId: result.session.id })
     res.json({ ok: true })
   })
 
   // ── Instructor: spotlight a team (or clear with teamId: null) ───────────────
   app.post('/api/commissioned-ideas/:sessionId/presentation-active', async (req, res) => {
-    const session = await loadInstructorSession(req, res)
-    if (!session) return
-    if (!requirePresentationPhase(session, res)) return
+    const result = await mutateSession(req, res, (session) => {
+      requireInstructor(req, session)
+      requirePresentationPhase(session)
+      const body = ensurePlainObject(req.body)
+      if (!('teamId' in body)) refuse(400, 'teamId is required (string or null)')
+      const teamId = typeof body.teamId === 'string' ? body.teamId : null
+      if (body.teamId !== null && teamId === null) refuse(400, 'teamId must be a string or null')
+      if (teamId && !ownEntry(session.data.teams, teamId)) refuse(404, 'Team not found')
+      spotlightTeam(session.data, teamId)
+      return { teamId, round: session.data.presentationRound }
+    })
+    if (!result) return
 
-    const body = ensurePlainObject(req.body)
-    if (!('teamId' in body)) { res.status(400).json({ error: 'teamId is required (string or null)' }); return }
-    const teamId = typeof body.teamId === 'string' ? body.teamId : null
-    if (body.teamId !== null && teamId === null) { res.status(400).json({ error: 'teamId must be a string or null' }); return }
-    if (teamId && !ownEntry(session.data.teams, teamId)) { res.status(404).json({ error: 'Team not found' }); return }
-
-    spotlightTeam(session.data, teamId)
-
-    await saveAndBroadcast(session)
-    console.info('[commissioned-ideas] Presenting team set', { sessionId: session.id, teamId, round: session.data.presentationRound })
+    broadcastRegistrationUpdate(ws, result.session.id, result.session.data)
+    console.info('[commissioned-ideas] Presenting team set', { sessionId: result.session.id, ...result.value })
     res.json({ ok: true })
   })
 
   // ── Instructor: spotlight a random team that has not presented this round ───
   app.post('/api/commissioned-ideas/:sessionId/presentation-randomize', async (req, res) => {
-    const session = await loadInstructorSession(req, res)
-    if (!session) return
-    if (!requirePresentationPhase(session, res)) return
+    const result = await mutateSession(req, res, (session) => {
+      requireInstructor(req, session)
+      requirePresentationPhase(session)
+      const eligible = unpresentedTeamIds(session.data.teams, session.data.presentationHistory, session.data.presentationRound)
+      if (eligible.length === 0) refuse(409, 'Every team has presented this round')
+      const teamId = eligible[randomInt(0, eligible.length)]!
+      spotlightTeam(session.data, teamId)
+      return { teamId, round: session.data.presentationRound }
+    })
+    if (!result) return
 
-    const eligible = unpresentedTeamIds(session.data.teams, session.data.presentationHistory, session.data.presentationRound)
-    if (eligible.length === 0) {
-      res.status(409).json({ error: 'Every team has presented this round' })
-      return
-    }
-    const teamId = eligible[randomInt(0, eligible.length)]!
-    spotlightTeam(session.data, teamId)
-
-    await saveAndBroadcast(session)
-    console.info('[commissioned-ideas] Random presenting team', { sessionId: session.id, teamId, round: session.data.presentationRound })
-    res.json({ ok: true, teamId })
+    broadcastRegistrationUpdate(ws, result.session.id, result.session.data)
+    console.info('[commissioned-ideas] Random presenting team', { sessionId: result.session.id, ...result.value })
+    res.json({ ok: true, teamId: result.value.teamId })
   })
 
   // ── Instructor: next round or reset the current round ───────────────────────
   // Body: { action: 'next' | 'reset' }
   app.post('/api/commissioned-ideas/:sessionId/presentation-round', async (req, res) => {
-    const session = await loadInstructorSession(req, res)
-    if (!session) return
-    if (!requirePresentationPhase(session, res)) return
+    const result = await mutateSession(req, res, (session) => {
+      requireInstructor(req, session)
+      requirePresentationPhase(session)
+      const body = ensurePlainObject(req.body)
+      const action = body.action
+      if (action !== 'next' && action !== 'reset') refuse(400, "action must be 'next' or 'reset'")
 
-    const body = ensurePlainObject(req.body)
-    const action = body.action
-    if (action !== 'next' && action !== 'reset') {
-      res.status(400).json({ error: "action must be 'next' or 'reset'" })
-      return
-    }
+      const round = session.data.presentationRound
+      if (action === 'next') {
+        session.data.presentationRound = round + 1
+      } else {
+        session.data.presentationHistory = session.data.presentationHistory.filter((entry) => entry.round !== round)
+      }
+      session.data.currentPresentationTeamId = null
+      return { action, round: session.data.presentationRound }
+    })
+    if (!result) return
 
-    const round = session.data.presentationRound
-    if (action === 'next') {
-      session.data.presentationRound = round + 1
-    } else {
-      session.data.presentationHistory = session.data.presentationHistory.filter((entry) => entry.round !== round)
-    }
-    session.data.currentPresentationTeamId = null
-
-    await saveAndBroadcast(session)
-    console.info('[commissioned-ideas] Presentation round updated', { sessionId: session.id, action, round: session.data.presentationRound })
-    res.json({ ok: true, round: session.data.presentationRound })
+    broadcastRegistrationUpdate(ws, result.session.id, result.session.data)
+    console.info('[commissioned-ideas] Presentation round updated', { sessionId: result.session.id, ...result.value })
+    res.json({ ok: true, round: result.value.round })
   })
 
   // ── WebSocket ───────────────────────────────────────────────────────────────
 
   /** Re-derives one participant's `connected` flag from live sockets; persists and broadcasts on change. */
   async function syncParticipantPresence(sessionId: string, participantId: string): Promise<void> {
-    const session = await getSession(sessions, sessionId)
-    if (!session) return
-    const participant = ownEntry(session.data.participantRoster, participantId)
-    if (!participant) return
-    const live = hasLiveParticipantSocket(ws, sessionId, participantId)
-    if (participant.connected === live) return
-    participant.connected = live
-    participant.lastSeen = Date.now()
-    await persistSession(sessions, sessionId, session)
-    broadcastRegistrationUpdate(ws, sessionId, session.data)
+    // Cheap read first: most closes (another tab still open) change nothing.
+    const current = await getSession(sessions, sessionId)
+    const known = current ? ownEntry(current.data.participantRoster, participantId) : undefined
+    if (!known || known.connected === hasLiveParticipantSocket(ws, sessionId, participantId)) return
+
+    const committed = await atomicUpdate(sessions, sessionId, (session) => {
+      const participant = ownEntry(session.data.participantRoster, participantId)
+      if (!participant) return
+      // Derived at commit time, so a retry sees the sockets as they are now.
+      participant.connected = hasLiveParticipantSocket(ws, sessionId, participantId)
+      participant.lastSeen = Date.now()
+    })
+    if (committed) broadcastRegistrationUpdate(ws, sessionId, committed.data)
   }
 
   function sendWsError(socket: CommissionedIdeasSocket, error: string, code?: string): void {
@@ -1706,11 +1634,15 @@ export default function setupCommissionedIdeasRoutes(
       socket.participantId = participant.id
       socket.studentAuth = 'authenticated'
       bound = true
-      participant.connected = true
-      participant.lastSeen = Date.now()
-      await persistSession(sessions, sessionId, session)
+      const committed = await atomicUpdate(sessions, sessionId, (draft) => {
+        const entry = ownEntry(draft.data.participantRoster, participant.id)
+        if (!entry) return
+        entry.connected = true
+        entry.lastSeen = Date.now()
+      })
+      if (!committed) throw new Error('Session disappeared during participant auth')
       // The broadcast includes this socket's personalized snapshot.
-      broadcastRegistrationUpdate(ws, sessionId, session.data)
+      broadcastRegistrationUpdate(ws, sessionId, committed.data)
       // Closed during the write: our `connected = true` may have landed after the
       // close handler's update, so derive presence once more.
       if (socket.readyState !== WS_OPEN) await syncParticipantPresence(sessionId, participant.id)

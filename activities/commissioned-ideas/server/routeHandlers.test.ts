@@ -68,17 +68,41 @@ function createMockWs(): WsRouter {
   }
 }
 
+/**
+ * In-memory store with the production `updateAtomic` contract: the mutation runs on a
+ * clone and commits only if the stored revision is unchanged, otherwise it re-reads and
+ * retries. `beforeCommit` lets a test inject a conflicting write between read and commit.
+ */
 function createMockSessions(initial: Record<string, SessionRecord> = {}) {
   const store: Record<string, SessionRecord> = { ...initial }
+  const hooks: { beforeCommit: ((id: string) => void) | null; setCalls: number } = { beforeCommit: null, setCalls: 0 }
 
   return {
     store,
+    hooks,
     sessions: {
       async get(id: string) {
         return store[id] ?? null
       },
       async set(id: string, session: SessionRecord) {
+        hooks.setCalls += 1
         store[id] = session
+      },
+      async updateAtomic(id: string, mutate: (session: SessionRecord) => SessionRecord) {
+        for (let attempt = 0; attempt < 12; attempt += 1) {
+          const current = store[id]
+          if (!current) return null
+          const revision = current.mutationRevision ?? 0
+          const next = mutate(structuredClone(current))
+          const hook = hooks.beforeCommit
+          hooks.beforeCommit = null
+          hook?.(id)
+          await Promise.resolve()
+          if ((store[id]?.mutationRevision ?? 0) !== revision) continue
+          store[id] = { ...next, mutationRevision: revision + 1 }
+          return store[id]
+        }
+        throw new Error('[TEST] atomic update exhausted retries')
       },
       async delete(id: string) {
         const had = id in store
@@ -1350,7 +1374,7 @@ const ROUTE = (name: string) => `/api/commissioned-ideas/:sessionId/${name}`
 
 async function setupSession() {
   const app = createMockApp()
-  const { store, sessions } = createMockSessions()
+  const { store, sessions, hooks } = createMockSessions()
   const ws = createMockWs()
   setupCommissionedIdeasRoutes(app, sessions, ws)
   const { id: sessionId, instructorPasscode } = await createSession(app)
@@ -1378,7 +1402,7 @@ async function setupSession() {
   const data = () => sessionData(store, sessionId)
   const register = (name: string) => registerParticipant(app, sessionId, name)
   const lastManagerFrame = () => managerFrames[managerFrames.length - 1]
-  return { sessionId, instructorPasscode, post, get, asInstructor, asStudent, data, register, lastManagerFrame }
+  return { sessionId, instructorPasscode, post, get, asInstructor, asStudent, data, register, lastManagerFrame, store, sessions, hooks }
 }
 
 function assertMembershipConsistent(data: CommissionedIdeasSessionData) {
@@ -2563,11 +2587,11 @@ void test('a store failure during participant auth leaves the socket retryable',
   const h = await setupWsHarness()
   const student = await h.register('Student')
   const conn = await h.connect({})
-  const realSet = h.sessions.set
-  h.sessions.set = async () => { throw new Error('[TEST] simulated store write failure') }
+  const realUpdate = h.sessions.updateAtomic
+  h.sessions.updateAtomic = async () => { throw new Error('[TEST] simulated store write failure') }
   console.log('[TEST] expecting participant auth persistence failure')
   await conn.say({ type: 'commissioned-ideas:participant-auth', participantId: student.participantId, token: student.token })
-  h.sessions.set = realSet
+  h.sessions.updateAtomic = realUpdate
 
   assert.equal(conn.socket.participantId, null, 'binding is not committed')
   assert.equal((conn.socket as { studentAuth?: string }).studentAuth, 'pending')
@@ -2583,3 +2607,81 @@ void test('a store failure during participant auth leaves the socket retryable',
 function sessionDataFromHarness(h: Awaited<ReturnType<typeof setupWsHarness>>): CommissionedIdeasSessionData {
   return sessionData(h.store, h.sessionId)
 }
+
+// ── Atomic-write contract ────────────────────────────────────────────────────
+
+void test('routes never write with a plain set after create', async () => {
+  const s = await setupPresentationSession()
+  const setsAfterCreate = s.hooks.setCalls
+  const late = await s.register('Late')
+  await s.asInstructor('settings', { maxTeamSize: 5 })
+  await s.asInstructor('assign-participant', { participantId: late.participantId, teamId: s.teamIds[0] })
+  await s.asInstructor('phase', { phase: 'presentation' })
+  await s.asInstructor('presentation-randomize', {})
+  assert.equal(s.hooks.setCalls, setsAfterCreate, 'every write goes through updateAtomic')
+})
+
+void test('a refused request writes nothing', async () => {
+  const s = await setupPresentationSession()
+  const before = s.store[s.sessionId]!.mutationRevision
+  console.log('[TEST] expecting refused requests')
+  assert.equal((await s.asInstructor('phase', { phase: 'results' })).statusCode, 409)
+  assert.equal((await s.asStudent('join-team', s.members[0]!, { teamId: 'missing' })).statusCode, 404)
+  assert.equal((await s.post('settings', createRequest({ sessionId: s.sessionId }, { maxTeamSize: 9 }))).statusCode, 403)
+  assert.equal(s.store[s.sessionId]!.mutationRevision, before, 'no revision bump for refusals')
+})
+
+void test('two concurrent joins cannot overfill a team', async () => {
+  const s = await setupSession()
+  await s.asInstructor('settings', { maxTeamSize: 2 })
+  const alice = await s.register('Alice')
+  const teamId = ((await s.asStudent('create-team', alice)).body as { teamId: string }).teamId
+  const bob = await s.register('Bob')
+  const carol = await s.register('Carol')
+
+  console.log('[TEST] expecting one concurrent join to be refused as full')
+  const [bobRes, carolRes] = await Promise.all([
+    s.asStudent('join-team', bob, { teamId }),
+    s.asStudent('join-team', carol, { teamId }),
+  ])
+  assert.deepEqual([bobRes.statusCode, carolRes.statusCode].sort(), [200, 409])
+  assert.equal(s.data().teams[teamId]?.memberIds.length, 2)
+})
+
+void test('a write from another instance between read and commit is retried, not overwritten', async () => {
+  const s = await setupSession()
+  await s.asInstructor('settings', { maxTeamSize: 2 })
+  const alice = await s.register('Alice')
+  const teamId = ((await s.asStudent('create-team', alice)).body as { teamId: string }).teamId
+  const bob = await s.register('Bob')
+  const carol = await s.register('Carol')
+
+  // Another instance places Bob, and core issues a capability, after Carol's request read the session.
+  s.hooks.beforeCommit = (id) => {
+    const record = s.store[id]!
+    const data = structuredClone(record.data) as CommissionedIdeasSessionData & { activityCapabilities?: Record<string, unknown> }
+    data.teams[teamId]!.memberIds.push(bob.participantId)
+    data.participantRoster[bob.participantId]!.teamId = teamId
+    data.activityCapabilities = { ...(data.activityCapabilities ?? {}), other: { id: 'other', principalKind: 'manager' } }
+    s.store[id] = { ...record, data, mutationRevision: (record.mutationRevision ?? 0) + 1 }
+  }
+
+  console.log('[TEST] expecting the retried join to be refused as full')
+  const res = await s.asStudent('join-team', carol, { teamId })
+  assert.equal(res.statusCode, 409, 'the retry sees the team is now full')
+  const data = s.data() as CommissionedIdeasSessionData & { activityCapabilities?: Record<string, unknown> }
+  assert.deepEqual(data.teams[teamId]?.memberIds, [alice.participantId, bob.participantId], 'the other write survives')
+  assert.notEqual(data.activityCapabilities?.other, undefined, 'a concurrent core capability write is not clobbered')
+})
+
+void test('a store failure during a route write returns 500 and changes nothing', async () => {
+  const s = await setupSession()
+  const alice = await s.register('Alice')
+  const realUpdate = s.sessions.updateAtomic
+  s.sessions.updateAtomic = async () => { throw new Error('[TEST] simulated store outage') }
+  console.log('[TEST] expecting a 500 from a store failure')
+  const res = await s.asStudent('create-team', alice)
+  s.sessions.updateAtomic = realUpdate
+  assert.equal(res.statusCode, 500)
+  assert.deepEqual(s.data().teams, {})
+})
