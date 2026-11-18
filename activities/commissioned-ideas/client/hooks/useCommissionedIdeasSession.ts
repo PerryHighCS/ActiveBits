@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
 import type {
   CommissionedIdeasBallot,
@@ -22,6 +22,8 @@ export type ClientTeam = Pick<StudentSafeTeam, 'id' | 'groupName' | 'projectName
 export type ManagerTeam = CommissionedIdeasTeam
 
 export interface StudentSnapshot {
+  /** Committed session revision this snapshot reflects; orders snapshots against HTTP responses. */
+  revision: number
   /** Participant the server authenticated this socket as (from the httpOnly cookie); null if anonymous. */
   viewerParticipantId: string | null
   phase: CommissionedIdeasPhase
@@ -54,6 +56,8 @@ export interface ManagerParticipant {
 }
 
 export interface ManagerSnapshot {
+  /** Committed session revision this snapshot reflects; orders snapshots against HTTP responses. */
+  revision: number
   phase: CommissionedIdeasPhase
   presentationRound: number
   presentationHistory: PresentationHistoryEntry[]
@@ -128,24 +132,68 @@ export function isParticipantAuthRefusal(msg: { type?: unknown; code?: unknown }
   return msg.type === 'commissioned-ideas:error' && msg.code === PARTICIPANT_AUTH_REFUSED
 }
 
+/** A snapshot payload worth storing: an object with a numeric revision (malformed frames are ignored). */
+export function isSnapshotPayload(data: unknown): data is { revision: number } {
+  return data !== null && typeof data === 'object' && typeof (data as { revision?: unknown }).revision === 'number'
+}
+
+/** A student snapshot plus what it arrived under: the registration attempt and the socket connection. */
+export interface ReceivedStudentSnapshot {
+  forId: string | null
+  connection: number
+  snapshot: StudentSnapshot
+}
+
 /**
- * The snapshot to render for the current registration attempt: only one received under
- * that attempt, and only once the server has authenticated the viewer. Until then the
- * page shows "Connecting…" (an anonymous refusal snapshot is never rendered as the
- * student's own view).
+ * Keeps the newest snapshot for one attempt and connection. A snapshot from the same
+ * attempt and connection with a lower revision is older (out-of-order delivery) and is
+ * dropped; anything from a new attempt or connection replaces the previous one.
  */
-export function studentSnapshotForAttempt(
-  received: { forId: string | null; snapshot: StudentSnapshot } | null,
+export function acceptStudentSnapshot(
+  current: ReceivedStudentSnapshot | null,
+  incoming: ReceivedStudentSnapshot,
+): ReceivedStudentSnapshot {
+  if (
+    current &&
+    current.forId === incoming.forId &&
+    current.connection === incoming.connection &&
+    incoming.snapshot.revision < current.snapshot.revision
+  ) {
+    return current
+  }
+  return incoming
+}
+
+/**
+ * What the student page may render. The tab's identity is pinned to its registered
+ * participant (`participantId`), across automatic reconnects:
+ * - only a snapshot from the current attempt and the current connection counts, so a
+ *   new connection shows "Connecting…" until it delivers its own snapshot;
+ * - only an authenticated snapshot for the pinned participant is rendered;
+ * - an authenticated snapshot for someone else (the browser's cookie changed in another
+ *   tab) is hidden and reported as `identityChanged`, so the page asks for a reload
+ *   instead of acting as that student.
+ */
+export function studentView(
+  received: ReceivedStudentSnapshot | null,
   participantId: string | null,
-): StudentSnapshot | null {
-  if (!received || received.forId !== participantId) return null
-  return received.snapshot.viewerParticipantId ? received.snapshot : null
+  connection: number,
+): { snapshot: StudentSnapshot | null; identityChanged: boolean } {
+  if (!received || received.forId !== participantId || received.connection !== connection) {
+    return { snapshot: null, identityChanged: false }
+  }
+  const viewer = received.snapshot.viewerParticipantId
+  if (!viewer) return { snapshot: null, identityChanged: false }
+  if (viewer !== participantId) return { snapshot: null, identityChanged: true }
+  return { snapshot: received.snapshot, identityChanged: false }
 }
 
 interface UseStudentSessionResult {
   snapshot: StudentSnapshot | null
   /** The server refused this browser's participant cookie; the student must register again. */
   authRefused: boolean
+  /** This browser's cookie now belongs to a different student (another tab); reload needed. */
+  identityChanged: boolean
   connect: () => WebSocket | null
   disconnect: () => void
 }
@@ -155,10 +203,11 @@ export function useStudentSession({
   participantId,
   attachSessionEndedHandler,
 }: UseStudentSessionOptions): UseStudentSessionResult {
-  // Tagged with the registration attempt it arrived under, so a new registration never
-  // shows the previous participant's ballot or team.
-  const [received, setReceived] = useState<{ forId: string | null; snapshot: StudentSnapshot } | null>(null)
-  const snapshot = studentSnapshotForAttempt(received, participantId)
+  const [received, setReceived] = useState<ReceivedStudentSnapshot | null>(null)
+  // Incremented per socket open: a snapshot belongs to the connection that delivered it.
+  const [connection, setConnection] = useState(0)
+  const connectionRef = useRef(0)
+  const { snapshot, identityChanged } = studentView(received, participantId, connection)
   // Tagged with the identity that was refused, so registering again (a new participant) clears it.
   const [refusedFor, setRefusedFor] = useState<string | null>(null)
   const authRefused = participantId !== null && refusedFor === participantId
@@ -169,13 +218,19 @@ export function useStudentSession({
     [sessionId],
   )
 
+  const handleOpen = useCallback(() => {
+    connectionRef.current += 1
+    setConnection(connectionRef.current)
+  }, [])
+
   const handleMessage = useCallback((event: MessageEvent) => {
     try {
       const msg = JSON.parse(event.data as string) as WsMessage
       if (isParticipantAuthRefusal(msg)) {
         setRefusedFor(participantId)
-      } else if (isSnapshotMessage(msg.type)) {
-        setReceived({ forId: participantId, snapshot: msg.data as StudentSnapshot })
+      } else if (isSnapshotMessage(msg.type) && isSnapshotPayload(msg.data)) {
+        const incoming = { forId: participantId, connection: connectionRef.current, snapshot: msg.data as StudentSnapshot }
+        setReceived((current) => acceptStudentSnapshot(current, incoming))
       }
     } catch {
       // malformed WS frame — ignored
@@ -185,11 +240,12 @@ export function useStudentSession({
   const { connect, disconnect } = useResilientWebSocket({
     buildUrl: buildWsUrl,
     shouldReconnect: Boolean(sessionId),
+    onOpen: handleOpen,
     onMessage: handleMessage,
     attachSessionEndedHandler,
   })
 
-  return { snapshot, authRefused, connect, disconnect }
+  return { snapshot, authRefused, identityChanged, connect, disconnect }
 }
 
 // ── Manager hook ──────────────────────────────────────────────────────────────
@@ -258,8 +314,14 @@ export function useManagerSession({
   const handleMessage = useCallback((event: MessageEvent) => {
     try {
       const msg = JSON.parse(event.data as string) as WsMessage
-      if (isSnapshotMessage(msg.type)) {
-        setViewState({ identity, snapshot: msg.data as ManagerSnapshot, authError: null })
+      if (isSnapshotMessage(msg.type) && isSnapshotPayload(msg.data)) {
+        const incoming = msg.data as ManagerSnapshot
+        // Drop an older snapshot delivered out of order for the same identity.
+        setViewState((prev) => (
+          prev.identity === identity && prev.snapshot && incoming.revision < prev.snapshot.revision
+            ? prev
+            : { identity, snapshot: incoming, authError: null }
+        ))
       } else if (msg.type === 'commissioned-ideas:error') {
         const error = typeof msg.error === 'string' ? msg.error : 'Connection refused'
         setViewState((prev) => ({

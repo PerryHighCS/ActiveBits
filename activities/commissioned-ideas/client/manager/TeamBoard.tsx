@@ -21,6 +21,8 @@ interface TeamBoardProps {
   participantRoster: Record<string, ManagerParticipant>
   maxTeamSize: number
   busy: boolean
+  /** Revision of the snapshot the board is showing. */
+  snapshotRevision: number
   /** Resolves with the server's answer (committed with the confirmed team, refused, or unknown). */
   onMove: (participantId: string, destination: MoveDestination) => Promise<MoveOutcome>
   onModerateProposal: (teamId: string, kind: ProposalKind, proposalId: string, rejected: boolean) => void
@@ -33,6 +35,7 @@ export default function TeamBoard({
   participantRoster,
   maxTeamSize,
   busy,
+  snapshotRevision,
   onMove,
   onModerateProposal,
 }: TeamBoardProps) {
@@ -118,7 +121,7 @@ export default function TeamBoard({
         setDragOver(null)
       }}
       onMove={(destination) => { void moveWithKeyboard(participant, destination) }}
-      takeFocus={moveFocusReady(focusRequest, participant, busy)}
+      takeFocus={moveFocusReady(focusRequest, participant, busy, snapshotRevision)}
       onFocusTaken={() => setFocusRequest(null)}
     />
   )

@@ -40,9 +40,11 @@ export async function postAsStudent(
   path: string,
   body: Record<string, unknown> = {},
 ) {
-  // Like the app: the action names the participant this client is bound to.
+  // Like the app: the action names the participant this client is bound to. Set last, so
+  // a body field cannot change the helper's identity (a test that needs a mismatch should
+  // build that request explicitly).
   return await request.post(`/api/commissioned-ideas/${sessionId}/${path}`, {
-    data: { expectedParticipantId: who.participantId, ...body },
+    data: { ...body, expectedParticipantId: who.participantId },
     headers: { Cookie: who.cookie },
   })
 }

@@ -76,7 +76,7 @@ function StudentSessionView({ sessionId }: { sessionId: string }) {
   }, [sessionId])
 
   // ── WS connection (only after registered) ───────────────────────────────────
-  const { snapshot, authRefused, connect, disconnect } = useStudentSession({
+  const { snapshot, authRefused, identityChanged, connect, disconnect } = useStudentSession({
     sessionId: registered ? sessionId : null,
     participantId: studentId,
     attachSessionEndedHandler,
@@ -96,8 +96,9 @@ function StudentSessionView({ sessionId }: { sessionId: string }) {
     setRegistrationNotice(REFUSED_CREDENTIAL_NOTICE)
   }, [authRefused])
 
-  // Bound identity for actions: the participant this tab's socket authenticated as.
-  const ballotApi = useParticipantApi(sessionId, snapshot?.viewerParticipantId ?? null)
+  // Bound identity for actions: the participant this tab is pinned to (its snapshot is
+  // only rendered when the socket authenticated as that same participant).
+  const ballotApi = useParticipantApi(sessionId, snapshot ? studentId : null)
 
   // ── Handlers ────────────────────────────────────────────────────────────────
   const handleRegistered = (participantId: string, name: string) => {
@@ -147,8 +148,21 @@ function StudentSessionView({ sessionId }: { sessionId: string }) {
       </div>
 
       <div className="max-w-2xl mx-auto">
+        {identityChanged && (
+          <div role="alert" data-testid="ci-identity-changed" className="mx-4 mt-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 space-y-2">
+            <p>This browser is now signed in as a different student, probably from another tab. Reload this page to continue as that student.</p>
+            <button
+              type="button"
+              onClick={() => window.location.reload()}
+              className="rounded-md border border-amber-400 px-3 py-1 text-sm font-medium text-amber-900 hover:bg-amber-100"
+            >
+              Reload
+            </button>
+          </div>
+        )}
+
         {/* Team controls depend on the phase and locks; never guess them before the first snapshot. */}
-        {!snapshot && (
+        {!snapshot && !identityChanged && (
           <p role="status" className="p-6 text-gray-500">Connecting…</p>
         )}
 
@@ -160,6 +174,8 @@ function StudentSessionView({ sessionId }: { sessionId: string }) {
 
         {snapshot && phase === 'registration' && (
           <StudentRoster
+            // Request status and focus state belong to one participant.
+            key={myId ?? ''}
             participants={participants}
             teams={teams}
             myParticipantId={myId ?? ''}
@@ -191,11 +207,17 @@ function StudentSessionView({ sessionId }: { sessionId: string }) {
               </div>
             )}
             <VotingBallot
+              // A different viewer gets a fresh draft; snapshots for the same viewer keep edits.
+              key={myId ?? ''}
               teams={teams}
               myTeamId={myTeamId}
               myBallot={snapshot.myBallot ?? null}
+              snapshotRevision={snapshot.revision}
               busy={ballotApi.busy}
-              onSubmit={(allocations) => ballotApi.post('ballot', { allocations })}
+              onSubmit={async (allocations) => {
+                const data = await ballotApi.postForResult('ballot', { allocations })
+                return data ? { replaced: data.replaced === true, revision: typeof data.revision === 'number' ? data.revision : 0 } : null
+              }}
             />
           </>
         )}

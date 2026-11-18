@@ -125,14 +125,16 @@ export interface PodiumRevealState {
  * was revealed for. If moderation changes the podium mid-reveal, the reveal returns to
  * `hidden` so a place never silently changes on screen. Changes that leave the podium
  * as it was (for example late placement of a student who has not voted) keep the reveal.
+ * `ranking` is a callback so scores are computed only when a reveal is active.
  * Mutates `state`; returns true when it reset the reveal.
  */
-export function reconcilePodiumReveal(state: PodiumRevealState, ranking: TeamScore[]): boolean {
+export function reconcilePodiumReveal(state: PodiumRevealState, ranking: () => TeamScore[]): boolean {
   if (state.podiumRevealStep === 'hidden') {
     state.podiumRevealKey = null
     return false
   }
-  if (state.podiumRevealKey === podiumRevealKey(ranking)) return false
+  // Scored only during an active reveal; hidden-state writes skip the scoring pass.
+  if (state.podiumRevealKey === podiumRevealKey(ranking())) return false
   state.podiumRevealStep = 'hidden'
   state.podiumRevealKey = null
   return true

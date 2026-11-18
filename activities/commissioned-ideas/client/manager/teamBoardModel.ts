@@ -82,8 +82,8 @@ export function buildAssignBody(participantId: string, destination: MoveDestinat
 /** The server's answer to a move, as far as the client knows it. */
 export type MoveOutcome =
   | { kind: 'pending' }
-  /** Committed; `teamId` is the confirmed destination (null = ungrouped; new teams use the returned id). */
-  | { kind: 'committed'; teamId: string | null }
+  /** Committed at session `revision` (from the response). */
+  | { kind: 'committed'; revision: number }
   | { kind: 'refused' }
   /** No readable answer: the move may or may not have happened. */
   | { kind: 'unknown' }
@@ -100,26 +100,27 @@ export interface MoveFocusRequest {
 }
 
 /**
- * True when the chip for `participant` should take focus for `request` now. Focus is
- * tied to the server's answer, never to "the roster changed", so a concurrent move by
- * someone else cannot consume it on a chip that is about to unmount:
- * - committed: once the snapshot shows the participant at the confirmed destination;
- * - refused: in place, once controls are enabled again;
- * - unknown: once the snapshot shows the participant moved (otherwise it stays pending
- *   until the instructor focuses something else, which cancels it);
+ * True when the participant's current "Move to" select should take focus for `request`
+ * now. Focus goes to wherever the student is, once the board is known to reflect the
+ * answer — never because the roster merely changed:
+ * - committed: once the board shows a snapshot at or after the move's revision (if a
+ *   later move took the student elsewhere, focus follows them there);
+ * - refused or unknown: in place, as soon as controls re-enable (no roster change needed);
  * - pending: not yet.
+ * Focusing any other control cancels the request (`focusCancelsMoveRequest`).
  */
 export function moveFocusReady(
   request: MoveFocusRequest | null,
-  participant: Pick<ManagerParticipant, 'id' | 'teamId'>,
+  participant: Pick<ManagerParticipant, 'id'>,
   busy: boolean,
+  snapshotRevision: number,
 ): boolean {
   if (!request || request.participantId !== participant.id || busy) return false
   switch (request.outcome.kind) {
     case 'pending': return false
-    case 'committed': return participant.teamId === request.outcome.teamId
-    case 'refused': return true
-    case 'unknown': return currentDestination(participant) !== request.from
+    case 'committed': return snapshotRevision >= request.outcome.revision
+    case 'refused':
+    case 'unknown': return true
   }
 }
 

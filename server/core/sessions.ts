@@ -107,7 +107,10 @@ export interface SessionStore extends SharedSessionStore<Record<string, unknown>
   getAllIds(): Promise<string[]>
   cleanup(): void
   close(): Promise<void>
-  subscribeToBroadcast?(channel: string, handler: (message: unknown) => void): void
+  /** Resolves (when the store supports it) once the subscription is active; see ValkeySessionStore. */
+  subscribeToBroadcast?(channel: string, handler: (message: unknown) => void): void | Promise<void>
+  /** Removes a handler added with `subscribeToBroadcast` (same function reference). */
+  unsubscribeFromBroadcast?(channel: string, handler: (message: unknown) => void): void
   initializePubSub?(): void
   publishBroadcast?(channel: string, message: Record<string, unknown>): Promise<void>
   valkeyStore?: ValkeySessionStore
@@ -286,6 +289,7 @@ class InMemorySessionStore implements SessionStore {
   }
 
   subscribeToBroadcast(): void {}
+  unsubscribeFromBroadcast(): void {}
   initializePubSub(): void {}
   async publishBroadcast(): Promise<void> {}
 }
@@ -590,10 +594,12 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
     linkedSessionRevalidatedAt.clear()
   }
 
-  const subscribeToBroadcast = (channel: string, handler: (message: unknown) => void): void => {
-    valkeyStore.subscribeToBroadcast(channel, (message) => {
-      handler(message)
-    })
+  // Handlers are passed through unchanged so `unsubscribeFromBroadcast` can match them.
+  const subscribeToBroadcast = (channel: string, handler: (message: unknown) => void): Promise<void> =>
+    valkeyStore.subscribeToBroadcast(channel, handler)
+
+  const unsubscribeFromBroadcast = (channel: string, handler: (message: unknown) => void): void => {
+    valkeyStore.unsubscribeFromBroadcast(channel, handler)
   }
 
   const initializePubSub = (): void => {
@@ -623,6 +629,7 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
     flushCache,
     close,
     subscribeToBroadcast,
+    unsubscribeFromBroadcast,
     initializePubSub,
     publishBroadcast,
   }

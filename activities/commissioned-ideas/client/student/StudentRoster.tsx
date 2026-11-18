@@ -3,6 +3,7 @@ import type { ProposalKind } from '../../shared/naming.js'
 import type { GroupingMode, StudentSafeParticipant, StudentSafeTeam } from '../../shared/types.js'
 import { sortTeams, teamLabel } from '../teamLabels.js'
 import TeamNamingPanel from './TeamNamingPanel.js'
+import { useRestoreFocusAfterRemoval } from '../useRestoreFocusAfterRemoval.js'
 import { useParticipantApi } from './useParticipantApi.js'
 
 interface StudentRosterProps {
@@ -37,17 +38,22 @@ export default function StudentRoster({
     .filter((p) => p.teamId === null)
     .sort((a, b) => a.name.localeCompare(b.name))
 
-  // Join, Switch, Leave, and Create unmount the button that was pressed. Move focus to the
-  // team status strip, which stays mounted in every state, so keyboard users keep their place.
+  // Join, Switch, Leave, and Create remove the button that was pressed once the change
+  // lands. Focus then moves to the team status strip, which stays mounted in every state,
+  // unless the student has already moved focus elsewhere.
   const statusRef = useRef<HTMLDivElement>(null)
-  const postAndRefocus = async (path: string, body: Record<string, unknown>) => {
-    if (await post(path, body)) statusRef.current?.focus()
+  const focusRestore = useRestoreFocusAfterRemoval(statusRef)
+  const postAndRefocus = async (control: HTMLElement, path: string, body: Record<string, unknown>) => {
+    focusRestore.begin(control)
+    focusRestore.settle(await post(path, body))
   }
-  const handleCreateTeam = () => { void postAndRefocus('create-team', {}) }
-  const handleJoinTeam = (teamId: string) => { void postAndRefocus('join-team', { teamId }) }
-  const handleLeaveTeam = () => { void postAndRefocus('leave-team', {}) }
-  const handlePropose = (kind: ProposalKind, value: string) => post('team/proposal', { kind, value })
-  const handleVote = (kind: ProposalKind, proposalId: string) => post('team/proposal-vote', { kind, proposalId })
+  const handleCreateTeam = (control: HTMLElement) => { void postAndRefocus(control, 'create-team', {}) }
+  const handleJoinTeam = (control: HTMLElement, teamId: string) => { void postAndRefocus(control, 'join-team', { teamId }) }
+  const handleLeaveTeam = (control: HTMLElement) => { void postAndRefocus(control, 'leave-team', {}) }
+  // Proposals and votes name the team the form was shown for; the server refuses them if
+  // the student was moved meanwhile, instead of recording them on the new team.
+  const handlePropose = (kind: ProposalKind, value: string) => post('team/proposal', { kind, value, expectedTeamId: myTeamId })
+  const handleVote = (kind: ProposalKind, proposalId: string) => post('team/proposal-vote', { kind, proposalId, expectedTeamId: myTeamId })
 
   const isManual = groupingMode === 'manual'
 
@@ -124,7 +130,7 @@ export default function StudentRoster({
                       <button
                         type="button"
                         disabled={busy}
-                        onClick={() => handleJoinTeam(team.id)}
+                        onClick={(event) => handleJoinTeam(event.currentTarget, team.id)}
                         aria-label={`${myTeamId ? 'Switch to' : 'Join'} ${label}`}
                         className="rounded-full border border-amber-400 bg-amber-50 px-2.5 py-0.5 text-xs font-medium text-amber-700 hover:bg-amber-100 disabled:opacity-50"
                       >
@@ -194,7 +200,7 @@ export default function StudentRoster({
         <button
           type="button"
           disabled={busy}
-          onClick={handleCreateTeam}
+          onClick={(event) => handleCreateTeam(event.currentTarget)}
           className="w-full rounded-lg border-2 border-dashed border-amber-300 py-3 text-sm font-medium text-amber-600 hover:bg-amber-50 disabled:opacity-50"
         >
           + Create a new team
@@ -217,7 +223,7 @@ interface MyTeamStatusProps {
   participants: Record<string, StudentSafeParticipant>
   canLeave: boolean
   busy: boolean
-  onLeave: () => void
+  onLeave: (control: HTMLElement) => void
 }
 
 function MyTeamStatus({ ref, myTeam, label, participants, canLeave, busy, onLeave }: MyTeamStatusProps) {
@@ -256,7 +262,7 @@ function MyTeamStatus({ ref, myTeam, label, participants, canLeave, busy, onLeav
         <button
           type="button"
           disabled={busy}
-          onClick={onLeave}
+          onClick={(event) => onLeave(event.currentTarget)}
           className="rounded-md border border-amber-400 px-2.5 py-1 text-xs font-medium text-amber-700 hover:bg-amber-100 disabled:opacity-50"
         >
           Leave team

@@ -130,6 +130,20 @@ playback state. Clients order state frames by that revision before considering
 wall-clock timestamps, so server clock skew and reordered pub/sub delivery cannot
 restore an older instructor command.
 
+Commissioned Ideas uses the same idea for a different problem. Every snapshot and
+every mutation response carries `revision` (the committed `mutationRevision`).
+Client pending state from a write, such as keyboard focus after a move, the podium
+reveal button, or a just-submitted ballot, is released only by a snapshot at or
+after that write's revision. Clients drop older snapshots. Across instances, a
+writer publishes a data-free invalidation after commit, and each instance re-reads
+committed state with `getStrict` before delivering to its own sockets.
+
+Pub/sub subscriptions are not replayed: Valkey drops messages published before a
+SUBSCRIBE is confirmed. `subscribeToBroadcast` returns a promise that settles once
+the subscription is active (a no-op store settles immediately). A caller that must
+not miss an update re-reads state after it settles. `unsubscribeFromBroadcast`
+removes one handler (by reference) and unsubscribes the channel when none remain.
+
 ## Activity Registration System
 
 ### Activity Containment Boundary

@@ -117,14 +117,24 @@ test('instructor drags students between teams, to a new team, and back to ungrou
   const copyLink = page.getByRole('button', { name: 'Copy link' })
   await copyLink.focus()
   releaseMove()
-  await assigned
-  await expect(teamCard(page, 'Bob').locator('[data-participant-name="Bob"]')).toBeVisible()
+  // The move really committed: check the answer, not just that a response arrived.
+  const moveResponse = await assigned
+  expect(moveResponse.ok()).toBe(true)
+  const moved = await moveResponse.json() as { teamId?: unknown; revision?: unknown }
+  expect(typeof moved.teamId).toBe('string')
+  expect(typeof moved.revision).toBe('number')
+  // Wait for the move to settle completely: Bob's relocated select is enabled again
+  // (controls are no longer busy), and two animation frames let any restoration run.
+  const bobsSelect = teamCard(page, 'Bob').getByRole('combobox', { name: 'Move Bob to' })
+  await expect(bobsSelect).toBeEnabled()
+  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
   await expect(copyLink).toBeFocused()
+  await expect(bobsSelect).not.toBeFocused()
   await page.unroute('**/assign-participant')
 
-  // Survives reload (state is server-side, not optimistic)
+  // Survives reload (state is server-side, not optimistic): Bob is alone on that new team.
   await page.reload()
-  await expect(teamCard(page, 'Bob').locator('[data-participant-name="Bob"]')).toBeVisible()
+  await expect(teamCard(page, 'Bob').getByTestId('ci-member-chip')).toHaveCount(1)
   await expect(teamCard(page, 'Alice').getByTestId('ci-member-chip')).toHaveCount(1)
 })
 

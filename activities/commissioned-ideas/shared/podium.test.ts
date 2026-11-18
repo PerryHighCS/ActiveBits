@@ -203,7 +203,7 @@ function revealScore(teamId: string, totalDollars: number, groupName: string | n
 
 const revealBaseRanking = [revealScore('A', 900), revealScore('B', 600), revealScore('C', 300)]
 const podiumRevealCases: { name: string; step: PodiumRevealStep; keyFrom: TeamScore[] | null; now: TeamScore[]; reset: boolean }[] = [
-  { name: 'hidden stays hidden', step: 'hidden', keyFrom: null, now: revealBaseRanking, reset: false },
+  { name: 'hidden stays hidden and clears a stale key', step: 'hidden', keyFrom: revealBaseRanking, now: revealBaseRanking, reset: false },
   { name: 'unchanged podium keeps the reveal', step: 'second', keyFrom: revealBaseRanking, now: revealBaseRanking, reset: false },
   { name: 'renamed team keeps the reveal', step: 'third', keyFrom: revealBaseRanking, now: [revealScore('A', 900), revealScore('B', 600), revealScore('C', 300, 'Owls')], reset: false },
   { name: 'unfunded team added below the podium keeps the reveal', step: 'third', keyFrom: revealBaseRanking, now: [...revealBaseRanking, revealScore('D', 0)], reset: false },
@@ -216,7 +216,9 @@ const podiumRevealCases: { name: string; step: PodiumRevealStep; keyFrom: TeamSc
 for (const row of podiumRevealCases) {
   void test(`reconcilePodiumReveal: ${row.name}`, () => {
     const state = { podiumRevealStep: row.step, podiumRevealKey: row.keyFrom ? podiumRevealKey(row.keyFrom) : null }
-    assert.equal(reconcilePodiumReveal(state, row.now), row.reset)
+    let scored = 0
+    assert.equal(reconcilePodiumReveal(state, () => { scored += 1; return row.now }), row.reset)
+    if (row.step === 'hidden') assert.equal(scored, 0, 'no scoring while hidden')
     assert.equal(state.podiumRevealStep, row.reset ? 'hidden' : row.step)
     if (state.podiumRevealStep === 'hidden') assert.equal(state.podiumRevealKey, null)
   })

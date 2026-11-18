@@ -24,6 +24,7 @@ interface RedisClient {
   on(event: 'message', handler: (channel: string, message: string) => void): void
   on(event: string, handler: (...args: unknown[]) => void): void
   subscribe(channel: string, callback?: (err: Error | null) => void): Promise<unknown>
+  unsubscribe(channel: string): Promise<unknown>
   publish(channel: string, message: string): Promise<number>
   get(key: string): Promise<string | null>
   set(key: string, value: string, mode?: string, ttl?: number): Promise<unknown>
@@ -48,6 +49,8 @@ export class ValkeySessionStore {
   public readonly client: RedisClient
   private readonly subscriber: RedisClient
   private readonly broadcastHandlers: Map<string, BroadcastHandler[]>
+  /** Per channel: settles once the server has confirmed the SUBSCRIBE. */
+  private readonly subscriptionsReady: Map<string, Promise<void>>
 
   constructor(valkeyUrl: string, options: { ttlMs?: number } = {}) {
     const RedisCtor = Redis as unknown as RedisConstructor
@@ -69,22 +72,53 @@ export class ValkeySessionStore {
     })
 
     this.broadcastHandlers = new Map()
+    this.subscriptionsReady = new Map()
   }
 
-  subscribeToBroadcast(channel: string, handler: BroadcastHandler): void {
+  /**
+   * Adds `handler` for `channel`. The returned promise settles once the subscription is
+   * active on the server (immediately if it already is). Messages published before that
+   * are not delivered and Valkey does not replay them, so a caller that must not miss
+   * an update should re-read state after it settles. A failed SUBSCRIBE is logged and
+   * still settles the promise.
+   */
+  subscribeToBroadcast(channel: string, handler: BroadcastHandler): Promise<void> {
     if (!this.broadcastHandlers.has(channel)) {
       this.broadcastHandlers.set(channel, [])
-      void this.subscriber.subscribe(channel, (err: Error | null) => {
-        if (err != null) {
-          console.error(`Failed to subscribe to ${channel}:`, err)
-        }
-      })
+      this.subscriptionsReady.set(channel, new Promise<void>((resolve) => {
+        void this.subscriber.subscribe(channel, (err: Error | null) => {
+          if (err != null) {
+            console.error(`Failed to subscribe to ${channel}:`, err)
+          }
+          resolve()
+        })
+      }))
     }
 
     const handlers = this.broadcastHandlers.get(channel)
     if (handlers != null) {
       handlers.push(handler)
     }
+    return this.subscriptionsReady.get(channel) ?? Promise.resolve()
+  }
+
+  /**
+   * Removes `handler` from `channel`. When no handler remains, the channel is
+   * unsubscribed on the server; a later `subscribeToBroadcast` subscribes again.
+   */
+  unsubscribeFromBroadcast(channel: string, handler: BroadcastHandler): void {
+    const handlers = this.broadcastHandlers.get(channel)
+    if (handlers == null) return
+    const remaining = handlers.filter((existing) => existing !== handler)
+    if (remaining.length > 0) {
+      this.broadcastHandlers.set(channel, remaining)
+      return
+    }
+    this.broadcastHandlers.delete(channel)
+    this.subscriptionsReady.delete(channel)
+    this.subscriber.unsubscribe(channel).catch((err: unknown) => {
+      console.error(`Failed to unsubscribe from ${channel}:`, err)
+    })
   }
 
   initializePubSub(): void {

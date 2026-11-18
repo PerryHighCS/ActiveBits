@@ -10,6 +10,8 @@ export type InstructorPasscodeState =
   | { status: 'loading'; passcode: null }
   | { status: 'ready'; passcode: string }
   | { status: 'missing'; passcode: null }
+  /** Recovery timed out; the manager cookie may already be valid, so a retry can work. */
+  | { status: 'retryable'; passcode: null }
 
 /**
  * Resolves the manager's instructor passcode without browser storage:
@@ -17,13 +19,17 @@ export type InstructorPasscodeState =
  *    state so the passcode does not linger in `window.history.state`;
  * 2. otherwise (a reload), the httpOnly capability-cookie exchange.
  */
-export function useCommissionedIdeasInstructorPasscode(sessionId: string | undefined): InstructorPasscodeState {
+export function useCommissionedIdeasInstructorPasscode(
+  sessionId: string | undefined,
+): InstructorPasscodeState & { retry: () => void } {
   const location = useLocation()
   const navigate = useNavigate()
   const [state, setState] = useState<{ sessionId: string | undefined; value: InstructorPasscodeState }>({
     sessionId,
     value: { status: 'loading', passcode: null },
   })
+  // Bumped by `retry` to run recovery again for the same session.
+  const [attempt, setAttempt] = useState(0)
 
   // Read through refs so clearing router state (which changes `location`) does
   // not re-run resolution and lose the passcode we already hold.
@@ -50,17 +56,22 @@ export function useCommissionedIdeasInstructorPasscode(sessionId: string | undef
 
     let cancelled = false
     setState({ sessionId, value: { status: 'loading', passcode: null } })
-    void recoverInstructorPasscodeOnce(sessionId).then((passcode) => {
+    void recoverInstructorPasscodeOnce(sessionId).then((outcome) => {
       if (cancelled) return
       setState({
         sessionId,
-        value: passcode ? { status: 'ready', passcode } : { status: 'missing', passcode: null },
+        value: outcome.status === 'ok'
+          ? { status: 'ready', passcode: outcome.passcode }
+          : outcome.status === 'timeout'
+            ? { status: 'retryable', passcode: null }
+            : { status: 'missing', passcode: null },
       })
     })
     return () => {
       cancelled = true
     }
-  }, [sessionId])
+  }, [sessionId, attempt])
 
-  return state.sessionId === sessionId ? state.value : { status: 'loading', passcode: null }
+  const value = state.sessionId === sessionId ? state.value : { status: 'loading' as const, passcode: null }
+  return { ...value, retry: () => setAttempt((n) => n + 1) }
 }

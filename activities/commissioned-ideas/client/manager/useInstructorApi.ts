@@ -33,7 +33,9 @@ export function useInstructorApi(sessionId: string, instructorPasscode: string) 
             body: JSON.stringify(body),
           })
         } catch {
-          setError('Network error — please try again.')
+          // The request may have reached the server; retrying blindly could repeat it
+          // (for example, create a second new team).
+          setError('Connection problem: the change may or may not have been saved. Check the board after it refreshes before trying again.')
           return { kind: 'unknown' }
         }
         const data = await res.json().then(

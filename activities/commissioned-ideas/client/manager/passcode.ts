@@ -82,7 +82,17 @@ export async function recoverCommissionedIdeasInstructorPasscode(
   }
 }
 
-const inFlightRecoveries = new Map<string, Promise<string | null>>()
+/**
+ * Result of a shared recovery. `timeout` is retryable and distinct from `missing`: the
+ * reissue may already have set a valid manager cookie, so a retry (which starts with
+ * the cookie exchange) can succeed.
+ */
+export type RecoveryOutcome =
+  | { status: 'ok'; passcode: string }
+  | { status: 'missing' }
+  | { status: 'timeout' }
+
+const inFlightRecoveries = new Map<string, Promise<RecoveryOutcome>>()
 
 /** Upper bound for one shared recovery, including reading response bodies. */
 export const RECOVERY_DEADLINE_MS = 15_000
@@ -95,27 +105,27 @@ export const RECOVERY_DEADLINE_MS = 15_000
  *
  * A deadline bounds the shared recovery: a stalled request (for example a response body
  * that never finishes) is aborted and the recovery settles as `null`, which clears the
- * entry, so reopening the manager starts a fresh recovery instead of waiting forever.
+ * entry, so a retry or reopening the manager starts a fresh recovery instead of waiting
+ * forever. The outcome is `timeout` (retryable), not `missing`.
  */
 export function recoverInstructorPasscodeOnce(
   sessionId: string,
   fetchImpl?: FetchLike,
   deadlineMs = RECOVERY_DEADLINE_MS,
-): Promise<string | null> {
+): Promise<RecoveryOutcome> {
   const existing = inFlightRecoveries.get(sessionId)
   if (existing) return existing
   const controller = new AbortController()
   let timer: ReturnType<typeof setTimeout> | undefined
-  const deadline = new Promise<null>((resolve) => {
+  const deadline = new Promise<RecoveryOutcome>((resolve) => {
     timer = setTimeout(() => {
       controller.abort()
-      resolve(null)
+      resolve({ status: 'timeout' })
     }, deadlineMs)
   })
-  const recovery = Promise.race([
-    recoverCommissionedIdeasInstructorPasscode(sessionId, fetchImpl, controller.signal),
-    deadline,
-  ]).finally(() => {
+  const attempt = recoverCommissionedIdeasInstructorPasscode(sessionId, fetchImpl, controller.signal)
+    .then((passcode): RecoveryOutcome => (passcode ? { status: 'ok', passcode } : { status: 'missing' }))
+  const recovery = Promise.race([attempt, deadline]).finally(() => {
     clearTimeout(timer)
     inFlightRecoveries.delete(sessionId)
   })

@@ -54,9 +54,11 @@ export type ParsedAssignTarget =
 
 /**
  * Reads the `assign-participant` target from a request body. Exactly one explicit
- * form is accepted: `newTeam: true`, `teamId: '<id>'`, or `teamId: null` (ungrouped).
- * A missing or non-string `teamId` is an error, never an implicit move to Ungrouped,
- * which could otherwise dissolve a student's team.
+ * target is accepted: `newTeam: true`, `teamId: '<id>'`, or `teamId: null` (ungrouped).
+ * `newTeam: false` is allowed but selects nothing, so it still needs an explicit
+ * `teamId` (`{ newTeam: false, teamId: 'T1' }` moves to T1). A missing or non-string
+ * `teamId` is an error, never an implicit move to Ungrouped, which could otherwise
+ * dissolve a student's team.
  */
 export function parseAssignTarget(body: Record<string, unknown>): ParsedAssignTarget {
   const hasTeamId = Object.hasOwn(body, 'teamId')
@@ -65,7 +67,7 @@ export function parseAssignTarget(body: Record<string, unknown>): ParsedAssignTa
     return { ok: true, target: { kind: 'new-team' } }
   }
   if (Object.hasOwn(body, 'newTeam') && body.newTeam !== false) {
-    return { ok: false, error: 'newTeam must be true when sent' }
+    return { ok: false, error: 'newTeam must be a boolean; true creates a team, false needs a teamId' }
   }
   if (!hasTeamId) return { ok: false, error: 'teamId (string or null) or newTeam: true is required' }
   if (body.teamId === null) return { ok: true, target: { kind: 'ungrouped' } }

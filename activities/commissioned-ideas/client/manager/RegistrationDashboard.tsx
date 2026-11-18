@@ -67,12 +67,13 @@ export default function RegistrationDashboard({
     await call('assign-random', { scope })
   }
 
-  // The confirmed destination comes from the server's answer (new teams get their id there).
+  // A committed move is identified by its revision; a success without one is not
+  // trusted as confirmation (treated as unknown).
   const handleMove = async (participantId: string, destination: MoveDestination): Promise<MoveOutcome> => {
     const outcome = await request('assign-participant', buildAssignBody(participantId, destination))
     if (outcome.kind === 'ok') {
-      const teamId = outcome.data.teamId
-      return { kind: 'committed', teamId: typeof teamId === 'string' ? teamId : null }
+      const revision = outcome.data.revision
+      return typeof revision === 'number' ? { kind: 'committed', revision } : { kind: 'unknown' }
     }
     return outcome.kind === 'refused' ? { kind: 'refused' } : { kind: 'unknown' }
   }
@@ -159,6 +160,7 @@ export default function RegistrationDashboard({
         participantRoster={snapshot.participantRoster}
         maxTeamSize={snapshot.maxTeamSize}
         busy={busy}
+        snapshotRevision={snapshot.revision}
         onMove={handleMove}
         onModerateProposal={(teamId, kind, proposalId, rejected) => {
           void handleModerateProposal(teamId, kind, proposalId, rejected)
@@ -200,33 +202,43 @@ function SettingsPanel({
   const serverMax = snapshot.maxTeamSize
   // Latest confirmed value, read after an await so a rollback never restores a stale size.
   const serverMaxRef = useRef(serverMax)
-  // True while the instructor has an unsaved draft in the field. A ref, because the
-  // snapshot effect below must read the current value without re-running on edits.
-  const maxEditedRef = useRef(false)
+  // The field's value when the current edit began, or null when not editing. Refs, because
+  // the snapshot effect below must read them without re-running on every keystroke.
+  const editStartRef = useRef<string | null>(null)
+  const maxInputRef = useRef(maxInput)
+  const updateMaxInput = (value: string) => {
+    maxInputRef.current = value
+    setMaxInput(value)
+  }
+  const hasNetDraft = () => editStartRef.current !== null && maxInputRef.current.trim() !== editStartRef.current.trim()
 
-  // Track every confirmed size, but only replace the field when no edit is in
-  // progress: a snapshot must never overwrite what the instructor is typing.
+  // Track every confirmed size, but only replace the field when there is no net draft:
+  // a snapshot must never overwrite what the instructor is typing, and typing back to the
+  // starting value is no draft at all.
   useEffect(() => {
     serverMaxRef.current = serverMax
-    if (!maxEditedRef.current) setMaxInput(String(serverMax))
+    if (!hasNetDraft()) {
+      editStartRef.current = null
+      updateMaxInput(String(serverMax))
+    }
   }, [serverMax])
 
   // Show the requested size immediately, and fall back to the latest confirmed
   // value if the request fails.
   const requestMaxTeamSize = async (value: number) => {
-    maxEditedRef.current = false
-    setMaxInput(String(value))
-    if (!(await onMaxTeamSize(value))) setMaxInput(String(serverMaxRef.current))
+    editStartRef.current = null
+    updateMaxInput(String(value))
+    if (!(await onMaxTeamSize(value))) updateMaxInput(String(serverMaxRef.current))
   }
 
   const handleMaxBlur = () => {
     // Compare the preserved draft with the latest confirmed value.
-    const action = maxTeamSizeBlurAction(maxInput, maxEditedRef.current, serverMaxRef.current)
+    const action = maxTeamSizeBlurAction(maxInput, hasNetDraft(), serverMaxRef.current)
     if (action.kind === 'submit') {
       void requestMaxTeamSize(action.value)
     } else {
-      maxEditedRef.current = false
-      setMaxInput(String(serverMaxRef.current))
+      editStartRef.current = null
+      updateMaxInput(String(serverMaxRef.current))
     }
   }
 
@@ -256,8 +268,8 @@ function SettingsPanel({
               min={2}
               value={maxInput}
               onChange={(e) => {
-                maxEditedRef.current = true
-                setMaxInput(e.target.value)
+                if (editStartRef.current === null) editStartRef.current = maxInput
+                updateMaxInput(e.target.value)
               }}
               onBlur={handleMaxBlur}
               disabled={busy}

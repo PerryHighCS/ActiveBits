@@ -39,6 +39,21 @@ export default function CommissionedIdeasManager() {
     return <div className="p-6 text-gray-400" role="status">Checking instructor access…</div>
   }
 
+  if (passcodeState.status === 'retryable') {
+    return (
+      <div className="p-6 space-y-3" role="alert">
+        <p className="text-gray-700">Checking instructor access took too long. Your access may already be restored.</p>
+        <button
+          type="button"
+          onClick={passcodeState.retry}
+          className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-700"
+        >
+          Retry
+        </button>
+      </div>
+    )
+  }
+
   if (!instructorPasscode) {
     return (
       <div className="p-6 text-gray-500">

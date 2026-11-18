@@ -345,3 +345,63 @@ void test('ValkeyPersistentStore incrementAttemptsStrict returns the script coun
   Object.defineProperty(store, 'client', { value: { async eval(): Promise<number> { return 3 } } })
   assert.equal(await store.incrementAttemptsStrict('ip:hash'), 3)
 })
+
+// ── Broadcast subscription lifecycle ─────────────────────────────────────────
+
+function pubSubStoreForTest() {
+  const commands: string[] = []
+  const pendingAcks: Array<() => void> = []
+  const store = Object.create(ValkeySessionStore.prototype) as ValkeySessionStore
+  Object.defineProperty(store, 'broadcastHandlers', { value: new Map() })
+  Object.defineProperty(store, 'subscriptionsReady', { value: new Map() })
+  Object.defineProperty(store, 'subscriber', {
+    value: {
+      subscribe(channel: string, callback?: (err: Error | null) => void) {
+        commands.push(`SUBSCRIBE ${channel}`)
+        pendingAcks.push(() => callback?.(null))
+        return Promise.resolve()
+      },
+      unsubscribe(channel: string) {
+        commands.push(`UNSUBSCRIBE ${channel}`)
+        return Promise.resolve()
+      },
+    },
+  })
+  return { store, commands, ackAll: () => { for (const ack of pendingAcks.splice(0)) ack() } }
+}
+
+void test('subscribeToBroadcast settles only after the server confirms the subscription', async () => {
+  const { store, commands, ackAll } = pubSubStoreForTest()
+  let settled = false
+  const ready = store.subscribeToBroadcast('ch', () => {}).then(() => { settled = true })
+  await Promise.resolve()
+  assert.equal(settled, false, 'not active before the SUBSCRIBE is confirmed')
+  ackAll()
+  await ready
+  assert.equal(settled, true)
+
+  // A second handler on an active channel does not subscribe again and settles at once.
+  await store.subscribeToBroadcast('ch', () => {})
+  assert.deepEqual(commands, ['SUBSCRIBE ch'])
+})
+
+void test('unsubscribeFromBroadcast unsubscribes only when the last handler leaves, and a later subscribe resubscribes', async () => {
+  const { store, commands, ackAll } = pubSubStoreForTest()
+  const first = () => {}
+  const second = () => {}
+  const ready = Promise.all([store.subscribeToBroadcast('ch', first), store.subscribeToBroadcast('ch', second)])
+  ackAll()
+  await ready
+
+  store.unsubscribeFromBroadcast('ch', first)
+  assert.deepEqual(commands, ['SUBSCRIBE ch'], 'another handler still listens')
+  store.unsubscribeFromBroadcast('ch', second)
+  assert.deepEqual(commands, ['SUBSCRIBE ch', 'UNSUBSCRIBE ch'])
+  store.unsubscribeFromBroadcast('ch', second)
+  assert.equal(commands.length, 2, 'unknown handler is a no-op')
+
+  const again = store.subscribeToBroadcast('ch', first)
+  ackAll()
+  await again
+  assert.deepEqual(commands, ['SUBSCRIBE ch', 'UNSUBSCRIBE ch', 'SUBSCRIBE ch'])
+})

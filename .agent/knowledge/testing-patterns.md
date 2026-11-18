@@ -466,3 +466,13 @@ Capture reusable test setup patterns, common failure modes, and reliability guid
 ## WebSocket mocks must close like real sockets
 
 A mock socket whose `close()` only records the code lets later messages through and never fires `close` handlers. Tests then pass when the server wrongly keeps handling a closed socket, and presence cleanup is never exercised. In the Commissioned Ideas harness (`server/routeHandlers.test.ts`, `setupWsHarness`), `close()` sets `readyState = 3` and then fires the `close` handler, and `say()` delivers nothing once the socket is closed. Assert ignored frames (socket still open) separately from terminal refusals, and use one connection per terminal case. To cover async interleavings, do not rely on ticks to land "inside" an await. A tick does not prove the code has reached the store read. Hold the operation instead: the mock store's `getGate`/`onGet` (signals that a read started and holds it) and `commitGate` (holds a write before commit). Act while it is held, for example close the socket or commit a competing write, then release it and assert. A second "server instance" over the same store and pub/sub bus (`setupWsHarness(sameStoreAs)`) covers cross-instance delivery.
+
+## Test doubles must enforce the production contracts the code relies on (2026-11-18)
+
+Several review findings were tests that passed only because the double was more forgiving than production. The Commissioned Ideas store double (`createMockSessions` in `server/routeHandlers.test.ts`) now behaves like the real store:
+- Compare-and-set commits only if the record still exists with the same revision and creation identity.
+- `get` can serve a per-instance cache while `getStrict` reads shared data, so stale-cache bugs show up.
+- Pub/sub delivers only to subscriptions that are active, and messages published before activation are lost.
+- Failure injection runs the mutation before throwing, so code that logs or binds inside the callback gets caught.
+
+When a test checks "X does not happen", make sure the fixture would otherwise make X happen. For example, a ballot test must use a voter who is eligible, or the voter check hides the rule under test.

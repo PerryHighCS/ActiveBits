@@ -6,7 +6,6 @@ import {
   podiumStepActionLabel,
   revealedPodium,
 } from '../../shared/podium.js'
-import type { PodiumRevealStep } from '../../shared/types.js'
 import type { ManagerSnapshot } from '../hooks/useCommissionedIdeasSession.js'
 import PodiumStage, { winnerHeadline } from '../PodiumStage.js'
 import { teamLabelsById } from '../teamLabels.js'
@@ -18,21 +17,30 @@ interface ResultsDashboardProps {
   snapshot: ManagerSnapshot
 }
 
+/** A podium reveal the instructor started and the board has not yet confirmed. */
+export type RevealRequest =
+  | { kind: 'in-flight' }
+  | { kind: 'awaiting-snapshot'; revision: number }
+  | null
+
+/** True while the reveal's own snapshot (at or after its committed revision) has not arrived. */
+export function isRevealPending(reveal: RevealRequest, snapshotRevision: number): boolean {
+  if (!reveal) return false
+  return reveal.kind === 'in-flight' || snapshotRevision < reveal.revision
+}
+
 export default function ResultsDashboard({ sessionId, instructorPasscode, snapshot }: ResultsDashboardProps) {
-  const { call, busy, error, clearError } = useInstructorApi(sessionId, instructorPasscode)
+  const { call, request, busy, error, clearError } = useInstructorApi(sessionId, instructorPasscode)
   const ranking = snapshot.results ?? []
   const labels = teamLabelsById(snapshot.teams)
   const step = snapshot.podiumRevealStep
-  // The step a reveal was requested from. The button stays pending until a snapshot
-  // moves past it (the HTTP response can arrive before the WebSocket snapshot), so a
-  // second click cannot reveal a place the button does not name.
-  const [revealFrom, setRevealFrom] = useState<PodiumRevealStep | null>(null)
-  const [seenStep, setSeenStep] = useState(step)
-  if (seenStep !== step) {
-    setSeenStep(step)
-    setRevealFrom(null)
-  }
-  const revealPending = revealFrom !== null && revealFrom === step
+  // A reveal stays pending until the board shows a snapshot at or after the reveal's
+  // committed revision (the HTTP response can arrive before the snapshot, and a socket
+  // reconnect delivers a fresh one). A changed step alone is not proof: a concurrent
+  // reset can produce the same step. The request also names the step it was made from,
+  // so the server refuses a click that no longer matches the podium.
+  const [reveal, setReveal] = useState<RevealRequest>(null)
+  const revealPending = isRevealPending(reveal, snapshot.revision)
   const placeCount = podiumPlaceCount(ranking)
   const next = nextPodiumStep(step, placeCount)
   const entries = revealedPodium(ranking, step)
@@ -66,10 +74,10 @@ export default function ResultsDashboard({ sessionId, instructorPasscode, snapsh
             disabled={busy || revealPending || next === null}
             aria-busy={revealPending}
             onClick={() => {
-              const from = step
-              setRevealFrom(from)
-              void call('podium-step', { action: 'next' }).then((ok) => {
-                if (!ok) setRevealFrom((current) => (current === from ? null : current))
+              setReveal({ kind: 'in-flight' })
+              void request('podium-step', { action: 'next', fromStep: step }).then((outcome) => {
+                const revision = outcome.kind === 'ok' ? outcome.data.revision : undefined
+                setReveal(typeof revision === 'number' ? { kind: 'awaiting-snapshot', revision } : null)
               })
             }}
             className="rounded-lg bg-amber-600 px-6 py-2.5 text-base font-semibold text-white hover:bg-amber-700 disabled:opacity-40"

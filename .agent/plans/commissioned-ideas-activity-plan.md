@@ -50,6 +50,30 @@ Triage of the 25 unresolved CodeRabbit threads from 2026-07-30 on PR #243, verif
 - [ ] Open, needs product/engineering decision: participant token in `localStorage` (move to a core httpOnly participant capability); per-session atomic updates (`updateAtomic` for every writer)
 - [x] Post replies and resolve threads after the fixes are pushed (0690ab1a: 23 resolved; the two follow-up threads replied to and left open)
 
+## CodeRabbit review round 5 (2026-11-18)
+
+34 threads: 21 new, 12 from round 4 that were missed because the thread query read only the first 100 of 133 threads (now paginated), and 1 outside-diff comment. Grouped by contract (AGENTS.md rule 16):
+
+1. **Revisions order responses against snapshots (root cause of five threads).** Every snapshot and every mutation response carries `revision`, the session's committed `mutationRevision`. Client pending state from a write is released only by a snapshot at or after that write's revision, never because a field changed. This applies to keyboard focus after a move, the podium reveal button, and the local ballot summary. Clients also drop snapshots older than the last one they accepted.
+2. **Tab identity is pinned.** A student tab accepts only snapshots whose `viewerParticipantId` equals its registered participant, across automatic reconnects. If another identity appears, the view is hidden and the tab asks for a reload. A snapshot is scoped to its connection: a new connection shows "Connecting…" until it delivers an authenticated snapshot. Request status (busy and error) belongs to the participant that sent the request.
+3. **Requests name the state they were made from.** Podium `next` sends `fromStep`, and name proposals and votes send `expectedTeamId`. The server refuses a mismatch with `409` before any change.
+4. **Socket auth re-checks the cookie inside the presence write** and binds the socket only after commit. A connect-time store failure closes with `1011` (retryable); a missing session closes with `1008`. Cross-instance reads (invalidations, connect, auth) use `getStrict`, which bypasses the per-instance cache.
+5. **Subscriptions have a lifecycle.** Core `subscribeToBroadcast` resolves when the subscription is active. After activation, the instance re-reads and delivers a fresh snapshot, covering changes published before it was active. `unsubscribeFromBroadcast` releases it when the instance's last socket for the session closes.
+6. **Focus follows the user.** Restoration happens only when the action removed the focused control and the user has not moved focus elsewhere. This covers roster Join, Switch, and Leave, the ballot view changes, and failed or unknown moves, which restore focus in place once controls re-enable.
+7. **Smaller client and test fixes:**
+   - Snapshot payload validation.
+   - The ballot draft is keyed by viewer.
+   - The ballot announcement uses the server's `replaced` result.
+   - A max-size edit that returns to its starting value is no draft.
+   - A recovery timeout is retryable.
+   - Unknown-outcome wording.
+   - Tests and docs that did not pin their rule.
+
+- [x] Core: subscription activation and unsubscribe, with tests
+- [x] Server: 1, 3, 4, 5
+- [x] Client: 1, 2, 6, 7
+- [x] Tests and docs
+
 ## CodeRabbit review round 4 (2026-11-18)
 
 23 threads, the fourth round, so they are grouped by the contract each one breaks (AGENTS.md rule 16):

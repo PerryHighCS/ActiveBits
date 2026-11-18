@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { orderedPresentationTeams } from '../../shared/presentation.js'
 import type { BallotAllocation, CommissionedIdeasBallot, StudentSafeTeam } from '../../shared/types.js'
 import { voterBallotStatus, type BallotAmount } from '../../shared/validation.js'
@@ -9,11 +9,28 @@ interface VotingBallotProps {
   teams: Record<string, StudentSafeTeam>
   myTeamId: string | null
   myBallot: CommissionedIdeasBallot | null
+  /** Revision of the snapshot `myBallot` came from. */
+  snapshotRevision: number
   busy: boolean
-  onSubmit: (allocations: BallotAllocation[]) => Promise<boolean>
+  /** Resolves with the server's result (whether it replaced a ballot, and its revision), or null on failure. */
+  onSubmit: (allocations: BallotAllocation[]) => Promise<{ replaced: boolean; revision: number } | null>
 }
 
-export default function VotingBallot({ teams, myTeamId, myBallot, busy, onSubmit }: VotingBallotProps) {
+/**
+ * The ballot to show: this tab's just-submitted ballot only while it is newer than the
+ * snapshot (the snapshot has not caught up yet); otherwise the snapshot's ballot. A
+ * delayed response can never replace a newer ballot the snapshot already shows.
+ */
+export function shownBallotAllocations(
+  justSubmitted: { allocations: BallotAllocation[]; revision: number } | null,
+  myBallot: Pick<CommissionedIdeasBallot, 'allocations'> | null,
+  snapshotRevision: number,
+): BallotAllocation[] | null {
+  if (justSubmitted && justSubmitted.revision > snapshotRevision) return justSubmitted.allocations
+  return myBallot?.allocations ?? null
+}
+
+export default function VotingBallot({ teams, myTeamId, myBallot, snapshotRevision, busy, onSubmit }: VotingBallotProps) {
   const labels = teamLabelsById(teams)
   const status = voterBallotStatus(myTeamId, teams)
   const eligibleIds = new Set(status.canVote ? status.eligibleTeamIds : [])
@@ -22,12 +39,19 @@ export default function VotingBallot({ teams, myTeamId, myBallot, busy, onSubmit
 
   const [draft, setDraft] = useState<BallotDraft>(() => draftFromBallot(myBallot, required, [...eligibleIds]))
   const [editing, setEditing] = useState(myBallot === null)
-  // Shown until the server's snapshot (myBallot) catches up, so the form never flashes back after submit.
-  const [justSubmitted, setJustSubmitted] = useState<BallotAllocation[] | null>(null)
-  const serverSubmittedAt = myBallot?.submittedAt ?? null
+  // Shown until a snapshot at or after its revision arrives, so the form never flashes
+  // back after submit (see `shownBallotAllocations`).
+  const [justSubmitted, setJustSubmitted] = useState<{ allocations: BallotAllocation[]; revision: number } | null>(null)
+  // After an explicit view change (Change, Cancel, a successful submit) focus moves to the
+  // new view's heading: the activated button is gone, so focus would otherwise drop to the body.
+  const focusAfterViewChange = useRef(false)
+  const summaryHeadingRef = useRef<HTMLHeadingElement>(null)
+  const formHeadingRef = useRef<HTMLHeadingElement>(null)
   useEffect(() => {
-    setJustSubmitted(null)
-  }, [serverSubmittedAt])
+    if (!focusAfterViewChange.current) return
+    focusAfterViewChange.current = false
+    ;(editing ? formHeadingRef : summaryHeadingRef).current?.focus()
+  }, [editing])
   // Persistent polite live region (rendered in both the form and submitted views) so the
   // submit result is announced even though the form is replaced and focus does not move.
   const [announcement, setAnnouncement] = useState('')
@@ -54,15 +78,16 @@ export default function VotingBallot({ teams, myTeamId, myBallot, busy, onSubmit
 
   const submit = async () => {
     if (!allocations) return
-    const wasUpdate = myBallot !== null
-    if (await onSubmit(allocations)) {
-      setAnnouncement(wasUpdate ? 'Ballot updated.' : 'Ballot submitted.')
-      setJustSubmitted(allocations)
-      setEditing(false)
-    }
+    const result = await onSubmit(allocations)
+    if (!result) return // failed: the announcement and view stay as they were
+    // The server says whether this replaced an earlier ballot; the local snapshot may lag.
+    setAnnouncement(result.replaced ? 'Ballot updated.' : 'Ballot submitted.')
+    setJustSubmitted({ allocations, revision: result.revision })
+    focusAfterViewChange.current = true
+    setEditing(false)
   }
 
-  const shownAllocations = justSubmitted ?? myBallot?.allocations ?? null
+  const shownAllocations = shownBallotAllocations(justSubmitted, myBallot, snapshotRevision)
 
   if (shownAllocations && !editing) {
     return (
@@ -70,7 +95,7 @@ export default function VotingBallot({ teams, myTeamId, myBallot, busy, onSubmit
       {statusRegion}
       <section aria-labelledby="ci-ballot-title" className="p-4">
         <div className="rounded-xl border border-green-300 bg-green-50 p-5 space-y-3">
-          <h2 id="ci-ballot-title" className="text-lg font-semibold text-green-800">✓ Ballot submitted</h2>
+          <h2 id="ci-ballot-title" ref={summaryHeadingRef} tabIndex={-1} className="text-lg font-semibold text-green-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-green-500">✓ Ballot submitted</h2>
           <ul className="space-y-1" aria-label="Your awards">
             {[...shownAllocations]
               .sort((a, b) => b.amount - a.amount)
@@ -87,6 +112,7 @@ export default function VotingBallot({ teams, myTeamId, myBallot, busy, onSubmit
             onClick={() => {
               setDraft(draftFromBallot({ allocations: shownAllocations }, required, [...eligibleIds]))
               setAnnouncement('')
+              focusAfterViewChange.current = true
               setEditing(true)
             }}
             className="rounded-md border border-green-400 px-3 py-1 text-sm font-medium text-green-800 hover:bg-green-100"
@@ -106,7 +132,7 @@ export default function VotingBallot({ teams, myTeamId, myBallot, busy, onSubmit
     {statusRegion}
     <section aria-labelledby="ci-ballot-title" className="p-4 space-y-4">
       <div>
-        <h2 id="ci-ballot-title" className="text-lg font-semibold text-gray-800">Fund the best ideas</h2>
+        <h2 id="ci-ballot-title" ref={formHeadingRef} tabIndex={-1} className="text-lg font-semibold text-gray-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400">Fund the best ideas</h2>
         <p className="text-sm text-gray-600 mt-1">
           {reduced
             ? `There ${eligibleTeams.length === 1 ? 'is' : 'are'} only ${eligibleTeams.length} other team${eligibleTeams.length === 1 ? '' : 's'}, so you have ${required.length} award${required.length === 1 ? '' : 's'} to give.`
@@ -134,13 +160,16 @@ export default function VotingBallot({ teams, myTeamId, myBallot, busy, onSubmit
           onClick={() => { void submit() }}
           className="flex-1 rounded-lg bg-amber-600 py-2.5 text-sm font-semibold text-white hover:bg-amber-700 disabled:opacity-50"
         >
-          {myBallot ? 'Update ballot' : 'Submit ballot'}
+          {shownAllocations ? 'Update ballot' : 'Submit ballot'}
         </button>
-        {myBallot && (
+        {shownAllocations && (
           <button
             type="button"
             disabled={busy}
-            onClick={() => setEditing(false)}
+            onClick={() => {
+              focusAfterViewChange.current = true
+              setEditing(false)
+            }}
             className="rounded-lg border border-gray-300 px-4 py-2.5 text-sm font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50"
           >
             Cancel

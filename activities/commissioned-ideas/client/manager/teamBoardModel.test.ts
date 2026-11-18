@@ -88,31 +88,23 @@ void test('buildAssignBody encodes each destination for the assign-participant r
 
 // ── Keyboard move focus restoration ──────────────────────────────────────────
 const req = (outcome: MoveOutcome, from: MoveDestination = 'team:A'): MoveFocusRequest => ({ participantId: 'p', from, outcome })
-const focusCases: {
-  name: string
-  request: MoveFocusRequest | null
-  teamId: string | null
-  busy: boolean
-  expected: boolean
-}[] = [
-  { name: 'no request', request: null, teamId: 'B', busy: false, expected: false },
-  { name: 'request for another participant', request: { ...req({ kind: 'refused' }), participantId: 'other' }, teamId: 'A', busy: false, expected: false },
-  { name: 'pending: never, even if the roster changed', request: req({ kind: 'pending' }), teamId: 'C', busy: false, expected: false },
-  { name: 'committed A → B, snapshot still shows A', request: req({ kind: 'committed', teamId: 'B' }), teamId: 'A', busy: false, expected: false },
-  { name: 'committed A → B, someone else moved them to C first', request: req({ kind: 'committed', teamId: 'B' }), teamId: 'C', busy: false, expected: false },
-  { name: 'committed A → B, snapshot shows B', request: req({ kind: 'committed', teamId: 'B' }), teamId: 'B', busy: false, expected: true },
-  { name: 'committed new team (returned id), snapshot shows it', request: req({ kind: 'committed', teamId: 'NEW' }, 'ungrouped'), teamId: 'NEW', busy: false, expected: true },
-  { name: 'committed to ungrouped, snapshot shows ungrouped', request: req({ kind: 'committed', teamId: null }), teamId: null, busy: false, expected: true },
-  { name: 'committed but still busy', request: req({ kind: 'committed', teamId: 'B' }), teamId: 'B', busy: true, expected: false },
-  { name: 'refused: in place', request: req({ kind: 'refused' }), teamId: 'A', busy: false, expected: true },
-  { name: 'refused but still busy', request: req({ kind: 'refused' }), teamId: 'A', busy: true, expected: false },
-  { name: 'unknown: not until the roster shows a move', request: req({ kind: 'unknown' }), teamId: 'A', busy: false, expected: false },
-  { name: 'unknown: the roster shows the move landed', request: req({ kind: 'unknown' }), teamId: 'B', busy: false, expected: true },
+const focusCases: { name: string; request: MoveFocusRequest | null; busy: boolean; snapshotRevision: number; expected: boolean }[] = [
+  { name: 'no request', request: null, busy: false, snapshotRevision: 9, expected: false },
+  { name: 'request for another participant', request: { ...req({ kind: 'refused' }), participantId: 'other' }, busy: false, snapshotRevision: 9, expected: false },
+  { name: 'pending: never, even if the roster changed', request: req({ kind: 'pending' }), busy: false, snapshotRevision: 9, expected: false },
+  { name: 'committed at r5, board still at r4', request: req({ kind: 'committed', revision: 5 }), busy: false, snapshotRevision: 4, expected: false },
+  { name: 'committed at r5, board at r5', request: req({ kind: 'committed', revision: 5 }), busy: false, snapshotRevision: 5, expected: true },
+  { name: 'committed at r5, a later move already at r7 (focus follows the student)', request: req({ kind: 'committed', revision: 5 }), busy: false, snapshotRevision: 7, expected: true },
+  { name: 'committed but controls still busy', request: req({ kind: 'committed', revision: 5 }), busy: true, snapshotRevision: 5, expected: false },
+  { name: 'refused: in place once controls re-enable', request: req({ kind: 'refused' }), busy: false, snapshotRevision: 1, expected: true },
+  { name: 'refused but still busy', request: req({ kind: 'refused' }), busy: true, snapshotRevision: 1, expected: false },
+  { name: 'unknown: in place, no roster change needed', request: req({ kind: 'unknown' }), busy: false, snapshotRevision: 1, expected: true },
+  { name: 'unknown but still busy', request: req({ kind: 'unknown' }), busy: true, snapshotRevision: 1, expected: false },
 ]
 
 for (const row of focusCases) {
   void test(`moveFocusReady: ${row.name}`, () => {
-    assert.equal(moveFocusReady(row.request, { id: 'p', teamId: row.teamId }, row.busy), row.expected)
+    assert.equal(moveFocusReady(row.request, { id: 'p' }, row.busy, row.snapshotRevision), row.expected)
   })
 }
 
@@ -120,7 +112,7 @@ void test('focusCancelsMoveRequest: focus elsewhere cancels; the requested selec
   assert.equal(focusCancelsMoveRequest(null, null), false)
   assert.equal(focusCancelsMoveRequest(req({ kind: 'pending' }), null), true, 'another control')
   assert.equal(focusCancelsMoveRequest(req({ kind: 'pending' }), 'someone-else'), true, 'another student’s select')
-  assert.equal(focusCancelsMoveRequest(req({ kind: 'committed', teamId: 'B' }), 'p'), false, 'the moved student’s own select')
+  assert.equal(focusCancelsMoveRequest(req({ kind: 'committed', revision: 2 }), 'p'), false, 'the moved student’s own select')
 })
 
 // ── Max team size field ──────────────────────────────────────────────────────

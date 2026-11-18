@@ -188,11 +188,11 @@ void test('shared recovery: concurrent callers for one session share a single re
   const first = recoverInstructorPasscodeOnce('s1', fakeFetch)
   const second = recoverInstructorPasscodeOnce('s1', fakeFetch)
   release()
-  assert.deepEqual(await Promise.all([first, second]), ['PASS', 'PASS'])
+  assert.deepEqual(await Promise.all([first, second]), [{ status: 'ok', passcode: 'PASS' }, { status: 'ok', passcode: 'PASS' }])
   assert.deepEqual(calls, [EXCHANGE], 'Strict Mode double effects must not send a second reissue')
 
   // After settling, a later recovery (for example a new reload) runs again.
-  assert.equal(await recoverInstructorPasscodeOnce('s1', fakeFetch), 'PASS')
+  assert.deepEqual(await recoverInstructorPasscodeOnce('s1', fakeFetch), { status: 'ok', passcode: 'PASS' })
   assert.deepEqual(calls, [EXCHANGE, EXCHANGE])
 })
 
@@ -210,7 +210,7 @@ void test('shared recovery: concurrent callers share one reissue POST on the 403
   const first = recoverInstructorPasscodeOnce('s1', fakeFetch)
   const second = recoverInstructorPasscodeOnce('s1', fakeFetch)
   release()
-  assert.deepEqual(await Promise.all([first, second]), ['PASS', 'PASS'])
+  assert.deepEqual(await Promise.all([first, second]), [{ status: 'ok', passcode: 'PASS' }, { status: 'ok', passcode: 'PASS' }])
   assert.deepEqual(calls, [EXCHANGE, REISSUE, EXCHANGE])
   assert.equal(calls.filter((call) => call === REISSUE).length, 1, 'exactly one reissue POST')
 })
@@ -221,9 +221,14 @@ void test('shared recovery: a stalled request hits the deadline, is aborted, and
     init?.signal?.addEventListener('abort', () => { aborted = true })
     return { ok: true, status: 200, json: () => new Promise<unknown>(() => {}) } // body never finishes
   }
-  assert.equal(await recoverInstructorPasscodeOnce('s1', stalled, 20), null)
+  assert.deepEqual(await recoverInstructorPasscodeOnce('s1', stalled, 20), { status: 'timeout' }, 'retryable, not missing')
   assert.equal(aborted, true, 'the stalled request is aborted')
 
   const healthy = async () => ({ ok: true, status: 200, json: async () => ({ instructorPasscode: 'PASS' }) })
-  assert.equal(await recoverInstructorPasscodeOnce('s1', healthy, 1000), 'PASS', 'the stalled entry was cleared')
+  assert.deepEqual(await recoverInstructorPasscodeOnce('s1', healthy, 1000), { status: 'ok', passcode: 'PASS' }, 'the stalled entry was cleared')
+})
+
+void test('shared recovery: a definitive refusal is missing, not retryable', async () => {
+  const refused = async () => ({ ok: false, status: 404, json: async () => ({}) })
+  assert.deepEqual(await recoverInstructorPasscodeOnce('s1', refused, 1000), { status: 'missing' })
 })

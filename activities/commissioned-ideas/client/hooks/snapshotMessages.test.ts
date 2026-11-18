@@ -5,7 +5,10 @@ import {
   isSnapshotMessage,
   managerSessionIdentity,
   managerViewForIdentity,
-  studentSnapshotForAttempt,
+  acceptStudentSnapshot,
+  isSnapshotPayload,
+  studentView,
+  type ReceivedStudentSnapshot,
   type StudentSnapshot,
 } from './useCommissionedIdeasSession.js'
 
@@ -60,16 +63,36 @@ for (const [name, msg, expected] of refusalCases) {
   })
 }
 
-// ── Student snapshot scoped to the registration attempt ──────────────────────
-void test('studentSnapshotForAttempt renders only authenticated snapshots from the current attempt', () => {
-  const snap = (viewerParticipantId: string | null) => ({ viewerParticipantId } as unknown as StudentSnapshot)
-  assert.equal(studentSnapshotForAttempt(null, 'p1'), null, 'nothing received yet')
-  assert.equal(studentSnapshotForAttempt({ forId: 'p1', snapshot: snap('p1') }, 'p1')?.viewerParticipantId, 'p1')
-  assert.equal(studentSnapshotForAttempt({ forId: 'old', snapshot: snap('old') }, 'new'), null, 'previous registration hidden')
-  assert.equal(studentSnapshotForAttempt({ forId: 'p1', snapshot: snap(null) }, 'p1'), null, 'anonymous refusal snapshot never rendered')
-  assert.equal(
-    studentSnapshotForAttempt({ forId: 'p1', snapshot: snap('p2') }, 'p1')?.viewerParticipantId,
-    'p2',
-    'the server-bound viewer wins over the stored id',
-  )
+// ── Student snapshot: pinned identity, connection scope, ordering ─────────────
+const snap = (viewerParticipantId: string | null, revision = 1) => ({ viewerParticipantId, revision } as unknown as StudentSnapshot)
+const recv = (forId: string | null, connection: number, snapshot: StudentSnapshot): ReceivedStudentSnapshot => ({ forId, connection, snapshot })
+
+const viewCases: [string, ReceivedStudentSnapshot | null, string | null, number, { shown: boolean; identityChanged: boolean }][] = [
+  ['nothing received yet', null, 'p1', 1, { shown: false, identityChanged: false }],
+  ['authenticated as the pinned participant', recv('p1', 1, snap('p1')), 'p1', 1, { shown: true, identityChanged: false }],
+  ['previous registration attempt', recv('old', 1, snap('old')), 'new', 1, { shown: false, identityChanged: false }],
+  ['previous connection (reconnecting)', recv('p1', 1, snap('p1')), 'p1', 2, { shown: false, identityChanged: false }],
+  ['anonymous refusal snapshot', recv('p1', 1, snap(null)), 'p1', 1, { shown: false, identityChanged: false }],
+  ['reconnect authenticated as someone else', recv('p1', 2, snap('p2')), 'p1', 2, { shown: false, identityChanged: true }],
+]
+
+for (const [name, received, participantId, connection, expected] of viewCases) {
+  void test(`studentView: ${name}`, () => {
+    const view = studentView(received, participantId, connection)
+    assert.equal(view.snapshot !== null, expected.shown)
+    assert.equal(view.identityChanged, expected.identityChanged)
+  })
+}
+
+void test('acceptStudentSnapshot drops older revisions on the same connection only', () => {
+  const current = recv('p1', 1, snap('p1', 5))
+  assert.equal(acceptStudentSnapshot(current, recv('p1', 1, snap('p1', 4))), current, 'older on the same connection: dropped')
+  assert.equal(acceptStudentSnapshot(current, recv('p1', 1, snap('p1', 5))).snapshot.revision, 5, 'same revision: accepted')
+  assert.equal(acceptStudentSnapshot(current, recv('p1', 1, snap('p1', 6))).snapshot.revision, 6)
+  assert.equal(acceptStudentSnapshot(current, recv('p1', 2, snap('p1', 3))).connection, 2, 'a new connection replaces it')
+})
+
+void test('isSnapshotPayload rejects malformed payloads', () => {
+  for (const bad of [null, undefined, 'x', 3, [], {}, { revision: '1' }]) assert.equal(isSnapshotPayload(bad), false, JSON.stringify(bad))
+  assert.equal(isSnapshotPayload({ revision: 0 }), true)
 })
