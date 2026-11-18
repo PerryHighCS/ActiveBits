@@ -101,7 +101,6 @@ export interface CommissionedIdeasSessionData extends Record<string, unknown> {
   maxTeamSize: number
   groupingMode: GroupingMode
   presentationRound: number
-  allowLateRegistration: boolean
   teams: Record<string, CommissionedIdeasTeam>
   participantRoster: Record<string, CommissionedIdeasParticipant>
   ballots: Record<string, CommissionedIdeasBallot>

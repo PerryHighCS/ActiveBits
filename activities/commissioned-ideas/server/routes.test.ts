@@ -33,7 +33,6 @@ function makeSession(overrides: Partial<CommissionedIdeasSessionData> = {}): Com
     maxTeamSize: 4,
     groupingMode: 'manual',
     presentationRound: 1,
-    allowLateRegistration: true,
     teams: {
       t1: makeTeam('t1'),
       t2: makeTeam('t2'),
@@ -180,7 +179,14 @@ void test('resolveLeadingProposal returns leading vote winner', () => {
 // ── validation ────────────────────────────────────────────────────────────────
 
 void test('validateBallot accepts a valid $100/$300/$500 ballot', () => {
-  const session = makeSession()
+  // Voter sits on a fourth team, so t1–t3 are all eligible.
+  const base = makeSession()
+  const session = makeSession({
+    teams: { ...base.teams, t4: makeTeam('t4') },
+    participantRoster: {
+      voter1: { id: 'voter1', name: 'Alice', teamId: 't4', connected: true, lastSeen: 0, rejectedByInstructor: false, token: 'TESTTOKEN' },
+    },
+  })
   const result = validateBallot(
     [
       { teamId: 't1', amount: 500 },
@@ -370,7 +376,6 @@ function makeFullSession(overrides: Partial<CommissionedIdeasSessionData> = {}):
     maxTeamSize: 4,
     groupingMode: 'manual',
     presentationRound: 1,
-    allowLateRegistration: true,
     teams: {},
     participantRoster: {
       p1: { id: 'p1', name: 'Alice', teamId: null, connected: true, lastSeen: 999, rejectedByInstructor: false, token: 'TESTTOKEN' },
@@ -453,7 +458,6 @@ function makeRegistrationSession(overrides: Partial<CommissionedIdeasSessionData
     maxTeamSize: 3,
     groupingMode: 'manual',
     presentationRound: 1,
-    allowLateRegistration: true,
     teams: {},
     participantRoster: {},
     ballots: {},

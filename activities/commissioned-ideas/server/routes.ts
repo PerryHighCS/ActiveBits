@@ -17,9 +17,10 @@ import type {
   StudentSafeProposal,
   StudentSafeTeam,
 } from '../shared/types.js'
-import { coerceAllocations, sanitizeDisplayName, validateBallot } from '../shared/validation.js'
+import { coerceAllocations, sanitizeDisplayName, validateBallot, voterBallotStatus } from '../shared/validation.js'
 import { computeTeamScores } from '../shared/scoring.js'
 import { nextPodiumStep, podiumPlaceCount, revealedPodium } from '../shared/podium.js'
+import { checkInstructorMove } from '../shared/membership.js'
 import {
   MAX_PROPOSAL_LENGTH,
   MAX_PROPOSALS_PER_KIND,
@@ -238,7 +239,6 @@ function normalizeSessionData(data: unknown): CommissionedIdeasSessionData {
     maxTeamSize: typeof source.maxTeamSize === 'number' && source.maxTeamSize >= 1 ? source.maxTeamSize : 4,
     groupingMode: normalizeGroupingMode(source.groupingMode),
     presentationRound: typeof source.presentationRound === 'number' ? source.presentationRound : 1,
-    allowLateRegistration: source.allowLateRegistration !== false,
     teams: normalizeTeams(source.teams),
     participantRoster: normalizeParticipantRoster(source.participantRoster),
     ballots: normalizeBallots(source.ballots),
@@ -349,7 +349,6 @@ function buildDefaultSessionData(): CommissionedIdeasSessionData {
     maxTeamSize: 4,
     groupingMode: 'manual',
     presentationRound: 1,
-    allowLateRegistration: true,
     teams: {},
     participantRoster: {},
     ballots: {},
@@ -850,9 +849,6 @@ export default function setupCommissionedIdeasRoutes(
     if ('namingLocked' in body) {
       session.data.namingLocked = Boolean(body.namingLocked)
     }
-    if ('allowLateRegistration' in body) {
-      session.data.allowLateRegistration = Boolean(body.allowLateRegistration)
-    }
 
     await sessions.set(sessionId, session)
     console.info('[commissioned-ideas] Settings updated', { sessionId })
@@ -987,7 +983,6 @@ export default function setupCommissionedIdeasRoutes(
   app.post('/api/commissioned-ideas/:sessionId/assign-participant', async (req, res) => {
     const session = await loadInstructorSession(req, res)
     if (!session) return
-    if (!requireRegistrationPhase(session, res)) return
 
     const body = ensurePlainObject(req.body)
     const participantId = typeof body.participantId === 'string' ? body.participantId : null
@@ -999,8 +994,21 @@ export default function setupCommissionedIdeasRoutes(
     const newTeam = body.newTeam === true
     const targetTeamId = typeof body.teamId === 'string' ? body.teamId : null
 
-    if ((newTeam || targetTeamId !== null) && participant.rejectedByInstructor) {
-      res.status(409).json({ error: 'Rejected participants cannot be placed on a team' })
+    // Membership contract: which moves are allowed in which phase lives in shared/membership.ts.
+    const decision = checkInstructorMove({
+      phase: session.data.phase,
+      participantTeamId: participant.teamId,
+      rejected: participant.rejectedByInstructor,
+      target: newTeam ? { kind: 'new-team' } : targetTeamId !== null ? { kind: 'team', teamId: targetTeamId } : { kind: 'ungrouped' },
+    })
+    if (!decision.ok) {
+      console.warn('[commissioned-ideas] Instructor move refused', {
+        sessionId: session.id,
+        participantId,
+        phase: session.data.phase,
+        error: decision.error,
+      })
+      res.status(decision.status).json({ error: decision.error })
       return
     }
 
@@ -1012,7 +1020,11 @@ export default function setupCommissionedIdeasRoutes(
     } else if (targetTeamId !== null) {
       const team = session.data.teams[targetTeamId]
       if (!team) { res.status(404).json({ error: 'Team not found' }); return }
-      if (participant.teamId !== targetTeamId && countActiveMembers(session.data, team) >= session.data.maxTeamSize) {
+      if (
+        decision.enforceCapacity &&
+        participant.teamId !== targetTeamId &&
+        countActiveMembers(session.data, team) >= session.data.maxTeamSize
+      ) {
         res.status(409).json({ error: 'Team is full' })
         return
       }
@@ -1028,6 +1040,7 @@ export default function setupCommissionedIdeasRoutes(
       participantId,
       teamId: resultTeamId,
       newTeam,
+      latePlacement: decision.latePlacement,
     })
     res.json({ ok: true, teamId: resultTeamId })
   })
@@ -1196,6 +1209,13 @@ export default function setupCommissionedIdeasRoutes(
 
     if (session.data.phase !== 'voting') {
       res.status(409).json({ error: 'Voting is not open' })
+      return
+    }
+
+    // Ballot contract: late arrivals and other ungrouped students wait for placement.
+    const status = voterBallotStatus(participant.teamId, session.data.teams)
+    if (!status.canVote) {
+      res.status(409).json({ error: status.message })
       return
     }
 

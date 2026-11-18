@@ -141,6 +141,11 @@ export default function CommissionedIdeasStudent({ sessionData }: { sessionData:
       </div>
 
       <div className="max-w-2xl mx-auto">
+        {snapshot && phase !== 'registration' && studentId && participants[studentId]?.teamId == null && (
+          <p role="status" className="mx-4 mt-4 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-800">
+            Teams are already formed. Your instructor will place you on a team — you can vote once you’re on one.
+          </p>
+        )}
         {phase === 'registration' && (
           <StudentRoster
             participants={participants}
