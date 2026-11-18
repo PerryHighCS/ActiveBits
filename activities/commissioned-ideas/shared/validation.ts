@@ -36,6 +36,31 @@ export function requiredBallotAmounts(eligibleTeamCount: number): BallotAmount[]
   return BALLOT_AMOUNTS_DESC.slice(0, size)
 }
 
+export type VoterBallotStatus =
+  | { canVote: true; eligibleTeamIds: string[]; requiredAmounts: BallotAmount[] }
+  | { canVote: false; reason: 'not-on-team' | 'no-eligible-teams'; message: string }
+
+/**
+ * Single owner of "can this participant vote, and with which awards".
+ * Only students on a team vote (late arrivals wait for placement); they may
+ * fund every other team, with a ballot of min(3, eligible teams) top amounts.
+ */
+export function voterBallotStatus(
+  voterTeamId: string | null,
+  teams: Record<string, unknown>,
+  allowSelfVote = false,
+): VoterBallotStatus {
+  if (voterTeamId === null || !(voterTeamId in teams)) {
+    return { canVote: false, reason: 'not-on-team', message: 'You need to be on a team before you can vote' }
+  }
+  const eligibleTeamIds = ballotEligibleTeamIds(teams, voterTeamId, allowSelfVote)
+  const requiredAmounts = requiredBallotAmounts(eligibleTeamIds.length)
+  if (requiredAmounts.length === 0) {
+    return { canVote: false, reason: 'no-eligible-teams', message: 'There are no other teams to vote for' }
+  }
+  return { canVote: true, eligibleTeamIds, requiredAmounts }
+}
+
 function formatAmounts(amounts: readonly number[]): string {
   return amounts.map((a) => `$${a}`).join(', ')
 }
@@ -47,12 +72,12 @@ export function validateBallot(
   allowSelfVote = false,
 ): BallotValidationResult {
   const voterTeamId = session.participantRoster[voterId]?.teamId ?? null
-  const eligible = new Set(ballotEligibleTeamIds(session.teams, voterTeamId, allowSelfVote))
-  const required = requiredBallotAmounts(eligible.size)
-
-  if (required.length === 0) {
-    return { valid: false, error: 'There are no other teams to vote for' }
+  const status = voterBallotStatus(voterTeamId, session.teams, allowSelfVote)
+  if (!status.canVote) {
+    return { valid: false, error: status.message }
   }
+  const eligible = new Set(status.eligibleTeamIds)
+  const required = status.requiredAmounts
 
   if (!Array.isArray(allocations) || allocations.length !== required.length) {
     const plural = required.length === 1 ? '' : 's'

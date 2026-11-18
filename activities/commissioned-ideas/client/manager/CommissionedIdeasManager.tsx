@@ -3,6 +3,7 @@ import { useLocation, useParams, useNavigate } from 'react-router'
 import SessionHeader from '@src/components/common/SessionHeader'
 import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler'
 import { useManagerSession } from '../hooks/useCommissionedIdeasSession.js'
+import LateArrivalsPanel from './LateArrivalsPanel.js'
 import PhaseControls from './PhaseControls.js'
 import PresentationDashboard from './PresentationDashboard.js'
 import RegistrationDashboard from './RegistrationDashboard.js'
@@ -67,6 +68,12 @@ export default function CommissionedIdeasManager() {
         {snapshot && (
           <div className="mb-6">
             <PhaseControls sessionId={sessionId} instructorPasscode={instructorPasscode} snapshot={snapshot} />
+          </div>
+        )}
+
+        {snapshot && phase !== 'registration' && (
+          <div className="mb-6 empty:hidden">
+            <LateArrivalsPanel sessionId={sessionId} instructorPasscode={instructorPasscode} snapshot={snapshot} />
           </div>
         )}
 

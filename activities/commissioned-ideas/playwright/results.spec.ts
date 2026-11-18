@@ -63,13 +63,15 @@ test('instructor reveals 3rd, 2nd, then the winner and the student podium follow
     await student.getByRole('button', { name: '+ Create a new team' }).click()
     await expect(student.getByText('Your team: Team 1')).toBeVisible()
 
-    // Teams 2–4, plus an ungrouped voter.
+    // Teams 2–4. Eli (Team 2) is the voter — only students on a team can vote.
     const teamIds: string[] = []
+    const members: Participant[] = []
     for (const name of ['Eli', 'Fay', 'Gus']) {
       const who = await register(request, session.id, name)
+      members.push(who)
       teamIds.push((await asStudent(request, session.id, who, 'create-team')).teamId as string)
     }
-    const voter = await register(request, session.id, 'Voter')
+    const voter = members[0]!
     const state = await (await request.get(`/api/commissioned-ideas/${session.id}/state`)).json() as {
       data: { teams: Record<string, { id: string; registeredAt: number }> }
     }
@@ -139,25 +141,26 @@ test('teams with equal funding share the winner step', async ({ page, browser, r
     await expect(student.getByText('Your team: Team 1')).toBeVisible()
 
     const teamIds: string[] = []
-    for (const name of ['Eli', 'Fay']) {
+    const members: Participant[] = []
+    for (const name of ['Eli', 'Fay', 'Gus']) {
       const who = await register(request, session.id, name)
+      members.push(who)
       teamIds.push((await asStudent(request, session.id, who, 'create-team')).teamId as string)
     }
     const state = await (await request.get(`/api/commissioned-ideas/${session.id}/state`)).json() as {
       data: { teams: Record<string, { id: string; registeredAt: number }> }
     }
     const team1 = Object.values(state.data.teams).sort((a, b) => a.registeredAt - b.registeredAt)[0]!.id
-    const [team2, team3] = teamIds as [string, string]
+    const [team2, team3, team4] = teamIds as [string, string, string]
+    const [, fay, gus] = members as [Participant, Participant, Participant]
 
     await setPhase(request, session, 'presentation')
     await setPhase(request, session, 'voting')
-    // Team 1 and Team 2 both reach $800; Team 3 gets $200.
-    const v1 = await register(request, session.id, 'Voter One')
-    const v2 = await register(request, session.id, 'Voter Two')
-    await asStudent(request, session.id, v1, 'ballot', {
-      allocations: [{ teamId: team1, amount: 500 }, { teamId: team2, amount: 300 }, { teamId: team3, amount: 100 }],
+    // Fay (Team 3) and Gus (Team 4) vote: Teams 1 and 2 both reach $800; Teams 3 and 4 both get $100.
+    await asStudent(request, session.id, fay, 'ballot', {
+      allocations: [{ teamId: team1, amount: 500 }, { teamId: team2, amount: 300 }, { teamId: team4, amount: 100 }],
     })
-    await asStudent(request, session.id, v2, 'ballot', {
+    await asStudent(request, session.id, gus, 'ballot', {
       allocations: [{ teamId: team2, amount: 500 }, { teamId: team1, amount: 300 }, { teamId: team3, amount: 100 }],
     })
 
@@ -169,7 +172,7 @@ test('teams with equal funding share the winner step', async ({ page, browser, r
     await expect(page.getByRole('button', { name: 'Reveal 2nd place' })).toBeVisible()
 
     await page.getByRole('button', { name: 'Reveal 2nd place' }).click()
-    await expect(student.getByTestId('ci-podium-place-2')).toHaveAccessibleName('2nd place: Team 3, $200')
+    await expect(student.getByTestId('ci-podium-place-2')).toHaveAccessibleName('2nd place (tie): Team 3 and Team 4, $100')
 
     await page.getByRole('button', { name: 'Reveal the winner' }).click()
     await expect(student.getByTestId('ci-podium-place-1')).toHaveAccessibleName('1st place (tie): Team 1 and Team 2, $800')

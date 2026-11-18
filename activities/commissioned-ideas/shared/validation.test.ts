@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import type { CommissionedIdeasSessionData, CommissionedIdeasTeam } from './types.js'
-import { ballotEligibleTeamIds, requiredBallotAmounts, validateBallot } from './validation.js'
+import { ballotEligibleTeamIds, requiredBallotAmounts, validateBallot, voterBallotStatus } from './validation.js'
 
 function team(id: string): CommissionedIdeasTeam {
   return {
@@ -28,7 +28,6 @@ function session(teamIds: string[], voterTeamId: string | null): CommissionedIde
     maxTeamSize: 4,
     groupingMode: 'manual',
     presentationRound: 1,
-    allowLateRegistration: true,
     teams: Object.fromEntries(teamIds.map((id) => [id, team(id)])),
     participantRoster: {
       v: { id: 'v', name: 'Voter', teamId: voterTeamId, connected: true, lastSeen: 0, rejectedByInstructor: false, token: 'T' },
@@ -75,8 +74,8 @@ const validationCases: {
   error?: RegExp
 }[] = [
   {
-    name: 'full ballot, ungrouped voter',
-    teams: ['a', 'b', 'c'], voterTeam: null,
+    name: 'full ballot (voter on a fourth team)',
+    teams: ['a', 'b', 'c', 'v'], voterTeam: 'v',
     allocations: [{ teamId: 'a', amount: 500 }, { teamId: 'b', amount: 300 }, { teamId: 'c', amount: 100 }],
     valid: true,
   },
@@ -118,31 +117,37 @@ const validationCases: {
   },
   {
     name: 'same team twice',
-    teams: ['a', 'b', 'c'], voterTeam: null,
+    teams: ['a', 'b', 'c', 'v'], voterTeam: 'v',
     allocations: [{ teamId: 'a', amount: 500 }, { teamId: 'a', amount: 300 }, { teamId: 'c', amount: 100 }],
     valid: false, error: /different team/,
   },
   {
     name: 'same amount twice',
-    teams: ['a', 'b', 'c'], voterTeam: null,
+    teams: ['a', 'b', 'c', 'v'], voterTeam: 'v',
     allocations: [{ teamId: 'a', amount: 500 }, { teamId: 'b', amount: 500 }, { teamId: 'c', amount: 100 }],
     valid: false, error: /Duplicate amount/,
   },
   {
     name: 'unknown team',
-    teams: ['a', 'b', 'c'], voterTeam: null,
+    teams: ['a', 'b', 'c', 'v'], voterTeam: 'v',
     allocations: [{ teamId: 'a', amount: 500 }, { teamId: 'b', amount: 300 }, { teamId: 'zz', amount: 100 }],
     valid: false, error: /Unknown team/,
   },
   {
     name: 'not an array',
-    teams: ['a', 'b', 'c'], voterTeam: null,
+    teams: ['a', 'b', 'c', 'v'], voterTeam: 'v',
     allocations: { a: 500 },
     valid: false, error: /exactly 3 awards/,
   },
   {
+    name: 'ungrouped voter (late arrival) cannot vote',
+    teams: ['a', 'b', 'c'], voterTeam: null,
+    allocations: [{ teamId: 'a', amount: 500 }, { teamId: 'b', amount: 300 }, { teamId: 'c', amount: 100 }],
+    valid: false, error: /on a team/,
+  },
+  {
     name: 'malformed entry',
-    teams: ['a'], voterTeam: null,
+    teams: ['a', 'v'], voterTeam: 'v',
     allocations: ['a'],
     valid: false, error: /Invalid allocation/,
   },
@@ -153,5 +158,23 @@ for (const row of validationCases) {
     const result = validateBallot(row.allocations, 'v', session(row.teams, row.voterTeam))
     assert.equal(result.valid, row.valid, result.error ?? 'expected invalid ballot')
     if (row.error) assert.match(result.error ?? '', row.error)
+  })
+}
+
+// ── voterBallotStatus: who may vote, and with which awards ───────────────────
+
+const statusCases: { name: string; teams: string[]; voterTeam: string | null; expected: unknown }[] = [
+  { name: 'ungrouped student', teams: ['a', 'b'], voterTeam: null, expected: { canVote: false, reason: 'not-on-team' } },
+  { name: 'team id that no longer exists', teams: ['a', 'b'], voterTeam: 'gone', expected: { canVote: false, reason: 'not-on-team' } },
+  { name: 'only team', teams: ['a'], voterTeam: 'a', expected: { canVote: false, reason: 'no-eligible-teams' } },
+  { name: 'two teams', teams: ['a', 'b'], voterTeam: 'a', expected: { canVote: true, eligibleTeamIds: ['b'], requiredAmounts: [500] } },
+  { name: 'four teams', teams: ['a', 'b', 'c', 'd'], voterTeam: 'b', expected: { canVote: true, eligibleTeamIds: ['a', 'c', 'd'], requiredAmounts: [500, 300, 100] } },
+]
+
+for (const row of statusCases) {
+  void test(`voterBallotStatus: ${row.name}`, () => {
+    const status = voterBallotStatus(row.voterTeam, Object.fromEntries(row.teams.map((id) => [id, {}])))
+    const { message: _message, ...rest } = status as Record<string, unknown>
+    assert.deepEqual(rest, row.expected)
   })
 }

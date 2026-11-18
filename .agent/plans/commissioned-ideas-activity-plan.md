@@ -2,6 +2,10 @@
 
 This plan outlines a new multi-phase ActiveBits activity for classroom presentations. `Commissioned Ideas` should stay self-contained under `activities/commissioned-ideas/`, and the product description can continue to frame it as Shark Tank-inspired while the activity itself keeps a broader classroom-friendly name.
 
+## Status (2026-11-16)
+
+Phases 0–7 are implemented and committed on `feat-commissioned-ideas`: registration, team formation with instructor drag/drop, naming, presentations and rounds, voting with reduced ballots for small classes, and the results podium with shared steps for equal funding. Phase 8 (verification and polish) is in progress; see its checklist for the remaining open question.
+
 ## Active bootstrap fix (2026-11-16)
 
 Owner: `activities/commissioned-ideas/client/manager/`. The manager must resolve its instructor passcode from the same-tab navigation payload or the activity's in-memory create-session handoff without writing it to browser storage. Repeated React effect setup for the same session must return the same passcode; if neither source has a valid passcode, manager controls stay unavailable and the UI shows a recovery message.
@@ -145,7 +149,6 @@ interface SharkTankSessionData {
   maxTeamSize: number
   groupingMode: 'manual' | 'random'
   presentationRound: number
-  allowLateRegistration: boolean
   teams: Record<string, SharkTankTeam>
   participantRoster: Record<string, {
     id: string
@@ -278,7 +281,7 @@ This gives a deterministic order for the full rankings table. Podium steps ignor
 | `GET` | `/api/commissioned-ideas/:sessionId/state` | Return current student-safe snapshot |
 | `POST` | `/api/commissioned-ideas/:sessionId/register-participant` | Register/reconnect a participant |
 | `POST` | `/api/commissioned-ideas/:sessionId/participant-name` | Instructor edits or rejects a participant name |
-| `POST` | `/api/commissioned-ideas/:sessionId/settings` | Instructor sets `maxTeamSize`, `groupingMode`, `studentGroupingLocked`, `namingLocked`, `allowLateRegistration` |
+| `POST` | `/api/commissioned-ideas/:sessionId/settings` | Instructor sets `maxTeamSize`, `groupingMode`, `studentGroupingLocked`, `namingLocked` |
 | `POST` | `/api/commissioned-ideas/:sessionId/create-team` | Student creates a team and joins it (manual mode, unlocked) |
 | `POST` | `/api/commissioned-ideas/:sessionId/join-team` | Student joins or switches to a team (manual mode, unlocked) |
 | `POST` | `/api/commissioned-ideas/:sessionId/leave-team` | Student leaves their team (manual mode, unlocked) |
@@ -297,13 +300,16 @@ This gives a deterministic order for the full rankings table. Podium steps ignor
 
 ### WebSocket Messages
 
-- `commissioned-ideas:session-state`
-- `commissioned-ideas:registration-updated`
-- `commissioned-ideas:phase-changed`
-- `commissioned-ideas:team-updated`
-- `commissioned-ideas:presentation-active`
-- `commissioned-ideas:ballot-progress`
-- `commissioned-ideas:podium-step`
+As built (2026-11-16): every server broadcast carries a full role-appropriate snapshot in `data`, and the client hooks treat the four snapshot types identically (`isSnapshotMessage`).
+
+- `commissioned-ideas:session-state` — initial snapshot on connect (students) or after manager auth
+- `commissioned-ideas:registration-updated` — any roster, team, naming, presentation, or ballot change
+- `commissioned-ideas:phase-changed` — phase transitions
+- `commissioned-ideas:podium-step` — podium reveal steps
+- `commissioned-ideas:manager-auth` — client → server, carries the instructor passcode after connect
+- `commissioned-ideas:error` — server → client failure notice
+
+The originally proposed `team-updated`, `presentation-active`, and `ballot-progress` messages were not needed; those changes ride on `registration-updated`.
 
 The outer message shape should follow the repo's existing activity-local realtime patterns rather than introducing new shared websocket infrastructure.
 
@@ -465,7 +471,9 @@ Owner: `activities/commissioned-ideas/server/routes.ts` (`removeParticipantFromT
 
 Invariant: `participant.teamId === team.id` if and only if `participant.id ∈ team.memberIds`. A team with zero members is deleted. Rejected participants are never members of a team. When a participant leaves a team (any path: student leave/switch, instructor move/remove, rejection, reshuffle), their votes in that team's `groupNameVotes`/`projectNameVotes` are deleted and the team's displayed names are re-resolved.
 
-Failure behavior: membership mutations that would exceed `maxTeamSize` return `409` without mutating state. Student-initiated membership changes after `studentGroupingLocked` return `403`; instructor moves are always allowed during registration. Any team mutation outside the `registration` phase returns `409`. Full reshuffle while grouping is locked returns `409`.
+Failure behavior: membership mutations that would exceed `maxTeamSize` return `409` without mutating state. Student-initiated membership changes after `studentGroupingLocked` return `403`; instructor moves are always allowed during registration. Any team mutation outside the `registration` phase returns `409`, with one exception: late placement. Full reshuffle while grouping is locked returns `409`.
+
+Late arrivals (decision 2026-11-16): students may register in any phase. Outside `registration`, the instructor may place an ungrouped, non-rejected student onto an existing team (`assign-participant` with a `teamId`). This may exceed `maxTeamSize`, since the size setting is only editable during registration. Creating teams, removing members, or moving a grouped student remain `409` outside registration, because they would invalidate ballots or the presentation queue. The manager shows ungrouped students in a "Late arrivals" panel in every phase after registration.
 
 ### Phase 4: Team Naming And Proposal Voting
 
@@ -554,7 +562,7 @@ Implementation:
 
 Owner: `activities/commissioned-ideas/shared/validation.ts` (`ballotEligibleTeamIds`, `requiredBallotAmounts`, `validateBallot`). The server route and the student ballot UI both use these.
 
-- Eligible teams for a voter: every existing team except the voter's own (`participant.teamId`). Ungrouped voters can vote for every team.
+- Only students on a team can vote (decision 2026-11-16): an ungrouped student, including a late arrival, gets `409` until the instructor places them. Eligible teams: every existing team except the voter's own. `voterBallotStatus` in `shared/validation.ts` is the single owner of "can this participant vote, and with how many awards".
 - Ballot size: `min(3, eligibleTeamCount)`. The ballot keeps the top amounts in order: 1 team → `$500`; 2 teams → `$500, $300`; 3 or more → `$500, $300, $100` (decision 2026-11-16). A voter with zero eligible teams cannot vote.
 - A valid ballot uses each required amount exactly once, on distinct eligible teams. Anything else returns `400` with a reason and a structured `warn` log; state is unchanged.
 - Ballots are accepted only in `voting` (`409` otherwise), from authenticated, non-rejected participants. Submitting again replaces the voter's ballot. Going results → voting reopens editing; existing ballots are kept.
@@ -601,11 +609,15 @@ Goal:
 - Close the feature with the expected repo validation and durable notes.
 
 Implementation:
-- [ ] Add any missing activity-specific tests
-- [ ] Run repo-appropriate validation commands
-- [ ] Run `npm run test:e2e` if shared browser seams changed materially
-- [ ] Update docs if runtime/build/deployment behavior changes
-- [ ] Record durable implementation discoveries in `.agent/knowledge/`
+- [x] Add any missing activity-specific tests (snapshot message filter)
+- [x] Run repo-appropriate validation commands (`npm test` passes)
+- [x] Run `npm run test:e2e` if shared browser seams changed materially (no shared seams changed; full suite run as a final check: 94 passed, 12 skipped, none of them in this activity)
+- [x] Update docs if runtime/build/deployment behavior changes (README activity list; no deployment or env changes, so `DEPLOYMENT.md` is untouched)
+- [x] Record durable implementation discoveries in `.agent/knowledge/`
+- [x] Sync the plan's REST and WebSocket contract sections with what was built
+- [x] Remove the brief ballot-form flash after submitting (local copy shown until the server snapshot arrives)
+- [x] Late arrivals (decision 2026-11-16): remove the unused `allowLateRegistration` setting; students may always join; only students on a team can vote; the instructor places late arrivals onto existing teams from a "Late arrivals" panel in any phase after registration
+  - Owners: `shared/membership.ts` (`checkInstructorMove`) and `shared/validation.ts` (`voterBallotStatus`), each with a decision-table test; `late-arrival.spec.ts` covers the browser flow
 
 Exit criteria:
 - The feature is reviewable, validated, and leaves reusable context for future contributors.

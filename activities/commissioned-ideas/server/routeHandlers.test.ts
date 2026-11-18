@@ -182,7 +182,6 @@ void test('create route initializes default session data', async () => {
   assert.equal(data.maxTeamSize, 4)
   assert.equal(data.groupingMode, 'manual')
   assert.equal(data.presentationRound, 1)
-  assert.equal(data.allowLateRegistration, true)
   assert.deepEqual(data.teams, {})
   assert.deepEqual(data.participantRoster, {})
   assert.deepEqual(data.ballots, {})
@@ -357,7 +356,6 @@ void test('state route snapshot participantRoster omits instructor-only fields',
       maxTeamSize: 4,
       groupingMode: 'manual',
       presentationRound: 1,
-      allowLateRegistration: true,
       teams: {},
       participantRoster: {
         p1: {
@@ -413,7 +411,6 @@ void test('state route snapshot omits rejected participants', async () => {
       maxTeamSize: 4,
       groupingMode: 'manual',
       presentationRound: 1,
-      allowLateRegistration: true,
       teams: {},
       participantRoster: {
         approved: {
@@ -470,7 +467,6 @@ void test('state route snapshot preserves team groupName from persisted value wh
       maxTeamSize: 4,
       groupingMode: 'manual',
       presentationRound: 1,
-      allowLateRegistration: true,
       teams: {
         t1: {
           id: 't1',
@@ -1877,13 +1873,41 @@ void test('ballot route accepts a reduced two-award ballot when only two other t
   assert.equal(res.statusCode, 200)
 })
 
-void test('ballot route lets an ungrouped student vote for every team', async () => {
+void test('a late arrival cannot vote until the instructor places them on a team', async () => {
   const s = await setupVotingSession(3)
   const [a, b, c] = s.teamIds as [string, string, string]
-  const res = await s.asStudent('ballot', s.loner, {
-    allocations: [{ teamId: a, amount: 500 }, { teamId: b, amount: 300 }, { teamId: c, amount: 100 }],
-  })
+  const late = await s.register('Late Larry')
+  assert.equal(s.data().phase, 'voting')
+
+  console.log('[TEST] expecting 409 ballot from ungrouped late arrival')
+  const early = await s.asStudent('ballot', late, { allocations: [{ teamId: b, amount: 500 }, { teamId: c, amount: 300 }] })
+  assert.equal(early.statusCode, 409)
+
+  const placed = await s.asInstructor('assign-participant', { participantId: late.participantId, teamId: a })
+  assert.equal(placed.statusCode, 200)
+  assert.equal(s.data().participantRoster[late.participantId]?.teamId, a)
+
+  const res = await s.asStudent('ballot', late, { allocations: [{ teamId: b, amount: 500 }, { teamId: c, amount: 300 }] })
   assert.equal(res.statusCode, 200)
+})
+
+void test('late placement may exceed the max team size; other moves stay locked after registration', async () => {
+  const s = await setupVotingSession(2)
+  const [a, b] = s.teamIds as [string, string]
+  await s.asInstructor('phase', { phase: 'presentation' })
+  s.data().maxTeamSize = 1
+  const late = await s.register('Late Larry')
+
+  const placed = await s.asInstructor('assign-participant', { participantId: late.participantId, teamId: a })
+  assert.equal(placed.statusCode, 200, 'team a already has 1 of 1 members')
+  assert.equal(s.data().teams[a]?.memberIds.length, 2)
+
+  console.log('[TEST] expecting 409 for non-late moves after registration')
+  assert.equal((await s.asInstructor('assign-participant', { participantId: late.participantId, teamId: b })).statusCode, 409, 'grouped student cannot move')
+  assert.equal((await s.asInstructor('assign-participant', { participantId: late.participantId, teamId: null })).statusCode, 409, 'no removals')
+  const other = await s.register('Other Late')
+  assert.equal((await s.asInstructor('assign-participant', { participantId: other.participantId, newTeam: true })).statusCode, 409, 'no new teams')
+  assert.equal(Object.keys(s.data().teams).length, 2)
 })
 
 void test('ballot route rejects invalid ballots without storing them', async () => {
@@ -1942,7 +1966,8 @@ void test('ballots survive results → voting and can be edited again', async ()
 async function setupResultsSession() {
   const s = await setupVotingSession(4)
   const [t1, t2, t3, t4] = s.teamIds as [string, string, string, string]
-  await s.asStudent('ballot', s.loner, {
+  // Team 1's member votes, so Team 1 ends on $0.
+  await s.asStudent('ballot', s.members[0]!, {
     allocations: [{ teamId: t4, amount: 500 }, { teamId: t3, amount: 300 }, { teamId: t2, amount: 100 }],
   })
   await s.asInstructor('phase', { phase: 'results' })
@@ -2010,9 +2035,10 @@ void test('no funding at all means nothing to reveal', async () => {
 })
 
 void test('two funded teams reveal 2nd then winner', async () => {
-  const s = await setupVotingSession(2)
-  const [a, b] = s.teamIds as [string, string]
-  await s.asStudent('ballot', s.loner, { allocations: [{ teamId: a, amount: 500 }, { teamId: b, amount: 300 }] })
+  const s = await setupVotingSession(3)
+  const [, b, c] = s.teamIds as [string, string, string]
+  // Team 1's member funds b and c; Team 1 stays at $0, so there are two podium steps.
+  await s.asStudent('ballot', s.members[0]!, { allocations: [{ teamId: b, amount: 500 }, { teamId: c, amount: 300 }] })
   await s.asInstructor('phase', { phase: 'results' })
   const first = await s.asInstructor('podium-step', { action: 'next' })
   assert.equal((first.body as { step: string }).step, 'second')
@@ -2031,14 +2057,13 @@ void test('podium-step requires instructor auth, results phase, and a valid acti
 })
 
 void test('teams with equal funding share a podium step', async () => {
-  const s = await setupVotingSession(4)
-  const [t1, t2, t3, t4] = s.teamIds as [string, string, string, string]
-  // Two ungrouped voters: t3 and t4 both end on $800; t2 gets $400; t1 $0.
-  const v2 = await s.register('Voter Two')
-  await s.asStudent('ballot', s.loner, {
+  const s = await setupVotingSession(5)
+  const [t1, t2, t3, t4, t5] = s.teamIds as [string, string, string, string, string]
+  // Members of t1 and t5 vote: t3 and t4 both end on $800; t2 gets $200; t1 and t5 stay at $0.
+  await s.asStudent('ballot', s.members[0]!, {
     allocations: [{ teamId: t4, amount: 500 }, { teamId: t3, amount: 300 }, { teamId: t2, amount: 100 }],
   })
-  await s.asStudent('ballot', v2, {
+  await s.asStudent('ballot', s.members[4]!, {
     allocations: [{ teamId: t3, amount: 500 }, { teamId: t4, amount: 300 }, { teamId: t2, amount: 100 }],
   })
   await s.asInstructor('phase', { phase: 'results' })
@@ -2051,5 +2076,6 @@ void test('teams with equal funding share a podium step', async () => {
   assert.equal(winners?.totalDollars, 800)
   assert.deepEqual(snapshot.podium.find((e) => e.place === 2)?.teams.map((t) => t.teamId), [t2])
   assert.equal(JSON.stringify(snapshot.podium).includes(t1), false)
+  assert.equal(JSON.stringify(snapshot.podium).includes(t5), false)
   assert.equal(s.data().podiumRevealStep, 'complete', '2 places: second → winner → complete')
 })

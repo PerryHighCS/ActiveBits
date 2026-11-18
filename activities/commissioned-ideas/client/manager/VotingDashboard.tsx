@@ -1,4 +1,4 @@
-import { ballotEligibleTeamIds, requiredBallotAmounts } from '../../shared/validation.js'
+import { voterBallotStatus } from '../../shared/validation.js'
 import type { ManagerParticipant, ManagerSnapshot } from '../hooks/useCommissionedIdeasSession.js'
 import { sortTeams, teamLabelsById } from '../teamLabels.js'
 
@@ -16,19 +16,21 @@ export default function VotingDashboard({ snapshot }: VotingDashboardProps) {
   const labels = teamLabelsById(snapshot.teams)
   const submitted = new Set(snapshot.ballotSubmitterIds)
   const active = Object.values(snapshot.participantRoster).filter((p) => !p.rejectedByInstructor)
-  const canVote = (p: ManagerParticipant) =>
-    requiredBallotAmounts(ballotEligibleTeamIds(snapshot.teams, p.teamId).length).length > 0
-  const voters = active.filter(canVote)
+  const statusOf = (p: ManagerParticipant) => voterBallotStatus(p.teamId, snapshot.teams)
+  const voters = active.filter((p) => statusOf(p).canVote)
   const votedCount = voters.filter((p) => submitted.has(p.id)).length
-  const cannotVote = active.filter((p) => !canVote(p))
+  // Late arrivals are listed (with placement controls) in the Late arrivals panel instead.
+  const waitingForTeam = active.filter((p) => p.teamId === null).length
+  const cannotVote = active.filter((p) => {
+    const status = statusOf(p)
+    return !status.canVote && status.reason === 'no-eligible-teams'
+  })
 
   const groups: VoterGroup[] = sortTeams(snapshot.teams).map((team) => ({
     key: team.id,
     label: labels.get(team.id) ?? '',
     voters: voters.filter((p) => p.teamId === team.id),
   }))
-  const ungrouped = voters.filter((p) => p.teamId === null)
-  if (ungrouped.length > 0) groups.push({ key: 'ungrouped', label: 'Not on a team', voters: ungrouped })
 
   const percent = voters.length === 0 ? 0 : Math.round((votedCount / voters.length) * 100)
 
@@ -52,6 +54,11 @@ export default function VotingDashboard({ snapshot }: VotingDashboardProps) {
         <p className="mt-3 text-xs text-gray-500">
           Totals stay hidden until you move to Results. Students can change their ballots until then.
         </p>
+        {waitingForTeam > 0 && (
+          <p className="mt-1 text-xs font-medium text-indigo-700" data-testid="ci-waiting-for-team">
+            {waitingForTeam} student{waitingForTeam === 1 ? ' is' : 's are'} waiting for a team and can’t vote yet — see Late arrivals.
+          </p>
+        )}
       </section>
 
       <section aria-labelledby="ci-voters-title" className="bg-white rounded-xl border border-gray-200 divide-y divide-gray-100">
