@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import type { ManagerParticipant, ManagerTeam } from '../hooks/useCommissionedIdeasSession.js'
-import { buildAssignBody, canMoveTo, listMoveOptions, type MoveDestination } from './teamBoardModel.js'
+import { buildAssignBody, canMoveTo, listMoveOptions, moveFocusReady, type MoveDestination } from './teamBoardModel.js'
 
 function participant(id: string, teamId: string | null, rejected = false): ManagerParticipant {
   return { id, name: id, teamId, connected: true, lastSeen: 0, rejectedByInstructor: rejected }
@@ -75,3 +75,28 @@ void test('buildAssignBody encodes each destination for the assign-participant r
   assert.deepEqual(buildAssignBody('p', 'new'), { participantId: 'p', newTeam: true })
   assert.deepEqual(buildAssignBody('p', 'ungrouped'), { participantId: 'p', teamId: null })
 })
+
+// ── Keyboard move focus restoration ──────────────────────────────────────────
+const focusCases: {
+  name: string
+  request: Parameters<typeof moveFocusReady>[0]
+  teamId: string | null
+  busy: boolean
+  expected: boolean
+}[] = [
+  { name: 'no request', request: null, teamId: 'B', busy: false, expected: false },
+  { name: 'request for another participant', request: { participantId: 'other', from: 'team:A', failed: false }, teamId: 'B', busy: false, expected: false },
+  { name: 'moved, still busy', request: { participantId: 'p', from: 'team:A', failed: false }, teamId: 'B', busy: true, expected: false },
+  { name: 'HTTP done, snapshot not yet arrived', request: { participantId: 'p', from: 'team:A', failed: false }, teamId: 'A', busy: false, expected: false },
+  { name: 'snapshot confirms team → team', request: { participantId: 'p', from: 'team:A', failed: false }, teamId: 'B', busy: false, expected: true },
+  { name: 'snapshot confirms new team', request: { participantId: 'p', from: 'ungrouped', failed: false }, teamId: 'NEW', busy: false, expected: true },
+  { name: 'snapshot confirms ungrouped', request: { participantId: 'p', from: 'team:A', failed: false }, teamId: null, busy: false, expected: true },
+  { name: 'failed move refocuses in place', request: { participantId: 'p', from: 'team:A', failed: true }, teamId: 'A', busy: false, expected: true },
+  { name: 'failed move waits for controls', request: { participantId: 'p', from: 'team:A', failed: true }, teamId: 'A', busy: true, expected: false },
+]
+
+for (const row of focusCases) {
+  void test(`moveFocusReady: ${row.name}`, () => {
+    assert.equal(moveFocusReady(row.request, { id: 'p', teamId: row.teamId }, row.busy), row.expected)
+  })
+}

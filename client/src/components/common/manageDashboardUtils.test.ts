@@ -768,20 +768,20 @@ void test('storeCreateSessionBootstrapPayload skips sessionStorage when fallback
       'commissioned-ideas',
       'session-123',
       {
+        id: 'non-sensitive-id',
         instructorPasscode: 'teacher-passcode',
       },
       10,
       { persistToSessionStorage: false },
     )
 
-    assert.equal(
-      sessionStorage.has('create-session-bootstrap:commissioned-ideas:session-123'),
-      false,
-    )
+    // `id` is not filtered as sensitive, so an empty store proves the option itself works.
+    assert.equal(sessionStorage.size, 0)
 
     assert.deepEqual(
       consumeCreateSessionBootstrapPayload('commissioned-ideas', 'session-123', 10),
       {
+        id: 'non-sensitive-id',
         instructorPasscode: 'teacher-passcode',
       },
     )

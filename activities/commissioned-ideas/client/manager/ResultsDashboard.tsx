@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import {
   fundingRanks,
   nextPodiumStep,
@@ -5,6 +6,7 @@ import {
   podiumStepActionLabel,
   revealedPodium,
 } from '../../shared/podium.js'
+import type { PodiumRevealStep } from '../../shared/types.js'
 import type { ManagerSnapshot } from '../hooks/useCommissionedIdeasSession.js'
 import PodiumStage, { winnerHeadline } from '../PodiumStage.js'
 import { teamLabelsById } from '../teamLabels.js'
@@ -21,6 +23,16 @@ export default function ResultsDashboard({ sessionId, instructorPasscode, snapsh
   const ranking = snapshot.results ?? []
   const labels = teamLabelsById(snapshot.teams)
   const step = snapshot.podiumRevealStep
+  // The step a reveal was requested from. The button stays pending until a snapshot
+  // moves past it (the HTTP response can arrive before the WebSocket snapshot), so a
+  // second click cannot reveal a place the button does not name.
+  const [revealFrom, setRevealFrom] = useState<PodiumRevealStep | null>(null)
+  const [seenStep, setSeenStep] = useState(step)
+  if (seenStep !== step) {
+    setSeenStep(step)
+    setRevealFrom(null)
+  }
+  const revealPending = revealFrom !== null && revealFrom === step
   const placeCount = podiumPlaceCount(ranking)
   const next = nextPodiumStep(step, placeCount)
   const entries = revealedPodium(ranking, step)
@@ -51,15 +63,22 @@ export default function ResultsDashboard({ sessionId, instructorPasscode, snapsh
         <div className="flex flex-wrap justify-center gap-2">
           <button
             type="button"
-            disabled={busy || next === null}
-            onClick={() => { void call('podium-step', { action: 'next' }) }}
+            disabled={busy || revealPending || next === null}
+            aria-busy={revealPending}
+            onClick={() => {
+              const from = step
+              setRevealFrom(from)
+              void call('podium-step', { action: 'next' }).then((ok) => {
+                if (!ok) setRevealFrom((current) => (current === from ? null : current))
+              })
+            }}
             className="rounded-lg bg-amber-600 px-6 py-2.5 text-base font-semibold text-white hover:bg-amber-700 disabled:opacity-40"
           >
             {podiumStepActionLabel(next)}
           </button>
           <button
             type="button"
-            disabled={busy || step === 'hidden'}
+            disabled={busy || revealPending || step === 'hidden'}
             onClick={() => { void call('podium-step', { action: 'reset' }) }}
             className="rounded-lg border border-gray-300 px-4 py-2.5 text-sm font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-40"
           >

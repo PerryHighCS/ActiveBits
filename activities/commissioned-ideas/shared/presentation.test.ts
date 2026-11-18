@@ -90,6 +90,12 @@ void test('isTeamPermutation requires every current team exactly once', () => {
   assert.equal(isTeamPermutation('a,b', teams), false, 'not an array')
 })
 
+void test('isTeamPermutation rejects inherited property names', () => {
+  assert.equal(isTeamPermutation(['__proto__'], { a: {} }), false, '__proto__')
+  assert.equal(isTeamPermutation(['toString'], { a: {} }), false, 'toString')
+  assert.equal(isTeamPermutation(['constructor', 'a'], { a: {}, b: {} }), false, 'constructor')
+})
+
 // ── Rounds ───────────────────────────────────────────────────────────────────
 
 void test('unpresentedTeamIds only counts history from the given round and skips deleted teams', () => {

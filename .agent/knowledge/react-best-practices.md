@@ -348,3 +348,9 @@ When passing a browser method such as `window.confirm` or `window.fetch` to a he
 ## Stable renderer component maps
 
 For renderers that accept React component maps (such as `react-markdown`), memoize the map when the variant is unchanged. Recreating functions in the map on every parent render changes their React element types, which unmounts and reloads descendants such as image nodes. Add a DOM-identity regression test when preserving media state matters.
+
+## Server-confirmed UI: wait for the snapshot, not the HTTP response
+
+When an action's visible result arrives by WebSocket snapshot (not the POST response), the response can land first. Keep the control pending until the snapshot shows the change, and release it on failure. Otherwise a second click acts on stale state, for example revealing a podium place the button does not name. Examples: Commissioned Ideas `ResultsDashboard` (reveal pending until `podiumRevealStep` changes) and `teamBoardModel.moveFocusReady` (restore focus after a keyboard move once the snapshot re-parents the chip). Moving an item to another list re-creates its component, so a focused control inside it is lost unless focus is restored explicitly.
+
+Snapshot state that belongs to a session identity should be tagged with that identity and hidden when the identity changes (`managerViewForIdentity`). Resetting it in an effect still renders the old session's data for one commit.

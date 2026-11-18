@@ -78,3 +78,30 @@ export function buildAssignBody(participantId: string, destination: MoveDestinat
   if (destination === 'ungrouped') return { participantId, teamId: null }
   return { participantId, teamId: destination.slice('team:'.length) }
 }
+
+/**
+ * A keyboard ("Move to" select) move whose focus must be restored. The chip is
+ * re-created under its destination list, so the focused select is lost on success.
+ */
+export interface MoveFocusRequest {
+  participantId: string
+  /** Where the participant was when the move was requested. */
+  from: MoveDestination
+  /** The request failed; focus the participant's select where it still is. */
+  failed: boolean
+}
+
+/**
+ * True when the chip for `participant` should take focus for `request` now:
+ * the request is for this participant, controls are enabled again, and either the
+ * server snapshot shows the participant moved or the request failed. Waiting for the
+ * snapshot (not just the HTTP response) avoids focusing a chip that is about to unmount.
+ */
+export function moveFocusReady(
+  request: MoveFocusRequest | null,
+  participant: Pick<ManagerParticipant, 'id' | 'teamId'>,
+  busy: boolean,
+): boolean {
+  if (!request || request.participantId !== participant.id || busy) return false
+  return request.failed || currentDestination(participant) !== request.from
+}

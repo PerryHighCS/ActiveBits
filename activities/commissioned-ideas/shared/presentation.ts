@@ -80,7 +80,7 @@ export function isTeamPermutation(teamIds: unknown, teams: Record<string, unknow
   if (teamIds.length !== existing.length) return false
   const seen = new Set<string>()
   for (const id of teamIds) {
-    if (typeof id !== 'string' || !(id in teams) || seen.has(id)) return false
+    if (typeof id !== 'string' || !Object.hasOwn(teams, id) || seen.has(id)) return false
     seen.add(id)
   }
   return true

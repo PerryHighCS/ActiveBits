@@ -56,9 +56,8 @@ export default function RegistrationDashboard({
     await call('assign-random', { scope })
   }
 
-  const handleMove = async (participantId: string, destination: MoveDestination) => {
-    await call('assign-participant', buildAssignBody(participantId, destination))
-  }
+  const handleMove = (participantId: string, destination: MoveDestination): Promise<boolean> =>
+    call('assign-participant', buildAssignBody(participantId, destination))
 
   const handleModerateProposal = async (teamId: string, kind: ProposalKind, proposalId: string, rejected: boolean) => {
     await call('team/proposal-moderation', { teamId, kind, proposalId, rejected })
@@ -136,7 +135,7 @@ export default function RegistrationDashboard({
         participantRoster={snapshot.participantRoster}
         maxTeamSize={snapshot.maxTeamSize}
         busy={busy}
-        onMove={(participantId, destination) => { void handleMove(participantId, destination) }}
+        onMove={handleMove}
         onModerateProposal={(teamId, kind, proposalId, rejected) => {
           void handleModerateProposal(teamId, kind, proposalId, rejected)
         }}
@@ -191,8 +190,9 @@ function SettingsPanel({
   }
 
   const handleMaxBlur = () => {
-    const v = parseInt(maxInput, 10)
-    if (!Number.isNaN(v) && v >= 2) {
+    const trimmed = maxInput.trim()
+    const v = trimmed === '' ? Number.NaN : Number(trimmed)
+    if (Number.isInteger(v) && v >= 2) {
       void requestMaxTeamSize(v)
     } else {
       setMaxInput(String(serverMax))
@@ -359,8 +359,10 @@ function ParticipantModerationPanel({
 
   const handleSaveEdit = async () => {
     if (!editState) return
-    const ok = await callModeration({ participantId: editState.participantId, name: editState.name })
-    if (ok) setEditState(null)
+    const submittedId = editState.participantId
+    const ok = await callModeration({ participantId: submittedId, name: editState.name })
+    // Only close the editor that was saved; another row may have been opened meanwhile.
+    if (ok) setEditState((current) => (current?.participantId === submittedId ? null : current))
   }
 
   const handleReject = async (participantId: string) => {

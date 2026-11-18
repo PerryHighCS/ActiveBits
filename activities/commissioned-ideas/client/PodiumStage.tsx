@@ -48,7 +48,7 @@ export default function PodiumStage({ entries, placeCount, labels, highlightTeam
               aria-label={entry
                 ? `${PLACE_NAMES[place]}${tie ? ' (tie)' : ''}: ${joinNames(names)}, $${entry.totalDollars}`
                 : `${PLACE_NAMES[place]}: not yet revealed`}
-              className="flex flex-1 max-w-[12rem] flex-col items-center"
+              className="flex min-w-0 flex-1 max-w-[12rem] flex-col items-center"
             >
               {entry ? (
                 <div

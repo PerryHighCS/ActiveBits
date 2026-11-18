@@ -28,6 +28,12 @@ export default function VotingBallot({ teams, myTeamId, myBallot, busy, onSubmit
   useEffect(() => {
     setJustSubmitted(null)
   }, [serverSubmittedAt])
+  // Persistent polite live region (rendered in both the form and submitted views) so the
+  // submit result is announced even though the form is replaced and focus does not move.
+  const [announcement, setAnnouncement] = useState('')
+  const statusRegion = (
+    <p role="status" aria-live="polite" data-testid="ci-ballot-status" className="sr-only">{announcement}</p>
+  )
 
   if (!status.canVote) {
     return (
@@ -48,7 +54,9 @@ export default function VotingBallot({ teams, myTeamId, myBallot, busy, onSubmit
 
   const submit = async () => {
     if (!allocations) return
+    const wasUpdate = myBallot !== null
     if (await onSubmit(allocations)) {
+      setAnnouncement(wasUpdate ? 'Ballot updated.' : 'Ballot submitted.')
       setJustSubmitted(allocations)
       setEditing(false)
     }
@@ -58,6 +66,8 @@ export default function VotingBallot({ teams, myTeamId, myBallot, busy, onSubmit
 
   if (shownAllocations && !editing) {
     return (
+      <>
+      {statusRegion}
       <section aria-labelledby="ci-ballot-title" className="p-4">
         <div className="rounded-xl border border-green-300 bg-green-50 p-5 space-y-3">
           <h2 id="ci-ballot-title" className="text-lg font-semibold text-green-800">✓ Ballot submitted</h2>
@@ -76,6 +86,7 @@ export default function VotingBallot({ teams, myTeamId, myBallot, busy, onSubmit
             type="button"
             onClick={() => {
               setDraft(draftFromBallot({ allocations: shownAllocations }, required, [...eligibleIds]))
+              setAnnouncement('')
               setEditing(true)
             }}
             className="rounded-md border border-green-400 px-3 py-1 text-sm font-medium text-green-800 hover:bg-green-100"
@@ -84,12 +95,15 @@ export default function VotingBallot({ teams, myTeamId, myBallot, busy, onSubmit
           </button>
         </div>
       </section>
+      </>
     )
   }
 
   const reduced = required.length < 3
 
   return (
+    <>
+    {statusRegion}
     <section aria-labelledby="ci-ballot-title" className="p-4 space-y-4">
       <div>
         <h2 id="ci-ballot-title" className="text-lg font-semibold text-gray-800">Fund the best ideas</h2>
@@ -134,6 +148,7 @@ export default function VotingBallot({ teams, myTeamId, myBallot, busy, onSubmit
         )}
       </div>
     </section>
+    </>
   )
 }
 

@@ -103,6 +103,19 @@ test('instructor drags students between teams, to a new team, and back to ungrou
   await page.getByRole('combobox', { name: 'Move Bob to' }).selectOption({ label: 'Ungrouped' })
   await assigned
   await expect(page.getByTestId('ci-ungrouped-zone').locator('[data-participant-name="Bob"]')).toBeVisible()
+  // The chip is re-created under the destination list; focus follows it.
+  await expect(page.getByTestId('ci-ungrouped-zone').getByRole('combobox', { name: 'Move Bob to' })).toBeFocused()
+
+  // Keyboard move to a new team keeps focus on the moved student's select too.
+  assigned = waitForAssign(page)
+  await page.getByRole('combobox', { name: 'Move Bob to' }).selectOption({ label: 'New team' })
+  await assigned
+  await expect(teamCard(page, 'Bob').getByRole('combobox', { name: 'Move Bob to' })).toBeFocused()
+
+  assigned = waitForAssign(page)
+  await page.getByRole('combobox', { name: 'Move Bob to' }).selectOption({ label: 'Ungrouped' })
+  await assigned
+  await expect(page.getByTestId('ci-ungrouped-zone').getByRole('combobox', { name: 'Move Bob to' })).toBeFocused()
 
   // Survives reload (state is server-side, not optimistic)
   await page.reload()

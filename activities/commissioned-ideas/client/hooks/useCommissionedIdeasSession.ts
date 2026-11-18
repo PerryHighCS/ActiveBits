@@ -162,6 +162,31 @@ export function useStudentSession({
 
 // ── Manager hook ──────────────────────────────────────────────────────────────
 
+/** Identity a manager snapshot belongs to; a change means a different session or credential. */
+export function managerSessionIdentity(sessionId: string | null | undefined, instructorPasscode: string | null): string {
+  return JSON.stringify([sessionId ?? null, instructorPasscode ?? null])
+}
+
+interface ManagerViewState {
+  identity: string
+  snapshot: ManagerSnapshot | null
+  authError: string | null
+}
+
+/**
+ * Manager state tagged with the identity it was received under. State from any other
+ * identity is never shown, so switching session URLs in place cannot render the previous
+ * session's roster, even for the first render after the switch.
+ */
+export function managerViewForIdentity(
+  state: ManagerViewState,
+  identity: string,
+): Pick<ManagerViewState, 'snapshot' | 'authError'> {
+  return state.identity === identity
+    ? { snapshot: state.snapshot, authError: state.authError }
+    : { snapshot: null, authError: null }
+}
+
 interface UseManagerSessionOptions {
   sessionId: string | null | undefined
   instructorPasscode: string | null
@@ -182,8 +207,9 @@ export function useManagerSession({
   instructorPasscode,
   attachSessionEndedHandler,
 }: UseManagerSessionOptions): UseManagerSessionResult {
-  const [snapshot, setSnapshot] = useState<ManagerSnapshot | null>(null)
-  const [authError, setAuthError] = useState<string | null>(null)
+  const identity = managerSessionIdentity(sessionId, instructorPasscode)
+  const [viewState, setViewState] = useState<ManagerViewState>({ identity, snapshot: null, authError: null })
+  const { snapshot, authError } = managerViewForIdentity(viewState, identity)
 
   const buildWsUrl = useCallback(
     () => (sessionId && instructorPasscode ? buildCommissionedIdeasWsUrl(sessionId, 'manager') : null),
@@ -201,15 +227,19 @@ export function useManagerSession({
     try {
       const msg = JSON.parse(event.data as string) as WsMessage
       if (isSnapshotMessage(msg.type)) {
-        setAuthError(null)
-        setSnapshot(msg.data as ManagerSnapshot)
+        setViewState({ identity, snapshot: msg.data as ManagerSnapshot, authError: null })
       } else if (msg.type === 'commissioned-ideas:error') {
-        setAuthError(typeof msg.error === 'string' ? msg.error : 'Connection refused')
+        const error = typeof msg.error === 'string' ? msg.error : 'Connection refused'
+        setViewState((prev) => ({
+          identity,
+          snapshot: prev.identity === identity ? prev.snapshot : null,
+          authError: error,
+        }))
       }
     } catch {
       // malformed WS frame — ignored
     }
-  }, [])
+  }, [identity])
 
   const { connect, disconnect, socketRef } = useResilientWebSocket({
     buildUrl: buildWsUrl,

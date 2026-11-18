@@ -1680,7 +1680,9 @@ export default function setupCommissionedIdeasRoutes(
         p.lastSeen = Date.now()
         await sessions.set(sessionId, session)
         broadcastRegistrationUpdate(ws, sessionId, session.data)
-      })()
+      })().catch((err: unknown) => {
+        console.error('[commissioned-ideas] WS close cleanup error', { sessionId, participantId, err })
+      })
     })
   })
 }

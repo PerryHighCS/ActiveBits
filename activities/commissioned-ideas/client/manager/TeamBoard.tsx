@@ -1,4 +1,4 @@
-import { useState, type DragEvent, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type DragEvent, type ReactNode } from 'react'
 import { countVotes, type ProposalKind } from '../../shared/naming.js'
 import type { NameProposal } from '../../shared/types.js'
 import type { ManagerParticipant, ManagerTeam } from '../hooks/useCommissionedIdeasSession.js'
@@ -8,7 +8,9 @@ import {
   countActiveMembers,
   currentDestination,
   listMoveOptions,
+  moveFocusReady,
   type MoveDestination,
+  type MoveFocusRequest,
 } from './teamBoardModel.js'
 
 interface TeamBoardProps {
@@ -16,7 +18,8 @@ interface TeamBoardProps {
   participantRoster: Record<string, ManagerParticipant>
   maxTeamSize: number
   busy: boolean
-  onMove: (participantId: string, destination: MoveDestination) => void
+  /** Resolves true when the server accepted the move. */
+  onMove: (participantId: string, destination: MoveDestination) => Promise<boolean>
   onModerateProposal: (teamId: string, kind: ProposalKind, proposalId: string, rejected: boolean) => void
 }
 
@@ -32,6 +35,15 @@ export default function TeamBoard({
 }: TeamBoardProps) {
   const [draggedId, setDraggedId] = useState<string | null>(null)
   const [dragOver, setDragOver] = useState<MoveDestination | null>(null)
+  const [focusRequest, setFocusRequest] = useState<MoveFocusRequest | null>(null)
+
+  // Keyboard moves re-create the chip under another list; keep focus on its select.
+  const moveWithKeyboard = async (participant: ManagerParticipant, destination: MoveDestination) => {
+    const from = currentDestination(participant)
+    setFocusRequest({ participantId: participant.id, from, failed: false })
+    const ok = await onMove(participant.id, destination)
+    if (!ok) setFocusRequest({ participantId: participant.id, from, failed: true })
+  }
 
   const orderedTeams = sortTeams(teams)
   const ungrouped = Object.values(participantRoster)
@@ -60,7 +72,7 @@ export default function TeamBoard({
       setDragOver(null)
       const participant = participantId ? participantRoster[participantId] : undefined
       if (participant && canMoveTo(participant, destination, teams, participantRoster, maxTeamSize)) {
-        onMove(participant.id, destination)
+        void onMove(participant.id, destination)
       }
     },
   })
@@ -87,7 +99,9 @@ export default function TeamBoard({
         setDraggedId(null)
         setDragOver(null)
       }}
-      onMove={(destination) => onMove(participant.id, destination)}
+      onMove={(destination) => { void moveWithKeyboard(participant, destination) }}
+      takeFocus={moveFocusReady(focusRequest, participant, busy)}
+      onFocusTaken={() => setFocusRequest(null)}
     />
   )
 
@@ -178,10 +192,29 @@ interface MemberChipProps {
   onDragStart: (event: DragEvent) => void
   onDragEnd: () => void
   onMove: (destination: MoveDestination) => void
+  /** Focus this chip's select now (a keyboard move for this participant settled). */
+  takeFocus: boolean
+  onFocusTaken: () => void
 }
 
-function MemberChip({ participant, options, busy, isDragging, onDragStart, onDragEnd, onMove }: MemberChipProps) {
+function MemberChip({
+  participant,
+  options,
+  busy,
+  isDragging,
+  onDragStart,
+  onDragEnd,
+  onMove,
+  takeFocus,
+  onFocusTaken,
+}: MemberChipProps) {
   const current = currentDestination(participant)
+  const selectRef = useRef<HTMLSelectElement>(null)
+  useEffect(() => {
+    if (!takeFocus) return
+    selectRef.current?.focus()
+    onFocusTaken()
+  }, [takeFocus, onFocusTaken])
   return (
     <li
       draggable={!busy}
@@ -201,6 +234,7 @@ function MemberChip({ participant, options, busy, isDragging, onDragStart, onDra
       />
       <span className="text-sm text-gray-800 flex-1 truncate">{participant.name}</span>
       <select
+        ref={selectRef}
         aria-label={`Move ${participant.name} to`}
         value={current}
         disabled={busy}

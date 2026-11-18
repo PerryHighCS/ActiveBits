@@ -85,6 +85,7 @@ test('student fills, submits, and changes a full ballot while the manager tracks
 
     const done = student.getByRole('region', { name: '✓ Ballot submitted' })
     await expect(done).toBeVisible()
+    await expect(student.getByRole('status').filter({ hasText: 'Ballot submitted.' })).toHaveCount(1)
     await expect(done.getByRole('list', { name: 'Your awards' })).toContainText('$500Team 3')
     await expect(page.getByTestId('ci-vote-count')).toContainText('1 of 4 voted')
     await expect(page.locator('[data-testid="ci-voter"][data-voted="true"]')).toHaveText(/Dana/)
@@ -95,6 +96,7 @@ test('student fills, submits, and changes a full ballot while the manager tracks
     await award(100).getByRole('radio', { name: /Team 3/ }).check()
     await ballot.getByRole('button', { name: 'Update ballot' }).click()
     await expect(done.getByRole('list', { name: 'Your awards' })).toContainText('$500Team 4')
+    await expect(student.getByTestId('ci-ballot-status')).toHaveText('Ballot updated.')
     await expect(page.getByTestId('ci-vote-count')).toContainText('1 of 4 voted')
 
     // Ballot survives a student reload.
