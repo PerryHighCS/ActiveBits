@@ -74,7 +74,27 @@ Contract:
 
 ### B. Participant credential in an httpOnly cookie
 
-To be planned after A lands.
+Owner: `resolveParticipantFromCookies` in `activities/commissioned-ideas/server/routes.ts`, using core's participant capabilities (`activityCapabilities.ts`, the same mechanism Resonance uses).
+
+Problem: the participant token lived in `localStorage`, where any same-origin script can read it, and it outlived the session.
+
+Contract:
+- `register-participant` reconnects when the request's `activebits_cap_participant_<scope>` cookie resolves to an existing participant (rejected participants included, so a reload cannot shed a rejection). Otherwise it registers a new participant and issues a participant capability for it (`subjectId` = participant ID), set as an httpOnly, SameSite=Lax cookie (Secure in production). It never returns a credential. A client-sent `participantId` is ignored; the cookie alone decides identity. The capability cap (200 per session) returns `409`.
+- HTTP student actions authenticate only from that cookie. A rejected participant is refused (`403`), as before.
+- Student WebSockets authenticate at connect from the upgrade request's cookie. There is no `participant-auth` message. States: `pending → authenticated | anonymous`. A refusal sends `code: 'participant-auth-refused'` plus the anonymous snapshot. A store failure sends `participant-auth-failed` and closes with `1011`; the reconnect retries.
+- Student snapshots carry `viewerParticipantId` so the client uses the server's identity, not its stored copy.
+- The client stores no credential. `localStorage` keeps only the name and participant ID (not secret), to pre-fill the form and to decide whether to reconnect on load. A refused socket shows the form again; re-registering with a still-valid cookie reconnects the same participant.
+- Participant records no longer have a `token` field.
+
+Failure behavior: a missing or expired cookie means the student registers again as a new participant. Losing `localStorage` alone does not lose identity, because the cookie reconnects on the next registration.
+
+Test impact: WebKit drops Secure cookies on the plain-HTTP Playwright origin (`NODE_ENV=production`), so specs that drive the student UI run in Chromium only, like the manager-cookie specs. API-driven students use their own request context and an explicit `Cookie` header.
+
+- [x] Plan the contract (this section)
+- [x] Server: capability issue on register, cookie auth for HTTP and WebSocket, `viewerParticipantId`, drop `token`
+- [x] Client: no token storage or header; socket without an auth message; identity from the snapshot
+- [x] Tests: route and socket tests through cookies; Playwright helpers per student; WebKit skips with reason
+- [x] Docs: data contracts and security notes; resolve the CodeRabbit thread
 
 ## CodeRabbit review round 3 (2026-11-18)
 
@@ -95,7 +115,7 @@ Root causes and contracts (owners in parentheses):
 - [x] Tests: route tests for each server change, websocket interleavings (concurrent auth, close during read, second tab, store failure), Playwright for refusal recovery, roster keyboard focus, passcode values in storage, and real manager-cookie reissue
 - [x] Docs: transition table, reduced-ballot wording, socket auth, test matrix, data contracts
 - [x] Per-session atomic updates: done (see "Deferred follow-ups → A")
-- [ ] Participant token in `localStorage`: in progress (see "Deferred follow-ups → B")
+- [x] Participant token in `localStorage`: replaced by an httpOnly cookie (see "Deferred follow-ups → B")
 
 ## Goal
 
@@ -326,7 +346,7 @@ As built (2026-11-16): every server broadcast carries a full role-appropriate sn
 - `commissioned-ideas:phase-changed` — phase transitions
 - `commissioned-ideas:podium-step` — podium reveal steps
 - `commissioned-ideas:manager-auth` — client → server, carries the instructor passcode after connect
-- `commissioned-ideas:participant-auth` — client → server, `{ participantId, token }` after connect. A student socket receives nothing until it sends this. Valid proof binds the socket and sends that student's personalized snapshot. Refused proof sends `commissioned-ideas:error` with `code: 'participant-auth-refused'`, then the anonymous snapshot; the client drops the stored token and shows the registration form. A store failure sends `code: 'participant-auth-failed'` and closes with `1011`, so the client reconnects and retries.
+- Student auth (no message): a student socket authenticates once at connect from the httpOnly participant cookie on the upgrade request, and receives nothing until then. A valid cookie binds the socket and sends that student's personalized snapshot. Otherwise the socket gets `commissioned-ideas:error` with `code: 'participant-auth-refused'`, then the anonymous snapshot, and the client shows the registration form. A store failure sends `code: 'participant-auth-failed'` and closes with `1011`, so the client reconnects and retries. (Updated for "Deferred follow-ups → B"; the earlier `participant-auth` message was removed.)
 - `commissioned-ideas:error` — server → client failure notice; `code` distinguishes `participant-auth-refused`, `participant-auth-failed`, and `session-not-found`
 
 The originally proposed `team-updated`, `presentation-active`, and `ballot-progress` messages were not needed; those changes ride on `registration-updated`.

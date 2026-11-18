@@ -39,7 +39,7 @@ function makeSession(overrides: Partial<CommissionedIdeasSessionData> = {}): Com
       t3: makeTeam('t3'),
     },
     participantRoster: {
-      voter1: { id: 'voter1', name: 'Alice', teamId: null, connected: true, lastSeen: 0, rejectedByInstructor: false, token: 'TESTTOKEN' },
+      voter1: { id: 'voter1', name: 'Alice', teamId: null, connected: true, lastSeen: 0, rejectedByInstructor: false },
     },
     ballots: {},
     presentationHistory: [],
@@ -185,7 +185,7 @@ void test('validateBallot accepts a valid $100/$300/$500 ballot', () => {
   const session = makeSession({
     teams: { ...base.teams, t4: makeTeam('t4') },
     participantRoster: {
-      voter1: { id: 'voter1', name: 'Alice', teamId: 't4', connected: true, lastSeen: 0, rejectedByInstructor: false, token: 'TESTTOKEN' },
+      voter1: { id: 'voter1', name: 'Alice', teamId: 't4', connected: true, lastSeen: 0, rejectedByInstructor: false },
     },
   })
   const result = validateBallot(
@@ -244,7 +244,7 @@ void test('validateBallot rejects duplicate team targets', () => {
 void test('validateBallot blocks self-vote when voter belongs to a team', () => {
   const session = makeSession({
     participantRoster: {
-      voter1: { id: 'voter1', name: 'Alice', teamId: 't1', connected: true, lastSeen: 0, rejectedByInstructor: false, token: 'TESTTOKEN' },
+      voter1: { id: 'voter1', name: 'Alice', teamId: 't1', connected: true, lastSeen: 0, rejectedByInstructor: false },
     },
   })
   // Voter is on t1, so only t2 and t3 are eligible → a two-award ballot.
@@ -263,7 +263,7 @@ void test('validateBallot blocks self-vote when voter belongs to a team', () => 
 void test('validateBallot allows self-vote when allowSelfVote=true', () => {
   const session = makeSession({
     participantRoster: {
-      voter1: { id: 'voter1', name: 'Alice', teamId: 't1', connected: true, lastSeen: 0, rejectedByInstructor: false, token: 'TESTTOKEN' },
+      voter1: { id: 'voter1', name: 'Alice', teamId: 't1', connected: true, lastSeen: 0, rejectedByInstructor: false },
     },
   })
   const result = validateBallot(
@@ -379,8 +379,8 @@ function makeFullSession(overrides: Partial<CommissionedIdeasSessionData> = {}):
     presentationRound: 1,
     teams: {},
     participantRoster: {
-      p1: { id: 'p1', name: 'Alice', teamId: null, connected: true, lastSeen: 999, rejectedByInstructor: false, token: 'TESTTOKEN' },
-      p2: { id: 'p2', name: 'BadName', teamId: null, connected: false, lastSeen: 100, rejectedByInstructor: true, token: 'TESTTOKEN' },
+      p1: { id: 'p1', name: 'Alice', teamId: null, connected: true, lastSeen: 999, rejectedByInstructor: false },
+      p2: { id: 'p2', name: 'BadName', teamId: null, connected: false, lastSeen: 100, rejectedByInstructor: true },
     },
     ballots: {
       p1: {
@@ -477,8 +477,8 @@ void test('removeParticipantFromTeam clears participant teamId and removes from 
       t1: { ...makeTeam('t1'), memberIds: ['p1', 'p2'] },
     },
     participantRoster: {
-      p1: { id: 'p1', name: 'Alice', teamId: 't1', connected: true, lastSeen: 0, rejectedByInstructor: false, token: 'TESTTOKEN' },
-      p2: { id: 'p2', name: 'Bob', teamId: 't1', connected: true, lastSeen: 0, rejectedByInstructor: false, token: 'TESTTOKEN' },
+      p1: { id: 'p1', name: 'Alice', teamId: 't1', connected: true, lastSeen: 0, rejectedByInstructor: false },
+      p2: { id: 'p2', name: 'Bob', teamId: 't1', connected: true, lastSeen: 0, rejectedByInstructor: false },
     },
   })
 
@@ -494,7 +494,7 @@ void test('removeParticipantFromTeam deletes team when it becomes empty', () => 
       t1: { ...makeTeam('t1'), memberIds: ['p1'] },
     },
     participantRoster: {
-      p1: { id: 'p1', name: 'Alice', teamId: 't1', connected: true, lastSeen: 0, rejectedByInstructor: false, token: 'TESTTOKEN' },
+      p1: { id: 'p1', name: 'Alice', teamId: 't1', connected: true, lastSeen: 0, rejectedByInstructor: false },
     },
   })
 
@@ -510,9 +510,9 @@ void test('assignRandom places all ungrouped participants into teams', () => {
   const data = makeRegistrationSession({
     maxTeamSize: 2,
     participantRoster: {
-      p1: { id: 'p1', name: 'Alice', teamId: null, connected: true, lastSeen: 0, rejectedByInstructor: false, token: 'TESTTOKEN' },
-      p2: { id: 'p2', name: 'Bob', teamId: null, connected: true, lastSeen: 0, rejectedByInstructor: false, token: 'TESTTOKEN' },
-      p3: { id: 'p3', name: 'Carol', teamId: null, connected: true, lastSeen: 0, rejectedByInstructor: false, token: 'TESTTOKEN' },
+      p1: { id: 'p1', name: 'Alice', teamId: null, connected: true, lastSeen: 0, rejectedByInstructor: false },
+      p2: { id: 'p2', name: 'Bob', teamId: null, connected: true, lastSeen: 0, rejectedByInstructor: false },
+      p3: { id: 'p3', name: 'Carol', teamId: null, connected: true, lastSeen: 0, rejectedByInstructor: false },
     },
   })
 
@@ -530,8 +530,8 @@ void test('assignRandom skips rejected participants', () => {
   const data = makeRegistrationSession({
     maxTeamSize: 3,
     participantRoster: {
-      p1: { id: 'p1', name: 'Alice', teamId: null, connected: true, lastSeen: 0, rejectedByInstructor: false, token: 'TESTTOKEN' },
-      rejected: { id: 'rejected', name: 'Bad', teamId: null, connected: false, lastSeen: 0, rejectedByInstructor: true, token: 'TESTTOKEN' },
+      p1: { id: 'p1', name: 'Alice', teamId: null, connected: true, lastSeen: 0, rejectedByInstructor: false },
+      rejected: { id: 'rejected', name: 'Bad', teamId: null, connected: false, lastSeen: 0, rejectedByInstructor: true },
     },
   })
 
@@ -548,8 +548,8 @@ void test('assignRandom does not disturb already-grouped participants', () => {
       existing: { ...makeTeam('existing'), memberIds: ['grouped'] },
     },
     participantRoster: {
-      grouped: { id: 'grouped', name: 'Already', teamId: 'existing', connected: true, lastSeen: 0, rejectedByInstructor: false, token: 'TESTTOKEN' },
-      ungrouped: { id: 'ungrouped', name: 'New', teamId: null, connected: true, lastSeen: 0, rejectedByInstructor: false, token: 'TESTTOKEN' },
+      grouped: { id: 'grouped', name: 'Already', teamId: 'existing', connected: true, lastSeen: 0, rejectedByInstructor: false },
+      ungrouped: { id: 'ungrouped', name: 'New', teamId: null, connected: true, lastSeen: 0, rejectedByInstructor: false },
     },
   })
 
@@ -566,8 +566,8 @@ void test('assignRandom fills existing teams before creating new ones', () => {
       partial: { ...makeTeam('partial'), memberIds: ['existing'] },
     },
     participantRoster: {
-      existing: { id: 'existing', name: 'E', teamId: 'partial', connected: true, lastSeen: 0, rejectedByInstructor: false, token: 'TESTTOKEN' },
-      new1: { id: 'new1', name: 'N1', teamId: null, connected: true, lastSeen: 0, rejectedByInstructor: false, token: 'TESTTOKEN' },
+      existing: { id: 'existing', name: 'E', teamId: 'partial', connected: true, lastSeen: 0, rejectedByInstructor: false },
+      new1: { id: 'new1', name: 'N1', teamId: null, connected: true, lastSeen: 0, rejectedByInstructor: false },
     },
   })
 
@@ -585,7 +585,7 @@ void test('assignRandom is a no-op when all participants are already grouped', (
       t1: { ...makeTeam('t1'), memberIds: ['p1'] },
     },
     participantRoster: {
-      p1: { id: 'p1', name: 'Alice', teamId: 't1', connected: true, lastSeen: 0, rejectedByInstructor: false, token: 'TESTTOKEN' },
+      p1: { id: 'p1', name: 'Alice', teamId: 't1', connected: true, lastSeen: 0, rejectedByInstructor: false },
     },
   })
 
@@ -599,7 +599,7 @@ void test('assignRandom is a no-op when all participants are already grouped', (
 
 function rosterOf(ids: string[], teamId: string | null = null) {
   return Object.fromEntries(
-    ids.map((id) => [id, { id, name: id, teamId, connected: true, lastSeen: 0, rejectedByInstructor: false, token: 'T' }]),
+    ids.map((id) => [id, { id, name: id, teamId, connected: true, lastSeen: 0, rejectedByInstructor: false }]),
   )
 }
 

@@ -22,6 +22,8 @@ export type ClientTeam = Pick<StudentSafeTeam, 'id' | 'groupName' | 'projectName
 export type ManagerTeam = CommissionedIdeasTeam
 
 export interface StudentSnapshot {
+  /** Participant the server authenticated this socket as (from the httpOnly cookie); null if anonymous. */
+  viewerParticipantId: string | null
   phase: CommissionedIdeasPhase
   presentationRound: number
   presentationHistory: PresentationHistoryEntry[]
@@ -109,8 +111,12 @@ const POLICY_VIOLATION_CLOSE_CODE = 1008
 
 interface UseStudentSessionOptions {
   sessionId: string | null | undefined
+  /**
+   * The participant this browser believes it registered as. Used only to tie a
+   * refusal to that identity (registering again clears it); the socket itself
+   * authenticates from the httpOnly participant cookie, never from this value.
+   */
   participantId: string | null
-  participantToken: string | null
   attachSessionEndedHandler?: (ws: WebSocket) => void
 }
 
@@ -124,7 +130,7 @@ export function isParticipantAuthRefusal(msg: { type?: unknown; code?: unknown }
 
 interface UseStudentSessionResult {
   snapshot: StudentSnapshot | null
-  /** The server refused the stored participant credential; the student must register again. */
+  /** The server refused this browser's participant cookie; the student must register again. */
   authRefused: boolean
   connect: () => WebSocket | null
   disconnect: () => void
@@ -133,42 +139,35 @@ interface UseStudentSessionResult {
 export function useStudentSession({
   sessionId,
   participantId,
-  participantToken,
   attachSessionEndedHandler,
 }: UseStudentSessionOptions): UseStudentSessionResult {
   const [snapshot, setSnapshot] = useState<StudentSnapshot | null>(null)
-  // Tagged with the token that was refused, so registering again (a new token) clears it.
-  const [refusedToken, setRefusedToken] = useState<string | null>(null)
-  const authRefused = participantToken !== null && refusedToken === participantToken
+  // Tagged with the identity that was refused, so registering again (a new participant) clears it.
+  const [refusedFor, setRefusedFor] = useState<string | null>(null)
+  const authRefused = participantId !== null && refusedFor === participantId
 
+  // The participant cookie rides on the upgrade request; nothing identifying is in the URL.
   const buildWsUrl = useCallback(
     () => (sessionId ? buildCommissionedIdeasWsUrl(sessionId, 'student') : null),
     [sessionId],
   )
 
-  // Bind identity after connect by proving the participant token (never via the URL).
-  const handleOpen = useCallback((_event: Event, ws: WebSocket) => {
-    if (!participantId || !participantToken) return
-    ws.send(JSON.stringify({ type: 'commissioned-ideas:participant-auth', participantId, token: participantToken }))
-  }, [participantId, participantToken])
-
   const handleMessage = useCallback((event: MessageEvent) => {
     try {
       const msg = JSON.parse(event.data as string) as WsMessage
       if (isParticipantAuthRefusal(msg)) {
-        setRefusedToken(participantToken)
+        setRefusedFor(participantId)
       } else if (isSnapshotMessage(msg.type)) {
         setSnapshot(msg.data as StudentSnapshot)
       }
     } catch {
       // malformed WS frame — ignored
     }
-  }, [participantToken])
+  }, [participantId])
 
   const { connect, disconnect } = useResilientWebSocket({
     buildUrl: buildWsUrl,
     shouldReconnect: Boolean(sessionId),
-    onOpen: handleOpen,
     onMessage: handleMessage,
     attachSessionEndedHandler,
   })

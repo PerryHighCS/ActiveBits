@@ -3,8 +3,11 @@ import { createSession, type SessionRecord, type SessionStore } from 'activebits
 import { registerSessionNormalizer } from 'activebits-server/core/sessionNormalization.js'
 import { createBroadcastSubscriptionHelper } from 'activebits-server/core/broadcastUtils.js'
 import {
+  getActivityCapabilityCookieName,
   issueActivityCapability,
+  readCookieValue,
   resolveActivityPrincipalFromCookies,
+  tryIssueActivityCapability,
   writeActivityCapabilityCookie,
 } from 'activebits-server/core/activityCapabilities.js'
 import type { ActiveBitsWebSocket, WsRouter } from '../../../types/websocket.js'
@@ -72,17 +75,17 @@ interface CommissionedIdeasSocket extends ActiveBitsWebSocket {
 /**
  * Student socket auth state machine (owner: the `/ws/commissioned-ideas` handler).
  *
- *   pending ──auth msg──▶ authenticating ──valid + presence saved──▶ authenticated (final)
- *      ▲                        │  └──refused──▶ anonymous ──auth msg──▶ authenticating …
- *      └──store failure─────────┘ (state restored, socket closed 1011 so the client reconnects)
+ *   pending ──participant cookie valid + presence saved──▶ authenticated (final)
+ *      ├──no valid cookie──▶ anonymous (final; the client registers and reconnects)
+ *      └──store failure──▶ socket closed 1011 (the client reconnects and retries)
  *
- * - Only one attempt runs per socket (`authenticating` ignores further auth messages),
- *   so a late refusal can never overwrite a successful binding.
- * - `pending`/`authenticating` sockets receive no snapshots, so a client never renders
- *   an anonymous view first and then its own. `anonymous` receives the anonymous view.
+ * - Exactly one attempt runs per socket, at connect, from the upgrade request's
+ *   httpOnly participant cookie. There is no auth message.
+ * - `pending` sockets receive no snapshots, so a client never renders an anonymous
+ *   view first and then its own. `anonymous` receives the anonymous view.
  * - `participantId` is set only in `authenticated`.
  */
-export type StudentSocketAuth = 'pending' | 'authenticating' | 'authenticated' | 'anonymous'
+export type StudentSocketAuth = 'pending' | 'authenticated' | 'anonymous'
 
 /** Which snapshot (if any) a socket should receive for a broadcast. */
 function snapshotAudience(client: CommissionedIdeasSocket): 'manager' | 'student' | null {
@@ -244,8 +247,6 @@ function normalizeParticipant(raw: unknown, id: string): CommissionedIdeasPartic
     connected: Boolean(item.connected),
     lastSeen: typeof item.lastSeen === 'number' ? item.lastSeen : 0,
     rejectedByInstructor: Boolean(item.rejectedByInstructor),
-    // Fail closed: an empty token never verifies. Tokens are issued only at registration.
-    token: typeof item.token === 'string' && item.token.length > 0 ? item.token : '',
   }
 }
 
@@ -357,44 +358,38 @@ function checkInstructorAuth(req: RouteRequest, session: CommissionedIdeasSessio
 }
 
 /**
- * Verifies that the caller owns the participantId they are acting on.
- * Reads the participantId from the request body and the token from the
- * `X-Commissioned-Ideas-Participant-Token` header, then does a constant-time
- * comparison against the stored token.  Returns the verified participant or
- * null on any failure (missing token, bad token, unknown id, rejected).
+ * Single owner of participant identity (HTTP actions, reconnect, and WebSocket
+ * binding): the httpOnly participant capability cookie issued at registration
+ * (core `activityCapabilities`, only a digest is stored). The client never holds a
+ * readable credential, and a participant ID sent by the client proves nothing.
+ * Rejected participants are refused unless `allowRejected` (reconnect and sockets
+ * keep a rejected student as themselves, still rejected).
  */
-function readParticipantToken(req: RouteRequest): string | null {
-  const raw = req.headers?.['x-commissioned-ideas-participant-token']
-  const header = Array.isArray(raw) ? raw[0] : raw
-  return typeof header === 'string' && header.length > 0 ? header : null
-}
-
-/**
- * Single owner of participant credential checks (HTTP actions, reconnect, and
- * WebSocket binding). Constant-time token comparison; an empty stored token
- * never verifies. Rejected participants are refused unless `allowRejected`
- * (reconnect keeps a rejected student as themselves, still rejected).
- */
-function verifyParticipantCredential(
-  data: CommissionedIdeasSessionData,
-  participantId: unknown,
-  token: unknown,
+function resolveParticipantFromCookies(
+  session: CommissionedIdeasSession,
+  cookies: Record<string, unknown> | undefined,
   { allowRejected = false }: { allowRejected?: boolean } = {},
 ): CommissionedIdeasParticipant | null {
-  if (typeof participantId !== 'string' || typeof token !== 'string' || token.length === 0) return null
-  const participant = ownEntry(data.participantRoster, participantId)
+  const principal = resolveActivityPrincipalFromCookies(session, session.id, 'participant', cookies)
+  const participant = ownEntry(session.data.participantRoster, principal?.subjectId)
   if (!participant) return null
   if (participant.rejectedByInstructor && !allowRejected) return null
-  return verifyPasscode(participant.token, token.toUpperCase()) ? participant : null
+  return participant
 }
 
-/** Authenticates a participant action: `participantId` in the body plus the token header. */
+/** The participant cookie from a WebSocket upgrade request, as a cookie map. */
+function socketCookies(socket: ActiveBitsWebSocket, sessionId: string): Record<string, unknown> {
+  const name = getActivityCapabilityCookieName('participant', sessionId)
+  const header = socket.upgradeHeaders?.cookie
+  return { [name]: readCookieValue(Array.isArray(header) ? header.join('; ') : header, name) }
+}
+
+/** Authenticates a participant action from the request's participant cookie. */
 function checkParticipantAuth(
   req: RouteRequest,
   session: CommissionedIdeasSession,
 ): CommissionedIdeasParticipant | null {
-  const body = ensurePlainObject(req.body)
-  return verifyParticipantCredential(session.data, body.participantId, readParticipantToken(req))
+  return resolveParticipantFromCookies(session, req.cookies)
 }
 
 function parseSocketMessage(raw: unknown): Record<string, unknown> | null {
@@ -599,7 +594,7 @@ function sharedSessionFields(data: CommissionedIdeasSessionData) {
 function buildStudentSnapshot(data: CommissionedIdeasSessionData, viewerParticipantId: string | null) {
   const { ballots: _ballots, participantRoster, teams } = data
 
-  const myBallot = viewerParticipantId ? (_ballots[viewerParticipantId] ?? null) : null
+  const myBallot = ownEntry(_ballots, viewerParticipantId) ?? null
 
   const safeRoster: Record<string, StudentSafeParticipant> = {}
   for (const [id, p] of Object.entries(participantRoster)) {
@@ -614,6 +609,8 @@ function buildStudentSnapshot(data: CommissionedIdeasSessionData, viewerParticip
 
   return {
     ...sharedSessionFields(data),
+    /** The authenticated viewer (from the participant cookie), or null for an anonymous view. */
+    viewerParticipantId,
     teams: safeTeams,
     participantRoster: safeRoster,
     ballotSubmitted: Boolean(myBallot),
@@ -664,7 +661,7 @@ function buildManagerSnapshot(data: CommissionedIdeasSessionData) {
   }
 }
 
-type ManagerParticipantView = Omit<CommissionedIdeasParticipant, 'token'>
+type ManagerParticipantView = CommissionedIdeasParticipant
 
 // ── Broadcast helpers ─────────────────────────────────────────────────────────
 
@@ -1011,36 +1008,32 @@ export default function setupCommissionedIdeasRoutes(
   })
 
   // ── Register / reconnect participant ────────────────────────────────────────
+  // Identity comes only from the httpOnly participant cookie: a valid cookie
+  // reconnects that participant; otherwise a new participant gets a new cookie.
   app.post('/api/commissioned-ideas/:sessionId/register-participant', async (req, res) => {
     const result = await mutateSession(req, res, (session) => {
       const body = ensurePlainObject(req.body)
       const name = sanitizeDisplayName(body.name, 100)
       if (!name) refuse(400, 'name is required')
 
-      // Accept a client-provided id for reconnect; generate one for new registrations.
-      const requestedId =
-        typeof body.participantId === 'string' && /^[A-Z0-9]{6,12}$/i.test(body.participantId)
-          ? body.participantId
-          : null
-      const requested = ownEntry(session.data.participantRoster, requestedId)
-      // Reconnect only with proof of ownership: participant ids are visible to every
-      // student, so an id alone must never return that participant's token.
-      const existing = requested
-        ? verifyParticipantCredential(session.data, requestedId, readParticipantToken(req), { allowRejected: true })
-        : null
-
+      const existing = resolveParticipantFromCookies(session, req.cookies, { allowRejected: true })
       if (existing) {
         // Reconnect: mark connected only. The server-side name is authoritative —
         // overwriting it here would silently undo instructor moderation applied
         // between the student's last visit and this reconnect.
         existing.connected = true
         existing.lastSeen = Date.now()
-        return { participantId: existing.id, name: existing.name, token: existing.token, reconnected: true, refusedId: null }
+        return { participantId: existing.id, name: existing.name, reconnected: true, capabilityToken: null }
       }
 
-      // New registration. Never reuse a requested id that already belongs to someone.
-      const participantId = requestedId && !requested ? requestedId : generateShortId()
-      const token = generatePasscode()
+      const participantId = generateShortId()
+      const capability = tryIssueActivityCapability(session, 'participant', participantId)
+      if (!capability) {
+        refuse(409, 'This session is full', {
+          message: '[commissioned-ideas] Registration refused: participant capability limit reached',
+          fields: { sessionId: session.id },
+        })
+      }
       session.data.participantRoster[participantId] = {
         id: participantId,
         name,
@@ -1048,18 +1041,15 @@ export default function setupCommissionedIdeasRoutes(
         connected: true,
         lastSeen: Date.now(),
         rejectedByInstructor: false,
-        token,
       }
-      return { participantId, name, token, reconnected: false, refusedId: requested ? requestedId : null }
+      return { participantId, name, reconnected: false, capabilityToken: capability.token }
     })
     if (!result) return
     const { session, value } = result
 
-    if (value.refusedId) {
-      console.warn('[commissioned-ideas] Reconnect without a valid participant token; registered as new', {
-        sessionId: session.id,
-        requestedId: value.refusedId,
-      })
+    res.setHeader?.('Cache-Control', 'no-store')
+    if (value.capabilityToken && res.cookie) {
+      writeActivityCapabilityCookie({ cookie: res.cookie.bind(res) }, session.id, 'participant', value.capabilityToken)
     }
     console.info('[commissioned-ideas] Participant registered', {
       sessionId: session.id,
@@ -1067,7 +1057,7 @@ export default function setupCommissionedIdeasRoutes(
       reconnected: value.reconnected,
     })
     broadcastRegistrationUpdate(ws, session.id, session.data)
-    res.json({ participantId: value.participantId, name: value.name, token: value.token })
+    res.json({ participantId: value.participantId, name: value.name })
   })
 
   // ── Instructor: edit or reject a participant name ───────────────────────────
@@ -1599,41 +1589,31 @@ export default function setupCommissionedIdeasRoutes(
     socket.send(JSON.stringify({ type: 'commissioned-ideas:error', error, ...(code ? { code } : {}) }))
   }
 
+  /** Binds a student socket to the participant its cookie proves, once, at connect. */
   async function authenticateParticipantSocket(
     socket: CommissionedIdeasSocket,
-    sessionId: string,
-    message: Record<string, unknown>,
+    session: CommissionedIdeasSession,
   ): Promise<void> {
-    const previous = socket.studentAuth === 'anonymous' ? 'anonymous' : 'pending'
-    socket.studentAuth = 'authenticating'
+    const sessionId = session.id
+    if (socket.readyState !== WS_OPEN) return // closed while reading: never mark online
+    const participant = resolveParticipantFromCookies(session, socketCookies(socket, sessionId), { allowRejected: true })
+    if (!participant) {
+      console.warn('[commissioned-ideas] WS participant auth refused', { sessionId })
+      socket.studentAuth = 'anonymous'
+      sendWsError(socket, 'Invalid participant credentials', 'participant-auth-refused')
+      socket.send(JSON.stringify({
+        type: 'commissioned-ideas:session-state',
+        sessionId,
+        data: buildStudentSnapshot(session.data, null),
+      }))
+      return
+    }
 
-    let bound = false
+    // Bind before writing presence so a close during the write is seen by the
+    // close handler, which then re-derives presence from the remaining sockets.
+    socket.participantId = participant.id
+    socket.studentAuth = 'authenticated'
     try {
-      const session = await getSession(sessions, sessionId)
-      if (socket.readyState !== WS_OPEN) return // closed while reading: never mark online
-      if (!session) {
-        sendWsError(socket, 'Session not found', 'session-not-found')
-        socket.close(1008, 'Session not found')
-        return
-      }
-      const participant = verifyParticipantCredential(session.data, message.participantId, message.token, { allowRejected: true })
-      if (!participant) {
-        console.warn('[commissioned-ideas] WS participant auth refused', { sessionId })
-        socket.studentAuth = 'anonymous'
-        sendWsError(socket, 'Invalid participant credentials', 'participant-auth-refused')
-        socket.send(JSON.stringify({
-          type: 'commissioned-ideas:session-state',
-          sessionId,
-          data: buildStudentSnapshot(session.data, null),
-        }))
-        return
-      }
-
-      // Bind before writing presence so a close during the write is seen by the
-      // close handler, which then re-derives presence from the remaining sockets.
-      socket.participantId = participant.id
-      socket.studentAuth = 'authenticated'
-      bound = true
       const committed = await atomicUpdate(sessions, sessionId, (draft) => {
         const entry = ownEntry(draft.data.participantRoster, participant.id)
         if (!entry) return
@@ -1648,18 +1628,13 @@ export default function setupCommissionedIdeasRoutes(
       if (socket.readyState !== WS_OPEN) await syncParticipantPresence(sessionId, participant.id)
     } catch (err: unknown) {
       console.error('[commissioned-ideas] WS participant auth failed', { sessionId, err })
-      if (socket.studentAuth === 'authenticating' || bound) {
-        socket.participantId = null
-        socket.studentAuth = previous
-      }
+      socket.participantId = null
+      socket.studentAuth = 'pending'
       // Retryable: the client reconnects on a non-policy close and authenticates again.
       if (socket.readyState === WS_OPEN) {
         sendWsError(socket, 'Failed to authenticate', 'participant-auth-failed')
         socket.close(1011, 'Authentication failed')
       }
-    } finally {
-      // A socket that closed before resolving must not stay `authenticating`.
-      if (socket.studentAuth === 'authenticating') socket.studentAuth = previous
     }
   }
 
@@ -1672,8 +1647,8 @@ export default function setupCommissionedIdeasRoutes(
 
     const typedSocket = socket as CommissionedIdeasSocket
     typedSocket.sessionId = sessionId
-    // Identity is bound only after a verified auth message (participant token or
-    // instructor passcode) — never from the URL.
+    // Identity is bound only from verified proof (the participant cookie at connect,
+    // or the instructor passcode message) — never from the URL.
     typedSocket.participantId = null
     typedSocket.wantsManager = query.get('role') === 'manager'
     typedSocket.studentAuth = typedSocket.wantsManager ? undefined : 'pending'
@@ -1695,8 +1670,9 @@ export default function setupCommissionedIdeasRoutes(
       // Subscribe only for sessions that exist, so stale links cannot add
       // permanent subscription entries.
       ensureBroadcastSubscription(sessionId)
-      // Students get their first snapshot after participant-auth (personalized)
-      // or after a failed auth (anonymous) — never an anonymous view first.
+      // Students get their first snapshot from cookie auth: personalized, or
+      // anonymous after a refusal — never an anonymous view first.
+      if (!typedSocket.wantsManager) await authenticateParticipantSocket(typedSocket, session)
     })().catch((err: unknown) => {
       console.error('[commissioned-ideas] WS init error', { sessionId, err })
       sendWsError(typedSocket, 'Failed to load session')
@@ -1705,14 +1681,6 @@ export default function setupCommissionedIdeasRoutes(
     socket.on('message', (raw: unknown) => {
       void (async () => {
         const message = parseSocketMessage(raw)
-
-        if (message?.type === 'commissioned-ideas:participant-auth') {
-          // Retry is allowed after a refusal, never during an attempt or after success.
-          if (typedSocket.studentAuth === 'pending' || typedSocket.studentAuth === 'anonymous') {
-            await authenticateParticipantSocket(typedSocket, sessionId, message)
-          }
-          return
-        }
 
         if (typedSocket.isManager || !typedSocket.wantsManager) {
           return

@@ -9,7 +9,6 @@ interface StudentRosterProps {
   participants: Record<string, StudentSafeParticipant>
   teams: Record<string, StudentSafeTeam>
   myParticipantId: string
-  participantToken: string
   sessionId: string
   studentGroupingLocked: boolean
   namingLocked: boolean
@@ -21,14 +20,13 @@ export default function StudentRoster({
   participants,
   teams,
   myParticipantId,
-  participantToken,
   sessionId,
   studentGroupingLocked,
   namingLocked,
   groupingMode,
   maxTeamSize,
 }: StudentRosterProps) {
-  const { post, busy, error, clearError } = useParticipantApi(sessionId, myParticipantId, participantToken)
+  const { post, busy, error, clearError } = useParticipantApi(sessionId)
 
   const me = participants[myParticipantId]
   const myTeamId = me?.teamId ?? null

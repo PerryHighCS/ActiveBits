@@ -1,7 +1,11 @@
 import { useCallback, useState } from 'react'
 
-/** POST helper for participant-authenticated Commissioned Ideas routes. */
-export function useParticipantApi(sessionId: string, participantId: string, participantToken: string) {
+/**
+ * POST helper for participant-authenticated Commissioned Ideas routes. The server
+ * identifies the student from the httpOnly participant cookie, which same-origin
+ * requests send automatically; the client holds no credential.
+ */
+export function useParticipantApi(sessionId: string) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -12,11 +16,9 @@ export function useParticipantApi(sessionId: string, participantId: string, part
       try {
         const res = await fetch(`/api/commissioned-ideas/${sessionId}/${path}`, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-Commissioned-Ideas-Participant-Token': participantToken,
-          },
-          body: JSON.stringify({ ...body, participantId }),
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
         })
         const data = (await res.json()) as { error?: string }
         if (!res.ok) {
@@ -31,7 +33,7 @@ export function useParticipantApi(sessionId: string, participantId: string, part
         setBusy(false)
       }
     },
-    [sessionId, participantId, participantToken],
+    [sessionId],
   )
 
   return { post, busy, error, clearError: () => setError(null) }

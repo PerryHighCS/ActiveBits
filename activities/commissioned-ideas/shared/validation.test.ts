@@ -36,7 +36,7 @@ function session(teamIds: string[], voterTeamId: string | null): CommissionedIde
     presentationRound: 1,
     teams: Object.fromEntries(teamIds.map((id) => [id, team(id)])),
     participantRoster: {
-      v: { id: 'v', name: 'Voter', teamId: voterTeamId, connected: true, lastSeen: 0, rejectedByInstructor: false, token: 'T' },
+      v: { id: 'v', name: 'Voter', teamId: voterTeamId, connected: true, lastSeen: 0, rejectedByInstructor: false },
     },
     ballots: {},
     presentationHistory: [],

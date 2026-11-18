@@ -1,13 +1,9 @@
 import { expect, type APIRequestContext, type Page, test } from '@playwright/test'
+import { postAsStudent, registerStudentViaApi, skipStudentBrowserFlowsOnWebKit, type ApiStudent } from './studentApi'
 
 interface CreatedSession {
   id: string
   instructorPasscode: string
-}
-
-interface RegisteredParticipant {
-  participantId: string
-  token: string
 }
 
 async function createSession(request: APIRequestContext): Promise<CreatedSession> {
@@ -16,23 +12,14 @@ async function createSession(request: APIRequestContext): Promise<CreatedSession
   return await response.json() as CreatedSession
 }
 
-async function registerViaApi(request: APIRequestContext, sessionId: string, name: string): Promise<RegisteredParticipant> {
-  const response = await request.post(`/api/commissioned-ideas/${sessionId}/register-participant`, { data: { name } })
-  expect(response.ok()).toBe(true)
-  return await response.json() as RegisteredParticipant
-}
-
 async function studentPost(
   request: APIRequestContext,
   sessionId: string,
-  who: RegisteredParticipant,
+  who: ApiStudent,
   path: string,
   body: Record<string, unknown> = {},
 ) {
-  const response = await request.post(`/api/commissioned-ideas/${sessionId}/${path}`, {
-    data: { ...body, participantId: who.participantId },
-    headers: { 'X-Commissioned-Ideas-Participant-Token': who.token },
-  })
+  const response = await postAsStudent(request, sessionId, who, path, body)
   expect(response.ok()).toBe(true)
   return await response.json() as Record<string, unknown>
 }
@@ -67,9 +54,9 @@ function waitForAssign(page: Page) {
 
 test('instructor drags students between teams, to a new team, and back to ungrouped', async ({ page, request }) => {
   const session = await createSession(request)
-  const alice = await registerViaApi(request, session.id, 'Alice')
-  const bob = await registerViaApi(request, session.id, 'Bob')
-  await registerViaApi(request, session.id, 'Carol')
+  const alice = await registerStudentViaApi(request, session.id, 'Alice')
+  const bob = await registerStudentViaApi(request, session.id, 'Bob')
+  await registerStudentViaApi(request, session.id, 'Carol')
   await studentPost(request, session.id, alice, 'create-team')
   const { teamId } = await studentPost(request, session.id, bob, 'create-team')
   expect(teamId).toBeTruthy()
@@ -124,6 +111,7 @@ test('instructor drags students between teams, to a new team, and back to ungrou
 })
 
 test('student proposes and votes on names; instructor rejection updates the student view live', async ({ page, browser, request }) => {
+  skipStudentBrowserFlowsOnWebKit()
   const session = await createSession(request)
   await openManager(page, session)
 

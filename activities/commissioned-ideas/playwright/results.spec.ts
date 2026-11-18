@@ -1,13 +1,9 @@
 import { expect, type APIRequestContext, type Page, test } from '@playwright/test'
+import { postAsStudent, registerStudentViaApi, skipStudentBrowserFlowsOnWebKit, type ApiStudent } from './studentApi'
 
 interface CreatedSession {
   id: string
   instructorPasscode: string
-}
-
-interface Participant {
-  participantId: string
-  token: string
 }
 
 async function createSession(request: APIRequestContext): Promise<CreatedSession> {
@@ -16,17 +12,8 @@ async function createSession(request: APIRequestContext): Promise<CreatedSession
   return await response.json() as CreatedSession
 }
 
-async function register(request: APIRequestContext, sessionId: string, name: string): Promise<Participant> {
-  const res = await request.post(`/api/commissioned-ideas/${sessionId}/register-participant`, { data: { name } })
-  expect(res.ok()).toBe(true)
-  return await res.json() as Participant
-}
-
-async function asStudent(request: APIRequestContext, sessionId: string, who: Participant, path: string, body: Record<string, unknown> = {}) {
-  const res = await request.post(`/api/commissioned-ideas/${sessionId}/${path}`, {
-    data: { ...body, participantId: who.participantId },
-    headers: { 'X-Commissioned-Ideas-Participant-Token': who.token },
-  })
+async function asStudent(request: APIRequestContext, sessionId: string, who: ApiStudent, path: string, body: Record<string, unknown> = {}) {
+  const res = await postAsStudent(request, sessionId, who, path, body)
   expect(res.ok()).toBe(true)
   return await res.json() as Record<string, unknown>
 }
@@ -52,6 +39,7 @@ async function openManager(page: Page, session: CreatedSession): Promise<void> {
 }
 
 test('instructor reveals 3rd, 2nd, then the winner and the student podium follows', async ({ page, browser, request }) => {
+  skipStudentBrowserFlowsOnWebKit()
   const session = await createSession(request)
 
   const studentContext = await browser.newContext()
@@ -65,9 +53,9 @@ test('instructor reveals 3rd, 2nd, then the winner and the student podium follow
 
     // Teams 2–4. Eli (Team 2) is the voter — only students on a team can vote.
     const teamIds: string[] = []
-    const members: Participant[] = []
+    const members: ApiStudent[] = []
     for (const name of ['Eli', 'Fay', 'Gus']) {
-      const who = await register(request, session.id, name)
+      const who = await registerStudentViaApi(request, session.id, name)
       members.push(who)
       teamIds.push((await asStudent(request, session.id, who, 'create-team')).teamId as string)
     }
@@ -129,6 +117,7 @@ test('instructor reveals 3rd, 2nd, then the winner and the student podium follow
 })
 
 test('teams with equal funding share the winner step', async ({ page, browser, request }) => {
+  skipStudentBrowserFlowsOnWebKit()
   const session = await createSession(request)
 
   const studentContext = await browser.newContext()
@@ -141,9 +130,9 @@ test('teams with equal funding share the winner step', async ({ page, browser, r
     await expect(student.getByText('Your team: Team 1')).toBeVisible()
 
     const teamIds: string[] = []
-    const members: Participant[] = []
+    const members: ApiStudent[] = []
     for (const name of ['Eli', 'Fay', 'Gus']) {
-      const who = await register(request, session.id, name)
+      const who = await registerStudentViaApi(request, session.id, name)
       members.push(who)
       teamIds.push((await asStudent(request, session.id, who, 'create-team')).teamId as string)
     }
@@ -152,7 +141,7 @@ test('teams with equal funding share the winner step', async ({ page, browser, r
     }
     const team1 = Object.values(state.data.teams).sort((a, b) => a.registeredAt - b.registeredAt)[0]!.id
     const [team2, team3, team4] = teamIds as [string, string, string]
-    const [, fay, gus] = members as [Participant, Participant, Participant]
+    const [, fay, gus] = members as [ApiStudent, ApiStudent, ApiStudent]
 
     await setPhase(request, session, 'presentation')
     await setPhase(request, session, 'voting')

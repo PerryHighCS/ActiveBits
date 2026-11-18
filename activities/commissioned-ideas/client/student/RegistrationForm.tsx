@@ -4,19 +4,14 @@ import Button from '@src/components/ui/Button'
 interface RegistrationFormProps {
   sessionId: string
   initialName?: string
-  initialParticipantId?: string | null
-  /** Stored participant token; proves ownership of `initialParticipantId` on reconnect. */
-  initialToken?: string | null
   /** Why the student is seeing the form again (for example a refused stored credential). */
   notice?: string | null
-  onRegistered: (participantId: string, name: string, token: string) => void
+  onRegistered: (participantId: string, name: string) => void
 }
 
 export default function RegistrationForm({
   sessionId,
   initialName = '',
-  initialParticipantId,
-  initialToken,
   notice = null,
   onRegistered,
 }: RegistrationFormProps) {
@@ -35,22 +30,20 @@ export default function RegistrationForm({
     try {
       const res = await fetch(`/api/commissioned-ideas/${sessionId}/register-participant`, {
         method: 'POST',
-        // Without a valid token the server registers a new participant rather
-        // than handing out the existing one's credentials.
-        headers: {
-          'Content-Type': 'application/json',
-          ...(initialParticipantId && initialToken ? { 'X-Commissioned-Ideas-Participant-Token': initialToken } : {}),
-        },
-        body: JSON.stringify({ name: trimmed, participantId: initialParticipantId }),
+        // A still-valid httpOnly participant cookie reconnects this browser's
+        // participant; otherwise the server registers a new one and sets the cookie.
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: trimmed }),
       })
-      const data = (await res.json()) as { participantId?: string; name?: string; token?: string; error?: string }
+      const data = (await res.json()) as { participantId?: string; name?: string; error?: string }
 
-      if (!res.ok || !data.participantId || !data.token) {
+      if (!res.ok || !data.participantId) {
         setError(data.error ?? 'Could not join. Please try again.')
         return
       }
 
-      onRegistered(data.participantId, data.name ?? trimmed, data.token)
+      onRegistered(data.participantId, data.name ?? trimmed)
     } catch {
       setError('Network error — could not join session')
     } finally {

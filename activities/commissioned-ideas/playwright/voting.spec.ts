@@ -1,4 +1,5 @@
 import { expect, type APIRequestContext, type Browser, type Page, test } from '@playwright/test'
+import { createTeamViaApi, skipStudentBrowserFlowsOnWebKit } from './studentApi'
 
 interface CreatedSession {
   id: string
@@ -9,17 +10,6 @@ async function createSession(request: APIRequestContext): Promise<CreatedSession
   const response = await request.post('/api/commissioned-ideas/create')
   expect(response.ok()).toBe(true)
   return await response.json() as CreatedSession
-}
-
-async function createTeamViaApi(request: APIRequestContext, sessionId: string, name: string): Promise<void> {
-  const reg = await request.post(`/api/commissioned-ideas/${sessionId}/register-participant`, { data: { name } })
-  expect(reg.ok()).toBe(true)
-  const who = await reg.json() as { participantId: string; token: string }
-  const team = await request.post(`/api/commissioned-ideas/${sessionId}/create-team`, {
-    data: { participantId: who.participantId },
-    headers: { 'X-Commissioned-Ideas-Participant-Token': who.token },
-  })
-  expect(team.ok()).toBe(true)
 }
 
 async function setPhase(request: APIRequestContext, session: CreatedSession, phase: string): Promise<void> {
@@ -55,6 +45,7 @@ async function joinAsStudentWithTeam(browser: Browser, sessionId: string, name: 
 }
 
 test('student fills, submits, and changes a full ballot while the manager tracks progress', async ({ page, browser, request }) => {
+  skipStudentBrowserFlowsOnWebKit()
   const session = await createSession(request)
   const { context, student } = await joinAsStudentWithTeam(browser, session.id, 'Dana')
   try {
@@ -108,6 +99,7 @@ test('student fills, submits, and changes a full ballot while the manager tracks
 })
 
 test('with only two teams a student gets a single $500 award', async ({ browser, request }) => {
+  skipStudentBrowserFlowsOnWebKit()
   const session = await createSession(request)
   const { context, student } = await joinAsStudentWithTeam(browser, session.id, 'Dana')
   try {

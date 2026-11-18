@@ -11,12 +11,7 @@ import ResultsView from './ResultsView'
 import { useParticipantApi } from './useParticipantApi'
 import VotingBallot from './VotingBallot'
 import StudentRoster from './StudentRoster'
-import {
-  clearParticipantToken,
-  lateArrivalNotice,
-  readParticipantToken,
-  saveParticipantToken,
-} from './studentIdentity'
+import { lateArrivalNotice } from './studentIdentity'
 
 interface SessionData {
   sessionId?: string
@@ -24,7 +19,6 @@ interface SessionData {
 }
 
 const REFUSED_CREDENTIAL_NOTICE = 'We couldn’t restore your earlier sign-in for this session. Join again to continue.'
-const STORAGE_WARNING = 'Your browser didn’t let us save your sign-in. If you reload this page you will need to join again.'
 
 export default function CommissionedIdeasStudent({ sessionData }: { sessionData: SessionData }) {
   const sessionId = sessionData?.sessionId ?? null
@@ -42,12 +36,10 @@ function StudentSessionView({ sessionId }: { sessionId: string }) {
   // ── Identity state ──────────────────────────────────────────────────────────
   const [studentName, setStudentName] = useState('')
   const [studentId, setStudentId] = useState<string | null>(null)
-  const [participantToken, setParticipantToken] = useState<string | null>(null)
   const [nameSubmitted, setNameSubmitted] = useState(false)
   const [registered, setRegistered] = useState(false)
   const [identityResolved, setIdentityResolved] = useState(false)
   const [registrationNotice, setRegistrationNotice] = useState<string | null>(null)
-  const [storageWarning, setStorageWarning] = useState(false)
 
   // ── Resolve stored identity from localStorage (reconnect support) ───────────
   useEffect(() => {
@@ -66,17 +58,11 @@ function StudentSessionView({ sessionId }: { sessionId: string }) {
         setStudentName(identity.studentName)
         setStudentId(identity.studentId)
         setNameSubmitted(identity.nameSubmitted)
-        // A stored token restores the joined view; the socket then proves it.
-        // Without a token the form re-appears with the name pre-filled. A saved
-        // participant ID alone proves nothing, so submitting the form registers
-        // a new participant; it does not restore the old token or team.
-        if (identity.studentId) {
-          const stored = readParticipantToken(window.localStorage, sessionId)
-          if (stored) {
-            setParticipantToken(stored)
-            setRegistered(true)
-          }
-        }
+        // A stored participant ID means this browser joined before: connect, and
+        // the socket proves identity with the httpOnly participant cookie. The ID
+        // itself proves nothing; if the cookie is gone the server refuses and the
+        // form re-appears with the name pre-filled.
+        if (identity.studentId && identity.nameSubmitted) setRegistered(true)
       } catch {
         // non-fatal — fall through to RegistrationForm
       } finally {
@@ -93,7 +79,6 @@ function StudentSessionView({ sessionId }: { sessionId: string }) {
   const { snapshot, authRefused, connect, disconnect } = useStudentSession({
     sessionId: registered ? sessionId : null,
     participantId: studentId,
-    participantToken,
     attachSessionEndedHandler,
   })
 
@@ -103,29 +88,27 @@ function StudentSessionView({ sessionId }: { sessionId: string }) {
     return () => disconnect()
   }, [registered, connect, disconnect])
 
-  // The server explicitly refused the stored credential (not a transient failure):
-  // drop it and offer the registration form again, with the name pre-filled.
+  // The server explicitly refused this browser's participant cookie (not a transient
+  // failure): offer the registration form again, with the name pre-filled.
   useEffect(() => {
     if (!authRefused) return
-    clearParticipantToken(window.localStorage, sessionId)
-    setParticipantToken(null)
     setRegistered(false)
     setRegistrationNotice(REFUSED_CREDENTIAL_NOTICE)
-  }, [authRefused, sessionId])
+  }, [authRefused])
 
-  const ballotApi = useParticipantApi(sessionId, studentId ?? '', participantToken ?? '')
+  const ballotApi = useParticipantApi(sessionId)
 
   // ── Handlers ────────────────────────────────────────────────────────────────
-  const handleRegistered = (participantId: string, name: string, token: string) => {
+  const handleRegistered = (participantId: string, name: string) => {
     setStudentId(participantId)
     setStudentName(name)
-    setParticipantToken(token)
     setNameSubmitted(true)
     setRegistered(true)
     setRegistrationNotice(null)
-    // Registration already succeeded; a storage failure only loses reload recovery.
+    // Not secret: pre-fills the form and marks this browser as joined. Identity is
+    // the httpOnly cookie, so losing this only means submitting the form again,
+    // which reconnects the same participant while the cookie is valid.
     persistSessionParticipantIdentity(window.localStorage, sessionId, name, participantId)
-    setStorageWarning(!saveParticipantToken(window.localStorage, sessionId, token))
   }
 
   // ── Render ──────────────────────────────────────────────────────────────────
@@ -138,8 +121,6 @@ function StudentSessionView({ sessionId }: { sessionId: string }) {
       <RegistrationForm
         sessionId={sessionId}
         initialName={studentName}
-        initialParticipantId={studentId}
-        initialToken={participantToken}
         notice={registrationNotice}
         onRegistered={handleRegistered}
       />
@@ -149,7 +130,10 @@ function StudentSessionView({ sessionId }: { sessionId: string }) {
   const phase = snapshot?.phase ?? null
   const participants = snapshot?.participantRoster ?? {}
   const teams = snapshot?.teams ?? {}
-  const myTeamId = studentId ? (participants[studentId]?.teamId ?? null) : null
+  // The server's view of who this socket is wins over the stored copy.
+  const myId = snapshot?.viewerParticipantId ?? studentId
+  const myName = (myId ? participants[myId]?.name : undefined) ?? studentName
+  const myTeamId = myId ? (participants[myId]?.teamId ?? null) : null
   const notice = snapshot && phase && myTeamId === null ? lateArrivalNotice(phase) : null
 
   return (
@@ -157,17 +141,11 @@ function StudentSessionView({ sessionId }: { sessionId: string }) {
       <div className="bg-white border-b border-gray-200 px-6 py-4">
         <h1 className="text-xl font-bold text-gray-800">Commissioned Ideas</h1>
         <p className="text-sm text-gray-500 mt-0.5">
-          Joined as <span className="font-medium text-amber-700">{studentName}</span>
+          Joined as <span className="font-medium text-amber-700">{myName}</span>
         </p>
       </div>
 
       <div className="max-w-2xl mx-auto">
-        {storageWarning && (
-          <p role="alert" data-testid="ci-storage-warning" className="mx-4 mt-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-            {STORAGE_WARNING}
-          </p>
-        )}
-
         {/* Team controls depend on the phase and locks; never guess them before the first snapshot. */}
         {!snapshot && (
           <p role="status" className="p-6 text-gray-500">Connecting…</p>
@@ -183,8 +161,7 @@ function StudentSessionView({ sessionId }: { sessionId: string }) {
           <StudentRoster
             participants={participants}
             teams={teams}
-            myParticipantId={studentId ?? ''}
-            participantToken={participantToken ?? ''}
+            myParticipantId={myId ?? ''}
             sessionId={sessionId}
             studentGroupingLocked={snapshot.studentGroupingLocked}
             namingLocked={snapshot.namingLocked}

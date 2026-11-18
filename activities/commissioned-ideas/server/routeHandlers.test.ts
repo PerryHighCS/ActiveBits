@@ -8,6 +8,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import type { SessionRecord } from 'activebits-server/core/sessions.js'
 import type { WsRouter } from '../../../types/websocket.js'
+import { getActivityCapabilityCookieName } from 'activebits-server/core/activityCapabilities.js'
 import setupCommissionedIdeasRoutes, { buildManagerSnapshot, buildStudentSnapshot } from './routes.js'
 import type { CommissionedIdeasSessionData } from '../shared/types.js'
 
@@ -20,19 +21,28 @@ interface MockRequest {
   query?: Record<string, string | undefined>
   body?: unknown
   headers?: Record<string, string | undefined>
+  cookies?: Record<string, unknown>
 }
 
 interface MockResponse {
   statusCode: number
   body: unknown
+  cookies: Record<string, { value: string; options: Record<string, unknown> }>
   status(code: number): MockResponse
   json(payload: unknown): MockResponse
+  cookie(name: string, value: string, options: Record<string, unknown>): void
+  setHeader(name: string, value: string): void
 }
 
 function createResponse(): MockResponse {
   const res: MockResponse = {
     statusCode: 200,
     body: null,
+    cookies: {},
+    cookie(name, value, options) {
+      res.cookies[name] = { value, options }
+    },
+    setHeader() {},
     status(code: number) {
       res.statusCode = code
       return res
@@ -135,12 +145,19 @@ function withPasscode(
   return createRequest(params, body, { 'x-commissioned-ideas-instructor-passcode': passcode })
 }
 
+/** The participant capability cookie value issued by register-participant (the student's only credential). */
+function participantCookieValue(res: MockResponse, sessionId: string): string {
+  return res.cookies[getActivityCapabilityCookieName('participant', sessionId)]?.value ?? ''
+}
+
+/** A request that carries a participant cookie, as a browser would after registering. */
 function withParticipantToken(
   params: Record<string, string | undefined>,
   body: unknown,
   token: string,
 ): MockRequest {
-  return createRequest(params, body, { 'x-commissioned-ideas-participant-token': token })
+  const sessionId = params.sessionId ?? ''
+  return { ...createRequest(params, body), cookies: { [getActivityCapabilityCookieName('participant', sessionId)]: token } }
 }
 
 function sessionData(store: Record<string, SessionRecord>, id: string): CommissionedIdeasSessionData {
@@ -564,10 +581,10 @@ void test('register-participant returns 400 when name is missing', async () => {
   assert.deepEqual(res.body, { error: 'name is required' })
 })
 
-void test('register-participant creates a new participant and returns id + name + token', async () => {
+void test('register-participant creates a participant, sets an httpOnly participant cookie, and returns no credential', async () => {
   const app = createMockApp()
   const ws = createMockWs()
-  const { sessions } = createMockSessions()
+  const { store, sessions } = createMockSessions()
   setupCommissionedIdeasRoutes(app, sessions, ws)
 
   const createRes = createResponse()
@@ -579,12 +596,20 @@ void test('register-participant creates a new participant and returns id + name 
   await handler(createRequest({ sessionId }, { name: 'Alice' }), res)
 
   assert.equal(res.statusCode, 200)
-  const body = res.body as { participantId: string; name: string; token: string }
+  const body = res.body as Record<string, unknown>
   assert.equal(typeof body.participantId, 'string')
-  assert.ok(body.participantId.length > 0)
+  assert.ok((body.participantId as string).length > 0)
   assert.equal(body.name, 'Alice')
-  assert.equal(typeof body.token, 'string', 'token must be returned for student auth')
-  assert.ok(body.token.length > 0)
+  assert.deepEqual(Object.keys(body).sort(), ['name', 'participantId'], 'no credential in the response body')
+
+  const cookie = res.cookies[getActivityCapabilityCookieName('participant', sessionId)]
+  assert.ok(cookie && cookie.value.length > 0, 'participant capability cookie is set')
+  assert.equal(cookie.options.httpOnly, true)
+  assert.equal(cookie.options.sameSite, 'lax')
+
+  const stored = JSON.stringify(sessionData(store, sessionId))
+  assert.equal(stored.includes(cookie.value), false, 'only a digest of the capability is stored')
+  assert.equal('token' in sessionData(store, sessionId).participantRoster[body.participantId as string]!, false)
 })
 
 void test('register-participant stores participant in session roster', async () => {
@@ -611,7 +636,7 @@ void test('register-participant stores participant in session roster', async () 
   assert.equal(participant.connected, true)
 })
 
-void test('register-participant reconnects an existing participant with id and token', async () => {
+void test('register-participant reconnects the participant its cookie proves, and ignores a client participantId', async () => {
   const app = createMockApp()
   const ws = createMockWs()
   const { store, sessions } = createMockSessions()
@@ -626,23 +651,24 @@ void test('register-participant reconnects an existing participant with id and t
   // First registration
   const firstRes = createResponse()
   await handler(createRequest({ sessionId }, { name: 'Carol' }), firstRes)
-  const { participantId: firstId, token: firstToken } = firstRes.body as { participantId: string; token: string }
+  const firstId = (firstRes.body as { participantId: string }).participantId
+  const firstCookie = participantCookieValue(firstRes, sessionId)
 
-  // Reconnect with same id, proving ownership with the token
+  // Reconnect: the cookie alone decides, even with no or a different participantId in the body
   const reconnectRes = createResponse()
-  await handler(
-    withParticipantToken({ sessionId }, { name: 'Carol Updated', participantId: firstId }, firstToken),
-    reconnectRes,
-  )
+  await handler(withParticipantToken({ sessionId }, { name: 'Carol Updated', participantId: 'SOMEONEELSE' }, firstCookie), reconnectRes)
 
   assert.equal(reconnectRes.statusCode, 200)
-  const reconnectBody = reconnectRes.body as { participantId: string; token: string }
-  assert.equal(reconnectBody.participantId, firstId, 'same id returned on reconnect')
-  assert.equal(reconnectBody.token, firstToken, 'same token returned on reconnect')
+  assert.equal((reconnectRes.body as { participantId: string }).participantId, firstId, 'same participant on reconnect')
+  assert.deepEqual(reconnectRes.cookies, {}, 'a valid cookie is not reissued')
+  assert.equal(Object.keys(sessionData(store, sessionId).participantRoster).length, 1)
 
-  // Only one participant in roster
-  const data = sessionData(store, sessionId)
-  assert.equal(Object.keys(data.participantRoster).length, 1)
+  // Knowing someone's id without their cookie registers a new participant.
+  const impostorRes = createResponse()
+  console.log('[TEST] expecting registration without a cookie to create a new participant')
+  await handler(createRequest({ sessionId }, { name: 'Mallory', participantId: firstId }), impostorRes)
+  assert.notEqual((impostorRes.body as { participantId: string }).participantId, firstId)
+  assert.equal(Object.keys(sessionData(store, sessionId).participantRoster).length, 2)
 })
 
 void test('register-participant reconnect does not overwrite instructor-moderated name', async () => {
@@ -662,12 +688,13 @@ void test('register-participant reconnect does not overwrite instructor-moderate
   // Student registers with a typo
   const regRes = createResponse()
   await regHandler(createRequest({ sessionId }, { name: 'bbo' }), regRes)
-  const { participantId, token } = regRes.body as { participantId: string; token: string }
+  const participantId = (regRes.body as { participantId: string }).participantId
+  const token = participantCookieValue(regRes, sessionId)
 
   // Instructor corrects the name
   await moderateHandler(withPasscode({ sessionId }, { participantId, name: 'Bob' }, passcode), createResponse())
 
-  // Student reconnects (with their token) using a stale local storage name
+  // Student reconnects (with their cookie) using a stale local storage name
   const reconnectRes = createResponse()
   await regHandler(withParticipantToken({ sessionId }, { name: 'bbo', participantId }, token), reconnectRes)
   assert.equal((reconnectRes.body as { participantId: string }).participantId, participantId, 'must be a reconnect')
@@ -973,7 +1000,7 @@ async function registerParticipant(
     createRequest({ sessionId }, { name }),
     res,
   )
-  return res.body as { participantId: string; token: string }
+  return { participantId: (res.body as { participantId: string }).participantId, token: participantCookieValue(res, sessionId) }
 }
 
 void test('settings route returns 403 without instructor auth', async () => {
@@ -2196,7 +2223,7 @@ void test('snapshots never include passcodes, participant tokens, capability rec
   const data = s.data()
   data.activityCapabilities = { cap1: { id: 'cap1', tokenHash: 'HASH-SECRET', principalKind: 'manager', issuedAt: 0, expiresAt: Number.MAX_SAFE_INTEGER } }
   data.someFieldCoreAddsLater = 'CORE-SECRET'
-  const aliceToken = data.participantRoster[s.alice.participantId]!.token
+  const aliceToken = s.alice.token // the participant cookie value
 
   for (const [label, snapshot] of [
     ['manager', buildManagerSnapshot(data)],
@@ -2205,7 +2232,7 @@ void test('snapshots never include passcodes, participant tokens, capability rec
   ] as const) {
     const json = JSON.stringify(snapshot)
     assert.equal(json.includes(data.instructorPasscode), false, `${label}: passcode`)
-    assert.equal(json.includes(aliceToken), false, `${label}: participant token`)
+    assert.equal(json.includes(aliceToken), false, `${label}: participant cookie value`)
     assert.equal(json.includes('HASH-SECRET'), false, `${label}: capability records`)
     assert.equal(json.includes('CORE-SECRET'), false, `${label}: unknown session fields`)
   }
@@ -2247,6 +2274,7 @@ void test('a rejected student reconnecting with their token stays themselves (an
 // ── WebSocket auth: failure paths and identity binding ───────────────────────
 
 interface WsTestSocket {
+  upgradeHeaders?: Record<string, string>
   sessionId?: string
   participantId?: string | null
   isManager?: boolean
@@ -2272,7 +2300,14 @@ async function setupWsHarness() {
   const { id: sessionId, instructorPasscode } = await createSession(app)
   const tick = () => new Promise((resolve) => setTimeout(resolve, 0))
 
-  const connect = async (query: Record<string, string>) => {
+  /** A browser that registered sends its participant cookie on the upgrade request. */
+  const cookieHeader = (who: { token: string }) => `${getActivityCapabilityCookieName('participant', sessionId)}=${who.token}`
+  const settle = async () => { for (let i = 0; i < 5; i += 1) await tick() }
+
+  const connect = async (
+    query: Record<string, string>,
+    opts: { as?: { token: string }; wait?: boolean } = {},
+  ) => {
     const sent: Record<string, unknown>[] = []
     const handlers: Record<string, (raw?: unknown) => void> = {}
     let closed: { code?: number; reason?: string } | null = null
@@ -2288,9 +2323,10 @@ async function setupWsHarness() {
       },
       on(event, handler) { handlers[event] = handler },
     }
+    if (opts.as) socket.upgradeHeaders = { cookie: `theme=dark; ${cookieHeader(opts.as)}` }
     clients.add(socket)
     wsHandler!(socket, new URLSearchParams({ sessionId, ...query }))
-    await tick()
+    if (opts.wait !== false) await settle()
     return {
       socket,
       sent,
@@ -2322,7 +2358,7 @@ async function setupWsHarness() {
     )
     return (res.body as { teamId: string }).teamId
   }
-  return { store, sessions, sessionId, instructorPasscode, connect, register, createTeam, tick }
+  return { store, sessions, sessionId, instructorPasscode, connect, register, createTeam, tick, settle }
 }
 
 void test('manager websocket with a wrong passcode gets an error, a 1008 close, and no snapshot', async () => {
@@ -2368,29 +2404,29 @@ void test('a participantId in the websocket URL grants nothing', async () => {
   const victim = await h.register('Victim')
   const teamId = await h.createTeam(victim)
 
+  console.log('[TEST] expecting participant websocket refusal without a cookie')
   const attacker = await h.connect({ participantId: victim.participantId })
   assert.equal(attacker.socket.participantId, null, 'identity must not bind from the URL')
-  assert.equal(attacker.sent.some((m) => m.type === 'commissioned-ideas:session-state'), false, 'no snapshot before auth')
-
-  console.log('[TEST] expecting participant websocket auth failure without a token')
-  await attacker.say({ type: 'commissioned-ideas:participant-auth', participantId: victim.participantId })
+  assert.ok(attacker.sent.some((m) => m.type === 'commissioned-ideas:error' && m.code === 'participant-auth-refused'))
   const teams = attacker.lastSnapshot()?.teams as Record<string, { naming?: unknown }>
   assert.equal(teams[teamId]?.naming, undefined, 'victim team naming details must not be sent')
+  assert.equal(attacker.lastSnapshot()?.viewerParticipantId, null)
 })
 
-void test('participant websocket auth binds identity only with a valid token', async () => {
+void test('participant websocket binds identity only from a valid participant cookie', async () => {
   const h = await setupWsHarness()
   const student = await h.register('Student')
   const teamId = await h.createTeam(student)
 
-  const conn = await h.connect({})
-  console.log('[TEST] expecting participant websocket auth failure with wrong token')
-  await conn.say({ type: 'commissioned-ideas:participant-auth', participantId: student.participantId, token: 'WRONGTOKEN' })
-  assert.equal(conn.socket.participantId, null)
-  assert.ok(conn.sent.some((m) => m.type === 'commissioned-ideas:error'))
+  console.log('[TEST] expecting participant websocket refusal with a forged cookie')
+  const forged = await h.connect({}, { as: { token: 'FORGED' } })
+  assert.equal(forged.socket.participantId, null)
+  assert.ok(forged.sent.some((m) => m.type === 'commissioned-ideas:error' && m.code === 'participant-auth-refused'))
 
-  await conn.say({ type: 'commissioned-ideas:participant-auth', participantId: student.participantId, token: student.token })
+  const conn = await h.connect({}, { as: student })
   assert.equal(conn.socket.participantId, student.participantId)
+  assert.equal(conn.sent.filter((m) => m.type === 'commissioned-ideas:error').length, 0)
+  assert.equal(conn.lastSnapshot()?.viewerParticipantId, student.participantId)
   const teams = conn.lastSnapshot()?.teams as Record<string, { naming?: unknown }>
   assert.notEqual(teams[teamId]?.naming, undefined, 'own team naming details arrive after auth')
   assert.equal(sessionData(h.store, h.sessionId).participantRoster[student.participantId]?.connected, true)
@@ -2532,65 +2568,57 @@ void test('student websocket for an unknown session closes without subscribing',
   assert.deepEqual(subscribed, [], 'stale links must not add broadcast subscriptions')
 })
 
-void test('participant auth refusal carries the refusal code; a retry after refusal can succeed', async () => {
+void test('a student socket gets no snapshot before cookie auth completes', async () => {
   const h = await setupWsHarness()
   const student = await h.register('Student')
-  const conn = await h.connect({})
-  console.log('[TEST] expecting participant websocket auth refusal')
-  await conn.say({ type: 'commissioned-ideas:participant-auth', participantId: student.participantId, token: 'WRONG' })
-  assert.ok(conn.sent.some((m) => m.type === 'commissioned-ideas:error' && m.code === 'participant-auth-refused'))
-  await conn.say({ type: 'commissioned-ideas:participant-auth', participantId: student.participantId, token: student.token })
-  assert.equal(conn.socket.participantId, student.participantId)
+  const conn = await h.connect({}, { as: student, wait: false })
+  assert.equal(conn.sent.length, 0, 'nothing is sent while auth is pending')
+  await h.settle()
+  const first = conn.sent.find((m) => m.type !== 'commissioned-ideas:error')
+  assert.equal((first?.data as { viewerParticipantId?: unknown } | undefined)?.viewerParticipantId, student.participantId, 'the first snapshot is already personalized')
 })
 
-void test('a refused auth that resolves after a successful one cannot unbind the socket', async () => {
+void test('participant auth messages are ignored: identity comes only from the cookie', async () => {
   const h = await setupWsHarness()
   const student = await h.register('Student')
+  console.log('[TEST] expecting participant websocket refusal without a cookie')
   const conn = await h.connect({})
-  // Both arrive before either session read completes.
-  conn.sayNow({ type: 'commissioned-ideas:participant-auth', participantId: student.participantId, token: student.token })
-  conn.sayNow({ type: 'commissioned-ideas:participant-auth', participantId: student.participantId, token: 'WRONG' })
-  await h.tick(); await h.tick(); await h.tick()
-  assert.equal(conn.socket.participantId, student.participantId)
-  assert.equal((conn.socket as { studentAuth?: string }).studentAuth, 'authenticated')
-  assert.equal(conn.sent.some((m) => m.type === 'commissioned-ideas:error'), false, 'the second attempt was ignored, not refused')
+  await conn.say({ type: 'commissioned-ideas:participant-auth', participantId: student.participantId, token: student.token })
+  assert.equal(conn.socket.participantId, null)
 })
 
 void test('a socket closed while auth is reading the session never marks the student online', async () => {
   const h = await setupWsHarness()
   const student = await h.register('Student')
   sessionDataFromHarness(h).participantRoster[student.participantId]!.connected = false
-  const conn = await h.connect({})
-  conn.sayNow({ type: 'commissioned-ideas:participant-auth', participantId: student.participantId, token: student.token })
+  const conn = await h.connect({}, { as: student, wait: false })
   await conn.hangUp()
-  await h.tick(); await h.tick()
+  await h.settle()
   assert.equal(sessionDataFromHarness(h).participantRoster[student.participantId]?.connected, false)
 })
 
 void test('presence stays online while another authenticated tab is open', async () => {
   const h = await setupWsHarness()
   const student = await h.register('Student')
-  const auth = { type: 'commissioned-ideas:participant-auth', participantId: student.participantId, token: student.token }
-  const oldTab = await h.connect({})
-  await oldTab.say(auth)
-  const newTab = await h.connect({})
-  await newTab.say(auth)
+  const oldTab = await h.connect({}, { as: student })
+  const newTab = await h.connect({}, { as: student })
 
   await oldTab.hangUp()
+  await h.settle()
   assert.equal(sessionDataFromHarness(h).participantRoster[student.participantId]?.connected, true, 'the new tab is still open')
 
   await newTab.hangUp()
+  await h.settle()
   assert.equal(sessionDataFromHarness(h).participantRoster[student.participantId]?.connected, false, 'last tab closed')
 })
 
 void test('a store failure during participant auth leaves the socket retryable', async () => {
   const h = await setupWsHarness()
   const student = await h.register('Student')
-  const conn = await h.connect({})
   const realUpdate = h.sessions.updateAtomic
   h.sessions.updateAtomic = async () => { throw new Error('[TEST] simulated store write failure') }
   console.log('[TEST] expecting participant auth persistence failure')
-  await conn.say({ type: 'commissioned-ideas:participant-auth', participantId: student.participantId, token: student.token })
+  const conn = await h.connect({}, { as: student })
   h.sessions.updateAtomic = realUpdate
 
   assert.equal(conn.socket.participantId, null, 'binding is not committed')
@@ -2599,8 +2627,7 @@ void test('a store failure during participant auth leaves the socket retryable',
   assert.equal(conn.closed()?.code, 1011, 'a non-policy close lets the client reconnect and retry')
 
   // The reconnect authenticates normally.
-  const retry = await h.connect({})
-  await retry.say({ type: 'commissioned-ideas:participant-auth', participantId: student.participantId, token: student.token })
+  const retry = await h.connect({}, { as: student })
   assert.equal(retry.socket.participantId, student.participantId)
 })
 
@@ -2684,4 +2711,46 @@ void test('a store failure during a route write returns 500 and changes nothing'
   s.sessions.updateAtomic = realUpdate
   assert.equal(res.statusCode, 500)
   assert.deepEqual(s.data().teams, {})
+})
+
+// ── Participant cookie identity ──────────────────────────────────────────────
+
+void test('student actions act as the cookie owner, whatever participantId the body names', async () => {
+  const s = await setupSession()
+  const alice = await s.register('Alice')
+  const bob = await s.register('Bob')
+  // Alice's cookie, Bob's id in the body: the team is Alice's.
+  const res = await s.post('create-team', withParticipantToken({ sessionId: s.sessionId }, { participantId: bob.participantId }, alice.token))
+  assert.equal(res.statusCode, 200)
+  const teamId = (res.body as { teamId: string }).teamId
+  assert.deepEqual(s.data().teams[teamId]?.memberIds, [alice.participantId])
+  assert.equal(s.data().participantRoster[bob.participantId]?.teamId, null)
+})
+
+void test('student actions without a valid cookie are refused, and rejection still applies', async () => {
+  const s = await setupSession()
+  const alice = await s.register('Alice')
+  console.log('[TEST] expecting 403 for missing, forged, and rejected participant cookies')
+  assert.equal((await s.post('create-team', createRequest({ sessionId: s.sessionId }, { participantId: alice.participantId }))).statusCode, 403)
+  assert.equal((await s.post('create-team', withParticipantToken({ sessionId: s.sessionId }, {}, 'FORGED'))).statusCode, 403)
+
+  await s.asInstructor('participant-name', { participantId: alice.participantId, rejected: true })
+  assert.equal((await s.asStudent('create-team', alice)).statusCode, 403, 'a rejected student cannot act')
+  const again = await s.post('register-participant', withParticipantToken({ sessionId: s.sessionId }, { name: 'Alice 2' }, alice.token))
+  assert.equal((again.body as { participantId: string }).participantId, alice.participantId, 'reconnecting cannot shed a rejection')
+  assert.equal(s.data().participantRoster[alice.participantId]?.rejectedByInstructor, true)
+})
+
+void test('registration is refused once the session reaches the participant capability limit', async () => {
+  const s = await setupSession()
+  let last = 0
+  for (let i = 0; i < 260 && last !== 409; i += 1) {
+    last = (await s.post('register-participant', createRequest({ sessionId: s.sessionId }, { name: `Student ${i}` }))).statusCode
+  }
+  console.log('[TEST] expected registration refusal at the capability limit')
+  assert.equal(last, 409)
+  const before = Object.keys(s.data().participantRoster).length
+  assert.ok(before >= 150, 'a full class registers before the limit')
+  assert.equal((await s.post('register-participant', createRequest({ sessionId: s.sessionId }, { name: 'One more' }))).statusCode, 409)
+  assert.equal(Object.keys(s.data().participantRoster).length, before, 'a refused registration adds nobody')
 })
