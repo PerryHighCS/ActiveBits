@@ -7,6 +7,7 @@ import {
 import {
   hasRouterStatePasscode,
   recoverCommissionedIdeasInstructorPasscode,
+  recoverInstructorPasscodeOnce,
   resolveCommissionedIdeasInstructorPasscode,
 } from './passcode.js'
 
@@ -158,15 +159,39 @@ const recoveryCases: { name: string; replies: Reply[]; expected: string | null; 
 for (const row of recoveryCases) {
   void test(`recoverCommissionedIdeasInstructorPasscode: ${row.name}`, async () => {
     const calls: string[] = []
+    const credentials: (RequestCredentials | undefined)[] = []
     const replies = [...row.replies]
     const fakeFetch = async (input: string, init?: RequestInit) => {
       calls.push(`${init?.method ?? 'GET'} ${input}`)
-      assert.equal(init?.credentials, 'include', 'every recovery request must send cookies')
+      // Recorded, not asserted here: production code catches throws from fetch,
+      // which would hide a failed assertion behind an expected `null` result.
+      credentials.push(init?.credentials)
       const reply = replies.shift()
       if (reply === undefined || reply === 'network-error') throw new Error('[TEST] simulated network error')
       return { ok: reply.status >= 200 && reply.status < 300, status: reply.status, json: async () => reply.body ?? {} }
     }
     assert.equal(await recoverCommissionedIdeasInstructorPasscode('s1', fakeFetch), row.expected)
     assert.deepEqual(calls, row.calls)
+    assert.deepEqual(credentials, row.calls.map(() => 'include'), 'every recovery request must send cookies')
   })
 }
+
+void test('shared recovery: concurrent callers for one session share a single request sequence', async () => {
+  const calls: string[] = []
+  let release: () => void = () => {}
+  const gate = new Promise<void>((resolve) => { release = resolve })
+  const fakeFetch = async (input: string, init?: RequestInit) => {
+    calls.push(`${init?.method ?? 'GET'} ${input}`)
+    await gate
+    return { ok: true, status: 200, json: async () => ({ instructorPasscode: 'PASS' }) }
+  }
+  const first = recoverInstructorPasscodeOnce('s1', fakeFetch)
+  const second = recoverInstructorPasscodeOnce('s1', fakeFetch)
+  release()
+  assert.deepEqual(await Promise.all([first, second]), ['PASS', 'PASS'])
+  assert.deepEqual(calls, [EXCHANGE], 'Strict Mode double effects must not send a second reissue')
+
+  // After settling, a later recovery (for example a new reload) runs again.
+  assert.equal(await recoverInstructorPasscodeOnce('s1', fakeFetch), 'PASS')
+  assert.deepEqual(calls, [EXCHANGE, EXCHANGE])
+})

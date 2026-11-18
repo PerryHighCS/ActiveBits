@@ -1,3 +1,4 @@
+import { ownEntry } from './records.js'
 import type {
   CommissionedIdeasPhase,
   CommissionedIdeasTeam,
@@ -80,7 +81,7 @@ export function isTeamPermutation(teamIds: unknown, teams: Record<string, unknow
   if (teamIds.length !== existing.length) return false
   const seen = new Set<string>()
   for (const id of teamIds) {
-    if (typeof id !== 'string' || !Object.hasOwn(teams, id) || seen.has(id)) return false
+    if (typeof id !== 'string' || ownEntry(teams, id) === undefined || seen.has(id)) return false
     seen.add(id)
   }
   return true

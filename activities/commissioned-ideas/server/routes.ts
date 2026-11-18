@@ -22,10 +22,18 @@ import type {
   StudentSafeProposal,
   StudentSafeTeam,
 } from '../shared/types.js'
-import { coerceAllocations, isValidBallotAmount, sanitizeDisplayName, validateBallot, voterBallotStatus } from '../shared/validation.js'
+import {
+  coerceAllocations,
+  isValidBallotAmount,
+  sanitizeDisplayName,
+  validateBallot,
+  voterBallotStatus,
+  withdrawBallotsFundingMissingTeams,
+} from '../shared/validation.js'
 import { computeTeamScores } from '../shared/scoring.js'
-import { nextPodiumStep, podiumPlaceCount, revealedPodium } from '../shared/podium.js'
-import { checkInstructorMove } from '../shared/membership.js'
+import { nextPodiumStep, podiumPlaceCount, podiumRevealKey, reconcilePodiumReveal, revealedPodium } from '../shared/podium.js'
+import { checkInstructorMove, parseAssignTarget } from '../shared/membership.js'
+import { ownEntry } from '../shared/records.js'
 import {
   MAX_PROPOSAL_LENGTH,
   MAX_PROPOSALS_PER_KIND,
@@ -58,19 +66,52 @@ interface CommissionedIdeasSocket extends ActiveBitsWebSocket {
   participantId?: string | null
   isManager?: boolean
   wantsManager?: boolean
-  /**
-   * Student sockets receive nothing while `pending` (waiting for the
-   * participant-auth message), so a client never renders an anonymous view
-   * first and then its own. `anonymous` follows a failed auth.
-   */
-  studentAuth?: 'pending' | 'authenticated' | 'anonymous'
+  studentAuth?: StudentSocketAuth
 }
+
+/**
+ * Student socket auth state machine (owner: the `/ws/commissioned-ideas` handler).
+ *
+ *   pending ──auth msg──▶ authenticating ──valid + presence saved──▶ authenticated (final)
+ *      ▲                        │  └──refused──▶ anonymous ──auth msg──▶ authenticating …
+ *      └──store failure─────────┘ (state restored, socket closed 1011 so the client reconnects)
+ *
+ * - Only one attempt runs per socket (`authenticating` ignores further auth messages),
+ *   so a late refusal can never overwrite a successful binding.
+ * - `pending`/`authenticating` sockets receive no snapshots, so a client never renders
+ *   an anonymous view first and then its own. `anonymous` receives the anonymous view.
+ * - `participantId` is set only in `authenticated`.
+ */
+export type StudentSocketAuth = 'pending' | 'authenticating' | 'authenticated' | 'anonymous'
 
 /** Which snapshot (if any) a socket should receive for a broadcast. */
 function snapshotAudience(client: CommissionedIdeasSocket): 'manager' | 'student' | null {
   if (client.isManager) return 'manager'
   if (client.wantsManager) return null // manager socket still authenticating
-  return client.studentAuth === 'pending' ? null : 'student'
+  return client.studentAuth === 'authenticated' || client.studentAuth === 'anonymous' ? 'student' : null
+}
+
+const WS_OPEN = 1
+
+/**
+ * Presence rule (single owner): a participant is online while at least one open,
+ * authenticated socket on this server is bound to them. Derived from live sockets,
+ * not toggled per connection, so a second tab or a reload that overlaps the old
+ * socket's close keeps the student online. Scope: per server process; with several
+ * instances, the instance that handled the last close decides.
+ */
+function hasLiveParticipantSocket(ws: WsRouter, sessionId: string, participantId: string): boolean {
+  for (const client of ws.wss.clients as Set<CommissionedIdeasSocket>) {
+    if (
+      client.readyState === WS_OPEN &&
+      client.sessionId === sessionId &&
+      client.studentAuth === 'authenticated' &&
+      client.participantId === participantId
+    ) {
+      return true
+    }
+  }
+  return false
 }
 
 interface JsonResponse {
@@ -281,6 +322,7 @@ function normalizeSessionData(data: unknown): CommissionedIdeasSessionData {
     currentPresentationTeamId:
       typeof source.currentPresentationTeamId === 'string' ? source.currentPresentationTeamId : null,
     podiumRevealStep: normalizePodiumStep(source.podiumRevealStep),
+    podiumRevealKey: typeof source.podiumRevealKey === 'string' ? source.podiumRevealKey : null,
   }
 }
 
@@ -340,7 +382,7 @@ function verifyParticipantCredential(
   { allowRejected = false }: { allowRejected?: boolean } = {},
 ): CommissionedIdeasParticipant | null {
   if (typeof participantId !== 'string' || typeof token !== 'string' || token.length === 0) return null
-  const participant = data.participantRoster[participantId]
+  const participant = ownEntry(data.participantRoster, participantId)
   if (!participant) return null
   if (participant.rejectedByInstructor && !allowRejected) return null
   return verifyPasscode(participant.token, token.toUpperCase()) ? participant : null
@@ -391,6 +433,19 @@ async function getSession(
   return session as CommissionedIdeasSession
 }
 
+/**
+ * Every write of an existing session goes through this. Enforces cross-field invariants that any
+ * mutation can affect, so individual routes cannot forget them:
+ * - podium reveal: a revealed podium always matches the ranking it was revealed for
+ *   (`reconcilePodiumReveal`); moderation that changes the podium resets the reveal.
+ */
+async function persistSession(sessions: SessionStore, sessionId: string, session: CommissionedIdeasSession): Promise<void> {
+  if (reconcilePodiumReveal(session.data, computeTeamScores(session.data.teams, session.data.ballots))) {
+    console.info('[commissioned-ideas] Podium reveal reset after the ranking changed', { sessionId })
+  }
+  await sessions.set(sessionId, session)
+}
+
 function buildDefaultSessionData(): CommissionedIdeasSessionData {
   return {
     instructorPasscode: generatePasscode(),
@@ -406,6 +461,7 @@ function buildDefaultSessionData(): CommissionedIdeasSessionData {
     presentationHistory: [],
     currentPresentationTeamId: null,
     podiumRevealStep: 'hidden',
+    podiumRevealKey: null,
   }
 }
 
@@ -661,18 +717,32 @@ function removeParticipantFromTeam(
   data: CommissionedIdeasSessionData,
   participant: CommissionedIdeasParticipant,
 ): void {
-  const team = participant.teamId ? data.teams[participant.teamId] : null
+  const team = ownEntry(data.teams, participant.teamId)
   if (team) {
     team.memberIds = team.memberIds.filter((id) => id !== participant.id)
     delete team.groupNameVotes[participant.id]
     delete team.projectNameVotes[participant.id]
     if (team.memberIds.length === 0) {
-      delete data.teams[team.id]
+      deleteTeam(data, team.id)
     } else {
       refreshTeamNames(team)
     }
   }
   participant.teamId = null
+}
+
+/**
+ * Deletes an (empty) team and everything that pointed at it. Ballot contract: a ballot
+ * that funded the team is withdrawn so its voter can vote again (see
+ * `withdrawBallotsFundingMissingTeams`). Single owner of team deletion.
+ */
+function deleteTeam(data: CommissionedIdeasSessionData, teamId: string): void {
+  delete data.teams[teamId]
+  if (data.currentPresentationTeamId === teamId) data.currentPresentationTeamId = null
+  const withdrawn = withdrawBallotsFundingMissingTeams(data)
+  if (withdrawn.length > 0) {
+    console.info('[commissioned-ideas] Ballots withdrawn after team removal', { teamId, voterCount: withdrawn.length })
+  }
 }
 
 /** Moves `participant` into `team`, leaving any previous team first. Caller checks capacity. */
@@ -690,7 +760,7 @@ function addParticipantToTeam(
 
 function countActiveMembers(data: CommissionedIdeasSessionData, team: CommissionedIdeasTeam): number {
   return team.memberIds.filter((id) => {
-    const p = data.participantRoster[id]
+    const p = ownEntry(data.participantRoster, id)
     return p !== undefined && !p.rejectedByInstructor
   }).length
 }
@@ -845,7 +915,7 @@ export default function setupCommissionedIdeasRoutes(
       typeof body.participantId === 'string' && /^[A-Z0-9]{6,12}$/i.test(body.participantId)
         ? body.participantId
         : null
-    const requested = requestedId ? session.data.participantRoster[requestedId] : null
+    const requested = ownEntry(session.data.participantRoster, requestedId)
     // Reconnect only with proof of ownership: participant ids are visible to every
     // student, so an id alone must never return that participant's token.
     const existing = requested
@@ -860,6 +930,7 @@ export default function setupCommissionedIdeasRoutes(
 
     let participantId: string
     let participantToken: string
+    let participantName: string
     let reconnected = false
     if (existing) {
       // Reconnect: mark connected only. The server-side name is authoritative —
@@ -868,12 +939,14 @@ export default function setupCommissionedIdeasRoutes(
       reconnected = true
       participantId = existing.id
       participantToken = existing.token
+      participantName = existing.name
       existing.connected = true
       existing.lastSeen = Date.now()
     } else {
       // New registration. Never reuse a requested id that already belongs to someone.
       participantId = requestedId && !requested ? requestedId : generateShortId()
       participantToken = generatePasscode()
+      participantName = name
       const participant: CommissionedIdeasParticipant = {
         id: participantId,
         name,
@@ -886,11 +959,11 @@ export default function setupCommissionedIdeasRoutes(
       session.data.participantRoster[participantId] = participant
     }
 
-    await sessions.set(sessionId, session)
+    await persistSession(sessions, sessionId, session)
     console.info('[commissioned-ideas] Participant registered', { sessionId, participantId, reconnected })
 
     broadcastRegistrationUpdate(ws, sessionId, session.data)
-    res.json({ participantId, name, token: participantToken })
+    res.json({ participantId, name: participantName, token: participantToken })
   })
 
   // ── Instructor: edit or reject a participant name ───────────────────────────
@@ -919,7 +992,7 @@ export default function setupCommissionedIdeasRoutes(
       return
     }
 
-    const participant = session.data.participantRoster[participantId]
+    const participant = ownEntry(session.data.participantRoster, participantId)
     if (!participant) {
       res.status(404).json({ error: 'Participant not found' })
       return
@@ -949,7 +1022,7 @@ export default function setupCommissionedIdeasRoutes(
       delete session.data.ballots[participant.id]
     }
 
-    await sessions.set(sessionId, session)
+    await persistSession(sessions, sessionId, session)
     console.info(`[commissioned-ideas] Participant name moderated`, { sessionId, participantId })
 
     broadcastRegistrationUpdate(ws, sessionId, session.data)
@@ -966,6 +1039,14 @@ export default function setupCommissionedIdeasRoutes(
 
     if (!checkInstructorAuth(req, session)) {
       res.status(403).json({ error: 'Instructor authentication required' })
+      return
+    }
+
+    // Team-formation settings only mean something while teams are forming. After
+    // registration the size limit is fixed (late placement may exceed it).
+    if (session.data.phase !== 'registration') {
+      console.warn('[commissioned-ideas] Settings change refused outside registration', { sessionId, phase: session.data.phase })
+      res.status(409).json({ error: 'Session settings can only be changed during registration' })
       return
     }
 
@@ -988,7 +1069,7 @@ export default function setupCommissionedIdeasRoutes(
       session.data.namingLocked = Boolean(body.namingLocked)
     }
 
-    await sessions.set(sessionId, session)
+    await persistSession(sessions, sessionId, session)
     console.info('[commissioned-ideas] Settings updated', { sessionId })
     broadcastToAll(ws, sessionId, 'commissioned-ideas:registration-updated', session.data)
     res.json({ ok: true })
@@ -1051,7 +1132,7 @@ export default function setupCommissionedIdeasRoutes(
   }
 
   async function saveAndBroadcast(session: CommissionedIdeasSession): Promise<void> {
-    await sessions.set(session.id, session)
+    await persistSession(sessions, session.id, session)
     broadcastRegistrationUpdate(ws, session.id, session.data)
   }
 
@@ -1082,7 +1163,7 @@ export default function setupCommissionedIdeasRoutes(
 
     if (!requireStudentGrouping(session, res)) return
 
-    const team = session.data.teams[teamId]
+    const team = ownEntry(session.data.teams, teamId)
     if (!team) { res.status(404).json({ error: 'Team not found' }); return }
 
     if (participant.teamId !== teamId && countActiveMembers(session.data, team) >= session.data.maxTeamSize) {
@@ -1126,18 +1207,25 @@ export default function setupCommissionedIdeasRoutes(
     const participantId = typeof body.participantId === 'string' ? body.participantId : null
     if (!participantId) { res.status(400).json({ error: 'participantId is required' }); return }
 
-    const participant = session.data.participantRoster[participantId]
+    const participant = ownEntry(session.data.participantRoster, participantId)
     if (!participant) { res.status(404).json({ error: 'Participant not found' }); return }
 
-    const newTeam = body.newTeam === true
-    const targetTeamId = typeof body.teamId === 'string' ? body.teamId : null
+    const parsed = parseAssignTarget(body)
+    if (!parsed.ok) {
+      console.warn('[commissioned-ideas] Instructor move refused: invalid target', { sessionId: session.id, participantId, error: parsed.error })
+      res.status(400).json({ error: parsed.error })
+      return
+    }
+    const { target } = parsed
+    const newTeam = target.kind === 'new-team'
+    const targetTeamId = target.kind === 'team' ? target.teamId : null
 
     // Membership contract: which moves are allowed in which phase lives in shared/membership.ts.
     const decision = checkInstructorMove({
       phase: session.data.phase,
       participantTeamId: participant.teamId,
       rejected: participant.rejectedByInstructor,
-      target: newTeam ? { kind: 'new-team' } : targetTeamId !== null ? { kind: 'team', teamId: targetTeamId } : { kind: 'ungrouped' },
+      target,
     })
     if (!decision.ok) {
       console.warn('[commissioned-ideas] Instructor move refused', {
@@ -1156,7 +1244,7 @@ export default function setupCommissionedIdeasRoutes(
       addParticipantToTeam(session.data, participant, team)
       resultTeamId = team.id
     } else if (targetTeamId !== null) {
-      const team = session.data.teams[targetTeamId]
+      const team = ownEntry(session.data.teams, targetTeamId)
       if (!team) { res.status(404).json({ error: 'Team not found' }); return }
       if (
         decision.enforceCapacity &&
@@ -1223,7 +1311,7 @@ export default function setupCommissionedIdeasRoutes(
     if (!requireRegistrationPhase(session, res)) return
     if (session.data.namingLocked) { res.status(403).json({ error: 'Naming is locked' }); return }
 
-    const team = participant.teamId ? session.data.teams[participant.teamId] : null
+    const team = ownEntry(session.data.teams, participant.teamId)
     if (!team) { res.status(409).json({ error: 'Join a team before proposing names' }); return }
 
     const proposals = proposalsForKind(team, kind)
@@ -1283,7 +1371,7 @@ export default function setupCommissionedIdeasRoutes(
     if (!requireRegistrationPhase(session, res)) return
     if (session.data.namingLocked) { res.status(403).json({ error: 'Naming is locked' }); return }
 
-    const team = participant.teamId ? session.data.teams[participant.teamId] : null
+    const team = ownEntry(session.data.teams, participant.teamId)
     if (!team) { res.status(409).json({ error: 'Join a team before voting on names' }); return }
 
     const proposal = proposalsForKind(team, kind).find((p) => p.id === proposalId)
@@ -1318,7 +1406,7 @@ export default function setupCommissionedIdeasRoutes(
     if (!teamId || !proposalId) { res.status(400).json({ error: 'teamId and proposalId are required' }); return }
     if (typeof body.rejected !== 'boolean') { res.status(400).json({ error: 'rejected must be a boolean' }); return }
 
-    const team = session.data.teams[teamId]
+    const team = ownEntry(session.data.teams, teamId)
     if (!team) { res.status(404).json({ error: 'Team not found' }); return }
     const proposal = proposalsForKind(team, kind).find((p) => p.id === proposalId)
     if (!proposal) { res.status(404).json({ error: 'Proposal not found' }); return }
@@ -1403,17 +1491,20 @@ export default function setupCommissionedIdeasRoutes(
     const from = session.data.podiumRevealStep
     if (body.action === 'reset') {
       session.data.podiumRevealStep = 'hidden'
+      session.data.podiumRevealKey = null
     } else {
-      const placeCount = podiumPlaceCount(computeTeamScores(session.data.teams, session.data.ballots))
-      const next = nextPodiumStep(from, placeCount)
+      const ranking = computeTeamScores(session.data.teams, session.data.ballots)
+      const next = nextPodiumStep(from, podiumPlaceCount(ranking))
       if (!next) {
         res.status(409).json({ error: 'The podium is already fully revealed' })
         return
       }
       session.data.podiumRevealStep = next
+      // The reveal is pinned to this podium; see reconcilePodiumReveal.
+      if (from === 'hidden') session.data.podiumRevealKey = podiumRevealKey(ranking)
     }
 
-    await sessions.set(session.id, session)
+    await persistSession(sessions, session.id, session)
     broadcastToAll(ws, session.id, 'commissioned-ideas:podium-step', session.data)
     console.info('[commissioned-ideas] Podium step', { sessionId: session.id, from, to: session.data.podiumRevealStep })
     res.json({ ok: true, step: session.data.podiumRevealStep })
@@ -1442,13 +1533,14 @@ export default function setupCommissionedIdeasRoutes(
 
     session.data.phase = to
     session.data.podiumRevealStep = 'hidden'
+    session.data.podiumRevealKey = null
     if (to === 'presentation') {
       normalizePresenterOrder(session.data.teams)
       const current = session.data.currentPresentationTeamId
-      if (current && !session.data.teams[current]) session.data.currentPresentationTeamId = null
+      if (current && !ownEntry(session.data.teams, current)) session.data.currentPresentationTeamId = null
     }
 
-    await sessions.set(session.id, session)
+    await persistSession(sessions, session.id, session)
     broadcastToAll(ws, session.id, 'commissioned-ideas:phase-changed', session.data)
     console.info('[commissioned-ideas] Phase changed', { sessionId: session.id, from, to })
     res.json({ ok: true, phase: to })
@@ -1504,7 +1596,7 @@ export default function setupCommissionedIdeasRoutes(
     if (!('teamId' in body)) { res.status(400).json({ error: 'teamId is required (string or null)' }); return }
     const teamId = typeof body.teamId === 'string' ? body.teamId : null
     if (body.teamId !== null && teamId === null) { res.status(400).json({ error: 'teamId must be a string or null' }); return }
-    if (teamId && !session.data.teams[teamId]) { res.status(404).json({ error: 'Team not found' }); return }
+    if (teamId && !ownEntry(session.data.teams, teamId)) { res.status(404).json({ error: 'Team not found' }); return }
 
     spotlightTeam(session.data, teamId)
 
@@ -1560,6 +1652,85 @@ export default function setupCommissionedIdeasRoutes(
   })
 
   // ── WebSocket ───────────────────────────────────────────────────────────────
+
+  /** Re-derives one participant's `connected` flag from live sockets; persists and broadcasts on change. */
+  async function syncParticipantPresence(sessionId: string, participantId: string): Promise<void> {
+    const session = await getSession(sessions, sessionId)
+    if (!session) return
+    const participant = ownEntry(session.data.participantRoster, participantId)
+    if (!participant) return
+    const live = hasLiveParticipantSocket(ws, sessionId, participantId)
+    if (participant.connected === live) return
+    participant.connected = live
+    participant.lastSeen = Date.now()
+    await persistSession(sessions, sessionId, session)
+    broadcastRegistrationUpdate(ws, sessionId, session.data)
+  }
+
+  function sendWsError(socket: CommissionedIdeasSocket, error: string, code?: string): void {
+    socket.send(JSON.stringify({ type: 'commissioned-ideas:error', error, ...(code ? { code } : {}) }))
+  }
+
+  async function authenticateParticipantSocket(
+    socket: CommissionedIdeasSocket,
+    sessionId: string,
+    message: Record<string, unknown>,
+  ): Promise<void> {
+    const previous = socket.studentAuth === 'anonymous' ? 'anonymous' : 'pending'
+    socket.studentAuth = 'authenticating'
+
+    let bound = false
+    try {
+      const session = await getSession(sessions, sessionId)
+      if (socket.readyState !== WS_OPEN) return // closed while reading: never mark online
+      if (!session) {
+        sendWsError(socket, 'Session not found', 'session-not-found')
+        socket.close(1008, 'Session not found')
+        return
+      }
+      const participant = verifyParticipantCredential(session.data, message.participantId, message.token, { allowRejected: true })
+      if (!participant) {
+        console.warn('[commissioned-ideas] WS participant auth refused', { sessionId })
+        socket.studentAuth = 'anonymous'
+        sendWsError(socket, 'Invalid participant credentials', 'participant-auth-refused')
+        socket.send(JSON.stringify({
+          type: 'commissioned-ideas:session-state',
+          sessionId,
+          data: buildStudentSnapshot(session.data, null),
+        }))
+        return
+      }
+
+      // Bind before writing presence so a close during the write is seen by the
+      // close handler, which then re-derives presence from the remaining sockets.
+      socket.participantId = participant.id
+      socket.studentAuth = 'authenticated'
+      bound = true
+      participant.connected = true
+      participant.lastSeen = Date.now()
+      await persistSession(sessions, sessionId, session)
+      // The broadcast includes this socket's personalized snapshot.
+      broadcastRegistrationUpdate(ws, sessionId, session.data)
+      // Closed during the write: our `connected = true` may have landed after the
+      // close handler's update, so derive presence once more.
+      if (socket.readyState !== WS_OPEN) await syncParticipantPresence(sessionId, participant.id)
+    } catch (err: unknown) {
+      console.error('[commissioned-ideas] WS participant auth failed', { sessionId, err })
+      if (socket.studentAuth === 'authenticating' || bound) {
+        socket.participantId = null
+        socket.studentAuth = previous
+      }
+      // Retryable: the client reconnects on a non-policy close and authenticates again.
+      if (socket.readyState === WS_OPEN) {
+        sendWsError(socket, 'Failed to authenticate', 'participant-auth-failed')
+        socket.close(1011, 'Authentication failed')
+      }
+    } finally {
+      // A socket that closed before resolving must not stay `authenticating`.
+      if (socket.studentAuth === 'authenticating') socket.studentAuth = previous
+    }
+  }
+
   ws.register('/ws/commissioned-ideas', (socket, query) => {
     const sessionId = query.get('sessionId')
     if (!sessionId) {
@@ -1582,54 +1753,32 @@ export default function setupCommissionedIdeasRoutes(
       })
     })
 
-    ensureBroadcastSubscription(sessionId)
-
     ;(async () => {
       const session = await getSession(sessions, sessionId)
       if (!session) {
-        socket.send(JSON.stringify({ type: 'commissioned-ideas:error', error: 'Session not found' }))
+        sendWsError(typedSocket, 'Session not found', 'session-not-found')
         socket.close(1008, 'Session not found')
         return
       }
-
+      // Subscribe only for sessions that exist, so stale links cannot add
+      // permanent subscription entries.
+      ensureBroadcastSubscription(sessionId)
       // Students get their first snapshot after participant-auth (personalized)
       // or after a failed auth (anonymous) — never an anonymous view first.
     })().catch((err: unknown) => {
-      console.error('[commissioned-ideas] WS init error', err)
-      socket.send(JSON.stringify({ type: 'commissioned-ideas:error', error: 'Failed to load session' }))
+      console.error('[commissioned-ideas] WS init error', { sessionId, err })
+      sendWsError(typedSocket, 'Failed to load session')
     })
 
     socket.on('message', (raw: unknown) => {
       void (async () => {
         const message = parseSocketMessage(raw)
 
-        // Accepted until it succeeds once (a failed attempt may be retried on the same socket).
-        if (message?.type === 'commissioned-ideas:participant-auth' && (typedSocket.studentAuth === 'pending' || typedSocket.studentAuth === 'anonymous')) {
-          const session = await getSession(sessions, sessionId)
-          if (!session) {
-            socket.send(JSON.stringify({ type: 'commissioned-ideas:error', error: 'Session not found' }))
-            socket.close(1008, 'Session not found')
-            return
+        if (message?.type === 'commissioned-ideas:participant-auth') {
+          // Retry is allowed after a refusal, never during an attempt or after success.
+          if (typedSocket.studentAuth === 'pending' || typedSocket.studentAuth === 'anonymous') {
+            await authenticateParticipantSocket(typedSocket, sessionId, message)
           }
-          const participant = verifyParticipantCredential(session.data, message.participantId, message.token, { allowRejected: true })
-          if (!participant) {
-            console.warn('[commissioned-ideas] WS participant auth refused', { sessionId })
-            typedSocket.studentAuth = 'anonymous'
-            socket.send(JSON.stringify({ type: 'commissioned-ideas:error', error: 'Invalid participant credentials' }))
-            socket.send(JSON.stringify({
-              type: 'commissioned-ideas:session-state',
-              sessionId,
-              data: buildStudentSnapshot(session.data, null),
-            }))
-            return
-          }
-          typedSocket.studentAuth = 'authenticated'
-          typedSocket.participantId = participant.id
-          participant.connected = true
-          participant.lastSeen = Date.now()
-          await sessions.set(sessionId, session)
-          // The broadcast includes this socket's personalized snapshot.
-          broadcastRegistrationUpdate(ws, sessionId, session.data)
           return
         }
 
@@ -1643,14 +1792,14 @@ export default function setupCommissionedIdeasRoutes(
 
         const session = await getSession(sessions, sessionId)
         if (!session) {
-          socket.send(JSON.stringify({ type: 'commissioned-ideas:error', error: 'Session not found' }))
+          sendWsError(typedSocket, 'Session not found', 'session-not-found')
           socket.close(1008, 'Session not found')
           return
         }
 
         const candidatePasscode = normalizeInstructorPasscode(message.instructorPasscode)
         if (!candidatePasscode || !verifyPasscode(session.data.instructorPasscode, candidatePasscode)) {
-          socket.send(JSON.stringify({ type: 'commissioned-ideas:error', error: 'Invalid instructor passcode' }))
+          sendWsError(typedSocket, 'Invalid instructor passcode')
           socket.close(1008, 'Invalid instructor passcode')
           return
         }
@@ -1662,25 +1811,16 @@ export default function setupCommissionedIdeasRoutes(
           data: buildManagerSnapshot(session.data),
         }))
       })().catch((err: unknown) => {
-        console.error('[commissioned-ideas] WS auth error', err)
-        socket.send(JSON.stringify({ type: 'commissioned-ideas:error', error: 'Failed to authenticate' }))
+        console.error('[commissioned-ideas] WS auth error', { sessionId, err })
+        sendWsError(typedSocket, 'Failed to authenticate')
       })
     })
 
     socket.on('close', () => {
       const participantId = typedSocket.participantId
-      if (!participantId) return
+      if (!participantId || typedSocket.studentAuth !== 'authenticated') return
 
-      void (async () => {
-        const session = await getSession(sessions, sessionId)
-        if (!session) return
-        const p = session.data.participantRoster[participantId]
-        if (!p) return
-        p.connected = false
-        p.lastSeen = Date.now()
-        await sessions.set(sessionId, session)
-        broadcastRegistrationUpdate(ws, sessionId, session.data)
-      })().catch((err: unknown) => {
+      void syncParticipantPresence(sessionId, participantId).catch((err: unknown) => {
         console.error('[commissioned-ideas] WS close cleanup error', { sessionId, participantId, err })
       })
     })

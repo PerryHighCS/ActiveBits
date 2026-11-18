@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { checkInstructorMove, type InstructorMoveTarget } from './membership.js'
+import { checkInstructorMove, parseAssignTarget, type InstructorMoveTarget } from './membership.js'
 import type { CommissionedIdeasPhase } from './types.js'
 
 const toTeam: InstructorMoveTarget = { kind: 'team', teamId: 't1' }
@@ -49,5 +49,27 @@ for (const row of cases) {
       assert.equal(decision.status, 409)
       assert.ok(decision.error.length > 0)
     }
+  })
+}
+
+// ── assign-participant target parsing ────────────────────────────────────────
+const targetCases: [string, Record<string, unknown>, ReturnType<typeof parseAssignTarget>['ok'], InstructorMoveTarget | null][] = [
+  ['existing team id', { teamId: 'T1' }, true, { kind: 'team', teamId: 'T1' }],
+  ['explicit null → ungrouped', { teamId: null }, true, { kind: 'ungrouped' }],
+  ['newTeam: true', { newTeam: true }, true, { kind: 'new-team' }],
+  ['newTeam: false with teamId', { newTeam: false, teamId: 'T1' }, true, { kind: 'team', teamId: 'T1' }],
+  ['no target at all', {}, false, null],
+  ['teamId undefined is not ungrouped', { teamId: undefined }, false, null],
+  ['numeric teamId', { teamId: 42 }, false, null],
+  ['empty teamId', { teamId: '' }, false, null],
+  ['newTeam truthy non-boolean', { newTeam: 'yes' }, false, null],
+  ['both teamId and newTeam', { newTeam: true, teamId: 'T1' }, false, null],
+]
+
+for (const [name, body, ok, target] of targetCases) {
+  void test(`parseAssignTarget: ${name}`, () => {
+    const parsed = parseAssignTarget(body)
+    assert.equal(parsed.ok, ok)
+    if (parsed.ok) assert.deepEqual(parsed.target, target)
   })
 }

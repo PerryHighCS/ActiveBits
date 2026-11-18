@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { isSnapshotMessage, managerSessionIdentity, managerViewForIdentity } from './useCommissionedIdeasSession.js'
+import { isParticipantAuthRefusal, isSnapshotMessage, managerSessionIdentity, managerViewForIdentity } from './useCommissionedIdeasSession.js'
 
 // Every server broadcast that carries a snapshot must be listed here; a missing
 // type silently freezes the client view (e.g. podium reveals would not appear).
@@ -36,3 +36,19 @@ void test('managerSessionIdentity does not collide across field boundaries', () 
   assert.notEqual(managerSessionIdentity('a:b', 'c'), managerSessionIdentity('a', 'b:c'))
   assert.notEqual(managerSessionIdentity(undefined, null), managerSessionIdentity('', null))
 })
+
+// ── Participant auth refusal ─────────────────────────────────────────────────
+// Only the explicit refusal code triggers re-registration; load and transport
+// errors must keep the stored credential.
+const refusalCases: [string, { type?: unknown; code?: unknown }, boolean][] = [
+  ['explicit refusal', { type: 'commissioned-ideas:error', code: 'participant-auth-refused' }, true],
+  ['generic error without code', { type: 'commissioned-ideas:error' }, false],
+  ['session load failure', { type: 'commissioned-ideas:error', code: 'session-not-found' }, false],
+  ['refusal code on a snapshot', { type: 'commissioned-ideas:session-state', code: 'participant-auth-refused' }, false],
+]
+
+for (const [name, msg, expected] of refusalCases) {
+  void test(`isParticipantAuthRefusal: ${name}`, () => {
+    assert.equal(isParticipantAuthRefusal(msg), expected)
+  })
+}

@@ -107,6 +107,8 @@ export interface CommissionedIdeasSessionData extends Record<string, unknown> {
   presentationHistory: PresentationHistoryEntry[]
   currentPresentationTeamId: string | null
   podiumRevealStep: PodiumRevealStep
+  /** Podium the current reveal started from (see `reconcilePodiumReveal`); null while hidden. */
+  podiumRevealKey: string | null
 }
 
 export interface TeamScore {

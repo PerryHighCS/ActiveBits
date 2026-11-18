@@ -4,7 +4,7 @@ import type { ProposalKind } from '../../shared/naming.js'
 import type { ManagerParticipant, ManagerSnapshot } from '../hooks/useCommissionedIdeasSession.js'
 import TeamBoard from './TeamBoard.js'
 import { useInstructorApi as useApi } from './useInstructorApi.js'
-import { buildAssignBody, type MoveDestination } from './teamBoardModel.js'
+import { buildAssignBody, maxTeamSizeBlurAction, type MoveDestination } from './teamBoardModel.js'
 
 interface RegistrationDashboardProps {
   sessionId: string
@@ -23,6 +23,17 @@ export default function RegistrationDashboard({
 
   const joinUrl =
     typeof window !== 'undefined' ? `${window.location.origin}/${sessionId}` : `/${sessionId}`
+  const [copyStatus, setCopyStatus] = useState<'idle' | 'copied' | 'failed'>('idle')
+  const handleCopyLink = async () => {
+    try {
+      // Undefined outside secure contexts, despite the DOM typings.
+      if (typeof navigator.clipboard?.writeText !== 'function') throw new Error('Clipboard API unavailable')
+      await navigator.clipboard.writeText(joinUrl)
+      setCopyStatus('copied')
+    } catch {
+      setCopyStatus('failed')
+    }
+  }
 
   const roster = Object.values(snapshot.participantRoster)
   const teamCount = Object.keys(snapshot.teams).length
@@ -78,13 +89,19 @@ export default function RegistrationDashboard({
             <code className="block w-full rounded bg-gray-50 border border-gray-200 px-3 py-2 text-sm font-mono text-gray-800 break-all">
               {joinUrl}
             </code>
-            <button
-              type="button"
-              onClick={() => { void navigator.clipboard.writeText(joinUrl) }}
-              className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-50"
-            >
-              Copy link
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => { void handleCopyLink() }}
+                className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-50"
+              >
+                Copy link
+              </button>
+              <span role="status" data-testid="ci-copy-status" className={`text-xs ${copyStatus === 'failed' ? 'text-red-700' : 'text-green-700'}`}>
+                {copyStatus === 'copied' && 'Link copied.'}
+                {copyStatus === 'failed' && 'Could not copy automatically. Select the link above and copy it.'}
+              </span>
+            </div>
           </div>
         </div>
       </div>
@@ -173,28 +190,33 @@ function SettingsPanel({
   onAssignRandom,
 }: SettingsPanelProps) {
   const [maxInput, setMaxInput] = useState(String(snapshot.maxTeamSize))
+  const [maxEdited, setMaxEdited] = useState(false)
   const serverMax = snapshot.maxTeamSize
+  // Latest confirmed value, read after an await so a rollback never restores a stale size.
+  const serverMaxRef = useRef(serverMax)
 
   // When the server pushes a new maxTeamSize (e.g. another admin changed it),
   // update the local input so it doesn't show a stale value. This runs only
   // when serverMax actually changes, so it never interrupts the user mid-type.
   useEffect(() => {
+    serverMaxRef.current = serverMax
     setMaxInput(String(serverMax))
   }, [serverMax])
 
-  // Show the requested size immediately, and fall back to the server's value if
-  // the request fails (serverMax does not change then, so the effect won't fire).
+  // Show the requested size immediately, and fall back to the latest confirmed
+  // value if the request fails.
   const requestMaxTeamSize = async (value: number) => {
+    setMaxEdited(false)
     setMaxInput(String(value))
-    if (!(await onMaxTeamSize(value))) setMaxInput(String(serverMax))
+    if (!(await onMaxTeamSize(value))) setMaxInput(String(serverMaxRef.current))
   }
 
   const handleMaxBlur = () => {
-    const trimmed = maxInput.trim()
-    const v = trimmed === '' ? Number.NaN : Number(trimmed)
-    if (Number.isInteger(v) && v >= 2) {
-      void requestMaxTeamSize(v)
+    const action = maxTeamSizeBlurAction(maxInput, maxEdited, serverMax)
+    if (action.kind === 'submit') {
+      void requestMaxTeamSize(action.value)
     } else {
+      setMaxEdited(false)
       setMaxInput(String(serverMax))
     }
   }
@@ -224,7 +246,10 @@ function SettingsPanel({
               type="number"
               min={2}
               value={maxInput}
-              onChange={(e) => setMaxInput(e.target.value)}
+              onChange={(e) => {
+                setMaxEdited(true)
+                setMaxInput(e.target.value)
+              }}
               onBlur={handleMaxBlur}
               disabled={busy}
               className="w-16 border border-gray-300 rounded-md px-2 py-1 text-sm text-center focus:outline-none focus:ring-2 focus:ring-amber-400 disabled:opacity-50"
@@ -358,7 +383,8 @@ function ParticipantModerationPanel({
   }
 
   const handleSaveEdit = async () => {
-    if (!editState) return
+    // Same rule as the disabled Save button, so Enter cannot submit a blank name.
+    if (!editState || busy || editState.name.trim().length === 0) return
     const submittedId = editState.participantId
     const ok = await callModeration({ participantId: submittedId, name: editState.name })
     // Only close the editor that was saved; another row may have been opened meanwhile.
@@ -446,12 +472,13 @@ function ParticipantRow({
   return (
     <div className={`px-4 py-3 flex items-center gap-3 ${rejectedByInstructor ? 'bg-red-50' : ''}`}>
       <span
-        aria-label={connected && !rejectedByInstructor ? 'Online' : 'Offline'}
+        aria-hidden="true"
         title={connected && !rejectedByInstructor ? 'Online' : 'Offline'}
         className={`h-2 w-2 rounded-full shrink-0 ${
           connected && !rejectedByInstructor ? 'bg-green-500' : 'bg-gray-300'
         }`}
       />
+      <span className="sr-only">{connected && !rejectedByInstructor ? 'Online' : 'Offline'}</span>
 
       <div className="flex-1 min-w-0">
         {isEditing ? (
@@ -503,8 +530,9 @@ function ParticipantRow({
               ref={editButtonRef}
               type="button"
               onClick={onStartEdit}
+              disabled={saving}
               aria-label={`Edit name for ${name}`}
-              className="rounded-md border border-gray-300 px-2.5 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50"
+              className="rounded-md border border-gray-300 px-2.5 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50"
             >
               Edit
             </button>
@@ -512,8 +540,9 @@ function ParticipantRow({
               <button
                 type="button"
                 onClick={onApprove}
+                disabled={saving}
                 aria-label={`Approve ${name}`}
-                className="rounded-md border border-green-300 px-2.5 py-1 text-xs font-medium text-green-700 hover:bg-green-50"
+                className="rounded-md border border-green-300 px-2.5 py-1 text-xs font-medium text-green-700 hover:bg-green-50 disabled:opacity-50"
               >
                 Approve
               </button>
@@ -521,8 +550,9 @@ function ParticipantRow({
               <button
                 type="button"
                 onClick={onReject}
+                disabled={saving}
                 aria-label={`Reject ${name}`}
-                className="rounded-md border border-red-300 px-2.5 py-1 text-xs font-medium text-red-600 hover:bg-red-50"
+                className="rounded-md border border-red-300 px-2.5 py-1 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"
               >
                 Reject
               </button>

@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import type { ManagerParticipant, ManagerTeam } from '../hooks/useCommissionedIdeasSession.js'
-import { buildAssignBody, canMoveTo, listMoveOptions, moveFocusReady, type MoveDestination } from './teamBoardModel.js'
+import { buildAssignBody, canMoveTo, listMoveOptions, maxTeamSizeBlurAction, moveFocusReady, type MoveDestination } from './teamBoardModel.js'
 
 function participant(id: string, teamId: string | null, rejected = false): ManagerParticipant {
   return { id, name: id, teamId, connected: true, lastSeen: 0, rejectedByInstructor: rejected }
@@ -98,5 +98,25 @@ const focusCases: {
 for (const row of focusCases) {
   void test(`moveFocusReady: ${row.name}`, () => {
     assert.equal(moveFocusReady(row.request, { id: 'p', teamId: row.teamId }, row.busy), row.expected)
+  })
+}
+
+// ── Max team size field ──────────────────────────────────────────────────────
+const blurCases: { name: string; input: string; edited: boolean; expected: ReturnType<typeof maxTeamSizeBlurAction> }[] = [
+  { name: 'unedited field never writes', input: '4', edited: false, expected: { kind: 'restore' } },
+  { name: 'unedited stale value never writes', input: '7', edited: false, expected: { kind: 'restore' } },
+  { name: 'edited, unchanged', input: '4', edited: true, expected: { kind: 'restore' } },
+  { name: 'edited, valid change', input: '6', edited: true, expected: { kind: 'submit', value: 6 } },
+  { name: 'edited, whitespace around valid', input: ' 5 ', edited: true, expected: { kind: 'submit', value: 5 } },
+  { name: 'minimum boundary', input: '2', edited: true, expected: { kind: 'submit', value: 2 } },
+  { name: 'below minimum', input: '1', edited: true, expected: { kind: 'restore' } },
+  { name: 'fractional', input: '2.5', edited: true, expected: { kind: 'restore' } },
+  { name: 'blank', input: '  ', edited: true, expected: { kind: 'restore' } },
+  { name: 'not a number', input: 'abc', edited: true, expected: { kind: 'restore' } },
+]
+
+for (const row of blurCases) {
+  void test(`maxTeamSizeBlurAction: ${row.name}`, () => {
+    assert.deepEqual(maxTeamSizeBlurAction(row.input, row.edited, 4), row.expected)
   })
 }

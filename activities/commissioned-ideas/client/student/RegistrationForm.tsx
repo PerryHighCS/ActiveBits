@@ -7,6 +7,8 @@ interface RegistrationFormProps {
   initialParticipantId?: string | null
   /** Stored participant token; proves ownership of `initialParticipantId` on reconnect. */
   initialToken?: string | null
+  /** Why the student is seeing the form again (for example a refused stored credential). */
+  notice?: string | null
   onRegistered: (participantId: string, name: string, token: string) => void
 }
 
@@ -15,6 +17,7 @@ export default function RegistrationForm({
   initialName = '',
   initialParticipantId,
   initialToken,
+  notice = null,
   onRegistered,
 }: RegistrationFormProps) {
   const [name, setName] = useState(initialName)
@@ -60,6 +63,11 @@ export default function RegistrationForm({
       <div className="bg-white rounded-xl shadow-md p-8 w-full max-w-sm">
         <h1 className="text-2xl font-bold text-gray-800 mb-2">Join Session</h1>
         <p className="text-gray-500 text-sm mb-6">Enter your name to join the activity.</p>
+        {notice && (
+          <p role="alert" data-testid="ci-registration-notice" className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            {notice}
+          </p>
+        )}
 
         <form onSubmit={(e) => { void handleSubmit(e) }} noValidate>
           <label htmlFor="ci-name" className="block text-sm font-medium text-gray-700 mb-1">

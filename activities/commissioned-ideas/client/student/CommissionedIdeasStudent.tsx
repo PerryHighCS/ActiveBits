@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   persistSessionParticipantIdentity,
   resolveInitialEntryParticipantIdentity,
@@ -11,21 +11,33 @@ import ResultsView from './ResultsView'
 import { useParticipantApi } from './useParticipantApi'
 import VotingBallot from './VotingBallot'
 import StudentRoster from './StudentRoster'
+import {
+  clearParticipantToken,
+  lateArrivalNotice,
+  readParticipantToken,
+  saveParticipantToken,
+} from './studentIdentity'
 
 interface SessionData {
   sessionId?: string
   data?: Record<string, unknown>
 }
 
-/** localStorage key for the activity-specific participant token. */
-function tokenKey(sessionId: string): string {
-  return `ci:${sessionId}:token`
-}
+const REFUSED_CREDENTIAL_NOTICE = 'We couldn’t restore your earlier sign-in for this session. Join again to continue.'
+const STORAGE_WARNING = 'Your browser didn’t let us save your sign-in. If you reload this page you will need to join again.'
 
 export default function CommissionedIdeasStudent({ sessionData }: { sessionData: SessionData }) {
   const sessionId = sessionData?.sessionId ?? null
+  if (!sessionId) {
+    return <div className="p-6 text-gray-500" role="status">Loading session…</div>
+  }
+  // Keyed so each session gets its own identity state and stored-identity lookup:
+  // switching sessions in place must never reuse another session's participant or token.
+  return <StudentSessionView key={sessionId} sessionId={sessionId} />
+}
+
+function StudentSessionView({ sessionId }: { sessionId: string }) {
   const attachSessionEndedHandler = useSessionEndedHandler()
-  const mountedRef = useRef(true)
 
   // ── Identity state ──────────────────────────────────────────────────────────
   const [studentName, setStudentName] = useState('')
@@ -34,11 +46,12 @@ export default function CommissionedIdeasStudent({ sessionData }: { sessionData:
   const [nameSubmitted, setNameSubmitted] = useState(false)
   const [registered, setRegistered] = useState(false)
   const [identityResolved, setIdentityResolved] = useState(false)
+  const [registrationNotice, setRegistrationNotice] = useState<string | null>(null)
+  const [storageWarning, setStorageWarning] = useState(false)
 
   // ── Resolve stored identity from localStorage (reconnect support) ───────────
   useEffect(() => {
-    if (!sessionId) return
-    mountedRef.current = true
+    let cancelled = false
 
     void (async () => {
       try {
@@ -49,17 +62,16 @@ export default function CommissionedIdeasStudent({ sessionData }: { sessionData:
           localStorage: window.localStorage,
           sessionStorage: window.sessionStorage,
         })
-        if (!mountedRef.current) return
+        if (cancelled) return
         setStudentName(identity.studentName)
         setStudentId(identity.studentId)
         setNameSubmitted(identity.nameSubmitted)
-        // Restore the participant token so team actions remain authenticated.
-        // If the token is absent (cleared storage, new device), leave registered=false
-        // so the form re-appears with the pre-filled name. Submitting it calls
-        // register-participant with the stored participantId, which returns the same
-        // token from the server and restores full team-action capability.
+        // A stored token restores the joined view; the socket then proves it.
+        // Without a token the form re-appears with the name pre-filled. A saved
+        // participant ID alone proves nothing, so submitting the form registers
+        // a new participant; it does not restore the old token or team.
         if (identity.studentId) {
-          const stored = window.localStorage.getItem(tokenKey(sessionId))
+          const stored = readParticipantToken(window.localStorage, sessionId)
           if (stored) {
             setParticipantToken(stored)
             setRegistered(true)
@@ -68,17 +80,17 @@ export default function CommissionedIdeasStudent({ sessionData }: { sessionData:
       } catch {
         // non-fatal — fall through to RegistrationForm
       } finally {
-        if (mountedRef.current) setIdentityResolved(true)
+        if (!cancelled) setIdentityResolved(true)
       }
     })()
 
     return () => {
-      mountedRef.current = false
+      cancelled = true
     }
   }, [sessionId])
 
   // ── WS connection (only after registered) ───────────────────────────────────
-  const { snapshot, connect, disconnect } = useStudentSession({
+  const { snapshot, authRefused, connect, disconnect } = useStudentSession({
     sessionId: registered ? sessionId : null,
     participantId: studentId,
     participantToken,
@@ -86,12 +98,22 @@ export default function CommissionedIdeasStudent({ sessionData }: { sessionData:
   })
 
   useEffect(() => {
-    if (!registered || !sessionId) return
+    if (!registered) return
     connect()
     return () => disconnect()
-  }, [registered, sessionId, connect, disconnect])
+  }, [registered, connect, disconnect])
 
-  const ballotApi = useParticipantApi(sessionId ?? '', studentId ?? '', participantToken ?? '')
+  // The server explicitly refused the stored credential (not a transient failure):
+  // drop it and offer the registration form again, with the name pre-filled.
+  useEffect(() => {
+    if (!authRefused) return
+    clearParticipantToken(window.localStorage, sessionId)
+    setParticipantToken(null)
+    setRegistered(false)
+    setRegistrationNotice(REFUSED_CREDENTIAL_NOTICE)
+  }, [authRefused, sessionId])
+
+  const ballotApi = useParticipantApi(sessionId, studentId ?? '', participantToken ?? '')
 
   // ── Handlers ────────────────────────────────────────────────────────────────
   const handleRegistered = (participantId: string, name: string, token: string) => {
@@ -100,17 +122,13 @@ export default function CommissionedIdeasStudent({ sessionData }: { sessionData:
     setParticipantToken(token)
     setNameSubmitted(true)
     setRegistered(true)
-    if (sessionId) {
-      persistSessionParticipantIdentity(window.localStorage, sessionId, name, participantId)
-      window.localStorage.setItem(tokenKey(sessionId), token)
-    }
+    setRegistrationNotice(null)
+    // Registration already succeeded; a storage failure only loses reload recovery.
+    persistSessionParticipantIdentity(window.localStorage, sessionId, name, participantId)
+    setStorageWarning(!saveParticipantToken(window.localStorage, sessionId, token))
   }
 
   // ── Render ──────────────────────────────────────────────────────────────────
-  if (!sessionId) {
-    return <div className="p-6 text-gray-500" role="status">Loading session…</div>
-  }
-
   if (!identityResolved) {
     return <div className="p-6 text-gray-500" role="status">Loading…</div>
   }
@@ -122,16 +140,17 @@ export default function CommissionedIdeasStudent({ sessionData }: { sessionData:
         initialName={studentName}
         initialParticipantId={studentId}
         initialToken={participantToken}
+        notice={registrationNotice}
         onRegistered={handleRegistered}
       />
     )
   }
 
-  const phase = snapshot?.phase ?? 'registration'
+  const phase = snapshot?.phase ?? null
   const participants = snapshot?.participantRoster ?? {}
   const teams = snapshot?.teams ?? {}
-  const studentGroupingLocked = snapshot?.studentGroupingLocked ?? false
-  const groupingMode = snapshot?.groupingMode ?? 'manual'
+  const myTeamId = studentId ? (participants[studentId]?.teamId ?? null) : null
+  const notice = snapshot && phase && myTeamId === null ? lateArrivalNotice(phase) : null
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -143,37 +162,49 @@ export default function CommissionedIdeasStudent({ sessionData }: { sessionData:
       </div>
 
       <div className="max-w-2xl mx-auto">
-        {snapshot && phase !== 'registration' && studentId && participants[studentId]?.teamId == null && (
-          <p role="status" className="mx-4 mt-4 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-800">
-            Teams are already formed. Your instructor will place you on a team — you can vote once you’re on one.
+        {storageWarning && (
+          <p role="alert" data-testid="ci-storage-warning" className="mx-4 mt-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            {STORAGE_WARNING}
           </p>
         )}
-        {phase === 'registration' && (
+
+        {/* Team controls depend on the phase and locks; never guess them before the first snapshot. */}
+        {!snapshot && (
+          <p role="status" className="p-6 text-gray-500">Connecting…</p>
+        )}
+
+        {notice && (
+          <p role="status" className="mx-4 mt-4 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-800">
+            {notice}
+          </p>
+        )}
+
+        {snapshot && phase === 'registration' && (
           <StudentRoster
             participants={participants}
             teams={teams}
             myParticipantId={studentId ?? ''}
             participantToken={participantToken ?? ''}
             sessionId={sessionId}
-            studentGroupingLocked={studentGroupingLocked}
-            namingLocked={snapshot?.namingLocked ?? false}
-            groupingMode={groupingMode}
-            maxTeamSize={snapshot?.maxTeamSize ?? 4}
+            studentGroupingLocked={snapshot.studentGroupingLocked}
+            namingLocked={snapshot.namingLocked}
+            groupingMode={snapshot.groupingMode}
+            maxTeamSize={snapshot.maxTeamSize}
           />
         )}
 
-        {phase === 'presentation' && (
+        {snapshot && phase === 'presentation' && (
           <PresentationView
             teams={teams}
             participants={participants}
-            currentTeamId={snapshot?.currentPresentationTeamId ?? null}
-            round={snapshot?.presentationRound ?? 1}
-            history={snapshot?.presentationHistory ?? []}
-            myTeamId={studentId ? (participants[studentId]?.teamId ?? null) : null}
+            currentTeamId={snapshot.currentPresentationTeamId ?? null}
+            round={snapshot.presentationRound}
+            history={snapshot.presentationHistory}
+            myTeamId={myTeamId}
           />
         )}
 
-        {phase === 'voting' && (
+        {snapshot && phase === 'voting' && (
           <>
             {ballotApi.error && (
               <div role="alert" className="mx-4 mt-4 rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700 flex items-center justify-between gap-2">
@@ -183,21 +214,21 @@ export default function CommissionedIdeasStudent({ sessionData }: { sessionData:
             )}
             <VotingBallot
               teams={teams}
-              myTeamId={studentId ? (participants[studentId]?.teamId ?? null) : null}
-              myBallot={snapshot?.myBallot ?? null}
+              myTeamId={myTeamId}
+              myBallot={snapshot.myBallot ?? null}
               busy={ballotApi.busy}
               onSubmit={(allocations) => ballotApi.post('ballot', { allocations })}
             />
           </>
         )}
 
-        {phase === 'results' && (
+        {snapshot && phase === 'results' && (
           <ResultsView
             teams={teams}
-            podium={snapshot?.podium ?? []}
-            placeCount={snapshot?.podiumPlaceCount ?? 0}
-            step={snapshot?.podiumRevealStep ?? 'hidden'}
-            myTeamId={studentId ? (participants[studentId]?.teamId ?? null) : null}
+            podium={snapshot.podium ?? []}
+            placeCount={snapshot.podiumPlaceCount ?? 0}
+            step={snapshot.podiumRevealStep ?? 'hidden'}
+            myTeamId={myTeamId}
           />
         )}
       </div>

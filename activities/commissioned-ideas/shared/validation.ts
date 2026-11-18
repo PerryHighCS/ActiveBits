@@ -140,3 +140,23 @@ export function coerceAllocations(raw: unknown): BallotAllocation[] | null {
   }
   return result
 }
+
+/**
+ * Ballot/team integrity (owner of the rule): an accepted ballot only funds teams that
+ * still exist. When moderation deletes a team, every ballot that funded it is withdrawn
+ * as a whole, so its voter shows as "not voted" and can submit a new ballot against the
+ * remaining teams (with the reduced amounts that `requiredBallotAmounts` then requires).
+ * Returns the voter ids whose ballots were withdrawn.
+ */
+export function withdrawBallotsFundingMissingTeams(
+  data: Pick<CommissionedIdeasSessionData, 'ballots' | 'teams'>,
+): string[] {
+  const withdrawn: string[] = []
+  for (const [voterId, ballot] of Object.entries(data.ballots)) {
+    if (ballot.allocations.some((allocation) => !Object.hasOwn(data.teams, allocation.teamId))) {
+      delete data.ballots[voterId]
+      withdrawn.push(voterId)
+    }
+  }
+  return withdrawn
+}

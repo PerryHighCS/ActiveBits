@@ -45,6 +45,7 @@ function makeSession(overrides: Partial<CommissionedIdeasSessionData> = {}): Com
     presentationHistory: [],
     currentPresentationTeamId: null,
     podiumRevealStep: 'hidden',
+    podiumRevealKey: null,
     ...overrides,
   }
 }
@@ -397,6 +398,7 @@ function makeFullSession(overrides: Partial<CommissionedIdeasSessionData> = {}):
     presentationHistory: [],
     currentPresentationTeamId: null,
     podiumRevealStep: 'hidden',
+    podiumRevealKey: null,
     ...overrides,
   }
 }
@@ -464,6 +466,7 @@ function makeRegistrationSession(overrides: Partial<CommissionedIdeasSessionData
     presentationHistory: [],
     currentPresentationTeamId: null,
     podiumRevealStep: 'hidden',
+    podiumRevealKey: null,
     ...overrides,
   }
 }

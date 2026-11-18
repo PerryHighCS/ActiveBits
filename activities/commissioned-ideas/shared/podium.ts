@@ -105,3 +105,35 @@ export function joinNames(names: string[]): string {
   if (names.length <= 1) return names[0] ?? ''
   return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`
 }
+
+/**
+ * Identity of the podium a reveal is showing: places, totals, and teams in order.
+ * Names are excluded, so renaming a team does not count as a different podium.
+ */
+export function podiumRevealKey(ranking: TeamScore[]): string {
+  return JSON.stringify(buildPodium(ranking).map((entry) => [entry.place, entry.totalDollars, entry.teams.map((team) => team.teamId)]))
+}
+
+export interface PodiumRevealState {
+  podiumRevealStep: PodiumRevealStep
+  /** `podiumRevealKey` of the ranking the current reveal started from; null while hidden. */
+  podiumRevealKey: string | null
+}
+
+/**
+ * Reveal invariant (owner of the rule): a revealed podium always shows the ranking it
+ * was revealed for. If moderation changes the podium mid-reveal, the reveal returns to
+ * `hidden` so a place never silently changes on screen. Changes that leave the podium
+ * as it was (for example late placement of a student who has not voted) keep the reveal.
+ * Mutates `state`; returns true when it reset the reveal.
+ */
+export function reconcilePodiumReveal(state: PodiumRevealState, ranking: TeamScore[]): boolean {
+  if (state.podiumRevealStep === 'hidden') {
+    state.podiumRevealKey = null
+    return false
+  }
+  if (state.podiumRevealKey === podiumRevealKey(ranking)) return false
+  state.podiumRevealStep = 'hidden'
+  state.podiumRevealKey = null
+  return true
+}

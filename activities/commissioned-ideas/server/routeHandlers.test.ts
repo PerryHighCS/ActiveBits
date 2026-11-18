@@ -311,35 +311,24 @@ void test('state route snapshot does not include raw ballots field', async () =>
 })
 
 void test('state route never returns myBallot even when participantId query param is supplied', async () => {
-  const app = createMockApp()
-  const ws = createMockWs()
-  const { sessions } = createMockSessions()
-  setupCommissionedIdeasRoutes(app, sessions, ws)
+  // A real ballot must exist, or this test would pass even if the route trusted the query.
+  const s = await setupVotingSession()
+  const [, a, b, c] = s.teamIds as [string, string, string, string]
+  const alice = s.members[0]!
+  const ballotRes = await s.asStudent('ballot', alice, {
+    allocations: [{ teamId: a, amount: 500 }, { teamId: b, amount: 300 }, { teamId: c, amount: 100 }],
+  })
+  assert.equal(ballotRes.statusCode, 200)
+  // Alice's authenticated (socket) view does carry her ballot.
+  assert.notEqual(buildStudentSnapshot(s.data(), alice.participantId).myBallot, null)
 
-  const createRes = createResponse()
-  await app.handlers.post['/api/commissioned-ideas/create']!(createRequest(), createRes)
-  const sessionId = (createRes.body as { id: string }).id
-
-  // Register a participant so there is a real id to attempt to look up
-  const regRes = createResponse()
-  await app.handlers.post['/api/commissioned-ideas/:sessionId/register-participant']!(
-    createRequest({ sessionId }, { name: 'Alice' }),
-    regRes,
-  )
-  const participantId = (regRes.body as { participantId: string }).participantId
-
-  // Request state with the participant's own id — ballot data must still be absent
-  const stateHandler = app.handlers.get['/api/commissioned-ideas/:sessionId/state']!
-  const stateRes = createResponse()
-  await stateHandler(
-    { params: { sessionId }, query: { participantId }, body: {} },
-    stateRes,
-  )
+  const stateRes = await s.get('state', { params: { sessionId: s.sessionId }, query: { participantId: alice.participantId }, body: {} })
 
   assert.equal(stateRes.statusCode, 200)
   const data = (stateRes.body as { data: Record<string, unknown> }).data
   assert.equal(data.myBallot, null, 'myBallot must always be null from the REST route')
   assert.equal(data.ballotSubmitted, false)
+  assert.equal(data.ballotsReceived, 1, 'the count is public')
 })
 
 void test('state route snapshot participantRoster omits instructor-only fields', async () => {
@@ -1362,11 +1351,25 @@ const ROUTE = (name: string) => `/api/commissioned-ideas/:sessionId/${name}`
 async function setupSession() {
   const app = createMockApp()
   const { store, sessions } = createMockSessions()
-  setupCommissionedIdeasRoutes(app, sessions, createMockWs())
+  const ws = createMockWs()
+  setupCommissionedIdeasRoutes(app, sessions, ws)
   const { id: sessionId, instructorPasscode } = await createSession(app)
+  // An authenticated manager socket that records every frame it receives.
+  const managerFrames: { type: string; data: Record<string, unknown> }[] = []
+  ;(ws.wss.clients as Set<unknown>).add({
+    sessionId,
+    isManager: true,
+    readyState: 1,
+    send(message: string) { managerFrames.push(JSON.parse(message) as { type: string; data: Record<string, unknown> }) },
+  })
   const post = async (name: string, req: MockRequest) => {
     const res = createResponse()
     await app.handlers.post[ROUTE(name)]!(req, res)
+    return res
+  }
+  const get = async (name: string, req: MockRequest) => {
+    const res = createResponse()
+    await app.handlers.get[ROUTE(name)]!(req, res)
     return res
   }
   const asInstructor = (name: string, body: unknown) => post(name, withPasscode({ sessionId }, body, instructorPasscode))
@@ -1374,7 +1377,8 @@ async function setupSession() {
     post(name, withParticipantToken({ sessionId }, { ...body, participantId: who.participantId }, who.token))
   const data = () => sessionData(store, sessionId)
   const register = (name: string) => registerParticipant(app, sessionId, name)
-  return { sessionId, instructorPasscode, post, asInstructor, asStudent, data, register }
+  const lastManagerFrame = () => managerFrames[managerFrames.length - 1]
+  return { sessionId, instructorPasscode, post, get, asInstructor, asStudent, data, register, lastManagerFrame }
 }
 
 function assertMembershipConsistent(data: CommissionedIdeasSessionData) {
@@ -1854,6 +1858,14 @@ void test('ballot route stores a valid ballot and reports it to the manager by i
   const ballot = s.data().ballots[alice.participantId]
   assert.equal(ballot?.voterTeamId, own)
   assert.equal(ballot?.allocations.length, 3)
+
+  // The manager is told who voted and how many, never what they voted.
+  const frame = s.lastManagerFrame()
+  assert.ok(frame, 'the manager socket received an update')
+  assert.deepEqual(frame.data.ballotSubmitterIds, [alice.participantId])
+  assert.equal(frame.data.ballotsReceived, 1)
+  assert.equal('ballots' in frame.data, false)
+  assert.equal(JSON.stringify(frame).includes('allocations'), false, 'no ballot contents in the manager frame')
 })
 
 void test('ballot route replaces an existing ballot', async () => {
@@ -2243,7 +2255,13 @@ async function setupWsHarness() {
     const socket: WsTestSocket = {
       readyState: 1,
       send(message) { sent.push(JSON.parse(message) as Record<string, unknown>) },
-      close(code, reason) { closed = { code, reason } },
+      // Like a real socket: CLOSED state, then the 'close' event.
+      close(code, reason) {
+        if (socket.readyState === 3) return
+        closed = { code, reason }
+        socket.readyState = 3
+        handlers.close?.()
+      },
       on(event, handler) { handlers[event] = handler },
     }
     clients.add(socket)
@@ -2254,7 +2272,18 @@ async function setupWsHarness() {
       sent,
       closed: () => closed,
       say: async (payload: unknown) => {
-        handlers.message?.(typeof payload === 'string' ? payload : JSON.stringify(payload))
+        // A closed socket delivers nothing.
+        if (socket.readyState === 1) handlers.message?.(typeof payload === 'string' ? payload : JSON.stringify(payload))
+        await tick()
+        await tick()
+      },
+      /** Sends a message without waiting, for interleaving tests. */
+      sayNow: (payload: unknown) => {
+        if (socket.readyState === 1) handlers.message?.(JSON.stringify(payload))
+      },
+      /** Client-side close (tab closed): CLOSED state, then the 'close' event. */
+      hangUp: async () => {
+        socket.close(1001, 'going away')
         await tick()
         await tick()
       },
@@ -2269,7 +2298,7 @@ async function setupWsHarness() {
     )
     return (res.body as { teamId: string }).teamId
   }
-  return { store, sessionId, instructorPasscode, connect, register, createTeam }
+  return { store, sessions, sessionId, instructorPasscode, connect, register, createTeam, tick }
 }
 
 void test('manager websocket with a wrong passcode gets an error, a 1008 close, and no snapshot', async () => {
@@ -2283,16 +2312,32 @@ void test('manager websocket with a wrong passcode gets an error, a 1008 close, 
   assert.notEqual(conn.socket.isManager, true)
 })
 
-void test('manager websocket ignores malformed and passcode-less auth messages', async () => {
+void test('manager websocket ignores malformed frames without closing, and can still authenticate', async () => {
   const h = await setupWsHarness()
   const conn = await h.connect({ role: 'manager' })
-  console.log('[TEST] expecting malformed websocket messages to be refused')
   await conn.say('not json {')
-  await conn.say({ type: 'commissioned-ideas:manager-auth' })
-  await conn.say({ type: 'commissioned-ideas:manager-auth', instructorPasscode: 42 })
+  await conn.say({ type: 'commissioned-ideas:something-else' })
+  assert.equal(conn.closed(), null, 'ignored frames must not close the socket')
   assert.equal(conn.sent.some((m) => m.type === 'commissioned-ideas:session-state'), false)
-  assert.notEqual(conn.socket.isManager, true)
+
+  await conn.say({ type: 'commissioned-ideas:manager-auth', instructorPasscode: h.instructorPasscode })
+  assert.equal(conn.socket.isManager, true)
 })
+
+for (const [name, payload] of [
+  ['missing passcode', { type: 'commissioned-ideas:manager-auth' }],
+  ['non-string passcode', { type: 'commissioned-ideas:manager-auth', instructorPasscode: 42 }],
+] as const) {
+  void test(`manager websocket refuses ${name} with a 1008 close`, async () => {
+    const h = await setupWsHarness()
+    const conn = await h.connect({ role: 'manager' })
+    console.log(`[TEST] expecting manager websocket refusal: ${name}`)
+    await conn.say(payload)
+    assert.equal(conn.closed()?.code, 1008)
+    assert.equal(conn.sent.some((m) => m.type === 'commissioned-ideas:session-state'), false)
+    assert.notEqual(conn.socket.isManager, true)
+  })
+}
 
 void test('a participantId in the websocket URL grants nothing', async () => {
   const h = await setupWsHarness()
@@ -2326,3 +2371,215 @@ void test('participant websocket auth binds identity only with a valid token', a
   assert.notEqual(teams[teamId]?.naming, undefined, 'own team naming details arrive after auth')
   assert.equal(sessionData(h.store, h.sessionId).participantRoster[student.participantId]?.connected, true)
 })
+
+// ── Review round 3: request validation ───────────────────────────────────────
+
+void test('assign-participant requires an explicit target and never treats a missing one as Ungrouped', async () => {
+  const s = await setupSession()
+  const alice = await s.register('Alice')
+  const teamId = ((await s.asStudent('create-team', alice)).body as { teamId: string }).teamId
+
+  console.log('[TEST] expecting 400 for assign-participant without a valid target')
+  for (const body of [{}, { teamId: 42 }, { teamId: '' }, { newTeam: 'yes' }, { newTeam: true, teamId: teamId }]) {
+    const res = await s.asInstructor('assign-participant', { participantId: alice.participantId, ...body })
+    assert.equal(res.statusCode, 400, JSON.stringify(body))
+  }
+  assert.equal(s.data().participantRoster[alice.participantId]?.teamId, teamId, 'membership unchanged')
+  assert.ok(s.data().teams[teamId], 'the team was not dissolved')
+
+  // Explicit null still means Ungrouped.
+  assert.equal((await s.asInstructor('assign-participant', { participantId: alice.participantId, teamId: null })).statusCode, 200)
+  assert.equal(s.data().participantRoster[alice.participantId]?.teamId, null)
+})
+
+void test('team routes treat inherited property names as unknown teams (404, not a crash)', async () => {
+  const s = await setupSession()
+  const alice = await s.register('Alice')
+  const bob = await s.register('Bob')
+  await s.asStudent('create-team', alice)
+  console.log('[TEST] expecting 404 for inherited property names used as team ids')
+  for (const teamId of ['__proto__', 'toString', 'constructor']) {
+    assert.equal((await s.asStudent('join-team', bob, { teamId })).statusCode, 404, `join ${teamId}`)
+    assert.equal((await s.asInstructor('assign-participant', { participantId: bob.participantId, teamId })).statusCode, 404, `assign ${teamId}`)
+    assert.equal(
+      (await s.asInstructor('team/proposal-moderation', { teamId, kind: 'group', proposalId: 'x', rejected: true })).statusCode,
+      404,
+      `moderate ${teamId}`,
+    )
+  }
+  assert.equal(
+    (await s.asInstructor('participant-name', { participantId: '__proto__', rejected: true })).statusCode,
+    404,
+    'participant lookups use own keys too',
+  )
+})
+
+void test('settings can only change during registration', async () => {
+  const s = await setupPresentationSession()
+  assert.equal((await s.asInstructor('settings', { maxTeamSize: 5 })).statusCode, 200)
+  await s.asInstructor('phase', { phase: 'presentation' })
+
+  console.log('[TEST] expecting 409 for settings changes after registration')
+  for (const body of [{ maxTeamSize: 6 }, { groupingMode: 'random' }, { namingLocked: false }]) {
+    assert.equal((await s.asInstructor('settings', body)).statusCode, 409, JSON.stringify(body))
+  }
+  assert.equal(s.data().maxTeamSize, 5)
+  assert.equal(s.data().groupingMode, 'manual')
+})
+
+void test('a verified reconnect returns the instructor-moderated name, not the stale one sent', async () => {
+  const s = await setupSession()
+  const student = await s.register('bbo')
+  await s.asInstructor('participant-name', { participantId: student.participantId, name: 'Bob' })
+
+  const res = await s.post(
+    'register-participant',
+    withParticipantToken({ sessionId: s.sessionId }, { name: 'bbo', participantId: student.participantId }, student.token),
+  )
+  assert.equal(res.statusCode, 200)
+  assert.equal((res.body as { name: string }).name, 'Bob')
+  assert.equal(s.data().participantRoster[student.participantId]?.name, 'Bob')
+
+  const fresh = await s.post('register-participant', createRequest({ sessionId: s.sessionId }, { name: '  Newcomer  ' }))
+  assert.equal((fresh.body as { name: string }).name, 'Newcomer', 'new registrations still echo the sanitized name')
+})
+
+// ── Review round 3: ballot and podium integrity under moderation ──────────────
+
+void test('rejecting the only member of a funded team withdraws ballots that funded it', async () => {
+  const s = await setupVotingSession(2)
+  const [teamA, teamB] = s.teamIds as [string, string]
+  const [alice, bob] = s.members as [{ participantId: string; token: string }, { participantId: string; token: string }]
+  assert.equal((await s.asStudent('ballot', alice, { allocations: [{ teamId: teamB, amount: 500 }] })).statusCode, 200)
+  assert.equal((await s.asStudent('ballot', bob, { allocations: [{ teamId: teamA, amount: 500 }] })).statusCode, 200)
+
+  await s.asInstructor('participant-name', { participantId: bob.participantId, rejected: true })
+
+  const data = s.data()
+  assert.equal(data.teams[teamB], undefined, 'team B is gone')
+  assert.equal(data.ballots[alice.participantId], undefined, 'Alice funded the deleted team, so her ballot is withdrawn')
+  assert.equal(data.ballots[bob.participantId], undefined, 'the rejected student’s own ballot does not count')
+  assert.deepEqual(s.lastManagerFrame()?.data.ballotSubmitterIds, [], 'the manager no longer counts Alice as voted')
+  for (const ballot of Object.values(data.ballots)) {
+    for (const allocation of ballot.allocations) assert.ok(data.teams[allocation.teamId], 'no ballot funds a missing team')
+  }
+})
+
+void test('ballots that did not fund the removed team are kept', async () => {
+  const s = await setupVotingSession(5)
+  const [t1, t2, t3, t4, t5] = s.teamIds as [string, string, string, string, string]
+  const [m1, m2] = s.members as [{ participantId: string; token: string }, { participantId: string; token: string }]
+  assert.equal((await s.asStudent('ballot', m1, { allocations: [{ teamId: t2, amount: 500 }, { teamId: t3, amount: 300 }, { teamId: t4, amount: 100 }] })).statusCode, 200)
+  assert.equal((await s.asStudent('ballot', m2, { allocations: [{ teamId: t1, amount: 500 }, { teamId: t3, amount: 300 }, { teamId: t5, amount: 100 }] })).statusCode, 200)
+
+  // Team 4's only member is rejected; m2 never funded team 4.
+  await s.asInstructor('participant-name', { participantId: s.members[3]!.participantId, rejected: true })
+
+  assert.equal(s.data().ballots[m1.participantId], undefined, 'm1 funded team 4')
+  assert.notEqual(s.data().ballots[m2.participantId], undefined, 'm2 keeps their ballot')
+})
+
+void test('podium reveal resets when moderation changes the ranking, and survives changes that do not', async () => {
+  const s = await setupResultsSession()
+  await s.asInstructor('podium-step', { action: 'next' })
+  await s.asInstructor('podium-step', { action: 'next' })
+  assert.equal(s.data().podiumRevealStep, 'second')
+
+  // Late placement of a student without a ballot leaves the podium as it was.
+  const late = await s.register('Late')
+  assert.equal((await s.asInstructor('assign-participant', { participantId: late.participantId, teamId: s.t1 })).statusCode, 200)
+  assert.equal(s.data().podiumRevealStep, 'second', 'unchanged podium keeps the reveal')
+
+  // Rejecting the only voter withdraws the only ballot: the podium changes.
+  await s.asInstructor('participant-name', { participantId: s.members[0]!.participantId, rejected: true })
+  assert.equal(s.data().podiumRevealStep, 'hidden', 'a changed podium is never shown under the old reveal')
+  assert.equal(s.data().podiumRevealKey, null)
+})
+
+// ── Review round 3: websocket auth state machine and presence ────────────────
+
+void test('student websocket for an unknown session closes without subscribing', async () => {
+  const h = await setupWsHarness()
+  const subscribed: string[] = []
+  ;(h.sessions as unknown as { subscribeToBroadcast: (id: string) => void }).subscribeToBroadcast = (id: string) => { subscribed.push(id) }
+  console.log('[TEST] expecting websocket refusal for an unknown session')
+  const conn = await h.connect({ sessionId: 'NOPE' })
+  assert.equal(conn.closed()?.code, 1008)
+  assert.deepEqual(subscribed, [], 'stale links must not add broadcast subscriptions')
+})
+
+void test('participant auth refusal carries the refusal code; a retry after refusal can succeed', async () => {
+  const h = await setupWsHarness()
+  const student = await h.register('Student')
+  const conn = await h.connect({})
+  console.log('[TEST] expecting participant websocket auth refusal')
+  await conn.say({ type: 'commissioned-ideas:participant-auth', participantId: student.participantId, token: 'WRONG' })
+  assert.ok(conn.sent.some((m) => m.type === 'commissioned-ideas:error' && m.code === 'participant-auth-refused'))
+  await conn.say({ type: 'commissioned-ideas:participant-auth', participantId: student.participantId, token: student.token })
+  assert.equal(conn.socket.participantId, student.participantId)
+})
+
+void test('a refused auth that resolves after a successful one cannot unbind the socket', async () => {
+  const h = await setupWsHarness()
+  const student = await h.register('Student')
+  const conn = await h.connect({})
+  // Both arrive before either session read completes.
+  conn.sayNow({ type: 'commissioned-ideas:participant-auth', participantId: student.participantId, token: student.token })
+  conn.sayNow({ type: 'commissioned-ideas:participant-auth', participantId: student.participantId, token: 'WRONG' })
+  await h.tick(); await h.tick(); await h.tick()
+  assert.equal(conn.socket.participantId, student.participantId)
+  assert.equal((conn.socket as { studentAuth?: string }).studentAuth, 'authenticated')
+  assert.equal(conn.sent.some((m) => m.type === 'commissioned-ideas:error'), false, 'the second attempt was ignored, not refused')
+})
+
+void test('a socket closed while auth is reading the session never marks the student online', async () => {
+  const h = await setupWsHarness()
+  const student = await h.register('Student')
+  sessionDataFromHarness(h).participantRoster[student.participantId]!.connected = false
+  const conn = await h.connect({})
+  conn.sayNow({ type: 'commissioned-ideas:participant-auth', participantId: student.participantId, token: student.token })
+  await conn.hangUp()
+  await h.tick(); await h.tick()
+  assert.equal(sessionDataFromHarness(h).participantRoster[student.participantId]?.connected, false)
+})
+
+void test('presence stays online while another authenticated tab is open', async () => {
+  const h = await setupWsHarness()
+  const student = await h.register('Student')
+  const auth = { type: 'commissioned-ideas:participant-auth', participantId: student.participantId, token: student.token }
+  const oldTab = await h.connect({})
+  await oldTab.say(auth)
+  const newTab = await h.connect({})
+  await newTab.say(auth)
+
+  await oldTab.hangUp()
+  assert.equal(sessionDataFromHarness(h).participantRoster[student.participantId]?.connected, true, 'the new tab is still open')
+
+  await newTab.hangUp()
+  assert.equal(sessionDataFromHarness(h).participantRoster[student.participantId]?.connected, false, 'last tab closed')
+})
+
+void test('a store failure during participant auth leaves the socket retryable', async () => {
+  const h = await setupWsHarness()
+  const student = await h.register('Student')
+  const conn = await h.connect({})
+  const realSet = h.sessions.set
+  h.sessions.set = async () => { throw new Error('[TEST] simulated store write failure') }
+  console.log('[TEST] expecting participant auth persistence failure')
+  await conn.say({ type: 'commissioned-ideas:participant-auth', participantId: student.participantId, token: student.token })
+  h.sessions.set = realSet
+
+  assert.equal(conn.socket.participantId, null, 'binding is not committed')
+  assert.equal((conn.socket as { studentAuth?: string }).studentAuth, 'pending')
+  assert.ok(conn.sent.some((m) => m.type === 'commissioned-ideas:error' && m.code === 'participant-auth-failed'))
+  assert.equal(conn.closed()?.code, 1011, 'a non-policy close lets the client reconnect and retry')
+
+  // The reconnect authenticates normally.
+  const retry = await h.connect({})
+  await retry.say({ type: 'commissioned-ideas:participant-auth', participantId: student.participantId, token: student.token })
+  assert.equal(retry.socket.participantId, student.participantId)
+})
+
+function sessionDataFromHarness(h: Awaited<ReturnType<typeof setupWsHarness>>): CommissionedIdeasSessionData {
+  return sessionData(h.store, h.sessionId)
+}

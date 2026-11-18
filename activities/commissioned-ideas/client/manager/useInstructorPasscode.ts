@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router'
 import {
   hasRouterStatePasscode,
-  recoverCommissionedIdeasInstructorPasscode,
+  recoverInstructorPasscodeOnce,
   resolveCommissionedIdeasInstructorPasscode,
 } from './passcode.js'
 
@@ -50,7 +50,7 @@ export function useCommissionedIdeasInstructorPasscode(sessionId: string | undef
 
     let cancelled = false
     setState({ sessionId, value: { status: 'loading', passcode: null } })
-    void recoverCommissionedIdeasInstructorPasscode(sessionId).then((passcode) => {
+    void recoverInstructorPasscodeOnce(sessionId).then((passcode) => {
       if (cancelled) return
       setState({
         sessionId,

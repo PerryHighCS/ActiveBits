@@ -47,3 +47,30 @@ export function checkInstructorMove(input: InstructorMoveInput): InstructorMoveD
     error: 'After registration you can only place students who are not on a team onto an existing team',
   }
 }
+
+export type ParsedAssignTarget =
+  | { ok: true; target: InstructorMoveTarget }
+  | { ok: false; error: string }
+
+/**
+ * Reads the `assign-participant` target from a request body. Exactly one explicit
+ * form is accepted: `newTeam: true`, `teamId: '<id>'`, or `teamId: null` (ungrouped).
+ * A missing or non-string `teamId` is an error, never an implicit move to Ungrouped,
+ * which could otherwise dissolve a student's team.
+ */
+export function parseAssignTarget(body: Record<string, unknown>): ParsedAssignTarget {
+  const hasTeamId = Object.hasOwn(body, 'teamId')
+  if (body.newTeam === true) {
+    if (hasTeamId) return { ok: false, error: 'Send either teamId or newTeam, not both' }
+    return { ok: true, target: { kind: 'new-team' } }
+  }
+  if (Object.hasOwn(body, 'newTeam') && body.newTeam !== false) {
+    return { ok: false, error: 'newTeam must be true when sent' }
+  }
+  if (!hasTeamId) return { ok: false, error: 'teamId (string or null) or newTeam: true is required' }
+  if (body.teamId === null) return { ok: true, target: { kind: 'ungrouped' } }
+  if (typeof body.teamId === 'string' && body.teamId.length > 0) {
+    return { ok: true, target: { kind: 'team', teamId: body.teamId } }
+  }
+  return { ok: false, error: 'teamId must be a team id or null' }
+}

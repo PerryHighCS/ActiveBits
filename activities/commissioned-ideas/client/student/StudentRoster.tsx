@@ -1,3 +1,4 @@
+import { useRef, type Ref } from 'react'
 import type { ProposalKind } from '../../shared/naming.js'
 import type { GroupingMode, StudentSafeParticipant, StudentSafeTeam } from '../../shared/types.js'
 import { sortTeams, teamLabel } from '../teamLabels.js'
@@ -38,9 +39,15 @@ export default function StudentRoster({
     .filter((p) => p.teamId === null)
     .sort((a, b) => a.name.localeCompare(b.name))
 
-  const handleCreateTeam = () => { void post('create-team', {}) }
-  const handleJoinTeam = (teamId: string) => { void post('join-team', { teamId }) }
-  const handleLeaveTeam = () => { void post('leave-team', {}) }
+  // Join, Switch, Leave, and Create unmount the button that was pressed. Move focus to the
+  // team status strip, which stays mounted in every state, so keyboard users keep their place.
+  const statusRef = useRef<HTMLDivElement>(null)
+  const postAndRefocus = async (path: string, body: Record<string, unknown>) => {
+    if (await post(path, body)) statusRef.current?.focus()
+  }
+  const handleCreateTeam = () => { void postAndRefocus('create-team', {}) }
+  const handleJoinTeam = (teamId: string) => { void postAndRefocus('join-team', { teamId }) }
+  const handleLeaveTeam = () => { void postAndRefocus('leave-team', {}) }
   const handlePropose = (kind: ProposalKind, value: string) => post('team/proposal', { kind, value })
   const handleVote = (kind: ProposalKind, proposalId: string) => post('team/proposal-vote', { kind, proposalId })
 
@@ -57,6 +64,7 @@ export default function StudentRoster({
 
       {/* My status */}
       <MyTeamStatus
+        ref={statusRef}
         myTeam={myTeam}
         label={myTeam ? teamLabel(myTeam, teamList.indexOf(myTeam)) : ''}
         participants={participants}
@@ -67,6 +75,8 @@ export default function StudentRoster({
 
       {myTeam?.naming && (
         <TeamNamingPanel
+          // Remount per team so a draft or pending vote never carries over to a new team.
+          key={myTeamId ?? ''}
           naming={myTeam.naming}
           groupName={myTeam.groupName}
           projectName={myTeam.projectName}
@@ -203,6 +213,7 @@ export default function StudentRoster({
 // ── My team status strip ──────────────────────────────────────────────────────
 
 interface MyTeamStatusProps {
+  ref: Ref<HTMLDivElement>
   myTeam: StudentSafeTeam | undefined
   label: string
   participants: Record<string, StudentSafeParticipant>
@@ -211,8 +222,19 @@ interface MyTeamStatusProps {
   onLeave: () => void
 }
 
-function MyTeamStatus({ myTeam, label, participants, canLeave, busy, onLeave }: MyTeamStatusProps) {
-  if (!myTeam) return null
+function MyTeamStatus({ ref, myTeam, label, participants, canLeave, busy, onLeave }: MyTeamStatusProps) {
+  if (!myTeam) {
+    return (
+      <div
+        ref={ref}
+        tabIndex={-1}
+        data-testid="ci-my-team-status"
+        className="rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm text-gray-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
+      >
+        You’re not on a team yet.
+      </div>
+    )
+  }
 
   const names = myTeam.memberIds
     .map((id) => participants[id])
@@ -221,7 +243,12 @@ function MyTeamStatus({ myTeam, label, participants, canLeave, busy, onLeave }: 
     .join(', ')
 
   return (
-    <div className="rounded-lg bg-amber-50 border border-amber-200 px-4 py-3 flex items-center justify-between gap-3">
+    <div
+      ref={ref}
+      tabIndex={-1}
+      data-testid="ci-my-team-status"
+      className="rounded-lg bg-amber-50 border border-amber-200 px-4 py-3 flex items-center justify-between gap-3 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
+    >
       <div>
         <p className="text-sm font-semibold text-amber-800">Your team: {label}</p>
         {myTeam.projectName && <p className="text-xs text-amber-700 italic">Project: {myTeam.projectName}</p>}

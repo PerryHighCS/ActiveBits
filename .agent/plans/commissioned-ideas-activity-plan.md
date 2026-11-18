@@ -50,13 +50,33 @@ Triage of the 25 unresolved CodeRabbit threads from 2026-07-30 on PR #243, verif
 - [ ] Open, needs product/engineering decision: participant token in `localStorage` (move to a core httpOnly participant capability); per-session atomic updates (`updateAtomic` for every writer)
 - [x] Post replies and resolve threads after the fixes are pushed (0690ab1a: 23 resolved; the two follow-up threads replied to and left open)
 
+## CodeRabbit review round 3 (2026-11-18)
+
+35 new threads. This is the third review round on this PR, so per AGENTS.md rule 16 the fixes are grouped by the contract each cluster broke rather than patched one by one.
+
+Root causes and contracts (owners in parentheses):
+
+1. **Client-keyed map lookups.** Team and roster maps are plain objects, so `map[id]` for `__proto__` or `toString` returns inherited values. Contract: every lookup by a client-supplied id uses `ownEntry` (`shared/records.ts`). Failure: unknown id → `404`.
+2. **Socket auth and presence were implicit.** Contract: an explicit per-socket state machine `pending → authenticating → authenticated | anonymous` (`StudentSocketAuth`, `server/routes.ts`). One attempt runs per socket. A refusal never overrides a success. A store failure restores the previous state and closes with `1011` (retryable). Presence is derived: online while at least one open, authenticated socket on this process is bound to the participant (`hasLiveParticipantSocket`, `syncParticipantPresence`). Subscribe to broadcasts only after the session lookup succeeds. Known limit: with several server instances, the instance handling the last close decides presence.
+3. **Moderation could break derived results.** Contracts: deleting a team withdraws every ballot that funded it (`withdrawBallotsFundingMissingTeams`, `shared/validation.ts`; called only from `deleteTeam`). A revealed podium is pinned to the podium it was revealed for (`podiumRevealKey` / `reconcilePodiumReveal`, `shared/podium.ts`). `persistSession` applies this on every write, and a changed podium resets the reveal to `hidden`.
+4. **Implicit request defaults.** `assign-participant` needs an explicit target (`parseAssignTarget`, `shared/membership.ts`); a missing target is `400`, never Ungrouped. `settings` is `409` outside `registration`. A verified reconnect returns the server-side (moderated) name.
+5. **Student identity outlived its session.** The student view is keyed by session ID. An explicit credential refusal (`participant-auth-refused`) clears the stored token and shows the form; transient failures keep it. A storage write failure keeps the in-memory registration and shows a warning. Team controls wait for the first snapshot.
+
+- [x] Shared helpers with decision-table tests: `ownEntry`, `parseAssignTarget`, `withdrawBallotsFundingMissingTeams`, `podiumRevealKey`/`reconcilePodiumReveal`, `maxTeamSizeBlurAction`, `isParticipantAuthRefusal`, `lateArrivalNotice`, token storage helpers, shared passcode recovery
+- [x] Server: own-key lookups, socket auth state machine, derived presence, subscribe after lookup, ballot withdrawal on team deletion, podium pinning, explicit assign target, settings phase guard, moderated name on reconnect
+- [x] Manager UI: single DELETE via `SessionHeader`, clipboard failure message, max-size rollback and no unedited writes, accessible online status, Enter uses the Save rule, moderation buttons disabled while saving, one shared passcode recovery per session
+- [x] Student UI: session-keyed identity, credential-refusal recovery, storage warning, first-snapshot gate, results-phase notice, naming panel keyed by team, focus kept after Join/Switch/Leave
+- [x] Tests: route tests for each server change, websocket interleavings (concurrent auth, close during read, second tab, store failure), Playwright for refusal recovery, roster keyboard focus, passcode values in storage, and real manager-cookie reissue
+- [x] Docs: transition table, reduced-ballot wording, socket auth, test matrix, data contracts
+- [ ] Still open by decision: participant token in `localStorage`; per-session atomic updates
+
 ## Goal
 
 Create a live classroom activity where:
 
 1. Students register as individuals, organize themselves into teams, and collaboratively settle on a team name and project name.
 2. The instructor moves the class into a presentation phase.
-3. Participants rate projects by assigning exactly one `$100`, one `$300`, and one `$500` award to three different projects.
+3. Participants fund other teams' projects: `$500`, `$300`, and `$100`, each to a different team. With fewer than three other teams the ballot keeps the top amounts only (see "Ballot contract").
 4. The instructor reveals the final podium with a dramatic `3 ... 2 ... winner` sequence showing the top three teams.
 
 ## Default Product Decisions
@@ -71,13 +91,13 @@ Create a live classroom activity where:
 - Instructor can continue assigning late or ungrouped students after the main student lock
 - Students self-organize into teams during registration
 - Team names and project names are proposed by team members and voted on by that team's members
-- Voting rule: each voter must assign `$100`, `$300`, and `$500` to three distinct teams
+- Voting rule: each voter gives `$500`, `$300`, and `$100` to distinct teams other than their own; with fewer than three other teams, only the top `min(3, eligible)` amounts (see "Ballot contract")
 - Result ranking: total awarded dollars, descending
 - Podium: teams with equal total funding share a podium step (decision 2026-11-16). The tiebreakers below only order the instructor's full rankings table:
   1. more `$500` awards
   2. more `$300` awards
   3. earlier registration time
-- Self-voting: disallowed by default when the voter belongs to a registered team
+- Self-voting: never allowed (not configurable). Only students on a team can vote, and their own team is not eligible
 - Podium reveal: instructor-controlled stepper showing third place, then second place, then winner
 
 ## Scope
@@ -207,11 +227,9 @@ The authoritative model is `CommissionedIdeasSessionData` in `shared/types.ts` (
 
 - Student view switches to a ballot builder.
 - Validation rules:
-  - exactly three allocations
-  - must contain one each of `$100`, `$300`, `$500`
-  - all three target teams must be different
-  - target teams must exist
-  - if self-voting is disabled, the participant's own team cannot be selected
+  - as built: the "Ballot contract" section below is authoritative
+  - `min(3, eligible teams)` allocations, using the top amounts in order (`$500`, then `$300`, then `$100`)
+  - each target team is different, exists, and is not the voter's own team
 - Manager view shows:
   - ballot submission progress
   - who has submitted
@@ -281,7 +299,8 @@ As built (2026-11-16): every server broadcast carries a full role-appropriate sn
 - `commissioned-ideas:phase-changed` — phase transitions
 - `commissioned-ideas:podium-step` — podium reveal steps
 - `commissioned-ideas:manager-auth` — client → server, carries the instructor passcode after connect
-- `commissioned-ideas:error` — server → client failure notice
+- `commissioned-ideas:participant-auth` — client → server, `{ participantId, token }` after connect. A student socket receives nothing until it sends this. Valid proof binds the socket and sends that student's personalized snapshot. Refused proof sends `commissioned-ideas:error` with `code: 'participant-auth-refused'`, then the anonymous snapshot; the client drops the stored token and shows the registration form. A store failure sends `code: 'participant-auth-failed'` and closes with `1011`, so the client reconnects and retries.
+- `commissioned-ideas:error` — server → client failure notice; `code` distinguishes `participant-auth-refused`, `participant-auth-failed`, and `session-not-found`
 
 The originally proposed `team-updated`, `presentation-active`, and `ballot-progress` messages were not needed; those changes ride on `registration-updated`.
 
@@ -504,10 +523,10 @@ Phase transitions (anything else → `409`, unchanged state):
 | --- | --- | --- | --- | --- |
 | registration | – | needs ≥1 team | no | no |
 | presentation | only with 0 ballots | – | needs ≥1 team | no |
-| voting | no | yes | – | yes |
-| results | no | yes | yes | – |
+| voting | no | needs ≥1 team | – | yes |
+| results | no | needs ≥1 team | needs ≥1 team | – |
 
-Every successful transition resets `podiumRevealStep` to `hidden`. Entering `presentation` normalizes presenter order and clears `currentPresentationTeamId` if that team no longer exists. Voting stays open with as few as one team. Product decision (2026-11-16): when a voter has fewer than three eligible teams (teams other than their own), they still vote but get fewer awards: the ballot size is `min(3, eligibleTeamCount)`, and a voter with zero eligible teams cannot vote. Phase 6 must centralize this ballot-size rule in shared code and decide which amounts the smaller ballot keeps.
+Every transition into `presentation` or `voting` needs at least one team, whatever the source phase. Moderation in `voting` or `results` can remove the last team, and then both transitions return `409`. Every successful transition resets `podiumRevealStep` to `hidden`. Entering `presentation` normalizes presenter order and clears `currentPresentationTeamId` if that team no longer exists. Voting stays open with as few as one team. Product decision (2026-11-16): when a voter has fewer than three eligible teams (teams other than their own), they still vote but get fewer awards: the ballot size is `min(3, eligibleTeamCount)`, and a voter with zero eligible teams cannot vote. Phase 6 must centralize this ballot-size rule in shared code and decide which amounts the smaller ballot keeps.
 
 Presenter order invariant: in `presentation`, `presenterOrder` values for the existing teams are exactly `0..n-1`. Teams with no order sort after ordered ones by `registeredAt`, then `id`. `presentation-order` takes the full permutation of current team IDs; anything else returns `400`.
 
@@ -610,8 +629,8 @@ Exit criteria:
 | Presentation ordering | order helper tests | reorder route persists order | active presenter changes appear on student view |
 | Weighted ballot rules | ballot validation tests | invalid ballots rejected; valid ballots saved/replaced | voter can assign `$100/$300/$500` once each |
 | Self-vote blocking | eligibility helper tests | own-team ballot target rejected | voter cannot submit with own team selected |
-| Ranking and tie-breaks | scoring helper tests | results route returns deterministic top three | final podium reflects computed order |
-| Podium reveal | reveal-step helper tests | reveal route broadcasts reveal state | student results screen animates through `3`, `2`, winner |
+| Ranking and tie-breaks | scoring helper tests (`computeTeamScores`, `fundingRanks`) | `buildManagerSnapshot` in `results` returns the full ranking (no separate results route) | final podium reflects computed order |
+| Podium reveal | reveal-step helper tests, `reconcilePodiumReveal` table | `podium-step` route; `buildStudentSnapshot` returns only revealed places | student results screen animates through `3`, `2`, winner |
 
 If the implementation changes shared routing or browser seams materially, include `npm run test:e2e` per repo guidance.
 

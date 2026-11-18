@@ -105,3 +105,19 @@ export function moveFocusReady(
   if (!request || request.participantId !== participant.id || busy) return false
   return request.failed || currentDestination(participant) !== request.from
 }
+
+export type MaxTeamSizeBlurAction = { kind: 'submit'; value: number } | { kind: 'restore' }
+
+/**
+ * What leaving the max-team-size field does. Only an edited, valid (integer ≥ 2),
+ * changed value is written; anything else restores the server value. Tabbing through
+ * an unedited field must not write, or it could undo another instructor's change
+ * this tab has not seen yet.
+ */
+export function maxTeamSizeBlurAction(input: string, edited: boolean, serverMax: number): MaxTeamSizeBlurAction {
+  if (!edited) return { kind: 'restore' }
+  const trimmed = input.trim()
+  const value = trimmed === '' ? Number.NaN : Number(trimmed)
+  if (!Number.isInteger(value) || value < 2 || value === serverMax) return { kind: 'restore' }
+  return { kind: 'submit', value }
+}

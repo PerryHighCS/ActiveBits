@@ -1,7 +1,13 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import type { CommissionedIdeasSessionData, CommissionedIdeasTeam } from './types.js'
-import { ballotEligibleTeamIds, requiredBallotAmounts, validateBallot, voterBallotStatus } from './validation.js'
+import {
+  ballotEligibleTeamIds,
+  requiredBallotAmounts,
+  validateBallot,
+  voterBallotStatus,
+  withdrawBallotsFundingMissingTeams,
+} from './validation.js'
 
 function team(id: string): CommissionedIdeasTeam {
   return {
@@ -36,6 +42,7 @@ function session(teamIds: string[], voterTeamId: string | null): CommissionedIde
     presentationHistory: [],
     currentPresentationTeamId: null,
     podiumRevealStep: 'hidden',
+    podiumRevealKey: null,
   }
 }
 
@@ -178,3 +185,18 @@ for (const row of statusCases) {
     assert.deepEqual(rest, row.expected)
   })
 }
+
+// ── Ballots that fund a deleted team ─────────────────────────────────────────
+void test('withdrawBallotsFundingMissingTeams withdraws only ballots that fund a missing team', () => {
+  const data = {
+    teams: { A: team('A'), C: team('C') },
+    ballots: {
+      fundsDeleted: { voterId: 'fundsDeleted', voterName: 'fundsDeleted', voterTeamId: null, allocations: [{ teamId: 'B', amount: 500 as const }, { teamId: 'C', amount: 300 as const }], submittedAt: 1 },
+      intact: { voterId: 'intact', voterName: 'intact', voterTeamId: null, allocations: [{ teamId: 'A', amount: 500 as const }, { teamId: 'C', amount: 300 as const }], submittedAt: 2 },
+      inherited: { voterId: 'inherited', voterName: 'inherited', voterTeamId: null, allocations: [{ teamId: 'toString', amount: 500 as const }], submittedAt: 3 },
+    },
+  }
+  assert.deepEqual(withdrawBallotsFundingMissingTeams(data).sort(), ['fundsDeleted', 'inherited'])
+  assert.deepEqual(Object.keys(data.ballots), ['intact'])
+  assert.deepEqual(withdrawBallotsFundingMissingTeams(data), [], 'idempotent')
+})

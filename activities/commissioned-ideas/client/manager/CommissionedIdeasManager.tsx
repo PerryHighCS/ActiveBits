@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { useParams, useNavigate } from 'react-router'
+import { useParams } from 'react-router'
 import SessionHeader from '@src/components/common/SessionHeader'
 import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler'
 import { useManagerSession } from '../hooks/useCommissionedIdeasSession.js'
@@ -13,7 +13,6 @@ import { useCommissionedIdeasInstructorPasscode } from './useInstructorPasscode.
 
 export default function CommissionedIdeasManager() {
   const { sessionId } = useParams<{ sessionId?: string }>()
-  const navigate = useNavigate()
   const attachSessionEndedHandler = useSessionEndedHandler()
   const passcodeState = useCommissionedIdeasInstructorPasscode(sessionId)
   const instructorPasscode = passcodeState.passcode
@@ -29,13 +28,6 @@ export default function CommissionedIdeasManager() {
     connect()
     return () => disconnect()
   }, [sessionId, instructorPasscode, connect, disconnect])
-
-  const handleEndSession = async () => {
-    if (sessionId) {
-      await fetch(`/api/session/${sessionId}`, { method: 'DELETE' })
-    }
-    void navigate('/manage')
-  }
 
   const phase = snapshot?.phase ?? 'registration'
 
@@ -60,7 +52,6 @@ export default function CommissionedIdeasManager() {
       <SessionHeader
         activityName="Commissioned Ideas"
         sessionId={sessionId}
-        onEndSession={() => { void handleEndSession() }}
       />
 
       <div className="max-w-3xl mx-auto px-4 py-6">

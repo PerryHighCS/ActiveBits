@@ -6,7 +6,9 @@ import {
   joinNames,
   nextPodiumStep,
   podiumPlaceCount,
+  podiumRevealKey,
   podiumSequence,
+  reconcilePodiumReveal,
   revealedPlaces,
   revealedPodium,
 } from './podium.js'
@@ -191,5 +193,31 @@ for (const row of tieCases) {
   void test(`computeTeamScores ranking: ${row.name}`, () => {
     const teams = { a: team('a', 1), b: team('b', 2) }
     assert.deepEqual(computeTeamScores(teams, row.ballots).map((s) => s.teamId), row.expectedOrder)
+  })
+}
+
+// ── Reveal invariant: a revealed podium matches the ranking it was revealed for ──
+function revealScore(teamId: string, totalDollars: number, groupName: string | null = null): TeamScore {
+  return { teamId, groupName, projectName: null, totalDollars, fiveHundredCount: 0, threeHundredCount: 0, oneHundredCount: 0, registeredAt: 0 }
+}
+
+const revealBaseRanking = [revealScore('A', 900), revealScore('B', 600), revealScore('C', 300)]
+const podiumRevealCases: { name: string; step: PodiumRevealStep; keyFrom: TeamScore[] | null; now: TeamScore[]; reset: boolean }[] = [
+  { name: 'hidden stays hidden', step: 'hidden', keyFrom: null, now: revealBaseRanking, reset: false },
+  { name: 'unchanged podium keeps the reveal', step: 'second', keyFrom: revealBaseRanking, now: revealBaseRanking, reset: false },
+  { name: 'renamed team keeps the reveal', step: 'third', keyFrom: revealBaseRanking, now: [revealScore('A', 900), revealScore('B', 600), revealScore('C', 300, 'Owls')], reset: false },
+  { name: 'unfunded team added below the podium keeps the reveal', step: 'third', keyFrom: revealBaseRanking, now: [...revealBaseRanking, revealScore('D', 0)], reset: false },
+  { name: 'withdrawn ballot changes a total', step: 'third', keyFrom: revealBaseRanking, now: [revealScore('A', 900), revealScore('B', 600), revealScore('C', 200)], reset: true },
+  { name: 'deleted team changes the podium', step: 'winner', keyFrom: revealBaseRanking, now: [revealScore('A', 900), revealScore('C', 300)], reset: true },
+  { name: 'teams swap places', step: 'complete', keyFrom: revealBaseRanking, now: [revealScore('B', 900), revealScore('A', 600), revealScore('C', 300)], reset: true },
+  { name: 'missing key while revealed (inconsistent state) resets', step: 'third', keyFrom: null, now: revealBaseRanking, reset: true },
+]
+
+for (const row of podiumRevealCases) {
+  void test(`reconcilePodiumReveal: ${row.name}`, () => {
+    const state = { podiumRevealStep: row.step, podiumRevealKey: row.keyFrom ? podiumRevealKey(row.keyFrom) : null }
+    assert.equal(reconcilePodiumReveal(state, row.now), row.reset)
+    assert.equal(state.podiumRevealStep, row.reset ? 'hidden' : row.step)
+    if (state.podiumRevealStep === 'hidden') assert.equal(state.podiumRevealKey, null)
   })
 }

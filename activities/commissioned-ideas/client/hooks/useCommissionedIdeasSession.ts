@@ -75,6 +75,7 @@ interface WsMessage {
   sessionId?: string
   data?: unknown
   error?: string
+  code?: string
 }
 
 /** Every server broadcast that carries a full snapshot in `data`. */
@@ -113,8 +114,18 @@ interface UseStudentSessionOptions {
   attachSessionEndedHandler?: (ws: WebSocket) => void
 }
 
+/** Error code the server sends when a participant credential is refused (not a transient failure). */
+export const PARTICIPANT_AUTH_REFUSED = 'participant-auth-refused'
+
+/** True only for the server's explicit credential refusal, never for transport or load errors. */
+export function isParticipantAuthRefusal(msg: { type?: unknown; code?: unknown }): boolean {
+  return msg.type === 'commissioned-ideas:error' && msg.code === PARTICIPANT_AUTH_REFUSED
+}
+
 interface UseStudentSessionResult {
   snapshot: StudentSnapshot | null
+  /** The server refused the stored participant credential; the student must register again. */
+  authRefused: boolean
   connect: () => WebSocket | null
   disconnect: () => void
 }
@@ -126,6 +137,9 @@ export function useStudentSession({
   attachSessionEndedHandler,
 }: UseStudentSessionOptions): UseStudentSessionResult {
   const [snapshot, setSnapshot] = useState<StudentSnapshot | null>(null)
+  // Tagged with the token that was refused, so registering again (a new token) clears it.
+  const [refusedToken, setRefusedToken] = useState<string | null>(null)
+  const authRefused = participantToken !== null && refusedToken === participantToken
 
   const buildWsUrl = useCallback(
     () => (sessionId ? buildCommissionedIdeasWsUrl(sessionId, 'student') : null),
@@ -141,13 +155,15 @@ export function useStudentSession({
   const handleMessage = useCallback((event: MessageEvent) => {
     try {
       const msg = JSON.parse(event.data as string) as WsMessage
-      if (isSnapshotMessage(msg.type)) {
+      if (isParticipantAuthRefusal(msg)) {
+        setRefusedToken(participantToken)
+      } else if (isSnapshotMessage(msg.type)) {
         setSnapshot(msg.data as StudentSnapshot)
       }
     } catch {
       // malformed WS frame — ignored
     }
-  }, [])
+  }, [participantToken])
 
   const { connect, disconnect } = useResilientWebSocket({
     buildUrl: buildWsUrl,
@@ -157,7 +173,7 @@ export function useStudentSession({
     attachSessionEndedHandler,
   })
 
-  return { snapshot, connect, disconnect }
+  return { snapshot, authRefused, connect, disconnect }
 }
 
 // ── Manager hook ──────────────────────────────────────────────────────────────

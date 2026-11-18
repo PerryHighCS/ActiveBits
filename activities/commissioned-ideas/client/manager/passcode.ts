@@ -77,3 +77,24 @@ export async function recoverCommissionedIdeasInstructorPasscode(
     return null
   }
 }
+
+const inFlightRecoveries = new Map<string, Promise<string | null>>()
+
+/**
+ * One in-flight recovery per session. React Strict Mode runs the recovery effect twice
+ * in development; without sharing, the cancelled run's reissue can succeed while the
+ * live run's reissue is rate-limited, and the live run would report `missing` although
+ * the cookie is valid. The entry is dropped once settled so a later reload recovers again.
+ */
+export function recoverInstructorPasscodeOnce(
+  sessionId: string,
+  fetchImpl?: FetchLike,
+): Promise<string | null> {
+  const existing = inFlightRecoveries.get(sessionId)
+  if (existing) return existing
+  const recovery = recoverCommissionedIdeasInstructorPasscode(sessionId, fetchImpl).finally(() => {
+    inFlightRecoveries.delete(sessionId)
+  })
+  inFlightRecoveries.set(sessionId, recovery)
+  return recovery
+}

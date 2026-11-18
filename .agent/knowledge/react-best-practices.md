@@ -354,3 +354,7 @@ For renderers that accept React component maps (such as `react-markdown`), memoi
 When an action's visible result arrives by WebSocket snapshot (not the POST response), the response can land first. Keep the control pending until the snapshot shows the change, and release it on failure. Otherwise a second click acts on stale state, for example revealing a podium place the button does not name. Examples: Commissioned Ideas `ResultsDashboard` (reveal pending until `podiumRevealStep` changes) and `teamBoardModel.moveFocusReady` (restore focus after a keyboard move once the snapshot re-parents the chip). Moving an item to another list re-creates its component, so a focused control inside it is lost unless focus is restored explicitly.
 
 Snapshot state that belongs to a session identity should be tagged with that identity and hidden when the identity changes (`managerViewForIdentity`). Resetting it in an effect still renders the old session's data for one commit.
+
+## Key per-identity state by that identity
+
+When a component holds state that belongs to one entity (a session, a team), key it by that entity's ID at the point where the ID can change. Otherwise React keeps the instance and its drafts, tokens, or pending requests carry over to the next entity. Examples: the Commissioned Ideas student view is rendered as `<StudentSessionView key={sessionId} />`, and the team naming panel is keyed by team ID, so a draft name can never be submitted to a team the student just moved to. This is a smaller and safer fix than resetting each piece of state in effects.
