@@ -50,6 +50,25 @@ Triage of the 25 unresolved CodeRabbit threads from 2026-07-30 on PR #243, verif
 - [ ] Open, needs product/engineering decision: participant token in `localStorage` (move to a core httpOnly participant capability); per-session atomic updates (`updateAtomic` for every writer)
 - [x] Post replies and resolve threads after the fixes are pushed (0690ab1a: 23 resolved; the two follow-up threads replied to and left open)
 
+## CodeRabbit review round 6 (2026-11-18)
+
+9 threads on a53f6cfb, no outside-diff comments. Grouped by contract (AGENTS.md rule 16):
+
+1. **Every local socket eventually gets the latest committed state (4 threads).** Owner: the per-session `InvalidationSubscription` record in `server/routes.ts`, with core `subscribeToBroadcast`. Invariant: whenever the instance's subscription becomes active (the first SUBSCRIBE, a retry after a failed one, or a subscriber reconnect), and whenever an invalidation arrives, local sockets get a snapshot read from committed state. Failure behavior:
+   - A failed read is retried up to 3 times while the subscription is current.
+   - A failed SUBSCRIBE rejects and is not cached as active; the activity retries with a capped backoff while local sockets need the session.
+   - After a subscriber reconnect, core re-confirms each channel and calls its `onResubscribed` listener.
+   - Refreshes are coalesced (one read per invalidation normally), and release cancels pending retries.
+   The late-activation test now gates the activity channel specifically.
+2. **A socket that is finishing auth counts as live for presence.** Its participant is claimed inside the presence write (while `pending`), so a cleanup for another tab that closes between this write's commit and its binding sees the participant as present. A refused or failed attempt clears its claim and reconciles presence. A refusal whose follow-up read fails closes with retryable `1011` instead of leaving the socket `pending`.
+3. **Podium `next` names the step its button offered (`toStep`).** The server compares it with the next step computed from the committed state. This refuses a click made before a concurrent reveal or reset, or before moderation changed the number of places. It accepts the click when unrelated changes leave the next step the same. This replaces `fromStep`.
+4. **Focus restoration waits until it can act.** The student API reports `ok`/`refused`/`unknown`, like instructor requests. After a refusal, focus returns to the control once it is enabled again. After an unknown outcome, focus returns to the control, and removal is still tracked so a late snapshot moves focus to the status strip. The decision is a tested table (`focusRestoreDecision`), with a Playwright regression for the refused-while-disabled case.
+
+- [x] Core: SUBSCRIBE failure, handler de-duplication, reconnect re-activation, with tests
+- [x] Server: 1, 2, 3, with regressions that fail when each fix is removed
+- [x] Client: 3, 4
+- [x] Tests and docs
+
 ## CodeRabbit review round 5 (2026-11-18)
 
 34 threads: 21 new, 12 from round 4 that were missed because the thread query read only the first 100 of 133 threads (now paginated), and 1 outside-diff comment. Grouped by contract (AGENTS.md rule 16):

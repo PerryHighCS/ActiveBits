@@ -8,6 +8,20 @@ interface RequestStatus {
 }
 
 /**
+ * What happened to a participant request (same meaning as the instructor's):
+ * - `ok`: the server committed it (`data` is the parsed response body);
+ * - `refused`: the server answered with an error status, so nothing changed;
+ * - `unknown`: no readable answer (network failure, or an unreadable success body),
+ *   so the change may or may not have been committed; a snapshot will tell.
+ */
+export type ParticipantApiOutcome =
+  | { kind: 'ok'; data: Record<string, unknown> }
+  | { kind: 'refused'; status: number }
+  | { kind: 'unknown' }
+
+const NETWORK_ERROR = 'Network error — please try again.'
+
+/**
  * POST helper for participant-authenticated Commissioned Ideas routes. The server
  * identifies the student from the httpOnly participant cookie, which same-origin
  * requests send automatically; the client holds no credential. Each request names
@@ -20,14 +34,15 @@ export function useParticipantApi(sessionId: string, expectedParticipantId: stri
   const [status, setStatus] = useState<RequestStatus>({ forId: null, busy: false, error: null })
   const mine = status.forId === expectedParticipantId
 
-  const postForResult = useCallback(
-    async (path: string, body: Record<string, unknown>): Promise<Record<string, unknown> | null> => {
+  const request = useCallback(
+    async (path: string, body: Record<string, unknown>): Promise<ParticipantApiOutcome> => {
       const forId = expectedParticipantId
       const settle = (error: string | null) =>
         setStatus((current) => (current.forId === forId ? { forId, busy: false, error } : current))
       setStatus({ forId, busy: true, error: null })
+      let res: Response
       try {
-        const res = await fetch(`/api/commissioned-ideas/${sessionId}/${path}`, {
+        res = await fetch(`/api/commissioned-ideas/${sessionId}/${path}`, {
           method: 'POST',
           credentials: 'same-origin',
           headers: { 'Content-Type': 'application/json' },
@@ -35,27 +50,43 @@ export function useParticipantApi(sessionId: string, expectedParticipantId: stri
           // the browser's cookie now belongs to someone else (another tab registered).
           body: JSON.stringify({ ...body, expectedParticipantId: forId }),
         })
-        const data = (await res.json()) as Record<string, unknown>
-        if (!res.ok) {
-          settle(typeof data.error === 'string' ? data.error : 'Something went wrong. Please try again.')
-          return null
-        }
-        settle(null)
-        return data
       } catch {
-        settle('Network error — please try again.')
-        return null
+        settle(NETWORK_ERROR)
+        return { kind: 'unknown' }
       }
+      const data = await res.json().then(
+        (value: unknown) => (value !== null && typeof value === 'object' ? value as Record<string, unknown> : {}),
+        () => null,
+      )
+      if (!res.ok) {
+        settle(typeof data?.error === 'string' ? data.error : 'Something went wrong. Please try again.')
+        return { kind: 'refused', status: res.status }
+      }
+      if (data === null) {
+        settle(NETWORK_ERROR)
+        return { kind: 'unknown' }
+      }
+      settle(null)
+      return { kind: 'ok', data }
     },
     [sessionId, expectedParticipantId],
   )
 
+  const postForResult = useCallback(
+    async (path: string, body: Record<string, unknown>): Promise<Record<string, unknown> | null> => {
+      const outcome = await request(path, body)
+      return outcome.kind === 'ok' ? outcome.data : null
+    },
+    [request],
+  )
+
   const post = useCallback(
-    async (path: string, body: Record<string, unknown>): Promise<boolean> => (await postForResult(path, body)) !== null,
-    [postForResult],
+    async (path: string, body: Record<string, unknown>): Promise<boolean> => (await request(path, body)).kind === 'ok',
+    [request],
   )
 
   return {
+    request,
     post,
     postForResult,
     busy: mine && status.busy,

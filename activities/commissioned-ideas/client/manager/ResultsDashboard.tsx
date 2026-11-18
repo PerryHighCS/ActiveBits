@@ -75,7 +75,7 @@ export default function ResultsDashboard({ sessionId, instructorPasscode, snapsh
             aria-busy={revealPending}
             onClick={() => {
               setReveal({ kind: 'in-flight' })
-              void request('podium-step', { action: 'next', fromStep: step }).then((outcome) => {
+              void request('podium-step', { action: 'next', toStep: next }).then((outcome) => {
                 const revision = outcome.kind === 'ok' ? outcome.data.revision : undefined
                 setReveal(typeof revision === 'number' ? { kind: 'awaiting-snapshot', revision } : null)
               })

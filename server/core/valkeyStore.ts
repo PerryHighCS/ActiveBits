@@ -18,6 +18,23 @@ interface PersistentMetadata {
 
 type BroadcastHandler = (message: BroadcastPayload) => void
 
+export interface BroadcastSubscribeOptions {
+  /**
+   * Called each time the channel is active again after the subscriber connection
+   * reconnected. Messages published while it was down are lost (Valkey does not replay
+   * them), so a caller that must not miss an update re-reads state here.
+   */
+  onResubscribed?: () => void
+}
+
+/** One channel's local subscription: its handlers and the server-side SUBSCRIBE state. */
+interface BroadcastChannelState {
+  /** Each handler with its optional re-activation listener. */
+  handlers: Map<BroadcastHandler, (() => void) | undefined>
+  /** Settles once the server confirmed the current SUBSCRIBE; null after a failure, so the next call retries. */
+  ready: Promise<void> | null
+}
+
 type ScanResult = [string, string[]]
 
 interface RedisClient {
@@ -48,9 +65,9 @@ export class ValkeySessionStore {
   public readonly ttlMs: number
   public readonly client: RedisClient
   private readonly subscriber: RedisClient
-  private readonly broadcastHandlers: Map<string, BroadcastHandler[]>
-  /** Per channel: settles once the server has confirmed the SUBSCRIBE. */
-  private readonly subscriptionsReady: Map<string, Promise<void>>
+  private readonly broadcastChannels: Map<string, BroadcastChannelState>
+  /** Whether the subscriber connection has been ready before (a later `ready` is a reconnect). */
+  private subscriberWasReady = false
 
   constructor(valkeyUrl: string, options: { ttlMs?: number } = {}) {
     const RedisCtor = Redis as unknown as RedisConstructor
@@ -71,35 +88,68 @@ export class ValkeySessionStore {
       console.error('Valkey subscriber error:', err)
     })
 
-    this.broadcastHandlers = new Map()
-    this.subscriptionsReady = new Map()
+    this.broadcastChannels = new Map()
+    this.subscriber.on('ready', () => this.handleSubscriberReady())
   }
 
   /**
-   * Adds `handler` for `channel`. The returned promise settles once the subscription is
-   * active on the server (immediately if it already is). Messages published before that
-   * are not delivered and Valkey does not replay them, so a caller that must not miss
-   * an update should re-read state after it settles. A failed SUBSCRIBE is logged and
-   * still settles the promise.
+   * Adds `handler` for `channel` (adding the same handler again only updates its
+   * options). The returned promise settles once the subscription is active on the
+   * server (immediately if it already is). Messages published before that are not
+   * delivered and Valkey does not replay them, so a caller that must not miss an update
+   * should re-read state after it settles, and again in `onResubscribed`.
+   *
+   * A failed SUBSCRIBE is logged and rejects the promise; the channel is not marked
+   * active, so the next call (for example a caller's retry) subscribes again, and a
+   * subscriber reconnect re-subscribes it. The rejection is pre-handled, so callers that
+   * ignore the returned promise do not cause an unhandled rejection.
    */
-  subscribeToBroadcast(channel: string, handler: BroadcastHandler): Promise<void> {
-    if (!this.broadcastHandlers.has(channel)) {
-      this.broadcastHandlers.set(channel, [])
-      this.subscriptionsReady.set(channel, new Promise<void>((resolve) => {
-        void this.subscriber.subscribe(channel, (err: Error | null) => {
-          if (err != null) {
-            console.error(`Failed to subscribe to ${channel}:`, err)
-          }
-          resolve()
-        })
-      }))
+  subscribeToBroadcast(channel: string, handler: BroadcastHandler, options: BroadcastSubscribeOptions = {}): Promise<void> {
+    let state = this.broadcastChannels.get(channel)
+    if (state == null) {
+      state = { handlers: new Map(), ready: null }
+      this.broadcastChannels.set(channel, state)
     }
+    state.handlers.set(handler, options.onResubscribed)
+    return state.ready ?? this.activateChannel(channel, state)
+  }
 
-    const handlers = this.broadcastHandlers.get(channel)
-    if (handlers != null) {
-      handlers.push(handler)
+  /** Sends SUBSCRIBE for `channel` and records the pending confirmation in `state`. */
+  private activateChannel(channel: string, state: BroadcastChannelState): Promise<void> {
+    const ready = new Promise<void>((resolve, reject) => {
+      void this.subscriber.subscribe(channel, (err: Error | null) => {
+        if (err == null) {
+          resolve()
+          return
+        }
+        console.error(`Failed to subscribe to ${channel}:`, err)
+        if (state.ready === ready) state.ready = null
+        reject(err)
+      })
+    })
+    ready.catch(() => {})
+    state.ready = ready
+    return ready
+  }
+
+  /**
+   * The subscriber connection is ready. After a reconnect (not the first connect),
+   * ioredis re-subscribes on its own, but anything published while it was down is lost:
+   * re-confirm every channel and tell each handler's `onResubscribed` listener.
+   */
+  handleSubscriberReady(): void {
+    if (!this.subscriberWasReady) {
+      this.subscriberWasReady = true
+      return
     }
-    return this.subscriptionsReady.get(channel) ?? Promise.resolve()
+    for (const [channel, state] of this.broadcastChannels) {
+      this.activateChannel(channel, state).then(() => {
+        if (this.broadcastChannels.get(channel) !== state) return // released meanwhile
+        for (const listener of state.handlers.values()) listener?.()
+      }, () => {
+        // Logged in activateChannel; the next subscribe call or reconnect retries.
+      })
+    }
   }
 
   /**
@@ -107,15 +157,10 @@ export class ValkeySessionStore {
    * unsubscribed on the server; a later `subscribeToBroadcast` subscribes again.
    */
   unsubscribeFromBroadcast(channel: string, handler: BroadcastHandler): void {
-    const handlers = this.broadcastHandlers.get(channel)
-    if (handlers == null) return
-    const remaining = handlers.filter((existing) => existing !== handler)
-    if (remaining.length > 0) {
-      this.broadcastHandlers.set(channel, remaining)
-      return
-    }
-    this.broadcastHandlers.delete(channel)
-    this.subscriptionsReady.delete(channel)
+    const state = this.broadcastChannels.get(channel)
+    if (state == null || !state.handlers.delete(handler)) return
+    if (state.handlers.size > 0) return
+    this.broadcastChannels.delete(channel)
     this.subscriber.unsubscribe(channel).catch((err: unknown) => {
       console.error(`Failed to unsubscribe from ${channel}:`, err)
     })
@@ -123,12 +168,12 @@ export class ValkeySessionStore {
 
   initializePubSub(): void {
     this.subscriber.on('message', (channel: string, message: string) => {
-      const handlers = this.broadcastHandlers.get(channel)
-      if (!handlers) return
+      const state = this.broadcastChannels.get(channel)
+      if (!state) return
 
       try {
         const data = JSON.parse(message) as BroadcastPayload
-        handlers.forEach((handler) => handler(data))
+        for (const handler of [...state.handlers.keys()]) handler(data)
       } catch (err) {
         console.error(`Error handling message on ${channel}:`, err)
       }

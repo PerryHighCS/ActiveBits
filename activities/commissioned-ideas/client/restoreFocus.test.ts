@@ -1,18 +1,34 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { focusRestoreTarget } from './useRestoreFocusAfterRemoval.js'
+import { focusRestoreDecision, type FocusRestoreDecision } from './useRestoreFocusAfterRemoval.js'
 
-const cases: [string, Parameters<typeof focusRestoreTarget>[0], ReturnType<typeof focusRestoreTarget>][] = [
-  ['control removed, focus lost → stable target', { originConnected: false, focusLost: true, requestFailed: false }, 'target'],
-  ['control removed, but the user focused something else → leave it', { originConnected: false, focusLost: false, requestFailed: false }, null],
-  ['still there and pending (disabled while busy) → wait', { originConnected: true, focusLost: true, requestFailed: false }, null],
-  ['request failed, control still there, focus lost → back to it', { originConnected: true, focusLost: true, requestFailed: true }, 'origin'],
-  ['request failed but the user moved on → leave it', { originConnected: true, focusLost: false, requestFailed: true }, null],
-  ['control removed although the response failed (change landed by snapshot) → target', { originConnected: false, focusLost: true, requestFailed: true }, 'target'],
+type State = Parameters<typeof focusRestoreDecision>[0]
+const state = (outcome: State['outcome'], originConnected: boolean, originFocusable: boolean, focusLost: boolean): State =>
+  ({ outcome, originConnected, originFocusable, focusLost })
+const keep = (focus: FocusRestoreDecision['focus']): FocusRestoreDecision => ({ focus, keepTracking: true })
+const stop = (focus: FocusRestoreDecision['focus']): FocusRestoreDecision => ({ focus, keepTracking: false })
+
+const cases: [string, State, FocusRestoreDecision][] = [
+  // Control removed (the change landed).
+  ['removed while pending (snapshot first), focus lost → target', state('pending', false, false, true), stop('target')],
+  ['removed after commit, focus lost → target', state('committed', false, false, true), stop('target')],
+  ['removed although the response was lost → target', state('unknown', false, false, true), stop('target')],
+  ['removed, but the user focused something else → leave it', state('committed', false, false, false), keep(null)],
+  // Control still there and disabled (busy): focusing it would do nothing.
+  ['pending and disabled → wait', state('pending', true, false, true), keep(null)],
+  ['refused while still disabled → wait for the render that enables it', state('refused', true, false, true), keep(null)],
+  ['unknown while still disabled → wait', state('unknown', true, false, true), keep(null)],
+  // Control still there and enabled.
+  ['refused and enabled → back to it, stop', state('refused', true, true, true), stop('origin')],
+  ['unknown and enabled → back to it, keep watching for removal', state('unknown', true, true, true), keep('origin')],
+  ['committed, snapshot not yet applied → wait', state('committed', true, true, true), keep(null)],
+  // Focus is somewhere (for example back on the control after an unknown outcome).
+  ['unknown, focus on the control → keep watching', state('unknown', true, true, false), keep(null)],
+  ['refused, focus already somewhere → stop', state('refused', true, true, false), stop(null)],
 ]
 
-for (const [name, state, expected] of cases) {
-  void test(`focusRestoreTarget: ${name}`, () => {
-    assert.equal(focusRestoreTarget(state), expected)
+for (const [name, input, expected] of cases) {
+  void test(`focusRestoreDecision: ${name}`, () => {
+    assert.deepEqual(focusRestoreDecision(input), expected)
   })
 }

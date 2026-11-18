@@ -1,5 +1,5 @@
 import { expect, type APIRequestContext, type Page, test } from '@playwright/test'
-import { postAsStudent, registerStudentViaApi, skipStudentBrowserFlowsOnWebKit, type ApiStudent } from './studentApi'
+import { createTeamViaApi, postAsStudent, registerStudentViaApi, skipStudentBrowserFlowsOnWebKit, type ApiStudent } from './studentApi'
 
 interface CreatedSession {
   id: string
@@ -179,6 +179,37 @@ test('student proposes and votes on names; instructor rejection updates the stud
     await page.getByRole('button', { name: 'Lock naming' }).click()
     await expect(naming.getByText('Naming is locked by your instructor.')).toBeVisible()
     await expect(naming.getByLabel('Suggest a team name')).toHaveCount(0)
+  } finally {
+    await studentContext.close()
+  }
+})
+
+test('a refused Join returns keyboard focus to the Join button once it is enabled again', async ({ browser, request }) => {
+  skipStudentBrowserFlowsOnWebKit()
+  const session = await createSession(request)
+  await createTeamViaApi(request, session.id, 'Ann')
+
+  const studentContext = await browser.newContext()
+  try {
+    const student = await studentContext.newPage()
+    await student.goto(`/${session.id}`)
+    await student.getByLabel('Your name').fill('Dana')
+    await student.getByRole('button', { name: 'Join' }).click()
+
+    const join = student.getByRole('button', { name: /^Join / })
+    await expect(join).toBeVisible()
+    // Hold the request until the button has rendered disabled (busy), then refuse it:
+    // the refusal settles while the button cannot take focus yet.
+    await student.route('**/join-team', async (route) => {
+      await expect(join).toBeDisabled()
+      await route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ error: '[TEST] Team is full' }) })
+    })
+    await join.focus()
+    await join.press('Enter')
+
+    await expect(student.getByRole('alert')).toContainText('[TEST] Team is full')
+    await expect(join).toBeEnabled()
+    await expect(join).toBeFocused()
   } finally {
     await studentContext.close()
   }

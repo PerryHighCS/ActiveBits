@@ -77,7 +77,8 @@ interface CommissionedIdeasSocket extends ActiveBitsWebSocket {
  *
  *   pending ──participant cookie valid + presence write committed──▶ authenticated (final)
  *      ├──no valid cookie──▶ anonymous (final; the client registers and reconnects)
- *      └──store failure──▶ socket closed 1011 (the client reconnects and retries)
+ *      └──store failure (including the re-read after a refusal)──▶ socket closed 1011
+ *         (the client reconnects and retries)
  *
  * - Exactly one attempt runs per socket, at connect, from the upgrade request's
  *   httpOnly participant cookie. There is no auth message.
@@ -85,9 +86,14 @@ interface CommissionedIdeasSocket extends ActiveBitsWebSocket {
  *   flight — so a client never renders an anonymous view first, and never gets a
  *   personalized view for an auth that may still fail. `anonymous` receives the
  *   anonymous view.
- * - `participantId` is set only together with `authenticated`, after the presence write
- *   commits (the cookie is re-checked inside that write). An auth whose socket closed
- *   during the write reconciles presence itself. Presence counts only `authenticated` sockets.
+ * - While `pending`, `participantId` is the participant this socket's presence write is
+ *   claiming: set inside the write (the cookie is re-checked there), so a tab that is
+ *   finishing auth already counts as live. Presence derivation counts `authenticated`
+ *   sockets and these claims. Otherwise a cleanup for another tab that closes between
+ *   this write's commit and its binding would see the participant as absent and commit
+ *   `connected: false` after it. A failed or refused attempt clears its claim and
+ *   reconciles presence. An auth whose socket closed during the write reconciles
+ *   presence itself.
  */
 export type StudentSocketAuth = 'pending' | 'authenticated' | 'anonymous'
 
@@ -112,7 +118,8 @@ function hasLiveParticipantSocket(ws: WsRouter, sessionId: string, participantId
     if (
       client.readyState === WS_OPEN &&
       client.sessionId === sessionId &&
-      client.studentAuth === 'authenticated' &&
+      // An open `pending` socket with a participantId is claiming it (see StudentSocketAuth).
+      (client.studentAuth === 'authenticated' || client.studentAuth === 'pending') &&
       client.participantId === participantId
     ) {
       return true
@@ -477,6 +484,13 @@ function refuse(status: number, error: string, log?: Refusal['log'], code?: stri
 
 /** Rounds of the store's `updateAtomic` before a write fails (each round has its own CAS retries). */
 const ATOMIC_UPDATE_ROUNDS = 3
+
+/** Cross-instance refresh: reads of committed state per invalidation, and the backoff step between them. */
+const REFRESH_READ_ATTEMPTS = 3
+const REFRESH_RETRY_DELAY_MS = 100
+/** Re-subscribe backoff after a failed SUBSCRIBE (doubling, capped), while local sockets need the session. */
+const SUBSCRIBE_RETRY_BASE_MS = 250
+const SUBSCRIBE_RETRY_MAX_MS = 5000
 
 /** Thrown inside a mutation when the stored record is not a Commissioned Ideas session. */
 class NotCommissionedIdeasSession extends Error {}
@@ -921,8 +935,22 @@ export default function setupCommissionedIdeasRoutes(
   // and builds role-appropriate snapshots for its own sockets.
   const instanceId = randomUUID()
   const invalidationChannel = (sessionId: string) => `session:${sessionId}:commissioned-ideas`
-  /** This instance's subscription per session, with the handler needed to release it. */
-  const invalidationSubscriptions = new Map<string, (message: unknown) => void>()
+  /**
+   * This instance's subscription for one session (owner: the functions below). It exists
+   * while local sockets need the session; every refresh, retry, and listener checks that
+   * it is still the current record before delivering, so a released one goes quiet.
+   */
+  interface InvalidationSubscription {
+    handler: (message: unknown) => void
+    /** A refresh is reading committed state (at most one per session at a time). */
+    refreshing: boolean
+    /** Refresh requested while one is reading; the latest event type wins. */
+    queued: SnapshotEventType | null
+    /** Pending re-subscribe after a failed SUBSCRIBE. */
+    retryTimer: ReturnType<typeof setTimeout> | null
+  }
+  const invalidationSubscriptions = new Map<string, InvalidationSubscription>()
+  const isCurrent = (sessionId: string, sub: InvalidationSubscription) => invalidationSubscriptions.get(sessionId) === sub
 
   function announce(
     session: CommissionedIdeasSession,
@@ -935,46 +963,100 @@ export default function setupCommissionedIdeasRoutes(
     })
   }
 
-  /** Re-reads committed state (not this instance's cache) and delivers it to local sockets. */
-  async function deliverCommitted(sessionId: string, type: SnapshotEventType): Promise<void> {
-    const session = await getSessionStrict(sessions, sessionId)
-    if (session) deliverSnapshots(ws, session, type)
+  /**
+   * Delivers committed state (re-read, never this instance's cache) to local sockets.
+   * Refreshes are coalesced: a request that arrives while one is reading is served by one
+   * more read after it, so ordinary delivery costs one read per invalidation. A failed
+   * read is retried a bounded number of times while the subscription is current.
+   */
+  function requestRefresh(sessionId: string, sub: InvalidationSubscription, type: SnapshotEventType): void {
+    sub.queued = type
+    if (sub.refreshing) return
+    sub.refreshing = true
+    void (async () => {
+      try {
+        while (sub.queued !== null && isCurrent(sessionId, sub)) {
+          await refreshOnce(sessionId, sub)
+        }
+      } finally {
+        sub.refreshing = false
+      }
+    })()
+  }
+
+  async function refreshOnce(sessionId: string, sub: InvalidationSubscription): Promise<void> {
+    for (let attempt = 1; ; attempt += 1) {
+      // Each attempt serves the newest request queued so far.
+      const type = sub.queued ?? 'commissioned-ideas:registration-updated'
+      sub.queued = null
+      try {
+        const session = await getSessionStrict(sessions, sessionId)
+        if (session && isCurrent(sessionId, sub)) deliverSnapshots(ws, session, type)
+        return
+      } catch (err: unknown) {
+        if (!isCurrent(sessionId, sub)) return
+        if (attempt >= REFRESH_READ_ATTEMPTS) {
+          console.error('[commissioned-ideas] Invalidation delivery failed', { sessionId, attempts: attempt, err })
+          return
+        }
+        console.warn('[commissioned-ideas] Invalidation read failed; retrying', { sessionId, attempt, err })
+        sub.queued ??= type
+        await new Promise((resolve) => setTimeout(resolve, REFRESH_RETRY_DELAY_MS * attempt))
+        if (!isCurrent(sessionId, sub)) return
+      }
+    }
   }
 
   /**
    * Subscribes this instance to a session's invalidations while it has local sockets for
-   * it. Once the subscription is active, local sockets get a fresh committed snapshot:
-   * a change published before activation is never delivered, and Valkey does not replay it.
+   * it. Each time the subscription becomes active (first SUBSCRIBE, a retry after a failed
+   * one, or the subscriber reconnecting) local sockets get a fresh committed snapshot: a
+   * change published while it was not active is never delivered, and Valkey does not
+   * replay it.
    */
   function ensureInvalidationSubscription(sessionId: string): void {
     if (typeof sessions.subscribeToBroadcast !== 'function' || invalidationSubscriptions.has(sessionId)) return
-    const handler = (message: unknown) => {
-      const event = isPlainObject(message) ? message : {}
-      if (event.origin === instanceId || !isSnapshotEventType(event.type)) return
-      deliverCommitted(sessionId, event.type).catch((err: unknown) => {
-        console.error('[commissioned-ideas] Invalidation delivery failed', { sessionId, err })
-      })
+    const sub: InvalidationSubscription = {
+      handler: (message: unknown) => {
+        const event = isPlainObject(message) ? message : {}
+        if (event.origin === instanceId || !isSnapshotEventType(event.type)) return
+        requestRefresh(sessionId, sub, event.type)
+      },
+      refreshing: false,
+      queued: null,
+      retryTimer: null,
     }
-    invalidationSubscriptions.set(sessionId, handler)
-    Promise.resolve(sessions.subscribeToBroadcast(invalidationChannel(sessionId), handler))
-      .then(() => {
-        if (invalidationSubscriptions.get(sessionId) !== handler) return // released meanwhile
-        return deliverCommitted(sessionId, 'commissioned-ideas:registration-updated')
-      })
-      .catch((err: unknown) => {
-        console.error('[commissioned-ideas] Post-subscription refresh failed', { sessionId, err })
+    invalidationSubscriptions.set(sessionId, sub)
+    subscribeInvalidations(sessionId, sub, 0)
+  }
+
+  function subscribeInvalidations(sessionId: string, sub: InvalidationSubscription, failures: number): void {
+    const refresh = () => {
+      if (isCurrent(sessionId, sub)) requestRefresh(sessionId, sub, 'commissioned-ideas:registration-updated')
+    }
+    Promise.resolve(sessions.subscribeToBroadcast?.(invalidationChannel(sessionId), sub.handler, { onResubscribed: refresh }))
+      .then(refresh, (err: unknown) => {
+        if (!isCurrent(sessionId, sub)) return
+        // Retried for as long as local sockets need the session (release clears the timer).
+        const delay = Math.min(SUBSCRIBE_RETRY_MAX_MS, SUBSCRIBE_RETRY_BASE_MS * 2 ** failures)
+        console.error('[commissioned-ideas] Invalidation subscribe failed; retrying', { sessionId, delayMs: delay, err })
+        sub.retryTimer = setTimeout(() => {
+          sub.retryTimer = null
+          if (isCurrent(sessionId, sub)) subscribeInvalidations(sessionId, sub, failures + 1)
+        }, delay)
       })
   }
 
   /** Releases the subscription once no open local socket remains for the session. */
   function releaseInvalidationSubscriptionIfIdle(sessionId: string): void {
-    const handler = invalidationSubscriptions.get(sessionId)
-    if (!handler) return
+    const sub = invalidationSubscriptions.get(sessionId)
+    if (!sub) return
     for (const client of ws.wss.clients as Set<CommissionedIdeasSocket>) {
       if (client.readyState === WS_OPEN && client.sessionId === sessionId) return
     }
     invalidationSubscriptions.delete(sessionId)
-    sessions.unsubscribeFromBroadcast?.(invalidationChannel(sessionId), handler)
+    if (sub.retryTimer !== null) clearTimeout(sub.retryTimer)
+    sessions.unsubscribeFromBroadcast?.(invalidationChannel(sessionId), sub.handler)
   }
 
   // ── Mutation plumbing (atomic-write contract) ──────────────────────────────
@@ -1547,20 +1629,22 @@ export default function setupCommissionedIdeasRoutes(
       if (body.action !== 'next' && body.action !== 'reset') refuse(400, "action must be 'next' or 'reset'")
 
       const from = session.data.podiumRevealStep
-      // `next` names the step the button was rendered from, so a click made before a
-      // concurrent reset (or another reveal) cannot reveal a place the button did not name.
-      if (body.action === 'next' && body.fromStep !== from) {
-        refuse(409, 'The podium changed. Check the current step and try again.', {
-          message: '[commissioned-ideas] Podium step refused: stale fromStep',
-          fields: { sessionId: session.id, current: from },
-        }, 'stale-step')
-      }
       if (body.action === 'reset') {
         session.data.podiumRevealStep = 'hidden'
         session.data.podiumRevealKey = null
       } else {
         const ranking = computeTeamScores(session.data.teams, session.data.ballots)
         const next = nextPodiumStep(from, podiumPlaceCount(ranking)) ?? refuse(409, 'The podium is already fully revealed')
+        // `next` names the step its button offered. Comparing it with the step computed
+        // from the committed state refuses a click made before a concurrent reveal or
+        // reset, or before moderation changed how many places exist, while accepting it
+        // when unrelated changes leave the next step the same.
+        if (body.toStep !== next) {
+          refuse(409, 'The podium changed. Check the current step and try again.', {
+            message: '[commissioned-ideas] Podium step refused: stale toStep',
+            fields: { sessionId: session.id, current: from, next },
+          }, 'stale-step')
+        }
         session.data.podiumRevealStep = next
         // The reveal is pinned to this podium; see reconcilePodiumReveal.
         if (from === 'hidden') session.data.podiumRevealKey = podiumRevealKey(ranking)
@@ -1764,6 +1848,8 @@ export default function setupCommissionedIdeasRoutes(
         const entry = resolveParticipantFromCookies(draft, cookies, { allowRejected: true })
           ?? refuse(403, 'Invalid participant credentials', undefined, 'participant-auth-refused')
         bound.participantId = entry.id
+        // Claim before commit, so a concurrent cleanup counts this socket as live.
+        socket.participantId = entry.id
         entry.connected = true
         entry.lastSeen = Date.now()
       })
@@ -1778,8 +1864,23 @@ export default function setupCommissionedIdeasRoutes(
       if (socket.readyState !== WS_OPEN) await syncParticipantPresence(sessionId, participantId)
     } catch (err: unknown) {
       if (err instanceof Refusal) {
-        const current = await getSessionStrict(sessions, sessionId).catch(() => null)
-        if (current && socket.readyState === WS_OPEN) sendAnonymousRefusal(socket, current)
+        // A retry refused the cookie; an earlier attempt may have claimed a participant.
+        socket.participantId = null
+        if (bound.participantId !== null) {
+          await syncParticipantPresence(sessionId, bound.participantId).catch((syncErr: unknown) => {
+            console.error('[commissioned-ideas] Presence reconcile after refused auth failed', { sessionId, err: syncErr })
+          })
+        }
+        // A failed read propagates: the connection handler closes the socket with
+        // retryable 1011, instead of leaving it `pending` with no snapshot.
+        const current = await getSessionStrict(sessions, sessionId)
+        if (socket.readyState !== WS_OPEN) return
+        if (!current) {
+          sendWsError(socket, 'Session not found', 'session-not-found')
+          socket.close(1008, 'Session not found')
+          return
+        }
+        sendAnonymousRefusal(socket, current)
         return
       }
       console.error('[commissioned-ideas] WS participant auth failed', { sessionId, err })
@@ -1896,8 +1997,8 @@ export default function setupCommissionedIdeasRoutes(
 
     socket.on('close', () => {
       releaseInvalidationSubscriptionIfIdle(sessionId)
-      // Only bound (authenticated) sockets affect presence; an auth still in flight
-      // reconciles presence itself after its write.
+      // Only sockets bound to (or claiming) a participant affect presence; an auth still
+      // in flight also reconciles presence itself after its write.
       const participantId = typedSocket.participantId
       if (!participantId) return
 

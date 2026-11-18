@@ -11,6 +11,8 @@ import type { WsRouter } from '../../../types/websocket.js'
 import { getActivityCapabilityCookieName } from 'activebits-server/core/activityCapabilities.js'
 import setupCommissionedIdeasRoutes, { buildManagerSnapshot, buildStudentSnapshot } from './routes.js'
 import type { CommissionedIdeasSessionData } from '../shared/types.js'
+import { nextPodiumStep, podiumPlaceCount } from '../shared/podium.js'
+import { computeTeamScores } from '../shared/scoring.js'
 
 // ── Mock infrastructure ───────────────────────────────────────────────────────
 
@@ -91,15 +93,21 @@ interface MockStoreHooks {
   failUpdatesAfterMutate: number
   /** The next N strict reads throw (a store outage). */
   failStrictReads: number
-  /** Awaited before a new subscription becomes active (Valkey confirms SUBSCRIBE later). */
-  subscribeGate: Promise<void> | null
+  /** Strict reads so far (every instance). */
+  strictReads: number
+  /** Awaited once, after the next update commits and before it returns (the reply is in flight). */
+  afterCommitGate: Promise<void> | null
+  /** Per channel: awaited once before a new subscription becomes active (Valkey confirms SUBSCRIBE later). */
+  subscribeGates: Map<string, Promise<void>>
+  /** Per channel: the next N SUBSCRIBEs fail. */
+  subscribeFailures: Map<string, number>
   /** Compare-and-set attempts per `updateAtomic` call (the Valkey store uses 12). */
   casBudget: number
   casConflicts: number
   setCalls: number
 }
 
-interface BusEntry { handler: BusHandler; active: boolean }
+interface BusEntry { handler: BusHandler; active: boolean; owner: symbol; onResubscribed?: () => void }
 type BusHandler = (message: unknown) => void
 
 /**
@@ -110,7 +118,10 @@ type BusHandler = (message: unknown) => void
  * - `get` may serve a per-instance cache (`cacheReads`), like the Valkey wrapper;
  *   `getStrict` always reads the shared data.
  * - Pub/sub: a subscription receives messages only once active (`subscribeToBroadcast`
- *   resolves then); messages published before that are lost, as in Valkey.
+ *   resolves then); messages published before that are lost, as in Valkey. A SUBSCRIBE
+ *   can fail (rejects, nothing registered), and `subscriberOutage()` drops this
+ *   instance's subscriber connection until its `reconnect()`, which re-activates the
+ *   subscriptions and calls their `onResubscribed` listeners.
  * Pass `shared` to create a second "server instance" over the same data and bus.
  */
 function createMockSessions(
@@ -121,8 +132,10 @@ function createMockSessions(
   const store: Record<string, SessionRecord> = shared?.store ?? { ...initial }
   const hooks: MockStoreHooks = shared?.hooks ?? {
     beforeCommit: null, commitGate: null, getGate: null, onGet: null, failUpdatesAfterMutate: 0, failStrictReads: 0,
-    subscribeGate: null, casBudget: 12, casConflicts: 0, setCalls: 0,
+    strictReads: 0, afterCommitGate: null, subscribeGates: new Map(), subscribeFailures: new Map(),
+    casBudget: 12, casConflicts: 0, setCalls: 0,
   }
+  const owner = Symbol('instance')
   const bus = shared?.bus ?? new Map<string, BusEntry[]>()
   const cache = new Map<string, SessionRecord>()
 
@@ -150,6 +163,7 @@ function createMockSessions(
       },
       async getStrict(id: string) {
         await holdRead()
+        hooks.strictReads += 1
         if (hooks.failStrictReads > 0) {
           hooks.failStrictReads -= 1
           throw new Error('[TEST] simulated store outage on read')
@@ -188,7 +202,11 @@ function createMockSessions(
             continue
           }
           store[id] = { ...next, mutationRevision: revision + 1 }
-          return store[id]
+          const committed = store[id]
+          const afterCommit = hooks.afterCommitGate
+          hooks.afterCommitGate = null
+          if (afterCommit) await afterCommit
+          return committed
         }
         throw new Error('[TEST] atomic update exhausted retries')
       },
@@ -202,15 +220,39 @@ function createMockSessions(
       async getAllIds() { return Object.keys(store) },
       cleanup() {},
       async close() {},
-      subscribeToBroadcast(channel: string, handler: BusHandler): Promise<void> {
-        const entry: BusEntry = { handler, active: false }
+      subscribeToBroadcast(channel: string, handler: BusHandler, opts: { onResubscribed?: () => void } = {}): Promise<void> {
+        const failures = hooks.subscribeFailures.get(channel) ?? 0
+        if (failures > 0) {
+          hooks.subscribeFailures.set(channel, failures - 1)
+          return Promise.reject(new Error(`[TEST] simulated SUBSCRIBE failure on ${channel}`))
+        }
+        const existing = (bus.get(channel) ?? []).find((entry) => entry.handler === handler && entry.owner === owner)
+        if (existing) {
+          existing.onResubscribed = opts.onResubscribed
+          return Promise.resolve()
+        }
+        const entry: BusEntry = { handler, active: false, owner, onResubscribed: opts.onResubscribed }
         bus.set(channel, [...(bus.get(channel) ?? []), entry])
-        const gate = hooks.subscribeGate
-        hooks.subscribeGate = null
+        const gate = hooks.subscribeGates.get(channel)
+        hooks.subscribeGates.delete(channel)
         return (gate ?? Promise.resolve()).then(() => { entry.active = true })
       },
       unsubscribeFromBroadcast(channel: string, handler: BusHandler) {
         bus.set(channel, (bus.get(channel) ?? []).filter((entry) => entry.handler !== handler))
+      },
+      /** Drops this instance's subscriber connection; messages meanwhile are lost. */
+      subscriberOutage() {
+        const mine = [...bus.values()].flat().filter((entry) => entry.owner === owner)
+        for (const entry of mine) entry.active = false
+        return {
+          reconnect() {
+            for (const entry of mine) {
+              if (![...bus.values()].flat().includes(entry)) continue // released meanwhile
+              entry.active = true
+              entry.onResubscribed?.()
+            }
+          },
+        }
       },
       // Every active subscriber gets every message, the publisher's instance included.
       async publishBroadcast(channel: string, message: Record<string, unknown>) {
@@ -2126,6 +2168,11 @@ void test('ballots survive results → voting and can be edited again', async ()
 // ── Phase 7: results and podium ──────────────────────────────────────────────
 
 /** 4 teams; Loner (ungrouped) funds Team 4 > Team 3 > Team 2, so Team 1 is last. */
+/** The step the reveal button offers for this state (what the client sends as `toStep`). */
+function revealButtonStep(data: CommissionedIdeasSessionData) {
+  return nextPodiumStep(data.podiumRevealStep, podiumPlaceCount(computeTeamScores(data.teams, data.ballots)))
+}
+
 async function setupResultsSession() {
   const s = await setupVotingSession(4)
   const [t1, t2, t3, t4] = s.teamIds as [string, string, string, string]
@@ -2141,13 +2188,13 @@ void test('podium-step reveals 3rd, 2nd, winner, then complete and refuses furth
   const s = await setupResultsSession()
   const steps: string[] = []
   for (let i = 0; i < 4; i++) {
-    const res = await s.asInstructor('podium-step', { action: 'next', fromStep: s.data().podiumRevealStep })
+    const res = await s.asInstructor('podium-step', { action: 'next', toStep: revealButtonStep(s.data()) })
     assert.equal(res.statusCode, 200)
     steps.push((res.body as { step: string }).step)
   }
   assert.deepEqual(steps, ['third', 'second', 'winner', 'complete'])
   console.log('[TEST] expecting 409 podium already revealed')
-  assert.equal((await s.asInstructor('podium-step', { action: 'next', fromStep: s.data().podiumRevealStep })).statusCode, 409)
+  assert.equal((await s.asInstructor('podium-step', { action: 'next', toStep: revealButtonStep(s.data()) })).statusCode, 409)
 
   assert.equal((await s.asInstructor('podium-step', { action: 'reset' })).statusCode, 200)
   assert.equal(s.data().podiumRevealStep, 'hidden')
@@ -2158,11 +2205,11 @@ void test('student snapshot reveals only podium places already shown', async () 
   const view = () => buildStudentSnapshot(s.data(), s.loner.participantId).podium.map((e) => [e.place, e.teams.map((t) => t.teamId).join()])
 
   assert.deepEqual(view(), [])
-  await s.asInstructor('podium-step', { action: 'next', fromStep: s.data().podiumRevealStep })
+  await s.asInstructor('podium-step', { action: 'next', toStep: revealButtonStep(s.data()) })
   assert.deepEqual(view(), [[3, s.t2]])
-  await s.asInstructor('podium-step', { action: 'next', fromStep: s.data().podiumRevealStep })
+  await s.asInstructor('podium-step', { action: 'next', toStep: revealButtonStep(s.data()) })
   assert.deepEqual(view(), [[3, s.t2], [2, s.t3]])
-  await s.asInstructor('podium-step', { action: 'next', fromStep: s.data().podiumRevealStep })
+  await s.asInstructor('podium-step', { action: 'next', toStep: revealButtonStep(s.data()) })
   assert.deepEqual(view(), [[3, s.t2], [2, s.t3], [1, s.t4]])
 
   const snapshot = buildStudentSnapshot(s.data(), s.loner.participantId)
@@ -2182,7 +2229,7 @@ void test('manager snapshot carries the full ranking only in results', async () 
 
 void test('leaving and re-entering results restarts the reveal', async () => {
   const s = await setupResultsSession()
-  await s.asInstructor('podium-step', { action: 'next', fromStep: s.data().podiumRevealStep })
+  await s.asInstructor('podium-step', { action: 'next', toStep: revealButtonStep(s.data()) })
   await s.asInstructor('phase', { phase: 'presentation' })
   await s.asInstructor('phase', { phase: 'voting' })
   await s.asInstructor('phase', { phase: 'results' })
@@ -2193,7 +2240,7 @@ void test('no funding at all means nothing to reveal', async () => {
   const s = await setupVotingSession(2)
   await s.asInstructor('phase', { phase: 'results' })
   console.log('[TEST] expecting 409 podium with no funding')
-  assert.equal((await s.asInstructor('podium-step', { action: 'next', fromStep: s.data().podiumRevealStep })).statusCode, 409)
+  assert.equal((await s.asInstructor('podium-step', { action: 'next', toStep: revealButtonStep(s.data()) })).statusCode, 409)
   assert.equal(buildStudentSnapshot(s.data(), null).podiumPlaceCount, 0)
 })
 
@@ -2203,16 +2250,16 @@ void test('two funded teams reveal 2nd then winner', async () => {
   // Team 1's member funds b and c; Team 1 stays at $0, so there are two podium steps.
   await s.asStudent('ballot', s.members[0]!, { allocations: [{ teamId: b, amount: 500 }, { teamId: c, amount: 300 }] })
   await s.asInstructor('phase', { phase: 'results' })
-  const first = await s.asInstructor('podium-step', { action: 'next', fromStep: s.data().podiumRevealStep })
+  const first = await s.asInstructor('podium-step', { action: 'next', toStep: revealButtonStep(s.data()) })
   assert.equal((first.body as { step: string }).step, 'second')
-  const second = await s.asInstructor('podium-step', { action: 'next', fromStep: s.data().podiumRevealStep })
+  const second = await s.asInstructor('podium-step', { action: 'next', toStep: revealButtonStep(s.data()) })
   assert.equal((second.body as { step: string }).step, 'winner')
 })
 
 void test('podium-step requires instructor auth, results phase, and a valid action', async () => {
   const s = await setupVotingSession(2)
   console.log('[TEST] expecting podium-step failures')
-  assert.equal((await s.asInstructor('podium-step', { action: 'next', fromStep: s.data().podiumRevealStep })).statusCode, 409, 'not in results yet')
+  assert.equal((await s.asInstructor('podium-step', { action: 'next', toStep: revealButtonStep(s.data()) })).statusCode, 409, 'not in results yet')
   await s.asInstructor('phase', { phase: 'results' })
   assert.equal((await s.asInstructor('podium-step', { action: 'skip' })).statusCode, 400)
   const noAuth = await s.post('podium-step', createRequest({ sessionId: s.sessionId }, { action: 'next' }))
@@ -2230,7 +2277,7 @@ void test('teams with equal funding share a podium step', async () => {
     allocations: [{ teamId: t3, amount: 500 }, { teamId: t4, amount: 300 }, { teamId: t2, amount: 100 }],
   })
   await s.asInstructor('phase', { phase: 'results' })
-  for (let i = 0; i < 3; i++) await s.asInstructor('podium-step', { action: 'next', fromStep: s.data().podiumRevealStep })
+  for (let i = 0; i < 3; i++) await s.asInstructor('podium-step', { action: 'next', toStep: revealButtonStep(s.data()) })
 
   const snapshot = buildStudentSnapshot(s.data(), s.loner.participantId)
   assert.equal(snapshot.podiumPlaceCount, 2, 'two funded totals → two steps; $0 team gets none')
@@ -2376,6 +2423,7 @@ interface WsTestSocket {
   participantId?: string | null
   isManager?: boolean
   wantsManager?: boolean
+  studentAuth?: string
   readyState: number
   send(message: string): void
   close(code?: number, reason?: string): void
@@ -2663,8 +2711,8 @@ void test('ballots that did not fund the removed team are kept', async () => {
 
 void test('podium reveal resets when moderation changes the ranking, and survives changes that do not', async () => {
   const s = await setupResultsSession()
-  await s.asInstructor('podium-step', { action: 'next', fromStep: s.data().podiumRevealStep })
-  await s.asInstructor('podium-step', { action: 'next', fromStep: s.data().podiumRevealStep })
+  await s.asInstructor('podium-step', { action: 'next', toStep: revealButtonStep(s.data()) })
+  await s.asInstructor('podium-step', { action: 'next', toStep: revealButtonStep(s.data()) })
   assert.equal(s.data().podiumRevealStep, 'second')
 
   // Late placement of a student without a ballot leaves the podium as it was.
@@ -2778,7 +2826,7 @@ void test('changes on one server instance reach sockets on another', async () =>
 void test('invalidations carry no snapshot data', async () => {
   const a = await setupWsHarness()
   const published: unknown[] = []
-  a.bus.set(`session:${a.sessionId}:commissioned-ideas`, [{ handler: (message) => { published.push(message) }, active: true }])
+  a.bus.set(`session:${a.sessionId}:commissioned-ideas`, [{ handler: (message) => { published.push(message) }, active: true, owner: Symbol('observer') }])
   await a.asInstructor('settings', { maxTeamSize: 6 })
   await a.settle()
   assert.equal(published.length, 1)
@@ -3058,19 +3106,47 @@ void test('mutation responses and snapshots carry the same committed revision', 
   assert.equal(s.lastManagerFrame()?.data.revision, revision, 'the snapshot from that commit names the same revision')
 })
 
-void test('podium next must name the step it was made from', async () => {
+void test('podium next must name the step its button offered', async () => {
   const s = await setupResultsSession()
-  await s.asInstructor('podium-step', { action: 'next', fromStep: 'hidden' })
+  assert.equal((await s.asInstructor('podium-step', { action: 'next', toStep: 'third' })).statusCode, 200)
   assert.equal(s.data().podiumRevealStep, 'third')
 
   console.log('[TEST] expecting 409 stale-step')
-  for (const fromStep of ['hidden', undefined, 'winner']) {
-    const res = await s.asInstructor('podium-step', { action: 'next', fromStep })
-    assert.equal(res.statusCode, 409, String(fromStep))
+  for (const toStep of ['third', undefined, 'winner']) {
+    const res = await s.asInstructor('podium-step', { action: 'next', toStep })
+    assert.equal(res.statusCode, 409, String(toStep))
     assert.equal((res.body as { code?: string }).code, 'stale-step')
   }
   assert.equal(s.data().podiumRevealStep, 'third', 'unchanged')
-  assert.equal((await s.asInstructor('podium-step', { action: 'reset' })).statusCode, 200, 'reset needs no fromStep')
+  assert.equal((await s.asInstructor('podium-step', { action: 'reset' })).statusCode, 200, 'reset names no step')
+})
+
+void test('podium next is refused when moderation changed the place count before the click', async () => {
+  const s = await setupResultsSession()
+  // The button rendered "Reveal 3rd place" (three funded places). Then t2 loses its
+  // funding, leaving two places: the same click would now reveal 2nd place.
+  const ballot = Object.values(s.store[s.sessionId]!.data.ballots as CommissionedIdeasSessionData['ballots'])[0]!
+  ballot.allocations = ballot.allocations.filter((entry) => entry.teamId !== s.t2)
+  assert.equal(revealButtonStep(s.data()), 'second')
+
+  console.log('[TEST] expecting 409 stale-step after the place count changed')
+  const res = await s.asInstructor('podium-step', { action: 'next', toStep: 'third' })
+  assert.equal(res.statusCode, 409)
+  assert.equal((res.body as { code?: string }).code, 'stale-step')
+  assert.equal(s.data().podiumRevealStep, 'hidden')
+})
+
+void test('podium next is accepted when an unrelated change leaves the next step the same', async () => {
+  const s = await setupResultsSession()
+  // Totals change (t2 and t3 swap amounts) but three distinct funded places remain.
+  const ballot = Object.values(s.store[s.sessionId]!.data.ballots as CommissionedIdeasSessionData['ballots'])[0]!
+  const amountOf = (teamId: string) => ballot.allocations.find((entry) => entry.teamId === teamId)!.amount
+  const [t2Amount, t3Amount] = [amountOf(s.t2), amountOf(s.t3)]
+  ballot.allocations = ballot.allocations.map((entry) =>
+    entry.teamId === s.t2 ? { ...entry, amount: t3Amount } : entry.teamId === s.t3 ? { ...entry, amount: t2Amount } : entry)
+  assert.equal(revealButtonStep(s.data()), 'third')
+  assert.equal((await s.asInstructor('podium-step', { action: 'next', toStep: 'third' })).statusCode, 200)
+  assert.equal(s.data().podiumRevealStep, 'third')
 })
 
 void test('name proposals and votes are refused if the student’s team changed since the form was shown', async () => {
@@ -3120,6 +3196,47 @@ void test('socket auth re-checks the cookie inside the presence write (a CAS ret
   assert.equal(conn.sent.some((m) => typeof (m.data as { viewerParticipantId?: unknown } | undefined)?.viewerParticipantId === 'string'), false, 'no personalized snapshot')
 })
 
+void test('a refused socket auth whose follow-up read fails closes with a retryable 1011', async () => {
+  const h = await setupWsHarness()
+  const student = await h.register('Student')
+  h.hooks.beforeCommit = (id) => {
+    const record = h.store[id]!
+    const data = structuredClone(record.data) as Record<string, unknown>
+    data.activityCapabilities = {}
+    h.store[id] = { ...record, data, mutationRevision: (record.mutationRevision ?? 0) + 1 }
+    // The read after the refusal fails (the subscription's own refresh reads concurrently).
+    h.hooks.failStrictReads = 2
+  }
+  console.log('[TEST] expecting auth refusal, then a failed re-read and a 1011 close')
+  const conn = await h.connect({}, { as: student, wait: false })
+  await waitFor(() => conn.closed() !== null, 'the socket is closed, not left pending')
+  assert.equal(conn.closed()?.code, 1011)
+  assert.equal(conn.sent.some((m) => m.type === 'commissioned-ideas:session-state'), false)
+})
+
+void test('a tab closing while a replacement tab finishes auth leaves the participant online', async () => {
+  const h = await setupWsHarness()
+  const student = await h.register('Student')
+  const tabA = await h.connect({}, { as: student })
+  assert.equal(sessionDataFromHarness(h).participantRoster[student.participantId]?.connected, true)
+
+  // Tab B's presence write commits, but its reply has not reached the route yet.
+  let deliverReply: () => void = () => {}
+  h.hooks.afterCommitGate = new Promise<void>((resolve) => { deliverReply = resolve })
+  const tabB = await h.connect({}, { as: student, wait: false })
+  await waitFor(() => h.hooks.afterCommitGate === null, 'B committed')
+  await tabA.hangUp()
+  await h.settle()
+  deliverReply()
+  await h.settle()
+  assert.equal(tabB.socket.studentAuth, 'authenticated')
+  assert.equal(sessionDataFromHarness(h).participantRoster[student.participantId]?.connected, true, 'B is open')
+
+  await tabB.hangUp()
+  await h.settle()
+  assert.equal(sessionDataFromHarness(h).participantRoster[student.participantId]?.connected, false, 'last tab closed')
+})
+
 void test('a failed socket auth reconciles presence with the sockets that remain', async () => {
   const h = await setupWsHarness()
   const student = await h.register('Student')
@@ -3140,15 +3257,99 @@ void test('an instance that subscribes late still delivers changes published bef
   await a.createTeam(student)
 
   let activate: () => void = () => {}
-  a.hooks.subscribeGate = new Promise<void>((resolve) => { activate = resolve })
+  // Hold the activity channel specifically (socket setup subscribes to the core
+  // broadcast channel first).
+  a.hooks.subscribeGates.set(`session:${a.sessionId}:commissioned-ideas`, new Promise<void>((resolve) => { activate = resolve }))
   const studentOnB = await b.connect({}, { as: student }) // B's subscription is not active yet
   assert.equal((await a.asInstructor('phase', { phase: 'presentation' })).statusCode, 200) // published while B is deaf
   await a.settle()
   await b.settle()
+  assert.equal((studentOnB.lastSnapshot() as { phase?: string } | undefined)?.phase, 'registration', 'B missed the invalidation')
 
   activate()
   await b.settle()
   assert.equal((studentOnB.lastSnapshot() as { phase?: string } | undefined)?.phase, 'presentation', 'B re-read after activation')
+})
+
+async function waitFor(condition: () => boolean, label: string): Promise<void> {
+  for (let i = 0; i < 200 && !condition(); i += 1) await new Promise((resolve) => setTimeout(resolve, 5))
+  assert.ok(condition(), label)
+}
+
+void test('an invalidation is delivered with one committed read', async () => {
+  const a = await setupWsHarness()
+  const b = await setupWsHarness(a)
+  const student = await a.register('Student')
+  await a.createTeam(student)
+  const studentOnB = await b.connect({}, { as: student })
+  const before = a.hooks.strictReads
+
+  assert.equal((await a.asInstructor('phase', { phase: 'presentation' })).statusCode, 200)
+  await a.settle()
+  await b.settle()
+  assert.equal((studentOnB.lastSnapshot() as { phase?: string } | undefined)?.phase, 'presentation')
+  assert.equal(a.hooks.strictReads - before, 1)
+})
+
+void test('a failed committed-state read after an invalidation is retried', async () => {
+  const a = await setupWsHarness()
+  const b = await setupWsHarness(a)
+  const student = await a.register('Student')
+  await a.createTeam(student)
+  const studentOnB = await b.connect({}, { as: student })
+
+  a.hooks.failStrictReads = 1 // B's read for the invalidation fails once
+  console.log('[TEST] expecting one failed invalidation read, then a retry')
+  assert.equal((await a.asInstructor('phase', { phase: 'presentation' })).statusCode, 200)
+  await waitFor(() => (studentOnB.lastSnapshot() as { phase?: string } | undefined)?.phase === 'presentation', 'B delivered after the retry')
+})
+
+void test('invalidation read retries stop once no local socket needs the session', async () => {
+  const a = await setupWsHarness()
+  const b = await setupWsHarness(a)
+  const student = await a.register('Student')
+  await a.createTeam(student)
+  const studentOnB = await b.connect({}, { as: student })
+
+  a.hooks.failStrictReads = 1
+  console.log('[TEST] expecting one failed invalidation read, then no retry after release')
+  assert.equal((await a.asInstructor('phase', { phase: 'presentation' })).statusCode, 200)
+  await b.settle()
+  const reads = a.hooks.strictReads
+  await studentOnB.hangUp()
+  await new Promise((resolve) => setTimeout(resolve, 400))
+  assert.equal(a.hooks.strictReads, reads, 'released: the pending retry does not read again')
+})
+
+void test('a failed invalidation SUBSCRIBE is retried, then refreshes local sockets', async () => {
+  const a = await setupWsHarness()
+  const b = await setupWsHarness(a)
+  const student = await a.register('Student')
+  await a.createTeam(student)
+
+  a.hooks.subscribeFailures.set(`session:${a.sessionId}:commissioned-ideas`, 1)
+  console.log('[TEST] expecting a failed invalidation SUBSCRIBE, then a retry')
+  const studentOnB = await b.connect({}, { as: student })
+  assert.equal((await a.asInstructor('phase', { phase: 'presentation' })).statusCode, 200) // B is not subscribed
+  await waitFor(() => (studentOnB.lastSnapshot() as { phase?: string } | undefined)?.phase === 'presentation', 'B refreshed after re-subscribing')
+})
+
+void test('after its subscriber reconnects, an instance refreshes local sockets with committed state', async () => {
+  const a = await setupWsHarness()
+  const b = await setupWsHarness(a)
+  const student = await a.register('Student')
+  await a.createTeam(student)
+  const studentOnB = await b.connect({}, { as: student })
+
+  const outage = b.sessions.subscriberOutage()
+  assert.equal((await a.asInstructor('phase', { phase: 'presentation' })).statusCode, 200) // lost on B
+  await a.settle()
+  await b.settle()
+  assert.equal((studentOnB.lastSnapshot() as { phase?: string } | undefined)?.phase, 'registration', 'B missed it')
+
+  outage.reconnect()
+  await b.settle()
+  assert.equal((studentOnB.lastSnapshot() as { phase?: string } | undefined)?.phase, 'presentation', 'B refreshed after reconnecting')
 })
 
 void test('an instance reads committed state, not its cache, when another instance invalidates', async () => {

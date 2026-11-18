@@ -140,9 +140,15 @@ committed state with `getStrict` before delivering to its own sockets.
 
 Pub/sub subscriptions are not replayed: Valkey drops messages published before a
 SUBSCRIBE is confirmed. `subscribeToBroadcast` returns a promise that settles once
-the subscription is active (a no-op store settles immediately). A caller that must
-not miss an update re-reads state after it settles. `unsubscribeFromBroadcast`
-removes one handler (by reference) and unsubscribes the channel when none remain.
+the subscription is active (a no-op store settles immediately). It rejects if the
+SUBSCRIBE fails, and the channel is then not treated as active, so the next call
+subscribes again (the rejection is pre-handled for callers that ignore it). When
+the subscriber connection reconnects, ioredis re-subscribes, but messages published
+while it was down are lost. The store then re-confirms each channel and calls the
+handler's optional `onResubscribed` listener. A caller that must not miss an update
+re-reads state after the promise settles and in `onResubscribed`. Adding the same
+handler twice registers it once. `unsubscribeFromBroadcast` removes one handler (by
+reference) and unsubscribes the channel when none remain.
 
 ## Activity Registration System
 

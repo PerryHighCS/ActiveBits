@@ -27,7 +27,7 @@ export default function StudentRoster({
   groupingMode,
   maxTeamSize,
 }: StudentRosterProps) {
-  const { post, busy, error, clearError } = useParticipantApi(sessionId, myParticipantId || null)
+  const { request, post, busy, error, clearError } = useParticipantApi(sessionId, myParticipantId || null)
 
   const me = participants[myParticipantId]
   const myTeamId = me?.teamId ?? null
@@ -45,7 +45,8 @@ export default function StudentRoster({
   const focusRestore = useRestoreFocusAfterRemoval(statusRef)
   const postAndRefocus = async (control: HTMLElement, path: string, body: Record<string, unknown>) => {
     focusRestore.begin(control)
-    focusRestore.settle(await post(path, body))
+    const outcome = await request(path, body)
+    focusRestore.settle(outcome.kind === 'ok' ? 'committed' : outcome.kind)
   }
   const handleCreateTeam = (control: HTMLElement) => { void postAndRefocus(control, 'create-team', {}) }
   const handleJoinTeam = (control: HTMLElement, teamId: string) => { void postAndRefocus(control, 'join-team', { teamId }) }

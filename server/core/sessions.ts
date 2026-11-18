@@ -7,7 +7,7 @@ import {
 import type { SessionEntryStatus } from '../../types/waitingRoom.js'
 import { findHashBySessionId, resetPersistentSession } from './persistentSessions.js'
 import { ValkeySessionStore } from './valkeyStore.js'
-import type { SessionLike } from './valkeyStore.js'
+import type { BroadcastSubscribeOptions, SessionLike } from './valkeyStore.js'
 import { SessionCache } from './sessionCache.js'
 import { normalizeSessionData } from './sessionNormalization.js'
 import { getActivityWaitingRoomFieldCount } from '../activities/activityRegistry.js'
@@ -107,8 +107,12 @@ export interface SessionStore extends SharedSessionStore<Record<string, unknown>
   getAllIds(): Promise<string[]>
   cleanup(): void
   close(): Promise<void>
-  /** Resolves (when the store supports it) once the subscription is active; see ValkeySessionStore. */
-  subscribeToBroadcast?(channel: string, handler: (message: unknown) => void): void | Promise<void>
+  /**
+   * Resolves (when the store supports it) once the subscription is active, and rejects
+   * if it could not be made active; `onResubscribed` runs each time it is active again
+   * after the subscriber reconnected. See ValkeySessionStore.
+   */
+  subscribeToBroadcast?(channel: string, handler: (message: unknown) => void, options?: BroadcastSubscribeOptions): void | Promise<void>
   /** Removes a handler added with `subscribeToBroadcast` (same function reference). */
   unsubscribeFromBroadcast?(channel: string, handler: (message: unknown) => void): void
   initializePubSub?(): void
@@ -595,8 +599,11 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
   }
 
   // Handlers are passed through unchanged so `unsubscribeFromBroadcast` can match them.
-  const subscribeToBroadcast = (channel: string, handler: (message: unknown) => void): Promise<void> =>
-    valkeyStore.subscribeToBroadcast(channel, handler)
+  const subscribeToBroadcast = (
+    channel: string,
+    handler: (message: unknown) => void,
+    options?: BroadcastSubscribeOptions,
+  ): Promise<void> => valkeyStore.subscribeToBroadcast(channel, handler, options)
 
   const unsubscribeFromBroadcast = (channel: string, handler: (message: unknown) => void): void => {
     valkeyStore.unsubscribeFromBroadcast(channel, handler)
