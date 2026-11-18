@@ -104,9 +104,27 @@ test('instructor drags students between teams, to a new team, and back to ungrou
   await assigned
   await expect(page.getByTestId('ci-ungrouped-zone').getByRole('combobox', { name: 'Move Bob to' })).toBeFocused()
 
+  // If the instructor moves focus elsewhere while a move is in flight, the move must not
+  // pull focus back when it lands.
+  let releaseMove: () => void = () => {}
+  const moveHeld = new Promise<void>((resolve) => { releaseMove = resolve })
+  await page.route('**/assign-participant', async (route) => {
+    await moveHeld
+    await route.continue()
+  })
+  assigned = waitForAssign(page)
+  await page.getByRole('combobox', { name: 'Move Bob to' }).selectOption({ label: 'New team' })
+  const copyLink = page.getByRole('button', { name: 'Copy link' })
+  await copyLink.focus()
+  releaseMove()
+  await assigned
+  await expect(teamCard(page, 'Bob').locator('[data-participant-name="Bob"]')).toBeVisible()
+  await expect(copyLink).toBeFocused()
+  await page.unroute('**/assign-participant')
+
   // Survives reload (state is server-side, not optimistic)
   await page.reload()
-  await expect(page.getByTestId('ci-ungrouped-zone').locator('[data-participant-name="Bob"]')).toBeVisible()
+  await expect(teamCard(page, 'Bob').locator('[data-participant-name="Bob"]')).toBeVisible()
   await expect(teamCard(page, 'Alice').getByTestId('ci-member-chip')).toHaveCount(1)
 })
 

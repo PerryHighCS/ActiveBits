@@ -78,20 +78,51 @@ function createMockWs(): WsRouter {
   }
 }
 
+/** Test controls shared by every store instance created over the same data. */
+interface MockStoreHooks {
+  /** Runs once, between the next update's read and its commit (inject a competing write). */
+  beforeCommit: ((id: string) => void) | null
+  /** Awaited once, before the next update commits (hold a write in flight). */
+  commitGate: Promise<void> | null
+  /** Awaited once, inside the next `get` (hold a read in flight); `onGet` fires when it starts. */
+  getGate: Promise<void> | null
+  onGet: (() => void) | null
+  /** Compare-and-set attempts per `updateAtomic` call (the Valkey store uses 12). */
+  casBudget: number
+  casConflicts: number
+  setCalls: number
+}
+
+type BusHandler = (message: unknown) => void
+
 /**
  * In-memory store with the production `updateAtomic` contract: the mutation runs on a
  * clone and commits only if the stored revision is unchanged, otherwise it re-reads and
- * retries. `beforeCommit` lets a test inject a conflicting write between read and commit.
+ * retries up to `casBudget` times, then throws like the Valkey store. Pass `shared` to
+ * create a second "server instance" over the same data and pub/sub bus.
  */
-function createMockSessions(initial: Record<string, SessionRecord> = {}) {
-  const store: Record<string, SessionRecord> = { ...initial }
-  const hooks: { beforeCommit: ((id: string) => void) | null; setCalls: number } = { beforeCommit: null, setCalls: 0 }
+function createMockSessions(
+  initial: Record<string, SessionRecord> = {},
+  shared?: { store: Record<string, SessionRecord>; hooks: MockStoreHooks; bus: Map<string, BusHandler[]> },
+) {
+  const store: Record<string, SessionRecord> = shared?.store ?? { ...initial }
+  const hooks: MockStoreHooks = shared?.hooks ?? {
+    beforeCommit: null, commitGate: null, getGate: null, onGet: null, casBudget: 12, casConflicts: 0, setCalls: 0,
+  }
+  const bus = shared?.bus ?? new Map<string, BusHandler[]>()
 
   return {
     store,
     hooks,
+    bus,
     sessions: {
       async get(id: string) {
+        const gate = hooks.getGate
+        hooks.getGate = null
+        if (gate) {
+          hooks.onGet?.()
+          await gate
+        }
         return store[id] ?? null
       },
       async set(id: string, session: SessionRecord) {
@@ -99,7 +130,7 @@ function createMockSessions(initial: Record<string, SessionRecord> = {}) {
         store[id] = session
       },
       async updateAtomic(id: string, mutate: (session: SessionRecord) => SessionRecord) {
-        for (let attempt = 0; attempt < 12; attempt += 1) {
+        for (let attempt = 0; attempt < hooks.casBudget; attempt += 1) {
           const current = store[id]
           if (!current) return null
           const revision = current.mutationRevision ?? 0
@@ -107,8 +138,14 @@ function createMockSessions(initial: Record<string, SessionRecord> = {}) {
           const hook = hooks.beforeCommit
           hooks.beforeCommit = null
           hook?.(id)
+          const gate = hooks.commitGate
+          hooks.commitGate = null
+          if (gate) await gate
           await Promise.resolve()
-          if ((store[id]?.mutationRevision ?? 0) !== revision) continue
+          if ((store[id]?.mutationRevision ?? 0) !== revision) {
+            hooks.casConflicts += 1
+            continue
+          }
           store[id] = { ...next, mutationRevision: revision + 1 }
           return store[id]
         }
@@ -124,7 +161,14 @@ function createMockSessions(initial: Record<string, SessionRecord> = {}) {
       async getAllIds() { return Object.keys(store) },
       cleanup() {},
       async close() {},
-      subscribeToBroadcast() {},
+      // Like Valkey pub/sub: every subscriber on the channel gets every message, the publisher's instance included.
+      subscribeToBroadcast(channel: string, handler: BusHandler) {
+        bus.set(channel, [...(bus.get(channel) ?? []), handler])
+      },
+      async publishBroadcast(channel: string, message: Record<string, unknown>) {
+        const payload = JSON.parse(JSON.stringify(message)) as unknown
+        for (const handler of bus.get(channel) ?? []) queueMicrotask(() => handler(payload))
+      },
     },
   }
 }
@@ -633,7 +677,7 @@ void test('register-participant stores participant in session roster', async () 
   assert.equal(participant.name, 'Bob')
   assert.equal(participant.teamId, null)
   assert.equal(participant.rejectedByInstructor, false)
-  assert.equal(participant.connected, true)
+  assert.equal(participant.connected, false, 'online only once a socket authenticates')
 })
 
 void test('register-participant reconnects the participant its cookie proves, and ignores a client participantId', async () => {
@@ -1070,7 +1114,7 @@ void test('create-team creates a team and sets participant teamId', async () => 
 
   const res = createResponse()
   await app.handlers.post['/api/commissioned-ideas/:sessionId/create-team']!(
-    withParticipantToken({ sessionId }, { participantId }, token),
+    withParticipantToken({ sessionId }, { expectedParticipantId: participantId }, token),
     res,
   )
 
@@ -1113,7 +1157,7 @@ void test('create-team returns 403 when grouping is locked', async () => {
 
   const res = createResponse()
   await app.handlers.post['/api/commissioned-ideas/:sessionId/create-team']!(
-    withParticipantToken({ sessionId }, { participantId }, token),
+    withParticipantToken({ sessionId }, { expectedParticipantId: participantId }, token),
     res,
   )
   assert.equal(res.statusCode, 403)
@@ -1134,7 +1178,7 @@ void test('create-team returns 403 in random grouping mode', async () => {
 
   const res = createResponse()
   await app.handlers.post['/api/commissioned-ideas/:sessionId/create-team']!(
-    withParticipantToken({ sessionId }, { participantId }, token),
+    withParticipantToken({ sessionId }, { expectedParticipantId: participantId }, token),
     res,
   )
   assert.equal(res.statusCode, 403)
@@ -1154,14 +1198,14 @@ void test('join-team adds participant to existing team', async () => {
   // Alice creates a team
   const teamRes = createResponse()
   await app.handlers.post['/api/commissioned-ideas/:sessionId/create-team']!(
-    withParticipantToken({ sessionId }, { participantId: aliceId }, aliceToken), teamRes,
+    withParticipantToken({ sessionId }, { expectedParticipantId: aliceId }, aliceToken), teamRes,
   )
   const { teamId } = teamRes.body as { teamId: string }
 
   // Bob joins Alice's team
   const joinRes = createResponse()
   await app.handlers.post['/api/commissioned-ideas/:sessionId/join-team']!(
-    withParticipantToken({ sessionId }, { participantId: bobId, teamId }, bobToken), joinRes,
+    withParticipantToken({ sessionId }, { expectedParticipantId: bobId, teamId }, bobToken), joinRes,
   )
 
   assert.equal(joinRes.statusCode, 200)
@@ -1181,7 +1225,7 @@ void test('join-team returns 403 without participant token', async () => {
 
   const teamRes = createResponse()
   await app.handlers.post['/api/commissioned-ideas/:sessionId/create-team']!(
-    withParticipantToken({ sessionId }, { participantId: aliceId }, aliceToken), teamRes,
+    withParticipantToken({ sessionId }, { expectedParticipantId: aliceId }, aliceToken), teamRes,
   )
   const { teamId } = teamRes.body as { teamId: string }
 
@@ -1205,7 +1249,7 @@ void test('join-team returns 403 in random grouping mode', async () => {
   // Alice creates team while still in manual mode, then instructor switches to random
   const teamRes = createResponse()
   await app.handlers.post['/api/commissioned-ideas/:sessionId/create-team']!(
-    withParticipantToken({ sessionId }, { participantId: aliceId }, aliceToken), teamRes,
+    withParticipantToken({ sessionId }, { expectedParticipantId: aliceId }, aliceToken), teamRes,
   )
   const { teamId } = teamRes.body as { teamId: string }
 
@@ -1215,7 +1259,7 @@ void test('join-team returns 403 in random grouping mode', async () => {
 
   const res = createResponse()
   await app.handlers.post['/api/commissioned-ideas/:sessionId/join-team']!(
-    withParticipantToken({ sessionId }, { participantId: bobId, teamId }, bobToken), res,
+    withParticipantToken({ sessionId }, { expectedParticipantId: bobId, teamId }, bobToken), res,
   )
   assert.equal(res.statusCode, 403)
 })
@@ -1235,13 +1279,13 @@ void test('join-team returns 409 when team is full', async () => {
 
   const teamRes = createResponse()
   await app.handlers.post['/api/commissioned-ideas/:sessionId/create-team']!(
-    withParticipantToken({ sessionId }, { participantId: aliceId }, aliceToken), teamRes,
+    withParticipantToken({ sessionId }, { expectedParticipantId: aliceId }, aliceToken), teamRes,
   )
   const { teamId } = teamRes.body as { teamId: string }
 
   const res = createResponse()
   await app.handlers.post['/api/commissioned-ideas/:sessionId/join-team']!(
-    withParticipantToken({ sessionId }, { participantId: bobId, teamId }, bobToken), res,
+    withParticipantToken({ sessionId }, { expectedParticipantId: bobId, teamId }, bobToken), res,
   )
   assert.equal(res.statusCode, 409)
 })
@@ -1257,12 +1301,12 @@ void test('leave-team removes participant from their team', async () => {
   const { participantId, token } = await registerParticipant(app, sessionId, 'Alice')
 
   await app.handlers.post['/api/commissioned-ideas/:sessionId/create-team']!(
-    withParticipantToken({ sessionId }, { participantId }, token), createResponse(),
+    withParticipantToken({ sessionId }, { expectedParticipantId: participantId }, token), createResponse(),
   )
 
   const res = createResponse()
   await app.handlers.post['/api/commissioned-ideas/:sessionId/leave-team']!(
-    withParticipantToken({ sessionId }, { participantId }, token), res,
+    withParticipantToken({ sessionId }, { expectedParticipantId: participantId }, token), res,
   )
 
   assert.equal(res.statusCode, 200)
@@ -1277,7 +1321,7 @@ void test('leave-team returns 403 without participant token', async () => {
 
   const { participantId, token } = await registerParticipant(app, sessionId, 'Alice')
   await app.handlers.post['/api/commissioned-ideas/:sessionId/create-team']!(
-    withParticipantToken({ sessionId }, { participantId }, token), createResponse(),
+    withParticipantToken({ sessionId }, { expectedParticipantId: participantId }, token), createResponse(),
   )
 
   const res = createResponse()
@@ -1297,7 +1341,7 @@ void test('leave-team returns 409 when participant is not in a team', async () =
 
   const res = createResponse()
   await app.handlers.post['/api/commissioned-ideas/:sessionId/leave-team']!(
-    withParticipantToken({ sessionId }, { participantId }, token), res,
+    withParticipantToken({ sessionId }, { expectedParticipantId: participantId }, token), res,
   )
   assert.equal(res.statusCode, 409)
 })
@@ -1315,7 +1359,7 @@ void test('assign-participant moves a participant to a specified team', async ()
 
   const teamRes = createResponse()
   await app.handlers.post['/api/commissioned-ideas/:sessionId/create-team']!(
-    withParticipantToken({ sessionId }, { participantId: aliceId }, aliceToken), teamRes,
+    withParticipantToken({ sessionId }, { expectedParticipantId: aliceId }, aliceToken), teamRes,
   )
   const { teamId } = teamRes.body as { teamId: string }
 
@@ -1341,7 +1385,7 @@ void test('assign-participant removes from team when teamId is null', async () =
   const { participantId, token } = await registerParticipant(app, sessionId, 'Alice')
 
   await app.handlers.post['/api/commissioned-ideas/:sessionId/create-team']!(
-    withParticipantToken({ sessionId }, { participantId }, token), createResponse(),
+    withParticipantToken({ sessionId }, { expectedParticipantId: participantId }, token), createResponse(),
   )
 
   const res = createResponse()
@@ -1425,7 +1469,7 @@ async function setupSession() {
   }
   const asInstructor = (name: string, body: unknown) => post(name, withPasscode({ sessionId }, body, instructorPasscode))
   const asStudent = (name: string, who: { participantId: string; token: string }, body: Record<string, unknown> = {}) =>
-    post(name, withParticipantToken({ sessionId }, { ...body, participantId: who.participantId }, who.token))
+    post(name, withParticipantToken({ sessionId }, { expectedParticipantId: who.participantId, ...body }, who.token))
   const data = () => sessionData(store, sessionId)
   const register = (name: string) => registerParticipant(app, sessionId, name)
   const lastManagerFrame = () => managerFrames[managerFrames.length - 1]
@@ -2285,9 +2329,25 @@ interface WsTestSocket {
   on(event: string, handler: (raw?: unknown) => void): void
 }
 
-async function setupWsHarness() {
+/**
+ * One "server instance" (its own routes, sockets, and instance id). Pass another
+ * harness as `sameStoreAs` to start a second instance over the same store and pub/sub
+ * bus, sharing its session.
+ */
+interface SharedWsStore {
+  store: Record<string, SessionRecord>
+  hooks: MockStoreHooks
+  bus: Map<string, BusHandler[]>
+  sessionId: string
+  instructorPasscode: string
+}
+
+async function setupWsHarness(sameStoreAs?: SharedWsStore) {
   const app = createMockApp()
-  const { store, sessions } = createMockSessions()
+  const { store, sessions, hooks, bus } = createMockSessions(
+    {},
+    sameStoreAs ? { store: sameStoreAs.store, hooks: sameStoreAs.hooks, bus: sameStoreAs.bus } : undefined,
+  )
   const clients = new Set<WsTestSocket>()
   let wsHandler: ((socket: WsTestSocket, query: URLSearchParams) => void) | null = null
   const wsRouter = {
@@ -2297,8 +2357,15 @@ async function setupWsHarness() {
     },
   } as unknown as WsRouter
   setupCommissionedIdeasRoutes(app, sessions, wsRouter)
-  const { id: sessionId, instructorPasscode } = await createSession(app)
+  const { id: sessionId, instructorPasscode } = sameStoreAs
+    ? { id: sameStoreAs.sessionId, instructorPasscode: sameStoreAs.instructorPasscode }
+    : await createSession(app)
   const tick = () => new Promise((resolve) => setTimeout(resolve, 0))
+  const asInstructor = async (path: string, body: unknown) => {
+    const res = createResponse()
+    await app.handlers.post[ROUTE(path)]!(withPasscode({ sessionId }, body, instructorPasscode), res)
+    return res
+  }
 
   /** A browser that registered sends its participant cookie on the upgrade request. */
   const cookieHeader = (who: { token: string }) => `${getActivityCapabilityCookieName('participant', sessionId)}=${who.token}`
@@ -2354,11 +2421,11 @@ async function setupWsHarness() {
   const createTeam = async (who: { participantId: string; token: string }) => {
     const res = createResponse()
     await app.handlers.post['/api/commissioned-ideas/:sessionId/create-team']!(
-      withParticipantToken({ sessionId }, { participantId: who.participantId }, who.token), res,
+      withParticipantToken({ sessionId }, { expectedParticipantId: who.participantId }, who.token), res,
     )
     return (res.body as { teamId: string }).teamId
   }
-  return { store, sessions, sessionId, instructorPasscode, connect, register, createTeam, tick, settle }
+  return { store, sessions, hooks, bus, sessionId, instructorPasscode, connect, register, createTeam, tick, settle, asInstructor }
 }
 
 void test('manager websocket with a wrong passcode gets an error, a 1008 close, and no snapshot', async () => {
@@ -2590,11 +2657,77 @@ void test('participant auth messages are ignored: identity comes only from the c
 void test('a socket closed while auth is reading the session never marks the student online', async () => {
   const h = await setupWsHarness()
   const student = await h.register('Student')
-  sessionDataFromHarness(h).participantRoster[student.participantId]!.connected = false
+  let releaseRead: () => void = () => {}
+  let readStarted = false
+  h.hooks.getGate = new Promise<void>((resolve) => { releaseRead = resolve })
+  h.hooks.onGet = () => { readStarted = true }
+
   const conn = await h.connect({}, { as: student, wait: false })
-  await conn.hangUp()
+  await h.settle()
+  assert.equal(readStarted, true, 'auth is inside the session read')
+  await conn.hangUp() // closes while the read is held
+  releaseRead() // the late read completes after the close
   await h.settle()
   assert.equal(sessionDataFromHarness(h).participantRoster[student.participantId]?.connected, false)
+  assert.equal(conn.socket.participantId, null, 'a closed socket is never bound')
+})
+
+void test('a student socket gets no snapshot until its presence write commits, even if another write broadcasts first', async () => {
+  const h = await setupWsHarness()
+  const student = await h.register('Student')
+  let releaseCommit: () => void = () => {}
+  h.hooks.commitGate = new Promise<void>((resolve) => { releaseCommit = resolve })
+
+  const conn = await h.connect({}, { as: student, wait: false })
+  await h.settle() // the presence write is now held before commit
+  assert.equal((conn.socket as { studentAuth?: string }).studentAuth, 'pending')
+
+  // Another write commits and broadcasts while this socket's auth is still in flight.
+  assert.equal((await h.asInstructor('settings', { maxTeamSize: 5 })).statusCode, 200)
+  await h.settle()
+  assert.equal(conn.sent.length, 0, 'no snapshot before auth commits')
+
+  releaseCommit()
+  await h.settle()
+  const first = conn.sent[0]
+  assert.equal((first?.data as { viewerParticipantId?: unknown } | undefined)?.viewerParticipantId, student.participantId, 'the first snapshot is personalized')
+  assert.equal((first?.data as { maxTeamSize?: unknown } | undefined)?.maxTeamSize, 5, 'and reflects the committed state')
+})
+
+void test('changes on one server instance reach sockets on another', async () => {
+  const a = await setupWsHarness()
+  const b = await setupWsHarness(a)
+  const student = await a.register('Student')
+  await a.createTeam(student)
+
+  const studentOnB = await b.connect({}, { as: student })
+  const managerOnA = await a.connect({ role: 'manager' })
+  await managerOnA.say({ type: 'commissioned-ideas:manager-auth', instructorPasscode: a.instructorPasscode })
+  const managerFramesBefore = managerOnA.sent.length
+
+  assert.equal((await a.asInstructor('phase', { phase: 'presentation' })).statusCode, 200)
+  await a.settle()
+  await b.settle()
+
+  const phaseFrame = studentOnB.sent.find((m) => m.type === 'commissioned-ideas:phase-changed')
+  assert.ok(phaseFrame, 'the student on instance B saw the phase change')
+  assert.equal((phaseFrame.data as { phase: string }).phase, 'presentation')
+  assert.equal((phaseFrame.data as { viewerParticipantId: string }).viewerParticipantId, student.participantId, 'B built its own personalized snapshot')
+  assert.equal(
+    managerOnA.sent.slice(managerFramesBefore).filter((m) => m.type === 'commissioned-ideas:phase-changed').length,
+    1,
+    'the origin instance ignores its own invalidation (no duplicate)',
+  )
+})
+
+void test('invalidations carry no snapshot data', async () => {
+  const a = await setupWsHarness()
+  const published: unknown[] = []
+  a.bus.set(`session:${a.sessionId}:commissioned-ideas`, [(message) => { published.push(message) }])
+  await a.asInstructor('settings', { maxTeamSize: 6 })
+  await a.settle()
+  assert.equal(published.length, 1)
+  assert.deepEqual(Object.keys(published[0] as object).sort(), ['origin', 'type'])
 })
 
 void test('presence stays online while another authenticated tab is open', async () => {
@@ -2617,8 +2750,10 @@ void test('a store failure during participant auth leaves the socket retryable',
   const student = await h.register('Student')
   const realUpdate = h.sessions.updateAtomic
   h.sessions.updateAtomic = async () => { throw new Error('[TEST] simulated store write failure') }
-  console.log('[TEST] expecting participant auth persistence failure')
+  console.log('[TEST] expecting participant auth persistence failure after all retry rounds')
   const conn = await h.connect({}, { as: student })
+  // atomicUpdate retries a few rounds with backoff before giving up.
+  for (let i = 0; i < 100 && conn.closed() === null; i += 1) await new Promise((resolve) => setTimeout(resolve, 5))
   h.sessions.updateAtomic = realUpdate
 
   assert.equal(conn.socket.participantId, null, 'binding is not committed')
@@ -2715,16 +2850,22 @@ void test('a store failure during a route write returns 500 and changes nothing'
 
 // ── Participant cookie identity ──────────────────────────────────────────────
 
-void test('student actions act as the cookie owner, whatever participantId the body names', async () => {
-  const s = await setupSession()
-  const alice = await s.register('Alice')
-  const bob = await s.register('Bob')
-  // Alice's cookie, Bob's id in the body: the team is Alice's.
-  const res = await s.post('create-team', withParticipantToken({ sessionId: s.sessionId }, { participantId: bob.participantId }, alice.token))
-  assert.equal(res.statusCode, 200)
-  const teamId = (res.body as { teamId: string }).teamId
-  assert.deepEqual(s.data().teams[teamId]?.memberIds, [alice.participantId])
-  assert.equal(s.data().participantRoster[bob.participantId]?.teamId, null)
+void test('a student action is refused when the tab’s bound participant is not the cookie’s participant', async () => {
+  const s = await setupVotingSession()
+  const [, a, b, c] = s.teamIds as [string, string, string, string]
+  const [alice, bob] = s.members as [{ participantId: string; token: string }, { participantId: string; token: string }]
+  const allocations = [{ teamId: a, amount: 500 }, { teamId: b, amount: 300 }, { teamId: c, amount: 100 }]
+
+  // The tab is bound to Alice, but another tab replaced the browser's cookie with Bob's.
+  console.log('[TEST] expecting 409 participant-mismatch')
+  const res = await s.post('ballot', withParticipantToken({ sessionId: s.sessionId }, { expectedParticipantId: alice.participantId, allocations }, bob.token))
+  assert.equal(res.statusCode, 409)
+  assert.equal((res.body as { code?: string }).code, 'participant-mismatch')
+  assert.deepEqual(s.data().ballots, {}, 'nothing stored under either participant')
+
+  console.log('[TEST] expecting 400 without expectedParticipantId')
+  const missing = await s.post('ballot', withParticipantToken({ sessionId: s.sessionId }, { allocations }, bob.token))
+  assert.equal(missing.statusCode, 400)
 })
 
 void test('student actions without a valid cookie are refused, and rejection still applies', async () => {
@@ -2753,4 +2894,87 @@ void test('registration is refused once the session reaches the participant capa
   assert.ok(before >= 150, 'a full class registers before the limit')
   assert.equal((await s.post('register-participant', createRequest({ sessionId: s.sessionId }, { name: 'One more' }))).statusCode, 409)
   assert.equal(Object.keys(s.data().participantRoster).length, before, 'a refused registration adds nobody')
+})
+
+// ── Review round 4 ───────────────────────────────────────────────────────────
+
+void test('registration does not mark a student online; HTTP reconnect leaves presence unchanged', async () => {
+  const s = await setupSession()
+  const alice = await s.register('Alice')
+  assert.equal(s.data().participantRoster[alice.participantId]?.connected, false, 'offline until a socket authenticates')
+
+  s.data().participantRoster[alice.participantId]!.connected = true // as if her socket were open
+  await s.post('register-participant', withParticipantToken({ sessionId: s.sessionId }, { name: 'Alice' }, alice.token))
+  assert.equal(s.data().participantRoster[alice.participantId]?.connected, true, 'reconnect does not touch presence')
+})
+
+void test('participant moderation requires a boolean rejected value', async () => {
+  const s = await setupSession()
+  const alice = await s.register('Alice')
+  await s.asStudent('create-team', alice)
+  console.log('[TEST] expecting 400 for non-boolean rejected values')
+  for (const rejected of ['false', 'true', 0, 1, null]) {
+    const res = await s.asInstructor('participant-name', { participantId: alice.participantId, rejected })
+    assert.equal(res.statusCode, 400, JSON.stringify(rejected))
+  }
+  assert.equal(s.data().participantRoster[alice.participantId]?.rejectedByInstructor, false)
+  assert.equal(Object.keys(s.data().teams).length, 1, 'no team was deleted')
+})
+
+void test('ballot removal is logged only after the change commits', async () => {
+  const s = await setupVotingSession(2)
+  const [teamA, teamB] = s.teamIds as [string, string]
+  const [alice, bob] = s.members as [{ participantId: string; token: string }, { participantId: string; token: string }]
+  await s.asStudent('ballot', alice, { allocations: [{ teamId: teamB, amount: 500 }] })
+  await s.asStudent('ballot', bob, { allocations: [{ teamId: teamA, amount: 500 }] })
+
+  const logged: unknown[][] = []
+  const realInfo = console.info
+  console.info = (...args: unknown[]) => { logged.push(args) }
+  const realUpdate = s.sessions.updateAtomic
+  try {
+    // Every round runs the mutation (which withdraws the ballots on its draft) and then fails.
+    s.sessions.updateAtomic = async (id, mutate) => {
+      mutate(structuredClone(s.store[id]!))
+      throw new Error('[TEST] simulated store failure after the mutation ran')
+    }
+    console.log('[TEST] expecting a 500 after repeated store failures')
+    const failed = await s.asInstructor('participant-name', { participantId: bob.participantId, rejected: true })
+    assert.equal(failed.statusCode, 500)
+    assert.equal(logged.some((args) => String(args[0]).includes('Ballots removed')), false, 'no log for an uncommitted change')
+
+    s.sessions.updateAtomic = realUpdate
+    await s.asInstructor('participant-name', { participantId: bob.participantId, rejected: true })
+  } finally {
+    console.info = realInfo
+    s.sessions.updateAtomic = realUpdate
+  }
+  const removed = logged.filter((args) => String(args[0]).includes('Ballots removed'))
+  assert.equal(removed.length, 1, 'logged once, after commit')
+  assert.deepEqual((removed[0]![1] as { count: number }).count, 2)
+})
+
+void test('a burst of registrations all succeed despite compare-and-set conflicts', async () => {
+  const s = await setupSession()
+  const responses = await Promise.all(
+    Array.from({ length: 30 }, (_, i) => s.post('register-participant', createRequest({ sessionId: s.sessionId }, { name: `Student ${i}` }))),
+  )
+  const statuses = responses.map((res) => res.statusCode)
+  assert.equal(statuses.filter((code) => code === 500).length, 0, `500s: ${JSON.stringify(statuses)}`)
+  assert.equal(Object.keys(s.data().participantRoster).length, 30)
+  assert.ok(s.hooks.casConflicts > 0, 'the burst really contended')
+})
+
+void test('an exhausted compare-and-set budget is retried in another round before failing', async () => {
+  const s = await setupSession()
+  s.hooks.casBudget = 1
+  // The first round's only attempt loses to a competing write; the next round commits.
+  s.hooks.beforeCommit = (id) => {
+    const record = s.store[id]!
+    s.store[id] = { ...record, mutationRevision: (record.mutationRevision ?? 0) + 1 }
+  }
+  console.log('[TEST] expecting one retried round after CAS exhaustion')
+  const res = await s.post('register-participant', createRequest({ sessionId: s.sessionId }, { name: 'Resilient' }))
+  assert.equal(res.statusCode, 200)
+  assert.equal(Object.keys(s.data().participantRoster).length, 1)
 })

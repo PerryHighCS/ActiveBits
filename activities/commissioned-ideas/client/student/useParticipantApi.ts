@@ -3,9 +3,10 @@ import { useCallback, useState } from 'react'
 /**
  * POST helper for participant-authenticated Commissioned Ideas routes. The server
  * identifies the student from the httpOnly participant cookie, which same-origin
- * requests send automatically; the client holds no credential.
+ * requests send automatically; the client holds no credential. Each request names
+ * the participant this tab is bound to (`expectedParticipantId`).
  */
-export function useParticipantApi(sessionId: string) {
+export function useParticipantApi(sessionId: string, expectedParticipantId: string | null) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -18,7 +19,9 @@ export function useParticipantApi(sessionId: string) {
           method: 'POST',
           credentials: 'same-origin',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
+          // The participant this tab's socket is bound to; the server refuses the action if
+          // the browser's cookie now belongs to someone else (another tab registered).
+          body: JSON.stringify({ ...body, expectedParticipantId }),
         })
         const data = (await res.json()) as { error?: string }
         if (!res.ok) {
@@ -33,7 +36,7 @@ export function useParticipantApi(sessionId: string) {
         setBusy(false)
       }
     },
-    [sessionId],
+    [sessionId, expectedParticipantId],
   )
 
   return { post, busy, error, clearError: () => setError(null) }

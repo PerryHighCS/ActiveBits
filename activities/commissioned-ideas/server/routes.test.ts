@@ -179,15 +179,25 @@ void test('resolveLeadingProposal returns leading vote winner', () => {
 
 // ── validation ────────────────────────────────────────────────────────────────
 
-void test('validateBallot accepts a valid $100/$300/$500 ballot', () => {
-  // Voter sits on a fourth team, so t1–t3 are all eligible.
+/** A voter on a fourth team, so t1–t3 are all eligible and a full three-award ballot is required. */
+function eligibleVoterSession(): CommissionedIdeasSessionData {
   const base = makeSession()
-  const session = makeSession({
+  return makeSession({
     teams: { ...base.teams, t4: makeTeam('t4') },
     participantRoster: {
       voter1: { id: 'voter1', name: 'Alice', teamId: 't4', connected: true, lastSeen: 0, rejectedByInstructor: false },
     },
   })
+}
+
+void test('validateBallot refuses an ungrouped voter before looking at allocations', () => {
+  const result = validateBallot([{ teamId: 't1', amount: 500 }], 'voter1', makeSession())
+  assert.equal(result.valid, false)
+  assert.match(result.error ?? '', /team/)
+})
+
+void test('validateBallot accepts a valid $100/$300/$500 ballot', () => {
+  const session = eligibleVoterSession()
   const result = validateBallot(
     [
       { teamId: 't1', amount: 500 },
@@ -201,7 +211,7 @@ void test('validateBallot accepts a valid $100/$300/$500 ballot', () => {
 })
 
 void test('validateBallot rejects fewer than three allocations', () => {
-  const session = makeSession()
+  const session = eligibleVoterSession()
   const result = validateBallot(
     [
       { teamId: 't1', amount: 500 },
@@ -211,10 +221,11 @@ void test('validateBallot rejects fewer than three allocations', () => {
     session,
   )
   assert.equal(result.valid, false)
+  assert.match(result.error ?? '', /exactly 3 awards/)
 })
 
 void test('validateBallot rejects duplicate amounts', () => {
-  const session = makeSession()
+  const session = eligibleVoterSession()
   const result = validateBallot(
     [
       { teamId: 't1', amount: 500 },
@@ -225,10 +236,11 @@ void test('validateBallot rejects duplicate amounts', () => {
     session,
   )
   assert.equal(result.valid, false)
+  assert.equal(result.error, 'Duplicate amount $500')
 })
 
 void test('validateBallot rejects duplicate team targets', () => {
-  const session = makeSession()
+  const session = eligibleVoterSession()
   const result = validateBallot(
     [
       { teamId: 't1', amount: 500 },
@@ -239,6 +251,7 @@ void test('validateBallot rejects duplicate team targets', () => {
     session,
   )
   assert.equal(result.valid, false)
+  assert.equal(result.error, 'Each award must go to a different team')
 })
 
 void test('validateBallot blocks self-vote when voter belongs to a team', () => {

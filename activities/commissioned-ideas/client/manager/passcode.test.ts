@@ -195,3 +195,35 @@ void test('shared recovery: concurrent callers for one session share a single re
   assert.equal(await recoverInstructorPasscodeOnce('s1', fakeFetch), 'PASS')
   assert.deepEqual(calls, [EXCHANGE, EXCHANGE])
 })
+
+void test('shared recovery: concurrent callers share one reissue POST on the 403 → reissue → exchange path', async () => {
+  const calls: string[] = []
+  const replies = [403, 200, 200]
+  let release: () => void = () => {}
+  const gate = new Promise<void>((resolve) => { release = resolve })
+  const fakeFetch = async (input: string, init?: RequestInit) => {
+    calls.push(`${init?.method ?? 'GET'} ${input}`)
+    await gate
+    const status = replies.shift() ?? 500
+    return { ok: status === 200, status, json: async () => ({ instructorPasscode: 'PASS' }) }
+  }
+  const first = recoverInstructorPasscodeOnce('s1', fakeFetch)
+  const second = recoverInstructorPasscodeOnce('s1', fakeFetch)
+  release()
+  assert.deepEqual(await Promise.all([first, second]), ['PASS', 'PASS'])
+  assert.deepEqual(calls, [EXCHANGE, REISSUE, EXCHANGE])
+  assert.equal(calls.filter((call) => call === REISSUE).length, 1, 'exactly one reissue POST')
+})
+
+void test('shared recovery: a stalled request hits the deadline, is aborted, and a later recovery starts fresh', async () => {
+  let aborted = false
+  const stalled = async (_input: string, init?: RequestInit) => {
+    init?.signal?.addEventListener('abort', () => { aborted = true })
+    return { ok: true, status: 200, json: () => new Promise<unknown>(() => {}) } // body never finishes
+  }
+  assert.equal(await recoverInstructorPasscodeOnce('s1', stalled, 20), null)
+  assert.equal(aborted, true, 'the stalled request is aborted')
+
+  const healthy = async () => ({ ok: true, status: 200, json: async () => ({ instructorPasscode: 'PASS' }) })
+  assert.equal(await recoverInstructorPasscodeOnce('s1', healthy, 1000), 'PASS', 'the stalled entry was cleared')
+})

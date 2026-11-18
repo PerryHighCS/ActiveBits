@@ -96,7 +96,8 @@ function StudentSessionView({ sessionId }: { sessionId: string }) {
     setRegistrationNotice(REFUSED_CREDENTIAL_NOTICE)
   }, [authRefused])
 
-  const ballotApi = useParticipantApi(sessionId)
+  // Bound identity for actions: the participant this tab's socket authenticated as.
+  const ballotApi = useParticipantApi(sessionId, snapshot?.viewerParticipantId ?? null)
 
   // ── Handlers ────────────────────────────────────────────────────────────────
   const handleRegistered = (participantId: string, name: string) => {
@@ -131,7 +132,7 @@ function StudentSessionView({ sessionId }: { sessionId: string }) {
   const participants = snapshot?.participantRoster ?? {}
   const teams = snapshot?.teams ?? {}
   // The server's view of who this socket is wins over the stored copy.
-  const myId = snapshot?.viewerParticipantId ?? studentId
+  const myId = snapshot?.viewerParticipantId ?? null
   const myName = (myId ? participants[myId]?.name : undefined) ?? studentName
   const myTeamId = myId ? (participants[myId]?.teamId ?? null) : null
   const notice = snapshot && phase && myTeamId === null ? lateArrivalNotice(phase) : null

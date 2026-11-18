@@ -1,4 +1,4 @@
-import { randomInt, timingSafeEqual } from 'crypto'
+import { randomInt, randomUUID, timingSafeEqual } from 'crypto'
 import { createSession, type SessionRecord, type SessionStore } from 'activebits-server/core/sessions.js'
 import { registerSessionNormalizer } from 'activebits-server/core/sessionNormalization.js'
 import { createBroadcastSubscriptionHelper } from 'activebits-server/core/broadcastUtils.js'
@@ -75,15 +75,18 @@ interface CommissionedIdeasSocket extends ActiveBitsWebSocket {
 /**
  * Student socket auth state machine (owner: the `/ws/commissioned-ideas` handler).
  *
- *   pending ──participant cookie valid + presence saved──▶ authenticated (final)
+ *   pending ──participant cookie valid + presence write committed──▶ authenticated (final)
  *      ├──no valid cookie──▶ anonymous (final; the client registers and reconnects)
  *      └──store failure──▶ socket closed 1011 (the client reconnects and retries)
  *
  * - Exactly one attempt runs per socket, at connect, from the upgrade request's
  *   httpOnly participant cookie. There is no auth message.
- * - `pending` sockets receive no snapshots, so a client never renders an anonymous
- *   view first and then its own. `anonymous` receives the anonymous view.
- * - `participantId` is set only in `authenticated`.
+ * - `pending` sockets receive no snapshots — including while the presence write is in
+ *   flight — so a client never renders an anonymous view first, and never gets a
+ *   personalized view for an auth that may still fail. `anonymous` receives the
+ *   anonymous view.
+ * - While `pending`, `participantId` may already be set: only so a close during the
+ *   presence write can re-derive presence. Presence counts only `authenticated` sockets.
  */
 export type StudentSocketAuth = 'pending' | 'authenticated' | 'anonymous'
 
@@ -437,15 +440,20 @@ class Refusal extends Error {
     readonly status: number,
     readonly error: string,
     readonly log?: { message: string; fields: Record<string, unknown> },
+    /** Machine-readable reason for clients that must react to it (sent as `code`). */
+    readonly code?: string,
   ) {
     super(error)
     this.name = 'Refusal'
   }
 }
 
-function refuse(status: number, error: string, log?: Refusal['log']): never {
-  throw new Refusal(status, error, log)
+function refuse(status: number, error: string, log?: Refusal['log'], code?: string): never {
+  throw new Refusal(status, error, log, code)
 }
+
+/** Rounds of the store's `updateAtomic` before a write fails (each round has its own CAS retries). */
+const ATOMIC_UPDATE_ROUNDS = 3
 
 /** Thrown inside a mutation when the stored record is not a Commissioned Ideas session. */
 class NotCommissionedIdeasSession extends Error {}
@@ -467,32 +475,49 @@ async function atomicUpdate(
   sessionId: string,
   mutate: (session: CommissionedIdeasSession) => void,
 ): Promise<CommissionedIdeasSession | null> {
+  // Facts about the last (committed) run of `mutate`, logged only after commit.
   let podiumReset = false
+  let ballotsRemoved = 0
   const apply = (draft: SessionRecord): SessionRecord => {
     if (draft.type !== 'commissioned-ideas') throw new NotCommissionedIdeasSession()
     const session = draft as CommissionedIdeasSession
     session.data = normalizeSessionData(session.data)
+    const ballotsBefore = Object.keys(session.data.ballots)
     mutate(session)
     podiumReset = reconcilePodiumReveal(session.data, computeTeamScores(session.data.teams, session.data.ballots))
+    ballotsRemoved = ballotsBefore.filter((id) => !Object.hasOwn(session.data.ballots, id)).length
     return session
   }
 
   let committed: SessionRecord | null
-  try {
-    if (typeof sessions.updateAtomic === 'function') {
-      committed = await sessions.updateAtomic(sessionId, apply)
-    } else {
-      // Only minimal test doubles lack updateAtomic; both production stores have it.
-      const current = await sessions.get(sessionId)
-      committed = current ? apply(current) : null
-      if (committed) await sessions.set(sessionId, committed)
+  for (let round = 1; ; round += 1) {
+    try {
+      if (typeof sessions.updateAtomic === 'function') {
+        committed = await sessions.updateAtomic(sessionId, apply)
+      } else {
+        // Only minimal test doubles lack updateAtomic; both production stores have it.
+        const current = await sessions.get(sessionId)
+        committed = current ? apply(current) : null
+        if (committed) await sessions.set(sessionId, committed)
+      }
+      break
+    } catch (err) {
+      if (err instanceof NotCommissionedIdeasSession) return null
+      // A refusal is an answer, not a failure. Anything else (the store's compare-and-set
+      // retry budget exhausted under a burst of writes, or a transient store error) gets a
+      // few more rounds with jittered backoff before the caller sees it.
+      if (err instanceof Refusal || round >= ATOMIC_UPDATE_ROUNDS) throw err
+      console.warn('[commissioned-ideas] Session update retrying after a store error', {
+        sessionId,
+        round,
+        error: err instanceof Error ? err.message : String(err),
+      })
+      await new Promise((resolve) => setTimeout(resolve, randomInt(5, 25) * round))
     }
-  } catch (err) {
-    if (err instanceof NotCommissionedIdeasSession) return null
-    throw err
   }
   if (!committed || committed.type !== 'commissioned-ideas') return null
   if (podiumReset) console.info('[commissioned-ideas] Podium reveal reset after the ranking changed', { sessionId })
+  if (ballotsRemoved > 0) console.info('[commissioned-ideas] Ballots removed by this change', { sessionId, count: ballotsRemoved })
   committed.data = normalizeSessionData(committed.data)
   return committed as CommissionedIdeasSession
 }
@@ -665,36 +690,41 @@ type ManagerParticipantView = CommissionedIdeasParticipant
 
 // ── Broadcast helpers ─────────────────────────────────────────────────────────
 
+/** Every server → client snapshot event. Clients treat them identically (`isSnapshotMessage`). */
+const SNAPSHOT_EVENT_TYPES = [
+  'commissioned-ideas:registration-updated',
+  'commissioned-ideas:phase-changed',
+  'commissioned-ideas:podium-step',
+] as const
+type SnapshotEventType = (typeof SNAPSHOT_EVENT_TYPES)[number]
+
+function isSnapshotEventType(value: unknown): value is SnapshotEventType {
+  return typeof value === 'string' && (SNAPSHOT_EVENT_TYPES as readonly string[]).includes(value)
+}
+
 /**
- * Fan out a `commissioned-ideas:registration-updated` event to all sockets
- * attached to the session.  Manager sockets receive the full roster; student
- * sockets receive their ballot-aware student-safe snapshot.
+ * Sends `data` to this process's sockets for the session: the manager snapshot to
+ * authenticated managers, a personalized (or anonymous) student snapshot to students.
+ * Sockets still authenticating get nothing (`snapshotAudience`). Local only; other
+ * server instances are reached through `announce` in `setupCommissionedIdeasRoutes`.
  */
-function broadcastRegistrationUpdate(
+function deliverSnapshots(
   ws: WsRouter,
   sessionId: string,
   data: CommissionedIdeasSessionData,
+  type: SnapshotEventType = 'commissioned-ideas:registration-updated',
 ): void {
-  const managerPayload = JSON.stringify({
-    type: 'commissioned-ideas:registration-updated',
-    sessionId,
-    data: buildManagerSnapshot(data),
-  })
+  const managerPayload = JSON.stringify({ type, sessionId, data: buildManagerSnapshot(data) })
 
   for (const client of ws.wss.clients as Set<CommissionedIdeasSocket>) {
-    if (client.readyState !== 1 || client.sessionId !== sessionId) continue
+    if (client.readyState !== WS_OPEN || client.sessionId !== sessionId) continue
     const audience = snapshotAudience(client)
     if (audience === null) continue
     try {
       if (audience === 'manager') {
         client.send(managerPayload)
       } else {
-        const snapshot = buildStudentSnapshot(data, client.participantId ?? null)
-        client.send(JSON.stringify({
-          type: 'commissioned-ideas:registration-updated',
-          sessionId,
-          data: snapshot,
-        }))
+        client.send(JSON.stringify({ type, sessionId, data: buildStudentSnapshot(data, client.participantId ?? null) }))
       }
     } catch {
       // stale socket — ignored
@@ -702,30 +732,14 @@ function broadcastRegistrationUpdate(
   }
 }
 
-/** Generic broadcast to all session sockets (student-safe). Used for phase changes etc. */
-function broadcastToAll(
-  ws: WsRouter,
-  sessionId: string,
-  type: string,
-  data: CommissionedIdeasSessionData,
-): void {
-  const managerPayload = JSON.stringify({ type, sessionId, data: buildManagerSnapshot(data) })
+/** Local delivery of a registration update (kept for tests and other modules). */
+function broadcastRegistrationUpdate(ws: WsRouter, sessionId: string, data: CommissionedIdeasSessionData): void {
+  deliverSnapshots(ws, sessionId, data)
+}
 
-  for (const client of ws.wss.clients as Set<CommissionedIdeasSocket>) {
-    if (client.readyState !== 1 || client.sessionId !== sessionId) continue
-    const audience = snapshotAudience(client)
-    if (audience === null) continue
-    try {
-      if (audience === 'manager') {
-        client.send(managerPayload)
-      } else {
-        const snapshot = buildStudentSnapshot(data, client.participantId ?? null)
-        client.send(JSON.stringify({ type, sessionId, data: snapshot }))
-      }
-    } catch {
-      // stale socket
-    }
-  }
+/** Local delivery of any snapshot event (kept for tests and other modules). */
+function broadcastToAll(ws: WsRouter, sessionId: string, type: SnapshotEventType, data: CommissionedIdeasSessionData): void {
+  deliverSnapshots(ws, sessionId, data, type)
 }
 
 // ── Team formation helpers ────────────────────────────────────────────────────
@@ -792,10 +806,8 @@ function removeParticipantFromTeam(
 function deleteTeam(data: CommissionedIdeasSessionData, teamId: string): void {
   delete data.teams[teamId]
   if (data.currentPresentationTeamId === teamId) data.currentPresentationTeamId = null
-  const withdrawn = withdrawBallotsFundingMissingTeams(data)
-  if (withdrawn.length > 0) {
-    console.info('[commissioned-ideas] Ballots withdrawn after team removal', { teamId, voterCount: withdrawn.length })
-  }
+  // Runs inside a mutation callback: no logging here (atomicUpdate logs removed ballots after commit).
+  withdrawBallotsFundingMissingTeams(data)
 }
 
 /** Moves `participant` into `team`, leaving any previous team first. Caller checks capacity. */
@@ -875,6 +887,43 @@ export default function setupCommissionedIdeasRoutes(
 ): void {
   const ensureBroadcastSubscription = createBroadcastSubscriptionHelper(sessions, ws)
 
+  // ── Cross-instance delivery ────────────────────────────────────────────────
+  // After a commit, the writing instance delivers snapshots to its own sockets and
+  // publishes a small invalidation ({ type, origin }, never a snapshot) on the
+  // session's activity channel. Every other instance re-reads the committed session
+  // and builds role-appropriate snapshots for its own sockets.
+  const instanceId = randomUUID()
+  const invalidationChannel = (sessionId: string) => `session:${sessionId}:commissioned-ideas`
+  const invalidationSubscriptions = new Set<string>()
+
+  function announce(
+    sessionId: string,
+    data: CommissionedIdeasSessionData,
+    type: SnapshotEventType = 'commissioned-ideas:registration-updated',
+  ): void {
+    deliverSnapshots(ws, sessionId, data, type)
+    if (typeof sessions.publishBroadcast !== 'function') return
+    sessions.publishBroadcast(invalidationChannel(sessionId), { type, origin: instanceId }).catch((err: unknown) => {
+      console.error('[commissioned-ideas] Invalidation publish failed', { sessionId, err })
+    })
+  }
+
+  /** Subscribes this instance to a session's invalidations (once, and only for real sessions). */
+  function ensureInvalidationSubscription(sessionId: string): void {
+    if (typeof sessions.subscribeToBroadcast !== 'function' || invalidationSubscriptions.has(sessionId)) return
+    invalidationSubscriptions.add(sessionId)
+    sessions.subscribeToBroadcast(invalidationChannel(sessionId), (message) => {
+      const event = isPlainObject(message) ? message : {}
+      if (event.origin === instanceId || !isSnapshotEventType(event.type)) return
+      const type = event.type
+      void getSession(sessions, sessionId)
+        .then((session) => { if (session) deliverSnapshots(ws, sessionId, session.data, type) })
+        .catch((err: unknown) => {
+          console.error('[commissioned-ideas] Invalidation delivery failed', { sessionId, err })
+        })
+    })
+  }
+
   // ── Mutation plumbing (atomic-write contract) ──────────────────────────────
 
   /**
@@ -899,7 +948,7 @@ export default function setupCommissionedIdeasRoutes(
     } catch (err) {
       if (err instanceof Refusal) {
         if (err.log) console.warn(err.log.message, err.log.fields)
-        res.status(err.status).json({ error: err.error })
+        res.status(err.status).json({ error: err.error, ...(err.code ? { code: err.code } : {}) })
         return null
       }
       console.error('[commissioned-ideas] Session update failed', { sessionId, err })
@@ -912,8 +961,24 @@ export default function setupCommissionedIdeasRoutes(
     if (!checkInstructorAuth(req, session)) refuse(403, 'Instructor authentication required')
   }
 
+  /**
+   * The participant this request acts as: the cookie's participant, which must also be
+   * the one the submitting tab is bound to (`expectedParticipantId`, from its socket's
+   * `viewerParticipantId`). The cookie is per browser while a tab binds at socket
+   * connect, so another tab registering would otherwise make this tab act as someone
+   * else. A mismatch is refused before any change.
+   */
   function requireParticipant(req: RouteRequest, session: CommissionedIdeasSession): CommissionedIdeasParticipant {
-    return checkParticipantAuth(req, session) ?? refuse(403, 'Participant authentication required')
+    const participant = checkParticipantAuth(req, session) ?? refuse(403, 'Participant authentication required')
+    const expected = ensurePlainObject(req.body).expectedParticipantId
+    if (typeof expected !== 'string' || expected.length === 0) refuse(400, 'expectedParticipantId is required')
+    if (expected !== participant.id) {
+      refuse(409, 'This tab is signed in as a different student. Reload the page to continue.', {
+        message: '[commissioned-ideas] Student action refused: tab identity does not match the participant cookie',
+        fields: { sessionId: session.id },
+      }, 'participant-mismatch')
+    }
+    return participant
   }
 
   function requireRegistrationPhase(session: CommissionedIdeasSession): void {
@@ -1018,10 +1083,9 @@ export default function setupCommissionedIdeasRoutes(
 
       const existing = resolveParticipantFromCookies(session, req.cookies, { allowRejected: true })
       if (existing) {
-        // Reconnect: mark connected only. The server-side name is authoritative —
-        // overwriting it here would silently undo instructor moderation applied
-        // between the student's last visit and this reconnect.
-        existing.connected = true
+        // Reconnect. The server-side name is authoritative — overwriting it here would
+        // silently undo instructor moderation applied between visits. Presence is left
+        // to socket auth: only an open, authenticated socket makes a student online.
         existing.lastSeen = Date.now()
         return { participantId: existing.id, name: existing.name, reconnected: true, capabilityToken: null }
       }
@@ -1038,7 +1102,9 @@ export default function setupCommissionedIdeasRoutes(
         id: participantId,
         name,
         teamId: null,
-        connected: true,
+        // Online once their socket authenticates; a student who closes the page before
+        // connecting must not count as online.
+        connected: false,
         lastSeen: Date.now(),
         rejectedByInstructor: false,
       }
@@ -1056,7 +1122,7 @@ export default function setupCommissionedIdeasRoutes(
       participantId: value.participantId,
       reconnected: value.reconnected,
     })
-    broadcastRegistrationUpdate(ws, session.id, session.data)
+    announce(session.id, session.data)
     res.json({ participantId: value.participantId, name: value.name })
   })
 
@@ -1077,7 +1143,9 @@ export default function setupCommissionedIdeasRoutes(
         participant.rejectedByInstructor = false
       }
       if ('rejected' in body) {
-        participant.rejectedByInstructor = Boolean(body.rejected)
+        // Strict: `"false"` must not reject (rejection can delete a team and withdraw ballots).
+        if (typeof body.rejected !== 'boolean') refuse(400, 'rejected must be a boolean')
+        participant.rejectedByInstructor = body.rejected
       }
 
       // Membership contract: rejected participants are never team members.
@@ -1093,7 +1161,7 @@ export default function setupCommissionedIdeasRoutes(
     if (!result) return
 
     console.info('[commissioned-ideas] Participant name moderated', { sessionId: result.session.id, participantId: result.value })
-    broadcastRegistrationUpdate(ws, result.session.id, result.session.data)
+    announce(result.session.id, result.session.data)
     res.json({ ok: true })
   })
 
@@ -1123,7 +1191,7 @@ export default function setupCommissionedIdeasRoutes(
     if (!result) return
 
     console.info('[commissioned-ideas] Settings updated', { sessionId: result.session.id })
-    broadcastToAll(ws, result.session.id, 'commissioned-ideas:registration-updated', result.session.data)
+    announce(result.session.id, result.session.data, 'commissioned-ideas:registration-updated')
     res.json({ ok: true })
   })
 
@@ -1138,7 +1206,7 @@ export default function setupCommissionedIdeasRoutes(
     })
     if (!result) return
 
-    broadcastRegistrationUpdate(ws, result.session.id, result.session.data)
+    announce(result.session.id, result.session.data)
     console.info('[commissioned-ideas] Team created', { sessionId: result.session.id, ...result.value })
     res.json({ teamId: result.value.teamId })
   })
@@ -1162,7 +1230,7 @@ export default function setupCommissionedIdeasRoutes(
     })
     if (!result) return
 
-    broadcastRegistrationUpdate(ws, result.session.id, result.session.data)
+    announce(result.session.id, result.session.data)
     console.info('[commissioned-ideas] Participant joined team', { sessionId: result.session.id, ...result.value })
     res.json({ ok: true })
   })
@@ -1178,7 +1246,7 @@ export default function setupCommissionedIdeasRoutes(
     })
     if (!result) return
 
-    broadcastRegistrationUpdate(ws, result.session.id, result.session.data)
+    announce(result.session.id, result.session.data)
     console.info('[commissioned-ideas] Participant left team', { sessionId: result.session.id, participantId: result.value })
     res.json({ ok: true })
   })
@@ -1239,7 +1307,7 @@ export default function setupCommissionedIdeasRoutes(
     })
     if (!result) return
 
-    broadcastRegistrationUpdate(ws, result.session.id, result.session.data)
+    announce(result.session.id, result.session.data)
     console.info('[commissioned-ideas] Instructor assigned participant', { sessionId: result.session.id, ...result.value })
     res.json({ ok: true, teamId: result.value.teamId })
   })
@@ -1264,7 +1332,7 @@ export default function setupCommissionedIdeasRoutes(
     })
     if (!result) return
 
-    broadcastRegistrationUpdate(ws, result.session.id, result.session.data)
+    announce(result.session.id, result.session.data)
     console.info('[commissioned-ideas] Random assignment complete', { sessionId: result.session.id, scope: result.value })
     res.json({ ok: true })
   })
@@ -1307,7 +1375,7 @@ export default function setupCommissionedIdeasRoutes(
     })
     if (!result) return
 
-    broadcastRegistrationUpdate(ws, result.session.id, result.session.data)
+    announce(result.session.id, result.session.data)
     console.info('[commissioned-ideas] Name proposed', { sessionId: result.session.id, ...result.value })
     res.json({ ok: true, proposalId: result.value.proposalId })
   })
@@ -1335,7 +1403,7 @@ export default function setupCommissionedIdeasRoutes(
     })
     if (!result) return
 
-    broadcastRegistrationUpdate(ws, result.session.id, result.session.data)
+    announce(result.session.id, result.session.data)
     console.info('[commissioned-ideas] Name vote cast', { sessionId: result.session.id, ...result.value })
     res.json({ ok: true })
   })
@@ -1361,7 +1429,7 @@ export default function setupCommissionedIdeasRoutes(
     })
     if (!result) return
 
-    broadcastRegistrationUpdate(ws, result.session.id, result.session.data)
+    announce(result.session.id, result.session.data)
     console.info('[commissioned-ideas] Proposal moderated', { sessionId: result.session.id, ...result.value })
     res.json({ ok: true })
   })
@@ -1401,7 +1469,7 @@ export default function setupCommissionedIdeasRoutes(
     })
     if (!result) return
 
-    broadcastRegistrationUpdate(ws, result.session.id, result.session.data)
+    announce(result.session.id, result.session.data)
     console.info('[commissioned-ideas] Ballot submitted', { sessionId: result.session.id, ...result.value })
     res.json({ ok: true, replaced: result.value.replaced })
   })
@@ -1430,7 +1498,7 @@ export default function setupCommissionedIdeasRoutes(
     })
     if (!result) return
 
-    broadcastToAll(ws, result.session.id, 'commissioned-ideas:podium-step', result.session.data)
+    announce(result.session.id, result.session.data, 'commissioned-ideas:podium-step')
     console.info('[commissioned-ideas] Podium step', { sessionId: result.session.id, ...result.value })
     res.json({ ok: true, step: result.session.data.podiumRevealStep })
   })
@@ -1467,7 +1535,7 @@ export default function setupCommissionedIdeasRoutes(
     })
     if (!result) return
 
-    broadcastToAll(ws, result.session.id, 'commissioned-ideas:phase-changed', result.session.data)
+    announce(result.session.id, result.session.data, 'commissioned-ideas:phase-changed')
     console.info('[commissioned-ideas] Phase changed', { sessionId: result.session.id, ...result.value })
     res.json({ ok: true, phase: result.value.to })
   })
@@ -1497,7 +1565,7 @@ export default function setupCommissionedIdeasRoutes(
     })
     if (!result) return
 
-    broadcastRegistrationUpdate(ws, result.session.id, result.session.data)
+    announce(result.session.id, result.session.data)
     console.info('[commissioned-ideas] Presentation order updated', { sessionId: result.session.id })
     res.json({ ok: true })
   })
@@ -1517,7 +1585,7 @@ export default function setupCommissionedIdeasRoutes(
     })
     if (!result) return
 
-    broadcastRegistrationUpdate(ws, result.session.id, result.session.data)
+    announce(result.session.id, result.session.data)
     console.info('[commissioned-ideas] Presenting team set', { sessionId: result.session.id, ...result.value })
     res.json({ ok: true })
   })
@@ -1535,7 +1603,7 @@ export default function setupCommissionedIdeasRoutes(
     })
     if (!result) return
 
-    broadcastRegistrationUpdate(ws, result.session.id, result.session.data)
+    announce(result.session.id, result.session.data)
     console.info('[commissioned-ideas] Random presenting team', { sessionId: result.session.id, ...result.value })
     res.json({ ok: true, teamId: result.value.teamId })
   })
@@ -1561,7 +1629,7 @@ export default function setupCommissionedIdeasRoutes(
     })
     if (!result) return
 
-    broadcastRegistrationUpdate(ws, result.session.id, result.session.data)
+    announce(result.session.id, result.session.data)
     console.info('[commissioned-ideas] Presentation round updated', { sessionId: result.session.id, ...result.value })
     res.json({ ok: true, round: result.value.round })
   })
@@ -1582,7 +1650,7 @@ export default function setupCommissionedIdeasRoutes(
       participant.connected = hasLiveParticipantSocket(ws, sessionId, participantId)
       participant.lastSeen = Date.now()
     })
-    if (committed) broadcastRegistrationUpdate(ws, sessionId, committed.data)
+    if (committed) announce(sessionId, committed.data)
   }
 
   function sendWsError(socket: CommissionedIdeasSocket, error: string, code?: string): void {
@@ -1609,10 +1677,9 @@ export default function setupCommissionedIdeasRoutes(
       return
     }
 
-    // Bind before writing presence so a close during the write is seen by the
-    // close handler, which then re-derives presence from the remaining sockets.
+    // Bind (still `pending`) before writing presence so a close during the write is
+    // seen by the close handler, which then re-derives presence from the remaining sockets.
     socket.participantId = participant.id
-    socket.studentAuth = 'authenticated'
     try {
       const committed = await atomicUpdate(sessions, sessionId, (draft) => {
         const entry = ownEntry(draft.data.participantRoster, participant.id)
@@ -1621,8 +1688,10 @@ export default function setupCommissionedIdeasRoutes(
         entry.lastSeen = Date.now()
       })
       if (!committed) throw new Error('Session disappeared during participant auth')
-      // The broadcast includes this socket's personalized snapshot.
-      broadcastRegistrationUpdate(ws, sessionId, committed.data)
+      // Only now is the socket eligible for snapshots; this announce sends its first,
+      // personalized one.
+      socket.studentAuth = 'authenticated'
+      announce(sessionId, committed.data)
       // Closed during the write: our `connected = true` may have landed after the
       // close handler's update, so derive presence once more.
       if (socket.readyState !== WS_OPEN) await syncParticipantPresence(sessionId, participant.id)
@@ -1670,6 +1739,7 @@ export default function setupCommissionedIdeasRoutes(
       // Subscribe only for sessions that exist, so stale links cannot add
       // permanent subscription entries.
       ensureBroadcastSubscription(sessionId)
+      ensureInvalidationSubscription(sessionId)
       // Students get their first snapshot from cookie auth: personalized, or
       // anonymous after a refusal — never an anonymous view first.
       if (!typedSocket.wantsManager) await authenticateParticipantSocket(typedSocket, session)
@@ -1717,8 +1787,9 @@ export default function setupCommissionedIdeasRoutes(
     })
 
     socket.on('close', () => {
+      // Bound sockets only (authenticated, or pending with a presence write in flight).
       const participantId = typedSocket.participantId
-      if (!participantId || typedSocket.studentAuth !== 'authenticated') return
+      if (!participantId) return
 
       void syncParticipantPresence(sessionId, participantId).catch((err: unknown) => {
         console.error('[commissioned-ideas] WS close cleanup error', { sessionId, participantId, err })

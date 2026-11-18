@@ -79,6 +79,15 @@ export function buildAssignBody(participantId: string, destination: MoveDestinat
   return { participantId, teamId: destination.slice('team:'.length) }
 }
 
+/** The server's answer to a move, as far as the client knows it. */
+export type MoveOutcome =
+  | { kind: 'pending' }
+  /** Committed; `teamId` is the confirmed destination (null = ungrouped; new teams use the returned id). */
+  | { kind: 'committed'; teamId: string | null }
+  | { kind: 'refused' }
+  /** No readable answer: the move may or may not have happened. */
+  | { kind: 'unknown' }
+
 /**
  * A keyboard ("Move to" select) move whose focus must be restored. The chip is
  * re-created under its destination list, so the focused select is lost on success.
@@ -87,15 +96,18 @@ export interface MoveFocusRequest {
   participantId: string
   /** Where the participant was when the move was requested. */
   from: MoveDestination
-  /** The request failed; focus the participant's select where it still is. */
-  failed: boolean
+  outcome: MoveOutcome
 }
 
 /**
- * True when the chip for `participant` should take focus for `request` now:
- * the request is for this participant, controls are enabled again, and either the
- * server snapshot shows the participant moved or the request failed. Waiting for the
- * snapshot (not just the HTTP response) avoids focusing a chip that is about to unmount.
+ * True when the chip for `participant` should take focus for `request` now. Focus is
+ * tied to the server's answer, never to "the roster changed", so a concurrent move by
+ * someone else cannot consume it on a chip that is about to unmount:
+ * - committed: once the snapshot shows the participant at the confirmed destination;
+ * - refused: in place, once controls are enabled again;
+ * - unknown: once the snapshot shows the participant moved (otherwise it stays pending
+ *   until the instructor focuses something else, which cancels it);
+ * - pending: not yet.
  */
 export function moveFocusReady(
   request: MoveFocusRequest | null,
@@ -103,7 +115,23 @@ export function moveFocusReady(
   busy: boolean,
 ): boolean {
   if (!request || request.participantId !== participant.id || busy) return false
-  return request.failed || currentDestination(participant) !== request.from
+  switch (request.outcome.kind) {
+    case 'pending': return false
+    case 'committed': return participant.teamId === request.outcome.teamId
+    case 'refused': return true
+    case 'unknown': return currentDestination(participant) !== request.from
+  }
+}
+
+/** Attribute on each "Move to" select, so focus changes can be matched to a request. */
+export const MOVE_SELECT_PARTICIPANT_ATTR = 'data-move-participant'
+
+/**
+ * Whether focus landing on `target` cancels a pending focus request: any control
+ * other than that participant's own select means the instructor moved on.
+ */
+export function focusCancelsMoveRequest(request: MoveFocusRequest | null, targetParticipantId: string | null): boolean {
+  return request !== null && targetParticipantId !== request.participantId
 }
 
 export type MaxTeamSizeBlurAction = { kind: 'submit'; value: number } | { kind: 'restore' }

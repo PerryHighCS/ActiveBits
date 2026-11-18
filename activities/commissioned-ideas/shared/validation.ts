@@ -97,7 +97,7 @@ export function validateBallot(
 
     const { teamId, amount } = alloc as Record<string, unknown>
 
-    if (typeof teamId !== 'string' || !session.teams[teamId]) {
+    if (typeof teamId !== 'string' || !Object.hasOwn(session.teams, teamId)) {
       return { valid: false, error: `Unknown team: ${String(teamId)}` }
     }
 

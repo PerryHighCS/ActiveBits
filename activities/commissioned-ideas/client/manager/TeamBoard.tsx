@@ -8,9 +8,12 @@ import {
   countActiveMembers,
   currentDestination,
   listMoveOptions,
+  focusCancelsMoveRequest,
+  MOVE_SELECT_PARTICIPANT_ATTR,
   moveFocusReady,
   type MoveDestination,
   type MoveFocusRequest,
+  type MoveOutcome,
 } from './teamBoardModel.js'
 
 interface TeamBoardProps {
@@ -18,8 +21,8 @@ interface TeamBoardProps {
   participantRoster: Record<string, ManagerParticipant>
   maxTeamSize: number
   busy: boolean
-  /** Resolves true when the server accepted the move. */
-  onMove: (participantId: string, destination: MoveDestination) => Promise<boolean>
+  /** Resolves with the server's answer (committed with the confirmed team, refused, or unknown). */
+  onMove: (participantId: string, destination: MoveDestination) => Promise<MoveOutcome>
   onModerateProposal: (teamId: string, kind: ProposalKind, proposalId: string, rejected: boolean) => void
 }
 
@@ -40,10 +43,25 @@ export default function TeamBoard({
   // Keyboard moves re-create the chip under another list; keep focus on its select.
   const moveWithKeyboard = async (participant: ManagerParticipant, destination: MoveDestination) => {
     const from = currentDestination(participant)
-    setFocusRequest({ participantId: participant.id, from, failed: false })
-    const ok = await onMove(participant.id, destination)
-    if (!ok) setFocusRequest({ participantId: participant.id, from, failed: true })
+    const request: MoveFocusRequest = { participantId: participant.id, from, outcome: { kind: 'pending' } }
+    setFocusRequest(request)
+    const outcome = await onMove(participant.id, destination)
+    // Only update our own request: a newer move or a cancellation wins.
+    setFocusRequest((current) => (current === request ? { ...request, outcome } : current))
   }
+
+  // The instructor moving focus to any other control cancels a pending restoration.
+  // A select that loses focus because it was disabled or removed fires no `focusin`.
+  useEffect(() => {
+    if (!focusRequest) return
+    const onFocusIn = (event: FocusEvent) => {
+      const target = event.target instanceof Element ? event.target : null
+      const targetParticipant = target?.getAttribute(MOVE_SELECT_PARTICIPANT_ATTR) ?? null
+      if (focusCancelsMoveRequest(focusRequest, targetParticipant)) setFocusRequest(null)
+    }
+    document.addEventListener('focusin', onFocusIn)
+    return () => document.removeEventListener('focusin', onFocusIn)
+  }, [focusRequest])
 
   const orderedTeams = sortTeams(teams)
   const ungrouped = Object.values(participantRoster)
@@ -235,6 +253,7 @@ function MemberChip({
       <span className="text-sm text-gray-800 flex-1 truncate">{participant.name}</span>
       <select
         ref={selectRef}
+        {...{ [MOVE_SELECT_PARTICIPANT_ATTR]: participant.id }}
         aria-label={`Move ${participant.name} to`}
         value={current}
         disabled={busy}

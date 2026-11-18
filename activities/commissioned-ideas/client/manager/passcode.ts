@@ -42,10 +42,12 @@ type FetchLike = (input: string, init?: RequestInit) => Promise<Pick<Response, '
 async function exchangeCapabilityForPasscode(
   sessionId: string,
   fetchImpl: FetchLike,
+  signal?: AbortSignal,
 ): Promise<{ passcode: string | null; status: number }> {
   const response = await fetchImpl(`/api/commissioned-ideas/${encodeURIComponent(sessionId)}/instructor-passcode`, {
     credentials: 'include',
     cache: 'no-store',
+    ...(signal ? { signal } : {}),
   })
   if (!response.ok) return { passcode: null, status: response.status }
   const body = (await response.json()) as { instructorPasscode?: unknown }
@@ -61,18 +63,20 @@ async function exchangeCapabilityForPasscode(
 export async function recoverCommissionedIdeasInstructorPasscode(
   sessionId: string,
   fetchImpl: FetchLike = (input, init) => fetch(input, init),
+  signal?: AbortSignal,
 ): Promise<string | null> {
   try {
-    const first = await exchangeCapabilityForPasscode(sessionId, fetchImpl)
+    const first = await exchangeCapabilityForPasscode(sessionId, fetchImpl, signal)
     if (first.passcode || first.status !== 403) return first.passcode
 
     const reissue = await fetchImpl(`/api/session/${encodeURIComponent(sessionId)}/persistent-manager-capability`, {
       method: 'POST',
       credentials: 'include',
+      ...(signal ? { signal } : {}),
     })
     if (!reissue.ok) return null
 
-    return (await exchangeCapabilityForPasscode(sessionId, fetchImpl)).passcode
+    return (await exchangeCapabilityForPasscode(sessionId, fetchImpl, signal)).passcode
   } catch {
     return null
   }
@@ -80,19 +84,39 @@ export async function recoverCommissionedIdeasInstructorPasscode(
 
 const inFlightRecoveries = new Map<string, Promise<string | null>>()
 
+/** Upper bound for one shared recovery, including reading response bodies. */
+export const RECOVERY_DEADLINE_MS = 15_000
+
 /**
  * One in-flight recovery per session. React Strict Mode runs the recovery effect twice
  * in development; without sharing, the cancelled run's reissue can succeed while the
  * live run's reissue is rate-limited, and the live run would report `missing` although
  * the cookie is valid. The entry is dropped once settled so a later reload recovers again.
+ *
+ * A deadline bounds the shared recovery: a stalled request (for example a response body
+ * that never finishes) is aborted and the recovery settles as `null`, which clears the
+ * entry, so reopening the manager starts a fresh recovery instead of waiting forever.
  */
 export function recoverInstructorPasscodeOnce(
   sessionId: string,
   fetchImpl?: FetchLike,
+  deadlineMs = RECOVERY_DEADLINE_MS,
 ): Promise<string | null> {
   const existing = inFlightRecoveries.get(sessionId)
   if (existing) return existing
-  const recovery = recoverCommissionedIdeasInstructorPasscode(sessionId, fetchImpl).finally(() => {
+  const controller = new AbortController()
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const deadline = new Promise<null>((resolve) => {
+    timer = setTimeout(() => {
+      controller.abort()
+      resolve(null)
+    }, deadlineMs)
+  })
+  const recovery = Promise.race([
+    recoverCommissionedIdeasInstructorPasscode(sessionId, fetchImpl, controller.signal),
+    deadline,
+  ]).finally(() => {
+    clearTimeout(timer)
     inFlightRecoveries.delete(sessionId)
   })
   inFlightRecoveries.set(sessionId, recovery)

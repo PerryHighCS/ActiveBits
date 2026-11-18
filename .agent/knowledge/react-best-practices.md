@@ -353,6 +353,10 @@ For renderers that accept React component maps (such as `react-markdown`), memoi
 
 When an action's visible result arrives by WebSocket snapshot (not the POST response), the response can land first. Keep the control pending until the snapshot shows the change, and release it on failure. Otherwise a second click acts on stale state, for example revealing a podium place the button does not name. Examples: Commissioned Ideas `ResultsDashboard` (reveal pending until `podiumRevealStep` changes) and `teamBoardModel.moveFocusReady` (restore focus after a keyboard move once the snapshot re-parents the chip). Moving an item to another list re-creates its component, so a focused control inside it is lost unless focus is restored explicitly.
 
+If the POST succeeds but the socket drops before the confirming snapshot, neither release condition fires. Recover by reconciling from the fresh snapshot the socket sends on reconnect (it reflects the committed change and releases the control), or from an explicit refresh. Never re-enable a non-idempotent action just because a timeout passed: the state may already have changed.
+
+Tie restored focus to the server's answer, not to "something changed". Restore it at the confirmed destination after a commit, in place after a refusal, and wait for the roster when the outcome is unknown. Cancel the restore when the user focuses another control. See `teamBoardModel.moveFocusReady` and `focusCancelsMoveRequest`.
+
 Snapshot state that belongs to a session identity should be tagged with that identity and hidden when the identity changes (`managerViewForIdentity`). Resetting it in an effect still renders the old session's data for one commit.
 
 ## Key per-identity state by that identity

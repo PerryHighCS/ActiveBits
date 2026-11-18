@@ -40,7 +40,11 @@ export async function postAsStudent(
   path: string,
   body: Record<string, unknown> = {},
 ) {
-  return await request.post(`/api/commissioned-ideas/${sessionId}/${path}`, { data: body, headers: { Cookie: who.cookie } })
+  // Like the app: the action names the participant this client is bound to.
+  return await request.post(`/api/commissioned-ideas/${sessionId}/${path}`, {
+    data: { expectedParticipantId: who.participantId, ...body },
+    headers: { Cookie: who.cookie },
+  })
 }
 
 /** Registers a student and has them create a team; returns the team id. */

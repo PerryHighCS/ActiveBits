@@ -128,6 +128,20 @@ export function isParticipantAuthRefusal(msg: { type?: unknown; code?: unknown }
   return msg.type === 'commissioned-ideas:error' && msg.code === PARTICIPANT_AUTH_REFUSED
 }
 
+/**
+ * The snapshot to render for the current registration attempt: only one received under
+ * that attempt, and only once the server has authenticated the viewer. Until then the
+ * page shows "Connecting…" (an anonymous refusal snapshot is never rendered as the
+ * student's own view).
+ */
+export function studentSnapshotForAttempt(
+  received: { forId: string | null; snapshot: StudentSnapshot } | null,
+  participantId: string | null,
+): StudentSnapshot | null {
+  if (!received || received.forId !== participantId) return null
+  return received.snapshot.viewerParticipantId ? received.snapshot : null
+}
+
 interface UseStudentSessionResult {
   snapshot: StudentSnapshot | null
   /** The server refused this browser's participant cookie; the student must register again. */
@@ -141,7 +155,10 @@ export function useStudentSession({
   participantId,
   attachSessionEndedHandler,
 }: UseStudentSessionOptions): UseStudentSessionResult {
-  const [snapshot, setSnapshot] = useState<StudentSnapshot | null>(null)
+  // Tagged with the registration attempt it arrived under, so a new registration never
+  // shows the previous participant's ballot or team.
+  const [received, setReceived] = useState<{ forId: string | null; snapshot: StudentSnapshot } | null>(null)
+  const snapshot = studentSnapshotForAttempt(received, participantId)
   // Tagged with the identity that was refused, so registering again (a new participant) clears it.
   const [refusedFor, setRefusedFor] = useState<string | null>(null)
   const authRefused = participantId !== null && refusedFor === participantId
@@ -158,7 +175,7 @@ export function useStudentSession({
       if (isParticipantAuthRefusal(msg)) {
         setRefusedFor(participantId)
       } else if (isSnapshotMessage(msg.type)) {
-        setSnapshot(msg.data as StudentSnapshot)
+        setReceived({ forId: participantId, snapshot: msg.data as StudentSnapshot })
       }
     } catch {
       // malformed WS frame — ignored

@@ -73,6 +73,13 @@ test('losing local storage alone keeps the same participant', async ({ page, req
   skipStudentBrowserFlowsOnWebKit()
   const session = await createSession(request)
   await createTeamViaApi(request, session.id, 'Eli')
+
+  const registeredIds: string[] = []
+  page.on('response', (response) => {
+    if (!response.url().endsWith('/register-participant') || !response.ok()) return
+    void response.json().then((body: { participantId?: string }) => { if (body.participantId) registeredIds.push(body.participantId) })
+  })
+
   await joinAsStudent(page, session.id, 'Gia')
   await page.getByRole('button', { name: /^Join / }).click()
   await expect(page.getByTestId('ci-my-team-status')).toContainText('Your team:')
@@ -82,9 +89,13 @@ test('losing local storage alone keeps the same participant', async ({ page, req
   await page.getByLabel('Your name').fill('Gia')
   await page.getByRole('button', { name: 'Join' }).click()
 
-  // The cookie reconnected the same participant, still on the team.
+  // The cookie reconnected the same participant (same id), and the view is Gia's own.
+  await expect.poll(() => registeredIds.length).toBe(2)
+  expect(registeredIds[1]).toBe(registeredIds[0])
   await expect(page.getByTestId('ci-my-team-status')).toContainText('Your team:')
-  await expect(page.getByText('(you)')).toHaveCount(1)
+  const myRow = page.getByRole('listitem').filter({ hasText: 'Gia' })
+  await expect(myRow).toContainText('(you)')
+  await expect(page.getByRole('listitem').filter({ hasText: 'Eli' })).not.toContainText('(you)')
 })
 
 test('keyboard focus stays in the roster after joining and leaving a team', async ({ page, request }) => {

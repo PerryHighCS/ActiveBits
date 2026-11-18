@@ -4,7 +4,7 @@ import type { ProposalKind } from '../../shared/naming.js'
 import type { ManagerParticipant, ManagerSnapshot } from '../hooks/useCommissionedIdeasSession.js'
 import TeamBoard from './TeamBoard.js'
 import { useInstructorApi as useApi } from './useInstructorApi.js'
-import { buildAssignBody, maxTeamSizeBlurAction, type MoveDestination } from './teamBoardModel.js'
+import { buildAssignBody, maxTeamSizeBlurAction, type MoveDestination, type MoveOutcome } from './teamBoardModel.js'
 
 interface RegistrationDashboardProps {
   sessionId: string
@@ -19,7 +19,7 @@ export default function RegistrationDashboard({
   instructorPasscode,
   snapshot,
 }: RegistrationDashboardProps) {
-  const { call, busy, error, clearError } = useApi(sessionId, instructorPasscode)
+  const { call, request, busy, error, clearError } = useApi(sessionId, instructorPasscode)
 
   const joinUrl =
     typeof window !== 'undefined' ? `${window.location.origin}/${sessionId}` : `/${sessionId}`
@@ -67,8 +67,15 @@ export default function RegistrationDashboard({
     await call('assign-random', { scope })
   }
 
-  const handleMove = (participantId: string, destination: MoveDestination): Promise<boolean> =>
-    call('assign-participant', buildAssignBody(participantId, destination))
+  // The confirmed destination comes from the server's answer (new teams get their id there).
+  const handleMove = async (participantId: string, destination: MoveDestination): Promise<MoveOutcome> => {
+    const outcome = await request('assign-participant', buildAssignBody(participantId, destination))
+    if (outcome.kind === 'ok') {
+      const teamId = outcome.data.teamId
+      return { kind: 'committed', teamId: typeof teamId === 'string' ? teamId : null }
+    }
+    return outcome.kind === 'refused' ? { kind: 'refused' } : { kind: 'unknown' }
+  }
 
   const handleModerateProposal = async (teamId: string, kind: ProposalKind, proposalId: string, rejected: boolean) => {
     await call('team/proposal-moderation', { teamId, kind, proposalId, rejected })
@@ -190,34 +197,36 @@ function SettingsPanel({
   onAssignRandom,
 }: SettingsPanelProps) {
   const [maxInput, setMaxInput] = useState(String(snapshot.maxTeamSize))
-  const [maxEdited, setMaxEdited] = useState(false)
   const serverMax = snapshot.maxTeamSize
   // Latest confirmed value, read after an await so a rollback never restores a stale size.
   const serverMaxRef = useRef(serverMax)
+  // True while the instructor has an unsaved draft in the field. A ref, because the
+  // snapshot effect below must read the current value without re-running on edits.
+  const maxEditedRef = useRef(false)
 
-  // When the server pushes a new maxTeamSize (e.g. another admin changed it),
-  // update the local input so it doesn't show a stale value. This runs only
-  // when serverMax actually changes, so it never interrupts the user mid-type.
+  // Track every confirmed size, but only replace the field when no edit is in
+  // progress: a snapshot must never overwrite what the instructor is typing.
   useEffect(() => {
     serverMaxRef.current = serverMax
-    setMaxInput(String(serverMax))
+    if (!maxEditedRef.current) setMaxInput(String(serverMax))
   }, [serverMax])
 
   // Show the requested size immediately, and fall back to the latest confirmed
   // value if the request fails.
   const requestMaxTeamSize = async (value: number) => {
-    setMaxEdited(false)
+    maxEditedRef.current = false
     setMaxInput(String(value))
     if (!(await onMaxTeamSize(value))) setMaxInput(String(serverMaxRef.current))
   }
 
   const handleMaxBlur = () => {
-    const action = maxTeamSizeBlurAction(maxInput, maxEdited, serverMax)
+    // Compare the preserved draft with the latest confirmed value.
+    const action = maxTeamSizeBlurAction(maxInput, maxEditedRef.current, serverMaxRef.current)
     if (action.kind === 'submit') {
       void requestMaxTeamSize(action.value)
     } else {
-      setMaxEdited(false)
-      setMaxInput(String(serverMax))
+      maxEditedRef.current = false
+      setMaxInput(String(serverMaxRef.current))
     }
   }
 
@@ -247,7 +256,7 @@ function SettingsPanel({
               min={2}
               value={maxInput}
               onChange={(e) => {
-                setMaxEdited(true)
+                maxEditedRef.current = true
                 setMaxInput(e.target.value)
               }}
               onBlur={handleMaxBlur}

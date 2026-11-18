@@ -1,6 +1,13 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { isParticipantAuthRefusal, isSnapshotMessage, managerSessionIdentity, managerViewForIdentity } from './useCommissionedIdeasSession.js'
+import {
+  isParticipantAuthRefusal,
+  isSnapshotMessage,
+  managerSessionIdentity,
+  managerViewForIdentity,
+  studentSnapshotForAttempt,
+  type StudentSnapshot,
+} from './useCommissionedIdeasSession.js'
 
 // Every server broadcast that carries a snapshot must be listed here; a missing
 // type silently freezes the client view (e.g. podium reveals would not appear).
@@ -52,3 +59,17 @@ for (const [name, msg, expected] of refusalCases) {
     assert.equal(isParticipantAuthRefusal(msg), expected)
   })
 }
+
+// ── Student snapshot scoped to the registration attempt ──────────────────────
+void test('studentSnapshotForAttempt renders only authenticated snapshots from the current attempt', () => {
+  const snap = (viewerParticipantId: string | null) => ({ viewerParticipantId } as unknown as StudentSnapshot)
+  assert.equal(studentSnapshotForAttempt(null, 'p1'), null, 'nothing received yet')
+  assert.equal(studentSnapshotForAttempt({ forId: 'p1', snapshot: snap('p1') }, 'p1')?.viewerParticipantId, 'p1')
+  assert.equal(studentSnapshotForAttempt({ forId: 'old', snapshot: snap('old') }, 'new'), null, 'previous registration hidden')
+  assert.equal(studentSnapshotForAttempt({ forId: 'p1', snapshot: snap(null) }, 'p1'), null, 'anonymous refusal snapshot never rendered')
+  assert.equal(
+    studentSnapshotForAttempt({ forId: 'p1', snapshot: snap('p2') }, 'p1')?.viewerParticipantId,
+    'p2',
+    'the server-bound viewer wins over the stored id',
+  )
+})

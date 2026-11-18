@@ -1,7 +1,17 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import type { ManagerParticipant, ManagerTeam } from '../hooks/useCommissionedIdeasSession.js'
-import { buildAssignBody, canMoveTo, listMoveOptions, maxTeamSizeBlurAction, moveFocusReady, type MoveDestination } from './teamBoardModel.js'
+import {
+  buildAssignBody,
+  canMoveTo,
+  focusCancelsMoveRequest,
+  listMoveOptions,
+  maxTeamSizeBlurAction,
+  moveFocusReady,
+  type MoveDestination,
+  type MoveFocusRequest,
+  type MoveOutcome,
+} from './teamBoardModel.js'
 
 function participant(id: string, teamId: string | null, rejected = false): ManagerParticipant {
   return { id, name: id, teamId, connected: true, lastSeen: 0, rejectedByInstructor: rejected }
@@ -77,22 +87,27 @@ void test('buildAssignBody encodes each destination for the assign-participant r
 })
 
 // ── Keyboard move focus restoration ──────────────────────────────────────────
+const req = (outcome: MoveOutcome, from: MoveDestination = 'team:A'): MoveFocusRequest => ({ participantId: 'p', from, outcome })
 const focusCases: {
   name: string
-  request: Parameters<typeof moveFocusReady>[0]
+  request: MoveFocusRequest | null
   teamId: string | null
   busy: boolean
   expected: boolean
 }[] = [
   { name: 'no request', request: null, teamId: 'B', busy: false, expected: false },
-  { name: 'request for another participant', request: { participantId: 'other', from: 'team:A', failed: false }, teamId: 'B', busy: false, expected: false },
-  { name: 'moved, still busy', request: { participantId: 'p', from: 'team:A', failed: false }, teamId: 'B', busy: true, expected: false },
-  { name: 'HTTP done, snapshot not yet arrived', request: { participantId: 'p', from: 'team:A', failed: false }, teamId: 'A', busy: false, expected: false },
-  { name: 'snapshot confirms team → team', request: { participantId: 'p', from: 'team:A', failed: false }, teamId: 'B', busy: false, expected: true },
-  { name: 'snapshot confirms new team', request: { participantId: 'p', from: 'ungrouped', failed: false }, teamId: 'NEW', busy: false, expected: true },
-  { name: 'snapshot confirms ungrouped', request: { participantId: 'p', from: 'team:A', failed: false }, teamId: null, busy: false, expected: true },
-  { name: 'failed move refocuses in place', request: { participantId: 'p', from: 'team:A', failed: true }, teamId: 'A', busy: false, expected: true },
-  { name: 'failed move waits for controls', request: { participantId: 'p', from: 'team:A', failed: true }, teamId: 'A', busy: true, expected: false },
+  { name: 'request for another participant', request: { ...req({ kind: 'refused' }), participantId: 'other' }, teamId: 'A', busy: false, expected: false },
+  { name: 'pending: never, even if the roster changed', request: req({ kind: 'pending' }), teamId: 'C', busy: false, expected: false },
+  { name: 'committed A → B, snapshot still shows A', request: req({ kind: 'committed', teamId: 'B' }), teamId: 'A', busy: false, expected: false },
+  { name: 'committed A → B, someone else moved them to C first', request: req({ kind: 'committed', teamId: 'B' }), teamId: 'C', busy: false, expected: false },
+  { name: 'committed A → B, snapshot shows B', request: req({ kind: 'committed', teamId: 'B' }), teamId: 'B', busy: false, expected: true },
+  { name: 'committed new team (returned id), snapshot shows it', request: req({ kind: 'committed', teamId: 'NEW' }, 'ungrouped'), teamId: 'NEW', busy: false, expected: true },
+  { name: 'committed to ungrouped, snapshot shows ungrouped', request: req({ kind: 'committed', teamId: null }), teamId: null, busy: false, expected: true },
+  { name: 'committed but still busy', request: req({ kind: 'committed', teamId: 'B' }), teamId: 'B', busy: true, expected: false },
+  { name: 'refused: in place', request: req({ kind: 'refused' }), teamId: 'A', busy: false, expected: true },
+  { name: 'refused but still busy', request: req({ kind: 'refused' }), teamId: 'A', busy: true, expected: false },
+  { name: 'unknown: not until the roster shows a move', request: req({ kind: 'unknown' }), teamId: 'A', busy: false, expected: false },
+  { name: 'unknown: the roster shows the move landed', request: req({ kind: 'unknown' }), teamId: 'B', busy: false, expected: true },
 ]
 
 for (const row of focusCases) {
@@ -100,6 +115,13 @@ for (const row of focusCases) {
     assert.equal(moveFocusReady(row.request, { id: 'p', teamId: row.teamId }, row.busy), row.expected)
   })
 }
+
+void test('focusCancelsMoveRequest: focus elsewhere cancels; the requested select does not', () => {
+  assert.equal(focusCancelsMoveRequest(null, null), false)
+  assert.equal(focusCancelsMoveRequest(req({ kind: 'pending' }), null), true, 'another control')
+  assert.equal(focusCancelsMoveRequest(req({ kind: 'pending' }), 'someone-else'), true, 'another student’s select')
+  assert.equal(focusCancelsMoveRequest(req({ kind: 'committed', teamId: 'B' }), 'p'), false, 'the moved student’s own select')
+})
 
 // ── Max team size field ──────────────────────────────────────────────────────
 const blurCases: { name: string; input: string; edited: boolean; expected: ReturnType<typeof maxTeamSizeBlurAction> }[] = [

@@ -26,7 +26,7 @@ export default function StudentRoster({
   groupingMode,
   maxTeamSize,
 }: StudentRosterProps) {
-  const { post, busy, error, clearError } = useParticipantApi(sessionId)
+  const { post, busy, error, clearError } = useParticipantApi(sessionId, myParticipantId || null)
 
   const me = participants[myParticipantId]
   const myTeamId = me?.teamId ?? null
