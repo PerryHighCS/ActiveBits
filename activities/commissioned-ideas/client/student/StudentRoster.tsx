@@ -1,4 +1,4 @@
-import { useRef, type Ref } from 'react'
+import { useCallback, useRef, type Ref } from 'react'
 import type { ProposalKind } from '../../shared/naming.js'
 import type { GroupingMode, StudentSafeParticipant, StudentSafeTeam } from '../../shared/types.js'
 import { sortTeams, teamLabel } from '../teamLabels.js'
@@ -42,7 +42,7 @@ export default function StudentRoster({
   // lands. Focus then moves to the team status strip, which stays mounted in every state,
   // unless the student has already moved focus elsewhere.
   const statusRef = useRef<HTMLDivElement>(null)
-  const focusRestore = useRestoreFocusAfterRemoval(statusRef)
+  const focusRestore = useRestoreFocusAfterRemoval(useCallback(() => statusRef.current, []))
   const postAndRefocus = async (control: HTMLElement, path: string, body: Record<string, unknown>) => {
     focusRestore.begin(control)
     const outcome = await request(path, body)

@@ -8,6 +8,19 @@ import type { SessionEntryStatus } from '../../types/waitingRoom.js'
 import { findHashBySessionId, resetPersistentSession } from './persistentSessions.js'
 import { ValkeySessionStore } from './valkeyStore.js'
 import type { BroadcastSubscribeOptions, SessionLike } from './valkeyStore.js'
+
+/**
+ * `updateAtomic` failed and definitely committed nothing (every compare-and-set lost, or
+ * the read before the write failed), so the caller may safely run the mutation again.
+ * Any other error from `updateAtomic` is ambiguous: the write may have committed with
+ * its reply lost, and re-running a non-idempotent mutation could apply it twice.
+ */
+export class AtomicUpdateNotCommittedError extends Error {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options)
+    this.name = 'AtomicUpdateNotCommittedError'
+  }
+}
 import { SessionCache } from './sessionCache.js'
 import { normalizeSessionData } from './sessionNormalization.js'
 import { getActivityWaitingRoomFieldCount } from '../activities/activityRegistry.js'
@@ -451,7 +464,14 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
   ): Promise<SessionRecord | null> => {
     const maxAttempts = 12
     for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-      const current = await getStrict(id)
+      let current: SessionRecord | null
+      try {
+        current = await getStrict(id)
+      } catch (err) {
+        // The read precedes any write in this attempt, and every earlier attempt's
+        // compare-and-set definitely lost, so nothing was committed.
+        throw new AtomicUpdateNotCommittedError(`Atomic session update could not read ${id}`, { cause: err })
+      }
       if (!current) return null
       const expectedRevision = current.mutationRevision ?? 0
       // Bind the CAS to the incarnation this attempt just read: a same-id
@@ -465,7 +485,7 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
       const updated = await compareAndSet(id, expectedRevision, mutate(draft), ttl, expectedCreated)
       if (updated) return updated
     }
-    throw new Error(`Atomic session update exhausted retry budget for ${id}`)
+    throw new AtomicUpdateNotCommittedError(`Atomic session update exhausted retry budget for ${id}`)
   }
 
   const finalizeConsumedToken = async (

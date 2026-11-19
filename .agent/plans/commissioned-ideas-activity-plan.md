@@ -50,6 +50,20 @@ Triage of the 25 unresolved CodeRabbit threads from 2026-07-30 on PR #243, verif
 - [ ] Open, needs product/engineering decision: participant token in `localStorage` (move to a core httpOnly participant capability); per-session atomic updates (`updateAtomic` for every writer)
 - [x] Post replies and resolve threads after the fixes are pushed (0690ab1a: 23 resolved; the two follow-up threads replied to and left open)
 
+## CodeRabbit review round 7 (2026-11-19)
+
+4 threads on 5edb18a4, no outside-diff comments.
+
+1. **Retries only when nothing was committed (high).** Owner: core `updateAtomic`, with the activity's `atomicUpdate`. Invariant: a mutation is re-run only after a failure that definitely committed nothing. Core throws `AtomicUpdateNotCommittedError` when its compare-and-set budget is exhausted or the read before a write fails. Any other store error (a lost reply) is ambiguous: it is passed on as a `500` with an unknown outcome and is never retried. Before this, a lost reply could register a student twice or advance two rounds.
+2. **Read-only routes read committed state.** `/instructor-passcode` (and `/state`, through `loadSession`) and the presence check use `getStrict`, so a manager capability reissued on another instance is visible. A read failure is a `500`, not a `404`.
+3. **A socket that closed during its connect read creates no subscription**, because its close handler has already run and nothing would release it.
+4. **Focus after placing or rejecting a late arrival** goes to the next waiting student's select, or to an "All late arrivals are placed" status when none remain. It uses the shared restore hook, which now finds its target when it restores and waits until that target can take focus (`targetFocusable` in the decision table).
+
+- [x] Core: `AtomicUpdateNotCommittedError`, with classification tests
+- [x] Server: 1, 2, 3, with tests (no double apply, a definite no-commit retried, passcode across instance caches, outage 500, no subscription after close)
+- [x] Client: 4, with a Playwright regression (Chromium and WebKit)
+- [x] Docs
+
 ## CodeRabbit review round 6 (2026-11-18)
 
 9 threads on a53f6cfb, no outside-diff comments. Grouped by contract (AGENTS.md rule 16):

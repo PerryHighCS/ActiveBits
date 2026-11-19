@@ -106,6 +106,14 @@ overwriting the replacement. Activity code must use this primitive when a write
 based on a session snapshot could otherwise overwrite unrelated state committed
 by another server instance.
 
+Failures are classified for callers that retry. `updateAtomic` throws
+`AtomicUpdateNotCommittedError` only when nothing was written: every
+compare-and-set lost (retry budget exhausted), or the read before a write failed.
+That is safe to retry by re-running the mutation. Any other error (for example a
+failed compare-and-set call whose reply was lost) is ambiguous: the write may have
+committed. A caller must not re-run a non-idempotent mutation after it, and should
+report an unknown outcome instead.
+
 When a caller supplies the incarnation it read, compare-and-set requires the
 stored record to contain that exact `created` value. A missing stored identity
 fails closed like a mismatch; revision-only compatibility applies only when the

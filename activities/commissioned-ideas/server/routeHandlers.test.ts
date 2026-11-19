@@ -6,9 +6,9 @@
  */
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import type { SessionRecord } from 'activebits-server/core/sessions.js'
+import { AtomicUpdateNotCommittedError, type SessionRecord } from 'activebits-server/core/sessions.js'
 import type { WsRouter } from '../../../types/websocket.js'
-import { getActivityCapabilityCookieName } from 'activebits-server/core/activityCapabilities.js'
+import { getActivityCapabilityCookieName, issueActivityCapability } from 'activebits-server/core/activityCapabilities.js'
 import setupCommissionedIdeasRoutes, { buildManagerSnapshot, buildStudentSnapshot } from './routes.js'
 import type { CommissionedIdeasSessionData } from '../shared/types.js'
 import { nextPodiumStep, podiumPlaceCount } from '../shared/podium.js'
@@ -91,6 +91,8 @@ interface MockStoreHooks {
   onGet: (() => void) | null
   /** The next N `updateAtomic` calls run the mutation, then throw (a store failure after the callback). */
   failUpdatesAfterMutate: number
+  /** The next N `updateAtomic` calls commit, then throw (the write landed but its reply was lost). */
+  failAfterCommit: number
   /** The next N strict reads throw (a store outage). */
   failStrictReads: number
   /** Strict reads so far (every instance). */
@@ -131,7 +133,7 @@ function createMockSessions(
 ) {
   const store: Record<string, SessionRecord> = shared?.store ?? { ...initial }
   const hooks: MockStoreHooks = shared?.hooks ?? {
-    beforeCommit: null, commitGate: null, getGate: null, onGet: null, failUpdatesAfterMutate: 0, failStrictReads: 0,
+    beforeCommit: null, commitGate: null, getGate: null, onGet: null, failUpdatesAfterMutate: 0, failAfterCommit: 0, failStrictReads: 0,
     strictReads: 0, afterCommitGate: null, subscribeGates: new Map(), subscribeFailures: new Map(),
     casBudget: 12, casConflicts: 0, setCalls: 0,
   }
@@ -203,12 +205,16 @@ function createMockSessions(
           }
           store[id] = { ...next, mutationRevision: revision + 1 }
           const committed = store[id]
+          if (hooks.failAfterCommit > 0) {
+            hooks.failAfterCommit -= 1
+            throw new Error('[TEST] simulated lost reply after the write committed')
+          }
           const afterCommit = hooks.afterCommitGate
           hooks.afterCommitGate = null
           if (afterCommit) await afterCommit
           return committed
         }
-        throw new Error('[TEST] atomic update exhausted retries')
+        throw new AtomicUpdateNotCommittedError('[TEST] atomic update exhausted retries')
       },
       async delete(id: string) {
         const had = id in store
@@ -2308,7 +2314,7 @@ function createCookieResponse() {
 
 async function createSessionWithCookie() {
   const app = createMockApp()
-  const { store, sessions } = createMockSessions()
+  const { store, sessions, hooks, bus } = createMockSessions()
   setupCommissionedIdeasRoutes(app, sessions, createMockWs())
   const res = createCookieResponse()
   await app.handlers.post['/api/commissioned-ideas/create']!(createRequest(), res)
@@ -2322,7 +2328,7 @@ async function createSessionWithCookie() {
     )
     return out
   }
-  return { app, store, sessionId, instructorPasscode, res, cookieName: cookieName!, cookie: cookie!, exchange }
+  return { app, store, hooks, bus, sessionId, instructorPasscode, res, cookieName: cookieName!, cookie: cookie!, exchange }
 }
 
 void test('create issues an httpOnly manager capability cookie and stores only its digest', async () => {
@@ -2347,6 +2353,66 @@ void test('instructor-passcode returns the passcode only for a valid manager cap
   assert.equal((await s.exchange(undefined)).statusCode, 403, 'no cookie')
   assert.equal((await s.exchange({ [s.cookieName]: 'not-the-token' })).statusCode, 403, 'wrong token')
   assert.equal((await s.exchange({ instructorPasscode: s.instructorPasscode })).statusCode, 403, 'the passcode itself is not proof')
+})
+
+void test('instructor-passcode sees a manager capability reissued on another instance (no stale cache)', async () => {
+  const a = await createSessionWithCookie()
+  // Instance B over the same store, with a per-instance read cache like the Valkey wrapper.
+  const appB = createMockApp()
+  const b = createMockSessions({}, { store: a.store, hooks: a.hooks, bus: a.bus }, { cacheReads: true })
+  setupCommissionedIdeasRoutes(appB, b.sessions, createMockWs())
+  await b.sessions.get(a.sessionId) // B caches the record before the reissue
+
+  // Another instance reissues the manager capability (core persistent-link reissue).
+  const record = structuredClone(a.store[a.sessionId]!)
+  const { token } = issueActivityCapability(record, 'manager')
+  a.store[a.sessionId] = { ...record, mutationRevision: (record.mutationRevision ?? 0) + 1 }
+
+  const out = createCookieResponse()
+  await appB.handlers.get['/api/commissioned-ideas/:sessionId/instructor-passcode']!(
+    { params: { sessionId: a.sessionId }, cookies: { [a.cookieName]: token } } as MockRequest,
+    out,
+  )
+  assert.equal(out.statusCode, 200)
+  assert.equal((out.body as { instructorPasscode: string }).instructorPasscode, a.instructorPasscode)
+})
+
+void test('instructor-passcode answers a store outage with a retryable 500, not 404', async () => {
+  const s = await createSessionWithCookie()
+  s.hooks.failStrictReads = 1
+  console.log('[TEST] expecting a passcode recovery read failure')
+  assert.equal((await s.exchange({ [s.cookieName]: s.cookie.value })).statusCode, 500)
+})
+
+void test('a store error after the write may have committed is not retried (no double apply)', async () => {
+  const app = createMockApp()
+  const { store, sessions, hooks } = createMockSessions()
+  setupCommissionedIdeasRoutes(app, sessions, createMockWs())
+  const { id: sessionId } = await createSession(app)
+  const roster = () => Object.values((store[sessionId]!.data as CommissionedIdeasSessionData).participantRoster)
+
+  hooks.failAfterCommit = 1
+  console.log('[TEST] expecting an ambiguous store failure to surface as 500 without a retry')
+  const res = createResponse()
+  await app.handlers.post['/api/commissioned-ideas/:sessionId/register-participant']!(createRequest({ sessionId }, { name: 'Ada' }), res)
+  assert.equal(res.statusCode, 500, 'the outcome is unknown to the client')
+  assert.equal(roster().length, 1, 'registered once, not once per retry round')
+})
+
+void test('a definitely uncommitted update (compare-and-set budget exhausted) is retried', async () => {
+  const app = createMockApp()
+  const { store, sessions, hooks } = createMockSessions()
+  setupCommissionedIdeasRoutes(app, sessions, createMockWs())
+  const { id: sessionId } = await createSession(app)
+
+  hooks.casBudget = 1
+  // The first round's only compare-and-set loses to a competing write; the next round commits.
+  hooks.beforeCommit = (id) => { store[id] = { ...store[id]!, mutationRevision: (store[id]!.mutationRevision ?? 0) + 1 } }
+  console.log('[TEST] expecting one uncommitted round, then a retry')
+  const res = createResponse()
+  await app.handlers.post['/api/commissioned-ideas/:sessionId/register-participant']!(createRequest({ sessionId }, { name: 'Ada' }), res)
+  assert.equal(res.statusCode, 200)
+  assert.equal(Object.keys((store[sessionId]!.data as CommissionedIdeasSessionData).participantRoster).length, 1)
 })
 
 void test('a manager capability for one session does not unlock another', async () => {
@@ -2773,6 +2839,7 @@ void test('a socket closed while auth is reading the session never marks the stu
   await h.settle()
   assert.equal(sessionDataFromHarness(h).participantRoster[student.participantId]?.connected, false)
   assert.equal(conn.socket.participantId, null, 'a closed socket is never bound')
+  assert.equal(h.bus.get(`session:${h.sessionId}:commissioned-ideas`)?.length ?? 0, 0, 'no subscription left behind')
 })
 
 void test('a student socket gets no snapshot until its presence write commits, even if another write broadcasts first', async () => {
@@ -3204,8 +3271,9 @@ void test('a refused socket auth whose follow-up read fails closes with a retrya
     const data = structuredClone(record.data) as Record<string, unknown>
     data.activityCapabilities = {}
     h.store[id] = { ...record, data, mutationRevision: (record.mutationRevision ?? 0) + 1 }
-    // The read after the refusal fails (the subscription's own refresh reads concurrently).
-    h.hooks.failStrictReads = 2
+    // Every read from here fails, including the one after the refusal (the presence
+    // reconcile and the subscription's refresh also read).
+    h.hooks.failStrictReads = 100
   }
   console.log('[TEST] expecting auth refusal, then a failed re-read and a 1011 close')
   const conn = await h.connect({}, { as: student, wait: false })
@@ -3241,7 +3309,7 @@ void test('a failed socket auth reconciles presence with the sockets that remain
   const h = await setupWsHarness()
   const student = await h.register('Student')
   sessionDataFromHarness(h).participantRoster[student.participantId]!.connected = true // stale: no socket is open
-  h.hooks.failUpdatesAfterMutate = 3 // every round of the auth write fails after its mutation ran
+  h.hooks.failUpdatesAfterMutate = 1 // the auth write fails after its mutation ran (ambiguous: not retried)
   console.log('[TEST] expecting socket auth failure after all retry rounds')
   const conn = await h.connect({}, { as: student, wait: false })
   for (let i = 0; i < 100 && conn.closed() === null; i += 1) await new Promise((resolve) => setTimeout(resolve, 5))
@@ -3315,8 +3383,9 @@ void test('invalidation read retries stop once no local socket needs the session
   console.log('[TEST] expecting one failed invalidation read, then no retry after release')
   assert.equal((await a.asInstructor('phase', { phase: 'presentation' })).statusCode, 200)
   await b.settle()
-  const reads = a.hooks.strictReads
   await studentOnB.hangUp()
+  await b.settle() // the close's own presence check reads once
+  const reads = a.hooks.strictReads
   await new Promise((resolve) => setTimeout(resolve, 400))
   assert.equal(a.hooks.strictReads, reads, 'released: the pending retry does not read again')
 })

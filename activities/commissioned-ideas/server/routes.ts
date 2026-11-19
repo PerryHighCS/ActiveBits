@@ -1,5 +1,5 @@
 import { randomInt, randomUUID, timingSafeEqual } from 'crypto'
-import { createSession, type SessionRecord, type SessionStore } from 'activebits-server/core/sessions.js'
+import { AtomicUpdateNotCommittedError, createSession, type SessionRecord, type SessionStore } from 'activebits-server/core/sessions.js'
 import { registerSessionNormalizer } from 'activebits-server/core/sessionNormalization.js'
 import { createBroadcastSubscriptionHelper } from 'activebits-server/core/broadcastUtils.js'
 import {
@@ -506,6 +506,13 @@ class NotCommissionedIdeasSession extends Error {}
  *
  * Returns the committed session, or null when there is no such session. A `Refusal`
  * (or any other error) thrown by `mutate` propagates without writing.
+ *
+ * Retries: only a failure the store reports as definitely uncommitted
+ * (`AtomicUpdateNotCommittedError`: every compare-and-set lost, or the read before the
+ * write failed) gets more rounds. Any other store error is ambiguous (the write may have
+ * committed with its reply lost) and propagates, because re-running a non-idempotent
+ * mutation (register, next round) could apply it twice. The route answers 500 and the
+ * client treats the outcome as unknown until a snapshot shows it.
  */
 async function atomicUpdate(
   sessions: SessionStore,
@@ -540,11 +547,11 @@ async function atomicUpdate(
       break
     } catch (err) {
       if (err instanceof NotCommissionedIdeasSession) return null
-      // A refusal is an answer, not a failure. Anything else (the store's compare-and-set
-      // retry budget exhausted under a burst of writes, or a transient store error) gets a
-      // few more rounds with jittered backoff before the caller sees it.
-      if (err instanceof Refusal || round >= ATOMIC_UPDATE_ROUNDS) throw err
-      console.warn('[commissioned-ideas] Session update retrying after a store error', {
+      // A refusal is an answer, and an ambiguous store error may have committed: neither
+      // is retried. A definite no-commit (for example the compare-and-set budget
+      // exhausted under a burst of writes) gets a few more rounds with jittered backoff.
+      if (!(err instanceof AtomicUpdateNotCommittedError) || round >= ATOMIC_UPDATE_ROUNDS) throw err
+      console.warn('[commissioned-ideas] Session update retrying after an uncommitted attempt', {
         sessionId,
         round,
         error: err instanceof Error ? err.message : String(err),
@@ -1131,10 +1138,22 @@ export default function setupCommissionedIdeasRoutes(
     if (session.data.phase !== 'presentation') refuse(409, 'Only available during presentations')
   }
 
+  /**
+   * Committed state for a read-only route (never this instance's cache: a capability
+   * reissued or a change committed on another instance must be visible). A store
+   * failure is a retryable 500, never a false 404.
+   */
   async function loadSession(req: RouteRequest, res: JsonResponse): Promise<CommissionedIdeasSession | null> {
     const { sessionId } = req.params
     if (!sessionId) { res.status(400).json({ error: 'Missing sessionId' }); return null }
-    const session = await getSession(sessions, sessionId)
+    let session: CommissionedIdeasSession | null
+    try {
+      session = await getSessionStrict(sessions, sessionId)
+    } catch (err: unknown) {
+      console.error('[commissioned-ideas] Session read failed', { sessionId, err })
+      res.status(500).json({ error: 'Session temporarily unavailable. Please try again.' })
+      return null
+    }
     if (!session) { res.status(404).json({ error: 'Session not found' }); return null }
     return session
   }
@@ -1793,8 +1812,9 @@ export default function setupCommissionedIdeasRoutes(
 
   /** Re-derives one participant's `connected` flag from live sockets; persists and broadcasts on change. */
   async function syncParticipantPresence(sessionId: string, participantId: string): Promise<void> {
-    // Cheap read first: most closes (another tab still open) change nothing.
-    const current = await getSession(sessions, sessionId)
+    // Read first: most closes (another tab still open) change nothing. Committed state,
+    // not this instance's cache, so a stale cached flag cannot skip a needed write.
+    const current = await getSessionStrict(sessions, sessionId)
     const known = current ? ownEntry(current.data.participantRoster, participantId) : undefined
     if (!known || known.connected === hasLiveParticipantSocket(ws, sessionId, participantId)) return
 
@@ -1938,6 +1958,9 @@ export default function setupCommissionedIdeasRoutes(
         socket.close(1008, 'Session not found')
         return
       }
+      // Closed during the read: its close handler already ran, so nothing would release
+      // a subscription created now.
+      if (socket.readyState !== WS_OPEN) return
       // Subscribe only for sessions that exist, so stale links cannot add
       // permanent subscription entries.
       ensureBroadcastSubscription(sessionId)

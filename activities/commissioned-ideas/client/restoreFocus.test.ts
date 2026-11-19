@@ -3,8 +3,8 @@ import assert from 'node:assert/strict'
 import { focusRestoreDecision, type FocusRestoreDecision } from './useRestoreFocusAfterRemoval.js'
 
 type State = Parameters<typeof focusRestoreDecision>[0]
-const state = (outcome: State['outcome'], originConnected: boolean, originFocusable: boolean, focusLost: boolean): State =>
-  ({ outcome, originConnected, originFocusable, focusLost })
+const state = (outcome: State['outcome'], originConnected: boolean, originFocusable: boolean, focusLost: boolean, targetFocusable = true): State =>
+  ({ outcome, originConnected, originFocusable, targetFocusable, focusLost })
 const keep = (focus: FocusRestoreDecision['focus']): FocusRestoreDecision => ({ focus, keepTracking: true })
 const stop = (focus: FocusRestoreDecision['focus']): FocusRestoreDecision => ({ focus, keepTracking: false })
 
@@ -14,6 +14,8 @@ const cases: [string, State, FocusRestoreDecision][] = [
   ['removed after commit, focus lost → target', state('committed', false, false, true), stop('target')],
   ['removed although the response was lost → target', state('unknown', false, false, true), stop('target')],
   ['removed, but the user focused something else → leave it', state('committed', false, false, false), keep(null)],
+  ['removed while the target is still disabled (busy) → wait for it', state('pending', false, false, true, false), keep(null)],
+  ['removed after commit, target not focusable yet → wait', state('committed', false, false, true, false), keep(null)],
   // Control still there and disabled (busy): focusing it would do nothing.
   ['pending and disabled → wait', state('pending', true, false, true), keep(null)],
   ['refused while still disabled → wait for the render that enables it', state('refused', true, false, true), keep(null)],

@@ -1,5 +1,5 @@
 import { expect, type APIRequestContext, type Page, test } from '@playwright/test'
-import { createTeamViaApi, skipStudentBrowserFlowsOnWebKit } from './studentApi'
+import { createTeamViaApi, registerStudentViaApi, skipStudentBrowserFlowsOnWebKit } from './studentApi'
 
 interface CreatedSession {
   id: string
@@ -82,4 +82,28 @@ test('a late arrival appears for the instructor and can vote once placed on a te
   } finally {
     await studentContext.close()
   }
+})
+
+test('placing late arrivals keeps keyboard focus on the next placement, then on the "all placed" status', async ({ page, request }) => {
+  const session = await createSession(request)
+  for (const name of ['Eli', 'Fay']) await createTeamViaApi(request, session.id, name)
+  await setPhase(request, session, 'presentation')
+  await registerStudentViaApi(request, session.id, 'Ann')
+  await registerStudentViaApi(request, session.id, 'Bob')
+
+  await openManager(page, session)
+  const late = page.getByRole('region', { name: 'Late arrivals (2)' })
+  await expect(late).toBeVisible()
+
+  const annSelect = late.getByRole('combobox', { name: 'Place Ann on a team' })
+  await annSelect.focus()
+  await annSelect.selectOption({ index: 1 })
+  // Ann's row is removed by the snapshot; focus moves to the next waiting student.
+  await expect(page.getByRole('combobox', { name: 'Place Ann on a team' })).toHaveCount(0)
+  await expect(page.getByRole('combobox', { name: 'Place Bob on a team' })).toBeFocused()
+
+  await page.getByRole('combobox', { name: 'Place Bob on a team' }).selectOption({ index: 1 })
+  const done = page.getByTestId('ci-late-arrivals-done')
+  await expect(done).toHaveText('All late arrivals are placed.')
+  await expect(done).toBeFocused()
 })
