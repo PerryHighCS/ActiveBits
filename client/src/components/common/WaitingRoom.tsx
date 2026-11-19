@@ -14,7 +14,10 @@ import {
   getPersistentLinkControlStateFromSearch,
   getPersistentSelectedOptionsFromSearchForActivity,
 } from './sessionRouterUtils'
-import { persistCreateSessionBootstrapToSessionStorage } from './manageDashboardUtils'
+import {
+  persistCreateSessionBootstrapToSessionStorage,
+  storeCreateSessionBootstrapPayload,
+} from './manageDashboardUtils'
 import {
   buildWaitingRoomStorageKey,
   getWaitingRoomInitialValues,
@@ -307,6 +310,9 @@ export default function WaitingRoom({
         const payload = message.createSessionPayload
         if (payload) {
           persistCreateSessionBootstrapToSessionStorage(activity?.createSessionBootstrap, message.sessionId, payload)
+          storeCreateSessionBootstrapPayload(activityName, message.sessionId, payload, undefined, {
+            persistToSessionStorage: false,
+          })
         }
       },
     })

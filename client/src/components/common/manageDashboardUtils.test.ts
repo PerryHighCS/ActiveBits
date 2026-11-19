@@ -23,6 +23,7 @@ import {
   parseMultiselectValues,
   parseDeepLinkOptions,
   readCreateSessionBootstrapPayload,
+  shouldPersistCreateSessionBootstrapPayloadToSessionStorage,
   storeCreateSessionBootstrapPayload,
   validateDeepLinkSelection,
 } from './manageDashboardUtils'
@@ -413,13 +414,46 @@ void test('parseCreateSessionBootstrap validates sessionStorage bootstrap metada
         { keyPrefix: 'x_', responseField: '' },
       ],
       historyState: [' instructorPasscode ', '', 42],
+      allowSessionStorageFallback: false,
     }),
     {
       sessionStorage: [
         { keyPrefix: 'syncdeck_instructor_', responseField: 'instructorPasscode' },
       ],
       historyState: ['instructorPasscode'],
+      allowSessionStorageFallback: false,
     },
+  )
+})
+
+void test('an explicit sessionStorage opt-out survives a config with no other bootstrap fields', () => {
+  const optOutOnly = { sessionStorage: [], historyState: [], allowSessionStorageFallback: false }
+  assert.deepEqual(parseCreateSessionBootstrap(optOutOnly), {
+    sessionStorage: [],
+    allowSessionStorageFallback: false,
+  })
+  assert.equal(shouldPersistCreateSessionBootstrapPayloadToSessionStorage(optOutOnly), false)
+  assert.equal(shouldPersistCreateSessionBootstrapPayloadToSessionStorage({ allowSessionStorageFallback: false }), false)
+
+  // Without the opt-out, an empty config still means "no bootstrap config".
+  assert.equal(parseCreateSessionBootstrap({ sessionStorage: [], historyState: [] }), null)
+  assert.equal(shouldPersistCreateSessionBootstrapPayloadToSessionStorage({ sessionStorage: [], historyState: [] }), true)
+})
+
+void test('shouldPersistCreateSessionBootstrapPayloadToSessionStorage respects explicit opt-out', () => {
+  assert.equal(
+    shouldPersistCreateSessionBootstrapPayloadToSessionStorage({
+      historyState: ['instructorPasscode'],
+      allowSessionStorageFallback: false,
+    }),
+    false,
+  )
+
+  assert.equal(
+    shouldPersistCreateSessionBootstrapPayloadToSessionStorage({
+      historyState: ['instructorPasscode'],
+    }),
+    true,
   )
 })
 
@@ -707,6 +741,49 @@ void test('readCreateSessionBootstrapPayload leaves iframe bootstrap storage ava
     assert.equal(
       sessionStorage.has('create-session-bootstrap:video-sync:session-iframe'),
       true,
+    )
+  } finally {
+    Object.defineProperty(globalThis, 'window', {
+      value: originalWindow,
+      configurable: true,
+      writable: true,
+    })
+  }
+})
+
+void test('storeCreateSessionBootstrapPayload skips sessionStorage when fallback is disabled', () => {
+  const originalWindow = globalThis.window
+  const { backing: sessionStorage, storage: fakeSessionStorage } = createFakeSessionStorage()
+
+  Object.defineProperty(globalThis, 'window', {
+    value: {
+      sessionStorage: fakeSessionStorage,
+    },
+    configurable: true,
+    writable: true,
+  })
+
+  try {
+    storeCreateSessionBootstrapPayload(
+      'commissioned-ideas',
+      'session-123',
+      {
+        id: 'non-sensitive-id',
+        instructorPasscode: 'teacher-passcode',
+      },
+      10,
+      { persistToSessionStorage: false },
+    )
+
+    // `id` is not filtered as sensitive, so an empty store proves the option itself works.
+    assert.equal(sessionStorage.size, 0)
+
+    assert.deepEqual(
+      consumeCreateSessionBootstrapPayload('commissioned-ideas', 'session-123', 10),
+      {
+        id: 'non-sensitive-id',
+        instructorPasscode: 'teacher-passcode',
+      },
     )
   } finally {
     Object.defineProperty(globalThis, 'window', {

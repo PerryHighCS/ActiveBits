@@ -456,3 +456,23 @@ Capture reusable test setup patterns, common failure modes, and reliability guid
 - Pattern: `activities/video-sync/server/routes.ts` keeps process-level maps/sets keyed by session id (`subscribersBySession`, `heartbeatTimers`, and now `migratedLegacyUnsyncedScopes`). A route test that shares a session id such as `s1` with earlier tests can observe state one of those tests left behind - e.g. a "once per process" guard that another test already tripped. When a new test depends on a *first-time* transition for an id, give it a dedicated id (`legacy-unsync-scope-move`) rather than `s1`.
 - Pattern: `createMockVideoSyncValkeyStore().client.eval` dispatches on `script.includes('video-sync-unsynced-<op>')` and asserts `numKeys`. A new multi-key Lua (the `video-sync-unsynced-merge` scope fold takes 2 keys) needs its own branch handled *before* the shared `assert.equal(numKeys, 1)`.
 - Evidence: `activities/video-sync/server/routes.test.ts` ("legacy session unsynced markers survive the scope move once created is persisted", "websocket initial snapshot failure unsubscribes the socket instead of leaving it in the broadcast set").
+
+## Server-confirmed controls and same-millisecond ordering (2026-11-16)
+
+- Pattern: A radio/checkbox whose `checked` is driven only by a WebSocket snapshot does not change on click, so Playwright `locator.check()` fails in Chromium with "Clicking the checkbox did not change its state" (WebKit happened to pass). Keep a local optimistic selection that clears when the server value changes and reverts on request failure; this also removes visible lag for users.
+- Pattern: Route-handler tests that create two records back-to-back often get identical `Date.now()` timestamps. Any tie-break that falls through to random IDs then makes the test flaky. Use append order (array position) as the final tie-break for append-only lists, and run new ordering tests several times before trusting them.
+- Evidence: `activities/commissioned-ideas/client/student/TeamNamingPanel.tsx`, `activities/commissioned-ideas/shared/naming.ts` (`breaksTieBefore`), `activities/commissioned-ideas/playwright/teams.spec.ts`.
+
+## WebSocket mocks must close like real sockets
+
+A mock socket whose `close()` only records the code lets later messages through and never fires `close` handlers. Tests then pass when the server wrongly keeps handling a closed socket, and presence cleanup is never exercised. In the Commissioned Ideas harness (`server/routeHandlers.test.ts`, `setupWsHarness`), `close()` sets `readyState = 3` and then fires the `close` handler, and `say()` delivers nothing once the socket is closed. Assert ignored frames (socket still open) separately from terminal refusals, and use one connection per terminal case. To cover async interleavings, do not rely on ticks to land "inside" an await. A tick does not prove the code has reached the store read. Hold the operation instead: the mock store's `getGate`/`onGet` (signals that a read started and holds it) and `commitGate` (holds a write before commit). Act while it is held, for example close the socket or commit a competing write, then release it and assert. A second "server instance" over the same store and pub/sub bus (`setupWsHarness(sameStoreAs)`) covers cross-instance delivery.
+
+## Test doubles must enforce the production contracts the code relies on (2026-11-18)
+
+Several review findings were tests that passed only because the double was more forgiving than production. The Commissioned Ideas store double (`createMockSessions` in `server/routeHandlers.test.ts`) now behaves like the real store:
+- Compare-and-set commits only if the record still exists with the same revision and creation identity.
+- `get` can serve a per-instance cache while `getStrict` reads shared data, so stale-cache bugs show up.
+- Pub/sub delivers only to subscriptions that are active, and messages published before activation are lost.
+- Failure injection runs the mutation before throwing, so code that logs or binds inside the callback gets caught.
+
+When a test checks "X does not happen", make sure the fixture would otherwise make X happen. For example, a ballot test must use a voter who is eligible, or the voter check hides the rule under test.

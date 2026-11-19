@@ -9,6 +9,7 @@ Current activity areas include:
 - Network and web-systems simulations
 - Algorithm demonstrations
 - Live response collection and class discussion activities
+- Commissioned Ideas team pitch competitions: students form and name teams, present, fund each other's projects with `$500/$300/$100` awards, and watch a podium reveal
 - Java and Python practice activities
 - Standalone practice and utility flows for independent student work
 - MobCode live sessions, including instructor-controlled private student code workspaces; newly initialized live sessions broadcast instructor changes by default unless they begin in Try it mode

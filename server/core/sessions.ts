@@ -7,7 +7,20 @@ import {
 import type { SessionEntryStatus } from '../../types/waitingRoom.js'
 import { findHashBySessionId, resetPersistentSession } from './persistentSessions.js'
 import { ValkeySessionStore } from './valkeyStore.js'
-import type { SessionLike } from './valkeyStore.js'
+import type { BroadcastSubscribeOptions, SessionLike } from './valkeyStore.js'
+
+/**
+ * `updateAtomic` failed and definitely committed nothing (every compare-and-set lost, or
+ * the read before the write failed), so the caller may safely run the mutation again.
+ * Any other error from `updateAtomic` is ambiguous: the write may have committed with
+ * its reply lost, and re-running a non-idempotent mutation could apply it twice.
+ */
+export class AtomicUpdateNotCommittedError extends Error {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options)
+    this.name = 'AtomicUpdateNotCommittedError'
+  }
+}
 import { SessionCache } from './sessionCache.js'
 import { normalizeSessionData } from './sessionNormalization.js'
 import { getActivityWaitingRoomFieldCount } from '../activities/activityRegistry.js'
@@ -107,9 +120,18 @@ export interface SessionStore extends SharedSessionStore<Record<string, unknown>
   getAllIds(): Promise<string[]>
   cleanup(): void
   close(): Promise<void>
-  subscribeToBroadcast?(channel: string, handler: (message: unknown) => void): void
+  /**
+   * Resolves (when the store supports it) once the subscription is active, and rejects
+   * if it could not be made active; `onResubscribed` runs each time it is active again
+   * after the subscriber reconnected. See ValkeySessionStore.
+   */
+  subscribeToBroadcast?(channel: string, handler: (message: unknown) => void, options?: BroadcastSubscribeOptions): void | Promise<void>
+  /** Removes a handler added with `subscribeToBroadcast` (same function reference). */
+  unsubscribeFromBroadcast?(channel: string, handler: (message: unknown) => void): void
   initializePubSub?(): void
   publishBroadcast?(channel: string, message: Record<string, unknown>): Promise<void>
+  /** Like publishBroadcast, but rejects when the publish failed (so the caller can retry). */
+  publishBroadcastStrict?(channel: string, message: Record<string, unknown>): Promise<void>
   valkeyStore?: ValkeySessionStore
   cache?: SessionCache<SessionRecord>
   flushCache?(): Promise<void>
@@ -286,8 +308,10 @@ class InMemorySessionStore implements SessionStore {
   }
 
   subscribeToBroadcast(): void {}
+  unsubscribeFromBroadcast(): void {}
   initializePubSub(): void {}
   async publishBroadcast(): Promise<void> {}
+  async publishBroadcastStrict(): Promise<void> {}
 }
 
 export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 * 60 * 1000, providedValkeyStore: ValkeySessionStore | null = null): SessionStore {
@@ -443,7 +467,14 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
   ): Promise<SessionRecord | null> => {
     const maxAttempts = 12
     for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-      const current = await getStrict(id)
+      let current: SessionRecord | null
+      try {
+        current = await getStrict(id)
+      } catch (err) {
+        // The read precedes any write in this attempt, and every earlier attempt's
+        // compare-and-set definitely lost, so nothing was committed.
+        throw new AtomicUpdateNotCommittedError(`Atomic session update could not read ${id}`, { cause: err })
+      }
       if (!current) return null
       const expectedRevision = current.mutationRevision ?? 0
       // Bind the CAS to the incarnation this attempt just read: a same-id
@@ -457,7 +488,7 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
       const updated = await compareAndSet(id, expectedRevision, mutate(draft), ttl, expectedCreated)
       if (updated) return updated
     }
-    throw new Error(`Atomic session update exhausted retry budget for ${id}`)
+    throw new AtomicUpdateNotCommittedError(`Atomic session update exhausted retry budget for ${id}`)
   }
 
   const finalizeConsumedToken = async (
@@ -590,14 +621,23 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
     linkedSessionRevalidatedAt.clear()
   }
 
-  const subscribeToBroadcast = (channel: string, handler: (message: unknown) => void): void => {
-    valkeyStore.subscribeToBroadcast(channel, (message) => {
-      handler(message)
-    })
+  // Handlers are passed through unchanged so `unsubscribeFromBroadcast` can match them.
+  const subscribeToBroadcast = (
+    channel: string,
+    handler: (message: unknown) => void,
+    options?: BroadcastSubscribeOptions,
+  ): Promise<void> => valkeyStore.subscribeToBroadcast(channel, handler, options)
+
+  const unsubscribeFromBroadcast = (channel: string, handler: (message: unknown) => void): void => {
+    valkeyStore.unsubscribeFromBroadcast(channel, handler)
   }
 
   const initializePubSub = (): void => {
     valkeyStore.initializePubSub()
+  }
+
+  const publishBroadcastStrict = async (channel: string, message: Record<string, unknown>): Promise<void> => {
+    await valkeyStore.publishBroadcastStrict(channel, message)
   }
 
   const publishBroadcast = async (channel: string, message: Record<string, unknown>): Promise<void> => {
@@ -623,8 +663,10 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
     flushCache,
     close,
     subscribeToBroadcast,
+    unsubscribeFromBroadcast,
     initializePubSub,
     publishBroadcast,
+    publishBroadcastStrict,
   }
 }
 

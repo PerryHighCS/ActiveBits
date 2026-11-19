@@ -2,7 +2,7 @@ import test, { type TestContext } from 'node:test'
 import assert from 'node:assert'
 import http from 'node:http'
 import { WebSocket } from 'ws'
-import { createSessionStore, createSession, type SessionRecord } from './core/sessions.js'
+import { AtomicUpdateNotCommittedError, createSessionStore, createSession, type SessionRecord } from './core/sessions.js'
 import { type ValkeySessionStore } from './core/valkeyStore.js'
 import { createWsRouter } from './core/wsRouter.js'
 import { EMBEDDED_CHILD_SESSION_PREFIX } from '../types/session.js'
@@ -953,3 +953,23 @@ void test('updateAtomic will not commit into a same-id incarnation recreated aft
   assert.equal((result?.data as { touched?: boolean }).touched, true)
   assert.equal(records.get('cas-aba')?.created, (recordA.created as number) + 10_000, 'incarnation B was not overwritten by a mutation derived from A')
 })
+
+// updateAtomic tells callers when a failure definitely committed nothing (safe to re-run
+// the mutation) apart from an ambiguous one (the write may have committed).
+for (const [name, override, notCommitted] of [
+  ['every compare-and-set loses', { async compareAndSet() { return null } }, true],
+  ['the read before the write fails', { async getStrict() { throw new Error('[TEST] read outage') } }, true],
+  ['the compare-and-set itself fails (reply lost)', { async compareAndSet() { throw new Error('[TEST] CAS reply lost') } }, false],
+] as const) {
+  void test(`Valkey updateAtomic failure classification: ${name}`, async (t) => {
+    const records = new Map<string, SessionRecord>()
+    records.set('s1', { id: 's1', created: 1, mutationRevision: 0, data: {} } as unknown as SessionRecord)
+    const backend = { ...valkeyStoreForTest(records, []), ...override } as unknown as ValkeySessionStore
+    const sessions = createSessionStore('redis://test', 1_000, backend)
+    t.after(async () => { await sessions.close() })
+    console.log(`[TEST] expecting an updateAtomic failure: ${name}`)
+    const error = await sessions.updateAtomic!('s1', (draft) => draft).then(() => null, (err: unknown) => err)
+    assert.ok(error instanceof Error)
+    assert.equal(error instanceof AtomicUpdateNotCommittedError, notCommitted)
+  })
+}

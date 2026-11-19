@@ -345,3 +345,213 @@ void test('ValkeyPersistentStore incrementAttemptsStrict returns the script coun
   Object.defineProperty(store, 'client', { value: { async eval(): Promise<number> { return 3 } } })
   assert.equal(await store.incrementAttemptsStrict('ip:hash'), 3)
 })
+
+// ── Broadcast subscription lifecycle ─────────────────────────────────────────
+
+function pubSubStoreForTest() {
+  const commands: string[] = []
+  const pendingAcks: Array<(err?: Error) => void> = []
+  const store = Object.create(ValkeySessionStore.prototype) as ValkeySessionStore
+  Object.defineProperty(store, 'broadcastChannels', { value: new Map() })
+  Object.defineProperty(store, 'subscriberWasReady', { value: false, writable: true })
+  Object.defineProperty(store, 'subscriber', {
+    value: {
+      subscribe(channel: string, callback?: (err: Error | null) => void) {
+        commands.push(`SUBSCRIBE ${channel}`)
+        pendingAcks.push((err) => callback?.(err ?? null))
+        return Promise.resolve()
+      },
+      unsubscribe(channel: string) {
+        commands.push(`UNSUBSCRIBE ${channel}`)
+        return Promise.resolve()
+      },
+    },
+  })
+  return {
+    store,
+    commands,
+    ackAll: () => { for (const ack of pendingAcks.splice(0)) ack() },
+    failAll: () => { for (const ack of pendingAcks.splice(0)) ack(new Error('[TEST] SUBSCRIBE failed')) },
+  }
+}
+
+void test('subscribeToBroadcast settles only after the server confirms the subscription', async () => {
+  const { store, commands, ackAll } = pubSubStoreForTest()
+  let settled = false
+  const ready = store.subscribeToBroadcast('ch', () => {}).then(() => { settled = true })
+  await Promise.resolve()
+  assert.equal(settled, false, 'not active before the SUBSCRIBE is confirmed')
+  ackAll()
+  await ready
+  assert.equal(settled, true)
+
+  // A second handler on an active channel does not subscribe again and settles at once.
+  await store.subscribeToBroadcast('ch', () => {})
+  assert.deepEqual(commands, ['SUBSCRIBE ch'])
+})
+
+void test('unsubscribeFromBroadcast unsubscribes only when the last handler leaves, and a later subscribe resubscribes', async () => {
+  const { store, commands, ackAll } = pubSubStoreForTest()
+  const first = () => {}
+  const second = () => {}
+  const ready = Promise.all([store.subscribeToBroadcast('ch', first), store.subscribeToBroadcast('ch', second)])
+  ackAll()
+  await ready
+
+  store.unsubscribeFromBroadcast('ch', first)
+  assert.deepEqual(commands, ['SUBSCRIBE ch'], 'another handler still listens')
+  store.unsubscribeFromBroadcast('ch', second)
+  assert.deepEqual(commands, ['SUBSCRIBE ch', 'UNSUBSCRIBE ch'])
+  store.unsubscribeFromBroadcast('ch', second)
+  assert.equal(commands.length, 2, 'unknown handler is a no-op')
+
+  const again = store.subscribeToBroadcast('ch', first)
+  ackAll()
+  await again
+  assert.deepEqual(commands, ['SUBSCRIBE ch', 'UNSUBSCRIBE ch', 'SUBSCRIBE ch'])
+})
+
+void test('a failed SUBSCRIBE rejects, is not cached as active, and the next subscribe retries', async () => {
+  const { store, commands, ackAll, failAll } = pubSubStoreForTest()
+  const handler = () => {}
+  console.log('[TEST] expecting a failed SUBSCRIBE to be logged')
+  const first = store.subscribeToBroadcast('ch', handler)
+  failAll()
+  await assert.rejects(first, /SUBSCRIBE failed/)
+
+  const retry = store.subscribeToBroadcast('ch', handler)
+  assert.deepEqual(commands, ['SUBSCRIBE ch', 'SUBSCRIBE ch'], 'the retry subscribes again')
+  ackAll()
+  await retry
+  await store.subscribeToBroadcast('ch', handler)
+  assert.equal(commands.length, 2, 'active now: no further SUBSCRIBE')
+})
+
+void test('a failed SUBSCRIBE that the caller ignores does not cause an unhandled rejection', async () => {
+  const { store, failAll } = pubSubStoreForTest()
+  let unhandled = 0
+  const onUnhandled = () => { unhandled += 1 }
+  process.on('unhandledRejection', onUnhandled)
+  try {
+    console.log('[TEST] expecting a failed SUBSCRIBE to be logged')
+    void store.subscribeToBroadcast('ch', () => {})
+    failAll()
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    assert.equal(unhandled, 0)
+  } finally {
+    process.off('unhandledRejection', onUnhandled)
+  }
+})
+
+void test('adding the same handler twice registers it once', async () => {
+  const { store, commands, ackAll } = pubSubStoreForTest()
+  const handler = () => {}
+  const ready = Promise.all([store.subscribeToBroadcast('ch', handler), store.subscribeToBroadcast('ch', handler)])
+  ackAll()
+  await ready
+  store.unsubscribeFromBroadcast('ch', handler)
+  assert.deepEqual(commands, ['SUBSCRIBE ch', 'UNSUBSCRIBE ch'], 'one removal releases it')
+})
+
+void test('after a subscriber reconnect, channels are re-confirmed and onResubscribed listeners run', async () => {
+  const { store, commands, ackAll } = pubSubStoreForTest()
+  const calls: string[] = []
+  const ready = Promise.all([
+    store.subscribeToBroadcast('a', () => {}, { onResubscribed: () => calls.push('a') }),
+    store.subscribeToBroadcast('b', () => {}),
+  ])
+  ackAll()
+  await ready
+  store.handleSubscriberReady() // first connect: nothing to re-confirm
+  assert.deepEqual(commands, ['SUBSCRIBE a', 'SUBSCRIBE b'])
+
+  store.handleSubscriberReady() // reconnect
+  assert.deepEqual(commands.slice(2), ['SUBSCRIBE a', 'SUBSCRIBE b'])
+  await Promise.resolve()
+  assert.deepEqual(calls, [], 'not before the server confirms')
+  ackAll()
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  assert.deepEqual(calls, ['a'])
+})
+
+void test('a channel released while its re-confirmation is pending does not notify', async () => {
+  const { store, ackAll } = pubSubStoreForTest()
+  const calls: string[] = []
+  const handler = () => {}
+  const ready = store.subscribeToBroadcast('a', handler, { onResubscribed: () => calls.push('a') })
+  ackAll()
+  await ready
+  store.handleSubscriberReady()
+  store.handleSubscriberReady() // reconnect
+  store.unsubscribeFromBroadcast('a', handler)
+  ackAll()
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  assert.deepEqual(calls, [])
+})
+
+void test('a failed re-confirmation after a reconnect is retried, and listeners run only after it succeeds', async () => {
+  const { store, commands, ackAll, failAll } = pubSubStoreForTest()
+  const calls: string[] = []
+  const ready = store.subscribeToBroadcast('a', () => {}, { onResubscribed: () => calls.push('a') })
+  ackAll()
+  await ready
+  store.handleSubscriberReady()
+
+  store.handleSubscriberReady() // reconnect
+  console.log('[TEST] expecting a failed re-confirmation SUBSCRIBE')
+  failAll()
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  assert.deepEqual(calls, [], 'no listener after a failure')
+
+  await new Promise((resolve) => setTimeout(resolve, 150)) // backoff elapses; retried
+  assert.deepEqual(commands, ['SUBSCRIBE a', 'SUBSCRIBE a', 'SUBSCRIBE a'])
+  ackAll()
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  assert.deepEqual(calls, ['a'])
+})
+
+void test('a pending re-confirmation retry stops when the channel is released', async () => {
+  const { store, commands, ackAll, failAll } = pubSubStoreForTest()
+  const handler = () => {}
+  const ready = store.subscribeToBroadcast('a', handler, { onResubscribed: () => {} })
+  ackAll()
+  await ready
+  store.handleSubscriberReady()
+  store.handleSubscriberReady() // reconnect
+  console.log('[TEST] expecting a failed re-confirmation SUBSCRIBE')
+  failAll()
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  store.unsubscribeFromBroadcast('a', handler)
+  await new Promise((resolve) => setTimeout(resolve, 150))
+  assert.deepEqual(commands, ['SUBSCRIBE a', 'SUBSCRIBE a', 'UNSUBSCRIBE a'], 'no retry after release')
+})
+
+void test('publishBroadcastStrict rejects on failure; publishBroadcast logs and resolves', async () => {
+  const store = Object.create(ValkeySessionStore.prototype) as ValkeySessionStore
+  Object.defineProperty(store, 'client', { value: { publish: () => Promise.reject(new Error('[TEST] publish failed')) } })
+  console.log('[TEST] expecting two logged publish failures')
+  await assert.rejects(store.publishBroadcastStrict('ch', { a: 1 }), /publish failed/)
+  await store.publishBroadcast('ch', { a: 1 })
+})
+
+void test('close cancels pending re-confirmation retries and clears the channel registry', async () => {
+  const { store, commands, ackAll, failAll } = pubSubStoreForTest()
+  const quits: string[] = []
+  Object.defineProperty(store, 'client', { value: { quit: async () => { quits.push('client') } } })
+  const subscriber = (store as unknown as { subscriber: Record<string, unknown> }).subscriber
+  subscriber.quit = async () => { quits.push('subscriber') }
+  const ready = store.subscribeToBroadcast('a', () => {}, { onResubscribed: () => {} })
+  ackAll()
+  await ready
+  store.handleSubscriberReady()
+  store.handleSubscriberReady() // reconnect
+  console.log('[TEST] expecting a failed re-confirmation SUBSCRIBE before close')
+  failAll()
+  await new Promise((resolve) => setTimeout(resolve, 0))
+
+  await store.close()
+  await new Promise((resolve) => setTimeout(resolve, 150))
+  assert.deepEqual(commands, ['SUBSCRIBE a', 'SUBSCRIBE a'], 'no retry after close')
+  assert.deepEqual(quits, ['client', 'subscriber'])
+  assert.equal((store as unknown as { broadcastChannels: Map<string, unknown> }).broadcastChannels.size, 0)
+})

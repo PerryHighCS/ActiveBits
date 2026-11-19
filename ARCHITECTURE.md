@@ -106,6 +106,14 @@ overwriting the replacement. Activity code must use this primitive when a write
 based on a session snapshot could otherwise overwrite unrelated state committed
 by another server instance.
 
+Failures are classified for callers that retry. `updateAtomic` throws
+`AtomicUpdateNotCommittedError` only when nothing was written: every
+compare-and-set lost (retry budget exhausted), or the read before a write failed.
+That is safe to retry by re-running the mutation. Any other error (for example a
+failed compare-and-set call whose reply was lost) is ambiguous: the write may have
+committed. A caller must not re-run a non-idempotent mutation after it, and should
+report an unknown outcome instead.
+
 When a caller supplies the incarnation it read, compare-and-set requires the
 stored record to contain that exact `created` value. A missing stored identity
 fails closed like a mismatch; revision-only compatibility applies only when the
@@ -129,6 +137,31 @@ Video Sync additionally carries a monotonic `playbackRevision` in its public
 playback state. Clients order state frames by that revision before considering
 wall-clock timestamps, so server clock skew and reordered pub/sub delivery cannot
 restore an older instructor command.
+
+Commissioned Ideas uses the same idea for a different problem. Every snapshot and
+every mutation response carries `revision` (the committed `mutationRevision`).
+Client pending state from a write, such as keyboard focus after a move, the podium
+reveal button, or a just-submitted ballot, is released only by a snapshot at or
+after that write's revision. Clients drop older snapshots. Across instances, a
+writer publishes a data-free invalidation after commit, and each instance re-reads
+committed state with `getStrict` before delivering to its own sockets.
+
+Pub/sub subscriptions are not replayed: Valkey drops messages published before a
+SUBSCRIBE is confirmed. `subscribeToBroadcast` returns a promise that settles once
+the subscription is active (a no-op store settles immediately). It rejects if the
+SUBSCRIBE fails, and the channel is then not treated as active, so the next call
+subscribes again (the rejection is pre-handled for callers that ignore it). When
+the subscriber connection reconnects, ioredis re-subscribes, but messages published
+while it was down are lost. The store then re-confirms each channel and calls the
+handler's optional `onResubscribed` listener. A failed re-confirmation is retried
+with capped backoff while the channel stays registered, and the listeners run only
+after it succeeds. `close()` cancels those retries and clears the channel registry
+before quitting the connections. `publishBroadcast` is fire-and-forget (it logs
+failures). `publishBroadcastStrict` rejects on failure, for callers that must
+deliver and will retry. A caller that must not miss an update
+re-reads state after the promise settles and in `onResubscribed`. Adding the same
+handler twice registers it once. `unsubscribeFromBroadcast` removes one handler (by
+reference) and unsubscribes the channel when none remain.
 
 ## Activity Registration System
 

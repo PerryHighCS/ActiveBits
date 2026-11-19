@@ -153,6 +153,14 @@ Use this log for durable findings that future contributors and agents should reu
 - Owner: Codex
 
 - Date: 2026-04-21
+- Area: activities | planning | commissioned-ideas
+- Discovery: A staged classroom competition activity like Commissioned Ideas, described to teachers as Shark Tank-inspired, fits the current repo best when it combines activity-local stage control and registration patterns from `gallery-walk`, reveal/review flow ideas from `resonance`, leaderboard-style ranking from `traveling-salesman`, and a lightweight winner reveal borrowed from `raffle`, without adding any activity-specific branches to shared dashboard or routing layers.
+- Why it matters: The requested flow spans registration, instructor-controlled live progression, weighted peer voting, and a final reveal. Treating those as activity-owned concerns keeps the repo aligned with the activity-containment policy and avoids speculative shared abstractions for "multi-phase competition" behavior.
+- Evidence: `activities/gallery-walk/server/routes.ts`; `activities/gallery-walk/client/manager/ManagerPage.tsx`; `activities/gallery-walk/client/student/StudentPage.tsx`; `activities/resonance/server/routes.ts`; `activities/resonance/client/manager/ResonanceManager.tsx`; `activities/traveling-salesman/client/components/Leaderboard.tsx`; `activities/raffle/client/manager/RaffleManager.tsx`; `.agent/plans/commissioned-ideas-activity-plan.md`
+- Follow-up action: When implementation begins, keep Commissioned Ideas session state, voting rules, scoring, and podium reveal inside `activities/commissioned-ideas/...`, and only extract shared seams if a second activity later needs the same contracts.
+- Owner: Codex
+
+- Date: 2026-04-21
 - Area: client | activities | syncdeck
 - Discovery: SyncDeck should scope `allow-popups-to-escape-sandbox` to instructor-configured presentation iframes only; embedded/internal iframes should keep the stricter sandbox without popup escape.
 - Why it matters: `allow-popups` alone permits popup creation but keeps the new browsing context sandboxed, which breaks normal outbound navigation for presentation-authored external links. Restricting popup escape to presentation iframes preserves the narrower trust boundary for internal child activities.
@@ -1894,3 +1902,17 @@ Use this log for durable findings that future contributors and agents should reu
 - Why it matters: The extensionless import produced a Vite warning that native config loading would not support it. The explicit extension lets `vite build --configLoader native` load the config successfully.
 - Evidence: `client/vite.config.ts`; `client/tsconfig.json`; client typecheck, lint, tests, and native-config build.
 - Owner: Codex
+
+- Date: 2026-11-16
+- Area: commissioned-ideas rebase onto Node 26 / React Router 8 main
+- Discovery: Activity client code should import router hooks from `react-router`; the current client workspace no longer installs `react-router-dom`. Rebasing the commissioned-ideas manager exposed its older `react-router-dom` import during activity typechecking.
+- Why it matters: New or rebased activities can compile only when their direct runtime imports match the current workspace dependencies.
+- Evidence: `activities/commissioned-ideas/client/manager/CommissionedIdeasManager.tsx`; `client/package.json`; `npm test`.
+- Owner: Codex
+
+- Date: 2026-11-16
+- Area: local development server
+- Discovery: `npm run dev` runs the server with `node --import tsx server.ts` and no file watching, so newly added activity routes do not exist until the dev server is restarted. Unknown API paths fall through to the SPA and return `index.html` with status 200, so client `res.json()` fails with "Unexpected token '<'" rather than a 404. Vite keeps hot-reloading the client, so the UI can look current while calling routes the running server lacks.
+- Why it matters: After adding server routes, restart `npm run dev` before manual testing; an HTML-instead-of-JSON error usually means a stale server, not a routing bug.
+- Evidence: Commissioned Ideas Phase 7 podium check against a dev server started before the `podium-step` route existed.
+- Owner: Claude

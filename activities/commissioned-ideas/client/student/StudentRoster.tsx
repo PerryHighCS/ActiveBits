@@ -1,0 +1,285 @@
+import { useCallback, useRef, useState, type Ref } from 'react'
+import type { ProposalKind } from '../../shared/naming.js'
+import type { GroupingMode, StudentSafeParticipant, StudentSafeTeam } from '../../shared/types.js'
+import { sortTeams, teamLabel } from '../teamLabels.js'
+import TeamNamingPanel from './TeamNamingPanel.js'
+import { useRestoreFocusAfterRemoval } from '../useRestoreFocusAfterRemoval.js'
+import { useParticipantApi } from './useParticipantApi.js'
+import { lockedUntilSnapshot } from '../requestOutcome.js'
+
+interface StudentRosterProps {
+  participants: Record<string, StudentSafeParticipant>
+  teams: Record<string, StudentSafeTeam>
+  myParticipantId: string
+  sessionId: string
+  studentGroupingLocked: boolean
+  namingLocked: boolean
+  groupingMode: GroupingMode
+  maxTeamSize: number
+  /** Committed revision of the snapshot being rendered. */
+  snapshotRevision: number
+}
+
+export default function StudentRoster({
+  participants,
+  teams,
+  myParticipantId,
+  sessionId,
+  studentGroupingLocked,
+  namingLocked,
+  groupingMode,
+  maxTeamSize,
+  snapshotRevision,
+}: StudentRosterProps) {
+  const { request, post, busy, error, clearError } = useParticipantApi(sessionId, myParticipantId || null)
+
+  const me = participants[myParticipantId]
+  const myTeamId = me?.teamId ?? null
+
+  const teamList = sortTeams(teams)
+  const myTeam = myTeamId ? teams[myTeamId] : undefined
+  const ungrouped = Object.values(participants)
+    .filter((p) => p.teamId === null)
+    .sort((a, b) => a.name.localeCompare(b.name))
+
+  // Join, Switch, Leave, and Create remove the button that was pressed once the change
+  // lands. Focus then moves to the team status strip, which stays mounted in every state,
+  // unless the student has already moved focus elsewhere.
+  const statusRef = useRef<HTMLDivElement>(null)
+  const [awaitedRevision, setAwaitedRevision] = useState<number | null>(null)
+  const teamBusy = lockedUntilSnapshot(busy, awaitedRevision, snapshotRevision)
+  const focusRestore = useRestoreFocusAfterRemoval(useCallback(() => statusRef.current, []))
+  const postAndRefocus = async (control: HTMLElement, path: string, body: Record<string, unknown>) => {
+    focusRestore.begin(control)
+    const outcome = await request(path, body)
+    if (outcome.kind === 'ok' && typeof outcome.data.revision === 'number') setAwaitedRevision(outcome.data.revision)
+    focusRestore.settle(outcome.kind === 'ok' ? 'committed' : outcome.kind)
+  }
+  const handleCreateTeam = (control: HTMLElement) => { void postAndRefocus(control, 'create-team', {}) }
+  const handleJoinTeam = (control: HTMLElement, teamId: string) => { void postAndRefocus(control, 'join-team', { teamId }) }
+  const handleLeaveTeam = (control: HTMLElement) => { void postAndRefocus(control, 'leave-team', {}) }
+  // Proposals and votes name the team the form was shown for; the server refuses them if
+  // the student was moved meanwhile, instead of recording them on the new team.
+  const handlePropose = (kind: ProposalKind, value: string) => post('team/proposal', { kind, value, expectedTeamId: myTeamId })
+  const handleVote = async (kind: ProposalKind, proposalId: string): Promise<number | null> => {
+    const outcome = await request('team/proposal-vote', { kind, proposalId, expectedTeamId: myTeamId })
+    return outcome.kind === 'ok' && typeof outcome.data.revision === 'number' ? outcome.data.revision : null
+  }
+
+  const isManual = groupingMode === 'manual'
+
+  return (
+    <div className="p-4 space-y-5">
+      {error && (
+        <div role="alert" className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700 flex items-center justify-between gap-2">
+          <span>{error}</span>
+          <button type="button" onClick={clearError} aria-label="Dismiss error" className="text-red-400 hover:text-red-600">×</button>
+        </div>
+      )}
+
+      {/* My status */}
+      <MyTeamStatus
+        ref={statusRef}
+        myTeam={myTeam}
+        label={myTeam ? teamLabel(myTeam, teamList.indexOf(myTeam)) : ''}
+        participants={participants}
+        canLeave={isManual && !studentGroupingLocked}
+        busy={teamBusy}
+        onLeave={handleLeaveTeam}
+      />
+
+      {myTeam?.naming && (
+        <TeamNamingPanel
+          // Remount per team so a draft or pending vote never carries over to a new team.
+          key={myTeamId ?? ''}
+          naming={myTeam.naming}
+          groupName={myTeam.groupName}
+          projectName={myTeam.projectName}
+          namingLocked={namingLocked}
+          busy={busy}
+          snapshotRevision={snapshotRevision}
+          onPropose={handlePropose}
+          onVote={handleVote}
+        />
+      )}
+
+      {/* Waiting for instructor placement */}
+      {myTeamId === null && (!isManual || studentGroupingLocked) && (
+        <p className="text-sm text-gray-500 italic" role="status">
+          Your instructor will assign you to a team.
+        </p>
+      )}
+
+      {/* Teams */}
+      {teamList.length > 0 && (
+        <section aria-label="Teams">
+          <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">
+            Teams ({teamList.length})
+          </h3>
+          <div className="space-y-2">
+            {teamList.map((team, idx) => {
+              const members = team.memberIds
+                .map((id) => participants[id])
+                .filter((p): p is StudentSafeParticipant => p !== undefined)
+                .sort((a, b) => a.name.localeCompare(b.name))
+              const isMine = team.id === myTeamId
+              const memberCount = members.length
+              const isFull = memberCount >= maxTeamSize
+              const canJoin = isManual && !isMine && !studentGroupingLocked && !isFull
+              const label = teamLabel(team, idx)
+
+              return (
+                <div
+                  key={team.id}
+                  className={`rounded-lg border px-3 py-2 ${isMine ? 'border-amber-300 bg-amber-50' : 'border-gray-200 bg-white'}`}
+                >
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <p className="text-xs font-semibold text-gray-600">
+                      {label}
+                      <span className="ml-1 font-normal text-gray-400">({memberCount}/{maxTeamSize})</span>
+                    </p>
+                    {canJoin && (
+                      <button
+                        type="button"
+                        disabled={teamBusy}
+                        onClick={(event) => handleJoinTeam(event.currentTarget, team.id)}
+                        aria-label={`${myTeamId ? 'Switch to' : 'Join'} ${label}`}
+                        className="rounded-full border border-amber-400 bg-amber-50 px-2.5 py-0.5 text-xs font-medium text-amber-700 hover:bg-amber-100 disabled:opacity-50"
+                      >
+                        {myTeamId ? 'Switch' : 'Join'}
+                      </button>
+                    )}
+                    {!isMine && isFull && (
+                      <span className="text-xs text-gray-400">Full</span>
+                    )}
+                    {isMine && (
+                      <span className="text-xs font-medium text-amber-600">Your team</span>
+                    )}
+                  </div>
+                  <ul className="space-y-0.5">
+                    {members.map((p) => (
+                      <li
+                        key={p.id}
+                        className={`text-sm px-1 py-0.5 rounded ${
+                          p.id === myParticipantId ? 'text-amber-800 font-medium' : 'text-gray-700'
+                        }`}
+                      >
+                        {p.name}
+                        {p.id === myParticipantId && (
+                          <span className="ml-1 text-amber-600 text-xs">(you)</span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )
+            })}
+          </div>
+        </section>
+      )}
+
+      {/* Ungrouped students */}
+      {ungrouped.length > 0 && (
+        <section aria-label="Ungrouped students">
+          <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">
+            {isManual && myTeamId === null && !studentGroupingLocked
+              ? 'Ungrouped — create a team to invite classmates'
+              : `Ungrouped (${ungrouped.length})`}
+          </h3>
+          <ul className="space-y-1">
+            {ungrouped.map((p) => {
+              const isMe = p.id === myParticipantId
+              return (
+                <li key={p.id}>
+                  <span
+                    aria-current={isMe ? 'true' : undefined}
+                    className={`text-sm px-3 py-1.5 rounded-lg inline-block ${
+                      isMe ? 'bg-amber-100 text-amber-800 font-medium' : 'text-gray-700'
+                    }`}
+                  >
+                    {p.name}
+                    {isMe && <span className="ml-1 text-amber-600 text-xs">(you)</span>}
+                  </span>
+                </li>
+              )
+            })}
+          </ul>
+        </section>
+      )}
+
+      {/* Create team */}
+      {isManual && myTeamId === null && !studentGroupingLocked && (
+        <button
+          type="button"
+          disabled={teamBusy}
+          onClick={(event) => handleCreateTeam(event.currentTarget)}
+          className="w-full rounded-lg border-2 border-dashed border-amber-300 py-3 text-sm font-medium text-amber-600 hover:bg-amber-50 disabled:opacity-50"
+        >
+          + Create a new team
+        </button>
+      )}
+
+      {ungrouped.length === 0 && teamList.length === 0 && (
+        <p className="text-sm text-gray-400 italic">Waiting for classmates to join…</p>
+      )}
+    </div>
+  )
+}
+
+// ── My team status strip ──────────────────────────────────────────────────────
+
+interface MyTeamStatusProps {
+  ref: Ref<HTMLDivElement>
+  myTeam: StudentSafeTeam | undefined
+  label: string
+  participants: Record<string, StudentSafeParticipant>
+  canLeave: boolean
+  busy: boolean
+  onLeave: (control: HTMLElement) => void
+}
+
+function MyTeamStatus({ ref, myTeam, label, participants, canLeave, busy, onLeave }: MyTeamStatusProps) {
+  if (!myTeam) {
+    return (
+      <div
+        ref={ref}
+        tabIndex={-1}
+        data-testid="ci-my-team-status"
+        className="rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm text-gray-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
+      >
+        You’re not on a team yet.
+      </div>
+    )
+  }
+
+  const names = myTeam.memberIds
+    .map((id) => participants[id])
+    .filter((p): p is StudentSafeParticipant => p !== undefined)
+    .map((p) => p.name)
+    .join(', ')
+
+  return (
+    <div
+      ref={ref}
+      tabIndex={-1}
+      data-testid="ci-my-team-status"
+      className="rounded-lg bg-amber-50 border border-amber-200 px-4 py-3 flex items-center justify-between gap-3 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
+    >
+      <div>
+        <p className="text-sm font-semibold text-amber-800">Your team: {label}</p>
+        {myTeam.projectName && <p className="text-xs text-amber-700 italic">Project: {myTeam.projectName}</p>}
+        <p className="text-xs text-amber-700 mt-0.5">{names}</p>
+      </div>
+      {canLeave && (
+        <button
+          type="button"
+          disabled={busy}
+          onClick={(event) => onLeave(event.currentTarget)}
+          className="rounded-md border border-amber-400 px-2.5 py-1 text-xs font-medium text-amber-700 hover:bg-amber-100 disabled:opacity-50"
+        >
+          Leave team
+        </button>
+      )}
+    </div>
+  )
+}
