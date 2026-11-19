@@ -488,3 +488,40 @@ void test('a channel released while its re-confirmation is pending does not noti
   await new Promise((resolve) => setTimeout(resolve, 0))
   assert.deepEqual(calls, [])
 })
+
+void test('a failed re-confirmation after a reconnect is retried, and listeners run only after it succeeds', async () => {
+  const { store, commands, ackAll, failAll } = pubSubStoreForTest()
+  const calls: string[] = []
+  const ready = store.subscribeToBroadcast('a', () => {}, { onResubscribed: () => calls.push('a') })
+  ackAll()
+  await ready
+  store.handleSubscriberReady()
+
+  store.handleSubscriberReady() // reconnect
+  console.log('[TEST] expecting a failed re-confirmation SUBSCRIBE')
+  failAll()
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  assert.deepEqual(calls, [], 'no listener after a failure')
+
+  await new Promise((resolve) => setTimeout(resolve, 150)) // backoff elapses; retried
+  assert.deepEqual(commands, ['SUBSCRIBE a', 'SUBSCRIBE a', 'SUBSCRIBE a'])
+  ackAll()
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  assert.deepEqual(calls, ['a'])
+})
+
+void test('a pending re-confirmation retry stops when the channel is released', async () => {
+  const { store, commands, ackAll, failAll } = pubSubStoreForTest()
+  const handler = () => {}
+  const ready = store.subscribeToBroadcast('a', handler, { onResubscribed: () => {} })
+  ackAll()
+  await ready
+  store.handleSubscriberReady()
+  store.handleSubscriberReady() // reconnect
+  console.log('[TEST] expecting a failed re-confirmation SUBSCRIBE')
+  failAll()
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  store.unsubscribeFromBroadcast('a', handler)
+  await new Promise((resolve) => setTimeout(resolve, 150))
+  assert.deepEqual(commands, ['SUBSCRIBE a', 'SUBSCRIBE a', 'UNSUBSCRIBE a'], 'no retry after release')
+})

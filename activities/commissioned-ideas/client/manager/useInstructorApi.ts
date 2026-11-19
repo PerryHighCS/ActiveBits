@@ -1,11 +1,13 @@
 import { useCallback, useState } from 'react'
+import { outcomeKindForStatus } from '../requestOutcome.js'
 
 /**
  * What happened to an instructor request:
  * - `ok`: the server committed it (`data` is the parsed response body);
- * - `refused`: the server answered with an error status, so nothing changed;
- * - `unknown`: no readable answer (network failure, or an unreadable success body),
- *   so the change may or may not have been committed.
+ * - `refused`: the server refused it (4xx), so nothing changed;
+ * - `unknown`: no definite answer (network failure, a 5xx, or an unreadable success
+ *   body), so the change may or may not have been committed. The server answers 500
+ *   when a store error may have followed a commit.
  */
 export type InstructorApiOutcome =
   | { kind: 'ok'; data: Record<string, unknown> }
@@ -42,7 +44,11 @@ export function useInstructorApi(sessionId: string, instructorPasscode: string) 
           (value: unknown) => (value !== null && typeof value === 'object' ? value as Record<string, unknown> : {}),
           () => null,
         )
-        if (!res.ok) {
+        if (outcomeKindForStatus(res.status) === 'unknown') {
+          setError('The server could not confirm the change. Check the board after it refreshes before trying again.')
+          return { kind: 'unknown' }
+        }
+        if (outcomeKindForStatus(res.status) === 'refused') {
           setError(typeof data?.error === 'string' ? data.error : 'Request failed. Please try again.')
           return { kind: 'refused', status: res.status }
         }

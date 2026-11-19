@@ -184,6 +184,7 @@ function StudentSessionView({ sessionId }: { sessionId: string }) {
             namingLocked={snapshot.namingLocked}
             groupingMode={snapshot.groupingMode}
             maxTeamSize={snapshot.maxTeamSize}
+            snapshotRevision={snapshot.revision}
           />
         )}
 

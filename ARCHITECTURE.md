@@ -153,7 +153,9 @@ SUBSCRIBE fails, and the channel is then not treated as active, so the next call
 subscribes again (the rejection is pre-handled for callers that ignore it). When
 the subscriber connection reconnects, ioredis re-subscribes, but messages published
 while it was down are lost. The store then re-confirms each channel and calls the
-handler's optional `onResubscribed` listener. A caller that must not miss an update
+handler's optional `onResubscribed` listener. A failed re-confirmation is retried
+with capped backoff while the channel stays registered, and the listeners run only
+after it succeeds. A caller that must not miss an update
 re-reads state after the promise settles and in `onResubscribed`. Adding the same
 handler twice registers it once. `unsubscribeFromBroadcast` removes one handler (by
 reference) and unsubscribes the channel when none remain.

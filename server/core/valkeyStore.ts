@@ -33,7 +33,13 @@ interface BroadcastChannelState {
   handlers: Map<BroadcastHandler, (() => void) | undefined>
   /** Settles once the server confirmed the current SUBSCRIBE; null after a failure, so the next call retries. */
   ready: Promise<void> | null
+  /** Pending retry of a failed re-confirmation after a reconnect; cleared on release or the next reconnect. */
+  reconfirmTimer: ReturnType<typeof setTimeout> | null
 }
+
+/** Backoff for retrying a failed re-confirmation after a reconnect (doubling, capped). */
+const RECONFIRM_RETRY_BASE_MS = 100
+const RECONFIRM_RETRY_MAX_MS = 5000
 
 type ScanResult = [string, string[]]
 
@@ -107,7 +113,7 @@ export class ValkeySessionStore {
   subscribeToBroadcast(channel: string, handler: BroadcastHandler, options: BroadcastSubscribeOptions = {}): Promise<void> {
     let state = this.broadcastChannels.get(channel)
     if (state == null) {
-      state = { handlers: new Map(), ready: null }
+      state = { handlers: new Map(), ready: null, reconfirmTimer: null }
       this.broadcastChannels.set(channel, state)
     }
     state.handlers.set(handler, options.onResubscribed)
@@ -143,13 +149,31 @@ export class ValkeySessionStore {
       return
     }
     for (const [channel, state] of this.broadcastChannels) {
-      this.activateChannel(channel, state).then(() => {
-        if (this.broadcastChannels.get(channel) !== state) return // released meanwhile
-        for (const listener of state.handlers.values()) listener?.()
-      }, () => {
-        // Logged in activateChannel; the next subscribe call or reconnect retries.
-      })
+      this.reconfirmChannel(channel, state, 0)
     }
+  }
+
+  /**
+   * Re-confirms `channel` after a reconnect, then calls its `onResubscribed` listeners. A
+   * failed SUBSCRIBE is retried with capped backoff while the channel stays registered
+   * (release or a newer reconnect cancels it); listeners run only after a success.
+   */
+  private reconfirmChannel(channel: string, state: BroadcastChannelState, failures: number): void {
+    if (state.reconfirmTimer !== null) {
+      clearTimeout(state.reconfirmTimer)
+      state.reconfirmTimer = null
+    }
+    this.activateChannel(channel, state).then(() => {
+      if (this.broadcastChannels.get(channel) !== state) return // released meanwhile
+      for (const listener of state.handlers.values()) listener?.()
+    }, () => {
+      if (this.broadcastChannels.get(channel) !== state) return
+      const delayMs = Math.min(RECONFIRM_RETRY_MAX_MS, RECONFIRM_RETRY_BASE_MS * 2 ** failures)
+      state.reconfirmTimer = setTimeout(() => {
+        state.reconfirmTimer = null
+        if (this.broadcastChannels.get(channel) === state) this.reconfirmChannel(channel, state, failures + 1)
+      }, delayMs)
+    })
   }
 
   /**
@@ -161,6 +185,7 @@ export class ValkeySessionStore {
     if (state == null || !state.handlers.delete(handler)) return
     if (state.handlers.size > 0) return
     this.broadcastChannels.delete(channel)
+    if (state.reconfirmTimer !== null) clearTimeout(state.reconfirmTimer)
     this.subscriber.unsubscribe(channel).catch((err: unknown) => {
       console.error(`Failed to unsubscribe from ${channel}:`, err)
     })

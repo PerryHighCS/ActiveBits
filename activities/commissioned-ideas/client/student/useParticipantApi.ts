@@ -1,4 +1,5 @@
 import { useCallback, useState } from 'react'
+import { outcomeKindForStatus } from '../requestOutcome.js'
 
 /** Request status, tagged with the participant whose request it is. */
 interface RequestStatus {
@@ -10,9 +11,10 @@ interface RequestStatus {
 /**
  * What happened to a participant request (same meaning as the instructor's):
  * - `ok`: the server committed it (`data` is the parsed response body);
- * - `refused`: the server answered with an error status, so nothing changed;
- * - `unknown`: no readable answer (network failure, or an unreadable success body),
- *   so the change may or may not have been committed; a snapshot will tell.
+ * - `refused`: the server refused it (4xx), so nothing changed;
+ * - `unknown`: no definite answer (network failure, a 5xx, or an unreadable success
+ *   body), so the change may or may not have been committed; a snapshot will tell. The
+ *   server answers 500 when a store error may have followed a commit.
  */
 export type ParticipantApiOutcome =
   | { kind: 'ok'; data: Record<string, unknown> }
@@ -20,6 +22,7 @@ export type ParticipantApiOutcome =
   | { kind: 'unknown' }
 
 const NETWORK_ERROR = 'Network error — please try again.'
+const UNCONFIRMED_ERROR = 'The server could not confirm your change. Your view will update if it was saved.'
 
 /**
  * POST helper for participant-authenticated Commissioned Ideas routes. The server
@@ -58,7 +61,11 @@ export function useParticipantApi(sessionId: string, expectedParticipantId: stri
         (value: unknown) => (value !== null && typeof value === 'object' ? value as Record<string, unknown> : {}),
         () => null,
       )
-      if (!res.ok) {
+      if (outcomeKindForStatus(res.status) === 'unknown') {
+        settle(UNCONFIRMED_ERROR)
+        return { kind: 'unknown' }
+      }
+      if (outcomeKindForStatus(res.status) === 'refused') {
         settle(typeof data?.error === 'string' ? data.error : 'Something went wrong. Please try again.')
         return { kind: 'refused', status: res.status }
       }

@@ -1,5 +1,5 @@
 import { expect, type APIRequestContext, type Page, test } from '@playwright/test'
-import { createTeamViaApi, registerStudentViaApi, skipStudentBrowserFlowsOnWebKit } from './studentApi'
+import { postAsStudent, registerStudentViaApi, skipStudentBrowserFlowsOnWebKit, createTeamViaApi } from './studentApi'
 
 interface CreatedSession {
   id: string
@@ -106,4 +106,28 @@ test('placing late arrivals keeps keyboard focus on the next placement, then on 
   const done = page.getByTestId('ci-late-arrivals-done')
   await expect(done).toHaveText('All late arrivals are placed.')
   await expect(done).toBeFocused()
+})
+
+test('with no teams left, rejecting a late arrival moves focus to the next student’s Reject button', async ({ page, request }) => {
+  const session = await createSession(request)
+  const eli = await registerStudentViaApi(request, session.id, 'Eli')
+  expect((await postAsStudent(request, session.id, eli, 'create-team')).ok()).toBe(true)
+  await setPhase(request, session, 'presentation')
+  await registerStudentViaApi(request, session.id, 'Ann')
+  await registerStudentViaApi(request, session.id, 'Bob')
+  // Rejecting the only team's last member deletes the team: placement is impossible.
+  const reject = await request.post(`/api/commissioned-ideas/${session.id}/participant-name`, {
+    data: { participantId: eli.participantId, rejected: true },
+    headers: { 'X-Commissioned-Ideas-Instructor-Passcode': session.instructorPasscode },
+  })
+  expect(reject.ok()).toBe(true)
+
+  await openManager(page, session)
+  const late = page.getByRole('region', { name: 'Late arrivals (2)' })
+  await expect(late.getByRole('combobox', { name: 'Place Bob on a team' })).toBeDisabled()
+
+  await late.getByRole('button', { name: 'Reject Ann' }).focus()
+  await page.keyboard.press('Enter')
+  await expect(page.getByRole('button', { name: 'Reject Ann' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Reject Bob' })).toBeFocused()
 })

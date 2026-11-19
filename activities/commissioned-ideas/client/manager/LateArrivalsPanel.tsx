@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from 'react'
 import type { ManagerParticipant, ManagerSnapshot } from '../hooks/useCommissionedIdeasSession.js'
 import { useRestoreFocusAfterRemoval } from '../useRestoreFocusAfterRemoval.js'
+import { LATE_ARRIVAL_CONTROL_ATTR, lateArrivalFocusTarget } from './lateArrivalsModel.js'
 import { sortTeams, teamLabelsById } from '../teamLabels.js'
 import { countActiveMembers } from './teamBoardModel.js'
 import { useInstructorApi } from './useInstructorApi.js'
@@ -9,22 +10,6 @@ interface LateArrivalsPanelProps {
   sessionId: string
   instructorPasscode: string
   snapshot: ManagerSnapshot
-}
-
-const PLACE_SELECT_ATTR = 'data-late-arrival-select'
-
-/**
- * Where focus goes after a late arrival's row is removed (placed or rejected): the
- * placement control of the student who was next to it (`preferredId`), else the first
- * one still waiting, else the "all placed" status that replaces the list.
- */
-export function lateArrivalFocusTarget(
-  list: ParentNode | null,
-  preferredId: string | null,
-  allPlaced: HTMLElement | null,
-): HTMLElement | null {
-  const selects = list ? [...list.querySelectorAll<HTMLElement>(`[${PLACE_SELECT_ATTR}]`)] : []
-  return selects.find((el) => el.getAttribute(PLACE_SELECT_ATTR) === preferredId) ?? selects[0] ?? allPlaced
 }
 
 /**
@@ -47,7 +32,11 @@ export default function LateArrivalsPanel({ sessionId, instructorPasscode, snaps
   const allPlacedRef = useRef<HTMLParagraphElement>(null)
   const nextIdRef = useRef<string | null>(null)
   const focusRestore = useRestoreFocusAfterRemoval(useCallback(
-    () => lateArrivalFocusTarget(listRef.current, nextIdRef.current, allPlacedRef.current),
+    () => lateArrivalFocusTarget<HTMLElement>(
+      listRef.current ? [...listRef.current.querySelectorAll<HTMLElement>(`[${LATE_ARRIVAL_CONTROL_ATTR}]`)] : [],
+      nextIdRef.current,
+      allPlacedRef.current,
+    ),
     [],
   ))
 
@@ -115,7 +104,7 @@ export default function LateArrivalsPanel({ sessionId, instructorPasscode, snaps
             <span className="flex-1 min-w-0 text-sm font-medium text-gray-800 truncate">{participant.name}</span>
             <select
               aria-label={`Place ${participant.name} on a team`}
-              {...{ [PLACE_SELECT_ATTR]: participant.id }}
+              {...{ [LATE_ARRIVAL_CONTROL_ATTR]: participant.id }}
               value=""
               disabled={busy || teams.length === 0}
               onChange={(event) => {
@@ -139,6 +128,7 @@ export default function LateArrivalsPanel({ sessionId, instructorPasscode, snaps
               type="button"
               disabled={busy}
               onClick={(event) => { void act(event.currentTarget, index, 'participant-name', { participantId: participant.id, rejected: true }) }}
+              {...{ [LATE_ARRIVAL_CONTROL_ATTR]: participant.id }}
               aria-label={`Reject ${participant.name}`}
               className="rounded-md border border-red-300 px-2.5 py-1 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"
             >

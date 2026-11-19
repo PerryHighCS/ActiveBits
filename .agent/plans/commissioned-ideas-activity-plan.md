@@ -50,6 +50,21 @@ Triage of the 25 unresolved CodeRabbit threads from 2026-07-30 on PR #243, verif
 - [ ] Open, needs product/engineering decision: participant token in `localStorage` (move to a core httpOnly participant capability); per-session atomic updates (`updateAtomic` for every writer)
 - [x] Post replies and resolve threads after the fixes are pushed (0690ab1a: 23 resolved; the two follow-up threads replied to and left open)
 
+## CodeRabbit review round 8 (2026-11-19)
+
+6 threads and 1 outside-diff comment (`valkeyStore.ts`), on c5c9481f. Grouped by contract (AGENTS.md rule 16):
+
+1. **A 5xx is an unknown outcome on the client (2 threads).** The server answers 500 when a store error may have followed a commit, but both request hooks reported it as `refused`. One exported function, `outcomeKindForStatus`, now classifies statuses for both hooks (decision table). Focus restoration keeps tracking removal after a 5xx, and nothing treats a 5xx as "nothing changed".
+2. **Committed state reaches every local socket once the store recovers (thread plus outside-diff).** Owner: the `InvalidationSubscription` record and core `reconfirmChannel`. A refresh read retries with capped backoff until it succeeds or the subscription is released, instead of giving up after 3 attempts. In core, a failed re-confirmation after a reconnect is retried while the channel stays registered, and the listeners run only after it succeeds.
+3. **One team per student (major).** `create-team` refuses a student already on a team (`409 already-on-team`), checked inside the atomic update. On the client, team controls stay disabled after a committed change until the confirming snapshot arrives (`teamControlsLocked`).
+4. **Late-arrival focus targets only enabled controls.** It tries the adjacent student's select, then their Reject button, then any enabled control. While everything is disabled (busy), it waits on that row. When nobody is left, it goes to the "all placed" status (`lateArrivalFocusTarget`, decision table, and a Playwright regression for the no-teams case).
+5. **The socket's provisional claim is made before the presence write, not inside the retryable callback.** The callback re-checks that the cookie still resolves to the claimed participant.
+
+- [x] Core: retry re-confirmation, with tests
+- [x] Server: 2, 3, 5, with tests
+- [x] Client: 1, 3, 4, with decision tables and the Playwright regression (it fails without the fix)
+- [x] Docs
+
 ## CodeRabbit review round 7 (2026-11-19)
 
 4 threads on 5edb18a4, no outside-diff comments.

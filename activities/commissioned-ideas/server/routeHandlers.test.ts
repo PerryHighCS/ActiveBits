@@ -2384,6 +2384,22 @@ void test('instructor-passcode answers a store outage with a retryable 500, not 
   assert.equal((await s.exchange({ [s.cookieName]: s.cookie.value })).statusCode, 500)
 })
 
+void test('create-team is refused for a student already on a team (no second team, no move)', async () => {
+  const s = await setupSession()
+  const ada = await s.register('Ada')
+  const first = await s.asStudent('create-team', ada, {})
+  assert.equal(first.statusCode, 200)
+  const teamId = s.teamOf(ada)
+  const teamsBefore = Object.keys(s.data().teams)
+
+  console.log('[TEST] expecting 409 already-on-team')
+  const again = await s.asStudent('create-team', ada, {})
+  assert.equal(again.statusCode, 409)
+  assert.equal((again.body as { code?: string }).code, 'already-on-team')
+  assert.deepEqual(Object.keys(s.data().teams), teamsBefore, 'no second team')
+  assert.equal(s.teamOf(ada), teamId, 'still on the first team')
+})
+
 void test('a store error after the write may have committed is not retried (no double apply)', async () => {
   const app = createMockApp()
   const { store, sessions, hooks } = createMockSessions()
@@ -3339,8 +3355,8 @@ void test('an instance that subscribes late still delivers changes published bef
   assert.equal((studentOnB.lastSnapshot() as { phase?: string } | undefined)?.phase, 'presentation', 'B re-read after activation')
 })
 
-async function waitFor(condition: () => boolean, label: string): Promise<void> {
-  for (let i = 0; i < 200 && !condition(); i += 1) await new Promise((resolve) => setTimeout(resolve, 5))
+async function waitFor(condition: () => boolean, label: string, timeoutMs = 1000): Promise<void> {
+  for (let i = 0; i < timeoutMs / 5 && !condition(); i += 1) await new Promise((resolve) => setTimeout(resolve, 5))
   assert.ok(condition(), label)
 }
 
@@ -3370,6 +3386,19 @@ void test('a failed committed-state read after an invalidation is retried', asyn
   console.log('[TEST] expecting one failed invalidation read, then a retry')
   assert.equal((await a.asInstructor('phase', { phase: 'presentation' })).statusCode, 200)
   await waitFor(() => (studentOnB.lastSnapshot() as { phase?: string } | undefined)?.phase === 'presentation', 'B delivered after the retry')
+})
+
+void test('committed state reaches local sockets even after several failed reads (no give-up while needed)', async () => {
+  const a = await setupWsHarness()
+  const b = await setupWsHarness(a)
+  const student = await a.register('Student')
+  await a.createTeam(student)
+  const studentOnB = await b.connect({}, { as: student })
+
+  a.hooks.failStrictReads = 4 // more than the old retry limit; the store then recovers
+  console.log('[TEST] expecting several failed invalidation reads, then delivery')
+  assert.equal((await a.asInstructor('phase', { phase: 'presentation' })).statusCode, 200)
+  await waitFor(() => (studentOnB.lastSnapshot() as { phase?: string } | undefined)?.phase === 'presentation', 'delivered once the store recovered', 4000)
 })
 
 void test('invalidation read retries stop once no local socket needs the session', async () => {

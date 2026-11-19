@@ -87,7 +87,7 @@ interface CommissionedIdeasSocket extends ActiveBitsWebSocket {
  *   personalized view for an auth that may still fail. `anonymous` receives the
  *   anonymous view.
  * - While `pending`, `participantId` is the participant this socket's presence write is
- *   claiming: set inside the write (the cookie is re-checked there), so a tab that is
+ *   claiming: set just before the write (the cookie is re-checked inside it), so a tab that is
  *   finishing auth already counts as live. Presence derivation counts `authenticated`
  *   sockets and these claims. Otherwise a cleanup for another tab that closes between
  *   this write's commit and its binding would see the participant as absent and commit
@@ -485,9 +485,14 @@ function refuse(status: number, error: string, log?: Refusal['log'], code?: stri
 /** Rounds of the store's `updateAtomic` before a write fails (each round has its own CAS retries). */
 const ATOMIC_UPDATE_ROUNDS = 3
 
-/** Cross-instance refresh: reads of committed state per invalidation, and the backoff step between them. */
-const REFRESH_READ_ATTEMPTS = 3
-const REFRESH_RETRY_DELAY_MS = 100
+/**
+ * Cross-instance refresh: a failed read of committed state is retried with doubling
+ * backoff (capped) until it succeeds or the subscription is released; after
+ * REFRESH_ESCALATE_AFTER failures it is logged as an error rather than a warning.
+ */
+const REFRESH_ESCALATE_AFTER = 3
+const REFRESH_RETRY_BASE_MS = 100
+const REFRESH_RETRY_MAX_MS = 5000
 /** Re-subscribe backoff after a failed SUBSCRIBE (doubling, capped), while local sockets need the session. */
 const SUBSCRIBE_RETRY_BASE_MS = 250
 const SUBSCRIBE_RETRY_MAX_MS = 5000
@@ -974,7 +979,9 @@ export default function setupCommissionedIdeasRoutes(
    * Delivers committed state (re-read, never this instance's cache) to local sockets.
    * Refreshes are coalesced: a request that arrives while one is reading is served by one
    * more read after it, so ordinary delivery costs one read per invalidation. A failed
-   * read is retried a bounded number of times while the subscription is current.
+   * read is retried with capped backoff for as long as the subscription is current (local
+   * sockets need the session), so committed state reaches them once the store recovers,
+   * even in an idle session with no further invalidations.
    */
   function requestRefresh(sessionId: string, sub: InvalidationSubscription, type: SnapshotEventType): void {
     sub.queued = type
@@ -1002,13 +1009,11 @@ export default function setupCommissionedIdeasRoutes(
         return
       } catch (err: unknown) {
         if (!isCurrent(sessionId, sub)) return
-        if (attempt >= REFRESH_READ_ATTEMPTS) {
-          console.error('[commissioned-ideas] Invalidation delivery failed', { sessionId, attempts: attempt, err })
-          return
-        }
-        console.warn('[commissioned-ideas] Invalidation read failed; retrying', { sessionId, attempt, err })
+        const delayMs = Math.min(REFRESH_RETRY_MAX_MS, REFRESH_RETRY_BASE_MS * 2 ** (attempt - 1))
+        const log = attempt >= REFRESH_ESCALATE_AFTER ? console.error : console.warn
+        log('[commissioned-ideas] Committed-state read failed; retrying', { sessionId, attempt, delayMs, err })
         sub.queued ??= type
-        await new Promise((resolve) => setTimeout(resolve, REFRESH_RETRY_DELAY_MS * attempt))
+        await new Promise((resolve) => setTimeout(resolve, delayMs))
         if (!isCurrent(sessionId, sub)) return
       }
     }
@@ -1354,6 +1359,9 @@ export default function setupCommissionedIdeasRoutes(
     const result = await mutateSession(req, res, (session) => {
       const participant = requireParticipant(req, session)
       requireStudentGrouping(session)
+      // Checked against the state being committed: a repeated or delayed create must not
+      // make a second team and move the student out of the first.
+      if (participant.teamId !== null) refuse(409, 'You are already on a team', undefined, 'already-on-team')
       const team = createTeamRecord(session.data)
       addParticipantToTeam(session.data, participant, team)
       return { teamId: team.id, participantId: participant.id }
@@ -1855,42 +1863,44 @@ export default function setupCommissionedIdeasRoutes(
     const sessionId = session.id
     if (socket.readyState !== WS_OPEN) return // closed while reading: never mark online
     const cookies = socketCookies(socket, sessionId)
-    if (!resolveParticipantFromCookies(session, cookies, { allowRejected: true })) {
+    const claimed = resolveParticipantFromCookies(session, cookies, { allowRejected: true })
+    if (!claimed) {
       sendAnonymousRefusal(socket, session)
       return
     }
 
-    // Set inside the update callback (TypeScript cannot see that assignment through a
-    // `let`, so a holder object keeps the checks below honest).
-    const bound: { participantId: string | null } = { participantId: null }
+    // Provisional claim, made before the write (never inside the retryable callback):
+    // while `pending`, a socket's participantId counts as live for presence, so another
+    // tab's cleanup that runs between this write's commit and the binding below cannot
+    // mark the participant offline. Cleared, with presence reconciled, if auth fails.
+    const participantId = claimed.id
+    socket.participantId = participantId
+    const releaseClaim = async (reason: string) => {
+      socket.participantId = null
+      await syncParticipantPresence(sessionId, participantId).catch((syncErr: unknown) => {
+        console.error(`[commissioned-ideas] Presence reconcile after ${reason} auth failed`, { sessionId, err: syncErr })
+      })
+    }
     try {
       const committed = await atomicUpdate(sessions, sessionId, (draft) => {
+        // Re-checked against the state being committed (the cookie may have been revoked).
         const entry = resolveParticipantFromCookies(draft, cookies, { allowRejected: true })
-          ?? refuse(403, 'Invalid participant credentials', undefined, 'participant-auth-refused')
-        bound.participantId = entry.id
-        // Claim before commit, so a concurrent cleanup counts this socket as live.
-        socket.participantId = entry.id
+        if (!entry || entry.id !== participantId) {
+          refuse(403, 'Invalid participant credentials', undefined, 'participant-auth-refused')
+        }
         entry.connected = true
         entry.lastSeen = Date.now()
       })
-      const participantId = bound.participantId
-      if (!committed || participantId === null) throw new Error('Session disappeared during participant auth')
+      if (!committed) throw new Error('Session disappeared during participant auth')
       // Bound and eligible for snapshots only now; this announce sends its first,
       // personalized one.
-      socket.participantId = participantId
       socket.studentAuth = 'authenticated'
       announce(committed)
-      // Closed during the write: the close handler saw no binding, so derive presence here.
+      // Closed during the write: derive presence from the sockets left.
       if (socket.readyState !== WS_OPEN) await syncParticipantPresence(sessionId, participantId)
     } catch (err: unknown) {
       if (err instanceof Refusal) {
-        // A retry refused the cookie; an earlier attempt may have claimed a participant.
-        socket.participantId = null
-        if (bound.participantId !== null) {
-          await syncParticipantPresence(sessionId, bound.participantId).catch((syncErr: unknown) => {
-            console.error('[commissioned-ideas] Presence reconcile after refused auth failed', { sessionId, err: syncErr })
-          })
-        }
+        await releaseClaim('refused')
         // A failed read propagates: the connection handler closes the socket with
         // retryable 1011, instead of leaving it `pending` with no snapshot.
         const current = await getSessionStrict(sessions, sessionId)
@@ -1904,14 +1914,9 @@ export default function setupCommissionedIdeasRoutes(
         return
       }
       console.error('[commissioned-ideas] WS participant auth failed', { sessionId, err })
-      socket.participantId = null
       socket.studentAuth = 'pending'
       // Another tab may have closed meanwhile; make presence match the sockets left.
-      if (bound.participantId !== null) {
-        await syncParticipantPresence(sessionId, bound.participantId).catch((syncErr: unknown) => {
-          console.error('[commissioned-ideas] Presence reconcile after failed auth failed', { sessionId, err: syncErr })
-        })
-      }
+      await releaseClaim('failed')
       // Retryable: the client reconnects on a non-policy close and authenticates again.
       if (socket.readyState === WS_OPEN) {
         sendWsError(socket, 'Failed to authenticate', 'participant-auth-failed')

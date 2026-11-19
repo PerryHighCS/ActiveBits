@@ -1,10 +1,11 @@
-import { useCallback, useRef, type Ref } from 'react'
+import { useCallback, useRef, useState, type Ref } from 'react'
 import type { ProposalKind } from '../../shared/naming.js'
 import type { GroupingMode, StudentSafeParticipant, StudentSafeTeam } from '../../shared/types.js'
 import { sortTeams, teamLabel } from '../teamLabels.js'
 import TeamNamingPanel from './TeamNamingPanel.js'
 import { useRestoreFocusAfterRemoval } from '../useRestoreFocusAfterRemoval.js'
 import { useParticipantApi } from './useParticipantApi.js'
+import { teamControlsLocked } from './rosterModel.js'
 
 interface StudentRosterProps {
   participants: Record<string, StudentSafeParticipant>
@@ -15,6 +16,8 @@ interface StudentRosterProps {
   namingLocked: boolean
   groupingMode: GroupingMode
   maxTeamSize: number
+  /** Committed revision of the snapshot being rendered. */
+  snapshotRevision: number
 }
 
 export default function StudentRoster({
@@ -26,6 +29,7 @@ export default function StudentRoster({
   namingLocked,
   groupingMode,
   maxTeamSize,
+  snapshotRevision,
 }: StudentRosterProps) {
   const { request, post, busy, error, clearError } = useParticipantApi(sessionId, myParticipantId || null)
 
@@ -42,10 +46,13 @@ export default function StudentRoster({
   // lands. Focus then moves to the team status strip, which stays mounted in every state,
   // unless the student has already moved focus elsewhere.
   const statusRef = useRef<HTMLDivElement>(null)
+  const [awaitedRevision, setAwaitedRevision] = useState<number | null>(null)
+  const teamBusy = teamControlsLocked(busy, awaitedRevision, snapshotRevision)
   const focusRestore = useRestoreFocusAfterRemoval(useCallback(() => statusRef.current, []))
   const postAndRefocus = async (control: HTMLElement, path: string, body: Record<string, unknown>) => {
     focusRestore.begin(control)
     const outcome = await request(path, body)
+    if (outcome.kind === 'ok' && typeof outcome.data.revision === 'number') setAwaitedRevision(outcome.data.revision)
     focusRestore.settle(outcome.kind === 'ok' ? 'committed' : outcome.kind)
   }
   const handleCreateTeam = (control: HTMLElement) => { void postAndRefocus(control, 'create-team', {}) }
@@ -74,7 +81,7 @@ export default function StudentRoster({
         label={myTeam ? teamLabel(myTeam, teamList.indexOf(myTeam)) : ''}
         participants={participants}
         canLeave={isManual && !studentGroupingLocked}
-        busy={busy}
+        busy={teamBusy}
         onLeave={handleLeaveTeam}
       />
 
@@ -130,7 +137,7 @@ export default function StudentRoster({
                     {canJoin && (
                       <button
                         type="button"
-                        disabled={busy}
+                        disabled={teamBusy}
                         onClick={(event) => handleJoinTeam(event.currentTarget, team.id)}
                         aria-label={`${myTeamId ? 'Switch to' : 'Join'} ${label}`}
                         className="rounded-full border border-amber-400 bg-amber-50 px-2.5 py-0.5 text-xs font-medium text-amber-700 hover:bg-amber-100 disabled:opacity-50"
@@ -200,7 +207,7 @@ export default function StudentRoster({
       {isManual && myTeamId === null && !studentGroupingLocked && (
         <button
           type="button"
-          disabled={busy}
+          disabled={teamBusy}
           onClick={(event) => handleCreateTeam(event.currentTarget)}
           className="w-full rounded-lg border-2 border-dashed border-amber-300 py-3 text-sm font-medium text-amber-600 hover:bg-amber-50 disabled:opacity-50"
         >
