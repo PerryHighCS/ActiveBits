@@ -28,7 +28,7 @@ Contract:
 - Snapshots sent to clients list their fields explicitly. Session-only data (`instructorPasscode`, `activityCapabilities`, participant tokens, anything core adds) never reaches students, and the manager snapshot also omits the passcode and capability records.
 - The WebSocket still authenticates with the passcode message after connect; no passcode in URLs or browser storage.
 
-Failure behavior: an expired or missing capability with no persistent teacher cookie yields the existing "Instructor passcode not found" recovery message. A rate-limited (`429`) persistent recovery is treated as a failure for that load.
+Failure behavior: only an answer is final. An expired or missing capability with no persistent teacher cookie (`403` or `404`, or a success body without a passcode) yields the "Instructor passcode not found" recovery message. A server error (`5xx`), a rate limit (`429`), a network failure, or the recovery deadline is `unavailable` or `timeout`. The manager shows a Retry button for those, and Retry starts again with the cookie exchange. Nothing retries automatically, so there is no retry loop (2026-11-19).
 
 - [x] Server: issue the manager capability cookie on create; add the exchange route
 - [x] Server: explicit field lists for student and manager snapshots
@@ -63,6 +63,7 @@ Triage of the 25 unresolved CodeRabbit threads from 2026-07-30 on PR #243, verif
 - [x] Server: 1, 2, 3, with tests (no double apply, a definite no-commit retried, passcode across instance caches, outage 500, no subscription after close)
 - [x] Client: 4, with a Playwright regression (Chromium and WebKit)
 - [x] Docs
+- [x] Follow-up: a server error, rate limit, or network failure during passcode recovery is retryable (`unavailable`, with a Retry button), not "not found"
 
 ## CodeRabbit review round 6 (2026-11-18)
 

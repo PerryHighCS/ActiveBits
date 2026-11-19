@@ -42,7 +42,11 @@ export default function CommissionedIdeasManager() {
   if (passcodeState.status === 'retryable') {
     return (
       <div className="p-6 space-y-3" role="alert">
-        <p className="text-gray-700">Checking instructor access took too long. Your access may already be restored.</p>
+        <p className="text-gray-700">
+          {passcodeState.reason === 'timeout'
+            ? 'Checking instructor access took too long. Your access may already be restored.'
+            : 'Couldn’t reach the server to check instructor access. Try again in a moment.'}
+        </p>
         <button
           type="button"
           onClick={passcodeState.retry}

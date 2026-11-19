@@ -151,3 +151,24 @@ test('persistent link and Teacher Join open managers that survive a reload', asy
     await secondContext.close()
   }
 })
+
+test('a server error during reload recovery offers Retry instead of "not found"', async ({ page }) => {
+  test.skip(test.info().project.name !== 'chromium', 'reload recovery needs the Secure manager cookie (see reloadAndExpectManagerReady)')
+  const passcode = capturePasscode(page)
+  await page.goto('/manage')
+  const card = page.getByRole('heading', { name: 'Commissioned Ideas' }).locator('../..')
+  await card.getByRole('button', { name: 'Start Session Now' }).click()
+  await expectManagerReady(page, passcode)
+
+  // The exchange fails like a store outage on reload.
+  await page.route('**/instructor-passcode', (route) =>
+    route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: '[TEST] store outage' }) }))
+  await page.reload()
+  await expect(page.getByText('Couldn’t reach the server to check instructor access.')).toBeVisible()
+  await expect(page.getByText('Instructor passcode not found.')).toHaveCount(0)
+
+  // The server recovers; Retry starts again with the cookie exchange.
+  await page.unroute('**/instructor-passcode')
+  await page.getByRole('button', { name: 'Retry' }).click()
+  await expectManagerReady(page, passcode)
+})

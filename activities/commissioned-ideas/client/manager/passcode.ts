@@ -55,42 +55,63 @@ async function exchangeCapabilityForPasscode(
 }
 
 /**
+ * A server error or rate limit says nothing about whether access exists; a retry
+ * later can succeed. Only an answer (403, 404, or a body without a passcode) is final.
+ */
+function isTransientStatus(status: number): boolean {
+  return status >= 500 || status === 429
+}
+
+/**
+ * Result of one recovery attempt:
+ * - `ok`: the passcode;
+ * - `missing`: the server answered that this browser has no manager access (final);
+ * - `unavailable`: a server error, rate limit, or network failure; a retry can succeed.
+ */
+export type RecoveryAttemptResult =
+  | { status: 'ok'; passcode: string }
+  | { status: 'missing' }
+  | { status: 'unavailable' }
+
+/**
  * Reload recovery (see the "Manager reload recovery" contract in the activity plan):
  * exchange the httpOnly manager capability cookie for the passcode. If the cookie is
  * missing or expired (403), ask core to reissue it from the persistent-link teacher
- * cookie once, then retry the exchange once. Returns null when no path succeeds.
+ * cookie once, then retry the exchange once.
  */
 export async function recoverCommissionedIdeasInstructorPasscode(
   sessionId: string,
   fetchImpl: FetchLike = (input, init) => fetch(input, init),
   signal?: AbortSignal,
-): Promise<string | null> {
+): Promise<RecoveryAttemptResult> {
+  const fromExchange = (result: { passcode: string | null; status: number }): RecoveryAttemptResult =>
+    result.passcode ? { status: 'ok', passcode: result.passcode }
+      : isTransientStatus(result.status) ? { status: 'unavailable' }
+        : { status: 'missing' }
   try {
     const first = await exchangeCapabilityForPasscode(sessionId, fetchImpl, signal)
-    if (first.passcode || first.status !== 403) return first.passcode
+    if (first.passcode || first.status !== 403) return fromExchange(first)
 
     const reissue = await fetchImpl(`/api/session/${encodeURIComponent(sessionId)}/persistent-manager-capability`, {
       method: 'POST',
       credentials: 'include',
       ...(signal ? { signal } : {}),
     })
-    if (!reissue.ok) return null
+    if (!reissue.ok) return isTransientStatus(reissue.status) ? { status: 'unavailable' } : { status: 'missing' }
 
-    return (await exchangeCapabilityForPasscode(sessionId, fetchImpl, signal)).passcode
+    return fromExchange(await exchangeCapabilityForPasscode(sessionId, fetchImpl, signal))
   } catch {
-    return null
+    // Network failure (or an abort at the deadline, which reports `timeout` instead).
+    return { status: 'unavailable' }
   }
 }
 
 /**
- * Result of a shared recovery. `timeout` is retryable and distinct from `missing`: the
- * reissue may already have set a valid manager cookie, so a retry (which starts with
- * the cookie exchange) can succeed.
+ * Result of a shared recovery. `timeout` and `unavailable` are retryable and distinct
+ * from `missing`: the reissue may already have set a valid manager cookie, or the
+ * server may recover, so a retry (which starts with the cookie exchange) can succeed.
  */
-export type RecoveryOutcome =
-  | { status: 'ok'; passcode: string }
-  | { status: 'missing' }
-  | { status: 'timeout' }
+export type RecoveryOutcome = RecoveryAttemptResult | { status: 'timeout' }
 
 const inFlightRecoveries = new Map<string, Promise<RecoveryOutcome>>()
 
@@ -123,8 +144,7 @@ export function recoverInstructorPasscodeOnce(
       resolve({ status: 'timeout' })
     }, deadlineMs)
   })
-  const attempt = recoverCommissionedIdeasInstructorPasscode(sessionId, fetchImpl, controller.signal)
-    .then((passcode): RecoveryOutcome => (passcode ? { status: 'ok', passcode } : { status: 'missing' }))
+  const attempt: Promise<RecoveryOutcome> = recoverCommissionedIdeasInstructorPasscode(sessionId, fetchImpl, controller.signal)
   const recovery = Promise.race([attempt, deadline]).finally(() => {
     clearTimeout(timer)
     inFlightRecoveries.delete(sessionId)

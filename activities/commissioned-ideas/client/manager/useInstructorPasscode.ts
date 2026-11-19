@@ -10,8 +10,11 @@ export type InstructorPasscodeState =
   | { status: 'loading'; passcode: null }
   | { status: 'ready'; passcode: string }
   | { status: 'missing'; passcode: null }
-  /** Recovery timed out; the manager cookie may already be valid, so a retry can work. */
-  | { status: 'retryable'; passcode: null }
+  /**
+   * Recovery timed out or the server was unavailable; the manager cookie may already be
+   * valid, or the server may recover, so a retry can work.
+   */
+  | { status: 'retryable'; passcode: null; reason: 'timeout' | 'unavailable' }
 
 /**
  * Resolves the manager's instructor passcode without browser storage:
@@ -62,8 +65,8 @@ export function useCommissionedIdeasInstructorPasscode(
         sessionId,
         value: outcome.status === 'ok'
           ? { status: 'ready', passcode: outcome.passcode }
-          : outcome.status === 'timeout'
-            ? { status: 'retryable', passcode: null }
+          : outcome.status === 'timeout' || outcome.status === 'unavailable'
+            ? { status: 'retryable', passcode: null, reason: outcome.status }
             : { status: 'missing', passcode: null },
       })
     })

@@ -9,6 +9,7 @@ import {
   recoverCommissionedIdeasInstructorPasscode,
   recoverInstructorPasscodeOnce,
   resolveCommissionedIdeasInstructorPasscode,
+  type RecoveryAttemptResult,
 } from './passcode.js'
 
 void test('manager passcode resolution follows the same-tab handoff decision table', () => {
@@ -105,54 +106,72 @@ type Reply = { status: number; body?: unknown } | 'network-error'
 const EXCHANGE = 'GET /api/commissioned-ideas/s1/instructor-passcode'
 const REISSUE = 'POST /api/session/s1/persistent-manager-capability'
 
-const recoveryCases: { name: string; replies: Reply[]; expected: string | null; calls: string[] }[] = [
+const recoveryCases: { name: string; replies: Reply[]; expected: RecoveryAttemptResult; calls: string[] }[] = [
   {
     name: 'capability cookie present → passcode',
     replies: [{ status: 200, body: { instructorPasscode: 'PASS' } }],
-    expected: 'PASS',
+    expected: { status: 'ok', passcode: 'PASS' },
     calls: [EXCHANGE],
   },
   {
     name: 'no cookie, persistent teacher cookie reissues → passcode on retry',
     replies: [{ status: 403 }, { status: 200, body: { success: true } }, { status: 200, body: { instructorPasscode: 'PASS' } }],
-    expected: 'PASS',
+    expected: { status: 'ok', passcode: 'PASS' },
     calls: [EXCHANGE, REISSUE, EXCHANGE],
   },
   {
-    name: 'no cookie and no persistent link → null after one reissue attempt',
+    name: 'no cookie and no persistent link → missing after one reissue attempt',
     replies: [{ status: 403 }, { status: 404 }],
-    expected: null,
+    expected: { status: 'missing' },
     calls: [EXCHANGE, REISSUE],
   },
   {
-    name: 'reissue rate-limited → null, no retry loop',
+    name: 'reissue rate-limited → unavailable (retryable by the user), no retry loop',
     replies: [{ status: 403 }, { status: 429 }],
-    expected: null,
+    expected: { status: 'unavailable' },
     calls: [EXCHANGE, REISSUE],
   },
   {
-    name: 'retry still refused → null, only one reissue',
+    name: 'retry still refused → missing, only one reissue',
     replies: [{ status: 403 }, { status: 200 }, { status: 403 }],
-    expected: null,
+    expected: { status: 'missing' },
     calls: [EXCHANGE, REISSUE, EXCHANGE],
   },
   {
-    name: 'unknown session → null without reissue',
+    name: 'unknown session → missing without reissue',
     replies: [{ status: 404 }],
-    expected: null,
+    expected: { status: 'missing' },
     calls: [EXCHANGE],
   },
   {
-    name: 'malformed success body → null',
+    name: 'malformed success body → missing',
     replies: [{ status: 200, body: { instructorPasscode: '' } }],
-    expected: null,
+    expected: { status: 'missing' },
     calls: [EXCHANGE],
   },
   {
-    name: 'network error → null',
+    name: 'network error → unavailable',
     replies: ['network-error'],
-    expected: null,
+    expected: { status: 'unavailable' },
     calls: [EXCHANGE],
+  },
+  {
+    name: 'exchange server error (store outage) → unavailable without reissue',
+    replies: [{ status: 500 }],
+    expected: { status: 'unavailable' },
+    calls: [EXCHANGE],
+  },
+  {
+    name: 'reissue server error → unavailable',
+    replies: [{ status: 403 }, { status: 503 }],
+    expected: { status: 'unavailable' },
+    calls: [EXCHANGE, REISSUE],
+  },
+  {
+    name: 'exchange after reissue hits a server error → unavailable',
+    replies: [{ status: 403 }, { status: 200 }, { status: 500 }],
+    expected: { status: 'unavailable' },
+    calls: [EXCHANGE, REISSUE, EXCHANGE],
   },
 ]
 
@@ -170,7 +189,7 @@ for (const row of recoveryCases) {
       if (reply === undefined || reply === 'network-error') throw new Error('[TEST] simulated network error')
       return { ok: reply.status >= 200 && reply.status < 300, status: reply.status, json: async () => reply.body ?? {} }
     }
-    assert.equal(await recoverCommissionedIdeasInstructorPasscode('s1', fakeFetch), row.expected)
+    assert.deepEqual(await recoverCommissionedIdeasInstructorPasscode('s1', fakeFetch), row.expected)
     assert.deepEqual(calls, row.calls)
     assert.deepEqual(credentials, row.calls.map(() => 'include'), 'every recovery request must send cookies')
   })
@@ -231,4 +250,9 @@ void test('shared recovery: a stalled request hits the deadline, is aborted, and
 void test('shared recovery: a definitive refusal is missing, not retryable', async () => {
   const refused = async () => ({ ok: false, status: 404, json: async () => ({}) })
   assert.deepEqual(await recoverInstructorPasscodeOnce('s1', refused, 1000), { status: 'missing' })
+})
+
+void test('shared recovery: a server error is retryable (unavailable), not missing', async () => {
+  const outage = async () => ({ ok: false, status: 500, json: async () => ({}) })
+  assert.deepEqual(await recoverInstructorPasscodeOnce('s1', outage, 1000), { status: 'unavailable' })
 })
