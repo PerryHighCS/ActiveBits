@@ -50,6 +50,19 @@ Triage of the 25 unresolved CodeRabbit threads from 2026-07-30 on PR #243, verif
 - [ ] Open, needs product/engineering decision: participant token in `localStorage` (move to a core httpOnly participant capability); per-session atomic updates (`updateAtomic` for every writer)
 - [x] Post replies and resolve threads after the fixes are pushed (0690ab1a: 23 resolved; the two follow-up threads replied to and left open)
 
+## CodeRabbit review round 9 (2026-11-19)
+
+4 threads on 9581d6c4, no outside-diff comments.
+
+1. **Every commit, or possible commit, reaches every instance (2 threads).** Owner: `publishInvalidation` and `reconcileAfterAmbiguousWrite` in `server/routes.ts`, with core `publishBroadcastStrict`. Invariant: after a commit, the invalidation is published at least once. It is coalesced per session, retried with capped backoff, and stops when the session is gone. After an ambiguous store error (the write may have committed and its reply was lost), the change is still delivered: local sockets refresh from committed state and other instances are invalidated, both retried. The mutation is never re-run. Presence writes use the same path.
+2. **The ballot can only be submitted with awards to teams that are still eligible.** `draftToAllocations` treats an award held by a team deleted by moderation as unassigned (decision table, plus a Playwright regression that fails without the fix).
+3. **Core `close()` cancels re-confirmation retries** and clears the channel registry before quitting.
+
+- [x] Core: `publishBroadcastStrict` and `close()` cleanup, with tests
+- [x] Server: 1, with tests (publish retried, retries stop when the session is gone, a lost reply is still delivered and applied once; the last fails with the reconcile removed)
+- [x] Client: 2
+- [x] Docs
+
 ## CodeRabbit review round 8 (2026-11-19)
 
 6 threads and 1 outside-diff comment (`valkeyStore.ts`), on c5c9481f. Grouped by contract (AGENTS.md rule 16):

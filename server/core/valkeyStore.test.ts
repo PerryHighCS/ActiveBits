@@ -525,3 +525,33 @@ void test('a pending re-confirmation retry stops when the channel is released', 
   await new Promise((resolve) => setTimeout(resolve, 150))
   assert.deepEqual(commands, ['SUBSCRIBE a', 'SUBSCRIBE a', 'UNSUBSCRIBE a'], 'no retry after release')
 })
+
+void test('publishBroadcastStrict rejects on failure; publishBroadcast logs and resolves', async () => {
+  const store = Object.create(ValkeySessionStore.prototype) as ValkeySessionStore
+  Object.defineProperty(store, 'client', { value: { publish: () => Promise.reject(new Error('[TEST] publish failed')) } })
+  console.log('[TEST] expecting two logged publish failures')
+  await assert.rejects(store.publishBroadcastStrict('ch', { a: 1 }), /publish failed/)
+  await store.publishBroadcast('ch', { a: 1 })
+})
+
+void test('close cancels pending re-confirmation retries and clears the channel registry', async () => {
+  const { store, commands, ackAll, failAll } = pubSubStoreForTest()
+  const quits: string[] = []
+  Object.defineProperty(store, 'client', { value: { quit: async () => { quits.push('client') } } })
+  const subscriber = (store as unknown as { subscriber: Record<string, unknown> }).subscriber
+  subscriber.quit = async () => { quits.push('subscriber') }
+  const ready = store.subscribeToBroadcast('a', () => {}, { onResubscribed: () => {} })
+  ackAll()
+  await ready
+  store.handleSubscriberReady()
+  store.handleSubscriberReady() // reconnect
+  console.log('[TEST] expecting a failed re-confirmation SUBSCRIBE before close')
+  failAll()
+  await new Promise((resolve) => setTimeout(resolve, 0))
+
+  await store.close()
+  await new Promise((resolve) => setTimeout(resolve, 150))
+  assert.deepEqual(commands, ['SUBSCRIBE a', 'SUBSCRIBE a'], 'no retry after close')
+  assert.deepEqual(quits, ['client', 'subscriber'])
+  assert.equal((store as unknown as { broadcastChannels: Map<string, unknown> }).broadcastChannels.size, 0)
+})

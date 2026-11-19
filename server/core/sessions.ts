@@ -130,6 +130,8 @@ export interface SessionStore extends SharedSessionStore<Record<string, unknown>
   unsubscribeFromBroadcast?(channel: string, handler: (message: unknown) => void): void
   initializePubSub?(): void
   publishBroadcast?(channel: string, message: Record<string, unknown>): Promise<void>
+  /** Like publishBroadcast, but rejects when the publish failed (so the caller can retry). */
+  publishBroadcastStrict?(channel: string, message: Record<string, unknown>): Promise<void>
   valkeyStore?: ValkeySessionStore
   cache?: SessionCache<SessionRecord>
   flushCache?(): Promise<void>
@@ -309,6 +311,7 @@ class InMemorySessionStore implements SessionStore {
   unsubscribeFromBroadcast(): void {}
   initializePubSub(): void {}
   async publishBroadcast(): Promise<void> {}
+  async publishBroadcastStrict(): Promise<void> {}
 }
 
 export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 * 60 * 1000, providedValkeyStore: ValkeySessionStore | null = null): SessionStore {
@@ -633,6 +636,10 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
     valkeyStore.initializePubSub()
   }
 
+  const publishBroadcastStrict = async (channel: string, message: Record<string, unknown>): Promise<void> => {
+    await valkeyStore.publishBroadcastStrict(channel, message)
+  }
+
   const publishBroadcast = async (channel: string, message: Record<string, unknown>): Promise<void> => {
     await valkeyStore.publishBroadcast(channel, message)
   }
@@ -659,6 +666,7 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
     unsubscribeFromBroadcast,
     initializePubSub,
     publishBroadcast,
+    publishBroadcastStrict,
   }
 }
 

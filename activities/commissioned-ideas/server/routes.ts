@@ -496,6 +496,9 @@ const REFRESH_RETRY_MAX_MS = 5000
 /** Re-subscribe backoff after a failed SUBSCRIBE (doubling, capped), while local sockets need the session. */
 const SUBSCRIBE_RETRY_BASE_MS = 250
 const SUBSCRIBE_RETRY_MAX_MS = 5000
+/** Invalidation publish backoff (doubling, capped), until delivered or the session is gone. */
+const INVALIDATION_RETRY_BASE_MS = 100
+const INVALIDATION_RETRY_MAX_MS = 5000
 
 /** Thrown inside a mutation when the stored record is not a Commissioned Ideas session. */
 class NotCommissionedIdeasSession extends Error {}
@@ -969,10 +972,73 @@ export default function setupCommissionedIdeasRoutes(
     type: SnapshotEventType = 'commissioned-ideas:registration-updated',
   ): void {
     deliverSnapshots(ws, session, type)
-    if (typeof sessions.publishBroadcast !== 'function') return
-    sessions.publishBroadcast(invalidationChannel(session.id), { type, origin: instanceId }).catch((err: unknown) => {
-      console.error('[commissioned-ideas] Invalidation publish failed', { sessionId: session.id, err })
-    })
+    publishInvalidation(session.id, type)
+  }
+
+  /**
+   * Cross-instance invalidation, delivered at least once after every commit (owner: this
+   * function). One record per session: a request while a publish is in flight or waiting
+   * to retry marks it dirty, and one more publish follows (receivers re-read committed
+   * state, so the latest publish covers every earlier change). A failed publish is retried
+   * with capped backoff until it succeeds or the session no longer exists; the mutation is
+   * never re-run.
+   */
+  interface PendingInvalidation {
+    type: SnapshotEventType
+    /** A newer request arrived since the current attempt started. */
+    dirty: boolean
+    failures: number
+  }
+  const pendingInvalidations = new Map<string, PendingInvalidation>()
+
+  function publishInvalidation(sessionId: string, type: SnapshotEventType): void {
+    const publish = sessions.publishBroadcastStrict ?? sessions.publishBroadcast
+    if (typeof publish !== 'function') return
+    const pending = pendingInvalidations.get(sessionId)
+    if (pending) {
+      pending.type = type
+      pending.dirty = true
+      return
+    }
+    const entry: PendingInvalidation = { type, dirty: false, failures: 0 }
+    pendingInvalidations.set(sessionId, entry)
+    void publishPending(sessionId, entry, publish.bind(sessions))
+  }
+
+  async function publishPending(
+    sessionId: string,
+    entry: PendingInvalidation,
+    publish: (channel: string, message: Record<string, unknown>) => Promise<void>,
+  ): Promise<void> {
+    for (;;) {
+      entry.dirty = false
+      try {
+        await publish(invalidationChannel(sessionId), { type: entry.type, origin: instanceId })
+        entry.failures = 0
+        if (!entry.dirty) break
+        continue // a newer commit asked meanwhile: publish once more
+      } catch (err: unknown) {
+        entry.failures += 1
+        const delayMs = Math.min(INVALIDATION_RETRY_MAX_MS, INVALIDATION_RETRY_BASE_MS * 2 ** (entry.failures - 1))
+        console.error('[commissioned-ideas] Invalidation publish failed; retrying', { sessionId, attempt: entry.failures, delayMs, err })
+        await new Promise((resolve) => setTimeout(resolve, delayMs))
+        // Stop once the session is gone; a failed check retries the publish anyway.
+        const exists = await getSessionStrict(sessions, sessionId).then((found) => found !== null, () => true)
+        if (!exists) break
+      }
+    }
+    pendingInvalidations.delete(sessionId)
+  }
+
+  /**
+   * After a write whose outcome is unknown (the store failed, possibly after committing):
+   * nothing announced the change, so local sockets refresh from committed state and other
+   * instances are invalidated, both with their own retries. The mutation is not re-run.
+   */
+  function reconcileAfterAmbiguousWrite(sessionId: string): void {
+    const sub = invalidationSubscriptions.get(sessionId)
+    if (sub) requestRefresh(sessionId, sub, 'commissioned-ideas:registration-updated')
+    publishInvalidation(sessionId, 'commissioned-ideas:registration-updated')
   }
 
   /**
@@ -1099,7 +1165,10 @@ export default function setupCommissionedIdeasRoutes(
         return null
       }
       console.error('[commissioned-ideas] Session update failed', { sessionId, err })
-      res.status(500).json({ error: 'Could not save the change. Please try again.' })
+      // Only a definite no-commit is known to have changed nothing; anything else may
+      // have committed without being announced.
+      if (!(err instanceof AtomicUpdateNotCommittedError)) reconcileAfterAmbiguousWrite(sessionId)
+      res.status(500).json({ error: 'The change could not be confirmed. Check the current state before trying again.' })
       return null
     }
   }
@@ -1826,13 +1895,19 @@ export default function setupCommissionedIdeasRoutes(
     const known = current ? ownEntry(current.data.participantRoster, participantId) : undefined
     if (!known || known.connected === hasLiveParticipantSocket(ws, sessionId, participantId)) return
 
-    const committed = await atomicUpdate(sessions, sessionId, (session) => {
-      const participant = ownEntry(session.data.participantRoster, participantId)
-      if (!participant) return
-      // Derived at commit time, so a retry sees the sockets as they are now.
-      participant.connected = hasLiveParticipantSocket(ws, sessionId, participantId)
-      participant.lastSeen = Date.now()
-    })
+    let committed: CommissionedIdeasSession | null
+    try {
+      committed = await atomicUpdate(sessions, sessionId, (session) => {
+        const participant = ownEntry(session.data.participantRoster, participantId)
+        if (!participant) return
+        // Derived at commit time, so a retry sees the sockets as they are now.
+        participant.connected = hasLiveParticipantSocket(ws, sessionId, participantId)
+        participant.lastSeen = Date.now()
+      })
+    } catch (err: unknown) {
+      if (!(err instanceof AtomicUpdateNotCommittedError)) reconcileAfterAmbiguousWrite(sessionId)
+      throw err
+    }
     if (committed) announce(committed)
   }
 

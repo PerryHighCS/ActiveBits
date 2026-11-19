@@ -103,6 +103,10 @@ interface MockStoreHooks {
   subscribeGates: Map<string, Promise<void>>
   /** Per channel: the next N SUBSCRIBEs fail. */
   subscribeFailures: Map<string, number>
+  /** The next N strict publishes fail (the plain publish swallows errors, like Valkey). */
+  failPublishes: number
+  /** Strict publish attempts so far. */
+  publishAttempts: number
   /** Compare-and-set attempts per `updateAtomic` call (the Valkey store uses 12). */
   casBudget: number
   casConflicts: number
@@ -134,7 +138,7 @@ function createMockSessions(
   const store: Record<string, SessionRecord> = shared?.store ?? { ...initial }
   const hooks: MockStoreHooks = shared?.hooks ?? {
     beforeCommit: null, commitGate: null, getGate: null, onGet: null, failUpdatesAfterMutate: 0, failAfterCommit: 0, failStrictReads: 0,
-    strictReads: 0, afterCommitGate: null, subscribeGates: new Map(), subscribeFailures: new Map(),
+    strictReads: 0, afterCommitGate: null, subscribeGates: new Map(), subscribeFailures: new Map(), failPublishes: 0, publishAttempts: 0,
     casBudget: 12, casConflicts: 0, setCalls: 0,
   }
   const owner = Symbol('instance')
@@ -259,6 +263,14 @@ function createMockSessions(
             }
           },
         }
+      },
+      async publishBroadcastStrict(channel: string, message: Record<string, unknown>) {
+        hooks.publishAttempts += 1
+        if (hooks.failPublishes > 0) {
+          hooks.failPublishes -= 1
+          throw new Error(`[TEST] simulated PUBLISH failure on ${channel}`)
+        }
+        await this.publishBroadcast(channel, message)
       },
       // Every active subscriber gets every message, the publisher's instance included.
       async publishBroadcast(channel: string, message: Record<string, unknown>) {
@@ -3399,6 +3411,52 @@ void test('committed state reaches local sockets even after several failed reads
   console.log('[TEST] expecting several failed invalidation reads, then delivery')
   assert.equal((await a.asInstructor('phase', { phase: 'presentation' })).statusCode, 200)
   await waitFor(() => (studentOnB.lastSnapshot() as { phase?: string } | undefined)?.phase === 'presentation', 'delivered once the store recovered', 4000)
+})
+
+void test('a failed invalidation publish is retried until another instance hears it', async () => {
+  const a = await setupWsHarness()
+  const b = await setupWsHarness(a)
+  const student = await a.register('Student')
+  await a.createTeam(student)
+  const studentOnB = await b.connect({}, { as: student })
+
+  a.hooks.failPublishes = 2
+  console.log('[TEST] expecting two failed invalidation publishes, then delivery')
+  assert.equal((await a.asInstructor('phase', { phase: 'presentation' })).statusCode, 200)
+  await waitFor(() => (studentOnB.lastSnapshot() as { phase?: string } | undefined)?.phase === 'presentation', 'B heard the retried invalidation')
+})
+
+void test('invalidation publish retries stop once the session is gone', async () => {
+  const a = await setupWsHarness()
+  a.hooks.failPublishes = 1000
+  console.log('[TEST] expecting failed invalidation publishes until the session is deleted')
+  assert.equal((await a.asInstructor('settings', { maxTeamSize: 5 })).statusCode, 200)
+  await waitFor(() => a.hooks.publishAttempts >= 2, 'retrying')
+  delete a.store[a.sessionId]
+  await new Promise((resolve) => setTimeout(resolve, 600))
+  const attempts = a.hooks.publishAttempts
+  await new Promise((resolve) => setTimeout(resolve, 600))
+  assert.equal(a.hooks.publishAttempts, attempts, 'no more publishes for a deleted session')
+})
+
+void test('a write whose reply was lost is still delivered locally and to other instances, without re-running it', async () => {
+  const a = await setupWsHarness()
+  const b = await setupWsHarness(a)
+  const student = await a.register('Student')
+  await a.createTeam(student)
+  assert.equal((await a.asInstructor('phase', { phase: 'presentation' })).statusCode, 200)
+  const studentOnA = await a.connect({}, { as: student })
+  const studentOnB = await b.connect({}, { as: student })
+  const round = (sessionDataFromHarness(a).presentationRound)
+
+  a.hooks.failAfterCommit = 1
+  console.log('[TEST] expecting an ambiguous store failure after commit, then reconciliation')
+  assert.equal((await a.asInstructor('presentation-round', { action: 'next' })).statusCode, 500)
+  assert.equal(sessionDataFromHarness(a).presentationRound, round + 1, 'applied once')
+  const roundOf = (conn: typeof studentOnA) => (conn.lastSnapshot() as { presentationRound?: number } | undefined)?.presentationRound
+  await waitFor(() => roundOf(studentOnA) === round + 1, 'local socket refreshed from committed state')
+  await waitFor(() => roundOf(studentOnB) === round + 1, 'other instance invalidated')
+  assert.equal(sessionDataFromHarness(a).presentationRound, round + 1, 'still applied once')
 })
 
 void test('invalidation read retries stop once no local socket needs the session', async () => {

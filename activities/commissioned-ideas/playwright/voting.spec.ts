@@ -1,5 +1,5 @@
 import { expect, type APIRequestContext, type Browser, type Page, test } from '@playwright/test'
-import { createTeamViaApi, skipStudentBrowserFlowsOnWebKit } from './studentApi'
+import { createTeamViaApi, postAsStudent, registerStudentViaApi, skipStudentBrowserFlowsOnWebKit } from './studentApi'
 
 interface CreatedSession {
   id: string
@@ -115,6 +115,45 @@ test('with only two teams a student gets a single $500 award', async ({ browser,
     await ballot.getByRole('radio', { name: /Team 2/ }).check()
     await ballot.getByRole('button', { name: 'Submit ballot' }).click()
     await expect(student.getByRole('region', { name: '✓ Ballot submitted' })).toContainText('$500Team 2')
+  } finally {
+    await context.close()
+  }
+})
+
+test('a selected team deleted by moderation while the ballot is open disables Submit until the award is re-chosen', async ({ browser, request }) => {
+  skipStudentBrowserFlowsOnWebKit()
+  const session = await createSession(request)
+  const { context, student } = await joinAsStudentWithTeam(browser, session.id, 'Dana')
+  try {
+    const eli = await registerStudentViaApi(request, session.id, 'Eli')
+    expect((await postAsStudent(request, session.id, eli, 'create-team')).ok()).toBe(true)
+    for (const name of ['Fay', 'Gus', 'Hal']) await createTeamViaApi(request, session.id, name)
+    await setPhase(request, session, 'presentation')
+    await setPhase(request, session, 'voting')
+
+    const ballot = student.getByRole('region', { name: 'Fund the best ideas' })
+    await expect(ballot).toBeVisible()
+    const award = (amount: number) => ballot.getByRole('group', { name: `$${amount} award` })
+    const submit = ballot.getByRole('button', { name: 'Submit ballot' })
+    // Eli's team is Team 2: give it $500, and fill the rest.
+    await award(500).getByRole('radio', { name: /Team 2/ }).check()
+    await award(300).getByRole('radio', { name: /Team 3/ }).check()
+    await award(100).getByRole('radio', { name: /Team 4/ }).check()
+    await expect(submit).toBeEnabled()
+
+    // Moderation takes Eli off; their now-empty team is deleted while Dana's draft is open.
+    const moderation = await request.post(`/api/commissioned-ideas/${session.id}/participant-name`, {
+      data: { participantId: eli.participantId, rejected: true },
+      headers: { 'X-Commissioned-Ideas-Instructor-Passcode': session.instructorPasscode },
+    })
+    expect(moderation.ok()).toBe(true)
+
+    // Three other teams remain, so three awards are still required, and $500 has no choice.
+    await expect(award(500).getByRole('radio', { checked: true })).toHaveCount(0)
+    await expect(submit).toBeDisabled()
+    // Hal's team (last in order) holds no award yet; giving it $500 completes the ballot.
+    await award(500).getByRole('radio').last().check()
+    await expect(submit).toBeEnabled()
   } finally {
     await context.close()
   }

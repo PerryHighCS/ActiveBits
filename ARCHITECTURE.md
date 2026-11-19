@@ -155,7 +155,10 @@ the subscriber connection reconnects, ioredis re-subscribes, but messages publis
 while it was down are lost. The store then re-confirms each channel and calls the
 handler's optional `onResubscribed` listener. A failed re-confirmation is retried
 with capped backoff while the channel stays registered, and the listeners run only
-after it succeeds. A caller that must not miss an update
+after it succeeds. `close()` cancels those retries and clears the channel registry
+before quitting the connections. `publishBroadcast` is fire-and-forget (it logs
+failures). `publishBroadcastStrict` rejects on failure, for callers that must
+deliver and will retry. A caller that must not miss an update
 re-reads state after the promise settles and in `onResubscribed`. Adding the same
 handler twice registers it once. `unsubscribeFromBroadcast` removes one handler (by
 reference) and unsubscribes the channel when none remain.

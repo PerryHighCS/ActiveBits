@@ -35,12 +35,20 @@ export function draftFromBallot(
   return draft
 }
 
-/** Allocations to submit, or null while any required award is unassigned. */
-export function draftToAllocations(draft: BallotDraft, required: readonly BallotAmount[]): BallotAllocation[] | null {
+/**
+ * Allocations to submit, or null while any required award is unassigned. An award held
+ * by a team that is no longer eligible (moderation deleted it while the draft was open)
+ * counts as unassigned: its radio is gone, so the student must choose again.
+ */
+export function draftToAllocations(
+  draft: BallotDraft,
+  required: readonly BallotAmount[],
+  eligibleTeamIds: ReadonlySet<string>,
+): BallotAllocation[] | null {
   const allocations: BallotAllocation[] = []
   for (const amount of required) {
     const teamId = draft[amount]
-    if (!teamId) return null
+    if (!teamId || !eligibleTeamIds.has(teamId)) return null
     allocations.push({ teamId, amount })
   }
   return allocations

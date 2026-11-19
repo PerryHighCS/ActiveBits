@@ -74,7 +74,7 @@ export default function VotingBallot({ teams, myTeamId, myBallot, snapshotRevisi
     )
   }
 
-  const allocations = draftToAllocations(draft, required)
+  const allocations = draftToAllocations(draft, required, eligibleIds)
 
   const submit = async () => {
     if (!allocations) return

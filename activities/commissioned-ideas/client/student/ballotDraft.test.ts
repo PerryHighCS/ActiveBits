@@ -31,10 +31,20 @@ void test('draftFromBallot keeps only required amounts on eligible teams', () =>
 })
 
 void test('draftToAllocations returns null until every required award is placed', () => {
-  assert.equal(draftToAllocations({ 500: 'a' }, [500, 300]), null)
-  assert.deepEqual(draftToAllocations({ 500: 'a', 300: 'b' }, [500, 300]), [
+  const eligible = new Set(['a', 'b'])
+  assert.equal(draftToAllocations({ 500: 'a' }, [500, 300], eligible), null)
+  assert.deepEqual(draftToAllocations({ 500: 'a', 300: 'b' }, [500, 300], eligible), [
     { teamId: 'a', amount: 500 },
     { teamId: 'b', amount: 300 },
   ])
-  assert.deepEqual(draftToAllocations({}, []), [])
+  assert.deepEqual(draftToAllocations({}, [], eligible), [])
+})
+
+void test('draftToAllocations treats an award held by a no-longer-eligible team as unassigned', () => {
+  // Team b was deleted by moderation while the draft was open.
+  assert.equal(draftToAllocations({ 500: 'a', 300: 'b' }, [500, 300], new Set(['a', 'c'])), null)
+  assert.deepEqual(draftToAllocations({ 500: 'a', 300: 'c' }, [500, 300], new Set(['a', 'c'])), [
+    { teamId: 'a', amount: 500 },
+    { teamId: 'c', amount: 300 },
+  ])
 })

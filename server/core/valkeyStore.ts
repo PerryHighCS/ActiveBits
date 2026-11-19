@@ -205,11 +205,25 @@ export class ValkeySessionStore {
     })
   }
 
+  /** Fire-and-forget publish: a failure is logged, never thrown. */
   async publishBroadcast(channel: string, message: BroadcastPayload): Promise<void> {
+    try {
+      await this.publishBroadcastStrict(channel, message)
+    } catch {
+      // publishBroadcastStrict already logged it.
+    }
+  }
+
+  /**
+   * Publish that reports failure: the error is logged and rethrown, so a caller that
+   * must deliver (for example a data-free invalidation) can retry.
+   */
+  async publishBroadcastStrict(channel: string, message: BroadcastPayload): Promise<void> {
     try {
       await this.client.publish(channel, JSON.stringify(message))
     } catch (err) {
       console.error(`Failed to publish to ${channel}:`, err)
+      throw err
     }
   }
 
@@ -503,6 +517,13 @@ export class ValkeySessionStore {
   }
 
   async close(): Promise<void> {
+    // Stop subscription bookkeeping first, so a pending re-confirmation retry (or a late
+    // SUBSCRIBE callback) cannot schedule more work against the closed subscriber.
+    for (const state of this.broadcastChannels.values()) {
+      if (state.reconfirmTimer !== null) clearTimeout(state.reconfirmTimer)
+      state.reconfirmTimer = null
+    }
+    this.broadcastChannels.clear()
     try {
       await this.client.quit()
       await this.subscriber.quit()
