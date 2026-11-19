@@ -50,6 +50,18 @@ Triage of the 25 unresolved CodeRabbit threads from 2026-07-30 on PR #243, verif
 - [ ] Open, needs product/engineering decision: participant token in `localStorage` (move to a core httpOnly participant capability); per-session atomic updates (`updateAtomic` for every writer)
 - [x] Post replies and resolve threads after the fixes are pushed (0690ab1a: 23 resolved; the two follow-up threads replied to and left open)
 
+## Copilot review on 48845f75 (2026-11-19)
+
+3 findings in the review body (code unchanged since its last pass; no threads). Each is a case of a rule this PR already has:
+
+1. **Requests name the state they were made from:** `presentation-round` sends `round`, and the server refuses a mismatch (`409 stale-round`), so a repeated "Start round N" click cannot advance twice. The round buttons also stay disabled until the confirming snapshot arrives (`lockedUntilSnapshot`, shared with the student team controls).
+2. **Optimistic state is released by revision:** a name vote is shown until a snapshot reaches its committed revision (`shownVote`, decision table), not until `myVote` changes.
+3. **Counts include only existing teams:** `presentedTeamIds` takes `teams` and drops history entries for deleted teams, so the dashboard and the student view never show more presented teams than exist.
+
+- [x] Server: 1, with tests
+- [x] Client: 1, 2, 3, with decision tables
+- [x] Docs
+
 ## CodeRabbit review round 9 (2026-11-19)
 
 4 threads on 9581d6c4, no outside-diff comments.
@@ -69,7 +81,7 @@ Triage of the 25 unresolved CodeRabbit threads from 2026-07-30 on PR #243, verif
 
 1. **A 5xx is an unknown outcome on the client (2 threads).** The server answers 500 when a store error may have followed a commit, but both request hooks reported it as `refused`. One exported function, `outcomeKindForStatus`, now classifies statuses for both hooks (decision table). Focus restoration keeps tracking removal after a 5xx, and nothing treats a 5xx as "nothing changed".
 2. **Committed state reaches every local socket once the store recovers (thread plus outside-diff).** Owner: the `InvalidationSubscription` record and core `reconfirmChannel`. A refresh read retries with capped backoff until it succeeds or the subscription is released, instead of giving up after 3 attempts. In core, a failed re-confirmation after a reconnect is retried while the channel stays registered, and the listeners run only after it succeeds.
-3. **One team per student (major).** `create-team` refuses a student already on a team (`409 already-on-team`), checked inside the atomic update. On the client, team controls stay disabled after a committed change until the confirming snapshot arrives (`teamControlsLocked`).
+3. **One team per student (major).** `create-team` refuses a student already on a team (`409 already-on-team`), checked inside the atomic update. On the client, team controls stay disabled after a committed change until the confirming snapshot arrives (`teamControlsLocked`, later generalized to `lockedUntilSnapshot`).
 4. **Late-arrival focus targets only enabled controls.** It tries the adjacent student's select, then their Reject button, then any enabled control. While everything is disabled (busy), it waits on that row. When nobody is left, it goes to the "all placed" status (`lateArrivalFocusTarget`, decision table, and a Playwright regression for the no-teams case).
 5. **The socket's provisional claim is made before the presence write, not inside the retryable callback.** The callback re-checks that the cookie still resolves to the claimed participant.
 

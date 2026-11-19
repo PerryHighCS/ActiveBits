@@ -5,6 +5,8 @@ import {
   unpresentedTeamIds,
 } from '../../shared/presentation.js'
 import type { ManagerParticipant, ManagerSnapshot, ManagerTeam } from '../hooks/useCommissionedIdeasSession.js'
+import { useState } from 'react'
+import { lockedUntilSnapshot } from '../requestOutcome.js'
 import { teamLabelsById } from '../teamLabels.js'
 import { useInstructorApi } from './useInstructorApi.js'
 
@@ -22,13 +24,13 @@ function memberNames(team: ManagerTeam, roster: Record<string, ManagerParticipan
 }
 
 export default function PresentationDashboard({ sessionId, instructorPasscode, snapshot }: PresentationDashboardProps) {
-  const { call, busy, error, clearError } = useInstructorApi(sessionId, instructorPasscode)
+  const { call, request, busy, error, clearError } = useInstructorApi(sessionId, instructorPasscode)
 
   const ordered = orderedPresentationTeams(snapshot.teams)
   const orderedIds = ordered.map((team) => team.id)
   const labels = teamLabelsById(snapshot.teams)
   const round = snapshot.presentationRound
-  const presented = presentedTeamIds(snapshot.presentationHistory, round)
+  const presented = presentedTeamIds(snapshot.teams, snapshot.presentationHistory, round)
   const remaining = unpresentedTeamIds(snapshot.teams, snapshot.presentationHistory, round)
   const currentId = snapshot.currentPresentationTeamId
   const current = currentId ? snapshot.teams[currentId] : undefined
@@ -46,9 +48,18 @@ export default function PresentationDashboard({ sessionId, instructorPasscode, s
     void call('presentation-order', { teamIds: next })
   }
 
+  // Round actions name the round shown; the buttons stay disabled until the snapshot
+  // reflecting a committed round change arrives, so "Start round N" is never stale.
+  const [awaitedRevision, setAwaitedRevision] = useState<number | null>(null)
+  const roundBusy = lockedUntilSnapshot(busy, awaitedRevision, snapshot.revision)
+  const changeRound = async (action: 'next' | 'reset') => {
+    const outcome = await request('presentation-round', { action, round })
+    if (outcome.kind === 'ok' && typeof outcome.data.revision === 'number') setAwaitedRevision(outcome.data.revision)
+  }
+
   const resetRound = () => {
     if (window.confirm(`Clear who has presented in round ${round}?`)) {
-      void call('presentation-round', { action: 'reset' })
+      void changeRound('reset')
     }
   }
 
@@ -126,7 +137,7 @@ export default function PresentationDashboard({ sessionId, instructorPasscode, s
           <div className="flex gap-2">
             <button
               type="button"
-              disabled={busy || presented.size === 0}
+              disabled={roundBusy || presented.size === 0}
               onClick={resetRound}
               className="rounded-md border border-gray-300 px-2.5 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-40"
             >
@@ -134,8 +145,8 @@ export default function PresentationDashboard({ sessionId, instructorPasscode, s
             </button>
             <button
               type="button"
-              disabled={busy}
-              onClick={() => { void call('presentation-round', { action: 'next' }) }}
+              disabled={roundBusy}
+              onClick={() => { void changeRound('next') }}
               className="rounded-md border border-indigo-300 bg-indigo-50 px-2.5 py-1 text-xs font-medium text-indigo-700 hover:bg-indigo-100 disabled:opacity-40"
             >
               Start round {round + 1}

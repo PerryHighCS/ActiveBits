@@ -2011,17 +2011,34 @@ void test('presentation-round next starts a fresh round; reset clears only the c
   await s.asInstructor('phase', { phase: 'presentation' })
   await s.asInstructor('presentation-active', { teamId: s.teamIds[0] })
 
-  const next = await s.asInstructor('presentation-round', { action: 'next' })
+  const next = await s.asInstructor('presentation-round', { action: 'next', round: 1 })
   assert.equal((next.body as { round: number }).round, 2)
   assert.equal(s.data().currentPresentationTeamId, null)
 
   await s.asInstructor('presentation-active', { teamId: s.teamIds[1] })
-  await s.asInstructor('presentation-round', { action: 'reset' })
+  await s.asInstructor('presentation-round', { action: 'reset', round: 2 })
   assert.deepEqual(s.data().presentationHistory.map((e) => [e.round, e.teamId]), [[1, s.teamIds[0]]])
   assert.equal(s.data().presentationRound, 2)
 
   console.log('[TEST] expecting 400 bad round action')
-  assert.equal((await s.asInstructor('presentation-round', { action: 'skip' })).statusCode, 400)
+  assert.equal((await s.asInstructor('presentation-round', { action: 'skip', round: 2 })).statusCode, 400)
+})
+
+void test('presentation-round actions must name the round their button showed (a repeated click cannot advance twice)', async () => {
+  const s = await setupPresentationSession()
+  await s.asInstructor('phase', { phase: 'presentation' })
+  await s.asInstructor('presentation-active', { teamId: s.teamIds[0] })
+  assert.equal((await s.asInstructor('presentation-round', { action: 'next', round: 1 })).statusCode, 200)
+  assert.equal(s.data().presentationRound, 2)
+
+  console.log('[TEST] expecting 409 stale-round')
+  for (const body of [{ action: 'next', round: 1 }, { action: 'next' }, { action: 'reset', round: 1 }]) {
+    const res = await s.asInstructor('presentation-round', body)
+    assert.equal(res.statusCode, 409, JSON.stringify(body))
+    assert.equal((res.body as { code?: string }).code, 'stale-round')
+  }
+  assert.equal(s.data().presentationRound, 2, 'advanced once')
+  assert.deepEqual(s.data().presentationHistory.map((e) => [e.round, e.teamId]), [[1, s.teamIds[0]]], 'nothing cleared')
 })
 
 void test('presentation controls are refused outside the presentation phase', async () => {
@@ -2029,7 +2046,7 @@ void test('presentation controls are refused outside the presentation phase', as
   console.log('[TEST] expecting 409 presentation controls during registration')
   assert.equal((await s.asInstructor('presentation-active', { teamId: s.teamIds[0] })).statusCode, 409)
   assert.equal((await s.asInstructor('presentation-randomize', {})).statusCode, 409)
-  assert.equal((await s.asInstructor('presentation-round', { action: 'next' })).statusCode, 409)
+  assert.equal((await s.asInstructor('presentation-round', { action: 'next', round: 1 })).statusCode, 409)
   assert.equal((await s.asInstructor('presentation-order', { teamIds: s.teamIds })).statusCode, 200, 'order is editable in registration')
 })
 
@@ -3451,7 +3468,7 @@ void test('a write whose reply was lost is still delivered locally and to other 
 
   a.hooks.failAfterCommit = 1
   console.log('[TEST] expecting an ambiguous store failure after commit, then reconciliation')
-  assert.equal((await a.asInstructor('presentation-round', { action: 'next' })).statusCode, 500)
+  assert.equal((await a.asInstructor('presentation-round', { action: 'next', round })).statusCode, 500)
   assert.equal(sessionDataFromHarness(a).presentationRound, round + 1, 'applied once')
   const roundOf = (conn: typeof studentOnA) => (conn.lastSnapshot() as { presentationRound?: number } | undefined)?.presentationRound
   await waitFor(() => roundOf(studentOnA) === round + 1, 'local socket refreshed from committed state')

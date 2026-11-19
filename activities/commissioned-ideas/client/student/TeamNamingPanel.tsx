@@ -1,4 +1,4 @@
-import { useEffect, useId, useState, type FormEvent } from 'react'
+import { useId, useState, type FormEvent } from 'react'
 import { MAX_PROPOSAL_LENGTH, type ProposalKind } from '../../shared/naming.js'
 import type { StudentSafeProposal, StudentTeamNaming } from '../../shared/types.js'
 
@@ -8,8 +8,27 @@ interface TeamNamingPanelProps {
   projectName: string | null
   namingLocked: boolean
   busy: boolean
+  /** Committed revision of the snapshot being rendered. */
+  snapshotRevision: number
   onPropose: (kind: ProposalKind, value: string) => Promise<boolean>
-  onVote: (kind: ProposalKind, proposalId: string) => Promise<boolean>
+  /** Resolves with the vote's committed revision, or null if it failed or its outcome is unknown. */
+  onVote: (kind: ProposalKind, proposalId: string) => Promise<number | null>
+}
+
+/** A vote this tab sent: in flight (`revision` null) or committed at `revision`. */
+export interface PendingVote {
+  proposalId: string
+  revision: number | null
+}
+
+/**
+ * The selection to show: this tab's vote while it is in flight or newer than the
+ * snapshot; otherwise the snapshot's vote. Released by revision, not by `myVote`
+ * changing: another tab can restore the earlier vote, leaving `myVote` unchanged.
+ */
+export function shownVote(pending: PendingVote | null, myVote: string | null, snapshotRevision: number): string | null {
+  if (pending && (pending.revision === null || pending.revision > snapshotRevision)) return pending.proposalId
+  return myVote
 }
 
 export default function TeamNamingPanel({
@@ -18,6 +37,7 @@ export default function TeamNamingPanel({
   projectName,
   namingLocked,
   busy,
+  snapshotRevision,
   onPropose,
   onVote,
 }: TeamNamingPanelProps) {
@@ -39,6 +59,7 @@ export default function TeamNamingPanel({
         myVote={naming.myGroupVote}
         locked={namingLocked}
         busy={busy}
+        snapshotRevision={snapshotRevision}
         onPropose={onPropose}
         onVote={onVote}
       />
@@ -50,6 +71,7 @@ export default function TeamNamingPanel({
         myVote={naming.myProjectVote}
         locked={namingLocked}
         busy={busy}
+        snapshotRevision={snapshotRevision}
         onPropose={onPropose}
         onVote={onVote}
       />
@@ -65,26 +87,25 @@ interface ProposalGroupProps {
   myVote: string | null
   locked: boolean
   busy: boolean
+  snapshotRevision: number
   onPropose: (kind: ProposalKind, value: string) => Promise<boolean>
-  onVote: (kind: ProposalKind, proposalId: string) => Promise<boolean>
+  onVote: (kind: ProposalKind, proposalId: string) => Promise<number | null>
 }
 
-function ProposalGroup({ kind, title, current, proposals, myVote, locked, busy, onPropose, onVote }: ProposalGroupProps) {
+function ProposalGroup({ kind, title, current, proposals, myVote, locked, busy, snapshotRevision, onPropose, onVote }: ProposalGroupProps) {
   const [draft, setDraft] = useState('')
-  // Optimistic selection while the vote round-trips; cleared once the server's myVote changes.
-  const [pendingVote, setPendingVote] = useState<string | null>(null)
+  // Optimistic selection while the vote round-trips (see `shownVote`).
+  const [pendingVote, setPendingVote] = useState<PendingVote | null>(null)
   const inputId = useId()
   const legendId = useId()
 
-  useEffect(() => {
-    setPendingVote(null)
-  }, [myVote])
-
-  const selected = pendingVote ?? myVote
+  const selected = shownVote(pendingVote, myVote, snapshotRevision)
 
   const handleVote = async (proposalId: string) => {
-    setPendingVote(proposalId)
-    if (!(await onVote(kind, proposalId))) setPendingVote(null)
+    setPendingVote({ proposalId, revision: null })
+    const revision = await onVote(kind, proposalId)
+    // Failed or unknown: show the snapshot's vote (it updates if the vote did land).
+    setPendingVote(revision === null ? null : { proposalId, revision })
   }
 
   const handleSubmit = async (event: FormEvent) => {

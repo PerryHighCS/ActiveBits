@@ -14,7 +14,7 @@ interface PresentationViewProps {
 export default function PresentationView({ teams, participants, currentTeamId, round, history, myTeamId }: PresentationViewProps) {
   const ordered = orderedPresentationTeams(teams)
   const labels = teamLabelsById(teams)
-  const presented = presentedTeamIds(history, round)
+  const presented = presentedTeamIds(teams, history, round)
   const current = currentTeamId ? teams[currentTeamId] : undefined
   const names = (team: StudentSafeTeam) =>
     team.memberIds.map((id) => participants[id]?.name).filter(Boolean).join(', ')

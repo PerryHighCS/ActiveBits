@@ -1794,7 +1794,7 @@ export default function setupCommissionedIdeasRoutes(
   /** Spotlights a team and records it as presented in the current round (once per round). */
   function spotlightTeam(data: CommissionedIdeasSessionData, teamId: string | null): void {
     data.currentPresentationTeamId = teamId
-    if (teamId && !presentedTeamIds(data.presentationHistory, data.presentationRound).has(teamId)) {
+    if (teamId && !presentedTeamIds(data.teams, data.presentationHistory, data.presentationRound).has(teamId)) {
       data.presentationHistory.push({ round: data.presentationRound, teamId, presentedAt: Date.now() })
     }
   }
@@ -1870,6 +1870,14 @@ export default function setupCommissionedIdeasRoutes(
       if (action !== 'next' && action !== 'reset') refuse(400, "action must be 'next' or 'reset'")
 
       const round = session.data.presentationRound
+      // Both actions name the round their button showed, so a repeated or delayed click
+      // cannot advance (or clear) a round the instructor did not see.
+      if (body.round !== round) {
+        refuse(409, 'The round changed. Check the current round and try again.', {
+          message: '[commissioned-ideas] Presentation round refused: stale round',
+          fields: { sessionId: session.id, current: round },
+        }, 'stale-round')
+      }
       if (action === 'next') {
         session.data.presentationRound = round + 1
       } else {

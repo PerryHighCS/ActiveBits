@@ -87,8 +87,21 @@ export function isTeamPermutation(teamIds: unknown, teams: Record<string, unknow
   return true
 }
 
-export function presentedTeamIds(history: PresentationHistoryEntry[], round: number): Set<string> {
-  return new Set(history.filter((entry) => entry.round === round).map((entry) => entry.teamId))
+/**
+ * Existing teams that have presented in `round`. History keeps entries for teams that
+ * were later deleted (moderation can remove a presented team's last member), so they are
+ * filtered against `teams`: counts like "presented/total" never exceed the total.
+ */
+export function presentedTeamIds(
+  teams: Record<string, unknown>,
+  history: PresentationHistoryEntry[],
+  round: number,
+): Set<string> {
+  return new Set(
+    history
+      .filter((entry) => entry.round === round && Object.hasOwn(teams, entry.teamId))
+      .map((entry) => entry.teamId),
+  )
 }
 
 /** Existing teams (in presentation order) that have not presented in `round`. */
@@ -97,7 +110,7 @@ export function unpresentedTeamIds(
   history: PresentationHistoryEntry[],
   round: number,
 ): string[] {
-  const presented = presentedTeamIds(history, round)
+  const presented = presentedTeamIds(teams, history, round)
   return orderedPresentationTeams(teams)
     .map((team) => team.id)
     .filter((id) => !presented.has(id))

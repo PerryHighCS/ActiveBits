@@ -5,7 +5,7 @@ import { sortTeams, teamLabel } from '../teamLabels.js'
 import TeamNamingPanel from './TeamNamingPanel.js'
 import { useRestoreFocusAfterRemoval } from '../useRestoreFocusAfterRemoval.js'
 import { useParticipantApi } from './useParticipantApi.js'
-import { teamControlsLocked } from './rosterModel.js'
+import { lockedUntilSnapshot } from '../requestOutcome.js'
 
 interface StudentRosterProps {
   participants: Record<string, StudentSafeParticipant>
@@ -47,7 +47,7 @@ export default function StudentRoster({
   // unless the student has already moved focus elsewhere.
   const statusRef = useRef<HTMLDivElement>(null)
   const [awaitedRevision, setAwaitedRevision] = useState<number | null>(null)
-  const teamBusy = teamControlsLocked(busy, awaitedRevision, snapshotRevision)
+  const teamBusy = lockedUntilSnapshot(busy, awaitedRevision, snapshotRevision)
   const focusRestore = useRestoreFocusAfterRemoval(useCallback(() => statusRef.current, []))
   const postAndRefocus = async (control: HTMLElement, path: string, body: Record<string, unknown>) => {
     focusRestore.begin(control)
@@ -61,7 +61,10 @@ export default function StudentRoster({
   // Proposals and votes name the team the form was shown for; the server refuses them if
   // the student was moved meanwhile, instead of recording them on the new team.
   const handlePropose = (kind: ProposalKind, value: string) => post('team/proposal', { kind, value, expectedTeamId: myTeamId })
-  const handleVote = (kind: ProposalKind, proposalId: string) => post('team/proposal-vote', { kind, proposalId, expectedTeamId: myTeamId })
+  const handleVote = async (kind: ProposalKind, proposalId: string): Promise<number | null> => {
+    const outcome = await request('team/proposal-vote', { kind, proposalId, expectedTeamId: myTeamId })
+    return outcome.kind === 'ok' && typeof outcome.data.revision === 'number' ? outcome.data.revision : null
+  }
 
   const isManual = groupingMode === 'manual'
 
@@ -94,6 +97,7 @@ export default function StudentRoster({
           projectName={myTeam.projectName}
           namingLocked={namingLocked}
           busy={busy}
+          snapshotRevision={snapshotRevision}
           onPropose={handlePropose}
           onVote={handleVote}
         />

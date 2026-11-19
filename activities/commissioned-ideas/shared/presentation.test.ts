@@ -8,6 +8,7 @@ import {
   normalizePhaseValue,
   normalizePresenterOrder,
   orderedPresentationTeams,
+  presentedTeamIds,
   unpresentedTeamIds,
 } from './presentation.js'
 import type { CommissionedIdeasPhase } from './types.js'
@@ -108,6 +109,18 @@ void test('unpresentedTeamIds only counts history from the given round and skips
   assert.deepEqual(unpresentedTeamIds(teams, history, 1), ['b', 'c'])
   assert.deepEqual(unpresentedTeamIds(teams, history, 2), ['a', 'c'])
   assert.deepEqual(unpresentedTeamIds(teams, history, 3), ['a', 'b', 'c'])
+})
+
+void test('presentedTeamIds counts only existing teams (a presented team may have been deleted)', () => {
+  const teams = { a: t('a', 0, 0), b: t('b', 1, 0) }
+  const history = [
+    { round: 1, teamId: 'a', presentedAt: 1 },
+    { round: 1, teamId: 'gone', presentedAt: 2 },
+    { round: 2, teamId: 'b', presentedAt: 3 },
+  ]
+  assert.deepEqual([...presentedTeamIds(teams, history, 1)], ['a'], 'never more presented than teams')
+  assert.deepEqual([...presentedTeamIds(teams, history, 2)], ['b'])
+  assert.deepEqual([...presentedTeamIds({}, history, 1)], [])
 })
 
 void test('adjacentTeamId walks the queue and stops at either end', () => {

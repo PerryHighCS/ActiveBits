@@ -12,3 +12,13 @@ export function outcomeKindForStatus(status: number): 'ok' | 'refused' | 'unknow
   if (status >= 500) return 'unknown'
   return 'refused'
 }
+
+/**
+ * Controls whose meaning depends on the rendered snapshot stay disabled while their
+ * request is in flight and, after it committed (at `awaitedRevision`), until a snapshot
+ * at or after that revision arrives. Otherwise a stale view (still "no team", still
+ * "Start round 2") could offer the same action again between the response and the snapshot.
+ */
+export function lockedUntilSnapshot(busy: boolean, awaitedRevision: number | null, snapshotRevision: number): boolean {
+  return busy || (awaitedRevision !== null && snapshotRevision < awaitedRevision)
+}
